@@ -27,9 +27,20 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
     public func makePaneView(context: PluginContext) -> NSView {
         // Construction and all callbacks are main-actor isolated by the plugin contract.
         MainActor.assumeIsolated {
-            let pane = DeviceLogPaneViewController(owningSessionID: context.argument("sessionID"))
+            let pane = DeviceLogPaneViewController(
+                owningSessionID: context.argument("sessionID"),
+                preferredPymobiledevice3Path: context.argument("pymobiledevice3Path"),
+                preferredMachineID: context.argument("deviceID")
+            )
             self.pane = pane
             return pane.view
+        }
+    }
+
+    public func activatePane(context: PluginContext) {
+        MainActor.assumeIsolated {
+            guard let deviceID = context.argument("deviceID") else { return }
+            pane?.selectMachine(id: deviceID)
         }
     }
 

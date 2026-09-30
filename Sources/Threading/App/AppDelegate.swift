@@ -792,13 +792,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // The shim directory that makes `~/.local/bin/threading-ptyd` survive a bundle move.
         // Every launch, because the bundle is exactly what moves: the autoinstall hook replaces
         // `/Applications/Threading.app` wholesale and a Debug build runs from DerivedData, so a
-        // link written yesterday names a path that may no longer hold a helper. Beside the
-        // registration above because it publishes the same daemon, and below the recovery guard
-        // for the same reason: a launch that came up because the last one did not should change
-        // as little as possible about the machine. Off-main and idempotent — an unchanged
-        // directory is one `readlink` per tool and no writes.
+        // link written yesterday names a path that may no longer hold a helper. The same bounded
+        // maintenance pass retires old managed iPhone-tool environments, but never the active
+        // one. Beside the registration above because both publish executables, and below the
+        // recovery guard for the same reason: a launch that came up because the last one did not
+        // should change as little as possible about the machine. Off-main and idempotent.
         Task.detached(priority: .utility) {
             ThreadingCommandLineTools.refreshAtLaunch()
+            Pymobiledevice3Installation().cleanupStaleVersions()
         }
 
         // One sweep of the runtime inventory, at most once a day and re-checked while the app

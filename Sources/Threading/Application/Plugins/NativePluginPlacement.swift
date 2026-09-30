@@ -24,6 +24,7 @@ struct NativePluginPlacement: Equatable {
         static let projectID = "projectID"
         static let projectName = "projectName"
         static let checkoutPath = "checkoutPath"
+        static let pymobiledevice3Path = "pymobiledevice3Path"
     }
 
     var sessionID: SessionID?
@@ -35,17 +36,20 @@ struct NativePluginPlacement: Equatable {
     /// folder instead would quietly read the wrong tree for any session working in a draft
     /// worktree, which is the sort of bug that looks like stale data rather than a wrong path.
     var checkoutPath: String?
+    var pymobiledevice3Path: String?
 
     init(
         sessionID: SessionID? = nil,
         projectID: ProjectID? = nil,
         projectName: String? = nil,
-        checkoutPath: String? = nil
+        checkoutPath: String? = nil,
+        pymobiledevice3Path: String? = nil
     ) {
         self.sessionID = sessionID
         self.projectID = projectID
         self.projectName = projectName
         self.checkoutPath = checkoutPath
+        self.pymobiledevice3Path = pymobiledevice3Path
     }
 
     /// The narrow dictionary the plugin receives.
@@ -59,6 +63,9 @@ struct NativePluginPlacement: Equatable {
         if let projectID { arguments[Key.projectID] = projectID.uuidString }
         if let projectName, !projectName.isEmpty { arguments[Key.projectName] = projectName }
         if let checkoutPath, !checkoutPath.isEmpty { arguments[Key.checkoutPath] = checkoutPath }
+        if let pymobiledevice3Path, !pymobiledevice3Path.isEmpty {
+            arguments[Key.pymobiledevice3Path] = pymobiledevice3Path
+        }
         return arguments
     }
 }

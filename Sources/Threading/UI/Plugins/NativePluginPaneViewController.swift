@@ -29,6 +29,12 @@ final class NativePluginPaneViewController: NSViewController {
     private let appEvents = AppEventObservations()
     private let loadPlugin: ((URL) -> Result<ThreadingNativePlugin, PluginLoadFailure>)?
     private let verifyPlugin: VerifyPlugin
+    /// A host-selected capability for the bundled Device Logs tenant. Third-party plugins do not
+    /// receive Threading's managed executable merely because they share this loading tier.
+    private let managedIPhoneToolPath: String?
+    /// Plugin-specific routing attached to the latest reveal. Kept separately from placement so
+    /// changing a target cannot rewrite the session/project identity the host owns.
+    private var activationArguments: [String: String]
     private var verifiedCandidate: NativePluginCatalog.VerifiedCandidate?
     private var loadTask: Task<Void, Never>?
     var onTitleChange: (() -> Void)?
@@ -67,6 +73,8 @@ final class NativePluginPaneViewController: NSViewController {
     init(
         bundleURL: URL,
         owningSessionID: SessionID?,
+        managedIPhoneToolPath: String? = nil,
+        activationArguments: [String: String] = [:],
         resolveStore: @escaping () -> ProjectStore? = { ProjectStore.shared },
         loadPlugin: ((URL) -> Result<ThreadingNativePlugin, PluginLoadFailure>)? = nil,
         verifyPlugin: @escaping VerifyPlugin = { url in
@@ -78,6 +86,8 @@ final class NativePluginPaneViewController: NSViewController {
     ) {
         self.bundleURL = bundleURL
         self.owningSessionID = owningSessionID
+        self.managedIPhoneToolPath = managedIPhoneToolPath
+        self.activationArguments = activationArguments
         self.resolveStore = resolveStore
         self.loadPlugin = loadPlugin
         self.verifyPlugin = verifyPlugin
@@ -191,13 +201,23 @@ final class NativePluginPaneViewController: NSViewController {
         loadViewContents()
     }
 
+    /// Reveals the already-loaded plugin with a more specific subject without rebuilding it.
+    /// If verification is still in flight, the arguments are retained and the first pane is made
+    /// with the newest target instead.
+    func activate(arguments: [String: String]) {
+        activationArguments.merge(arguments) { _, newest in newest }
+        loaded?.activatePane?(context: context())
+    }
+
     /// What the plugin is told. Narrow and versioned on purpose: never a session, a project, a
     /// store or a window. If a plugin needs to know something, it gets a name here first.
     ///
     /// The names live in `NativePluginPlacement` rather than being spelled here, so the host and a
     /// plugin author read them from one place.
     private func context() -> PluginContext {
-        PluginContext(theme: NativePluginCatalog.theme(), arguments: placement().arguments)
+        var arguments = placement().arguments
+        arguments.merge(activationArguments) { _, activation in activation }
+        return PluginContext(theme: NativePluginCatalog.theme(), arguments: arguments)
     }
 
     /// Where the pane is, resolved from the session that owns it.
@@ -207,14 +227,17 @@ final class NativePluginPaneViewController: NSViewController {
     /// handed the project folder would read the wrong tree for every draft-worktree session, which
     /// presents as stale content rather than as a wrong path.
     private func placement() -> NativePluginPlacement {
-        guard let owningSessionID else { return NativePluginPlacement() }
+        guard let owningSessionID else {
+            return NativePluginPlacement(pymobiledevice3Path: managedIPhoneToolPath)
+        }
         let store = resolveStore()
         let project = store?.project(forSessionID: owningSessionID)
         return NativePluginPlacement(
             sessionID: owningSessionID,
             projectID: project?.id,
             projectName: project?.name,
-            checkoutPath: store?.workingDirectory(forSessionID: owningSessionID)
+            checkoutPath: store?.workingDirectory(forSessionID: owningSessionID),
+            pymobiledevice3Path: managedIPhoneToolPath
         )
     }
 

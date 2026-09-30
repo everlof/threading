@@ -148,9 +148,11 @@ Three consequences shape the contract:
 - **The framework builds with library evolution**, so host and plugin can be built at different
   times against different versions of the package without recompiling the plugin.
 
-`ThreadingPluginAPI.version` is compared before `init()`. Bump it whenever a member is added,
-removed or re-typed; `PluginLoaderTests` asserts the current value as a deliberate tripwire, so a
-version change is something you do on purpose rather than something that happens to you.
+`ThreadingPluginAPI.version` is compared before `init()`. Bump it when a member is removed or
+re-typed; additive protocol members are `@objc optional`, and additive payload fields remain
+binary-compatible under library evolution. `PluginLoaderTests` asserts the current value as a
+deliberate tripwire, so a version change is something you do on purpose rather than something that
+happens to you.
 
 ## The design system crosses by symlink, and the theme crosses encoded
 
@@ -402,18 +404,32 @@ three were plain in a picture and invisible to every passing assertion — the r
 holds them, and the host loads it through the same `NativePluginCatalog` path a third-party bundle
 takes. The app is ~1,500 lines lighter and the tier carries a feature rather than a probe.
 
-**Nothing about the user's route changed.** Device logs is still an entry in the panel's new-tab
-menu, still one pane per session, and `device_log_prepare` still reveals it. `activateDeviceLog`
-opens the bundled plugin, and the persisted `.deviceLog` tab kind restores as that plugin so an
-older row opens the pane it always did.
+Device logs remains an entry in the panel's new-tab menu and `device_log_prepare` still reveals it.
+The live Simulator and physical-iPhone toolbars also carry a logs button: it moves that session's
+one plugin tab into the bottom drawer, keeps the device visible in the right panel, and targets the
+same UDID. The drawer persists and restores this bundled singleton through `.deviceLog`; other
+native plugins remain panel-only because the drawer cannot reconstruct their installed identity.
+
+Revealing a singleton for a new subject must not rebuild its view or start a second reader.
+`ThreadingNativePlugin.activatePane(context:)` is therefore optional and additive: the host sends
+the latest narrow activation arguments to an existing instance, while an older plugin simply keeps
+the pane it already made. Device Logs consumes `deviceID` and switches through its ordinary machine
+selection path, so reader teardown, row clearing and recents retain one owner.
 
 Two things stayed in the application deliberately. The **tap consent** is a security grant about
 the user's own product, so it belongs to the host and is asked by the agent command rather than by
 the pane; `DeviceLogTap` stays with it, because compiling the tap is the agent's build step.
 
 The feature's own decisions — the four sources, what each one redacts, the predicate pushed into
-the log daemon, and `DeviceRelayReclaim` — stay in
+the log daemon, the modern paired-phone native-RSD reader with its legacy relay fallback, and
+`DeviceRelayReclaim` — stay in
 [`device-and-simulator-logs.md`](../feature-drafts/device-and-simulator-logs.md).
+
+The bundled Device Logs tenant alone receives the preferred path to Threading's managed
+`pymobiledevice3` environment in its placement arguments. The host owns that installation and
+selects the capability; arbitrary installed plugins do not receive it. The pane resolves and
+version-checks the path during every source rescan, so an explicit Advanced Settings installation
+can become active without reloading the plugin or restarting the app.
 
 ## Publishing the kit: not yet, but ready whenever
 

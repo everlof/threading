@@ -3479,8 +3479,9 @@ repeated screen clicks do not keep presenting the permission sheet.
 
 **The toolbar, left to right:** the camera saves a screenshot, the record button records a video,
 the hand shows touches, the speech bubble annotates, the accessibility figure outlines the screen's
-elements, the window button opens the presenter window, then device control and Refresh. The
-device's appearance toggle sits with the hardware buttons under the screen.
+elements, the window button opens the presenter window, the log-list button opens this Simulator's
+Device Logs in the bottom pane, then device control and Refresh. The device's appearance toggle
+sits with the hardware buttons under the screen.
 
 **Right-click the device** (or Control-click) for everything the pane can do to it: copy, save or
 save-as a screenshot, start or stop a recording, add a note exactly where you clicked, send, copy or
@@ -3608,15 +3609,70 @@ to put a floor under how narrow the window could be made. It no longer does: dra
 edge in and the panel is squeezed with everything else. Its own width is still yours — drag the
 divider to set it, and it opens there next time.
 
-Shell and browser tabs can also change *pane*: drag the tab off its row and the other pane
+Shell, browser and the bundled Device Logs tabs can also change *pane*: drag the tab off its row and the other pane
 opens on its own to take it — a closed drawer or panel springs open the moment the drag
 leaves its home row, the receiving tab row shows a quiet wash while the drop would land, and
 the tab dims to say it is on its way out. Drop it at the spot you want; it lands in exactly
 that slot. Let go anywhere else and everything springs back. The same move is in the tab's
 secondary-click menu — **Move to Shell Drawer** on a panel tab, **Move to Display Panel** on
 a drawer tab. Either way the tab moves live — a shell keeps its process and scrollback, a
-browser keeps its page — and the new home survives a relaunch. The panel-only surfaces
+browser keeps its page, and Device Logs keeps its one reader — and the new home survives a relaunch. The panel-only surfaces
 (Review, Overview, comparisons) stay where they are one of a kind.
+
+### Physical iPhone in the panel
+
+Choose **+ → iPhone Device** to keep a paired physical iPhone beside the current conversation.
+Threading shows a visibility-bounded screenshot preview and stops asking the phone for frames when
+the tab is hidden. Pairing, trusting this Mac or detecting developer services does not grant
+control.
+
+When the phone supports it, press the hand button and approve **Allow Control** for that exact
+iPhone. You can then click the preview to tap and drag across it to swipe. The grant is temporary:
+hiding or closing the tab, switching phones or ending the session revokes it. A denial is not
+asked again on every screen click; press the crossed-out hand button to retry explicitly. This
+first control version does not type text or send Home, Lock or volume-button presses, and agents
+cannot use your visible-pane grant to operate the phone.
+
+The second status line explains what Threading found. **Media streaming unavailable** means the
+developer service reports no usable media features; because its media session authenticates
+touch, input cannot work in that state either. **Touch surface unavailable** means the phone did
+not report its main touchscreen. If the check fails after an iOS upgrade, the hand button becomes
+**Prepare iPhone Control**. Pressing it can download and install the matching developer image—for
+iOS 27, its Cryptex1 DDI—then Threading checks again. Connect and unlock that exact iPhone over USB
+for this one-time preparation. Afterward, an already-prepared phone can still be controlled over
+Wi-Fi.
+
+Use the log-list button in the iPhone toolbar to keep the preview on the right and open this exact
+phone's **Device logs** in the bottom pane. Threading reuses the session's existing logs tab rather
+than starting a second reader.
+
+The deeper compatibility check requires external `pymobiledevice3` 11.13.1 or newer. Threading
+does not bundle it in the app. Open **Settings → Advanced → iPhone Tooling** and choose
+**Install Latest** to download a managed copy, or **Update** later. Threading installs it in its own
+data folder and keeps the working version active if an update fails. Return to the iPhone pane and
+retry; no restart is needed. Its device-image and pairing cache also stays in Threading's own data
+folder, so a stale `~/.pymobiledevice3` from a manual installation cannot break the managed copy.
+When the tool is absent or older, the pane says the control check is unavailable; older phones can
+continue the screenshot preview, while iOS 27 also needs the managed tool for its DVT screenshot.
+
+### Live logs from a physical iPhone
+
+Choose **+ → Device logs**, select the paired iPhone, then choose **System log (USB)** (or Wi-Fi),
+or press the log-list button on a live Simulator or iPhone pane to open the same logs tab below and
+preselect that device.
+Use **Settings → Advanced → iPhone Tooling → Install Latest** if a recent external
+`pymobiledevice3` is not already available, then rescan the Device Logs sources. With version
+11.13.1 or newer, Threading reads the phone's unified log live through macOS's native device
+tunnel. Rows include process, severity, message, and the real `subsystem / category` label, so the
+existing filter, level chooser, folds and recorded-history tools work on physical-device logs too.
+Private unified-log values remain `<private>`.
+
+Threading does not bundle `pymobiledevice3`; installation is an explicit download into Threading's
+data folder and updates occur only when you press **Update**. If it is absent, too old, or the
+native route is not supported by that phone, the same System log source falls back automatically
+to `idevicesyslog`. That fallback remains live but has only the flattened metadata its relay
+supplies. Hiding the pane stops either reader; showing it resumes the selected source without
+clearing the rows already on screen.
 
 ### Overview
 

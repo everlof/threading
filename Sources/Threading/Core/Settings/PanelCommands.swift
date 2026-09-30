@@ -3,7 +3,7 @@ import Foundation
 /// Panel creation is a host command by default. Menus contribute presentation, never closures
 /// with a separate implementation. Dynamic targets retain values, not constructed controllers.
 enum PanelCommandTarget: Equatable {
-    case simulator, deviceLogs, audit, browser, privateBrowser, overview, compare, supervision
+    case simulator, realDevice, deviceLogs, audit, browser, privateBrowser, overview, compare, supervision
     case notificationTest
     case nativePlugin(URL)
     case extensionPanel(identifier: String, panelID: String)
@@ -22,6 +22,8 @@ enum PanelCommands {
     static let entries: [Entry] = [
         Entry(id: AppCommands.ID.newTerminalTab, title: "Terminal", icon: "terminal", target: nil),
         Entry(id: "panel.simulator", title: "iOS Simulator", icon: "iphone", target: .simulator),
+        Entry(id: "panel.realDevice", title: "iPhone Device", icon: "iphone.gen2", target: .realDevice,
+              detail: "Preview and control a paired physical iPhone"),
         Entry(id: "panel.deviceLogs", title: "Device logs", icon: "list.bullet.rectangle", target: .deviceLogs),
         Entry(id: "panel.notificationTest", title: "Push Test", icon: "bell.badge",
               target: .notificationTest,

@@ -22,6 +22,13 @@ An idea investigated to the point of *no*, *not yet*, or *only this much* belong
 should reopen it. A draft that turns out to be a bad idea moves there rather than being deleted —
 the investigation is the value, and an idea deleted without a record comes back.
 
+## Active prototype
+
+- [Physical iPhone pane](physical-iphone-pane.md) — paired-device discovery, a visibility-bounded
+  screenshot preview, explicit developer-image preparation and user-driven taps and drags after
+  a per-device grant now live in the display panel. Persistent streaming, keyboard and hardware
+  buttons, and agent input remain future work.
+
 ## Drafts, by priority
 
 The grouping below is the priority statement, kept here and nowhere else — each draft's own

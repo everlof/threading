@@ -95,6 +95,22 @@ final class NativePluginCatalogTests: XCTestCase {
         XCTAssertEqual(plugin.appliedThemes.count, 2)
     }
 
+    func testPaneActivationRetargetsTheLoadedPluginWithoutRebuildingItsView() {
+        let plugin = PanePresentationProbe()
+        let controller = NativePluginPaneViewController(
+            bundleURL: directory.appendingPathComponent("Probe.bundle"),
+            owningSessionID: nil,
+            loadPlugin: { _ in .success(plugin) }
+        )
+
+        controller.loadView()
+        let pane = controller.view.subviews.first
+        controller.activate(arguments: ["deviceID": "DEVICE-A"])
+
+        XCTAssertTrue(controller.view.subviews.first === pane)
+        XCTAssertEqual(plugin.activationContexts.last?.argument("deviceID"), "DEVICE-A")
+    }
+
     func testNavigatorOnlyPluginProducesANamedPaneCapabilityRefusal() {
         let plugin = NavigatorOnlyPresentationProbe()
         let controller = NativePluginPaneViewController(
@@ -333,10 +349,13 @@ private final class PanePresentationProbe: NSObject, ThreadingNativePlugin {
     static let pluginAPIVersion = 4
     let pluginIdentifier = "tests.pane-presentation"
     private(set) var appliedThemes: [PluginTheme] = []
+    private(set) var activationContexts: [PluginContext] = []
 
     required override init() { super.init() }
 
     func makePaneView(context _: PluginContext) -> NSView { NSView() }
+
+    func activatePane(context: PluginContext) { activationContexts.append(context) }
 
     func apply(theme: PluginTheme) { appliedThemes.append(theme) }
 }

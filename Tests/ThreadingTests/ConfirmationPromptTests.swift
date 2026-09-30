@@ -78,6 +78,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "approveSystemPermissionPrompt",
             "conferManagerRole",
             "controlSimulatorDevice",
+            "controlPhysicalDevice",
             "linkDeviceLogTap",
             "runNativePlugin",
             "connectSourceControlProvider",

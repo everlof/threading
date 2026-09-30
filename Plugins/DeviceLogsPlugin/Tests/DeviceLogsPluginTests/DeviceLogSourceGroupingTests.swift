@@ -63,6 +63,133 @@ final class DeviceLogSourceGroupingTests: XCTestCase {
         XCTAssertTrue(sim.machine.isSimulator)
         XCTAssertEqual(sim.machine.title, "iPhone 17 Pro")
     }
+
+    func testAStructuredDeviceOptionBuildsTheModernReader() throws {
+        let option = DeviceLogSourceOption(
+            machine: phone,
+            title: "System log (USB)",
+            kind: .structuredDevice(
+                udid: phone.id,
+                overNetwork: false,
+                toolPath: "/mock/pymobiledevice3",
+                fallbackToolPath: "/mock/idevicesyslog"
+            )
+        )
+
+        XCTAssertTrue(option.makeSource(predicate: nil) is StructuredPairedDeviceLogRowSource)
+    }
+
+    func testStructuredSyslogRequiresTheNativeJSONCapableToolVersion() {
+        XCTAssertEqual(DeviceLogSourceCatalog.structuredSyslogVersionIsSupported("11.13.1\n"), true)
+        XCTAssertEqual(DeviceLogSourceCatalog.structuredSyslogVersionIsSupported("11.13.0"), false)
+        XCTAssertEqual(DeviceLogSourceCatalog.structuredSyslogVersionIsSupported("12.0.0.dev1"), true)
+        XCTAssertNil(DeviceLogSourceCatalog.structuredSyslogVersionIsSupported("old"))
+    }
+
+    func testManagedStructuredSyslogPathFollowsExplicitDeveloperOverride() {
+        XCTAssertEqual(
+            DeviceLogSourceCatalog.structuredSyslogCandidatePaths(
+                preferredPath: "/managed/current/bin/pymobiledevice3",
+                environment: [
+                    "THREADING_PHYSICAL_DEVICE_PROBE_PATH": "/developer/pymobiledevice3",
+                ]
+            ),
+            [
+                "/developer/pymobiledevice3",
+                "/managed/current/bin/pymobiledevice3",
+                "/opt/homebrew/bin/pymobiledevice3",
+                "/usr/local/bin/pymobiledevice3",
+                "/usr/bin/pymobiledevice3",
+            ]
+        )
+    }
+
+    @MainActor
+    func testExplicitHostRouteSelectsThatMachineAheadOfTheRecentOne() {
+        let controller = DeviceLogPaneViewController(
+            owningSessionID: UUID().uuidString,
+            preferredMachineID: phone.id
+        )
+        controller.loadView()
+
+        controller.installSourcesForTesting([
+            DeviceLogSourceOption(
+                machine: simulator,
+                title: "System log",
+                kind: .simulator(udid: simulator.id)
+            ),
+            DeviceLogSourceOption(
+                machine: phone,
+                title: "System log (USB)",
+                kind: .device(udid: phone.id, overNetwork: false)
+            ),
+        ])
+
+        XCTAssertEqual(controller.selectedMachineIDForTesting, phone.id)
+    }
+
+    @MainActor
+    func testRepeatedActivationRetargetsTheExistingPane() {
+        let controller = DeviceLogPaneViewController(owningSessionID: UUID().uuidString)
+        controller.loadView()
+        controller.installSourcesForTesting([
+            DeviceLogSourceOption(
+                machine: simulator,
+                title: "System log",
+                kind: .simulator(udid: simulator.id)
+            ),
+            DeviceLogSourceOption(
+                machine: phone,
+                title: "System log (USB)",
+                kind: .device(udid: phone.id, overNetwork: false)
+            ),
+        ])
+
+        controller.selectMachine(id: phone.id)
+
+        XCTAssertEqual(controller.selectedMachineIDForTesting, phone.id)
+    }
+
+    /// `availableData` blocks when a child stays alive without writing. The old discovery runner
+    /// called it from the deadline loop itself, so a silent phone-side command could freeze Rescan
+    /// forever despite the documented timeout.
+    func testDiscoveryDeadlineStopsAChildThatNeverWrites() {
+        let started = Date()
+
+        let output = BoundedDeviceLogCommand.run(
+            "/bin/sleep",
+            ["30"],
+            deadline: 0.05
+        )
+
+        XCTAssertNil(output)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+    }
+
+    func testDiscoveryCommandCollectsOutputWhileItWaitsForExit() {
+        XCTAssertEqual(
+            BoundedDeviceLogCommand.run("/bin/echo", ["11.19.4"]),
+            "11.19.4\n"
+        )
+    }
+
+    func testTheStructuredReaderPinsOnePhoneAndClearsConflictingTransportModes() {
+        let environment = StructuredPairedDeviceLogRowSource.environment(
+            udid: phone.id,
+            inherited: [
+                "PATH": "/usr/bin",
+                "PYMOBILEDEVICE3_TUNNEL": "remote",
+                "PYMOBILEDEVICE3_USERSPACE": "1",
+                "PYMOBILEDEVICE3_NATIVE": "1",
+            ]
+        )
+
+        XCTAssertEqual(environment["PATH"], "/usr/bin")
+        XCTAssertEqual(environment["PYMOBILEDEVICE3_UDID"], phone.id)
+        XCTAssertNil(environment["PYMOBILEDEVICE3_TUNNEL"])
+        XCTAssertNil(environment["PYMOBILEDEVICE3_USERSPACE"])
+        XCTAssertNil(environment["PYMOBILEDEVICE3_NATIVE"])
+    }
 }
 
 import AppKit

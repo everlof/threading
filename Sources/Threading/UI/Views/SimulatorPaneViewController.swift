@@ -45,6 +45,7 @@ enum SimulatorPaneSymbols {
     static let control = "cursorarrow.click"
     static let controlDenied = "cursorarrow.slash"
     static let appearance = "circle.lefthalf.filled"
+    static let logs = "list.bullet.rectangle"
 }
 
 /// A session's adopted CoreSimulator device inside the right display pane.
@@ -151,6 +152,7 @@ final class SimulatorPaneViewController: NSViewController {
     var canAnnotateNotes: Bool { isPresented && lease != nil && screenView.image != nil }
 
     var onSelectedDeviceChange: ((SimulatorDeviceID) -> Void)?
+    var onOpenDeviceLogs: ((SimulatorDeviceID) -> Void)?
 
     private lazy var deviceChip: ChipView = {
         let chip = ChipView()
@@ -175,6 +177,22 @@ final class SimulatorPaneViewController: NSViewController {
         button.toolTip = L10n.string("Refresh Simulator")
         button.onPress = { [weak self] in self?.retry() }
         button.setAccessibilityIdentifier("simulator.refresh")
+        return button
+    }()
+
+    private lazy var logsButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: SimulatorPaneSymbols.logs,
+            accessibility: L10n.string("Open Device Logs in Bottom Pane"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Open Device Logs in Bottom Pane")
+        button.onPress = { [weak self] in
+            guard let self, let deviceID = self.selectedDeviceID else { return }
+            self.onOpenDeviceLogs?(deviceID)
+        }
+        button.setAccessibilityIdentifier("simulator.logs")
         return button
     }()
 
@@ -385,14 +403,19 @@ final class SimulatorPaneViewController: NSViewController {
     private var isInspecting = false
 
     /// Capture first (screenshot, record), then what draws over the device (touches, notes,
-    /// element outlines), then where it is shown (the presenter window), then the connection
-    /// (control, refresh). Device settings live with the hardware buttons under the screen.
+    /// element outlines), then where it is shown (the presenter window), then its diagnostics
+    /// and connection (logs, control, refresh). The related icon actions share the compact
+    /// toolbar spacing; leaving each as a separate row member makes one added action widen the
+    /// protected 420-point display pane. Device settings live with the hardware buttons under
+    /// the screen.
+    private lazy var actionButtons = ControlButtonGroupView(buttons: [
+        captureButton, recordButton, showTouchesButton, annotateButton,
+        inspectButton, presenterButton, logsButton, controlButton, retryButton,
+    ], spacing: Design.Spacing.hairline)
+
     private lazy var controlRow = ControlRowView(
         leading: [deviceChip],
-        trailing: [
-            captureButton, recordButton, showTouchesButton, annotateButton,
-            inspectButton, presenterButton, controlButton, retryButton,
-        ]
+        trailing: [actionButtons]
     )
 
     private func makeHardwareButton(
@@ -2904,6 +2927,11 @@ final class SimulatorPaneViewController: NSViewController {
             retryButton.isEnabled = true
         }
         if isRecording { showRecordingStatus() }
+        if case .ready = presentationState {
+            logsButton.isEnabled = selectedDeviceID != nil
+        } else {
+            logsButton.isEnabled = false
+        }
         recordButton.isEnabled = isRecording ? !isFinishingRecording : canRecord
         refreshPresenterButton()
         // The selected device is useful identity even when it is the only available target.
@@ -2967,6 +2995,7 @@ final class SimulatorPaneViewController: NSViewController {
     var statusForTesting: String { statusLabel.stringValue }
     var statusTooltipForTesting: String { statusLabel.toolTip ?? "" }
     var controlButtonForTesting: ThemedIconButton { controlButton }
+    var logsButtonForTesting: ThemedIconButton { logsButton }
     var recordButtonForTesting: ThemedIconButton { recordButton }
     var recordingBadgeForTesting: SimulatorRecordingBadge { recordingBadge }
     var showTouchesButtonForTesting: ThemedIconButton { showTouchesButton }

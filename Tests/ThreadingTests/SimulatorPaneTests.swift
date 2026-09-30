@@ -25,6 +25,11 @@ final class SimulatorPaneTests: HostedStoreTestCase {
         XCTAssertEqual(controller.selectedDeviceID, simulatorPaneTestDevice.id)
         XCTAssertTrue(controller.isPresentedForTesting)
 
+        var openedLogsFor: SimulatorDeviceID?
+        controller.onOpenDeviceLogs = { openedLogsFor = $0 }
+        XCTAssertTrue(controller.logsButtonForTesting.performPrimaryAction())
+        XCTAssertEqual(openedLogsFor, simulatorPaneTestDevice.id)
+
         controller.setPresented(false)
         try await eventually { stream.session.lastVisibility == false }
         let hiddenCounts = await control.counts()

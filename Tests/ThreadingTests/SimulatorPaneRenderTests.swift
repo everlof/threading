@@ -57,6 +57,14 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 accuracy: 2,
                 "the adopted device was not rendered at the protected right-panel width"
             )
+            XCTAssertEqual(
+                fixture.simulator.logsButtonForTesting.accessibilityTitle(),
+                L10n.string("Open Device Logs in Bottom Pane")
+            )
+            XCTAssertNotNil(
+                fixture.simulator.logsButtonForTesting.window,
+                "the Device Logs shortcut must ship in the visible Simulator toolbar"
+            )
             var representation = try XCTUnwrap(
                 content.bitmapImageRepForCachingDisplay(in: content.bounds)
             )
@@ -180,6 +188,78 @@ final class SimulatorPaneRenderTests: XCTestCase {
         }
 
         print("Rendered the adopted Simulator pane to \(Render.directory.path)")
+    }
+
+    func testRendersPhysicalIPhoneInRightPanel() throws {
+        try FileManager.default.createDirectory(
+            at: Render.directory,
+            withIntermediateDirectories: true
+        )
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
+        AppThemePalette.set(.system)
+        let deviceFrame = try makeDeviceFramePNG()
+
+        for appearance in Render.appearances {
+            let fixture = try makePhysicalDeviceFixture(
+                appearance: appearance.value,
+                deviceFrame: deviceFrame
+            )
+            defer { fixture.tearDown() }
+
+            eventually {
+                fixture.realDevice.frameImageForTesting != nil
+            }
+            settle(fixture.window)
+
+            let content = try XCTUnwrap(fixture.window.contentView)
+            XCTAssertEqual(
+                fixture.panel.view.bounds.width,
+                Render.panelWidth,
+                accuracy: 2,
+                "the physical iPhone was not rendered at the protected right-panel width"
+            )
+            XCTAssertEqual(
+                fixture.realDevice.screenInteractionStateForTesting,
+                .unavailable,
+                "the screen must remain view-only until the user grants input"
+            )
+            XCTAssertEqual(
+                fixture.realDevice.controlSupportForTesting,
+                .available(supportedMediaFeatures: 140)
+            )
+            XCTAssertTrue(fixture.realDevice.statusForTesting.contains("View only"))
+            XCTAssertTrue(fixture.realDevice.statusForTesting.contains("Preview fallback"))
+            XCTAssertTrue(fixture.realDevice.statusForTesting.contains("Click to enable control"))
+            XCTAssertEqual(
+                fixture.realDevice.controlButtonForTesting.accessibilityTitle(),
+                L10n.string("Enable iPhone Control")
+            )
+            XCTAssertTrue(fixture.realDevice.controlButtonForTesting.isEnabled)
+            XCTAssertEqual(
+                fixture.realDevice.logsButtonForTesting.accessibilityTitle(),
+                L10n.string("Open Device Logs in Bottom Pane")
+            )
+            XCTAssertNotNil(
+                fixture.realDevice.logsButtonForTesting.window,
+                "the Device Logs shortcut must ship in the visible iPhone toolbar"
+            )
+
+            let representation = try XCTUnwrap(
+                content.bitmapImageRepForCachingDisplay(in: content.bounds)
+            )
+            content.cacheDisplay(in: content.bounds, to: representation)
+            let png = try XCTUnwrap(
+                representation.representation(using: .png, properties: [:])
+            )
+            try png.write(
+                to: Render.directory.appendingPathComponent(
+                    "physical-iphone-pane-system-\(appearance.name).png"
+                )
+            )
+        }
+
+        print("Rendered the physical iPhone pane to \(Render.directory.path)")
     }
 
     func testRendersBootFailureInTheRightPanel() throws {
@@ -501,6 +581,92 @@ final class SimulatorPaneRenderTests: XCTestCase {
         )
     }
 
+    private func makePhysicalDeviceFixture(
+        appearance appearanceName: NSAppearance.Name,
+        deviceFrame: Data
+    ) throws -> PhysicalDevicePaneRenderFixture {
+        let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+        let device = PhysicalDevice(
+            id: try XCTUnwrap(PhysicalDeviceID("00008140-000C208C1108801C")),
+            coreDeviceIdentifier: try XCTUnwrap(
+                UUID(uuidString: "ECE91967-105E-5BAE-9110-E49CBB0DEBD3")
+            ),
+            name: "David’s iPhone",
+            productType: "iPhone17,1",
+            osVersion: "26.6.2",
+            connection: .localNetwork,
+            developerModeEnabled: true,
+            developerServicesAvailable: true
+        )
+        let control = PhysicalDevicePaneRenderControl(device: device, frame: deviceFrame)
+        let project = Project(
+            name: "Threading",
+            folderURL: FileManager.default.temporaryDirectory
+        )
+        let session = AgentSession(
+            kind: .claude,
+            title: "Test on my iPhone",
+            usesNativeUI: true
+        )
+        let conversation = requireConversationViewController(
+            agentSession: session,
+            project: project,
+            customizationLookup: { _ in .empty }
+        )
+        applyPhysicalDeviceConversationFixture(to: conversation)
+
+        let panel = DisplayPaneController(physicalDeviceControl: control)
+        let split = SidebarSplitViewController()
+        let conversationItem = NSSplitViewItem(viewController: conversation)
+        conversationItem.minimumThickness = 560
+        let panelItem = NSSplitViewItem(viewController: panel)
+        panelItem.minimumThickness = Render.panelWidth
+        split.addSplitViewItem(conversationItem)
+        split.addSplitViewItem(panelItem)
+
+        let host = WindowChromeHostViewController(workspace: split)
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: Render.size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.contentViewController = host
+        window.setContentSize(Render.size)
+        window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.animationBehavior = .none
+        window.orderFront(nil)
+
+        host.setTitle("Threading")
+        host.setTakeoverActive(true)
+        host.bandView.fixtureIsKey = true
+        host.commandBandView.setLeadingControls(makeWindowControls())
+        host.view.frame = NSRect(origin: .zero, size: Render.size)
+        host.view.appearance = appearance
+        host.view.layoutSubtreeIfNeeded()
+
+        let dividerPosition = split.splitView.bounds.width
+            - Render.panelWidth
+            - split.splitView.dividerThickness
+        split.splitView.setPosition(dividerPosition, ofDividerAt: 0)
+        host.view.layoutSubtreeIfNeeded()
+
+        panel.showSession(session.id)
+        let realDevice = panel.activateRealDevice(for: session.id, deviceID: device.id)
+        conversation.scrollToConversationEnd()
+        AppThemeRefresh.repaint(host.view)
+        settle(window)
+
+        return PhysicalDevicePaneRenderFixture(
+            window: window,
+            panel: panel,
+            realDevice: realDevice,
+            sessionID: session.id
+        )
+    }
+
     private func applyConversationFixture(to conversation: ConversationViewController) {
         let events: [StreamEvent] = [
             .userMessage(
@@ -522,6 +688,40 @@ final class SimulatorPaneRenderTests: XCTestCase {
                     outputTokens: 96,
                     effort: "high",
                     contextTokens: 21_300,
+                    contextWindow: 200_000
+                )
+            )
+        ]
+
+        for event in events {
+            for change in conversation.timeline.apply(event) {
+                conversation.apply(change)
+            }
+        }
+    }
+
+    private func applyPhysicalDeviceConversationFixture(
+        to conversation: ConversationViewController
+    ) {
+        let events: [StreamEvent] = [
+            .userMessage("Keep my paired iPhone visible here while we check the real-device UI."),
+            .assistantMessage(blocks: [
+                .thinking(
+                    "I can keep the physical-device pane view-only until you grant input."
+                ),
+                .text(
+                    "Your paired iPhone is open in the right panel. Use the hand button to grant "
+                    + "temporary tap and swipe control; typing remains unavailable."
+                )
+            ]),
+            .turnFinished(
+                text: nil,
+                outcome: .completed,
+                metrics: TurnMetrics(
+                    duration: 4.2,
+                    outputTokens: 74,
+                    effort: "high",
+                    contextTokens: 18_900,
                     contextWindow: 200_000
                 )
             )
@@ -698,6 +898,44 @@ private struct SimulatorPaneRenderFixture {
         window.contentViewController = nil
         window.close()
     }
+}
+
+@MainActor
+private struct PhysicalDevicePaneRenderFixture {
+    let window: NSWindow
+    let panel: DisplayPaneController
+    let realDevice: RealDevicePaneViewController
+    let sessionID: SessionID
+
+    func tearDown() {
+        realDevice.terminate()
+        window.orderOut(nil)
+        window.contentViewController = nil
+        window.close()
+        DisplayPaneStore.shared.removeSession(sessionID)
+    }
+}
+
+private actor PhysicalDevicePaneRenderControl: PhysicalDeviceControlling {
+    private let device: PhysicalDevice
+    private let frame: Data
+
+    init(device: PhysicalDevice, frame: Data) {
+        self.device = device
+        self.frame = frame
+    }
+
+    func availableDevices() async throws -> [PhysicalDevice] { [device] }
+
+    func controlSupport(of device: PhysicalDevice) async throws -> PhysicalDeviceControlSupport {
+        .available(supportedMediaFeatures: 140)
+    }
+
+    func prepareControl(of device: PhysicalDevice) async throws {}
+
+    func sendInput(_ input: PhysicalDeviceInput, to device: PhysicalDevice) async throws {}
+
+    func screenshot(of device: PhysicalDevice) async throws -> Data { frame }
 }
 
 private actor SimulatorPaneRenderControl: SimulatorControlling {

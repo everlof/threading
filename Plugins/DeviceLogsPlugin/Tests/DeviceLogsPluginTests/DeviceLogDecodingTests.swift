@@ -47,6 +47,41 @@ final class DeviceLogDecodingTests: XCTestCase {
         XCTAssertNil(decodeNDJSON("{not json at all"))
     }
 
+    // MARK: Physical-device NDJSON
+
+    /// A real entry captured from `pymobiledevice3 syslog live --native --format json` on the
+    /// paired iPhone running iOS 26.6.2. This is the metadata the flattened relay used to lose.
+    func testTheStructuredDeviceStreamDecodesItsRealSchema() throws {
+        let line = #"{"pid":75,"timestamp":"2026-09-29T15:11:04.497349","level":"NOTICE","image_name":"/System/Library/PrivateFrameworks/CoreBrightness.framework/CoreBrightness","filename":"/usr/libexec/backboardd","message":"Lux changed","label":{"subsystem":"com.apple.CoreBrightness.ChromaticCorrection","category":"GCP"}}"#
+        let row = try XCTUnwrap(
+            DeviceLogDecoding.pymobiledevice3(ArraySlice(Array(line.utf8)))
+        )
+
+        XCTAssertEqual(row.time, "15:11:04.497")
+        XCTAssertEqual(row.level, "Notice")
+        XCTAssertEqual(row.process, "backboardd")
+        XCTAssertEqual(row.subsystem, "com.apple.CoreBrightness.ChromaticCorrection / GCP")
+        XCTAssertEqual(row.message, "Lux changed")
+        XCTAssertNotNil(row.timestamp)
+    }
+
+    func testTheStructuredDeviceStreamKeepsKernelRowsWithoutLabels() throws {
+        let line = #"{"pid":0,"timestamp":"2026-09-29T15:11:04.462629","level":"ERROR","image_name":"/kernel","filename":"/kernel","message":"vm pressure","label":null}"#
+        let row = try XCTUnwrap(
+            DeviceLogDecoding.pymobiledevice3(ArraySlice(Array(line.utf8)))
+        )
+
+        XCTAssertEqual(row.process, "kernel")
+        XCTAssertEqual(row.level, "Error")
+        XCTAssertNil(row.subsystem)
+    }
+
+    func testStructuredDeviceNoiseAndIncompleteObjectsAreRejected() {
+        for line in ["Connected", "{}", #"{"timestamp":"2026-09-29T15:11:04"}"#] {
+            XCTAssertNil(DeviceLogDecoding.pymobiledevice3(ArraySlice(Array(line.utf8))))
+        }
+    }
+
     // MARK: Syslog
 
     func testTheDeviceRelayDecodesProcessSenderAndLevel() throws {

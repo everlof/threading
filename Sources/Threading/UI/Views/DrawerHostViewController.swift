@@ -12,7 +12,9 @@ import AppKit
 ///
 /// Tabs are per-session, exactly as the panel's are: switching sessions swaps which list is
 /// shown and tears nothing down, so a shell keeps its process and scrollback across switches
-/// — the old drawer's one load-bearing promise, kept. Closing a *tab* ends what it held.
+/// — the old drawer's one load-bearing promise, kept. The bundled Device Logs pane is the one
+/// singleton surface with an explicit bottom-pane route: keeping the device beside its logs is
+/// the point of that route. Closing a *tab* ends what it held.
 @MainActor
 final class DrawerHostViewController: NSViewController {
 
@@ -400,6 +402,21 @@ final class DrawerHostViewController: NSViewController {
         return controller
     }
 
+    private func makeDeviceLogs(for sessionID: SessionID) -> NativePluginPaneViewController? {
+        guard let bundleURL = NativePluginCatalog.deviceLogsBundle else { return nil }
+        let controller = NativePluginPaneViewController(
+            bundleURL: bundleURL,
+            owningSessionID: sessionID,
+            managedIPhoneToolPath: Pymobiledevice3ManagedTool.executable().path
+        )
+        addChild(controller)
+        controller.onTitleChange = { [weak self] in
+            guard let self, sessionID == self.currentSessionID else { return }
+            self.render()
+        }
+        return controller
+    }
+
     private func presentNewTabMenu(from source: NSView) {
         guard let sessionID = currentSessionID else { return }
         let entries: [ThemedMenuEntry] = [
@@ -574,6 +591,14 @@ final class DrawerHostViewController: NSViewController {
                 controller.restoredURL = persisted.url
                 tabs.append(PaneTab(id: id, body: .browser(controller)))
 
+            case .deviceLog:
+                guard let controller = makeDeviceLogs(for: sessionID) else { continue }
+                tabs.append(PaneTab(
+                    id: id,
+                    body: .nativePlugin(controller),
+                    owningSessionID: sessionID
+                ))
+
             default:
                 // Kinds the drawer cannot rebuild yet keep their place in the payload; they
                 // are simply not shown until the host that can build them exists here.
@@ -623,6 +648,15 @@ final class DrawerHostViewController: NSViewController {
             )
         }
 
+        if case .nativePlugin(let plugin) = tab.body,
+           plugin.bundleURL == NativePluginCatalog.deviceLogsBundle {
+            return PersistedTab(
+                id: tab.id.uuidString, kind: .deviceLog, title: tab.title,
+                subtitle: "", url: nil, html: nil, cacheFile: nil,
+                host: PersistedTab.drawerHost
+            )
+        }
+
         return nil
     }
 }
@@ -665,13 +699,15 @@ extension DrawerHostViewController: TabHosting {
         return moveTab(id: id, toIndex: index, for: session)
     }
 
-    /// The drawer shows what it can build — and therefore *restore*: shells and browsers. A
-    /// session page can never live in a strip under a session; the singleton surfaces keep
-    /// their one home in the panel; and a kind this host could not rebuild after a relaunch
-    /// would be a tab the layout later forgets, which is worse than refusing the move.
+    /// The drawer shows what it can build — and therefore *restore*: shells, browsers and the
+    /// bundled Device Logs pane. Other singleton surfaces keep their one home in the panel, and
+    /// a kind this host could not rebuild after a relaunch would be a tab the layout later
+    /// forgets, which is worse than refusing the move.
     func canAdopt(_ tab: PaneTab) -> Bool {
         switch tab.body {
         case .terminal, .browser: return true
+        case .nativePlugin(let plugin):
+            return plugin.bundleURL == NativePluginCatalog.deviceLogsBundle
         default: return false
         }
     }

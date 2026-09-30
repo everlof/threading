@@ -267,6 +267,18 @@ public protocol ThreadingNativePlugin: NSObjectProtocol {
     /// Build a pane. Optional because a navigator-only plugin is complete on its own.
     @objc optional func makePaneView(context: PluginContext) -> NSView
 
+    /// Re-target an existing pane after the host reveals it again.
+    ///
+    /// A pane is normally a singleton for its plugin and placement. An affordance elsewhere in
+    /// the host may reveal that same pane with a more specific subject — for example, opening a
+    /// device-log pane from the iPhone currently on screen. Rebuilding the pane would discard its
+    /// live state and creating another would duplicate whatever resource it owns, so the host
+    /// sends the newest narrow string arguments through this optional hook instead.
+    ///
+    /// Optional keeps existing plugins binary-compatible. A plugin that has no re-targetable
+    /// subject simply ignores repeated activation and keeps the pane it already made.
+    @objc optional func activatePane(context: PluginContext)
+
     /// Builds one complete leading workspace navigator declared in the bundle's static metadata.
     ///
     /// Optional so every existing pane-only plugin remains loadable. The host discovers the

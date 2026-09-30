@@ -45,6 +45,10 @@ Optionally contribute tools the agent can call, through `pluginTools` and `invok
 are unqualified — `search`, not `my_plugin_search` — and the host prefixes them with your identity
 so two plugins cannot collide.
 
+A host may reveal the same singleton pane again with more specific string arguments. Implement the
+optional `activatePane(context:)` hook when the pane can be re-targeted without rebuilding its view;
+plugins without it keep their existing presentation unchanged.
+
 ## Building one
 
 ```sh

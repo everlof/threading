@@ -109,6 +109,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case approveSystemPermissionPrompt
     case conferManagerRole
     case controlSimulatorDevice
+    case controlPhysicalDevice
     case linkDeviceLogTap
     case runNativePlugin
     case connectSourceControlProvider
@@ -303,6 +304,7 @@ enum ConfirmationPrompt: String, CaseIterable {
              .shareChatLink,
              .conferManagerRole,
              .controlSimulatorDevice,
+             .controlPhysicalDevice,
              // Linking the log tap gives an app's output a capability it did not have: whatever
              // it prints stops being ephemeral and is published into the device's unified log,
              // where it persists and leaves in a sysdiagnose or a log archive. Rebuilding without

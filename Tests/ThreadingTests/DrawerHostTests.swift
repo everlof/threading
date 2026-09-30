@@ -153,6 +153,31 @@ final class DrawerHostTests: XCTestCase {
         XCTAssertFalse(second.isOpen(for: sessionB))
     }
 
+    func testBundledDeviceLogsCanMoveIntoTheDrawerAndRestoreThere() throws {
+        let host = makeHost()
+        let session = SessionID()
+        let bundle = try XCTUnwrap(NativePluginCatalog.deviceLogsBundle)
+        let plugin = NativePluginPaneViewController(
+            bundleURL: bundle,
+            owningSessionID: session
+        )
+        let tab = PaneTab(
+            body: .nativePlugin(plugin),
+            owningSessionID: session
+        )
+
+        XCTAssertTrue(host.canAdopt(tab))
+        host.adopt(tab, at: nil, for: session)
+        XCTAssertEqual(store.panels[session]?.drawerTabs.first?.kind, .deviceLog)
+
+        let restored = makeHost()
+        let restoredTab = try XCTUnwrap(restored.tabs(for: session).first)
+        guard case .nativePlugin(let restoredPlugin) = restoredTab.body else {
+            return XCTFail("Device Logs did not restore as its bundled plugin")
+        }
+        XCTAssertEqual(restoredPlugin.bundleURL, bundle)
+    }
+
     // MARK: - Reordering & Selection
 
     func testReorderPersistsInListOrder() throws {

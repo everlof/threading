@@ -6,6 +6,12 @@
 > measurement record and the source matrix — research done on 2026-09-01 against a real iPhone 16
 > Pro (iOS 26.6) and an iPhone 17 Pro simulator (iOS 26.5).
 >
+> **Enhanced 2026-09-29:** the paired-phone System log now prefers structured live NDJSON from
+> `pymobiledevice3` 11.13.1 or newer over macOS's native RSD tunnel, with `idevicesyslog` retained
+> as the automatic fallback. This was verified through the shipping source against the same
+> iPhone 16 Pro on iOS 26.6.2. Advanced Settings now also provides an explicit, app-owned
+> install/update path for that external tool; a source rescan can use it without restarting.
+>
 > **The opt-in tap is the remaining slice.** Its consent and `DeviceLogTap` stay in the application
 > deliberately, for the reasons under "Where the pane lives" at the end of this file. The rendering
 > gap this draft was written around is closed, so the "Open question: where it renders" section
@@ -57,6 +63,7 @@ attached** for the app's lifetime (verified: still streaming at a 20s timeout, r
 | `log stream --device…` | **does not exist**. `--device`/`--device-name`/`--device-udid` are `log collect` options only |
 | `log collect --device-name …` | `Must be root to collect logs from attached device`. Dead end for a GUI app |
 | `idevicesyslog -u <udid>` | **works**, live, no root, no tunnel, USB or Wi-Fi, iOS 26.6. Text lines: process, sender image, level, message. **No subsystem or category**, and its `-m`/`-p` filters are client-side string matches, so nothing bounds the daemon's work on this route. **Single-client — see below** |
+| `pymobiledevice3 syslog live --native --format json` | **works**, live and structured on iOS 26.6.2, without root or a separately managed tunnel. NDJSON carries timestamp, process, level, message and a real subsystem/category label. Threading uses this when version 11.13.1 or newer is installed, then falls back to `idevicesyslog` if the native route ends before one structured row arrives |
 | `idevicesyslog archive - --age-limit N` | **works**, no root, pulls a real `.logarchive` as a tar on stdout |
 | `devicectl device process launch --console` | **the best device route, and it was nearly missed.** See below |
 
@@ -134,19 +141,26 @@ and the whole design bent around it: archive pulls, and a tap whose purpose was 
 into the unified log because the unified log looked like the only readable channel. The row above
 had been written and dismissed. **A route dismissed in a table cell is not a route that was tried.**
 
-The archive route is the one that produces **byte-identical field structure to the simulator
-stream**, so one parser serves the simulator and a device archive. It is not, as an earlier revision
-of this draft claimed, the *valuable* one: the live stream works, and the reason it appeared not to
-is recorded above. The live device row is a poorer shape — the row model carries subsystem and
-category as optional, and a device live row never has them — but it is live, and it is the only
-route that shows the system's account of the app as it happens.
+The archive route produces **byte-identical field structure to the simulator stream**, so one parser
+serves the simulator and a device archive. It is not, as an earlier revision of this draft claimed,
+the *valuable* one: the live stream works, and the reason it appeared not to is recorded above. The
+new native-RSD live route is structured too. Its JSON schema differs from macOS `log` NDJSON, so it
+has a focused decoder, but it retains the fields the legacy relay flattened away. The pane's one
+label column records `subsystem / category`, which keeps both values visible, searchable and in the
+bounded SQLite history without splitting the row/store schema by source.
 
-`idevicesyslog` is not Xcode's. It is libimobiledevice (1.4.0 here, from Homebrew), GPL-2.0 tools
-over an LGPL library, so it is **never bundled**: Threading resolves it on the user's login-shell
-`PATH` the way `AgentCLIProbe` and `OnePasswordCLI` resolve theirs, and an absent binary is a
-named, actionable state carrying the install command, not a silent empty pane. The device also
-needs an existing pairing record; any Mac that has run Xcode against it has one. Its default
-service is `os_trace_relay` (`--syslog-relay` exists to force the legacy one).
+Neither optional reader is Xcode's and neither is bundled in the application. `idevicesyslog` is
+libimobiledevice (1.4.0 here, from Homebrew), GPL-2.0 tools over an LGPL library.
+`pymobiledevice3` is GPL-3.0 and remains a separate executable. Advanced Settings can explicitly
+download the latest stable PyPI release into a versioned Python environment in Threading's
+Application Support directory. A candidate is validated before its atomic activation, failed
+updates preserve the active version, and no background update check or download occurs. Resolution
+then considers the developer override `THREADING_PHYSICAL_DEVICE_PROBE_PATH`, the managed path, and
+fixed Homebrew/local/system paths. Its version is checked during background source discovery,
+never while the main actor starts the stream. Finite discovery commands drain stdout on a separate
+worker and have enforced deadlines; a connected phone or external tool that stays alive without
+writing cannot wedge Rescan. The device also needs an existing pairing record; any Mac that has
+run Xcode against it has one.
 
 Cost: `--age-limit 60` produced a **284 MB** archive; `--age-limit 600` produced **296 MB**.
 `--size-limit` was ignored. This is a deliberate one-shot pull, never a poll.
@@ -436,10 +450,10 @@ invalidates views for nobody's benefit, since both readers are notification-deli
 - **The write-through revision of the tap on a real device.** The measured run used the version
   that swallowed the original descriptors; the pass-through above has been reasoned about, not
   re-run.
-- **A direct `os_trace_relay` client.** `idevicesyslog` prints text, but the service it speaks by
-  default carries subsystem and category, and other tooling (pymobiledevice3's `syslog live`)
-  renders them live without root or a tunnel. Not measured here. If it holds, the live device
-  route gets the NDJSON shape and the archive pull stops being the only structured device source.
+- **iOS 27 compatibility after the upgrade.** The native-RSD stream and its JSON schema are proven
+  on iOS 26.6.2 with `pymobiledevice3` 11.19.4. The opt-in
+  `LiveStructuredDeviceLogTests` hardware test is the pre/post-upgrade check; until it is rerun on
+  iOS 27, that OS remains deliberately unclaimed.
 - **Runtime `DYLD_INSERT_LIBRARIES` on a real device.** `devicectl` accepts env vars (`DEVICECTL_CHILD_`
   prefix, or `--environment-variables` JSON) but the dylib must still be signed and readable inside
   the bundle. Untested; the build-time route made it unnecessary.
@@ -456,13 +470,14 @@ needs, which is much of what ThreadingMobile does.
 
 So the product is both:
 
-- **Baseline, any app, no cooperation:** host-side `log stream` (simulator) or archive pull /
-  `idevicesyslog` (device). Never asks anything of the user's project.
+- **Baseline, any app, no cooperation:** host-side `log stream` (simulator), structured
+  `pymobiledevice3` live syslog (modern device), or `idevicesyslog` fallback. Never asks anything
+  of the user's project.
 - **Opt-in depth:** the tap, when Threading builds or launches the app, turning `stdout` into
   first-class unified-log entries in the same stream.
 
-One row model either way; the device live route fills only the fields it has. The renderer does
-not need to know which source produced a row.
+One row model either way; each device route fills the fields it has. The renderer does not need to
+know which source produced a row.
 
 ## Scaling contract
 
@@ -531,10 +546,11 @@ ships in `Contents/PlugIns`. The host loads it through `NativePluginCatalog` —
 third-party bundle takes — so the plugin tier carries a real feature rather than only a probe, and
 device logs can grow without adding to the app.
 
-Nothing about the user's route changed: **Device logs** is still an entry in the panel's new-tab
-menu, still one pane per session, and `device_log_prepare` still reveals it. What changed is that
-`activateDeviceLog` now opens the bundled plugin, and the persisted `.deviceLog` tab kind restores
-as that plugin so an older row opens the pane it always did.
+**Device logs** remains in the panel's new-tab menu and `device_log_prepare` still reveals it. A
+live Simulator or physical-iPhone pane can additionally move that same per-session singleton into
+the bottom drawer and target its own UDID, leaving the device visible beside the stream. Both hosts
+persist `.deviceLog` as the bundled plugin; the activation hook retargets an existing instance
+without discarding its view or creating a second reader.
 
 Two things stayed in the application deliberately. The **tap consent** is a security grant about
 the user's own product, so it belongs to the host and is asked by the agent command rather than by

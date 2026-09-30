@@ -73,6 +73,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Session Overview body | — | host-only | Activity attribution and lazy tree, usage/accounting truth, Info polling/process controls and command-line disclosure/port routing, section lifecycle, persistence and empty-panel fallback | Host-only |
 | Subagents navigator and child transcript | — | host-only | child identity/hierarchy, lifecycle and transcript availability, bounded paging, provider progress and usage truth, selection/reveal routing | Host-only |
 | In-panel iOS Simulator body | — | host-only | CoreSimulator device identity, boot lease and ownership, agent consent/routing, framebuffer/input authority, visibility budget and fallback truth | Host-only |
+| In-panel physical iPhone body | — | host-only | exact paired hardware identity, trust and developer-service/media/HID capability truth, capture lifetime, input grant and fail-closed DisplayService/HID authority | Host-only |
 | Simulator presenter window, recording badge and screen menu | — | host-only | The same device lease, consent route and stream demand as the pane; recording state; the touch style burned into shared and recorded pixels | Host-only |
 | Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity and usage truth, refresh, the whole reveal gesture | Implemented |
 | Launch failure surface | — | host-only | the runtime's captured words verbatim, exit classification, retry, the report path's review-before-send rule, repair eligibility and the working-copy boundary | Host-only |
@@ -82,6 +83,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Background sessions (quit choice, launch band, Advanced list) | — | host-only | which children the daemon holds and their identities, the quit answer and what it stops, registration and its removal rule, the stop's attach-then-kill, bounded survey and viewport | Host-only |
 | Trigger center, source connection and activation approval | — | host-only | credential custody, exact immutable revision, project and permission authority, daemon health, queue/run truth and pause/activate actions | Host-only |
 | Command-line tool installation (Advanced row) | — | host-only | which tools are public, the shim directory and its refresh, what in a user's `~/.local/bin` may be written or removed, the login-shell `PATH` reading, the refusal to edit a shell profile | Host-only |
+| Managed iPhone tooling installation (Advanced row) | — | host-only | explicit network consent, PyPI source and package identity, the app-owned environment, version validation, atomic activation and rollback, stale-version cleanup, and which bundled feature receives the executable path | Host-only |
 | Command-line tools on launched `PATH` (Advanced switch) | — | host-only | the environment composed for every shell and agent, prepend-never-substitute, the absent-`PATH` refusal | Host-only |
 | Update channel picker | — | host-only | which builds the updater accepts, the default a build resolves to, the feed override, the versions Sparkle compares | Host-only |
 | Hosted-service environment picker (Developer Settings) | — | host-only | selected control-plane identity, public Release's production lock, credential and push-registration isolation, live Hosted Direct replacement | Host-only |
@@ -549,6 +551,14 @@ Sidebar, chooser, usage, details and notification labels consume the host's comm
 value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
+
+The live Simulator and physical-iPhone **Open Device Logs in Bottom Pane** control is a host-only
+navigation affordance on the existing protected device surfaces. Its entity is the selected device
+UDID within the current session. Threading owns that identity, singleton routing, tab movement and
+drawer placement even under full visual replacement; the bundled Device Logs plugin owns the log
+sources, reader lifetime, filters and history once revealed. An absent bundled plugin fails closed,
+an invalid or disconnected UDID remains a pending selection for the next source rescan, and a
+repeated press reuses the existing pane. No extension receives new device data or authority.
 
 The browser origin prompt's chat-wide grant is host-only authorization UI. Its entity is the
 calling chat, and Threading owns the origin check, exact choice, durable scope, deletion cleanup

@@ -78,6 +78,7 @@ final class PaneTab {
     case sharing(SessionSharingViewController)
     case supervision(SupervisionListViewController)
     case simulator(SimulatorPaneViewController)
+    case realDevice(RealDevicePaneViewController)
     case notificationTest(NotificationTestViewController)
     case nativePlugin(NativePluginPaneViewController)
     case extensionPanel(ExtensionPanelViewController)
@@ -182,6 +183,11 @@ final class PaneTab {
     return nil
   }
 
+  var realDevice: RealDevicePaneViewController? {
+    if case .realDevice(let realDevice) = body { return realDevice }
+    return nil
+  }
+
   var notificationTest: NotificationTestViewController? {
     if case .notificationTest(let controller) = body { return controller }
     return nil
@@ -219,6 +225,7 @@ final class PaneTab {
     case .sharing(let sharing): return sharing
     case .supervision(let supervision): return supervision
     case .simulator(let simulator): return simulator
+    case .realDevice(let realDevice): return realDevice
     case .notificationTest(let controller): return controller
     case .extensionPanel(let panel): return panel
     case .compare(let compare): return compare
@@ -256,6 +263,8 @@ final class PaneTab {
       return "person.3"
     case .simulator:
       return "iphone"
+    case .realDevice:
+      return "iphone.gen2"
     case .notificationTest:
       return "bell.badge"
     case .extensionPanel:
@@ -303,6 +312,8 @@ final class PaneTab {
       return L10n.string("Chats")
     case .simulator:
       return L10n.string("iOS Simulator")
+    case .realDevice:
+      return L10n.string("iPhone Device")
     case .notificationTest:
       return L10n.string("Push Test")
     case .extensionPanel(let panel):

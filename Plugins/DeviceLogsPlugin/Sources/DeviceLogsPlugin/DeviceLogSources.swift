@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import ThreadingDesignKit
 import TimberLineParser
@@ -13,8 +14,9 @@ public struct DeviceLogRow {
     public let time: String
     public let level: String
     public let process: String
-    /// Absent on the live device route: the syslog relay flattens the unified log and does not
-    /// carry a subsystem. Optional rather than empty so the difference stays visible.
+    /// Absent when a source carries no label. The modern live-device route keeps its subsystem
+    /// and category here as `subsystem / category`; the legacy relay can only offer sender image.
+    /// Optional rather than empty so the difference stays visible.
     public let subsystem: String?
     public let message: String
 
@@ -148,6 +150,7 @@ public final class DeviceLogLineReader {
     public func run(
         executable: String,
         arguments: [String],
+        environment: [String: String]? = nil,
         onLine: @escaping (ArraySlice<UInt8>) -> Void,
         onEnd: ((String) -> Void)? = nil
     ) {
@@ -159,6 +162,7 @@ public final class DeviceLogLineReader {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: executable)
         task.arguments = arguments
+        task.environment = environment
         let pipe = Pipe()
         task.standardOutput = pipe
         // Diagnostics used to go to /dev/null, so a device that was locked, an app that was not
@@ -343,6 +347,9 @@ public enum DeviceLogLimits {
     public static let ringCapacity = 50_000
     /// How long a discovery command may take before its answer is abandoned.
     public static let discoveryDeadline: TimeInterval = 6
+    /// Discovery output is metadata, not a log stream. A tool returning more than this is either
+    /// the wrong command or a changed protocol, and must not grow the plugin without limit.
+    public static let maximumDiscoveryOutputBytes = 8 * 1_048_576
     /// Listing a device's apps talks to the device rather than to a local service, so it is given
     /// its own longer deadline. It still has one: a phone that stops answering must not stall a
     /// rescan.
@@ -352,6 +359,98 @@ public enum DeviceLogLimits {
     /// Listing or copying inside an app container talks to the device over its own transport, so
     /// it gets a longer leash than a local `simctl` call — and still a deadline.
     public static let containerDeadline: TimeInterval = 40
+}
+
+/// Runs one finite device-discovery command while draining its output concurrently.
+///
+/// Reading `FileHandle.availableData` on the caller blocks until bytes arrive. Doing that inside a
+/// deadline loop made the deadline fictional for the most important failure shape: a child that
+/// stayed alive and said nothing. The reader has its own worker now, so the caller can enforce the
+/// timeout and reclaim the child independently of whether stdout ever becomes readable.
+enum BoundedDeviceLogCommand {
+    private static let terminationGrace: TimeInterval = 0.5
+
+    static func run(
+        _ executable: String,
+        _ arguments: [String],
+        deadline seconds: TimeInterval = DeviceLogLimits.discoveryDeadline
+    ) -> String? {
+        guard FileManager.default.isExecutableFile(atPath: executable) else { return nil }
+
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: executable)
+        task.arguments = arguments
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = FileHandle.nullDevice
+
+        let processFinished = DispatchSemaphore(value: 0)
+        task.terminationHandler = { _ in processFinished.signal() }
+        guard (try? task.run()) != nil else { return nil }
+
+        let output = BoundedDeviceLogCommandOutput()
+        let outputFinished = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            output.drain(pipe.fileHandleForReading)
+            outputFinished.signal()
+        }
+
+        guard processFinished.wait(timeout: .now() + seconds) == .success else {
+            stop(task, processFinished: processFinished)
+            try? pipe.fileHandleForReading.close()
+            _ = outputFinished.wait(timeout: .now() + terminationGrace)
+            return nil
+        }
+
+        guard outputFinished.wait(timeout: .now() + terminationGrace) == .success else {
+            try? pipe.fileHandleForReading.close()
+            return nil
+        }
+        return output.text()
+    }
+
+    private static func stop(_ task: Process, processFinished: DispatchSemaphore) {
+        task.terminate()
+        guard processFinished.wait(timeout: .now() + terminationGrace) != .success,
+              task.isRunning
+        else { return }
+
+        _ = Darwin.kill(task.processIdentifier, SIGKILL)
+        _ = processFinished.wait(timeout: .now() + terminationGrace)
+    }
+}
+
+private final class BoundedDeviceLogCommandOutput: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+    private var exceededLimit = false
+
+    func drain(_ handle: FileHandle) {
+        while true {
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else { return }
+            append(chunk)
+        }
+    }
+
+    func text() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !exceededLimit else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func append(_ chunk: Data) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !exceededLimit else { return }
+        guard data.count + chunk.count <= DeviceLogLimits.maximumDiscoveryOutputBytes else {
+            exceededLimit = true
+            data.removeAll(keepingCapacity: false)
+            return
+        }
+        data.append(chunk)
+    }
 }
 
 // MARK: - Simulator
@@ -429,6 +528,183 @@ public final class PairedDeviceLogRowSource: BufferedDeviceLogSource {
     }
 
     public override func stop() { reader.stop() }
+}
+
+/// Structured unified-log entries from a paired iPhone through `pymobiledevice3`'s native RSD
+/// route.
+///
+/// This is the live shape Apple's own console makes useful: process, level, message and the real
+/// subsystem/category label arrive as data rather than prose. `--native` piggybacks the tunnel
+/// macOS already owns, so it needs neither root nor a long-running tunnel helper. The executable
+/// remains an external developer tool and is never bundled with Threading.
+///
+/// A phone older than iOS 17, or a native route that becomes unavailable, produces no structured
+/// rows. In that case this source starts the existing `idevicesyslog` reader automatically rather
+/// than turning an installed optional tool into a regression.
+public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, @unchecked Sendable {
+    private let structuredReader = DeviceLogLineReader(label: "device-structured")
+    private let fallbackReader = DeviceLogLineReader(label: "device-fallback")
+    private let lifecycle = DispatchQueue(label: "codes.threading.devicelog.device-lifecycle")
+    private let decodedLock = NSLock()
+    private let udid: String
+    private let overNetwork: Bool
+    private let toolPath: String
+    private let fallbackToolPath: String?
+    private let structuredStartupDeadline: TimeInterval
+    private var fallbackTimer: DispatchSourceTimer?
+    private var stopped = true
+    private var fallbackStarted = false
+    private var decodedStructuredRows = 0
+
+    public init(
+        udid: String,
+        overNetwork: Bool,
+        toolPath: String,
+        fallbackToolPath: String?,
+        structuredStartupDeadline: TimeInterval = 6
+    ) {
+        self.udid = udid
+        self.overNetwork = overNetwork
+        self.toolPath = toolPath
+        self.fallbackToolPath = fallbackToolPath
+        self.structuredStartupDeadline = structuredStartupDeadline
+    }
+
+    public override func start() {
+        lifecycle.sync {
+            structuredReader.stop()
+            fallbackReader.stop()
+            stopped = false
+            fallbackStarted = false
+            setDecodedStructuredRows(0)
+            startStructuredReader()
+            scheduleFallbackIfSilent()
+        }
+    }
+
+    public override func stop() {
+        lifecycle.sync {
+            stopped = true
+            cancelFallbackTimer()
+            structuredReader.stop()
+            fallbackReader.stop()
+        }
+    }
+
+    /// Visible to the opt-in hardware test without exposing transport details to the pane.
+    public var didDecodeStructuredRow: Bool {
+        decodedLock.lock()
+        defer { decodedLock.unlock() }
+        return decodedStructuredRows > 0
+    }
+
+    private func startStructuredReader() {
+        structuredReader.run(
+            executable: toolPath,
+            arguments: [
+                "--no-color", "syslog", "live", "--native", "--format", "json",
+            ],
+            environment: Self.environment(udid: udid),
+            onLine: { [weak self] line in
+                guard let self, let row = DeviceLogDecoding.pymobiledevice3(line) else { return }
+                let isFirstStructuredRow = self.markDecodedStructuredRow()
+                self.enqueue(row)
+                if isFirstStructuredRow {
+                    self.lifecycle.async { [weak self] in self?.cancelFallbackTimer() }
+                }
+            },
+            onEnd: { [weak self] reason in
+                self?.structuredReaderEnded(reason: reason)
+            }
+        )
+    }
+
+    private func structuredReaderEnded(reason: String) {
+        lifecycle.async { [weak self] in
+            guard let self, !self.stopped else { return }
+            self.cancelFallbackTimer()
+            guard !self.didDecodeStructuredRow, let fallbackToolPath = self.fallbackToolPath else {
+                self.onStreamEnded?(reason)
+                return
+            }
+            self.startFallbackOnce(toolPath: fallbackToolPath)
+        }
+    }
+
+    /// A command that stays alive but never produces a row is not a working route. This is the
+    /// exact failure shape of a contended relay, and waiting forever would prevent the fallback
+    /// from doing the one job it exists for.
+    private func scheduleFallbackIfSilent() {
+        guard let fallbackToolPath else { return }
+        let timer = DispatchSource.makeTimerSource(queue: lifecycle)
+        timer.schedule(deadline: .now() + structuredStartupDeadline)
+        timer.setEventHandler { [weak self] in
+            guard let self, !self.stopped, !self.didDecodeStructuredRow else { return }
+            self.structuredReader.stop()
+            self.startFallbackOnce(toolPath: fallbackToolPath)
+        }
+        fallbackTimer = timer
+        timer.resume()
+    }
+
+    private func startFallbackOnce(toolPath: String) {
+        guard !fallbackStarted else { return }
+        fallbackStarted = true
+        cancelFallbackTimer()
+        startFallbackReader(toolPath: toolPath)
+    }
+
+    private func cancelFallbackTimer() {
+        fallbackTimer?.setEventHandler {}
+        fallbackTimer?.cancel()
+        fallbackTimer = nil
+    }
+
+    private func startFallbackReader(toolPath: String) {
+        // The fallback is the same single-client relay as `PairedDeviceLogRowSource`, including
+        // its orphan-reclaim rule. Skipping this step can make a successful fallback stay silent.
+        DeviceRelayReclaim.reclaimOrphanedReaders(udid: udid, toolPath: toolPath)
+        var arguments = ["-u", udid, "--no-colors"]
+        if overNetwork { arguments.append("-n") }
+        fallbackReader.run(
+            executable: toolPath,
+            arguments: arguments,
+            onLine: { [weak self] line in
+                if let row = DeviceLogDecoding.syslog(line) { self?.enqueue(row) }
+            },
+            onEnd: { [weak self] fallbackReason in
+                self?.onStreamEnded?(fallbackReason)
+            }
+        )
+    }
+
+    /// Target one phone and neutralise inherited transport selectors that conflict with
+    /// `--native`. The host's other environment remains intact for Python and its virtualenv.
+    static func environment(
+        udid: String,
+        inherited: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        var result = inherited
+        result["PYMOBILEDEVICE3_UDID"] = udid
+        result.removeValue(forKey: "PYMOBILEDEVICE3_TUNNEL")
+        result.removeValue(forKey: "PYMOBILEDEVICE3_USERSPACE")
+        result.removeValue(forKey: "PYMOBILEDEVICE3_NATIVE")
+        return result
+    }
+
+    private func setDecodedStructuredRows(_ count: Int) {
+        decodedLock.lock()
+        decodedStructuredRows = count
+        decodedLock.unlock()
+    }
+
+    private func markDecodedStructuredRow() -> Bool {
+        decodedLock.lock()
+        decodedStructuredRows += 1
+        let isFirst = decodedStructuredRows == 1
+        decodedLock.unlock()
+        return isFirst
+    }
 }
 
 // MARK: - Device console
@@ -741,6 +1017,67 @@ public enum DeviceLogDecoding {
         )
     }
 
+    /// One NDJSON object emitted by `pymobiledevice3 syslog live --format json`.
+    ///
+    /// Captured from a physical iPhone on iOS 26.6.2. The label is nested rather than using the
+    /// macOS `log stream` keys, and contains both subsystem and category. The pane has one label
+    /// column, so both are retained there as `subsystem / category`; this also makes either value
+    /// searchable and records both in SQLite without a schema fork for one source.
+    public static func pymobiledevice3(_ line: ArraySlice<UInt8>) -> DeviceLogRow? {
+        let data = Data(line)
+        guard data.first == 0x7B,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = object["message"] as? String
+        else { return nil }
+
+        let processPath = (object["filename"] as? String)
+            ?? (object["image_name"] as? String)
+        let process = processPath.map { ($0 as NSString).lastPathComponent } ?? "?"
+        let rawTimestamp = object["timestamp"] as? String
+        let time = rawTimestamp.map(Self.clockFromISO8601) ?? DeviceLogLimits.undatedTime
+        let rawLevel = object["level"] as? String
+        let level = rawLevel.map(Self.unifiedLogLevel) ?? "Default"
+        let label = object["label"] as? [String: Any]
+        let subsystem = Self.combinedLabel(label)
+
+        return DeviceLogRow(
+            time: time,
+            level: level,
+            process: process,
+            subsystem: subsystem,
+            message: message,
+            timestamp: instant(in: rawTimestamp)
+        )
+    }
+
+    private static func clockFromISO8601(_ timestamp: String) -> String {
+        guard timestamp.count >= 19 else { return DeviceLogLimits.undatedTime }
+        return String(timestamp.dropFirst(11).prefix(12))
+    }
+
+    private static func unifiedLogLevel(_ raw: String) -> String {
+        switch raw.uppercased() {
+        case "EMERGENCY": return "Emergency"
+        case "ALERT": return "Alert"
+        case "CRITICAL": return "Critical"
+        case "FAULT": return "Fault"
+        case "ERROR": return "Error"
+        case "WARNING", "WARN": return "Warning"
+        case "NOTICE": return "Notice"
+        case "INFO": return "Info"
+        case "DEBUG": return "Debug"
+        default: return "Default"
+        }
+    }
+
+    private static func combinedLabel(_ label: [String: Any]?) -> String? {
+        guard let label else { return nil }
+        let subsystem = (label["subsystem"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let category = (label["category"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let components = [subsystem, category].compactMap { $0 }
+        return components.isEmpty ? nil : components.joined(separator: " / ")
+    }
+
     /// `idevicesyslog` output, which looks like:
     ///
     ///     Sep  1 16:21:01.548727 AccessibilityUIServer(CoreMotion)[41737] <Debug>: message
@@ -795,6 +1132,12 @@ public struct DeviceLogSourceOption: Equatable {
     public enum Kind: Equatable {
         case simulator(udid: String)
         case device(udid: String, overNetwork: Bool)
+        case structuredDevice(
+            udid: String,
+            overNetwork: Bool,
+            toolPath: String,
+            fallbackToolPath: String?
+        )
         /// One app on a real device. Which of its two logs to read is `DeviceLogRoute`, chosen
         /// beside the source rather than by doubling every app into two entries.
         case app(deviceID: String, bundleID: String, appName: String)
@@ -845,6 +1188,13 @@ public struct DeviceLogSourceOption: Equatable {
         case .device(let udid, let overNetwork):
             guard let tool = DeviceLogSourceCatalog.syslogToolPath else { return nil }
             return PairedDeviceLogRowSource(udid: udid, overNetwork: overNetwork, toolPath: tool)
+        case .structuredDevice(let udid, let overNetwork, let tool, let fallbackTool):
+            return StructuredPairedDeviceLogRowSource(
+                udid: udid,
+                overNetwork: overNetwork,
+                toolPath: tool,
+                fallbackToolPath: fallbackTool
+            )
         case .app(let deviceID, let bundleID, let appName):
             switch route {
             case .appLog:
@@ -871,6 +1221,9 @@ public struct DeviceLogSourceOption: Equatable {
 /// not a stalled pane.
 public enum DeviceLogSourceCatalog {
 
+    private static let pymobiledevice3Override = "THREADING_PHYSICAL_DEVICE_PROBE_PATH"
+    static let minimumStructuredSyslogToolVersion = [11, 13, 1]
+
     /// `idevicesyslog` is libimobiledevice's, GPL-2.0 over an LGPL library, so it is never bundled.
     /// Its absence is a named state the pane can explain, not a silent empty list.
     public static var syslogToolPath: String? {
@@ -888,8 +1241,67 @@ public enum DeviceLogSourceCatalog {
             .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
-    public static func discover(completion: @escaping @Sendable ([DeviceLogSourceOption]) -> Void) {
+    /// A recent `pymobiledevice3` can expose the real unified-log fields over Apple's native RSD
+    /// tunnel. Version probing happens inside background discovery, never while the pane starts a
+    /// reader on the main actor.
+    private static func structuredSyslogToolPath(preferredPath: String?) -> String? {
+        let candidates = structuredSyslogCandidatePaths(
+            preferredPath: preferredPath,
+            environment: ProcessInfo.processInfo.environment
+        )
+        for path in candidates {
+            guard FileManager.default.isExecutableFile(atPath: path),
+                  let version = BoundedDeviceLogCommand.run(path, ["--no-color", "version"]),
+                  structuredSyslogVersionIsSupported(version) == true
+            else { continue }
+            return path
+        }
+        return nil
+    }
+
+    static func structuredSyslogCandidatePaths(
+        preferredPath: String?,
+        environment: [String: String]
+    ) -> [String] {
+        var candidates: [String] = []
+        if let configured = environment[pymobiledevice3Override], configured.hasPrefix("/") {
+            candidates.append(configured)
+        }
+        if let preferredPath, preferredPath.hasPrefix("/") {
+            candidates.append(preferredPath)
+        }
+        candidates.append(contentsOf: [
+            "/opt/homebrew/bin/pymobiledevice3",
+            "/usr/local/bin/pymobiledevice3",
+            "/usr/bin/pymobiledevice3",
+        ])
+
+        var seen = Set<String>()
+        return candidates.filter { seen.insert($0).inserted }
+    }
+
+    static func structuredSyslogVersionIsSupported(_ rawVersion: String) -> Bool? {
+        let version = rawVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+        let components = version.split(separator: ".", omittingEmptySubsequences: false)
+        guard components.count >= minimumStructuredSyslogToolVersion.count else { return nil }
+
+        let parsed = components.prefix(minimumStructuredSyslogToolVersion.count).map { component in
+            Int(component.prefix(while: \Character.isNumber))
+        }
+        guard parsed.allSatisfy({ $0 != nil }) else { return nil }
+        return parsed.compactMap { $0 }
+            .lexicographicallyPrecedes(minimumStructuredSyslogToolVersion) == false
+    }
+
+    public static func discover(
+        preferredPymobiledevice3Path: String? = nil,
+        completion: @escaping @Sendable ([DeviceLogSourceOption]) -> Void
+    ) {
         DispatchQueue.global(qos: .userInitiated).async {
+            let structuredTool = structuredSyslogToolPath(
+                preferredPath: preferredPymobiledevice3Path
+            )
+            let fallbackTool = syslogToolPath
             // A simulator is its own machine and offers exactly one thing to read, so it is a
             // group of one rather than a special case in the menu.
             var options = bootedSimulators().map {
@@ -912,10 +1324,24 @@ public enum DeviceLogSourceCatalog {
                     title: name,
                     isSimulator: false
                 )
+                let systemLogKind: DeviceLogSourceOption.Kind
+                if let structuredTool {
+                    systemLogKind = .structuredDevice(
+                        udid: device.udid,
+                        overNetwork: device.overNetwork,
+                        toolPath: structuredTool,
+                        fallbackToolPath: fallbackTool
+                    )
+                } else {
+                    systemLogKind = .device(
+                        udid: device.udid,
+                        overNetwork: device.overNetwork
+                    )
+                }
                 options.append(DeviceLogSourceOption(
                     machine: machine,
                     title: L10n.format("System log (%@)", transport),
-                    kind: .device(udid: device.udid, overNetwork: device.overNetwork)
+                    kind: systemLogKind
                 ))
                 // One entry per app the user builds themselves. This is the route worth reaching
                 // for first: live, Apple-native, and unredacted, unlike the system log beside it.
@@ -937,7 +1363,10 @@ public enum DeviceLogSourceCatalog {
     }
 
     private static func bootedSimulators() -> [(udid: String, name: String)] {
-        guard let output = run("/usr/bin/xcrun", ["simctl", "list", "devices", "booted", "-j"]),
+        guard let output = BoundedDeviceLogCommand.run(
+            "/usr/bin/xcrun",
+            ["simctl", "list", "devices", "booted", "-j"]
+        ),
               let data = output.data(using: .utf8),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let byRuntime = root["devices"] as? [String: [[String: Any]]]
@@ -955,8 +1384,12 @@ public enum DeviceLogSourceCatalog {
     /// so which list a device came from is part of its identity here.
     private static func pairedDevices() -> [(udid: String, overNetwork: Bool)] {
         guard let tool = deviceIDToolPath else { return [] }
-        let usb = (run(tool, ["-l"]) ?? "").split(separator: "\n").map(String.init)
-        let network = (run(tool, ["-n"]) ?? "").split(separator: "\n").map(String.init)
+        let usb = (BoundedDeviceLogCommand.run(tool, ["-l"]) ?? "")
+            .split(separator: "\n")
+            .map(String.init)
+        let network = (BoundedDeviceLogCommand.run(tool, ["-n"]) ?? "")
+            .split(separator: "\n")
+            .map(String.init)
         var seen = Set<String>()
         var result: [(String, Bool)] = []
         for udid in usb where !udid.isEmpty && seen.insert(udid).inserted {
@@ -976,7 +1409,9 @@ public enum DeviceLogSourceCatalog {
     private static func deviceName(udid: String, overNetwork: Bool) -> String? {
         var arguments = ["-u", udid, "-k", "DeviceName"]
         if overNetwork { arguments.insert("-n", at: 0) }
-        guard let tool = infoToolPath, let raw = run(tool, arguments) else { return nil }
+        guard let tool = infoToolPath,
+              let raw = BoundedDeviceLogCommand.run(tool, arguments)
+        else { return nil }
         let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty ? nil : name
     }
@@ -989,7 +1424,7 @@ public enum DeviceLogSourceCatalog {
         let output = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-apps-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: output) }
-        guard run(
+        guard BoundedDeviceLogCommand.run(
             "/usr/bin/xcrun",
             [
                 "devicectl", "device", "info", "apps", "--device", deviceID,
@@ -1023,7 +1458,7 @@ public enum DeviceLogSourceCatalog {
         let output = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-container-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: output) }
-        guard run(
+        guard BoundedDeviceLogCommand.run(
             "/usr/bin/xcrun",
             [
                 "devicectl", "device", "info", "files", "--device", deviceID,
@@ -1057,7 +1492,7 @@ public enum DeviceLogSourceCatalog {
         let destination = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-log-\(UUID().uuidString).log")
         defer { try? FileManager.default.removeItem(at: destination) }
-        guard run(
+        guard BoundedDeviceLogCommand.run(
             "/usr/bin/xcrun",
             [
                 "devicectl", "device", "copy", "from", "--device", deviceID,
@@ -1069,29 +1504,4 @@ public enum DeviceLogSourceCatalog {
         return try? String(contentsOf: destination, encoding: .utf8)
     }
 
-    private static func run(
-        _ executable: String,
-        _ arguments: [String],
-        deadline seconds: TimeInterval = DeviceLogLimits.discoveryDeadline
-    ) -> String? {
-        guard FileManager.default.isExecutableFile(atPath: executable) else { return nil }
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: executable)
-        task.arguments = arguments
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
-        guard (try? task.run()) != nil else { return nil }
-        let deadline = Date().addingTimeInterval(seconds)
-        var data = Data()
-        while task.isRunning, Date() < deadline {
-            data.append(pipe.fileHandleForReading.availableData)
-        }
-        if task.isRunning {
-            task.terminate()
-            return nil
-        }
-        data.append(pipe.fileHandleForReading.readDataToEndOfFile())
-        return String(data: data, encoding: .utf8)
-    }
 }

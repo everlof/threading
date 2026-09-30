@@ -116,7 +116,7 @@ final class SimulatorCommandCancellation: @unchecked Sendable {
         lock.unlock()
     }
 
-    fileprivate func attach(_ child: SpawnedChildProcess) {
+    func attach(_ child: SpawnedChildProcess) {
         lock.lock()
         self.child = child
         if cancelled {
@@ -125,7 +125,7 @@ final class SimulatorCommandCancellation: @unchecked Sendable {
         lock.unlock()
     }
 
-    fileprivate func complete() {
+    func complete() {
         lock.lock()
         child = nil
         let escalation = escalation

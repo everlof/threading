@@ -294,7 +294,8 @@ host-owned.
 **The toolbar is grouped by what a control acts on**, and its glyphs are chosen against their
 neighbours (`SimulatorPaneSymbols`): capture (camera, record), what draws over the device
 (touches `hand.tap`, notes, element outlines `accessibility`), where it is shown (the presenter
-window), then the connection (control `cursorarrow.click`, crossed out after a denial; Refresh).
+window), then diagnostics (Device Logs in the bottom drawer), then the connection (control
+`cursorarrow.click`, crossed out after a denial; Refresh).
 The inspector was a viewfinder beside the camera and the control toggle was the tap glyph that now
 means touches. Appearance is a `simctl` device setting and sits with the hardware buttons under the
 screen, whose volume marks are `speaker.minus`/`speaker.plus` rather than two wave counts.

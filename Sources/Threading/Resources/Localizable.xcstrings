@@ -10666,6 +10666,17 @@
         }
       }
     },
+    "Capturing…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tar skärmavbild…"
+          }
+        }
+      }
+    },
     "Change Requests" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11084,6 +11095,17 @@
         }
       }
     },
+    "Checking Threading's managed installation…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollerar Threadings hanterade installation…"
+          }
+        }
+      }
+    },
     "Checking banked reset…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11095,6 +11117,17 @@
         }
       }
     },
+    "Checking control support…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollerar stöd för styrning…"
+          }
+        }
+      }
+    },
     "Checking for Updates…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11102,6 +11135,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Söker efter uppdateringar…"
+          }
+        }
+      }
+    },
+    "Checking iPhone Control…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollerar iPhone-styrning…"
           }
         }
       }
@@ -11593,6 +11637,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj hur ofta fönstret %@ ska avisera dig när det fylls."
+          }
+        }
+      }
+    },
+    "Choose iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj iPhone"
           }
         }
       }
@@ -14136,6 +14191,17 @@
         }
       }
     },
+    "Connect and unlock a paired iPhone to preview it here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut och lås upp en parkopplad iPhone för att förhandsvisa den här."
+          }
+        }
+      }
+    },
     "Connect keyvault" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14171,6 +14237,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anslut Mac-datorn till Wi-Fi eller Ethernet. Vägen in kommer tillbaka av sig själv."
+          }
+        }
+      }
+    },
+    "Connect this iPhone with a cable, unlock it, then retry." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut denna iPhone med en kabel, lås upp den och försök igen."
           }
         }
       }
@@ -14600,6 +14677,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Styra %@?"
+          }
+        }
+      }
+    },
+    "Control check needs a newer pymobiledevice3" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontroll av styrstöd kräver en nyare pymobiledevice3"
+          }
+        }
+      }
+    },
+    "Control check unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontroll av styrstöd är inte tillgänglig"
           }
         }
       }
@@ -17655,6 +17754,17 @@
         }
       }
     },
+    "Disable iPhone Control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inaktivera iPhone-styrning"
+          }
+        }
+      }
+    },
     "Disable rich preview" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18062,6 +18172,17 @@
         }
       }
     },
+    "Downloading, validating and activating the latest stable release…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hämtar, validerar och aktiverar den senaste stabila versionen…"
+          }
+        }
+      }
+    },
     "Downloads" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18069,6 +18190,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hämtningar"
+          }
+        }
+      }
+    },
+    "Downloads the latest stable release from PyPI into Threading's own data folder when you press Install Latest. Used for iPhone control compatibility checks and structured Device Logs. The separate tool is GPL-3.0-or-later and its environment is usually around 200 MB." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hämtar den senaste stabila versionen från PyPI till Threadings egen datamapp när du trycker på Installera senaste. Används för kompatibilitetskontroller av iPhone-styrning och strukturerade enhetsloggar. Det separata verktyget är GPL-3.0-or-later och dess miljö är vanligtvis runt 200 MB."
           }
         }
       }
@@ -18829,6 +18961,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktivera högst 32 Codex-konton innan du uppdaterar modellerna."
+          }
+        }
+      }
+    },
+    "Enable iPhone Control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera iPhone-styrning"
           }
         }
       }
@@ -24267,6 +24410,17 @@
         }
       }
     },
+    "Install Latest" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera senaste"
+          }
+        }
+      }
+    },
     "Install Tailscale and sign in on this Mac. The door comes back on its own." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26798,6 +26952,17 @@
         }
       }
     },
+    "Looking for paired iPhones…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Söker efter parkopplade iPhone-enheter…"
+          }
+        }
+      }
+    },
     "Looking through your past conversations…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27377,6 +27542,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Medieobjekt"
+          }
+        }
+      }
+    },
+    "Media streaming unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Medieströmning är inte tillgänglig"
           }
         }
       }
@@ -31869,6 +32045,17 @@
         }
       }
     },
+    "Open Device Logs in Bottom Pane" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna enhetsloggar i nederpanelen"
+          }
+        }
+      }
+    },
     "Open Extensions Settings" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34004,6 +34191,17 @@
         }
       }
     },
+    "Prepare iPhone Control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förbered iPhone-styrning"
+          }
+        }
+      }
+    },
     "Prepare mints the next certificate and announces it over the connection your devices already trust. Activate switches to it, and a device that has connected since the announcement keeps working." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34044,6 +34242,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Förbereder bilagor…"
+          }
+        }
+      }
+    },
+    "Preparing iPhone control…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förbereder iPhone-styrning…"
           }
         }
       }
@@ -35419,6 +35628,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Återställer teman, profiler och alla inställningar till standardvärdena. Dina projekt, sessioner och konversationer lämnas orörda."
+          }
+        }
+      }
+    },
+    "PyPI returned an iPhone tooling version that Threading cannot use." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PyPI returnerade en version av iPhone-verktyget som Threading inte kan använda."
           }
         }
       }
@@ -36801,6 +37021,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppdatera artefaktkartan"
+          }
+        }
+      }
+    },
+    "Refresh iPhones" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdatera iPhone-enheter"
           }
         }
       }
@@ -38728,6 +38959,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Försök med simulatorstyrning igen"
+          }
+        }
+      }
+    },
+    "Retry iPhone Control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Försök igen med iPhone-styrning"
+          }
+        }
+      }
+    },
+    "Retry iPhone Preview" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Försök visa iPhone igen"
           }
         }
       }
@@ -49113,6 +49366,28 @@
         }
       }
     },
+    "The iPhone tooling installation failed. Check the network connection and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installationen av iPhone-verktyget misslyckades. Kontrollera nätverksanslutningen och försök igen."
+          }
+        }
+      }
+    },
+    "The iPhone tooling installation took too long and was stopped." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installationen av iPhone-verktyget tog för lång tid och stoppades."
+          }
+        }
+      }
+    },
     "The image could not be decoded." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -53380,6 +53655,17 @@
         }
       }
     },
+    "Threading could not find Xcode's Python 3, which is needed to install iPhone tooling." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kunde inte hitta Xcodes Python 3, som behövs för att installera iPhone-verktyget."
+          }
+        }
+      }
+    },
     "Threading could not match the published review to this repository’s origin remote." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -53431,6 +53717,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading kunde inte förbereda en isolerad leverantörsmapp för den här inloggningen."
+          }
+        }
+      }
+    },
+    "Threading could not prepare its managed iPhone tooling folder." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kunde inte förbereda sin hanterade mapp för iPhone-verktyg."
           }
         }
       }
@@ -53842,6 +54139,17 @@
         }
       }
     },
+    "Threading installed the iPhone tooling but could not activate it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading installerade iPhone-verktyget men kunde inte aktivera det."
+          }
+        }
+      }
+    },
     "Threading is already running" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54117,6 +54425,17 @@
         }
       }
     },
+    "Threading will be able to tap and swipe on this exact iPhone while its pane is visible. Hiding the pane or switching phones revokes control." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kommer att kunna trycka och svepa på just den här iPhonen medan dess panel är synlig. Om panelen döljs eller om du byter telefon återkallas styrningen."
+          }
+        }
+      }
+    },
     "Threading will delete its saved credential from your Keychain. Reconnecting requires the token again." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54256,6 +54575,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threadings inkluderade tilläggsresurser är inte tillgängliga."
+          }
+        }
+      }
+    },
+    "Threading's managed installation is incomplete or too old. Install Latest replaces it with a validated release." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threadings hanterade installation är ofullständig eller för gammal. Installera senaste ersätter den med en validerad version."
           }
         }
       }
@@ -54762,6 +55092,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tryckstil"
+          }
+        }
+      }
+    },
+    "Touch surface unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pekytan är inte tillgänglig"
           }
         }
       }
@@ -55808,6 +56149,17 @@
         }
       }
     },
+    "Update" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdatera"
+          }
+        }
+      }
+    },
     "Update %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -55907,6 +56259,17 @@
         }
       }
     },
+    "Update failed; version %1$@ remains active. %2$@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdateringen misslyckades; version %1$@ är fortfarande aktiv. %2$@"
+          }
+        }
+      }
+    },
     "Update ready" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -55969,6 +56332,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppdaterar"
+          }
+        }
+      }
+    },
+    "Updating version %@. It stays active unless the new installation validates." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdaterar version %@. Den förblir aktiv tills den nya installationen har validerats."
           }
         }
       }
@@ -56774,6 +57148,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Version"
+          }
+        }
+      }
+    },
+    "Version %1$@ is active at %2$@. Update checks PyPI only when you press Update." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Version %1$@ är aktiv på %2$@. PyPI kontrolleras endast när du trycker på Uppdatera."
           }
         }
       }
@@ -60797,6 +61182,28 @@
         }
       }
     },
+    "iPhone Control Unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone-styrning är inte tillgänglig"
+          }
+        }
+      }
+    },
+    "iPhone Device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone-enhet"
+          }
+        }
+      }
+    },
     "iPhone SE" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60804,6 +61211,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "iPhone SE"
+          }
+        }
+      }
+    },
+    "iPhone Tooling" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone-verktyg"
           }
         }
       }
@@ -60832,6 +61250,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "iPhone registrerad"
+          }
+        }
+      }
+    },
+    "iPhone screen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone-skärm"
           }
         }
       }
@@ -62026,6 +62455,17 @@
         }
       }
     },
+    "power" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ström"
+          }
+        }
+      }
+    },
     "preferences file" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62132,6 +62572,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "pull requests"
+          }
+        }
+      }
+    },
+    "pymobiledevice3" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "pymobiledevice3"
           }
         }
       }
@@ -63045,6 +63496,17 @@
       }
     },
     "subagent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "underagenter"
+          }
+        }
+      }
+    },
+    "subagents" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {

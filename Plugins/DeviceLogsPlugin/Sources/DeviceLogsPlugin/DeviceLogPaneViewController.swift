@@ -74,6 +74,11 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// rescan that finds the same machines does not move the reader off the one being watched.
     private var selectedMachine: DeviceLogSourceOption.Machine?
 
+    /// An explicit host route outranks the pane's current and recent selections once that machine
+    /// appears in discovery. It remains pending while a temporarily disconnected device is
+    /// absent, so the next rescan still lands where the user asked.
+    private var requestedMachineID: String?
+
     /// The running source's title *within* its machine, used to re-find it after a rescan.
     private var runningSourceTitleWithinMachine: String?
 
@@ -141,12 +146,22 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// The session this tab belongs to, kept so a predicate could later be scoped to its project.
     public let owningSessionID: String?
 
+    /// The app-owned tool location. It may not exist when the pane is created: a later rescan
+    /// picks up a Settings installation without requiring Threading or the plugin to restart.
+    private let preferredPymobiledevice3Path: String?
+
     /// Writes what arrives to disk, so search and a time range have something to look at once the
     /// ring has moved on. One store per chat: two chats watching two devices are two histories.
     public let recorder: DeviceLogRecorder?
 
-    public init(owningSessionID: String?) {
+    public init(
+        owningSessionID: String?,
+        preferredPymobiledevice3Path: String? = nil,
+        preferredMachineID: String? = nil
+    ) {
         self.owningSessionID = owningSessionID
+        self.preferredPymobiledevice3Path = preferredPymobiledevice3Path
+        self.requestedMachineID = preferredMachineID
         self.recorder = DeviceLogRecorder(
             directory: Self.storeDirectory,
             name: owningSessionID ?? "unattached"
@@ -433,7 +448,9 @@ public final class DeviceLogPaneViewController: NSViewController {
     // MARK: Sources
 
     @objc private func reloadSources() {
-        DeviceLogSourceCatalog.discover { [weak self] found in
+        DeviceLogSourceCatalog.discover(
+            preferredPymobiledevice3Path: preferredPymobiledevice3Path
+        ) { [weak self] found in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.options = found
@@ -489,9 +506,14 @@ public final class DeviceLogPaneViewController: NSViewController {
         // A rescan looks for machines; it is not a request to change the one being read. Keep the
         // current machine when it survived, so plugging a phone in does not yank the pane off the
         // simulator it was watching.
-        let machine = machines.first { $0 == selectedMachine }
+        let requestedMachine = requestedMachineID.flatMap { requestedID in
+            machines.first { $0.id == requestedID }
+        }
+        let machine = requestedMachine
+            ?? machines.first { $0 == selectedMachine }
             ?? machines.first { $0.id == Recents.machineID() }
             ?? machines[0]
+        if requestedMachine != nil { requestedMachineID = nil }
         selectedMachine = machine
         machines.forEach { devicePopUp.addItem(withTitle: $0.title) }
         devicePopUp.selectItem(at: machines.firstIndex(of: machine) ?? 0)
@@ -532,6 +554,18 @@ public final class DeviceLogPaneViewController: NSViewController {
         Recents.rememberMachine(machines[index].id)
         rebuildMenus()
         startSelectedSource()
+    }
+
+    /// Points this singleton pane at the machine named by a host affordance. Discovery owns the
+    /// available machine objects; this method carries only stable identity and lets the ordinary
+    /// menu/source path perform the switch so rows, recents and reader lifetime stay coherent.
+    public func selectMachine(id: String) {
+        guard !id.isEmpty else { return }
+        requestedMachineID = id
+        guard isViewLoaded, machines.contains(where: { $0.id == id }) else { return }
+        let wasReading = source != nil
+        rebuildMenus()
+        if wasReading { startSelectedSource() }
     }
 
     /// The selected source, resolved through the machine rather than through a flat index.
@@ -711,6 +745,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     }
 
     public var isRouteControlHiddenForTesting: Bool { routePopUp.isHidden }
+    public var selectedMachineIDForTesting: String? { selectedMachine?.id }
 
     public var agentNoteForTesting: String? { agentNote }
     public var agentHitsForTesting: Set<Int> { agentHits }

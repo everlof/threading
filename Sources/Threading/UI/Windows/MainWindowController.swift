@@ -1451,6 +1451,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             guard let self, sessionID == self.currentSessionID else { return }
             self.containerViewController.selectSubagent(threadID)
         }
+        displayPaneController.onOpenDeviceLogs = { [weak self] sessionID, deviceID in
+            self?.openDeviceLogsInDrawer(for: sessionID, deviceID: deviceID)
+        }
         displayPaneController.onShareSession = { sessionID in
             ShareChatSheet.run(for: sessionID)
         }
@@ -1649,6 +1652,38 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         guard width > 0 else { return }
 
         DisplayPaneWidth.stored = width
+    }
+
+    /// Keeps the live device in the right panel and reveals its one Device Logs reader below it.
+    /// The tab itself moves rather than being copied: a second plugin instance would start a
+    /// second child process against the same firehose and split the session's recorded history.
+    private func openDeviceLogsInDrawer(for sessionID: SessionID, deviceID: String) {
+        guard sessionID == currentSessionID else { return }
+        let drawer = containerViewController.drawerHostController
+
+        if let existing = drawer.tabs(for: sessionID).first(where: {
+            guard case .nativePlugin(let plugin) = $0.body else { return false }
+            return plugin.bundleURL == NativePluginCatalog.deviceLogsBundle
+        }), case .nativePlugin(let plugin) = existing.body {
+            plugin.activate(arguments: ["deviceID": deviceID])
+            _ = drawer.activateTab(id: existing.id, for: sessionID)
+            containerViewController.openShellDrawer()
+            return
+        }
+
+        guard let plugin = displayPaneController.activateDeviceLog(for: sessionID) else {
+            SystemAlert.refuse()
+            return
+        }
+        plugin.activate(arguments: ["deviceID": deviceID])
+        guard let tabID = displayPaneController.tabs(for: sessionID).first(where: {
+            guard case .nativePlugin(let candidate) = $0.body else { return false }
+            return candidate === plugin
+        })?.id else {
+            SystemAlert.refuse()
+            return
+        }
+        moveTab(tabID, from: .displayPanel, to: .drawer)
     }
 
     // MARK: - Header Inset

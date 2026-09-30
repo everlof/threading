@@ -143,6 +143,98 @@ final class AdvancedSettingsRenderTests: XCTestCase {
         XCTAssertEqual(written, 4)
     }
 
+    /// The explicit package-manager boundary, before and after a validated installation.
+    @MainActor
+    func testRendersIPhoneToolingStates() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let previousTheme = AppThemeLibrary.current
+        AppThemeLibrary.apply(.system)
+        defer { AppThemeLibrary.apply(previousTheme) }
+
+        let executable = URL(
+            fileURLWithPath: "/Users/test/Library/Application Support/Threading/Managed Tools/"
+                + "pymobiledevice3/current/bin/pymobiledevice3"
+        )
+        let states: [(name: String, state: Pymobiledevice3SettingsState, button: String)] = [
+            ("absent", .absent, AdvancedStrings.iphoneToolingInstallButton),
+            (
+                "installed",
+                .installed(version: "11.19.4", executable: executable),
+                AdvancedStrings.iphoneToolingUpdateButton
+            ),
+        ]
+
+        var written = 0
+        for item in states {
+            for (appearanceName, appearance) in [
+                ("light", NSAppearance.Name.aqua),
+                ("dark", NSAppearance.Name.darkAqua),
+            ] {
+                let resolvedAppearance = try XCTUnwrap(NSAppearance(named: appearance))
+                var rendered: Data?
+                var buttonTitle: String?
+                var rowIsOnThePicture = false
+                var hasThemeBoundaryViolations = false
+                resolvedAppearance.performAsCurrentDrawingAppearance {
+                    let surface = Pymobiledevice3SettingsSurface(
+                        initialState: item.state,
+                        readStatus: { .absent },
+                        install: {
+                            Pymobiledevice3InstalledTool(
+                                version: "11.19.4",
+                                executable: executable
+                            )
+                        }
+                    )
+                    let controller = AdvancedPreferencesViewController(iphoneTooling: surface)
+                    let host = self.laidOut(
+                        controller.view,
+                        width: Render.width,
+                        height: Render.height
+                    )
+                    host.appearance = resolvedAppearance
+                    controller.view.appearance = resolvedAppearance
+                    AppThemeRefresh.repaint(host)
+                    host.layoutSubtreeIfNeeded()
+
+                    let row = SettingsRowAnchor.find(
+                        title: AdvancedStrings.iphoneToolingTitle,
+                        in: controller.view
+                    )
+                    row?.scrollToVisible(row?.bounds ?? .zero)
+                    host.layoutSubtreeIfNeeded()
+                    rowIsOnThePicture = row.map {
+                        host.bounds.contains($0.convert($0.bounds, to: host))
+                    } ?? false
+                    buttonTitle = self.descendants(of: controller.view)
+                        .compactMap { $0 as? ThemedButton }
+                        .first {
+                            $0.accessibilityIdentifier() == "advanced.iphone-tooling.install"
+                        }?.title
+                    hasThemeBoundaryViolations = !ThemeBoundaryAudit.violations(
+                        in: controller.view
+                    ).isEmpty
+                    rendered = self.png(of: host)
+                }
+
+                XCTAssertEqual(buttonTitle, item.button)
+                XCTAssertTrue(rowIsOnThePicture)
+                XCTAssertFalse(hasThemeBoundaryViolations)
+
+                let url = directory.appendingPathComponent(
+                    "advanced-iphone-tooling-\(item.name)-\(appearanceName).png"
+                )
+                try XCTUnwrap(rendered).write(to: url)
+                written += 1
+            }
+        }
+
+        print("Rendered \(written) Advanced iPhone-tooling pages to \(directory.path)")
+        XCTAssertEqual(written, 4)
+    }
+
 #if DEBUG || THREADING_INTERNAL
     /// The internal Release is the app a developer actually leaves in `/Applications`, so the
     /// service selector must be visible there without returning a production build to Debug.

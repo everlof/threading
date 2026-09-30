@@ -14,7 +14,8 @@ final class NativePluginPlacementTests: XCTestCase {
             sessionID: session,
             projectID: project,
             projectName: "Threading",
-            checkoutPath: "/Users/someone/repo/Threading"
+            checkoutPath: "/Users/someone/repo/Threading",
+            pymobiledevice3Path: "/managed/bin/pymobiledevice3"
         )
 
         XCTAssertEqual(placement.arguments, [
@@ -22,6 +23,7 @@ final class NativePluginPlacementTests: XCTestCase {
             "projectID": project.uuidString,
             "projectName": "Threading",
             "checkoutPath": "/Users/someone/repo/Threading",
+            "pymobiledevice3Path": "/managed/bin/pymobiledevice3",
         ])
     }
 
@@ -60,5 +62,6 @@ final class NativePluginPlacementTests: XCTestCase {
         XCTAssertEqual(NativePluginPlacement.Key.projectID, "projectID")
         XCTAssertEqual(NativePluginPlacement.Key.projectName, "projectName")
         XCTAssertEqual(NativePluginPlacement.Key.checkoutPath, "checkoutPath")
+        XCTAssertEqual(NativePluginPlacement.Key.pymobiledevice3Path, "pymobiledevice3Path")
     }
 }

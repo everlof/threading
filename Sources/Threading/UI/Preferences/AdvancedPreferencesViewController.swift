@@ -38,6 +38,10 @@ final class AdvancedPreferencesViewController: NSViewController {
     /// specific to a machine, and a hosted test must not be able to write into a real home.
     private let commandLineTools: CommandLineToolsSurface
 
+    /// The optional Python tool used by both the physical-iPhone compatibility probe and the
+    /// Device Logs plugin. It owns process/filesystem work; this controller only renders state.
+    private let iphoneTooling: Pymobiledevice3SettingsSurface
+
 #if DEBUG || THREADING_INTERNAL
     /// Deliberately lives on Advanced rather than beside Hosted Direct: this changes which
     /// first-party service owns the account and push registration, not how Remote Access is
@@ -49,10 +53,12 @@ final class AdvancedPreferencesViewController: NSViewController {
 
     init(
         backgroundSessions: PTYHostBackgroundSessionsInventory = .init(),
-        commandLineTools: CommandLineToolsSurface = CommandLineToolsSurface()
+        commandLineTools: CommandLineToolsSurface = CommandLineToolsSurface(),
+        iphoneTooling: Pymobiledevice3SettingsSurface = Pymobiledevice3SettingsSurface()
     ) {
         self.backgroundSessions = backgroundSessions
         self.commandLineTools = commandLineTools
+        self.iphoneTooling = iphoneTooling
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -89,6 +95,8 @@ final class AdvancedPreferencesViewController: NSViewController {
         // login shell, so the row draws without it and gains the `PATH` sentence when it lands.
         commandLineTools.onChange = { [weak self] in self?.rebuild() }
         commandLineTools.readLoginShellPATH()
+        iphoneTooling.onChange = { [weak self] in self?.rebuild() }
+        iphoneTooling.start()
 #if DEBUG
         refreshOutboxRecordCount()
 #endif
@@ -108,6 +116,10 @@ final class AdvancedPreferencesViewController: NSViewController {
             SettingsUI.section(
                 AdvancedStrings.localDiagnosticsSection,
                 SettingsCard(rows: localDiagnosticsRows())
+            ),
+            SettingsUI.section(
+                AdvancedStrings.iphoneToolingSection,
+                SettingsCard(rows: [iphoneToolingRow()])
             ),
             SettingsUI.section(AdvancedStrings.locationsSection, SettingsCard(rows: locationRows())),
             SettingsUI.section(AdvancedStrings.tourSection, SettingsCard(rows: [
@@ -224,6 +236,54 @@ final class AdvancedPreferencesViewController: NSViewController {
                 control: toggle
             )
         ]
+    }
+
+    /// One explicit package-manager boundary for both iPhone features.
+    ///
+    /// Nothing happens merely because Settings opened. The button downloads the latest stable
+    /// PyPI release into Threading's own Application Support directory, and an installed version
+    /// remains active if a later attempt fails.
+    private func iphoneToolingRow() -> NSView {
+        let button = SettingsUI.button(
+            iphoneTooling.state.installedTool == nil
+                ? AdvancedStrings.iphoneToolingInstallButton
+                : AdvancedStrings.iphoneToolingUpdateButton,
+            target: self,
+            action: #selector(installLatestIPhoneTooling)
+        )
+        button.isEnabled = !iphoneTooling.state.isWorking
+        button.setAccessibilityIdentifier("advanced.iphone-tooling.install")
+
+        return SettingsUI.row(
+            title: AdvancedStrings.iphoneToolingTitle,
+            subtitle: iphoneToolingDetail,
+            control: button
+        )
+    }
+
+    private var iphoneToolingDetail: String {
+        switch iphoneTooling.state {
+        case .checking:
+            return AdvancedStrings.iphoneToolingChecking
+        case .absent:
+            return AdvancedStrings.iphoneToolingAbsent
+        case .installed(let version, let executable):
+            return AdvancedStrings.iphoneToolingInstalled(
+                version: version,
+                path: abbreviate(executable)
+            )
+        case .installing(let previous):
+            if let previous {
+                return AdvancedStrings.iphoneToolingUpdating(version: previous.version)
+            }
+            return AdvancedStrings.iphoneToolingInstalling
+        case .failed(let message, let previous):
+            guard let previous else { return message }
+            return AdvancedStrings.iphoneToolingUpdateFailed(
+                version: previous.version,
+                message: message
+            )
+        }
     }
 
 #if DEBUG || THREADING_INTERNAL
@@ -607,6 +667,10 @@ final class AdvancedPreferencesViewController: NSViewController {
         AppSettings.shared.prependsCommandLineToolsToPATH = sender.state == .on
     }
 
+    @objc private func installLatestIPhoneTooling() {
+        iphoneTooling.installLatest()
+    }
+
     private func stopBackgroundSession(_ session: PTYHostHeldSession) {
         guard ConfirmationAlert.ask(Self.stopConfirmation(sessionName: session.name)) else {
             return
@@ -767,6 +831,47 @@ enum AdvancedStrings {
         }
     }
     static var clearDiagnosticsButton: String { L10n.string("Clear Evidence") }
+
+    static var iphoneToolingSection: String { L10n.string("iPhone Tooling") }
+    static var iphoneToolingTitle: String { L10n.string("pymobiledevice3") }
+    static var iphoneToolingChecking: String {
+        L10n.string("Checking Threading's managed installation…")
+    }
+    static var iphoneToolingAbsent: String {
+        L10n.string(
+            "Downloads the latest stable release from PyPI into Threading's own data folder "
+                + "when you press Install Latest. Used for iPhone control compatibility checks "
+                + "and structured Device Logs. The separate tool is GPL-3.0-or-later and its "
+                + "environment is usually around 200 MB."
+        )
+    }
+    static func iphoneToolingInstalled(version: String, path: String) -> String {
+        L10n.format(
+            "Version %1$@ is active at %2$@. Update checks PyPI only when you press Update.",
+            version,
+            path
+        )
+    }
+    static var iphoneToolingInstalling: String {
+        L10n.string("Downloading, validating and activating the latest stable release…")
+    }
+    static func iphoneToolingUpdating(version: String) -> String {
+        L10n.format(
+            "Updating version %@. It stays active unless the new installation validates.",
+            version
+        )
+    }
+    static func iphoneToolingUpdateFailed(version: String, message: String) -> String {
+        L10n.format("Update failed; version %1$@ remains active. %2$@", version, message)
+    }
+    static var iphoneToolingDamaged: String {
+        L10n.string(
+            "Threading's managed installation is incomplete or too old. Install Latest replaces "
+                + "it with a validated release."
+        )
+    }
+    static var iphoneToolingInstallButton: String { L10n.string("Install Latest") }
+    static var iphoneToolingUpdateButton: String { L10n.string("Update") }
 
     static var developerSettingsSection: String { L10n.string("Developer Settings") }
     static var hostedServiceTitle: String { L10n.string("Hosted service") }

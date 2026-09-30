@@ -222,6 +222,7 @@ final class DisplayPaneController: NSViewController {
   /// review — so switching tabs can swap it out without rebuilding its state.
   private weak var installedController: NSViewController?
   private weak var presentedSimulator: SimulatorPaneViewController?
+  private weak var presentedRealDevice: RealDevicePaneViewController?
 
   /// The hosted controller *this pane* built, when the tab holds a value rather than a
   /// controller.
@@ -272,6 +273,7 @@ final class DisplayPaneController: NSViewController {
   private let simulatorLeaseManager: any SimulatorLeaseManaging
   private let simulatorStreamCoordinator: any SimulatorLiveStreamCoordinating
   private let simulatorInputAuthorizer: any SimulatorInputAuthorizing
+  private let physicalDeviceControl: any PhysicalDeviceControlling
 
   /// Test and embedding seam for extension actions. Production routes through the shared
   /// provider slot when no explicit receiver is installed.
@@ -301,6 +303,12 @@ final class DisplayPaneController: NSViewController {
     return activeTab(for: currentSessionID)?.simulator
   }
 
+  /// The physical iPhone actually visible in the selected session.
+  var currentRealDevice: RealDevicePaneViewController? {
+    guard !isShowingCurrentTheme else { return nil }
+    return activeTab(for: currentSessionID)?.realDevice
+  }
+
   /// The Git Review surface actually visible in the selected session.
   var currentReview: GitReviewViewController? {
     guard !isShowingCurrentTheme else { return nil }
@@ -319,6 +327,11 @@ final class DisplayPaneController: NSViewController {
 
   /// Routes child selection back to the renderer that owns provider transcript loading.
   var onSubagentSelection: ((SessionID, String) -> Void)?
+
+  /// The device panes know which UDID their pixels belong to; the window knows where the bottom
+  /// drawer is. Keep that navigation crossing as one narrow callback instead of teaching either
+  /// pane about another split-view child.
+  var onOpenDeviceLogs: ((SessionID, String) -> Void)?
 
   /// Asks for a new invitation to this chat. The sharing pane offers the button; the sheet, its
   /// grant choice and its copy behaviour stay where the sidebar's Share Chat… already put them.
@@ -349,7 +362,8 @@ final class DisplayPaneController: NSViewController {
     },
     simulatorControl: any SimulatorControlling = SimctlSimulatorControl(),
     simulatorStreamCoordinator: any SimulatorLiveStreamCoordinating = SimulatorLiveStreamCoordinator.shared,
-    simulatorInputAuthorizer: any SimulatorInputAuthorizing = SimulatorInputConsentController.shared
+    simulatorInputAuthorizer: any SimulatorInputAuthorizing = SimulatorInputConsentController.shared,
+    physicalDeviceControl: any PhysicalDeviceControlling = DevicectlPhysicalDeviceControl()
   ) {
     self.extensionPanels = extensionPanels ?? ExtensionManager.shared
     self.customizationLookup = customizationLookup
@@ -362,6 +376,7 @@ final class DisplayPaneController: NSViewController {
     }
     self.simulatorStreamCoordinator = simulatorStreamCoordinator
     self.simulatorInputAuthorizer = simulatorInputAuthorizer
+    self.physicalDeviceControl = physicalDeviceControl
     super.init(nibName: nil, bundle: nil)
 
     appEvents.observe(SessionAttachmentsDidChange.self) { [weak self] event in
@@ -552,6 +567,7 @@ final class DisplayPaneController: NSViewController {
     guard panelCommandRefusal(target, for: sessionID) == nil else { return false }
     switch target {
     case .simulator: activateSimulator(for: sessionID); return true
+    case .realDevice: activateRealDevice(for: sessionID); return true
     case .deviceLogs: return activateDeviceLog(for: sessionID) != nil
     case .notificationTest: return activateNotificationTest(for: sessionID) != nil
     case .audit: return addAuditTab(for: sessionID) != nil
@@ -971,7 +987,10 @@ final class DisplayPaneController: NSViewController {
   ) -> NativePluginPaneViewController {
     let controller = NativePluginPaneViewController(
       bundleURL: bundleURL,
-      owningSessionID: sessionID
+      owningSessionID: sessionID,
+      managedIPhoneToolPath: bundleURL == NativePluginCatalog.deviceLogsBundle
+        ? Pymobiledevice3ManagedTool.executable().path
+        : nil
     )
     controller.onTitleChange = { [weak self] in
       guard let self, sessionID == self.currentSessionID else { return }
@@ -1475,6 +1494,59 @@ final class DisplayPaneController: NSViewController {
     addChild(controller)
     controller.onSelectedDeviceChange = { [weak self] _ in
       self?.persist(sessionID)
+    }
+    controller.onOpenDeviceLogs = { [weak self] deviceID in
+      self?.onOpenDeviceLogs?(sessionID, deviceID.rawValue)
+    }
+    return controller
+  }
+
+  // MARK: - Public — Physical iPhone Tab
+
+  /// Reveals one paired physical iPhone in the right panel. Like the Simulator, this is a
+  /// singleton per session so capture ownership and the selected hardware identity cannot split
+  /// across two tabs.
+  @discardableResult
+  func activateRealDevice(
+    for sessionID: SessionID,
+    deviceID: PhysicalDeviceID? = nil
+  ) -> RealDevicePaneViewController {
+    restoreIfNeeded(sessionID)
+    var tabs = tabsBySession[sessionID] ?? []
+    if let existing = tabs.first(where: { $0.realDevice != nil }),
+      let controller = existing.realDevice
+    {
+      if let deviceID { controller.selectDevice(deviceID) }
+      activeTabIDBySession[sessionID] = existing.id
+      persist(sessionID)
+      if sessionID == currentSessionID { render() }
+      return controller
+    }
+
+    let controller = makeRealDevice(for: sessionID, preferredDeviceID: deviceID)
+    let tab = DisplayTab(body: .realDevice(controller), owningSessionID: sessionID)
+    tabs.append(tab)
+    tabsBySession[sessionID] = tabs
+    activeTabIDBySession[sessionID] = tab.id
+    persist(sessionID)
+    if sessionID == currentSessionID { render() }
+    return controller
+  }
+
+  private func makeRealDevice(
+    for sessionID: SessionID,
+    preferredDeviceID: PhysicalDeviceID?
+  ) -> RealDevicePaneViewController {
+    let controller = RealDevicePaneViewController(
+      preferredDeviceID: preferredDeviceID,
+      control: physicalDeviceControl
+    )
+    addChild(controller)
+    controller.onSelectedDeviceChange = { [weak self] _ in
+      self?.persist(sessionID)
+    }
+    controller.onOpenDeviceLogs = { [weak self] deviceID in
+      self?.onOpenDeviceLogs?(sessionID, deviceID.rawValue)
     }
     return controller
   }
@@ -2173,7 +2245,9 @@ final class DisplayPaneController: NSViewController {
   private func teardownHosted(_ tab: DisplayTab) {
     tab.terminal?.terminate()
     tab.simulator?.terminate()
+    tab.realDevice?.terminate()
     if presentedSimulator === tab.simulator { presentedSimulator = nil }
+    if presentedRealDevice === tab.realDevice { presentedRealDevice = nil }
 
     guard let controller = tab.hostedController else { return }
     if installedController === controller { installHosted(nil) }
@@ -2215,6 +2289,7 @@ final class DisplayPaneController: NSViewController {
       ? nil
       : activeTab(for: currentSessionID) ?? fallback
     updateSimulatorPresentation(active?.simulator)
+    updateRealDevicePresentation(active?.realDevice)
     let performanceSpan = PerformanceRecorder.shared.begin(
       "display-pane.render",
       category: "display-pane.ui",
@@ -2490,6 +2565,14 @@ final class DisplayPaneController: NSViewController {
       contentMenuButton.isHidden = true
       installHosted(simulator)
 
+    case .realDevice(let realDevice):
+      imageView.image = nil
+      imageView.isHidden = true
+      hideHTML()
+      captionLabel.isHidden = true
+      contentMenuButton.isHidden = true
+      installHosted(realDevice)
+
     case .notificationTest(let controller):
       imageView.image = nil
       imageView.isHidden = true
@@ -2529,6 +2612,13 @@ final class DisplayPaneController: NSViewController {
     presentedSimulator?.setPresented(false)
     presentedSimulator = simulator
     simulator?.setPresented(true)
+  }
+
+  private func updateRealDevicePresentation(_ realDevice: RealDevicePaneViewController?) {
+    guard presentedRealDevice !== realDevice else { return }
+    presentedRealDevice?.setPresented(false)
+    presentedRealDevice = realDevice
+    realDevice?.setPresented(true)
   }
 
   /// Hides the shared web view and drops its page, so a switched-away document is not still
@@ -2644,6 +2734,7 @@ final class DisplayPaneController: NSViewController {
     case .sharing: return "sharing"
     case .supervision: return "supervision"
     case .simulator: return "simulator"
+    case .realDevice: return "real-device"
     case .notificationTest: return "notification-test"
     case .extensionPanel: return "extension-panel"
     case .compare: return "compare"
@@ -2800,6 +2891,18 @@ final class DisplayPaneController: NSViewController {
         tabs.append(DisplayTab(
           id: id,
           body: .simulator(controller),
+          owningSessionID: sessionID
+        ))
+
+      case .realDevice:
+        let deviceID = persisted.physicalDeviceID.flatMap(PhysicalDeviceID.init)
+        let controller = makeRealDevice(
+          for: sessionID,
+          preferredDeviceID: deviceID
+        )
+        tabs.append(DisplayTab(
+          id: id,
+          body: .realDevice(controller),
           owningSessionID: sessionID
         ))
 
@@ -2997,6 +3100,19 @@ final class DisplayPaneController: NSViewController {
         html: nil,
         cacheFile: nil,
         simulatorDeviceID: simulator.selectedDeviceID?.rawValue
+      )
+    }
+
+    if let realDevice = tab.realDevice {
+      return PersistedTab(
+        id: tab.id.uuidString,
+        kind: .realDevice,
+        title: tab.title,
+        subtitle: "",
+        url: nil,
+        html: nil,
+        cacheFile: nil,
+        physicalDeviceID: realDevice.selectedDeviceID?.rawValue
       )
     }
 
