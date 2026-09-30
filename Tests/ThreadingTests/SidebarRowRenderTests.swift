@@ -636,6 +636,45 @@ final class SidebarRowRenderTests: XCTestCase {
         )
     }
 
+    /// The shared semantic row must drive the shipping view without decorating its title or
+    /// leaving attention behind when AppKit recycles it for an ordinary session.
+    func testSharedAttentionPresentationSurvivesRefreshAndReuse() throws {
+        let row = SessionRowView(customizationLookup: { _ in .empty })
+        var session = AgentSession(kind: .codex, title: "調査 — e\u{301}")
+        session.snoozedAt = .distantPast
+        session.snoozedUntil = .distantFuture
+        session.wake = SessionWake(reason: .approvalRequested, wokeAt: .distantPast)
+
+        func assertAttention(_ expected: String, accessibility: String,
+                             scheduled: Bool = false) throws {
+            row.configure(with: session, activity: .idle, isScheduledStart: scheduled)
+            let label = try XCTUnwrap(row.descendant(
+                identified: "sidebar.session.attention-overlay") as? NSTextField)
+            XCTAssertFalse(label.isHidden)
+            XCTAssertEqual(label.stringValue, L10n.string(expected))
+            XCTAssertEqual(label.accessibilityLabel(), L10n.string(accessibility))
+            let title = try XCTUnwrap(row.descendant(identified: "sidebar.session.title"))
+            XCTAssertEqual(title.accessibilityLabel(), session.displayTitle)
+            let archive = try XCTUnwrap(row.descendant(identified: "sidebar.session.archive"))
+            XCTAssertEqual(archive.isHidden, scheduled)
+        }
+
+        try assertAttention("Scheduled", accessibility: "Session is scheduled to start automatically",
+                            scheduled: true)
+        try assertAttention("Woke", accessibility: "Session woke from snooze")
+        session.wake = nil
+        try assertAttention("Snoozed", accessibility: "Session is snoozed")
+
+        row.prepareForReuse()
+        row.configure(with: AgentSession(kind: .claude, title: "An ordinary session"), activity: .idle)
+        let label = try XCTUnwrap(row.descendant(
+            identified: "sidebar.session.attention-overlay") as? NSTextField)
+        XCTAssertTrue(label.isHidden)
+        XCTAssertEqual(label.stringValue, "")
+        XCTAssertEqual(row.descendant(identified: "sidebar.session.title")?.accessibilityLabel(),
+                       "An ordinary session")
+    }
+
     // MARK: - Selected Ground
 
     /// The OpenAI knot is a template image, so unlike Claude's fixed-colour mark its pixels are

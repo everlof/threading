@@ -1021,8 +1021,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         isScheduledStart: Bool = false
     ) {
         let hoverSession = NativeSidebarParity.host(.hoverContent, session)
-        let rowID = NativeSidebarParity.host(.entityIdentity, session.id)
-        let rowTitle = NativeSidebarParity.fact(.sessionTitle, session.displayTitle)
         let rowIsPinned = NativeSidebarParity.fact(.sessionPinned, session.isPinned)
         let rowActivity = NativeSidebarParity.fact(.sessionActivity, activity)
         let rowIsLoading = NativeSidebarParity.host(.transientLoading, isLoading)
@@ -1034,13 +1032,25 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         let hasCustomConduct = NativeSidebarParity.fact(.sessionConduct, conduct != nil)
         let conductDetail = NativeSidebarParity.host(.conductDetail, conduct)
         let rowExecutionHost = NativeSidebarParity.host(.executionPlacement, executionHost)
-        let provider = NativeSidebarParity.fact(.sessionProvider, session.kind)
-        let accountHandle = NativeSidebarParity.fact(.sessionAccount, session.accountHandle)
         let isSideChat = NativeSidebarParity.fact(.sessionParent, session.isSideChat)
+        let row = AgentSessionRowPresentation(
+            id: NativeSidebarParity.host(.entityIdentity, session.id),
+            kind: NativeSidebarParity.fact(.sessionProvider, session.kind),
+            accountHandle: NativeSidebarParity.fact(.sessionAccount, session.accountHandle),
+            title: NativeSidebarParity.fact(.sessionTitle, session.displayTitle),
+            attention: AgentSessionRowPresentation.Attention.resolve(
+                isScheduled: rowIsScheduled,
+                hasWoken: rowWake != nil,
+                isSnoozed: NativeSidebarParity.fact(
+                    .sessionSnoozed,
+                    session.isSnoozed(at: NativeSidebarParity.host(.clock, Date()))
+                )
+            )
+        )
 
         // Rows reconfigure constantly while an agent works, so an open popover survives a
         // same-session refresh; only reuse for a different session dismisses it.
-        if sessionID != rowID {
+        if sessionID != row.id {
             dismissPopover()
         }
         popoverSession = hoverSession
@@ -1050,20 +1060,20 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // replaced is the one this row is showing, which means the *same* session with a
         // *different* title. Everything else — a first fill, a row reconfigured while an
         // agent works, a cell recycled from another session — lands the title directly.
-        animatesNextTitle = sessionID == rowID
-            && titleLabel.stringValue != rowTitle
+        animatesNextTitle = sessionID == row.id
+            && titleLabel.stringValue != row.title
 
-        sessionID = rowID
-        nativeTitle = rowTitle
+        sessionID = row.id
+        nativeTitle = row.title
         nativeToolTip = nil
         setPinned(rowIsPinned)
         let supervision = NativeSidebarParity.fact(
             .sessionManagerRelationship,
-            ControlGrantStore.shared.overview(for: rowID)
+            ControlGrantStore.shared.overview(for: row.id)
         )
         let isManager = NativeSidebarParity.fact(
             .sessionManagerRole,
-            ControlGrantStore.shared.isManager(rowID)
+            ControlGrantStore.shared.isManager(row.id)
         )
         setManager(isManager)
         setConductMark(hasCustomConduct ? conductDetail : nil)
@@ -1075,34 +1085,34 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
            ) {
             let managerTitle = NativeSidebarParity.fact(.sessionTitle, manager.displayTitle)
             titleLabel.setAccessibilityLabel(
-                L10n.format("%@, managed by %@", rowTitle, managerTitle)
+                L10n.format("%@, managed by %@", row.title, managerTitle)
             )
         } else if isManager {
-            titleLabel.setAccessibilityLabel(L10n.format("%@, manager", rowTitle))
+            titleLabel.setAccessibilityLabel(L10n.format("%@, manager", row.title))
         } else {
-            titleLabel.setAccessibilityLabel(rowTitle)
+            titleLabel.setAccessibilityLabel(row.title)
         }
-        if rowIsScheduled {
+        switch row.attention {
+        case .scheduled:
             let label = attentionLabelForPresentation()
             label.stringValue = L10n.string("Scheduled")
             label.setAccessibilityLabel(L10n.string("Session is scheduled to start automatically"))
             label.isHidden = false
-        } else if rowWake != nil {
+        case .woke:
             let label = attentionLabelForPresentation()
             label.stringValue = L10n.string("Woke")
             label.setAccessibilityLabel(L10n.string("Session woke from snooze"))
             label.isHidden = false
-        } else if NativeSidebarParity.fact(
-            .sessionSnoozed,
-            session.isSnoozed(at: NativeSidebarParity.host(.clock, Date()))
-        ) {
+        case .snoozed:
             let label = attentionLabelForPresentation()
             label.stringValue = L10n.string("Snoozed")
             label.setAccessibilityLabel(L10n.string("Session is snoozed"))
             label.isHidden = false
-        } else if let attentionOverlayLabel {
-            attentionOverlayLabel.stringValue = ""
-            attentionOverlayLabel.isHidden = true
+        case nil:
+            if let attentionOverlayLabel {
+                attentionOverlayLabel.stringValue = ""
+                attentionOverlayLabel.isHidden = true
+            }
         }
 
         // Bound to *this* session rather than reading the row's id when it fires. A press
@@ -1112,7 +1122,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         archiveButton.isHidden = rowIsScheduled
         archiveButton.onPress = rowIsScheduled
             ? nil
-            : { [weak self] in self?.onArchive?(rowID) }
+            : { [weak self, rowID = row.id] in self?.onArchive?(rowID) }
 
         isDormant = rowActivity == .dormant && !rowIsScheduled
 
@@ -1131,15 +1141,15 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // the hover card performs its own complete lookup only when requested.
         let showsStandardBadge = NativeSidebarParity.host(
             .identityPresentation,
-            AccountPresentation.showsStandardBadge(provider: provider)
+            AccountPresentation.showsStandardBadge(provider: row.kind)
         )
-        let account = accountHandle.isStandard && !showsStandardBadge
+        let account = row.accountHandle.isStandard && !showsStandardBadge
             ? nil
             : NativeSidebarParity.host(
                 .identityPresentation,
-                sessionAccountProvider(provider, accountHandle)
+                sessionAccountProvider(row.kind, row.accountHandle)
             )
-        applyAgentIcon(provider: provider, isSideChat: isSideChat, account: account)
+        applyAgentIcon(provider: row.kind, isSideChat: isSideChat, account: account)
         applyTextColors()
 
         refreshCustomizations()

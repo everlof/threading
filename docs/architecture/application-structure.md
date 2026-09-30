@@ -58,7 +58,8 @@ mechanical rewrite.
 Persisted records do not own runtime discovery or presentation policy. Launch environment
 policy lives in `Core/Agent/AgentEnvironment.swift`, with process/preference resolution in
 `AgentEnvironmentHost.swift`; session title policy lives in
-`Core/Session/AgentSessionPresentation.swift`; terminal creation's git lookup lives in
+`Core/Session/AgentSessionRowPresentation.swift`, with macOS preference injection in
+`AgentSessionPresentation.swift`; terminal creation's git lookup lives in
 `Core/Project/ProjectTerminalCreation.swift`. `RemoteHostRecord.sshDestination` belongs to the
 SSH adapter. Read-receipt state is a model; its store and remote participant projection stay in
 Core. Outbox capacity is a separate shared default, so scheduled records do not import the live
@@ -87,6 +88,13 @@ project/identity checks, fallback branch lookup, persistence and notification de
 not yet a shared session-creation transaction or runtime coordinator. `AgentLaunchRecording`
 applies the resolved plan to one durable session before persistence and spawn; admission,
 transaction scope and process-start acknowledgement stay with the host.
+
+`AgentSessionRowPresentation` carries typed identity, title precedence and attention precedence
+(scheduled, woke, then snoozed). `SessionRowView.configure` assembles it from the existing
+`NativeSidebarParity` fact and host reads; a scheduled or wake state avoids evaluating the snooze
+clock. Hosts own localization, account resolution, activity, commands and extension composition.
+The value does not own persistence or layout: the Mac view owns its constraints, identity badge
+and trailing-control reservation. No new extension surface is introduced.
 
 `PTYHostSocket` is the shared Unix connection leaf: it receives a path, deadline and desired
 blocking mode, then returns an owned descriptor or a portable `PTYHostClientError`. It does not

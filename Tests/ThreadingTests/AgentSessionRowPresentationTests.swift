@@ -49,6 +49,40 @@ final class AgentSessionRowPresentationTests: XCTestCase {
         }
     }
 
+    func testAttentionPrecedenceDoesNotReadSnoozeWhenAnEarlierStateWins() {
+        typealias Attention = AgentSessionRowPresentation.Attention
+        var snoozeReads = 0
+        func snoozed(_ result: Bool) -> Bool {
+            snoozeReads += 1
+            return result
+        }
+        XCTAssertEqual(Attention.resolve(isScheduled: true, hasWoken: true,
+                                         isSnoozed: snoozed(true)), .scheduled)
+        XCTAssertEqual(Attention.resolve(isScheduled: true, hasWoken: false,
+                                         isSnoozed: snoozed(false)), .scheduled)
+        XCTAssertEqual(Attention.resolve(isScheduled: false, hasWoken: true,
+                                         isSnoozed: snoozed(true)), .woke)
+        XCTAssertEqual(snoozeReads, 0)
+        XCTAssertEqual(Attention.resolve(isScheduled: false, hasWoken: false,
+                                         isSnoozed: snoozed(true)), .snoozed)
+        XCTAssertNil(Attention.resolve(isScheduled: false, hasWoken: false,
+                                      isSnoozed: snoozed(false)))
+        XCTAssertEqual(snoozeReads, 2)
+    }
+
+    func testHostResolvedPresentationPreservesIdentityAndAttentionWithoutDecoratingTitle() {
+        let session = AgentSession(kind: .codex, title: "調査 — e\u{301}",
+                                   accountHandle: .named("work"))
+        let attention = AgentSessionRowPresentation.Attention.woke
+        let stored = AgentSessionRowPresentation(session: session, usesAgentTitle: false,
+                                                 untitledTitle: "Untitled", attention: attention)
+        let resolved = AgentSessionRowPresentation(id: session.id, kind: session.kind,
+            accountHandle: session.accountHandle, title: session.title, attention: attention)
+        XCTAssertEqual(stored, resolved)
+        XCTAssertEqual(resolved.title, session.title)
+        XCTAssertEqual(resolved.attention, .woke)
+    }
+
     private func row(_ session: AgentSession, agentTitles: Bool = true) -> AgentSessionRowPresentation {
         AgentSessionRowPresentation(session: session, usesAgentTitle: agentTitles,
                                     untitledTitle: "Host fallback")
