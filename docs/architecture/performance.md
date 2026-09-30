@@ -4,6 +4,65 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## Linux preview raster bounds, 2026-09-30
+
+The experimental native navigator's Debug first-frame trace on the loaded Ubuntu arm64 VM
+spent 6,995 of 8,265 ms in raster work. The scanline implementation reset and composited the
+whole bitmap width for each shape's covered rows, including narrow stroke joints. It now limits
+those two loops to clipped device-X bounds while preserving crossings, coverage and blending
+order. That initial change reduced isolated drawing CPU by 4–17%, but a later native trace still
+spent 12,512 ms rasterizing 11 rows at 960×600 after returning from a terminal. Accessibility
+enqueue-to-dequeue took only 0.068 ms; drawing, rather than delivery, blocked that transition.
+
+Profiling the actual optimized specimen attributed 60–75% of populated-navigator CPU to masks.
+Each row allocated and initialized a full RGBA probe, blended RGB that was discarded, then
+walked the frame again to extract alpha. One scan converter now feeds both fills and direct
+mask generation. Masks preserve the 0.0005 coverage threshold and 8-bit alpha quantization;
+nested clips still multiply those exact values. The full-width coverage buffer and full-frame
+alpha-mask storage remain.
+
+An isolated macOS arm64 fixture compiled the actual shim and navigator specimen with `-O`,
+substituting only a frozen pre-change rasterizer for the reference run. All seven raw RGBA outputs
+and 6,912 bytes of direct mask values matched both the original and intermediate implementations,
+covering fractional/quantization boundaries, offscreen geometry, holes, nested transformed clips,
+translucent strokes and the five navigator cases below. Five repeats timed `root.render`; fixture assembly,
+bitmap allocation, process startup, Pango, SDL and image encoding were outside that measurement.
+
+| Viewport / mounted rows | CPU median before → after (ms) | CPU max before → after (ms) |
+|---|---:|---:|
+| 800×480 / 1 | 12.80 → 9.86 | 13.30 → 10.56 |
+| 800×480 / 8 | 26.65 → 11.24 | 29.07 → 11.57 |
+| 960×600 / 11 | 45.02 → 17.30 | 45.90 → 17.58 |
+| 1280×900 / 1 | 34.06 → 26.17 | 37.63 → 27.20 |
+| 1280×900 / 17 | 110.95 → 31.73 | 112.84 → 33.68 |
+
+The mask follow-up alone reduced the 960×600/11-row CPU median from 42.14 to 17.30 ms and the
+1280×900/17-row median from 105.67 to 31.73 ms. The table compares the original implementation
+with both optimizations. Scheduling contention varied across runs, so process CPU is reported
+separately from wall time. These are algorithm measurements, not Linux Release launch evidence.
+Reproduce the isolated comparison and mask attribution with:
+
+```bash
+python3 Spikes/linux-appkit/tests/raster_bounds/run.py \
+  --output /tmp/threading-raster-bounds --optimization O --cpu-timings --profile-mask
+```
+
+`THREADING_LINUX_STARTUP_TRACE=1` on the native window runner records separate SDL initialization,
+window/renderer creation, accessibility startup, raster, Pango and first presentation spans.
+The original native startup and selected-terminal restoration scenarios passed a subsequent
+frozen-runner run with unchanged deadlines. This does not establish a stable launch-time bound.
+The separate Debug raster comparison reached its 600-second reference-process deadline under
+host contention before testing the optimized variant; no matched Debug result is claimed.
+
+The navigator also re-presents its retained texture for same-size surface events. It rebuilds rows
+and rasterizes when geometry or semantic state changes. A native `XClearArea` exposure regression
+failed against the preserved earlier executable because it rasterized unchanged rows. Pixel
+restoration, subsequent selection, resize and terminal return passed through the actual native
+accessibility journey with both optimizations. The startup and selected-terminal restoration lane
+also passed, with unchanged deadlines, and the resulting native screenshots were inspected.
+The final Debug terminal-return raster took 1,088 ms in that run. Host scheduling load varied,
+so this observation does not establish a stable Linux Release latency bound.
+
 ## Startup checkpoint reconciliation, 2026-09-25
 
 The installed Release HUD recorded three launch stalls of 681, 274 and 299 ms. The first had

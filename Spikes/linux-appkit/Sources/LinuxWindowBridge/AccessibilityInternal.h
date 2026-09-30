@@ -2,6 +2,8 @@
 #define THREADING_LINUX_ACCESSIBILITY_INTERNAL_H
 #include <stdint.h>
 
+enum { TW_MAX_NAVIGATION_TRACE_RECORDS = 64 };
+
 void tw_accessibility_open(TWWindow *window);
 void tw_accessibility_close(void);
 void tw_accessibility_poll(void);

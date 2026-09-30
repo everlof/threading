@@ -1096,6 +1096,153 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertEqual(restored.projects.map(\.name), ["Persisted"])
     }
 
+    func testStandaloneTerminalSelectionIsExactAndMutuallyExclusiveWithSessionSelection() throws {
+        let database = try makeDatabase()
+        var project = makeProject("Persisted")
+        project.terminals = (0..<4).map { index in
+            ProjectTerminal(id: TerminalID(), title: "Shell \(index)", customTitle: nil,
+                            currentDirectory: project.folderPath, branch: nil, themeID: nil,
+                            soundOverrides: nil, createdAt: Date())
+        }
+        try database.save(ProjectsState(projects: [project]))
+        let older = project.terminals[0]
+
+        try database.saveSelectedTerminalID(older.id)
+        let snapshot = try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 1)
+        XCTAssertNil(snapshot.selectedSessionID)
+        XCTAssertEqual(snapshot.projects[0].recentTerminals.map(\.id), [project.terminals[3].id])
+        XCTAssertEqual(snapshot.selectedTerminal?.projectID, project.id)
+        XCTAssertEqual(snapshot.selectedTerminal?.terminal.id, older.id)
+
+        let session = SessionID()
+        try database.saveSelectedSessionID(session)
+        let changed = try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 1)
+        XCTAssertEqual(changed.selectedSessionID, session)
+        XCTAssertNil(changed.selectedTerminal)
+        try database.saveSelectedSessionID(nil)
+        let cleared = try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 1)
+        XCTAssertNil(cleared.selectedSessionID)
+        XCTAssertNil(cleared.selectedTerminal)
+    }
+
+    func testRuntimeSelectionRollsBackBothScalarsWhenCommitFails() throws {
+        enum Expected: Error { case commitRefused }
+        var refuseNextCommit = false
+        let database = try ProjectDatabase(
+            url: directory.appendingPathComponent("selection-rollback.db"),
+            transactionCommitPreflight: {
+                guard refuseNextCommit else { return }
+                refuseNextCommit = false
+                throw Expected.commitRefused
+            }
+        )
+        let session = AgentSession(kind: .codex, title: "Chat")
+        var project = makeProject("alpha", sessions: [session])
+        let terminal = ProjectTerminal(id: TerminalID(), title: "Shell", customTitle: nil,
+            currentDirectory: project.folderPath, branch: nil, themeID: nil,
+            soundOverrides: nil, createdAt: Date())
+        project.terminals = [terminal]
+        try database.save(ProjectsState(projects: [project], selectedSessionID: session.id))
+
+        refuseNextCommit = true
+        XCTAssertThrowsError(try database.saveSelectedTerminalID(terminal.id))
+        var snapshot = try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 0)
+        XCTAssertEqual(snapshot.selectedSessionID, session.id)
+        XCTAssertNil(snapshot.selectedTerminal)
+
+        try database.saveSelectedTerminalID(terminal.id)
+        refuseNextCommit = true
+        XCTAssertThrowsError(try database.saveSelectedSessionID(session.id))
+        snapshot = try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 0)
+        XCTAssertNil(snapshot.selectedSessionID)
+        XCTAssertEqual(snapshot.selectedTerminal?.terminal.id, terminal.id)
+
+        refuseNextCommit = true
+        XCTAssertThrowsError(try database.clearSelectedTerminalID(ifMatches: terminal.id))
+        XCTAssertEqual(try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 0)
+            .selectedTerminal?.terminal.id, terminal.id)
+    }
+
+    func testFailedSpawnSelectionCleanupPreservesALaterChoice() throws {
+        let database = try makeDatabase()
+        let session = AgentSession(kind: .codex, title: "Chat")
+        var project = makeProject("alpha", sessions: [session])
+        project.terminals = (0..<2).map { index in
+            ProjectTerminal(id: TerminalID(), title: "Shell \(index)", customTitle: nil,
+                currentDirectory: project.folderPath, branch: nil, themeID: nil,
+                soundOverrides: nil, createdAt: Date())
+        }
+        try database.save(ProjectsState(projects: [project]))
+        let failed = project.terminals[0].id
+        let later = project.terminals[1].id
+        try database.saveSelectedTerminalID(failed)
+        try database.saveSelectedTerminalID(later)
+        try database.clearSelectedTerminalID(ifMatches: failed)
+        XCTAssertEqual(try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 0)
+            .selectedTerminal?.terminal.id, later)
+
+        try database.saveSelectedSessionID(session.id)
+        try database.clearSelectedTerminalID(ifMatches: failed)
+        XCTAssertEqual(try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 0)
+            .selectedSessionID, session.id)
+
+        try database.saveSelectedTerminalID(failed)
+        try database.clearSelectedTerminalID(ifMatches: failed)
+        let cleared = try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 0)
+        XCTAssertNil(cleared.selectedSessionID)
+        XCTAssertNil(cleared.selectedTerminal)
+        XCTAssertEqual(try database.projectRecord(id: project.id)?.terminals.map(\.id),
+                       project.terminals.map(\.id), "Cleanup must retain saved shell destinations")
+    }
+
+    func testNavigationSelectionDistinguishesStaleAndMalformedTerminalIDs() throws {
+        let database = try makeDatabase()
+        try database.save(ProjectsState(projects: [makeProject("alpha")]))
+        let raw = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+        defer { raw.close() }
+        try raw.prepare(ProjectDatabaseSchema.upsertAppState)
+            .bind(1, ProjectDatabaseSchema.selectedTerminalKey)
+            .bind(2, TerminalID().uuidString).run()
+        XCTAssertNil(try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 0)
+            .selectedTerminal, "A deleted destination cannot restore another terminal")
+
+        try raw.prepare(ProjectDatabaseSchema.upsertAppState)
+            .bind(1, ProjectDatabaseSchema.selectedTerminalKey)
+            .bind(2, "not-a-terminal-id").run()
+        XCTAssertThrowsError(try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 0)) {
+            guard case ProjectDatabaseLoadError.corruptRow(let table, let id, _) = $0 else {
+                return XCTFail("unexpected error: \($0)")
+            }
+            XCTAssertEqual(table, "app_state")
+            XCTAssertEqual(id, ProjectDatabaseSchema.selectedTerminalKey)
+        }
+    }
+
+    func testIndexedProjectReadSkipsUnrelatedPayloadsAndCannotAuthorizeGraphSave() throws {
+        let database = try makeDatabase()
+        let session = AgentSession(kind: .codex, title: "Unreadable")
+        let target = makeProject("target", sessions: [session])
+        let other = makeProject("other")
+        try database.save(ProjectsState(projects: [target, other]))
+        let raw = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+        defer { raw.close() }
+        try raw.prepare("UPDATE project SET data = ? WHERE id = ?")
+            .bind(1, "{ unreadable project").bind(2, other.id.uuidString).run()
+        try raw.prepare("UPDATE session SET data = ? WHERE id = ?")
+            .bind(1, "{ unreadable session").bind(2, session.id.uuidString).run()
+
+        let loaded = try XCTUnwrap(database.projectRecord(id: target.id))
+        XCTAssertEqual(loaded.id, target.id)
+        XCTAssertTrue(loaded.sessions.isEmpty)
+        XCTAssertNil(try database.projectRecord(id: ProjectID()))
+        XCTAssertThrowsError(try database.save(ProjectsState(projects: [loaded]))) {
+            guard case ProjectDatabaseWriteError.partialReadRequiresFullLoad = $0 else {
+                return XCTFail("unexpected error: \($0)")
+            }
+        }
+        XCTAssertThrowsError(try database.load())
+    }
+
     func testNavigationSnapshotBoundsPayloadsAndCannotAuthorizeGraphSave() throws {
         let database = try makeDatabase()
         let sessions = (0..<4).map { AgentSession(kind: .codex, title: "Chat \($0)") }

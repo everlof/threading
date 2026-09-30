@@ -25,9 +25,13 @@ socket under `${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/threading-linu
 `THREADING_LINUX_CODEX` or `THREADING_LINUX_CLAUDE` to an absolute executable path to enable a
 provider, or to an empty value to disable it.
 
-The application-menu launch inherits the desktop session's `PATH`, which can omit CLI installs in
-`~/.local/bin` or a shell-managed Node directory. If an installed provider is missing from the
-window, use the installed launcher from a terminal with an explicit path, for example
+The launcher asks the configured login shell for its `PATH` once per start, using the same
+`-l -c` mode as provider launches. It adds those directories ahead of the desktop session's
+inherited `PATH`, so both the CLI and an `/usr/bin/env` interpreter such as Node can resolve.
+A slow or failing shell profile falls back to the inherited `PATH`. Explicit
+`THREADING_LINUX_CODEX` and `THREADING_LINUX_CLAUDE` values still take precedence, including an
+empty value to disable a provider. If a provider is configured only by an interactive shell
+profile, use the installed launcher with an explicit path, for example
 `THREADING_LINUX_CODEX="$HOME/.local/bin/codex" /opt/threading-linux-preview/run-app.sh`.
 For an application-menu override, copy
 `/usr/share/applications/threading-linux-preview.desktop` to
@@ -42,5 +46,6 @@ absolute paths in the desktop entry: it does not expand `$HOME`.
 
 The `bin/` directory contains the window, store host and PTY daemon. Keep all three binaries
 together: the window uses its sibling host for project-folder import. Closing the window leaves
-live children with the daemon; running `./run-app.sh` again can reattach the selected agent or
-open a saved terminal from its project's picker.
+live children with the daemon; running `./run-app.sh` again reattaches the selected live agent or
+standalone terminal. An exited or absent standalone terminal returns to the project list; saved
+terminals are also available from their project's picker.

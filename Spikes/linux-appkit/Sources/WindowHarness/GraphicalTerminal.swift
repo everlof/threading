@@ -11,7 +11,7 @@ import ThreadingPTYHostKit
 /// Experimental host-only terminal surface. Threading retains store identity, process ownership,
 /// input and exit truth. This is not a new extension component or a shipping theme boundary.
 final class GraphicalTerminal: @unchecked Sendable {
-    enum AgentPresence {
+    enum RuntimePresence {
         case running
         case exited(Int32)
         case absent
@@ -20,16 +20,16 @@ final class GraphicalTerminal: @unchecked Sendable {
     private final class AgentSurvey: @unchecked Sendable {
         private let lock = NSLock()
         private let semaphore = DispatchSemaphore(value: 0)
-        private var result: AgentPresence?
+        private var result: RuntimePresence?
 
-        func finish(_ value: AgentPresence) {
+        func finish(_ value: RuntimePresence) {
             lock.lock()
             guard result == nil else { lock.unlock(); return }
             result = value
             lock.unlock()
             semaphore.signal()
         }
-        func wait() -> AgentPresence {
+        func wait() -> RuntimePresence {
             guard semaphore.wait(timeout: .now() + 2) == .success else { return .unavailable }
             lock.lock(); defer { lock.unlock() }
             return result ?? .unavailable
@@ -39,9 +39,14 @@ final class GraphicalTerminal: @unchecked Sendable {
     /// Expect tens of held children; at 1,000, the protocol's 1 MiB frame cap bounds the list
     /// and an oversized answer is unavailable. Only one typed identity survives decoding.
     /// A failed query never becomes evidence that a child has exited.
-    static func agentPresence(socket: String, id: SessionID) -> AgentPresence {
+    static func agentPresence(socket: String, id: SessionID) -> RuntimePresence {
+        runtimePresence(socket: socket, identity: .agentSession(id))
+    }
+    static func terminalPresence(socket: String, id: TerminalID) -> RuntimePresence {
+        runtimePresence(socket: socket, identity: PTYHostSessionIdentity(.projectTerminal(id)))
+    }
+    private static func runtimePresence(socket: String, identity: PTYHostSessionIdentity) -> RuntimePresence {
         let survey = AgentSurvey()
-        let identity = PTYHostSessionIdentity.agentSession(id)
         let client = PTYHostClient(socketPath: socket, build: "linux-native-window",
             events: .init(frame: { frame in
                 guard case .sessions(let summaries) = frame else { return }
@@ -112,6 +117,8 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var running = false
     private var closed = false
     private var createdTerminal = false
+    private var createdTerminalID: TerminalID?
+    private var createdTerminalStore: String?
     private var createdAgent = false
     private var spawnMayBeLive = false
     private var finished = false
@@ -143,13 +150,24 @@ final class GraphicalTerminal: @unchecked Sendable {
                 let link = try connect(socket: socket)
                 let id = try Self.createTerminal(store: store, directory: directory, executable: executable)
                 identity = id
-                lock.lock(); createdTerminal = true; lock.unlock()
+                if case .projectTerminal(let terminalID) = id.identity {
+                    lock.lock(); createdTerminal = true; createdTerminalID = terminalID; lock.unlock()
+                    createdTerminalStore = store
+                }
                 // Once send is attempted, failure cannot prove that the daemon did not spawn.
                 lock.lock(); spawnMayBeLive = true; lock.unlock()
                 try link.spawn(PTYHostSpawnRequest(id: id, channel: .pty(grid: PTYHostGrid(cols: 80, rows: 24)),
                     executable: executable, arguments: arguments,
                     environment: Self.launchEnvironment(), cwd: directory))
-            } catch { fail(error) }
+            } catch {
+                if let terminalID = createdTerminalID {
+                    switch Self.terminalPresence(socket: socket, id: terminalID) {
+                    case .absent, .exited: clearTerminalSelection(id: terminalID)
+                    case .running, .unavailable: break
+                    }
+                }
+                fail(error)
+            }
         }
     }
     func startAgent(store: String, socket: String, directory: String, shell: String,
@@ -227,8 +245,13 @@ final class GraphicalTerminal: @unchecked Sendable {
         try link.connect()
         return link
     }
-    func attach(store: String, socket: String, terminalID: String) {
-        attach(store: store, socket: socket, savedID: terminalID, kind: .terminal)
+    func attach(store: String, socket: String, terminalID: String, projectID: String? = nil) {
+        attach(store: store, socket: socket, savedID: terminalID, kind: .terminal,
+               projectID: projectID)
+    }
+    var terminalID: String? {
+        lock.lock(); defer { lock.unlock() }
+        return createdTerminalID?.uuidString
     }
     func attachAgent(store: String, socket: String, sessionID: String) {
         attach(store: store, socket: socket, savedID: sessionID, kind: .agent)
@@ -243,13 +266,24 @@ final class GraphicalTerminal: @unchecked Sendable {
     /// check and scalar write off the UI actor; terminal selection clears a prior agent as on
     /// macOS. The window keeps a failed choice in its picker or project list; a new shell still
     /// reports its own launch failure if the same store refusal prevents it from starting.
-    static func selectRuntime(store: String, agentID: String?) throws {
+    static func selectRuntime(store: String, agentID: String?, terminalID: String? = nil,
+                              terminalProjectID: String? = nil) throws {
+        guard agentID == nil || terminalID == nil else { throw WindowFailure("ambiguous runtime selection") }
         let id: SessionID?
         if let agentID {
             guard let uuid = UUID(uuidString: agentID) else { throw WindowFailure("invalid session UUID") }
             id = SessionID(uuid)
         } else {
             id = nil
+        }
+        let selectedTerminal: TerminalID?
+        if let terminalID {
+            guard let parsed = TerminalID(uuidString: terminalID) else {
+                throw WindowFailure("invalid terminal UUID")
+            }
+            selectedTerminal = parsed
+        } else {
+            selectedTerminal = nil
         }
         let root = URL(fileURLWithPath: store, isDirectory: true)
         let file = root.appendingPathComponent("threading.db")
@@ -265,14 +299,26 @@ final class GraphicalTerminal: @unchecked Sendable {
                 throw WindowFailure("session is not in this store")
             }
         }
-        try database.saveSelectedSessionID(id)
+        if let selectedTerminal {
+            guard let rawProjectID = terminalProjectID,
+                  let projectID = ProjectID(uuidString: rawProjectID),
+                  let project = try database.projectRecord(id: projectID),
+                  project.terminals.contains(where: { $0.id == selectedTerminal }) else {
+                throw WindowFailure("terminal is not in its saved project")
+            }
+            try database.saveSelectedTerminalID(selectedTerminal)
+        } else {
+            try database.saveSelectedSessionID(id)
+        }
     }
     private func attach(store: String, socket: String, savedID: String, kind: SavedKind,
-                        resume: (String, String?, String?, Int, Int)? = nil) {
+                        resume: (String, String?, String?, Int, Int)? = nil,
+                        projectID: String? = nil) {
         worker.async { [self] in
             do {
                 attaching = true
-                let id = try Self.storedIdentity(store: store, savedID: savedID, kind: kind)
+                let id = try Self.storedIdentity(store: store, savedID: savedID, kind: kind,
+                                                 projectID: projectID)
                 identity = id
                 if kind == .agent, let uuid = UUID(uuidString: savedID) {
                     savedAgent = (store, SessionID(uuid))
@@ -304,7 +350,8 @@ final class GraphicalTerminal: @unchecked Sendable {
             } catch { fail(error) }
         }
     }
-    private static func storedIdentity(store: String, savedID: String, kind: SavedKind) throws -> PTYHostSessionIdentity {
+    private static func storedIdentity(store: String, savedID: String, kind: SavedKind,
+                                       projectID: String? = nil) throws -> PTYHostSessionIdentity {
         guard let uuid = UUID(uuidString: savedID) else {
             throw WindowFailure(kind == .agent ? "invalid session UUID" : "invalid terminal identity")
         }
@@ -320,8 +367,20 @@ final class GraphicalTerminal: @unchecked Sendable {
         switch kind {
         case .terminal:
             let id = TerminalID(uuid)
-            let records = try database.projectRecords()
-            guard records.contains(where: { $0.project.terminals.contains(where: { $0.id == id }) }) else {
+            let isStored: Bool
+            if let projectID {
+                guard let parsed = ProjectID(uuidString: projectID) else {
+                    throw WindowFailure("invalid project identity")
+                }
+                isStored = try database.projectRecord(id: parsed)?.terminals.contains(where: {
+                    $0.id == id
+                }) ?? false
+            } else {
+                isStored = try database.projectRecords().contains(where: { record in
+                    record.project.terminals.contains(where: { $0.id == id })
+                })
+            }
+            guard isStored else {
                 throw WindowFailure("terminal is not in this store")
             }
             return PTYHostSessionIdentity(.projectTerminal(id))
@@ -371,6 +430,7 @@ final class GraphicalTerminal: @unchecked Sendable {
         } else {
             try database.saveProject(project, position: position)
         }
+        try database.saveSelectedTerminalID(terminal.id)
         return PTYHostSessionIdentity(.projectTerminal(terminal.id))
     }
     private static func createAgent(store: String, directory: String, shell: String,
@@ -486,6 +546,7 @@ final class GraphicalTerminal: @unchecked Sendable {
             pendingResumeRecording = nil
             if value.reason != .alreadyExists {
                 lock.lock(); spawnMayBeLive = false; lock.unlock()
+                if let terminalID = createdTerminalID { clearTerminalSelection(id: terminalID) }
             }
             fail(WindowFailure("spawn refused: \(value.reason)"))
         case .error(let value) where value.code == .sessionExited && value.detail == "input":
@@ -667,6 +728,24 @@ final class GraphicalTerminal: @unchecked Sendable {
     }
     private func fail(_ error: Error) {
         lock.lock(); if !closed && failure == nil { failure = String(describing: error) }; lock.unlock()
+    }
+    private func clearTerminalSelection(id: TerminalID) {
+        guard let store = createdTerminalStore else { return }
+        do {
+            let root = URL(fileURLWithPath: store, isDirectory: true)
+            let fd = Glibc.open(root.appendingPathComponent("host.lock").path,
+                                O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+            guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
+            defer { Glibc.close(fd) }
+            guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+                throw WindowFailure("store is already owned")
+            }
+            let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
+            defer { database.close() }
+            try database.clearSelectedTerminalID(ifMatches: id)
+        } catch {
+            FileHandle.standardError.write(Data("Terminal selection cleanup: \(error)\n".utf8))
+        }
     }
     func send(_ bytes: Data) {
         guard bytes.count <= 32 else { fail(WindowFailure("input event exceeds byte budget")); return }

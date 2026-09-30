@@ -1,3 +1,5 @@
+// Frozen pre-X-bound implementation. Keep this independent of future raster optimizations;
+// run.py compiles it in place of Raster.swift and compares exact output bytes.
 import Foundation
 
 /// The leaf the whole spike rests on: a scanline rasterizer with analytic horizontal coverage
@@ -58,7 +60,6 @@ public final class Bitmap: @unchecked Sendable {
 enum Rasterizer {
 
     static let subsamples = 4
-    private static let minimumCoverage: CGFloat = 0.0005
 
     /// Fills `polygons` (already flattened, in device pixels, y-down) into `bitmap`.
     ///
@@ -71,27 +72,8 @@ enum Rasterizer {
         clip: [CGFloat]?,
         into bitmap: Bitmap
     ) {
-        scanlines(polygons: polygons, evenOdd: evenOdd, width: bitmap.width, height: bitmap.height) {
-            row, columns, coverage in
-            for column in columns {
-                var value = coverage[column] * color.3
-                if let clip { value *= clip[row * bitmap.width + column] }
-                guard value > minimumCoverage else { continue }
-                bitmap.blend(x: column, y: row, red: color.0, green: color.1, blue: color.2, coverage: value)
-            }
-        }
-    }
-
-    /// One scan converter supplies both pixel fills and alpha masks. Consumers receive one
-    /// bounded row at a time; coverage order and fractional span arithmetic stay identical.
-    private static func scanlines(
-        polygons: [[NSPoint]], evenOdd: Bool, width: Int, height: Int,
-        consume: (_ row: Int, _ columns: ClosedRange<Int>, _ coverage: [CGFloat]) -> Void
-    ) {
         guard !polygons.isEmpty else { return }
         var edges: [(x0: CGFloat, y0: CGFloat, x1: CGFloat, y1: CGFloat, winding: CGFloat)] = []
-        var minX = CGFloat.greatestFiniteMagnitude
-        var maxX = -CGFloat.greatestFiniteMagnitude
         var minY = CGFloat.greatestFiniteMagnitude
         var maxY = -CGFloat.greatestFiniteMagnitude
         for polygon in polygons where polygon.count > 1 {
@@ -100,27 +82,21 @@ enum Rasterizer {
                 let b = polygon[(index + 1) % polygon.count]
                 guard a.y != b.y else { continue }
                 edges.append((a.x, a.y, b.x, b.y, b.y > a.y ? 1 : -1))
-                minX = min(minX, min(a.x, b.x)); maxX = max(maxX, max(a.x, b.x))
                 minY = min(minY, min(a.y, b.y)); maxY = max(maxY, max(a.y, b.y))
             }
         }
         guard !edges.isEmpty else { return }
 
         let firstRow = max(0, Int(minY.rounded(.down)))
-        let lastRow = min(height - 1, Int(maxY.rounded(.up)))
-        // Clamp before integer conversion, just as span does, including wholly offscreen paths.
-        let firstColumn = Int(max(0, min(CGFloat(width), minX.rounded(.down))))
-        let lastColumn = Int(max(-1, min(CGFloat(width - 1), maxX.rounded(.up))))
-        guard firstRow <= lastRow, firstColumn <= lastColumn else { return }
+        let lastRow = min(bitmap.height - 1, Int(maxY.rounded(.up)))
+        guard firstRow <= lastRow else { return }
 
-        var coverage = [CGFloat](repeating: 0, count: width)
+        var coverage = [CGFloat](repeating: 0, count: bitmap.width)
         let step = 1 / CGFloat(subsamples)
         let weight = step
 
         for row in firstRow...lastRow {
-            // Stroke joints and bitmap glyphs can cover only a few columns of a wide frame.
-            // Crossings remain in device coordinates; only clear/composite work is bounded.
-            for column in firstColumn...lastColumn { coverage[column] = 0 }
+            for index in coverage.indices { coverage[index] = 0 }
             for sub in 0..<subsamples {
                 let sampleY = CGFloat(row) + (CGFloat(sub) + 0.5) * step
                 var crossings: [(x: CGFloat, winding: CGFloat)] = []
@@ -141,7 +117,12 @@ enum Rasterizer {
                     span(from: crossings[index].x, to: crossings[index + 1].x, weight: weight, into: &coverage)
                 }
             }
-            consume(row, firstColumn...lastColumn, coverage)
+            for column in 0..<bitmap.width {
+                var value = coverage[column] * color.3
+                if let clip { value *= clip[row * bitmap.width + column] }
+                guard value > 0.0005 else { continue }
+                bitmap.blend(x: column, y: row, red: color.0, green: color.1, blue: color.2, coverage: value)
+            }
         }
     }
 
@@ -165,19 +146,13 @@ enum Rasterizer {
         coverage[lastPixel] += (end - CGFloat(lastPixel)) * weight
     }
 
-    /// Preserve the original transparent probe's 8-bit alpha quantization, without allocating
-    /// and blending an RGBA frame whose RGB channels are discarded. Nested clips still multiply
-    /// these quantized values in NSGraphicsContext.
+    /// The same coverage, accumulated into a clip mask instead of pixels.
     static func mask(polygons: [[NSPoint]], evenOdd: Bool, width: Int, height: Int) -> [CGFloat] {
+        let probe = Bitmap(width: width, height: height)
+        fill(polygons: polygons, evenOdd: evenOdd, color: (1, 1, 1, 1), clip: nil, into: probe)
         var mask = [CGFloat](repeating: 0, count: width * height)
-        scanlines(polygons: polygons, evenOdd: evenOdd, width: width, height: height) {
-            row, columns, coverage in
-            for column in columns {
-                let value = coverage[column]
-                guard value > minimumCoverage else { continue }
-                let alpha = UInt8(max(0, min(255, (min(1, value) * 255).rounded())))
-                mask[row * width + column] = CGFloat(alpha) / 255
-            }
+        for index in 0..<(width * height) {
+            mask[index] = CGFloat(probe.pixels[index * 4 + 3]) / 255
         }
         return mask
     }

@@ -3,8 +3,10 @@
 #ifdef __linux__
 #include <SDL2/SDL.h>
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 struct TWWindow {
     SDL_Window *window;
     SDL_Renderer *renderer;
@@ -19,6 +21,32 @@ static int tw_modifiers(SDL_Keymod mods) {
         | ((mods & KMOD_CAPS) ? 16 : 0) | ((mods & KMOD_NUM) ? 32 : 0);
 }
 const char *tw_error(void) { return SDL_GetError(); }
+static double tw_startup_milliseconds(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (double)now.tv_sec * 1000 + (double)now.tv_nsec / 1000000;
+}
+static void tw_startup_trace(int enabled, double started, const char *stage) {
+    if (!enabled) return;
+    fprintf(stderr, "STARTUP_TRACE scope=window stage=%s elapsedMs=%.3f\n",
+            stage, tw_startup_milliseconds() - started);
+    fflush(stderr);
+}
+static void tw_navigation_trace_dequeue(const SDL_Event *event, int current) {
+    static int enabled = -1;
+    static unsigned records;
+    if (enabled < 0) {
+        const char *value = getenv("THREADING_LINUX_NAVIGATION_TRACE");
+        enabled = value && strcmp(value, "1") == 0;
+    }
+    if (!enabled || records >= TW_MAX_NAVIGATION_TRACE_RECORDS) return;
+    records++;
+    fprintf(stderr, "NAVIGATION_TRACE scope=window stage=dequeue monotonicMs=%.3f "
+            "code=%d row=%d generation=%u current=%d\n",
+            tw_startup_milliseconds(), event->user.code,
+            (int)(intptr_t)event->user.data1, (uint32_t)(uintptr_t)event->user.data2, current);
+    fflush(stderr);
+}
 void tw_close(TWWindow *w) {
     if (!w) return;
     tw_accessibility_close();
@@ -29,22 +57,34 @@ void tw_close(TWWindow *w) {
     SDL_Quit();
 }
 TWWindow *tw_open(const char *title, int width, int height) {
+    const char *traceValue = getenv("THREADING_LINUX_STARTUP_TRACE");
+    const int trace = traceValue && strcmp(traceValue, "1") == 0;
+    const double started = trace ? tw_startup_milliseconds() : 0;
     // The legacy 32-byte editing event silently truncates long compositions. SDL's extended
     // event keeps the whole preedit available for an explicit bounded projection below.
     SDL_SetHint(SDL_HINT_IME_SUPPORT_EXTENDED_TEXT, "1");
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) return NULL;
+    tw_startup_trace(trace, started, "sdl-init.begin");
+    const int initialized = SDL_Init(SDL_INIT_VIDEO);
+    tw_startup_trace(trace, started, "sdl-init.end");
+    if (initialized != 0) return NULL;
     TWWindow *w = calloc(1, sizeof(*w));
     if (!w) { SDL_Quit(); return NULL; }
+    tw_startup_trace(trace, started, "create-window.begin");
     w->window = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                 width, height, SDL_WINDOW_RESIZABLE);
+    tw_startup_trace(trace, started, "create-window.end");
     if (!w->window) { tw_close(w); return NULL; }
     // Explicit experiment bounds keep the software rasterizer's allocation/work bounded.
     SDL_SetWindowMinimumSize(w->window, 320, 180);
     SDL_SetWindowMaximumSize(w->window, 1280, 900);
+    tw_startup_trace(trace, started, "create-renderer.begin");
     w->renderer = SDL_CreateRenderer(w->window, -1, SDL_RENDERER_SOFTWARE);
+    tw_startup_trace(trace, started, "create-renderer.end");
     if (!w->renderer) { tw_close(w); return NULL; }
+    tw_startup_trace(trace, started, "accessibility-open.begin");
     tw_accessibility_open(w);
     tw_accessibility_window_focus(w, (SDL_GetWindowFlags(w->window) & SDL_WINDOW_INPUT_FOCUS) != 0);
+    tw_startup_trace(trace, started, "accessibility-open.end");
     return w;
 }
 void tw_window_geometry(TWWindow *w, int *x, int *y, int *width, int *height) {
@@ -145,7 +185,9 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         SDL_GetWindowSize(w->window, &out->width, &out->height);
         if (e.type == SDL_QUIT) out->kind = 5;
         else if (e.type == tw_accessibility_event_type()) {
-            if (!tw_accessibility_event_is_current((uint32_t)(uintptr_t)e.user.data2)) continue;
+            const int current = tw_accessibility_event_is_current((uint32_t)(uintptr_t)e.user.data2);
+            tw_navigation_trace_dequeue(&e, current);
+            if (!current) continue;
             if (e.user.code == 1) {
                 if (!tw_accessibility_row_center((int)(intptr_t)e.user.data1, &out->x, &out->y)) continue;
                 out->kind = 2;

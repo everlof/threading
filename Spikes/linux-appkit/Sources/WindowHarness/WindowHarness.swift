@@ -21,7 +21,7 @@ struct ProjectSnapshot: Sendable {
     var sessions: Int
     let terminalCount: Int
     var recentAgents: [SavedRuntime]
-    let recentTerminals: [SavedRuntime]
+    var recentTerminals: [SavedRuntime]
 }
 struct WindowSnapshot: Sendable {
     let projects: [ProjectSnapshot]
@@ -29,6 +29,7 @@ struct WindowSnapshot: Sendable {
     let restoreAgentID: String?
     let restoreAgentActivity: Date?
     let restoreAgentProjectID: ProjectID?
+    let restoreTerminalID: String?
 }
 struct WindowFailure: Error, CustomStringConvertible {
     let description: String
@@ -153,22 +154,35 @@ struct WindowHarness {
 
     private struct PendingAgent {
         let projectIndex: Int
-        let kind: AgentKind
-        let accountHandle: AccountHandle
+        let row: AgentSessionRowPresentation
     }
 
-    private static func savedAgentTitle(_ title: String, accountHandle: AccountHandle) -> String {
+    private static func savedAgentTitle(_ title: String, kind: AgentKind,
+                                        accountHandle: AccountHandle) -> String {
+        // The specimen has no provider icon. Keep that identity as decoration before the
+        // title so ellipsis cannot make two providers' unnamed sessions indistinguishable.
+        let provider = "[\(kind.displayName)] "
         let account = accountHandle.isStandard ? "" :
             " [\(String(accountHandle.name.unicodeScalars.prefix(64)))]"
         let visibleTitle = String(title.unicodeScalars.prefix(
-            max(0, maximumPersistedRuntimeTitleScalars - account.unicodeScalars.count)))
-        return visibleTitle + account
+            max(0, maximumPersistedRuntimeTitleScalars - provider.unicodeScalars.count
+                - account.unicodeScalars.count)))
+        return provider + visibleTitle + account
     }
 
     private static func savedAgent(_ session: AgentSession) -> ProjectSnapshot.SavedRuntime {
-        let title = session.title.isEmpty ? session.kind.rawValue : session.title
-        return .init(id: session.id.uuidString,
-                     title: savedAgentTitle(title, accountHandle: session.accountHandle))
+        savedAgent(agentRow(session))
+    }
+
+    private static func agentRow(_ session: AgentSession) -> AgentSessionRowPresentation {
+        // The preview has no title preference yet; follow agent titles, as the Mac default does.
+        AgentSessionRowPresentation(session: session, usesAgentTitle: true,
+                                    untitledTitle: AgentDefaults.untitledSessionName)
+    }
+
+    private static func savedAgent(_ row: AgentSessionRowPresentation) -> ProjectSnapshot.SavedRuntime {
+        .init(id: row.id.uuidString,
+              title: savedAgentTitle(row.title, kind: row.kind, accountHandle: row.accountHandle))
     }
 
     @MainActor static func main() async {
@@ -409,12 +423,17 @@ struct WindowHarness {
         let gate: SelectionGate
     }
 
-    private static func recordSelection(_ agentID: String?, store: String,
+    private static func recordSelection(_ agentID: String?, terminalID: String? = nil,
+                                        terminalProjectID: String? = nil, store: String,
                                         after event: TWEvent,
                                         continuesOnRefusal: Bool = false) -> PendingSelection {
         let gate = SelectionGate()
         DispatchQueue.global(qos: .userInitiated).async {
-            gate.finish(Result { try GraphicalTerminal.selectRuntime(store: store, agentID: agentID) })
+            gate.finish(Result {
+                try GraphicalTerminal.selectRuntime(store: store, agentID: agentID,
+                                                    terminalID: terminalID,
+                                                    terminalProjectID: terminalProjectID)
+            })
         }
         return PendingSelection(event: event, continuesOnRefusal: continuesOnRefusal, gate: gate)
     }
@@ -422,6 +441,17 @@ struct WindowHarness {
     static func loadSnapshot(_ path: String, selectingProjectAt requestedPath: String? = nil,
                              socket: String? = nil) throws -> WindowSnapshot {
         let snapshot = try loadStoredSnapshot(path, selectingProjectAt: requestedPath)
+        if let socket, let idText = snapshot.restoreTerminalID,
+           let uuid = UUID(uuidString: idText) {
+            switch GraphicalTerminal.terminalPresence(socket: socket, id: TerminalID(uuid)) {
+            case .running, .unavailable: break
+            case .absent, .exited:
+                return WindowSnapshot(projects: snapshot.projects,
+                    selectedProjectIndex: snapshot.selectedProjectIndex,
+                    restoreAgentID: nil, restoreAgentActivity: nil,
+                    restoreAgentProjectID: nil, restoreTerminalID: nil)
+            }
+        }
         guard let socket, let idText = snapshot.restoreAgentID,
               let uuid = UUID(uuidString: idText) else { return snapshot }
         switch GraphicalTerminal.agentPresence(socket: socket, id: SessionID(uuid)) {
@@ -441,7 +471,8 @@ struct WindowHarness {
         // missing summary gives no exit status; explicit selection remains the resume route.
         return WindowSnapshot(projects: snapshot.projects,
             selectedProjectIndex: snapshot.selectedProjectIndex, restoreAgentID: nil,
-            restoreAgentActivity: nil, restoreAgentProjectID: nil)
+            restoreAgentActivity: nil, restoreAgentProjectID: nil,
+            restoreTerminalID: snapshot.restoreTerminalID)
     }
 
     private static func loadStoredSnapshot(_ path: String,
@@ -459,9 +490,10 @@ struct WindowHarness {
             recentSessionLimit: maximumSelectableAgentsPerProject,
             recentTerminalLimit: maximumSelectableTerminalsPerProject
         )
-        // A normal relaunch follows the saved agent to its owning project. Reuse a session in
+        // A normal relaunch follows the saved runtime to its owning project. Reuse a session in
         // the bounded navigator snapshot; one indexed read covers a selection older than that
-        // window. An explicit project argument remains authoritative.
+        // window. Standalone terminals are already decoded with their owning project payload.
+        // An explicit project argument remains authoritative.
         var selectedAgent: (projectID: ProjectID, session: AgentSession)?
         if let selectedID = catalog.selectedSessionID {
             for project in catalog.projects {
@@ -484,6 +516,8 @@ struct WindowHarness {
         } else {
             selectedIndex = selectedAgent.flatMap { agent in
                 catalog.projects.firstIndex(where: { $0.id == agent.projectID })
+            } ?? catalog.selectedTerminal.flatMap { terminal in
+                catalog.projects.firstIndex(where: { $0.id == terminal.projectID })
             } ?? 0
         }
         var projects = catalog.projects.map { project in
@@ -496,11 +530,12 @@ struct WindowHarness {
                 path: project.folderPath, sessions: project.sessionCount,
                 terminalCount: project.terminalCount, recentAgents: agents, recentTerminals: terminals)
         }
-        // Restore only a selected, launched agent in the chosen project. Attach never starts a
-        // process. An older selected agent joins the picker without increasing its row ceiling.
+        // Restore only a selected live runtime in the chosen project. An older selected row
+        // joins its bounded picker without increasing the mounted-row ceiling.
         let restoreAgentID: String?
         let restoreAgentActivity: Date?
         let restoreAgentProjectID: ProjectID?
+        let restoreTerminalID: String?
         if let selectedAgent,
            catalog.projects.indices.contains(selectedIndex),
            selectedAgent.projectID == catalog.projects[selectedIndex].id {
@@ -528,10 +563,29 @@ struct WindowHarness {
             restoreAgentActivity = nil
             restoreAgentProjectID = nil
         }
+        if let selectedTerminal = catalog.selectedTerminal,
+           catalog.projects.indices.contains(selectedIndex),
+           selectedTerminal.projectID == catalog.projects[selectedIndex].id,
+           restoreAgentID == nil {
+            let id = selectedTerminal.terminal.id.uuidString
+            if !projects[selectedIndex].recentTerminals.contains(where: { $0.id == id }) {
+                let saved = ProjectSnapshot.SavedRuntime(id: id,
+                    title: String(selectedTerminal.terminal.displayTitle.unicodeScalars.prefix(
+                        maximumPersistedRuntimeTitleScalars)))
+                projects[selectedIndex].recentTerminals.insert(saved, at: 0)
+                if projects[selectedIndex].recentTerminals.count > maximumSelectableTerminalsPerProject {
+                    projects[selectedIndex].recentTerminals.removeLast()
+                }
+            }
+            restoreTerminalID = id
+        } else {
+            restoreTerminalID = nil
+        }
         return WindowSnapshot(projects: projects, selectedProjectIndex: selectedIndex,
                               restoreAgentID: restoreAgentID,
                               restoreAgentActivity: restoreAgentActivity,
-                              restoreAgentProjectID: restoreAgentProjectID)
+                              restoreAgentProjectID: restoreAgentProjectID,
+                              restoreTerminalID: restoreTerminalID)
     }
 
     static func modifiers(_ event: TWEvent) -> PTYEmulator.Modifiers {
@@ -786,8 +840,7 @@ struct WindowHarness {
             if runtime.hasCreatedAgent {
                 projects[launch.projectIndex].sessions += 1
                 projects[launch.projectIndex].recentAgents.insert(
-                    .init(id: id, title: savedAgentTitle(launch.kind.rawValue,
-                                                       accountHandle: launch.accountHandle)),
+                    savedAgent(launch.row),
                     at: 0)
                 if projects[launch.projectIndex].recentAgents.count > maximumSelectableAgentsPerProject {
                     projects[launch.projectIndex].recentAgents.removeLast()
@@ -810,6 +863,21 @@ struct WindowHarness {
                                 claudeExecutable: String? = nil,
                                 codexAccounts: [AccountHandle] = [],
                                 claudeAccounts: [AccountHandle] = []) throws {
+        var traceFirstFrame = ProcessInfo.processInfo.environment["THREADING_LINUX_STARTUP_TRACE"] == "1"
+        let traceNavigation = ProcessInfo.processInfo.environment["THREADING_LINUX_NAVIGATION_TRACE"] == "1"
+        let maximumTraceRecords = 256
+        var traceRecords = 0
+        let traceStarted = traceFirstFrame || traceNavigation ? DispatchTime.now().uptimeNanoseconds : 0
+        func trace(_ stage: @autoclosure () -> String) {
+            guard (traceFirstFrame || traceNavigation), traceRecords < maximumTraceRecords else { return }
+            traceRecords += 1
+            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - traceStarted) / 1_000_000
+            // Direct stderr writes survive a stall before the ordinary frame log is flushed.
+            let label = traceFirstFrame ? "STARTUP_TRACE" : "NAVIGATION_TRACE"
+            FileHandle.standardError.write(Data(
+                "\(label) scope=navigator stage=\(stage()) elapsedMs=\(elapsed)\n".utf8))
+        }
+        trace("open.begin")
         var codexAccount = AccountHandle(storedName:
             ProcessInfo.processInfo.environment["THREADING_LINUX_CODEX_ACCOUNT"])
         var claudeAccount = AccountHandle(storedName:
@@ -818,6 +886,7 @@ struct WindowHarness {
         guard let window = tw_open("Threading Linux window experiment", 800, 480) else {
             throw WindowFailure(String(cString: tw_error()))
         }
+        trace("open.end")
         defer { tw_close(window) }
         var terminals: [String: GraphicalTerminal] = [:]
         var restoredRuntimes: [SavedRuntimeKey: GraphicalTerminal] = [:]
@@ -837,6 +906,24 @@ struct WindowHarness {
         var pendingFolderImport: FolderImportGate?
         defer { pendingFolderImport?.cancel() }
         var dirty = true
+        func updateSurface(_ event: TWEvent) throws {
+            let nextWidth = max(320, min(1280, Int(event.width)))
+            let nextHeight = max(180, min(900, Int(event.height)))
+            if nextWidth == width, nextHeight == height {
+                // Exposure invalidates the native drawable, not the unchanged row models.
+                // The initial frame and every terminal-to-project transition render before
+                // this loop waits, so the retained texture already describes the current UI.
+                trace("repaint.begin")
+                guard tw_repaint(window) == 0 else {
+                    throw WindowFailure(String(cString: tw_error()))
+                }
+                trace("repaint.end")
+            } else {
+                width = nextWidth
+                height = nextHeight
+                dirty = true
+            }
+        }
         if let id = snapshot.restoreAgentID, let launch,
            let row = projects[selected].recentAgents.firstIndex(where: { $0.id == id }) {
             let session = GraphicalTerminal()
@@ -845,6 +932,20 @@ struct WindowHarness {
             savedPicker = .agents(selected)
             savedSelected = row
             session.attachAgent(store: launch[0], socket: launch[1], sessionID: id)
+            guard let size = try runTerminal(session, window: window, width: width, height: height,
+                                             allowsProjects: true) else { return }
+            width = size.0; height = size.1
+            tw_project_mode(window)
+        } else if let id = snapshot.restoreTerminalID, let launch,
+                  projects.indices.contains(selected),
+                  let row = projects[selected].recentTerminals.firstIndex(where: { $0.id == id }) {
+            let session = GraphicalTerminal()
+            restoredRuntimes[.terminal(id)] = session
+            restoredProjectIDs.insert(projects[selected].id)
+            savedPicker = .terminals(selected)
+            savedSelected = row
+            session.attach(store: launch[0], socket: launch[1], terminalID: id,
+                           projectID: projects[selected].id)
             guard let size = try runTerminal(session, window: window, width: width, height: height,
                                              allowsProjects: true) else { return }
             width = size.0; height = size.1
@@ -888,6 +989,7 @@ struct WindowHarness {
                 if selected >= first + count { first = selected - count + 1 }
             }
             if dirty {
+                trace(traceFirstFrame ? "first-frame.begin" : "frame.begin")
                 // At most viewport/count row objects, even for a large persisted catalogue.
                 let root = Specimen.Window(frame: NSRect(x: 0, y: 0, width: width / 2, height: height / 2))
                 let accent = NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1)
@@ -982,19 +1084,26 @@ struct WindowHarness {
                                                  width: Int32(width),
                                                  height: Int32(Specimen.Window.titleHeight * 2),
                                                  inset: 24, selected: false))
+                trace("raster.begin")
                 let bitmap = Bitmap(width: width, height: height, background: (0.87, 0.87, 0.87, 1))
                 let context = NSGraphicsContext(bitmap: bitmap, scale: 2)
                 NSGraphicsContext.current = context
                 root.render(in: context)
                 NSGraphicsContext.current = nil
+                trace("raster.end")
                 let textStarted = DispatchTime.now().uptimeNanoseconds
+                trace("pango.begin")
                 try drawNavigatorText(textRows, into: bitmap)
+                trace("pango.end")
                 let textMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - textStarted) / 1_000_000
                 print("NAVIGATOR_TEXT mounted=\(textRows.count) drawMs=\(textMilliseconds)")
+                trace("present.begin")
                 let result = bitmap.pixels.withUnsafeBufferPointer {
                     tw_present(window, $0.baseAddress, Int32(width), Int32(height))
                 }
+                trace("present.end")
                 guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
+                trace("accessibility-title.begin")
                 if let accountPicker {
                     let provider = accountPicker == .claude ? "Claude" : "Codex"
                     let active = accountPicker == .claude ? claudeAccount : codexAccount
@@ -1068,6 +1177,8 @@ struct WindowHarness {
                     tw_title(window, title)
                     print("FRAME \(width)x\(height) mounted=\(end - first) selected=\(projects.isEmpty ? "none" : projects[selected].id)")
                 }
+                trace("accessibility-title.end")
+                traceFirstFrame = false
                 fflush(nil)
                 dirty = false
             }
@@ -1096,9 +1207,7 @@ struct WindowHarness {
                     if tw_next_timeout(window, &event, 33) == 1 {
                         if event.kind == 5 { return }
                         if event.kind == 1 {
-                            width = max(320, min(1280, Int(event.width)))
-                            height = max(180, min(900, Int(event.height)))
-                            dirty = true
+                            try updateSurface(event)
                         }
                     }
                     continue
@@ -1107,9 +1216,7 @@ struct WindowHarness {
                 if tw_next_timeout(window, &event, 33) == 1 {
                     if event.kind == 5 { return }
                     if event.kind == 1 {
-                        width = max(320, min(1280, Int(event.width)))
-                        height = max(180, min(900, Int(event.height)))
-                        dirty = true
+                        try updateSurface(event)
                     }
                 }
                 continue
@@ -1118,6 +1225,7 @@ struct WindowHarness {
                     throw WindowFailure(String(cString: tw_error()))
                 }
             }
+            trace("event kind=\(event.kind) action=\(event.action)")
             switch event.kind {
             case 5: return
             case 12:
@@ -1129,9 +1237,7 @@ struct WindowHarness {
                     dirty = true
                 } else { return }
             case 1:
-                width = max(320, min(1280, Int(event.width)))
-                height = max(180, min(900, Int(event.height)))
-                dirty = true
+                try updateSurface(event)
             case 2:
                 let listFirst = accountPicker != nil ? accountFirst : (savedPicker == nil ? first : savedFirst)
                 let listCount: Int
@@ -1157,6 +1263,7 @@ struct WindowHarness {
                     if accountPicker != nil { accountSelected = candidate }
                     else if savedPicker == nil { selected = candidate }
                     else { savedSelected = candidate }
+                    trace("selection index=\(candidate)")
                     dirty = true
                 }
             case 8:
@@ -1192,6 +1299,8 @@ struct WindowHarness {
                     }
                     if !selectionWasCommitted {
                         pendingSelection = recordSelection(savedPicker.isAgent ? runtime.id : nil,
+                                                           terminalID: savedPicker.isAgent ? nil : runtime.id,
+                                                           terminalProjectID: savedPicker.isAgent ? nil : project.id,
                                                            store: launch[0], after: event)
                         break
                     }
@@ -1210,7 +1319,8 @@ struct WindowHarness {
                                 session.attachAgent(store: launch[0], socket: launch[1], sessionID: runtime.id)
                             }
                         } else {
-                            session.attach(store: launch[0], socket: launch[1], terminalID: runtime.id)
+                            session.attach(store: launch[0], socket: launch[1], terminalID: runtime.id,
+                                           projectID: project.id)
                         }
                     }
                     guard let size = try runTerminal(session, window: window, width: width, height: height,
@@ -1227,7 +1337,10 @@ struct WindowHarness {
                     break
                 }
                 if !selectionWasCommitted {
-                    pendingSelection = recordSelection(nil, store: launch[0], after: event,
+                    pendingSelection = recordSelection(nil,
+                                                       terminalID: terminals[project.id]?.terminalID,
+                                                       terminalProjectID: project.id,
+                                                       store: launch[0], after: event,
                                                        continuesOnRefusal: terminals[project.id] == nil)
                     break
                 }
@@ -1296,7 +1409,8 @@ struct WindowHarness {
                 let session = GraphicalTerminal()
                 restoredRuntimes[.agent(savedID)] = session
                 pendingAgentProjects[savedID] = PendingAgent(projectIndex: selected,
-                                                             kind: kind, accountHandle: accountHandle)
+                    row: .unnamed(id: id, kind: kind, accountHandle: accountHandle,
+                                  untitledTitle: AgentDefaults.untitledSessionName))
                 session.startAgent(store: launch[0], socket: launch[1], directory: projects[selected].path,
                                    shell: launch[2], kind: kind, executable: executable,
                                    accountHandle: accountHandle, id: id,

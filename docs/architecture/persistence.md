@@ -187,11 +187,17 @@ no session payloads. The caller can append a terminal with the exact-row `savePr
 whole graph from those project rows. The project-array decode remains the scale boundary until
 terminals have independent rows.
 
-The Linux project window persists an opened saved agent as the selected session through an exact
-targeted validation and scalar write on a worker. Opening a shell or saved terminal clears that
-selection when the store accepts the write. A project-targeted relaunch can attempt attach-only
-restoration of the matching recent agent without authorizing a whole-graph rewrite or a new child
-process.
+The Linux project window persists one selected runtime: a session id or a standalone terminal id,
+never both. The two `app_state` scalars change in one transaction after a targeted membership
+check on a worker. A newly created shell records its terminal identity before daemon spawn; a
+proven spawn refusal clears that selection only if no later choice displaced it. The terminal
+record remains a saved sidebar destination. Normal relaunch follows the selected runtime to its
+owning project and surveys the daemon before opening: a live child is attach-only, while an
+absent or exited child leaves the project list visible. An explicit project target wins over a
+saved runtime in another project. The selected terminal is found while decoding the project
+payloads already needed by navigation, then inserted into the bounded 512-row picker if older
+than its recent window. No archived session payloads are read for that terminal route; project
+payload decode remains the scaling limit until terminals have independent rows.
 Exact-row `saveSession` remains allowed, so a newer unrelated payload is not decoded or rewritten
 by a selected-session update.
 
