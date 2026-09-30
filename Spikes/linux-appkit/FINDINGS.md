@@ -3071,3 +3071,50 @@ with `source_dirty=true`; its SHA-256 is
 The existing detailed AT-SPI suite also passed against that installed binary, covering bounded
 navigation, simultaneous panes, native/text geometry and independent focus. All 129 recorded
 spike compilation inputs retained their build-time hashes after verification.
+
+## 109. Flat surfaces share production geometry and paint
+
+`SurfaceDrawing.swift` now owns the production flat fill/border painter and fitted silhouette.
+Mac `ThemedSurface` keeps its public `Shape` spelling through a typealias, resolves the default
+radius after the half-border inset, and delegates flat drawing. Hard/soft bevel selection and
+artwork remain in the Mac wrapper. The shared leaf has no theme observer, control/responder,
+CoreText or layer dependency, so Linux compiles the exact file against its existing shim.
+The native plugin design kit also links the new leaf through its existing shared-source boundary;
+extracting a dependency from `ThemedControl` requires both compilation owners to receive it.
+
+Selected navigator rows and the Actions button now call that painter instead of constructing
+their own rounded selection path. Their current radius, colors, clipping and paint order remain
+the same. This is still diagnostic assembly, not production sidebar or button behavior parity;
+Linux does not yet consume the Mac theme environment or bevel artwork. This adds no public
+extension surface: the existing host retains selection, focus, command and runtime authority.
+
+The scaling boundary is unchanged: fixed-cost silhouette construction and paint occur only for
+mounted rows (normally eight, bounded by the viewport), never for all 512 retained catalogue
+values. There is no new discovery, I/O, view population or animation work. The existing raster
+comparison includes the new exact source so the laboratory still compiles the shipping painter.
+
+Linux validation passed: the full installed Ubuntu 24.04 arm64 Release package lane, including
+workspace input/focus/resize, bounded catalogue admission, Actions pointer/keyboard/AT-SPI
+activation, provider glyphs, shell identity/restart/cwd, live-child reinstall and desktop launch.
+The native normal/pressed Actions and selected-row screenshots were inspected. The existing
+raster suite still matches all seven RGBA frames and its threshold mask. A separate matched run
+of that same fixture, changing only pre/post `Specimen`, found zero differing bytes across five
+navigator frames at three viewport sizes (14,592,000 RGBA bytes). This is shim equivalence;
+it does not claim identical raster sampling between AppKit and Linux.
+
+The tested package identifies `a9fc15bd3` with `source_dirty=true`; all 128 recorded spike source
+inputs retained their build-time hashes. The `.deb` SHA-256 is
+`92b99be59c08cf6a9880ceaba1fb54f03e6fcc11c4e365c8dbd1d2d34f783e86`.
+
+On macOS, both complete 85-test evidence capture runs passed. The extraction also passed
+363 tests covering that catalogue and the existing surface geometry, bevel and panel-inset
+contracts (one opt-in stress test skipped). All 24 command-palette captures across six states
+and four theme/appearance choices have identical decoded pixels before and after the extraction;
+the real shell, navigator and component images were inspected as well.
+
+Full-catalogue pixel equivalence remains unverified. The canonical decoder's measured throughput
+under host contention projected roughly seven hours for the 1.645-billion-pixel catalogue, so its
+partial comparison was preserved rather than reported as complete. It also exposed existing
+gallery variability: a clock/random greeting, animated artwork and time-based usage data, plus
+ambiguous accessory/banner widths. Those owners were unchanged by the extraction. No baseline
+was accepted, no pixels were masked, and the partial report is not a clean full-catalogue result.

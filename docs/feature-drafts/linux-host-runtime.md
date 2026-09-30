@@ -62,8 +62,11 @@ three AppKit-oriented visual dependencies each need a real platform story.
 
 The later native-window probe (`FINDINGS.md` §40) presents the existing rasterizer through
 SDL2/X11 and exercises real window input against a production-store snapshot. It is diagnostic
-specimen UI, not a backend selection or the product navigator. The next shared-code target is
-session creation and launch coordination; a platform-only window does not satisfy that extraction.
+specimen UI, not a backend selection or the product navigator. Later slices share session creation,
+launch command assembly, typed command admission, provider artwork and flat surface painting with
+macOS, and exercise them in the installed preview (see `FINDINGS.md` §§99–109). The next UI boundary
+is shared navigator presentation and assembly; the diagnostic rows still supply their own spacing,
+text composition and colors, and do not consume the production theme or extension environment.
 
 `Spikes/linux-appkit/` is a bounded, wired-to-nothing experiment run on 2026-09-17 and 2026-09-18
 against `swift:6.3.2-noble` — the same image and Swift as `scripts/test-ptyd-linux.sh`. It is
