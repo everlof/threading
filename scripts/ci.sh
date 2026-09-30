@@ -124,6 +124,9 @@ python3 "${repository_directory}/scripts/tests/test_source_control_schema.py"
 say "Testing UI evidence tooling"
 python3 "${repository_directory}/scripts/tests/test_ui_evidence_tools.py"
 
+say "Testing XCTest process containment"
+python3 "${repository_directory}/scripts/tests/test_test_process_guard.py"
+
 say "Testing the development launcher"
 python3 "${repository_directory}/scripts/tests/test_dev_launcher.py"
 

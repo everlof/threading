@@ -173,6 +173,36 @@ A feature is not stable merely because its happy path works. Before calling one 
 - a support-report or durable event seam for failures that otherwise disappear;
 - inclusion in the non-interactive CI and release gate.
 
+### XCTest cleanup has bounded identity checks
+
+`scripts/test.sh` delegates process containment to `scripts/test_process_guard.py`. Global
+`ps` command-line enumeration hung on unrelated processes after XCTest had already finished,
+which also prevented the wrapper from reporting its test result. Discovery now reads bounded
+numeric `libproc` child lists starting at the launched command; unrelated processes are never
+queried. Only that command and descendants of its XCTest hosts enter the ledger. Reusable Xcode
+workers stay outside that ownership tree. An unreadable live descendant or incomplete child
+list fails discovery visibly rather than becoming an empty tree. Each discovered row records
+its full start identity; later exec or reparenting does not turn mutable names or parent PIDs
+into incarnation checks.
+
+Recorded descendants require both the same PID/start timestamp and the exact environment run
+token before every signal. The guard rereads the current group and only signals a group when
+that verified process is its leader. A reused PID, changed group, failed identity read, or failed
+token read never authorizes a signal. The supervisor separately owns its unreaped direct child
+through `Popen`, so a failed initial lookup still lets it stop that command without guessing
+about descendants. Found leaks and incomplete inspection both fail the run.
+
+Each inspection forks a worker from the deliberately single-threaded, non-Cocoa supervisor.
+This avoids repeated interpreter startup: a package-graph probe timed out before its first
+Python statement under host load. The worker resets inherited termination handlers, explicitly
+flushes its result, and exits without running inherited finalizers. A multithreaded supervisor
+refuses to fork. Inspection keeps its deadline, file-backed bounded output, and bounded
+post-kill observation using `waitpid` only for that exact child. Timeout diagnostics retain the action and last API/PID stage without
+arguments or environment values. An inspection failure stops the command and periodic monitoring; it
+cannot accumulate stuck replacement workers during a long build. Cleanup never waits forever
+for a worker or command to exit. `scripts/ci.sh` runs the ownership, PID reuse, lookup failure,
+timeout, exit-status, and real isolated child-cleanup tests without launching Xcode.
+
 ## Three failure states, not two
 
 `BrowserBaselineStore` is where "missing or corrupt" stopped being enough. A durable bundle written
