@@ -95,20 +95,23 @@ final class ProjectTerminalViewController: NSViewController {
 
         let preferred = URL(fileURLWithPath: terminal.currentDirectory, isDirectory: true)
         var isDirectory: ObjCBool = false
-        let startDirectory = FileManager.default.fileExists(
+        let preferredDirectoryIsAvailable = FileManager.default.fileExists(
             atPath: preferred.path,
             isDirectory: &isDirectory
         ) && isDirectory.boolValue
-            ? preferred
-            : home.folderURL
+        let plan = ProjectTerminalStartPlan(
+            terminal: terminal,
+            project: home,
+            preferredDirectoryIsAvailable: preferredDirectoryIsAvailable
+        )
 
         if let initialCommand {
-            session.startShell(initialDirectory: startDirectory, running: initialCommand)
+            session.startShell(initialDirectory: plan.directory, running: initialCommand)
             if session.isRunning {
                 self.initialCommand = nil
             }
         } else {
-            session.startShell(initialDirectory: startDirectory)
+            session.startShell(initialDirectory: plan.directory)
         }
     }
 

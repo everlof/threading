@@ -193,6 +193,13 @@ PTY begins when the terminal is first shown, is retained by
 After a normal exit the row remains dormant and **Start Again** creates a fresh shell in its
 last recorded directory. The record survives relaunch; process state and scrollback do not.
 
+`ProjectTerminalStartPlan` shares that directory choice with the Linux host as a Foundation-only
+value carrying the terminal and owning-project identities. The host probes the recorded directory
+and supplies its availability; an unavailable directory falls back to the owning project's URL.
+The plan performs no I/O or persistence and chooses no shell arguments. macOS retains Recovery
+Mode, its profile and initial-command paths; Linux retains explicit activation and daemon
+admission. A directory in another checkout never changes terminal ownership.
+
 `TerminalSession` therefore carries a `TerminalInstanceIdentity`, not a conveniently converted
 `SessionID`. Agent PTYs, a conversation's drawer shell, standalone project terminals and
 fixture/ephemeral terminals are separate enum cases. History filenames derive from that typed
