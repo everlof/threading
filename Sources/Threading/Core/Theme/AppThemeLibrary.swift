@@ -247,7 +247,45 @@ enum AppThemeLibrary {
                 variants[kind] = materialised
             }
 
+            if !materialised.sprites.isEmpty {
+                var sprites = materialised.sprites
+                for index in sprites.indices {
+                    guard let data = ExtensionAppearanceRegistry.shared.sidebarAssetData(
+                        named: sprites[index].asset, forThemeID: source.id
+                    ), let stored = ThemeAssetStore.storeSprite(
+                        imageData: data, for: copy.id, name: sprites[index].name, variant: kind
+                    ) else {
+                        throw AppThemeEditingError.invalid(
+                            "The contributed theme’s sprite “\(sprites[index].name)” could not be copied."
+                        )
+                    }
+                    sprites[index].asset = stored
+                }
+                materialised = materialised.replacingCharacter(
+                    sprites: sprites,
+                    moments: materialised.moments,
+                    words: materialised.words
+                )
+                variants[kind] = materialised
+            }
+
             guard var sidebar = materialised.sidebar else { continue }
+
+            if var mascot = sidebar.mascot {
+                for (mood, pose) in mascot.poses {
+                    guard let data = ExtensionAppearanceRegistry.shared.sidebarAssetData(
+                        named: pose.asset, forThemeID: source.id
+                    ), let stored = ThemeAssetStore.storeMascotPose(
+                        imageData: data, for: copy.id, mood: mood, variant: kind
+                    ) else {
+                        throw AppThemeEditingError.invalid(
+                            "The contributed theme’s mascot could not be copied."
+                        )
+                    }
+                    mascot.poses[mood]?.asset = stored
+                }
+                sidebar.mascot = mascot
+            }
 
             if let layer = sidebar.background?.image {
                 guard let data = ExtensionAppearanceRegistry.shared.sidebarAssetData(

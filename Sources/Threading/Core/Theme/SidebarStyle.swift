@@ -38,19 +38,27 @@ public struct SidebarStyle: Codable, Equatable {
     /// field without feature code knowing which visual language it belongs to.
     public var navigatorWell: NavigatorWell?
 
+    /// A character standing at the column's foot, beneath the list, whose pose follows what the
+    /// app is doing. Absent means no one is there.
+    public var mascot: ThemeMascot?
+
     public init(
         background: Background? = nil,
         brand: Brand? = nil,
-        navigatorWell: NavigatorWell? = nil
+        navigatorWell: NavigatorWell? = nil,
+        mascot: ThemeMascot? = nil
     ) {
         self.background = background
         self.brand = brand
         self.navigatorWell = navigatorWell
+        self.mascot = mascot
     }
 
     /// Nothing stated at all — indistinguishable from a document without the block, and what
     /// an update that removes both halves normalises to.
-    public var isEmpty: Bool { background == nil && brand == nil && navigatorWell == nil }
+    public var isEmpty: Bool {
+        background == nil && brand == nil && navigatorWell == nil && mascot == nil
+    }
 
     // MARK: - Navigator Work Area
 
@@ -94,21 +102,27 @@ public struct SidebarStyle: Codable, Equatable {
         /// How the theme's logo image answers the pointer, a launch and working agents, and
         /// what it gives off while it does. Absent means the logo holds still.
         public var motion: LogoMotion?
+        /// The theme's logo image also stands in for the Threading mark on the Dock tile,
+        /// drawn on the theme's own plate — the opt-in a contributed theme's icon mark already
+        /// had. Needs an image logo.
+        public var dockIcon: Bool
 
         public init(
             logo: Logo = .mark,
             title: Title? = nil,
             band: Band? = nil,
-            motion: LogoMotion? = nil
+            motion: LogoMotion? = nil,
+            dockIcon: Bool = false
         ) {
             self.logo = logo
             self.title = title
             self.band = band
             self.motion = motion
+            self.dockIcon = dockIcon
         }
 
         public var isEmpty: Bool {
-            logo == .mark && title == nil && band == nil && motion == nil
+            logo == .mark && title == nil && band == nil && motion == nil && !dockIcon
         }
 
         public enum Logo: Equatable {
@@ -269,7 +283,7 @@ public struct SidebarStyle: Codable, Equatable {
 
 extension SidebarStyle.Brand: Codable {
     private enum CodingKeys: String, CodingKey {
-        case logo, title, band, motion
+        case logo, title, band, motion, dockIcon
     }
 
     public init(from decoder: Decoder) throws {
@@ -278,6 +292,7 @@ extension SidebarStyle.Brand: Codable {
         title = try container.decodeIfPresent(Title.self, forKey: .title)
         band = try container.decodeIfPresent(Band.self, forKey: .band)
         motion = try container.decodeIfPresent(LogoMotion.self, forKey: .motion)
+        dockIcon = try container.decodeIfPresent(Bool.self, forKey: .dockIcon) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -286,6 +301,7 @@ extension SidebarStyle.Brand: Codable {
         try container.encodeIfPresent(title, forKey: .title)
         try container.encodeIfPresent(band, forKey: .band)
         try container.encodeIfPresent(motion, forKey: .motion)
+        if dockIcon { try container.encode(dockIcon, forKey: .dockIcon) }
     }
 }
 

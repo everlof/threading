@@ -188,6 +188,7 @@ final class ThemeLogoView: NSView, ThemedComponent, ThemeParticleHolding {
                 emitter,
                 particles: particles.spec,
                 colors: particles.colors,
+                sprites: particles.sprites,
                 placement: .point(origin),
                 region: bounds,
                 scale: scale,

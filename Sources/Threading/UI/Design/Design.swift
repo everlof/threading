@@ -2130,6 +2130,28 @@ public enum Design {
         /// puff rather than a stream.
         public static var logoBurstWindow: TimeInterval { reducesMotion ? 0 : 0.12 }
 
+        /// One play of a mascot's looping motion (`ThemeMascot.Motion`), and the period it loops
+        /// at for a pose. Zero under Reduce Motion: the mascot holds its pose still.
+        public static func mascotMotion(_ motion: ThemeMascot.Motion) -> TimeInterval {
+            reducesMotion ? 0 : motion.duration
+        }
+
+        public static func mascotLoop(_ pose: ThemeMascot.Pose) -> TimeInterval {
+            reducesMotion ? 0 : pose.resolvedEvery
+        }
+
+        /// How long one pose dissolves into the next. Kept under Reduce Motion — a cross-fade is
+        /// not movement — but shortened, the way a selection fade is.
+        public static var mascotPoseChange: TimeInterval { reducesMotion ? 0.12 : 0.3 }
+
+        /// A theme moment's shower, as its document states it, held to the model's bounds.
+        /// Zero under Reduce Motion, which the presenter reads as "do not play".
+        public static func themeMoment(_ authored: Double) -> TimeInterval {
+            guard !reducesMotion else { return 0 }
+            let range = ThemeMomentLimits.durationRange
+            return min(max(authored, range.lowerBound), range.upperBound)
+        }
+
         /// A theme's arrival, as its document states it (`ThemeTransition.duration`), held to
         /// the model's bounds. Zero under Reduce Motion, which the presenter reads as "apply at
         /// once" rather than as a very fast transition.
@@ -2585,11 +2607,75 @@ public enum SurfacePattern: Equatable {
 /// Both children are frozen `CGColor`/`contents` territory and are restated on every `apply`,
 /// which the theme sweep runs; the layer never trusts a previous theme's answer. Gravity does
 /// the fitting, so a resized pane never re-decodes the picture.
+/// A fitted or filled theme picture placed where its `ThemeImageAlignment` says, inside a host
+/// layer that clips it. `contentsGravity` can only centre an aspect fill, which is why a picture
+/// meant to stand on a column's foot needs a frame of its own: the host lays this layer out on
+/// every resize (`place(in:)`), and the picture keeps its proportions at any size.
+public final class ThemeAlignedPictureLayer: CALayer {
+    private var mode: ThemeBackdrop.ImageLayer.Mode = .fill
+    private var alignment: ThemeImageAlignment = .center
+    private var pictureSize: CGSize = .zero
+
+    override init() {
+        super.init()
+        contentsGravity = .resize
+    }
+
+    override init(layer: Any) {
+        super.init(layer: layer)
+        if let other = layer as? ThemeAlignedPictureLayer {
+            mode = other.mode
+            alignment = other.alignment
+            pictureSize = other.pictureSize
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    /// States the picture, or empties the layer for nil or a tile (which its host draws as a
+    /// pattern).
+    func show(_ image: NSImage?, mode: ThemeBackdrop.ImageLayer.Mode, alignment: ThemeImageAlignment) {
+        guard let image, mode != .tile else {
+            contents = nil
+            pictureSize = .zero
+            isHidden = true
+            return
+        }
+        var rect = CGRect(origin: .zero, size: image.size)
+        let cgImage = image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+        contents = cgImage
+        pictureSize = cgImage.map { CGSize(width: $0.width, height: $0.height) } ?? image.size
+        self.mode = mode
+        self.alignment = alignment
+        isHidden = false
+    }
+
+    /// Puts the picture where its alignment says within `bounds` — the host's own.
+    func place(in bounds: CGRect) {
+        guard !isHidden,
+              let target = alignment.frame(
+                  for: pictureSize,
+                  in: bounds,
+                  mode: mode,
+                  flipped: superlayer?.contentsAreFlipped() ?? false
+              ) else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        frame = target
+        CATransaction.commit()
+    }
+}
+
 public final class ThemeBackdropDressingLayer: CALayer {
     static let layerName = "threading.backdropDressing"
 
     private let gradient = CAGradientLayer()
     private let picture = CALayer()
+    /// A fill or fit picture, placed by its alignment inside `picture`, which clips it. A tile
+    /// stays `picture`'s own pattern.
+    private let alignedPicture = ThemeAlignedPictureLayer()
     private var motionView: ThemeBackdropMotionView?
     /// The theme's ambient particles over the wash and picture — `ThemeBackdrop.particles`.
     private let particleField = ThemeParticleFieldLayer()
@@ -2599,6 +2685,7 @@ public final class ThemeBackdropDressingLayer: CALayer {
         masksToBounds = true
         gradient.type = .axial
         picture.masksToBounds = true
+        picture.addSublayer(alignedPicture)
         addSublayer(gradient)
         addSublayer(picture)
         addSublayer(particleField)
@@ -2616,6 +2703,7 @@ public final class ThemeBackdropDressingLayer: CALayer {
         super.layoutSublayers()
         gradient.frame = bounds
         picture.frame = bounds
+        alignedPicture.place(in: picture.bounds)
         particleField.frame = bounds
     }
 
@@ -2659,24 +2747,21 @@ public final class ThemeBackdropDressingLayer: CALayer {
         if let stated = resolved.image {
             picture.isHidden = false
             picture.opacity = Float(stated.opacity)
+            picture.contents = nil
+            alignedPicture.contentsScale = contentsScale
             switch stated.mode {
             case .tile:
-                picture.contents = nil
+                alignedPicture.show(nil, mode: .tile, alignment: stated.alignment)
                 picture.backgroundColor = NSColor(patternImage: stated.image).cgColor
             case .fill, .fit:
                 picture.backgroundColor = nil
-                var rect = CGRect(origin: .zero, size: stated.image.size)
-                picture.contents = stated.image.cgImage(
-                    forProposedRect: &rect,
-                    context: nil,
-                    hints: nil
-                )
-                picture.contentsGravity = stated.mode == .fill ? .resizeAspectFill : .resizeAspect
+                alignedPicture.show(stated.image, mode: stated.mode, alignment: stated.alignment)
             }
         } else {
             picture.isHidden = true
             picture.contents = nil
             picture.backgroundColor = nil
+            alignedPicture.show(nil, mode: .tile, alignment: .center)
         }
         setNeedsLayout()
     }

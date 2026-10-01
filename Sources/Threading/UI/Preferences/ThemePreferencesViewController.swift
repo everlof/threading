@@ -248,6 +248,22 @@ final class ThemePreferencesViewController: NSViewController {
         AppSettings.shared.playsThemeMotion = themeMotionToggle.state == .on
     }
 
+    /// A theme's own sounds for its moments, on or off — read at the moment one would play,
+    /// so nothing has to be told.
+    private lazy var themeSoundsToggle: ThemedToggle = {
+        let toggle = SettingsUI.toggle(
+            isOn: AppSettings.shared.playsThemeSounds,
+            target: self,
+            action: #selector(themeSoundsChanged)
+        )
+        toggle.setAccessibilityIdentifier("settings.themes.theme-sounds")
+        return toggle
+    }()
+
+    @objc private func themeSoundsChanged() {
+        AppSettings.shared.playsThemeSounds = themeSoundsToggle.state == .on
+    }
+
     /// The app's own theme — the window, sidebar, panels and text — chosen for the whole app.
     ///
     /// App-wide rather than per-session, unlike the terminal palette below it: there is one
@@ -306,6 +322,12 @@ final class ThemePreferencesViewController: NSViewController {
                     + "when you switch to it. Off keeps a theme's look but holds it still; "
                     + "Reduce Motion always turns them off.",
                 control: themeMotionToggle
+            ),
+            SettingsUI.row(
+                title: "Theme sounds",
+                subtitle: "Short sounds a theme plays when a turn finishes or a chat needs you, "
+                    + "only while Threading is in front.",
+                control: themeSoundsToggle
             )
         ])
         reloadAppThemeControls()

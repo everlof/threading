@@ -30,6 +30,8 @@ enum AppThemePreviewService {
         static let rowHeight: CGFloat = 26
         static let terminalHeight: CGFloat = 112
         static let scale: CGFloat = 1.5
+        /// The mascot's moods drawn small along the pane, above the terminal sample.
+        static let moodFigureHeight: CGFloat = 48
     }
 
     // MARK: - Public Methods
@@ -190,6 +192,7 @@ enum AppThemePreviewService {
             context.scaleBy(x: Layout.scale, y: Layout.scale)
 
             stampLogoPlume(in: host, context: context, appearance: appearance)
+            stampMascotPlumes(in: host, context: context)
             drawTerminal(theme: theme, kind: kind, in: context)
             result = context.makeImage()
         }
@@ -249,7 +252,68 @@ enum AppThemePreviewService {
             rows.leadingAnchor.constraint(equalTo: column.leadingAnchor),
             rows.trailingAnchor.constraint(equalTo: column.trailingAnchor)
         ])
+
+        // The mascot at the column's foot, in its idle pose — the real sidebar's strip.
+        if let mascot = SidebarAppearance.mascot(for: NSAppearance.currentDrawing()) {
+            let figure = mascotFigure(mascot, mood: .idle)
+            column.addSubview(figure)
+            let inset = Design.Spacing.medium
+            var constraints = [
+                figure.bottomAnchor.constraint(equalTo: column.bottomAnchor, constant: -Design.Spacing.small)
+            ]
+            switch mascot.spec.placement {
+            case .leading:
+                constraints.append(figure.leadingAnchor.constraint(equalTo: column.leadingAnchor, constant: inset))
+            case .center:
+                constraints.append(figure.centerXAnchor.constraint(equalTo: column.centerXAnchor))
+            case .trailing:
+                constraints.append(figure.trailingAnchor.constraint(equalTo: column.trailingAnchor, constant: -inset))
+            }
+            NSLayoutConstraint.activate(constraints)
+        }
         return column
+    }
+
+    /// A mascot standing in its box at its stated size, showing `mood`.
+    private static func mascotFigure(
+        _ mascot: SidebarAppearance.Mascot,
+        mood: ThemeMascotMood,
+        height: CGFloat? = nil
+    ) -> ThemeMascotView {
+        let figure = ThemeMascotView()
+        let tall = height ?? CGFloat(mascot.spec.size)
+        NSLayoutConstraint.activate([
+            figure.heightAnchor.constraint(equalToConstant: tall),
+            figure.widthAnchor.constraint(equalToConstant: (tall * mascot.aspectRatio).rounded())
+        ])
+        figure.configure(mascot, mood: mood, fallbackMood: .idle)
+        return figure
+    }
+
+    /// Every mood the mascot draws a pose of its own for, side by side with the mood's name —
+    /// how an author checks the cast without waiting for an agent to finish a turn.
+    private static func mascotMoods() -> NSView? {
+        guard let mascot = SidebarAppearance.mascot(for: NSAppearance.currentDrawing()) else {
+            return nil
+        }
+        let cells: [NSView] = ThemeMascotMood.allCases.compactMap { mood in
+            guard mascot.poses[mood] != nil else { return nil }
+            let figure = mascotFigure(mascot, mood: mood, height: Layout.moodFigureHeight)
+            let name = NSTextField(labelWithString: mood.rawValue)
+            name.applyFont(.caption)
+            name.textColor = Design.Text.secondary
+            let cell = NSStackView(views: [figure, name])
+            cell.orientation = .vertical
+            cell.alignment = .centerX
+            cell.spacing = Design.Spacing.tight
+            return cell
+        }
+        guard !cells.isEmpty else { return nil }
+        let strip = NSStackView(views: cells)
+        strip.orientation = .horizontal
+        strip.alignment = .bottom
+        strip.spacing = Design.Spacing.large
+        return strip
     }
 
     /// Invented rows — a project and its chats, one of them selected — so the sample carries
@@ -340,7 +404,7 @@ enum AppThemePreviewService {
         cardStack.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(cardStack)
 
-        let column = NSStackView(views: [caption, card])
+        let column = NSStackView(views: [caption, card] + [mascotMoods()].compactMap { $0 })
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = Design.Spacing.medium
@@ -379,10 +443,32 @@ enum AppThemePreviewService {
         ThemeParticleStill.plume(
             particles: particles.spec,
             colors: particles.colors,
+            sprites: particles.sprites,
             origin: origin,
             in: context,
             up: 1
         )
+    }
+
+    /// Where each mascot's pose stream would be a moment after it began.
+    private static func stampMascotPlumes(in host: NSView, context: CGContext) {
+        for figure in descendants(of: host, as: ThemeMascotView.self) where !figure.isHidden {
+            guard let pose = figure.pose, let particles = pose.particles else { continue }
+            let frame = figure.convert(figure.bounds, to: host)
+            let unit = pose.spec.resolvedOrigin
+            let origin = CGPoint(
+                x: frame.minX + frame.width * CGFloat(unit.x),
+                y: frame.maxY - frame.height * CGFloat(unit.y)
+            )
+            ThemeParticleStill.plume(
+                particles: particles.spec,
+                colors: particles.colors,
+                sprites: particles.sprites,
+                origin: origin,
+                in: context,
+                up: 1
+            )
+        }
     }
 
     /// The paired terminal palette as a few lines of a session, drawn along the pane's foot.
@@ -440,6 +526,12 @@ enum AppThemePreviewService {
         AppThemeRefresh.repaint(view)
         for subview in view.subviews {
             repaintTree(subview)
+        }
+    }
+
+    private static func descendants<T: NSView>(of view: NSView, as type: T.Type) -> [T] {
+        view.subviews.flatMap { subview -> [T] in
+            ((subview as? T).map { [$0] } ?? []) + descendants(of: subview, as: type)
         }
     }
 

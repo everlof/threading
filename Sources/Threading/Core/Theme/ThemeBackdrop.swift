@@ -82,7 +82,7 @@ public struct ThemeBackdrop: Equatable {
 
     // MARK: - Image
 
-    public struct ImageLayer: Codable, Equatable {
+    public struct ImageLayer: Equatable {
         /// Resolved through `ThemeAssetStore` for custom themes and the extension registry for
         /// contributed ones. See `ThemeAssetSlot` for the names custom themes use.
         public var asset: String
@@ -90,11 +90,22 @@ public struct ThemeBackdrop: Equatable {
         /// 0...1 over whatever is beneath. Full strength suits a drawn pattern; a photograph
         /// under text usually wants far less, and the tool description says so.
         public var opacity: Double
+        /// Which edge or corner a `fill` keeps and a `fit` sits against. Centre is what every
+        /// picture did before this existed; `bottom` is how an illustration stands on the
+        /// column's foot however tall the window is. A tile always starts at the top-leading
+        /// corner.
+        public var alignment: ThemeImageAlignment
 
-        public init(asset: String, mode: Mode = .fill, opacity: Double = 1) {
+        public init(
+            asset: String,
+            mode: Mode = .fill,
+            opacity: Double = 1,
+            alignment: ThemeImageAlignment = .center
+        ) {
             self.asset = asset
             self.mode = mode
             self.opacity = opacity
+            self.alignment = alignment
         }
 
         public enum Mode: String, Codable, CaseIterable {
@@ -127,6 +138,31 @@ extension ThemeBackdrop: Codable {
         try container.encodeIfPresent(gradient, forKey: .gradient)
         try container.encodeIfPresent(image, forKey: .image)
         try container.encodeIfPresent(particles, forKey: .particles)
+    }
+}
+
+extension ThemeBackdrop.ImageLayer: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case asset, mode, opacity, alignment
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        asset = try container.decode(String.self, forKey: .asset)
+        mode = try container.decode(Mode.self, forKey: .mode)
+        opacity = try container.decode(Double.self, forKey: .opacity)
+        alignment = try container.decodeIfPresent(ThemeImageAlignment.self, forKey: .alignment)
+            ?? .center
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(asset, forKey: .asset)
+        try container.encode(mode, forKey: .mode)
+        try container.encode(opacity, forKey: .opacity)
+        // Centre is the historical meaning of an absent key, so a document that never chose
+        // one round-trips byte-identical.
+        if alignment != .center { try container.encode(alignment, forKey: .alignment) }
     }
 }
 
@@ -174,6 +210,69 @@ extension ThemeBackdrop.Gradient.Stop: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(color.hexString, forKey: .color)
         try container.encode(position, forKey: .position)
+    }
+}
+
+// MARK: - Image Alignment
+
+/// Where a picture sits in the region it is drawn into: the edge or corner a `fill` keeps when it
+/// crops, and the one a `fit` stands against when it letterboxes. Leading and trailing follow
+/// the reading direction the way every other edge in the app does.
+public enum ThemeImageAlignment: String, Codable, CaseIterable {
+    case center
+    case top
+    case bottom
+    case leading
+    case trailing
+    case topLeading = "top_leading"
+    case topTrailing = "top_trailing"
+    case bottomLeading = "bottom_leading"
+    case bottomTrailing = "bottom_trailing"
+
+    /// The unit position of the picture's slack: 0 puts the picture against the leading (or
+    /// top) edge, 1 against the trailing (or bottom), 0.5 centres it. Top-down, so the caller
+    /// flips it for a layer whose y axis points up.
+    public var unitPosition: (x: CGFloat, y: CGFloat) {
+        switch self {
+        case .center: return (0.5, 0.5)
+        case .top: return (0.5, 0)
+        case .bottom: return (0.5, 1)
+        case .leading: return (0, 0.5)
+        case .trailing: return (1, 0.5)
+        case .topLeading: return (0, 0)
+        case .topTrailing: return (1, 0)
+        case .bottomLeading: return (0, 1)
+        case .bottomTrailing: return (1, 1)
+        }
+    }
+
+    /// The frame a picture of `imageSize` takes in `bounds` for `mode` — larger than the bounds
+    /// for a `fill`, which its host clips — or nil for a tile, which is drawn as a pattern.
+    /// `flipped` is true when `bounds` has its origin at the top (an AppKit flipped view or a
+    /// layer beneath one); unit positions are top-down.
+    public func frame(
+        for imageSize: CGSize,
+        in bounds: CGRect,
+        mode: ThemeBackdrop.ImageLayer.Mode,
+        flipped: Bool,
+        layoutDirection: NSUserInterfaceLayoutDirection = .leftToRight
+    ) -> CGRect? {
+        guard mode != .tile,
+              imageSize.width > 0, imageSize.height > 0,
+              bounds.width > 0, bounds.height > 0 else { return nil }
+        let widthRatio = bounds.width / imageSize.width
+        let heightRatio = bounds.height / imageSize.height
+        let scale = mode == .fill ? max(widthRatio, heightRatio) : min(widthRatio, heightRatio)
+        let size = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        var unit = unitPosition
+        if layoutDirection == .rightToLeft { unit.x = 1 - unit.x }
+        if !flipped { unit.y = 1 - unit.y }
+        return CGRect(
+            x: bounds.minX + (bounds.width - size.width) * unit.x,
+            y: bounds.minY + (bounds.height - size.height) * unit.y,
+            width: size.width,
+            height: size.height
+        )
     }
 }
 

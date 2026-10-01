@@ -463,42 +463,76 @@ enum ExtensionBundleInspector {
         declaredAt declarationPath: String,
         root: URL
     ) throws -> [String: Data] {
-        var slots: [String: ThemeAssetSlot] = [:]
+        /// The byte ceiling a picture is read under and the pixel size it is stored at.
+        struct Budget {
+            var bytes: Int
+            var pixels: Int
+
+            init(_ slot: ThemeAssetSlot) {
+                bytes = slot.maximumImageBytes
+                pixels = ThemeAssetDefaults.storedPixelSize(for: slot)
+            }
+
+            init(bytes: Int, pixels: Int) {
+                self.bytes = bytes
+                self.pixels = pixels
+            }
+        }
+        var budgets: [String: Budget] = [:]
+        // A name shared between regions keeps the largest pixel and byte budget it is asked
+        // for, so the one file serves every region that names it.
+        func want(_ name: String, _ budget: Budget) {
+            let current = budgets[name]
+            budgets[name] = Budget(
+                bytes: max(current?.bytes ?? 0, budget.bytes),
+                pixels: max(current?.pixels ?? 0, budget.pixels)
+            )
+        }
         for variant in theme.variants.values {
-            // A name shared between slots keeps the largest pixel and byte budget it is asked
-            // for, so the one file serves every region that names it.
             if let name = variant.material.backdrop?.image?.asset {
-                slots[name] = .backdrop
+                want(name, Budget(.backdrop))
             }
-            if let name = variant.sidebar?.background?.image?.asset, slots[name] == nil {
-                slots[name] = .background
+            if let name = variant.sidebar?.background?.image?.asset {
+                want(name, Budget(.background))
             }
-            if case .asset(let name) = variant.sidebar?.brand.map(\.logo), slots[name] == nil {
-                slots[name] = .logo
+            if case .asset(let name) = variant.sidebar?.brand.map(\.logo) {
+                want(name, Budget(.logo))
+            }
+            for sprite in variant.sprites {
+                want(sprite.asset, Budget(
+                    bytes: ThemeSpriteLimits.maximumImageBytes,
+                    pixels: ThemeSpriteLimits.storedPixelSize
+                ))
+            }
+            for pose in variant.sidebar?.mascot?.poses.values.map({ $0 }) ?? [] {
+                want(pose.asset, Budget(
+                    bytes: ThemeMascotLimits.maximumImageBytes,
+                    pixels: ThemeMascotLimits.storedPixelSize
+                ))
             }
         }
 
         var assets: [String: Data] = [:]
-        for (name, slot) in slots {
+        for (name, budget) in budgets {
             let url = try resolveResource(
                 name,
                 root: root,
-                maximumBytes: slot.maximumImageBytes,
+                maximumBytes: budget.bytes,
                 failure: { ExtensionBundleError.themeResourceInvalid(path: name, message: $0) }
             )
             let data = try boundedData(
                 at: url,
-                maximumBytes: slot.maximumImageBytes,
+                maximumBytes: budget.bytes,
                 failure: { ExtensionBundleError.themeResourceInvalid(path: name, message: $0) }
             )
             guard let normalized = ProjectIconStore.normalizedPNGData(
                       from: data,
-                      maxPixelSize: ThemeAssetDefaults.storedPixelSize(for: slot)
+                      maxPixelSize: budget.pixels
                   ) else {
                 throw ExtensionBundleError.themeResourceInvalid(
                     path: name,
-                    message: "referenced by \(declarationPath)'s sidebar or backdrop block "
-                        + "but not a readable image"
+                    message: "referenced by \(declarationPath)'s sidebar, backdrop, sprite or "
+                        + "mascot block but not a readable image"
                 )
             }
             assets[name] = normalized

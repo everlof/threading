@@ -71,7 +71,19 @@ enum GeneratedAppIcon {
             for: theme,
             appearance: appearance,
             mark: ExtensionAppearanceRegistry.shared.iconMark(forThemeID: theme.id)
+                ?? logoMark(for: theme, appearance: appearance)
         )
+    }
+
+    /// A custom theme's own logo, when its brand asks for it on the Dock tile
+    /// (`SidebarStyle.Brand.dockIcon`) — the same opt-in a contributed theme's icon mark is,
+    /// drawn the same way on the theme's own plate.
+    @MainActor
+    static func logoMark(for theme: AppTheme, appearance: NSAppearance) -> NSImage? {
+        guard let brand = theme.variant(for: appearance)?.sidebar?.brand,
+              brand.dockIcon,
+              case .asset(let name) = brand.logo else { return nil }
+        return ThemeBackdropAppearance.image(named: name, themeID: theme.id)
     }
 
     /// The stated-mark form, for tests and previews that must not depend on what is installed.

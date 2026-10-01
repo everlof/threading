@@ -199,26 +199,51 @@ extension AgentToolCoordinator {
         // new image under the old everything-else.
         var replacedAssets: [(name: String, data: Data)] = []
         var introducedAssets: [String] = []
-        var slotsToSnapshot: [(ThemeAssetSlot, AppTheme.VariantKind)] = []
+        var filesToSnapshot: [String] = []
         for (rawKind, patch) in arguments.variants ?? [:] {
             guard let kind = AppTheme.VariantKind(rawValue: rawKind.lowercased()) else { continue }
             if let sidebar = patch.sidebar {
-                if sidebar.image?.source != nil { slotsToSnapshot.append((.background, kind)) }
-                if case .image = sidebar.logo { slotsToSnapshot.append((.logo, kind)) }
+                if sidebar.image?.source != nil {
+                    filesToSnapshot.append(ThemeAssetSlot.background.fileName(for: kind))
+                }
+                if case .image = sidebar.logo {
+                    filesToSnapshot.append(ThemeAssetSlot.logo.fileName(for: kind))
+                }
+                for (rawMood, pose) in sidebar.mascot?.poses ?? [:] where pose.source != nil {
+                    guard let mood = ThemeMascotMood(rawValue: rawMood) else { continue }
+                    filesToSnapshot.append(ThemeMascotLimits.fileName(for: mood, variant: kind))
+                }
             }
             if patch.material?.backdrop?.image?.source != nil {
-                slotsToSnapshot.append((.backdrop, kind))
+                filesToSnapshot.append(ThemeAssetSlot.backdrop.fileName(for: kind))
+            }
+            for sprite in patch.sprites ?? [] where sprite.source != nil {
+                guard let name = sprite.name?.trimmingCharacters(in: .whitespaces),
+                      ThemeSprite.isValidName(name) else { continue }
+                filesToSnapshot.append(ThemeSprite.fileName(for: name, variant: kind))
+            }
+            let moments: [(ThemeMomentEvent, AppThemeMomentArguments?)] = [
+                (.turnFinished, patch.moments?.turnFinished),
+                (.needsAttention, patch.moments?.needsAttention)
+            ]
+            for case let (event, moment?) in moments {
+                guard let sound = moment.sound else { continue }
+                let format = (sound.format ?? sound.path.map { ($0 as NSString).pathExtension } ?? "")
+                    .lowercased()
+                guard ThemeMomentLimits.soundExtensions.contains(format) else { continue }
+                filesToSnapshot.append(
+                    ThemeMomentLimits.soundFileName(for: event, variant: kind, extension: format)
+                )
             }
         }
         // A legacy top-level material lands on whichever variant is current, decided further
         // down; snapshotting both is cheap and never wrong.
         if arguments.material?.backdrop?.image?.source != nil {
             for kind in AppTheme.VariantKind.allCases {
-                slotsToSnapshot.append((.backdrop, kind))
+                filesToSnapshot.append(ThemeAssetSlot.backdrop.fileName(for: kind))
             }
         }
-        for (slot, kind) in slotsToSnapshot {
-            let fileName = slot.fileName(for: kind)
+        for fileName in filesToSnapshot {
             if let existing = ThemeAssetStore.pngData(named: fileName, for: source.id) {
                 replacedAssets.append((fileName, existing))
             } else if ThemeAssetStore.assetExists(named: fileName, for: source.id) {
@@ -453,6 +478,25 @@ extension AgentToolCoordinator {
         } else {
             transition = .inherit
         }
+        let sprites = try AppThemeToolParsing.sprites(
+            patch?.sprites,
+            remove: patch?.removeSprites,
+            base: source?.sprites ?? [],
+            themeID: themeID,
+            kind: kind
+        )
+        let moments = try AppThemeToolParsing.moments(
+            patch?.moments,
+            remove: patch?.removeMoments,
+            base: source?.moments,
+            themeID: themeID,
+            kind: kind
+        )
+        let words = try AppThemeToolParsing.words(
+            patch?.words,
+            remove: patch?.removeWords,
+            base: source?.words
+        )
         return AppThemeEditing.makeVariant(
             named: name,
             from: base,
@@ -462,7 +506,10 @@ extension AgentToolCoordinator {
             terminalPalette: terminal,
             sidebar: sidebar,
             chrome: chrome,
-            transition: transition
+            transition: transition,
+            sprites: sprites,
+            moments: moments,
+            words: words
         )
     }
 
@@ -1468,6 +1515,15 @@ extension AgentToolCoordinator {
         }
         if let transition = variant?.transition {
             document["transition"] = AppThemeToolParsing.document(transition)
+        }
+        if let sprites = variant?.sprites, !sprites.isEmpty {
+            document["sprites"] = AppThemeToolParsing.document(sprites)
+        }
+        if let moments = variant?.moments {
+            document["moments"] = AppThemeToolParsing.document(moments)
+        }
+        if let words = variant?.words {
+            document["words"] = AppThemeToolParsing.document(words)
         }
         return document
     }

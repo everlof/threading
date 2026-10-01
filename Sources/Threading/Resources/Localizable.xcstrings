@@ -4799,6 +4799,17 @@
         }
       }
     },
+    "A theme's mascot in its box. Each button shows that mood's pose: the picture changes under a short fade and the pose's motion loops from rest. Reduce Motion and the Theme animations setting keep the pose but hold it still." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ett temas maskot i sin ruta. Varje knapp visar det humörets pose: bilden byts med en kort övertoning och posens rörelse loopar från vila. Minska rörelse och inställningen Temaanimationer behåller posen men håller den stilla."
+          }
+        }
+      }
+    },
     "A theme-owned heading whose authored line break remains visible and meaningful." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8632,6 +8643,17 @@
         }
       }
     },
+    "Attention" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppmärksam"
+          }
+        }
+      }
+    },
     "Audit" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10948,6 +10970,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tar skärmavbild…"
+          }
+        }
+      }
+    },
+    "Celebrating" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Firar"
           }
         }
       }
@@ -28459,6 +28492,17 @@
         }
       }
     },
+    "Mascot pose changed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Maskotens pose ändrades."
+          }
+        }
+      }
+    },
     "Match conditions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40194,6 +40238,17 @@
         }
       }
     },
+    "Resting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vilar"
+          }
+        }
+      }
+    },
     "Restore" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44452,6 +44507,17 @@
         }
       }
     },
+    "Short sounds a theme plays when a turn finishes or a chat needs you, only while Threading is in front." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Korta ljud som ett tema spelar när en tur är klar eller en chatt behöver dig, bara när Threading är i förgrunden."
+          }
+        }
+      }
+    },
     "ShortcutRecorderView" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45579,6 +45645,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "SidebarEdgeRevealCoordinator"
+          }
+        }
+      }
+    },
+    "SidebarMascotView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SidebarMascotView"
           }
         }
       }
@@ -53064,6 +53141,17 @@
         }
       }
     },
+    "The strip at the sidebar's foot where the current theme's mascot stands, following what the app's agents are doing. Empty, and reserving no room, under a theme without a mascot — switch the theme above to compare." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remsan vid sidofältets fot där det aktuella temats maskot står och följer vad appens agenter gör. Tom, och utan reserverat utrymme, under ett tema utan maskot – byt tema ovan för att jämföra."
+          }
+        }
+      }
+    },
     "The strip those tabs live in: select, close, drag a chip along it, or reorder from its secondary-click menu." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -53477,6 +53565,17 @@
         }
       }
     },
+    "Theme sounds" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Temaljud"
+          }
+        }
+      }
+    },
     "Theme tools are disabled." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -53506,6 +53605,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ThemeLogoView"
+          }
+        }
+      }
+    },
+    "ThemeMascotView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemeMascotView"
           }
         }
       }

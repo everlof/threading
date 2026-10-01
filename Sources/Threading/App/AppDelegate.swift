@@ -683,6 +683,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             SessionCurfewCenter.shared.start()
             AttentionAlertCenter.shared.start()
             AgentWorkloadMonitor.shared.start()
+            // A theme's answer to turns coming back and sessions waiting; it starts the mood
+            // monitor only while the theme in force states moments.
+            ThemeMomentPresenter.shared.install()
 
             let runtime = environment.agentRuntime
             let settings = environment.settings

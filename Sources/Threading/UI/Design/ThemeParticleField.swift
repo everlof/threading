@@ -242,6 +242,7 @@ public final class ThemeParticleFieldLayer: CALayer, ThemeParticleHolding {
             emitter,
             particles: particles.spec,
             colors: particles.colors,
+            sprites: particles.sprites,
             placement: .ambient,
             region: bounds,
             scale: scale,
@@ -262,7 +263,7 @@ public final class ThemeParticleFieldLayer: CALayer, ThemeParticleHolding {
             region: bounds.size
         )
         let rate = ThemeParticleEmitter.ambientRate(for: particles.spec, region: bounds.size)
-        let perInk = Float(rate / Double(max(emitter.emitterCells?.count ?? 1, 1)))
+        let perCell = Float(rate / Double(max(emitter.emitterCells?.count ?? 1, 1)))
         withoutActions {
             ThemeParticleEmitter.place(
                 emitter,
@@ -272,7 +273,7 @@ public final class ThemeParticleFieldLayer: CALayer, ThemeParticleHolding {
             )
             for cell in emitter.emitterCells ?? [] {
                 guard let name = cell.name else { continue }
-                emitter.setValue(perInk, forKeyPath: "emitterCells.\(name).birthRate")
+                emitter.setValue(perCell, forKeyPath: "emitterCells.\(name).birthRate")
             }
         }
     }
@@ -310,6 +311,7 @@ public final class ThemeParticleFieldLayer: CALayer, ThemeParticleHolding {
         guard let tile = ThemeParticleStill.tile(
             particles: particles.spec,
             colors: particles.colors,
+            sprites: particles.sprites,
             side: Self.stillTileSide,
             scale: scale,
             opacity: min(particles.spec.opacity, opacityCeiling)

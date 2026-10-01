@@ -2865,7 +2865,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
         if invocation?.capability.presentation == .command {
             apply(timeline.appendNotice(sourceText, kind: .muted))
-            apply(.status(.working(word: workingWords.next())))
+            apply(.status(.working(word: workingWords.next(drawingFrom: ThemeWording.workingWords))))
         } else {
             recordSentTurn(localPrompt)
         }
@@ -2896,7 +2896,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // Drawn here, which is the moment the turn starts and the only place the status enters
         // `working` — so the word is fixed for the whole wait and a new one arrives with the
         // next turn.
-        apply(.status(.working(word: workingWords.next())))
+        apply(.status(.working(word: workingWords.next(drawingFrom: ThemeWording.workingWords))))
     }
 
     private var nativeStatusText: String {

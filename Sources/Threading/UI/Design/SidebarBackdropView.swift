@@ -34,6 +34,9 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
     private let decor = NSView()
     private let gradientLayer = CAGradientLayer()
     private let imageLayer = CALayer()
+    /// A fill or fit picture placed by its alignment inside `imageLayer`, which clips it — how
+    /// an illustration stands on the column's foot at any window height.
+    private let alignedImage = ThemeAlignedPictureLayer()
     private var motionView: ThemeBackdropMotionView?
     /// The theme's ambient particles over both — bubbles rising through the column.
     private let particleField = ThemeParticleFieldLayer()
@@ -57,6 +60,7 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
         gradientLayer.type = .axial
         decor.layer?.addSublayer(gradientLayer)
         imageLayer.masksToBounds = true
+        imageLayer.addSublayer(alignedImage)
         decor.layer?.addSublayer(imageLayer)
         decor.layer?.addSublayer(particleField)
         addSubview(decor)
@@ -87,6 +91,7 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
         super.layout()
         gradientLayer.frame = decor.bounds
         imageLayer.frame = decor.bounds
+        alignedImage.place(in: imageLayer.bounds)
         particleField.frame = decor.bounds
     }
 
@@ -165,26 +170,24 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
             imageLayer.isHidden = true
             imageLayer.contents = nil
             imageLayer.backgroundColor = nil
+            alignedImage.show(nil, mode: .tile, alignment: .center)
             return
         }
         imageLayer.isHidden = false
         imageLayer.opacity = Float(layer.opacity)
+        imageLayer.contents = nil
+        alignedImage.contentsScale = window?.backingScaleFactor ?? 2
 
         switch layer.mode {
         case .tile:
             // A pattern colour is how Core Animation tiles at the image's own size; restated
             // per apply like every other frozen colour.
-            imageLayer.contents = nil
+            alignedImage.show(nil, mode: .tile, alignment: layer.alignment)
             imageLayer.backgroundColor = NSColor(patternImage: layer.image).cgColor
         case .fill, .fit:
             imageLayer.backgroundColor = nil
-            var rect = CGRect(origin: .zero, size: layer.image.size)
-            imageLayer.contents = layer.image.cgImage(
-                forProposedRect: &rect,
-                context: nil,
-                hints: nil
-            )
-            imageLayer.contentsGravity = layer.mode == .fill ? .resizeAspectFill : .resizeAspect
+            alignedImage.show(layer.image, mode: layer.mode, alignment: layer.alignment)
+            needsLayout = true
         }
     }
 

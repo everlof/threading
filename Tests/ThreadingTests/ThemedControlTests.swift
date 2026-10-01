@@ -7998,6 +7998,8 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "TerminalStatusBanner",
                 "ThreadingMarkView",
                 "ThemeLogoView",
+                "ThemeMascotView",
+                "SidebarMascotView",
                 "ThemeSwatchImage",
                 "ThemeSwatchView",
                 "ThemeTransitionOverlayView",
@@ -8105,11 +8107,13 @@ final class ThemedControlTests: HostedStoreTestCase {
         // particle or drift moves (ThemeMotionTests), the presenter plays the transition overlay
         // — which has its own story — over the main window only, and the gradient animator and
         // its zero-size lifecycle observer drive the drift SidebarBackdropView's story shows
-        // under a drifting theme (ThemeGradientMotionTests).
+        // under a drifting theme (ThemeGradientMotionTests). The moment presenter plays that same
+        // overlay for an app event and owns only the cooldown (ThemeCharacterTests).
         let nonvisualModels: Set<String> = [
             "SimulatorTouchOverlayModel",
             "ThemeParticleHold",
             "ThemeTransitionPresenter",
+            "ThemeMomentPresenter",
             "ThemeGradientAnimator",
             "ThemeBackdropMotionView"
         ]

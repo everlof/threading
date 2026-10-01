@@ -298,6 +298,8 @@ final class ProjectSidebarViewController: NSViewController {
     private(set) var extensionBackdrop: SidebarExtensionBackdropView?
     /// The theme's band behind the header, when it states one.
     private(set) var brandBand: SidebarBrandBandView?
+    /// The theme's mascot at the column's foot, beneath the list (`ThemeMascot`).
+    private(set) var mascotStrip: SidebarMascotView?
 
     /// Where the backdrop plane asks what has been published for it, and how it resolves a
     /// picture. Injected only by tests; the app reads the shared provider slot and the
@@ -899,6 +901,21 @@ private extension ProjectSidebarViewController {
         view.addSubview(band, positioned: .above, relativeTo: extensionPlane)
         band.onApply = { [weak self] shows in self?.applyHeaderGround(onBand: shows) }
 
+        // The theme's mascot stands on the footer, over both grounds and beneath the list, so
+        // rows scroll over it; the list keeps its foot clear by as much as the mascot needs.
+        let mascot = SidebarMascotView()
+        view.addSubview(mascot, positioned: .above, relativeTo: extensionPlane)
+        mascot.onReservedHeightChange = { [weak self] height in
+            self?.reserveListFoot(height)
+        }
+        NSLayoutConstraint.activate([
+            mascot.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            mascot.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            mascot.bottomAnchor.constraint(equalTo: footer.topAnchor),
+            mascot.topAnchor.constraint(equalTo: header.bottomAnchor)
+        ])
+        mascotStrip = mascot
+
         NSLayoutConstraint.activate([
             band.topAnchor.constraint(equalTo: view.topAnchor),
             band.bottomAnchor.constraint(equalTo: header.bottomAnchor),
@@ -917,6 +934,16 @@ private extension ProjectSidebarViewController {
         themeBackdrop = backdrop
         extensionBackdrop = extensionPlane
         brandBand = band
+    }
+
+    /// Room at the list's foot for the theme's mascot, inside the scroll view so the last row
+    /// can be scrolled clear of it while rows above still pass over it.
+    private func reserveListFoot(_ height: CGFloat) {
+        guard let scroll = scrollView as? ThemedScrollView else { return }
+        var breathing = scroll.contentBreathing
+        guard breathing.bottom != height else { return }
+        breathing.bottom = height
+        scroll.contentBreathing = breathing
     }
 
     /// The header's controls read their ink from the band while the theme states one: the

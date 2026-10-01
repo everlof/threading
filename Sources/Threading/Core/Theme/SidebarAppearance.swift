@@ -58,6 +58,28 @@ public enum SidebarAppearance {
         public struct Particles: Equatable {
             public let spec: ThemeParticles
             public let colors: [NSColor]
+            /// The block's sprites, decoded from the variant's library. Empty draws the style's
+            /// host shape — a block naming none, or naming only sprites whose pictures are gone.
+            public var sprites: [Sprite] = []
+
+            /// One decoded sprite. Equal when it is the same stored picture drawn the same way:
+            /// a replaced file decodes to a new image, so a field restarts with the new art.
+            public struct Sprite: Equatable {
+                /// Stable for one stored file — the theme and the asset name.
+                public let key: String
+                public let image: CGImage
+                public let tinted: Bool
+
+                public init(key: String, image: CGImage, tinted: Bool) {
+                    self.key = key
+                    self.image = image
+                    self.tinted = tinted
+                }
+
+                public static func == (lhs: Sprite, rhs: Sprite) -> Bool {
+                    lhs.key == rhs.key && lhs.tinted == rhs.tinted && lhs.image === rhs.image
+                }
+            }
         }
 
         public struct Gradient: Equatable {
@@ -72,6 +94,7 @@ public enum SidebarAppearance {
             public let image: NSImage
             public let mode: SidebarStyle.ImageLayer.Mode
             public let opacity: CGFloat
+            public var alignment: ThemeImageAlignment = .center
         }
     }
 
@@ -185,6 +208,61 @@ public enum SidebarAppearance {
         )
     }
 
+    // MARK: - Mascot
+
+    /// The mascot with its pictures decoded and its particle inks resolved for one appearance.
+    public struct Mascot: Equatable {
+        public let spec: ThemeMascot
+        public let poses: [ThemeMascotMood: Pose]
+
+        public struct Pose: Equatable {
+            public let spec: ThemeMascot.Pose
+            public let image: NSImage
+            public let particles: Background.Particles?
+        }
+
+        /// The pose drawn for `mood`, following the model's borrowing rule over the poses whose
+        /// pictures resolved. Nil only for a celebration the theme does not draw.
+        public func pose(for mood: ThemeMascotMood) -> Pose? {
+            if let own = poses[mood] { return own }
+            switch mood {
+            case .celebrating: return nil
+            case .attention: return poses[.working] ?? poses[.idle]
+            case .resting, .working, .idle: return poses[.idle]
+            }
+        }
+
+        /// Width over height of the box the mascot stands in: the widest pose's proportions,
+        /// so changing pose never changes the box and the list's breathing room stays put.
+        public var aspectRatio: CGFloat {
+            let ratios = poses.values.compactMap { pose -> CGFloat? in
+                let size = pose.image.size
+                return size.height > 0 ? size.width / size.height : nil
+            }
+            return min(max(ratios.max() ?? 1, 0.25), 4)
+        }
+    }
+
+    /// The current theme's mascot for `appearance`, or nil when it states none or its idle
+    /// picture is gone — a mascot with no pose to fall back on is no mascot.
+    public static func mascot(for appearance: NSAppearance) -> Mascot? {
+        let theme = AppThemePalette.current
+        guard let stated = theme.variant(for: appearance)?.sidebar?.mascot else { return nil }
+        var poses: [ThemeMascotMood: Mascot.Pose] = [:]
+        for (mood, pose) in stated.poses {
+            guard let image = image(named: pose.asset, themeID: theme.id) else { continue }
+            poses[mood] = Mascot.Pose(
+                spec: pose,
+                image: image,
+                particles: pose.particles.map {
+                    ThemeBackdropAppearance.particles($0, theme: theme, appearance: appearance)
+                }
+            )
+        }
+        guard poses[.idle] != nil else { return nil }
+        return Mascot(spec: stated, poses: poses)
+    }
+
     // MARK: - The Band as a Ground
 
     /// The ink family for the header's controls while a band is stated — `InkSource.brandBand`'s
@@ -280,7 +358,8 @@ public enum ThemeBackdropAppearance {
             resolved.image = Resolved.ImageLayer(
                 image: image,
                 mode: layer.mode,
-                opacity: CGFloat(max(0, min(1, layer.opacity)))
+                opacity: CGFloat(max(0, min(1, layer.opacity))),
+                alignment: layer.alignment
             )
         }
 
@@ -307,7 +386,8 @@ public enum ThemeBackdropAppearance {
         )
     }
 
-    /// A particle block with its inks turned into colours for the variant in `appearance`.
+    /// A particle block with its inks turned into colours for the variant in `appearance`, and
+    /// its sprites decoded from that variant's library.
     public static func particles(
         _ stated: ThemeParticles,
         theme: AppTheme,
@@ -317,7 +397,34 @@ public enum ThemeBackdropAppearance {
         appearance.performAsCurrentDrawingAppearance {
             colors = stated.resolvedInks.map { $0.resolved(in: theme, appearance: appearance) }
         }
-        return Resolved.Particles(spec: stated, colors: colors)
+        return Resolved.Particles(
+            spec: stated,
+            colors: colors,
+            sprites: sprites(stated.sprites, theme: theme, appearance: appearance)
+        )
+    }
+
+    /// Names in, decoded pictures out, in the order stated. A name the library does not hold,
+    /// or whose file is gone, is dropped rather than drawn as a hole — and a block left with
+    /// none falls back to its style's shape.
+    public static func sprites(
+        _ names: [String],
+        theme: AppTheme,
+        appearance: NSAppearance
+    ) -> [Resolved.Particles.Sprite] {
+        guard !names.isEmpty, let library = theme.variant(for: appearance)?.sprites,
+              !library.isEmpty else { return [] }
+        return names.compactMap { name in
+            guard let sprite = library.first(where: { $0.name == name }),
+                  let image = image(named: sprite.asset, themeID: theme.id),
+                  let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            else { return nil }
+            return Resolved.Particles.Sprite(
+                key: "\(theme.id.rawValue)/\(sprite.asset)",
+                image: cgImage,
+                tinted: sprite.tinted
+            )
+        }
     }
 
     /// The tier that owns the theme answers for its bytes: a contributed theme's were read out

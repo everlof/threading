@@ -1,6 +1,9 @@
 import AppKit
 import QuartzCore
 
+/// A decoded theme sprite, as every particle renderer receives it.
+typealias ThemeParticleSprite = SidebarAppearance.Background.Particles.Sprite
+
 // MARK: - Placement
 
 /// Where a theme's particles are being drawn, which decides where they are born, how far they
@@ -34,6 +37,8 @@ enum ThemeParticleBudget {
     static let burstMaximumCount = 48
     /// A whole window for a second or two — the one placement meant to cover what is beneath.
     static let transitionMaximumAlive = 700
+    /// A moment's shower crosses the same window but must not cover it.
+    static let momentMaximumAlive = ThemeMomentLimits.maximumAlive
     /// Ambient fields cross their region in at most this long, so a tall pane never keeps a
     /// particle alive for a minute.
     static let maximumAmbientLifetime: Float = 24
@@ -55,13 +60,18 @@ enum ThemeParticleBudget {
 /// the latter.
 enum ThemeParticleEmitter {
 
-    /// States the whole emitter. `rate` is particles per second across all inks, already
+    /// States the whole emitter. `rate` is particles per second across every cell, already
     /// within the placement's budget (see `ambientRate`, `transitionRate`); `up` is +1 when the
     /// layer's y axis points up the screen and -1 when an ancestor flipped it.
+    ///
+    /// One cell per picture per ink: the style's shape (or each tinted sprite) in every ink, and
+    /// each full-colour sprite once in its own colours. The rate is shared across them, so a
+    /// block naming four sprites in four inks keeps exactly the budget one shape in one ink had.
     static func configure(
         _ emitter: CAEmitterLayer,
         particles: ThemeParticles,
         colors: [NSColor],
+        sprites: [ThemeParticleSprite] = [],
         placement: ThemeParticlePlacement,
         region: CGRect,
         scale: CGFloat,
@@ -74,22 +84,24 @@ enum ThemeParticleEmitter {
             placement: placement,
             region: region.size
         )
-        let inks = colors.isEmpty ? [NSColor.white] : colors
-        let sprite = ThemeParticleArtwork.sprite(
-            particles.resolvedShape,
+        let pictures = ThemeParticleArtwork.cellPictures(
+            particles: particles,
+            colors: colors,
+            sprites: sprites,
             points: motion.size,
             scale: scale
         )
 
         place(emitter, motion: motion, region: region, up: up)
 
-        let perInk = Float(max(0, rate) / Double(inks.count))
-        emitter.emitterCells = inks.enumerated().map { index, ink in
+        let perCell = Float(max(0, rate) / Double(max(pictures.count, 1)))
+        emitter.emitterCells = pictures.enumerated().map { index, picture in
+            let ink = picture.ink
             let cell = CAEmitterCell()
-            cell.name = "ink\(index)"
-            cell.contents = sprite
+            cell.name = "cell\(index)"
+            cell.contents = picture.image
             cell.contentsScale = scale
-            cell.birthRate = perInk
+            cell.birthRate = perCell
             cell.lifetime = motion.lifetime
             cell.lifetimeRange = motion.lifetime * 0.15
             cell.velocity = motion.velocity
@@ -488,6 +500,130 @@ enum ThemeParticleArtwork {
     /// `NSCache` is documented thread-safe, so the unchecked opt-out states a fact rather than
     /// a hope; sprites are only ever drawn from the main actor today.
     nonisolated(unsafe) private static let cache = NSCache<NSString, CGImage>()
+    /// Rasterised theme sprites, keyed by stored file, tint and pixel size. The entry keeps the
+    /// picture it was drawn from, so a file replaced under the same name is drawn afresh rather
+    /// than served from a raster of its predecessor.
+    nonisolated(unsafe) private static let spriteCache = NSCache<NSString, SpriteRaster>()
+
+    private final class SpriteRaster {
+        let source: CGImage
+        let raster: CGImage
+
+        init(source: CGImage, raster: CGImage) {
+            self.source = source
+            self.raster = raster
+        }
+    }
+
+    /// One emitter cell's picture and the ink it is drawn in.
+    struct CellPicture {
+        let image: CGImage?
+        let ink: NSColor
+    }
+
+    /// The cells a block draws: the style's shape in every ink, or each tinted sprite in every
+    /// ink and each full-colour sprite once. The pictures are white (tinted) or their own
+    /// colours, and the cell's colour does the rest.
+    static func cellPictures(
+        particles: ThemeParticles,
+        colors: [NSColor],
+        sprites: [ThemeParticleSprite],
+        points: CGFloat,
+        scale: CGFloat
+    ) -> [CellPicture] {
+        let inks = colors.isEmpty ? [NSColor.white] : colors
+        guard !sprites.isEmpty else {
+            let image = sprite(particles.resolvedShape, points: points, scale: scale)
+            return inks.map { CellPicture(image: image, ink: $0) }
+        }
+        return sprites.flatMap { sprite -> [CellPicture] in
+            let image = raster(sprite, points: points, scale: scale)
+            return sprite.tinted
+                ? inks.map { CellPicture(image: image, ink: $0) }
+                : [CellPicture(image: image, ink: .white)]
+        }
+    }
+
+    /// A theme sprite at `points` on its long side, rasterised for `scale` — a white
+    /// silhouette when tinted, its own colours otherwise — cached per stored file.
+    static func raster(_ sprite: ThemeParticleSprite, points: CGFloat, scale: CGFloat) -> CGImage? {
+        let pixels = max(2, Int((points * scale).rounded(.up)))
+        let key = "\(sprite.key)|\(sprite.tinted)|\(pixels)" as NSString
+        if let cached = spriteCache.object(forKey: key), cached.source === sprite.image {
+            return cached.raster
+        }
+        guard let context = CGContext(
+            data: nil,
+            width: pixels,
+            height: pixels,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .high
+        draw(
+            sprite,
+            in: CGRect(x: 0, y: 0, width: pixels, height: pixels),
+            color: CGColor(gray: 1, alpha: 1),
+            context: context
+        )
+        guard let image = context.makeImage() else { return nil }
+        spriteCache.setObject(SpriteRaster(source: sprite.image, raster: image), forKey: key)
+        return image
+    }
+
+    /// Draws a theme sprite fitted into `rect`: as a silhouette in `color` when tinted, in its
+    /// own colours at `color`'s alpha otherwise.
+    static func draw(
+        _ sprite: ThemeParticleSprite,
+        in rect: CGRect,
+        color: CGColor,
+        context: CGContext
+    ) {
+        let width = CGFloat(sprite.image.width)
+        let height = CGFloat(sprite.image.height)
+        guard width > 0, height > 0, rect.width > 0, rect.height > 0 else { return }
+        let fit = min(rect.width / width, rect.height / height)
+        let size = CGSize(width: width * fit, height: height * fit)
+        let target = CGRect(
+            x: rect.midX - size.width / 2,
+            y: rect.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+        context.saveGState()
+        defer { context.restoreGState() }
+        if sprite.tinted {
+            // The picture's coverage, filled with the ink: the one paw print in any colour.
+            context.beginTransparencyLayer(in: target, auxiliaryInfo: nil)
+            context.draw(sprite.image, in: target)
+            context.setBlendMode(.sourceIn)
+            context.setFillColor(color)
+            context.fill(target)
+            context.endTransparencyLayer()
+        } else {
+            context.setAlpha(color.alpha)
+            context.draw(sprite.image, in: target)
+        }
+    }
+
+    /// Stamps the `index`th particle of a block — its shape, or the sprite it would be born
+    /// with — the way a still frame or a preview plume does.
+    static func stamp(
+        _ index: Int,
+        particles: ThemeParticles,
+        sprites: [ThemeParticleSprite],
+        in rect: CGRect,
+        color: CGColor,
+        context: CGContext
+    ) {
+        guard !sprites.isEmpty else {
+            draw(particles.resolvedShape, in: rect, color: color, context: context)
+            return
+        }
+        draw(sprites[index % sprites.count], in: rect, color: color, context: context)
+    }
 
     /// The shape at `points`, rasterised for `scale`, cached by both.
     static func sprite(_ shape: ThemeParticles.Shape, points: CGFloat, scale: CGFloat) -> CGImage? {
@@ -652,6 +788,7 @@ enum ThemeParticleStill {
     static func tile(
         particles: ThemeParticles,
         colors: [NSColor],
+        sprites: [ThemeParticleSprite] = [],
         side: CGFloat,
         scale: CGFloat,
         opacity: Double,
@@ -699,8 +836,10 @@ enum ThemeParticleStill {
                     guard rect.intersects(CGRect(x: 0, y: 0, width: side, height: side)) else {
                         continue
                     }
-                    ThemeParticleArtwork.draw(
-                        particles.resolvedShape,
+                    ThemeParticleArtwork.stamp(
+                        index,
+                        particles: particles,
+                        sprites: sprites,
                         in: rect,
                         color: color,
                         context: context
@@ -716,6 +855,7 @@ enum ThemeParticleStill {
     static func plume(
         particles: ThemeParticles,
         colors: [NSColor],
+        sprites: [ThemeParticleSprite] = [],
         origin: CGPoint,
         in context: CGContext,
         up: CGFloat,
@@ -740,8 +880,10 @@ enum ThemeParticleStill {
             let color = ink.withAlphaComponent(
                 ink.alphaComponent * CGFloat(particles.opacity) * CGFloat(1 - 0.6 * progress)
             ).cgColor
-            ThemeParticleArtwork.draw(
-                particles.resolvedShape,
+            ThemeParticleArtwork.stamp(
+                index,
+                particles: particles,
+                sprites: sprites,
                 in: CGRect(x: point.x - size / 2, y: point.y - size / 2, width: size, height: size),
                 color: color,
                 context: context

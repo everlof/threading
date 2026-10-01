@@ -91,6 +91,11 @@ public struct ThemeParticles: Equatable {
     public var style: Style
     /// Overrides the style's own artwork — snow drawn as dots, fizz drawn as sparks.
     public var shape: Shape?
+    /// Names from the stating variant's sprite library (`AppTheme.Variant.sprites`), drawn in
+    /// place of a host shape — paw prints, hearts, a theme's own little sheep. Each particle
+    /// takes one. Empty means the host shape; validation refuses a block naming both, and a
+    /// name that resolves to no stored image degrades to the style's own shape.
+    public var sprites: [String]
     /// One to four inks; each particle takes one. Empty means the variant's accent.
     public var colors: [ThemeInk]
     /// 0…1 — how much of the placement's particle budget the theme asks for.
@@ -106,6 +111,7 @@ public struct ThemeParticles: Equatable {
     public init(
         style: Style,
         shape: Shape? = nil,
+        sprites: [String] = [],
         colors: [ThemeInk] = [],
         density: Double = ThemeParticleLimits.defaultDensity,
         size: Double? = nil,
@@ -114,6 +120,7 @@ public struct ThemeParticles: Equatable {
     ) {
         self.style = style
         self.shape = shape
+        self.sprites = sprites
         self.colors = colors
         self.density = density
         self.size = size
@@ -170,13 +177,14 @@ public struct ThemeParticles: Equatable {
 
 extension ThemeParticles: Codable {
     private enum CodingKeys: String, CodingKey {
-        case style, shape, colors, density, size, speed, opacity
+        case style, shape, sprites, colors, density, size, speed, opacity
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         style = try container.decode(Style.self, forKey: .style)
         shape = try container.decodeIfPresent(Shape.self, forKey: .shape)
+        sprites = try container.decodeIfPresent([String].self, forKey: .sprites) ?? []
         colors = try container.decodeIfPresent([ThemeInk].self, forKey: .colors) ?? []
         density = try container.decodeIfPresent(Double.self, forKey: .density)
             ?? ThemeParticleLimits.defaultDensity
@@ -189,6 +197,7 @@ extension ThemeParticles: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(style, forKey: .style)
         try container.encodeIfPresent(shape, forKey: .shape)
+        if !sprites.isEmpty { try container.encode(sprites, forKey: .sprites) }
         if !colors.isEmpty { try container.encode(colors, forKey: .colors) }
         try container.encode(density, forKey: .density)
         try container.encodeIfPresent(size, forKey: .size)
@@ -269,6 +278,9 @@ extension ThemeTransition: Codable {
 /// alive at once — are the renderer's, because they are about frames rather than documents.
 public enum ThemeParticleLimits {
     public static let maximumColors = 4
+    /// Sprites one block may name. Every sprite is drawn in every ink, so this and
+    /// `maximumColors` bound a block's emitter cells at sixteen whatever the library holds.
+    public static let maximumSprites = 4
     public static let defaultDensity = 0.5
     public static let densityRange: ClosedRange<Double> = 0...1
     /// Points. Below one a particle is a sub-pixel shimmer nobody asked for; above twenty-four

@@ -30,7 +30,9 @@ private final class ThemeTransitionWashLayer: CALayer {
 
 // MARK: - Theme Transition Overlay
 
-/// The surface a switch *into* a theme is played on — `ThemeTransition` drawn over one window.
+/// The surface a switch *into* a theme is played on — `ThemeTransition` drawn over one window —
+/// and a theme moment's shower (`ThemeMoments`), which is the same timeline with no wash, no
+/// shimmer, no swap and a fraction of the budget (`Palette.budgetShare`).
 ///
 /// Three layers over the window's whole content root, all colours already resolved from the
 /// *incoming* variant before the switch happens:
@@ -63,8 +65,12 @@ final class ThemeTransitionOverlayView: NSView, ThemedComponent {
     struct Palette {
         let transition: ThemeTransition
         let particleColors: [NSColor]
+        var particleSprites: [ThemeParticleSprite] = []
         let wash: NSColor
         let shimmer: NSColor
+        /// The share of the arrival budget this play may use: 1 for an arrival, less for a
+        /// moment's shower, which is a gesture rather than a cover.
+        var budgetShare: Double = 1
     }
 
     private let washLayer = ThemeTransitionWashLayer()
@@ -122,6 +128,7 @@ final class ThemeTransitionOverlayView: NSView, ThemedComponent {
             emitter,
             particles: particles,
             colors: palette.particleColors,
+            sprites: palette.particleSprites,
             placement: .transition(duration: duration),
             region: region,
             scale: window?.backingScaleFactor ?? 2,
@@ -129,7 +136,7 @@ final class ThemeTransitionOverlayView: NSView, ThemedComponent {
                 for: particles,
                 region: region.size,
                 duration: duration
-            ),
+            ) * max(0, min(1, palette.budgetShare)),
             opacity: particles.opacity,
             up: ThemeParticleEmitter.upSign(of: emitter)
         )

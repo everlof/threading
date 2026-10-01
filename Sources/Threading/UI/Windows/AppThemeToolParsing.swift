@@ -133,43 +133,29 @@ enum AppThemeToolParsing {
         if patch.removeImage == true {
             backdrop.image = nil
         } else if let image = patch.image {
-            guard let source = image.source else {
-                throw AppThemeEditingError.invalid(
-                    "material.backdrop.image needs a source: {path} or {base64}."
+            backdrop.image = try Self.imageLayer(
+                image,
+                base: backdrop.image,
+                field: "material.backdrop.image"
+            ) { source in
+                let data = try Self.imageBytes(
+                    source,
+                    describing: "material.backdrop.image.source",
+                    maximumBytes: ThemeAssetSlot.backdrop.maximumImageBytes
                 )
-            }
-            let data = try Self.imageBytes(
-                source,
-                describing: "material.backdrop.image.source",
-                maximumBytes: ThemeAssetSlot.backdrop.maximumImageBytes
-            )
-            guard let stored = ThemeAssetStore.store(
-                imageData: data,
-                for: themeID,
-                slot: .backdrop,
-                variant: kind
-            ) else {
-                throw AppThemeEditingError.invalid(
-                    "material.backdrop.image.source is not a readable image (or exceeds "
-                        + "\(ThemeAssetSlot.backdrop.maximumImageBytes / (1024 * 1024)) MB)."
-                )
-            }
-            let mode: ThemeBackdrop.ImageLayer.Mode
-            if let rawMode = cleaned(image.mode) {
-                guard let parsed = ThemeBackdrop.ImageLayer.Mode(rawValue: rawMode) else {
+                guard let stored = ThemeAssetStore.store(
+                    imageData: data,
+                    for: themeID,
+                    slot: .backdrop,
+                    variant: kind
+                ) else {
                     throw AppThemeEditingError.invalid(
-                        "material.backdrop.image.mode must be \"tile\", \"fill\" or \"fit\"."
+                        "material.backdrop.image.source is not a readable image (or exceeds "
+                            + "\(ThemeAssetSlot.backdrop.maximumImageBytes / (1024 * 1024)) MB)."
                     )
                 }
-                mode = parsed
-            } else {
-                mode = .fill
+                return stored
             }
-            backdrop.image = ThemeBackdrop.ImageLayer(
-                asset: stored,
-                mode: mode,
-                opacity: image.opacity ?? 1
-            )
         }
 
         if patch.removeParticles == true {
@@ -201,6 +187,7 @@ enum AppThemeToolParsing {
             let statesAnything = patch.gradient != nil || patch.image != nil
                 || patch.logo != nil || patch.title != nil || patch.navigatorWell != nil
                 || patch.particles != nil || patch.band != nil || patch.logoMotion != nil
+                || patch.mascot != nil || patch.logoInDock != nil
             guard !statesAnything else {
                 throw AppThemeEditingError.invalid(
                     "sidebar cannot set fields and remove in the same patch."
@@ -243,6 +230,11 @@ enum AppThemeToolParsing {
                 "sidebar cannot set logo_motion and remove_logo_motion in the same patch."
             )
         }
+        guard patch.mascot == nil || patch.removeMascot != true else {
+            throw AppThemeEditingError.invalid(
+                "sidebar cannot set mascot and remove_mascot in the same patch."
+            )
+        }
 
         var style = base ?? SidebarStyle()
         var background = style.background ?? SidebarStyle.Background()
@@ -256,39 +248,25 @@ enum AppThemeToolParsing {
         if patch.removeImage == true {
             background.image = nil
         } else if let image = patch.image {
-            guard let source = image.source else {
-                throw AppThemeEditingError.invalid(
-                    "sidebar.image needs a source: {path} or {base64}."
-                )
-            }
-            let data = try Self.imageBytes(source, describing: "sidebar.image.source")
-            guard let stored = ThemeAssetStore.store(
-                imageData: data,
-                for: themeID,
-                slot: .background,
-                variant: kind
-            ) else {
-                throw AppThemeEditingError.invalid(
-                    "sidebar.image.source is not a readable image (or exceeds "
-                        + "\(SidebarStyleLimits.maximumImageBytes / (1024 * 1024)) MB)."
-                )
-            }
-            let mode: SidebarStyle.ImageLayer.Mode
-            if let rawMode = cleaned(image.mode) {
-                guard let parsed = SidebarStyle.ImageLayer.Mode(rawValue: rawMode) else {
+            background.image = try Self.imageLayer(
+                image,
+                base: background.image,
+                field: "sidebar.image"
+            ) { source in
+                let data = try Self.imageBytes(source, describing: "sidebar.image.source")
+                guard let stored = ThemeAssetStore.store(
+                    imageData: data,
+                    for: themeID,
+                    slot: .background,
+                    variant: kind
+                ) else {
                     throw AppThemeEditingError.invalid(
-                        "sidebar.image.mode must be \"tile\", \"fill\" or \"fit\"."
+                        "sidebar.image.source is not a readable image (or exceeds "
+                            + "\(SidebarStyleLimits.maximumImageBytes / (1024 * 1024)) MB)."
                     )
                 }
-                mode = parsed
-            } else {
-                mode = .fill
+                return stored
             }
-            background.image = SidebarStyle.ImageLayer(
-                asset: stored,
-                mode: mode,
-                opacity: image.opacity ?? 1
-            )
         }
 
         if patch.removeParticles == true {
@@ -369,6 +347,14 @@ enum AppThemeToolParsing {
             brand.motion = try Self.logoMotion(motion, base: brand.motion)
         }
 
+        if let inDock = patch.logoInDock { brand.dockIcon = inDock }
+
+        if patch.removeMascot == true {
+            style.mascot = nil
+        } else if let mascot = patch.mascot {
+            style.mascot = try Self.mascot(mascot, base: style.mascot, themeID: themeID, kind: kind)
+        }
+
         if patch.removeTitle == true {
             brand.title = nil
         } else if let title = patch.title {
@@ -437,6 +423,10 @@ enum AppThemeToolParsing {
             if let motion = brand.motion {
                 document["logo_motion"] = Self.document(motion)
             }
+            if brand.dockIcon { document["logo_in_dock"] = true }
+        }
+        if let mascot = sidebar.mascot {
+            document["mascot"] = Self.document(mascot)
         }
         if let well = sidebar.navigatorWell {
             document["navigator_well"] = [
@@ -483,6 +473,11 @@ enum AppThemeToolParsing {
                 )
             }
             particles.shape = shape
+            if patch.sprites == nil { particles.sprites = [] }
+        }
+        if let sprites = patch.sprites {
+            particles.sprites = sprites.compactMap { cleaned($0) }
+            if !particles.sprites.isEmpty, cleaned(patch.shape) == nil { particles.shape = nil }
         }
         if let colors = patch.colors {
             particles.colors = try colors.map { raw in
@@ -510,6 +505,7 @@ enum AppThemeToolParsing {
             "opacity": particles.opacity
         ]
         if let shape = particles.shape { document["shape"] = shape.rawValue }
+        if !particles.sprites.isEmpty { document["sprites"] = particles.sprites }
         if let size = particles.size { document["size"] = size }
         return document
     }
@@ -669,14 +665,481 @@ enum AppThemeToolParsing {
             document["gradient"] = fields
         }
         if let image = backdrop.image {
-            document["image"] = [
+            var fields: [String: Any] = [
                 "asset": image.asset,
                 "mode": image.mode.rawValue,
                 "opacity": image.opacity
-            ] as [String: Any]
+            ]
+            if image.alignment != .center { fields["alignment"] = image.alignment.rawValue }
+            document["image"] = fields
         }
         if let particles = backdrop.particles {
             document["particles"] = Self.document(particles)
+        }
+        return document
+    }
+
+    // MARK: - Images
+
+    /// An image patch merged onto what is stated: a `source` stores new bytes through `store`,
+    /// and without one the patch restyles the picture already there — its mode, opacity or
+    /// alignment — so moving an illustration to the column's foot needs no second upload.
+    static func imageLayer(
+        _ patch: AppThemeSidebarImageArguments,
+        base: ThemeBackdrop.ImageLayer?,
+        field: String,
+        store: (AppThemeImageArguments) throws -> String
+    ) throws -> ThemeBackdrop.ImageLayer {
+        let asset: String
+        if let source = patch.source {
+            asset = try store(source)
+        } else if let existing = base?.asset {
+            asset = existing
+        } else {
+            throw AppThemeEditingError.invalid("\(field) needs a source: {path} or {base64}.")
+        }
+        var layer = base ?? ThemeBackdrop.ImageLayer(asset: asset)
+        layer.asset = asset
+        if let rawMode = cleaned(patch.mode) {
+            guard let parsed = ThemeBackdrop.ImageLayer.Mode(rawValue: rawMode) else {
+                throw AppThemeEditingError.invalid(
+                    "\(field).mode must be \"tile\", \"fill\" or \"fit\"."
+                )
+            }
+            layer.mode = parsed
+        } else if base == nil {
+            layer.mode = .fill
+        }
+        if let opacity = patch.opacity { layer.opacity = opacity }
+        if let rawAlignment = cleaned(patch.alignment) {
+            guard let parsed = ThemeImageAlignment(rawValue: rawAlignment) else {
+                throw AppThemeEditingError.invalid(
+                    "\(field).alignment must be one of "
+                        + ThemeImageAlignment.allCases.map { "\"\($0.rawValue)\"" }
+                            .joined(separator: ", ") + "."
+                )
+            }
+            layer.alignment = parsed
+        }
+        return layer
+    }
+
+    // MARK: - Sprites
+
+    /// The library after a patch: named entries added or replaced (a source stores new bytes,
+    /// `tinted` alone restyles one already there), named removals taken out, order kept.
+    static func sprites(
+        _ patch: [AppThemeSpriteArguments]?,
+        remove: [String]?,
+        base: [ThemeSprite],
+        themeID: AppThemeID,
+        kind: AppTheme.VariantKind
+    ) throws -> AppThemeEditing.BlockChange<[ThemeSprite]> {
+        guard patch != nil || remove != nil else { return .inherit }
+        var library = base
+        let removing = Set((remove ?? []).compactMap { cleaned($0) })
+        for entry in patch ?? [] {
+            guard let name = cleaned(entry.name), ThemeSprite.isValidName(name) else {
+                throw AppThemeEditingError.invalid(
+                    "sprites[].name must be 1 to \(ThemeSpriteLimits.maximumNameLength) lowercase "
+                        + "letters, digits, - or _."
+                )
+            }
+            guard !removing.contains(name) else {
+                throw AppThemeEditingError.invalid(
+                    "sprites cannot set and remove \"\(name)\" in the same patch."
+                )
+            }
+            let existing = library.firstIndex { $0.name == name }
+            var sprite: ThemeSprite
+            if let source = entry.source {
+                let data = try Self.imageBytes(
+                    source,
+                    describing: "sprites.\(name).source",
+                    maximumBytes: ThemeSpriteLimits.maximumImageBytes
+                )
+                guard let stored = ThemeAssetStore.storeSprite(
+                    imageData: data,
+                    for: themeID,
+                    name: name,
+                    variant: kind
+                ) else {
+                    throw AppThemeEditingError.invalid(
+                        "sprites.\(name).source is not a readable image."
+                    )
+                }
+                sprite = ThemeSprite(
+                    name: name,
+                    asset: stored,
+                    tinted: existing.map { library[$0].tinted } ?? true
+                )
+            } else if let existing {
+                sprite = library[existing]
+            } else {
+                throw AppThemeEditingError.invalid(
+                    "sprites.\(name) is new and needs a source: {path} or {base64}."
+                )
+            }
+            if let tinted = entry.tinted { sprite.tinted = tinted }
+            if let existing {
+                library[existing] = sprite
+            } else {
+                library.append(sprite)
+            }
+        }
+        library.removeAll { removing.contains($0.name) }
+        return library.isEmpty ? .remove : .set(library)
+    }
+
+    static func document(_ sprites: [ThemeSprite]) -> [[String: Any]] {
+        sprites.map { ["name": $0.name, "asset": $0.asset, "tinted": $0.tinted] }
+    }
+
+    // MARK: - Mascot
+
+    static func mascot(
+        _ patch: AppThemeMascotArguments,
+        base: ThemeMascot?,
+        themeID: AppThemeID,
+        kind: AppTheme.VariantKind
+    ) throws -> ThemeMascot {
+        var mascot = base ?? ThemeMascot(poses: [:])
+        if let size = patch.size { mascot.size = size }
+        if let raw = cleaned(patch.placement) {
+            guard let placement = ThemeMascot.Placement(rawValue: raw) else {
+                throw AppThemeEditingError.invalid(
+                    "sidebar.mascot.placement must be \"leading\", \"center\" or \"trailing\"."
+                )
+            }
+            mascot.placement = placement
+        }
+        let removing = try (patch.removePoses ?? []).map { raw -> ThemeMascotMood in
+            guard let mood = ThemeMascotMood(rawValue: raw.trimmingCharacters(in: .whitespaces)) else {
+                throw AppThemeEditingError.invalid(
+                    "sidebar.mascot.remove_poses: \"\(raw)\" is not a mood — one of "
+                        + ThemeMascotMood.allCases.map { "\"\($0.rawValue)\"" }
+                            .joined(separator: ", ") + "."
+                )
+            }
+            return mood
+        }
+        for (raw, posePatch) in patch.poses ?? [:] {
+            guard let mood = ThemeMascotMood(rawValue: raw) else {
+                throw AppThemeEditingError.invalid(
+                    "sidebar.mascot.poses: \"\(raw)\" is not a mood — one of "
+                        + ThemeMascotMood.allCases.map { "\"\($0.rawValue)\"" }
+                            .joined(separator: ", ") + "."
+                )
+            }
+            guard !removing.contains(mood) else {
+                throw AppThemeEditingError.invalid(
+                    "sidebar.mascot cannot set and remove the \(mood.rawValue) pose in the same patch."
+                )
+            }
+            mascot.poses[mood] = try Self.pose(
+                posePatch,
+                base: mascot.poses[mood],
+                mood: mood,
+                themeID: themeID,
+                kind: kind
+            )
+        }
+        for mood in removing { mascot.poses[mood] = nil }
+        return mascot
+    }
+
+    private static func pose(
+        _ patch: AppThemeMascotPoseArguments,
+        base: ThemeMascot.Pose?,
+        mood: ThemeMascotMood,
+        themeID: AppThemeID,
+        kind: AppTheme.VariantKind
+    ) throws -> ThemeMascot.Pose {
+        let field = "sidebar.mascot.poses.\(mood.rawValue)"
+        let asset: String
+        if let source = patch.source {
+            let data = try Self.imageBytes(
+                source,
+                describing: "\(field).source",
+                maximumBytes: ThemeMascotLimits.maximumImageBytes
+            )
+            guard let stored = ThemeAssetStore.storeMascotPose(
+                imageData: data,
+                for: themeID,
+                mood: mood,
+                variant: kind
+            ) else {
+                throw AppThemeEditingError.invalid("\(field).source is not a readable image.")
+            }
+            asset = stored
+        } else if let existing = base?.asset {
+            asset = existing
+        } else {
+            throw AppThemeEditingError.invalid(
+                "\(field) is new and needs a source: {path} or {base64}."
+            )
+        }
+        guard patch.particles == nil || patch.removeParticles != true else {
+            throw AppThemeEditingError.invalid(
+                "\(field) cannot set particles and remove_particles in the same patch."
+            )
+        }
+        var pose = base ?? ThemeMascot.Pose(asset: asset)
+        pose.asset = asset
+        if let raw = cleaned(patch.motion) {
+            if raw == "none" {
+                pose.motion = nil
+            } else {
+                guard let motion = ThemeMascot.Motion(rawValue: raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "\(field).motion must be \"none\" or one of "
+                            + ThemeMascot.Motion.allCases.map { "\"\($0.rawValue)\"" }
+                                .joined(separator: ", ") + "."
+                    )
+                }
+                pose.motion = motion
+            }
+        }
+        if let every = patch.every { pose.every = every }
+        if patch.removeParticles == true {
+            pose.particles = nil
+        } else if let particles = patch.particles {
+            pose.particles = try Self.particles(
+                particles,
+                base: pose.particles,
+                field: "\(field).particles"
+            )
+        }
+        if let origin = patch.origin {
+            let current = pose.resolvedOrigin
+            pose.origin = SidebarStyle.Brand.LogoMotion.Origin(
+                x: origin.x ?? current.x,
+                y: origin.y ?? current.y
+            )
+        }
+        return pose
+    }
+
+    static func document(_ mascot: ThemeMascot) -> [String: Any] {
+        var poses: [String: Any] = [:]
+        for (mood, pose) in mascot.poses {
+            var fields: [String: Any] = ["asset": pose.asset]
+            if let motion = pose.motion { fields["motion"] = motion.rawValue }
+            if let every = pose.every { fields["every"] = every }
+            if let particles = pose.particles { fields["particles"] = Self.document(particles) }
+            if let origin = pose.origin { fields["origin"] = ["x": origin.x, "y": origin.y] }
+            poses[mood.rawValue] = fields
+        }
+        return [
+            "size": mascot.size,
+            "placement": mascot.placement.rawValue,
+            "poses": poses
+        ]
+    }
+
+    // MARK: - Moments
+
+    static func moments(
+        _ patch: AppThemeMomentsArguments?,
+        remove: Bool?,
+        base: ThemeMoments?,
+        themeID: AppThemeID,
+        kind: AppTheme.VariantKind
+    ) throws -> AppThemeEditing.BlockChange<ThemeMoments> {
+        if remove == true {
+            guard patch == nil else {
+                throw AppThemeEditingError.invalid(
+                    "moments cannot be set and removed in the same patch."
+                )
+            }
+            return .remove
+        }
+        guard let patch else { return .inherit }
+        var moments = base ?? ThemeMoments()
+        let stated: [(ThemeMomentEvent, AppThemeMomentArguments?)] = [
+            (.turnFinished, patch.turnFinished),
+            (.needsAttention, patch.needsAttention)
+        ]
+        for case let (event, momentPatch?) in stated {
+            moments[event] = try Self.moment(
+                momentPatch,
+                base: moments[event],
+                event: event,
+                themeID: themeID,
+                kind: kind
+            )
+        }
+        return moments.isEmpty ? .remove : .set(moments)
+    }
+
+    private static func moment(
+        _ patch: AppThemeMomentArguments,
+        base: ThemeMoments.Moment?,
+        event: ThemeMomentEvent,
+        themeID: AppThemeID,
+        kind: AppTheme.VariantKind
+    ) throws -> ThemeMoments.Moment? {
+        let field = "moments.\(event.rawValue)"
+        if patch.remove == true {
+            guard patch.particles == nil, patch.sound == nil else {
+                throw AppThemeEditingError.invalid(
+                    "\(field) cannot set fields and remove in the same patch."
+                )
+            }
+            return nil
+        }
+        guard patch.particles == nil || patch.removeParticles != true else {
+            throw AppThemeEditingError.invalid(
+                "\(field) cannot set particles and remove_particles in the same patch."
+            )
+        }
+        guard patch.sound == nil || patch.removeSound != true else {
+            throw AppThemeEditingError.invalid(
+                "\(field) cannot set sound and remove_sound in the same patch."
+            )
+        }
+        var moment = base ?? ThemeMoments.Moment()
+        if patch.removeParticles == true {
+            moment.particles = nil
+        } else if let particles = patch.particles {
+            moment.particles = try Self.particles(
+                particles,
+                base: moment.particles,
+                field: "\(field).particles"
+            )
+        }
+        // Files are never deleted here: a refused update restores the document, and a document
+        // naming a file this parse had removed would be left pointing at nothing. A container
+        // change leaves the old file in the theme's folder until the theme is deleted.
+        if patch.removeSound == true {
+            moment.sound = nil
+        } else if let sound = patch.sound {
+            let (data, format) = try Self.soundBytes(sound, describing: "\(field).sound")
+            guard let stored = ThemeAssetStore.storeSound(
+                data: data,
+                for: themeID,
+                event: event,
+                variant: kind,
+                pathExtension: format
+            ) else {
+                throw AppThemeEditingError.invalid(
+                    "\(field).sound is not a playable sound of at most "
+                        + "\(Int(ThemeMomentLimits.maximumSoundSeconds)) seconds in a "
+                        + ThemeMomentLimits.soundExtensions.sorted().joined(separator: ", ")
+                        + " container."
+                )
+            }
+            moment.sound = stored
+        }
+        // Rebuilt rather than assigned: this is a document's number, not an animation's, and
+        // the motion lint reads any `.duration =` under UI/ as the latter.
+        let merged = ThemeMoments.Moment(
+            particles: moment.particles,
+            duration: patch.duration ?? moment.duration,
+            sound: moment.sound
+        )
+        return merged.isEmpty ? nil : merged
+    }
+
+    /// A sound's bytes and container, from a path (its extension names the container) or from
+    /// base64 with `format`.
+    static func soundBytes(
+        _ source: AppThemeSoundArguments,
+        describing field: String
+    ) throws -> (Data, String) {
+        let maximum = ThemeMomentLimits.maximumSoundBytes
+        if let rawPath = cleaned(source.path) {
+            let path = (rawPath as NSString).expandingTildeInPath
+            let format = (cleaned(source.format) ?? (path as NSString).pathExtension).lowercased()
+            let data: Data
+            do {
+                data = try BoundedFileReader.read(URL(fileURLWithPath: path), maximumBytes: maximum)
+            } catch BoundedFileReadError.exceedsLimit(maximumBytes: _) {
+                throw AppThemeEditingError.invalid(
+                    "\(field): file exceeds \(maximum / (1024 * 1024)) MB."
+                )
+            } catch {
+                throw AppThemeEditingError.invalid("\(field): no readable file at \(path).")
+            }
+            return (data, format)
+        }
+        if let base64 = cleaned(source.base64) {
+            guard let format = cleaned(source.format)?.lowercased() else {
+                throw AppThemeEditingError.invalid(
+                    "\(field): base64 needs a format — "
+                        + ThemeMomentLimits.soundExtensions.sorted().joined(separator: ", ") + "."
+                )
+            }
+            guard let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else {
+                throw AppThemeEditingError.invalid("\(field): base64 did not decode.")
+            }
+            guard data.count <= maximum else {
+                throw AppThemeEditingError.invalid(
+                    "\(field): sound exceeds \(maximum / (1024 * 1024)) MB."
+                )
+            }
+            return (data, format)
+        }
+        throw AppThemeEditingError.invalid("\(field): provide {path} or {base64, format}.")
+    }
+
+    static func document(_ moments: ThemeMoments) -> [String: Any] {
+        var document: [String: Any] = [:]
+        for event in ThemeMomentEvent.allCases {
+            guard let moment = moments[event] else { continue }
+            var fields: [String: Any] = ["duration": moment.duration]
+            if let particles = moment.particles { fields["particles"] = Self.document(particles) }
+            if let sound = moment.sound { fields["sound"] = ["asset": sound] }
+            document[event.rawValue] = fields
+        }
+        return document
+    }
+
+    // MARK: - Words
+
+    static func words(
+        _ patch: AppThemeWordsArguments?,
+        remove: Bool?,
+        base: ThemeWords?
+    ) throws -> AppThemeEditing.BlockChange<ThemeWords> {
+        if remove == true {
+            guard patch == nil else {
+                throw AppThemeEditingError.invalid(
+                    "words cannot be set and removed in the same patch."
+                )
+            }
+            return .remove
+        }
+        guard let patch else { return .inherit }
+        guard patch.working == nil || patch.removeWorking != true else {
+            throw AppThemeEditingError.invalid(
+                "words cannot set working and remove_working in the same patch."
+            )
+        }
+        guard patch.composerPlaceholder == nil || patch.removeComposerPlaceholder != true else {
+            throw AppThemeEditingError.invalid(
+                "words cannot set composer_placeholder and remove_composer_placeholder in the same patch."
+            )
+        }
+        var words = base ?? ThemeWords()
+        if patch.removeWorking == true {
+            words.working = []
+        } else if let working = patch.working {
+            words.working = working.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        }
+        if patch.removeComposerPlaceholder == true {
+            words.composerPlaceholder = nil
+        } else if let placeholder = patch.composerPlaceholder {
+            words.composerPlaceholder = placeholder.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return words.isEmpty ? .remove : .set(words)
+    }
+
+    static func document(_ words: ThemeWords) -> [String: Any] {
+        var document: [String: Any] = [:]
+        if !words.working.isEmpty { document["working"] = words.working }
+        if let placeholder = words.composerPlaceholder {
+            document["composer_placeholder"] = placeholder
         }
         return document
     }

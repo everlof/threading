@@ -712,12 +712,17 @@ final class SessionComposerViewController: NSViewController {
         appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
             self?.refreshChips()
         }
+        // A theme may state its own invitation (`ThemeWords.composerPlaceholder`); an open
+        // composer takes the new one with the theme rather than on its next project change.
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.refreshRolePresentation()
+        }
     }
 
     private func wirePrompt() {
         promptView.showsImageAttachments = true
         promptView.showsMovieAttachments = true
-        promptView.placeholder = ComposerDefaults.promptPlaceholder
+        promptView.placeholder = ComposerDefaults.invitation
         promptView.minimumHeight = ComposerDefaults.promptHeight
         // Return belongs to the text here; `startButton` sends. The box still carries the
         // control row the conversation's reply box has — the row comes from `setFooterControls`
@@ -1363,7 +1368,7 @@ final class SessionComposerViewController: NSViewController {
         // is the one stable place that can connect the location chip to the disabled send.
         promptView.placeholder = project == nil
             ? ComposerDefaults.chooseProjectFirstReason
-            : ComposerDefaults.promptPlaceholder
+            : ComposerDefaults.invitation
         refreshStartButton()
 
         let account = selectedAgent.supportsAccounts
@@ -2311,7 +2316,7 @@ final class SessionComposerViewController: NSViewController {
             ? ComposerDefaults.chooseProjectFirstReason
             : (selectedRole == .manager
                 ? L10n.string("Write the brief: what to run, on which accounts, when to stop")
-                : ComposerDefaults.promptPlaceholder)
+                : ComposerDefaults.invitation)
         if editingScheduledStartID == nil {
             startButton.title = selectedRole == .manager
                 ? L10n.string("Start manager")
@@ -2762,6 +2767,12 @@ enum ComposerDefaults {
     /// three surfaces share.
     static var promptPlaceholder: String {
         L10n.string("Describe a task or ask a question")
+    }
+
+    /// The invitation an empty composer shows: the theme's own when it states one, the app's
+    /// otherwise.
+    @MainActor static var invitation: String {
+        ThemeWording.composerPlaceholder ?? promptPlaceholder
     }
 
     /// What a manager is for, in place of the greeting a chat gets. Three lines the hero morphs

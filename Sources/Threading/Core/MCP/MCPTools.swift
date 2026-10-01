@@ -1107,6 +1107,180 @@ struct AppThemeSidebarImageArguments: Codable, Sendable {
   let source: AppThemeImageArguments?
   let mode: String?
   let opacity: Double?
+  let alignment: String?
+
+  init(
+    source: AppThemeImageArguments? = nil,
+    mode: String? = nil,
+    opacity: Double? = nil,
+    alignment: String? = nil
+  ) {
+    self.source = source
+    self.mode = mode
+    self.opacity = opacity
+    self.alignment = alignment
+  }
+}
+
+/// One picture for a variant's sprite library. Stating a name the library already holds
+/// replaces that picture (or only its tint, when no source is given).
+struct AppThemeSpriteArguments: Codable, Sendable {
+  let name: String?
+  let source: AppThemeImageArguments?
+  let tinted: Bool?
+
+  init(name: String? = nil, source: AppThemeImageArguments? = nil, tinted: Bool? = nil) {
+    self.name = name
+    self.source = source
+    self.tinted = tinted
+  }
+}
+
+/// A sound handed to a theme tool: a file the host reads, whose extension names its container,
+/// or the bytes inline with the container named in `format`.
+struct AppThemeSoundArguments: Codable, Sendable {
+  let path: String?
+  let base64: String?
+  let format: String?
+
+  init(path: String? = nil, base64: String? = nil, format: String? = nil) {
+    self.path = path
+    self.base64 = base64
+    self.format = format
+  }
+}
+
+/// What the variant does for one app event. Merged onto the moment already stated.
+struct AppThemeMomentArguments: Codable, Sendable {
+  let particles: AppThemeParticlesArguments?
+  let removeParticles: Bool?
+  let duration: Double?
+  let sound: AppThemeSoundArguments?
+  let removeSound: Bool?
+  let remove: Bool?
+
+  init(
+    particles: AppThemeParticlesArguments? = nil,
+    removeParticles: Bool? = nil,
+    duration: Double? = nil,
+    sound: AppThemeSoundArguments? = nil,
+    removeSound: Bool? = nil,
+    remove: Bool? = nil
+  ) {
+    self.particles = particles
+    self.removeParticles = removeParticles
+    self.duration = duration
+    self.sound = sound
+    self.removeSound = removeSound
+    self.remove = remove
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case particles
+    case removeParticles = "remove_particles"
+    case duration, sound
+    case removeSound = "remove_sound"
+    case remove
+  }
+}
+
+struct AppThemeMomentsArguments: Codable, Sendable {
+  let turnFinished: AppThemeMomentArguments?
+  let needsAttention: AppThemeMomentArguments?
+
+  init(turnFinished: AppThemeMomentArguments? = nil, needsAttention: AppThemeMomentArguments? = nil) {
+    self.turnFinished = turnFinished
+    self.needsAttention = needsAttention
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case turnFinished = "turn_finished"
+    case needsAttention = "needs_attention"
+  }
+}
+
+/// The variant's words. Each half merges: a stated list replaces the list, a stated
+/// placeholder replaces the placeholder, and each `remove_*` gives one back to the app.
+struct AppThemeWordsArguments: Codable, Sendable {
+  let working: [String]?
+  let removeWorking: Bool?
+  let composerPlaceholder: String?
+  let removeComposerPlaceholder: Bool?
+
+  init(
+    working: [String]? = nil,
+    removeWorking: Bool? = nil,
+    composerPlaceholder: String? = nil,
+    removeComposerPlaceholder: Bool? = nil
+  ) {
+    self.working = working
+    self.removeWorking = removeWorking
+    self.composerPlaceholder = composerPlaceholder
+    self.removeComposerPlaceholder = removeComposerPlaceholder
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case working
+    case removeWorking = "remove_working"
+    case composerPlaceholder = "composer_placeholder"
+    case removeComposerPlaceholder = "remove_composer_placeholder"
+  }
+}
+
+/// One mood's pose. `source` is required for a mood with no pose yet; the rest merge.
+struct AppThemeMascotPoseArguments: Codable, Sendable {
+  let source: AppThemeImageArguments?
+  let motion: String?
+  let every: Double?
+  let particles: AppThemeParticlesArguments?
+  let removeParticles: Bool?
+  let origin: AppThemeLogoOriginArguments?
+
+  init(
+    source: AppThemeImageArguments? = nil,
+    motion: String? = nil,
+    every: Double? = nil,
+    particles: AppThemeParticlesArguments? = nil,
+    removeParticles: Bool? = nil,
+    origin: AppThemeLogoOriginArguments? = nil
+  ) {
+    self.source = source
+    self.motion = motion
+    self.every = every
+    self.particles = particles
+    self.removeParticles = removeParticles
+    self.origin = origin
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case source, motion, every, particles
+    case removeParticles = "remove_particles"
+    case origin
+  }
+}
+
+struct AppThemeMascotArguments: Codable, Sendable {
+  let size: Double?
+  let placement: String?
+  let poses: [String: AppThemeMascotPoseArguments]?
+  let removePoses: [String]?
+
+  init(
+    size: Double? = nil,
+    placement: String? = nil,
+    poses: [String: AppThemeMascotPoseArguments]? = nil,
+    removePoses: [String]? = nil
+  ) {
+    self.size = size
+    self.placement = placement
+    self.poses = poses
+    self.removePoses = removePoses
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case size, placement, poses
+    case removePoses = "remove_poses"
+  }
 }
 
 /// The material's backdrop — the sidebar block's gradient-and-image half, stated for the app's
@@ -1157,6 +1331,7 @@ struct AppThemeBackdropArguments: Codable, Sendable {
 struct AppThemeParticlesArguments: Codable, Sendable {
   let style: String?
   let shape: String?
+  let sprites: [String]?
   let colors: [String]?
   let density: Double?
   let size: Double?
@@ -1166,6 +1341,7 @@ struct AppThemeParticlesArguments: Codable, Sendable {
   init(
     style: String? = nil,
     shape: String? = nil,
+    sprites: [String]? = nil,
     colors: [String]? = nil,
     density: Double? = nil,
     size: Double? = nil,
@@ -1174,6 +1350,7 @@ struct AppThemeParticlesArguments: Codable, Sendable {
   ) {
     self.style = style
     self.shape = shape
+    self.sprites = sprites
     self.colors = colors
     self.density = density
     self.size = size
@@ -1313,6 +1490,9 @@ struct AppThemeSidebarArguments: Codable, Sendable {
   let removeBand: Bool?
   let navigatorWell: AppThemeSidebarNavigatorWellArguments?
   let removeNavigatorWell: Bool?
+  let mascot: AppThemeMascotArguments?
+  let removeMascot: Bool?
+  let logoInDock: Bool?
   let remove: Bool?
 
   init(
@@ -1331,6 +1511,9 @@ struct AppThemeSidebarArguments: Codable, Sendable {
     removeBand: Bool? = nil,
     navigatorWell: AppThemeSidebarNavigatorWellArguments? = nil,
     removeNavigatorWell: Bool? = nil,
+    mascot: AppThemeMascotArguments? = nil,
+    removeMascot: Bool? = nil,
+    logoInDock: Bool? = nil,
     remove: Bool? = nil
   ) {
     self.gradient = gradient
@@ -1348,6 +1531,9 @@ struct AppThemeSidebarArguments: Codable, Sendable {
     self.removeBand = removeBand
     self.navigatorWell = navigatorWell
     self.removeNavigatorWell = removeNavigatorWell
+    self.mascot = mascot
+    self.removeMascot = removeMascot
+    self.logoInDock = logoInDock
     self.remove = remove
   }
 
@@ -1367,6 +1553,9 @@ struct AppThemeSidebarArguments: Codable, Sendable {
     case removeBand = "remove_band"
     case navigatorWell = "navigator_well"
     case removeNavigatorWell = "remove_navigator_well"
+    case mascot
+    case removeMascot = "remove_mascot"
+    case logoInDock = "logo_in_dock"
     case remove
   }
 }
@@ -1567,6 +1756,12 @@ struct AppThemeVariantArguments: Codable, Sendable {
   let chrome: AppThemeChromeArguments?
   let transition: AppThemeTransitionArguments?
   let removeTransition: Bool?
+  let sprites: [AppThemeSpriteArguments]?
+  let removeSprites: [String]?
+  let moments: AppThemeMomentsArguments?
+  let removeMoments: Bool?
+  let words: AppThemeWordsArguments?
+  let removeWords: Bool?
 
   /// Defaulted so the call sites (and tests) written before `sidebar` and `chrome` existed
   /// keep reading as they did.
@@ -1577,7 +1772,13 @@ struct AppThemeVariantArguments: Codable, Sendable {
     sidebar: AppThemeSidebarArguments? = nil,
     chrome: AppThemeChromeArguments? = nil,
     transition: AppThemeTransitionArguments? = nil,
-    removeTransition: Bool? = nil
+    removeTransition: Bool? = nil,
+    sprites: [AppThemeSpriteArguments]? = nil,
+    removeSprites: [String]? = nil,
+    moments: AppThemeMomentsArguments? = nil,
+    removeMoments: Bool? = nil,
+    words: AppThemeWordsArguments? = nil,
+    removeWords: Bool? = nil
   ) {
     self.roles = roles
     self.material = material
@@ -1586,6 +1787,12 @@ struct AppThemeVariantArguments: Codable, Sendable {
     self.chrome = chrome
     self.transition = transition
     self.removeTransition = removeTransition
+    self.sprites = sprites
+    self.removeSprites = removeSprites
+    self.moments = moments
+    self.removeMoments = removeMoments
+    self.words = words
+    self.removeWords = removeWords
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -1593,6 +1800,12 @@ struct AppThemeVariantArguments: Codable, Sendable {
     case terminalColors = "terminal_colors"
     case sidebar, chrome, transition
     case removeTransition = "remove_transition"
+    case sprites
+    case removeSprites = "remove_sprites"
+    case moments
+    case removeMoments = "remove_moments"
+    case words
+    case removeWords = "remove_words"
   }
 }
 
@@ -7851,7 +8064,13 @@ enum MCPTools {
         lights and rounded corners while the theme is worn. The material's optional \
         `bevel` turns flat borders into raised/sunken two-tone edges — hard for square \
         period chrome, soft for rounded clay relief — using the bevel_highlight and \
-        bevel_shadow roles.
+        bevel_shadow roles. A theme can also have a character: `sprites` gives its particle \
+        blocks pictures of their own (paw prints, hearts), `sidebar.mascot` stands a \
+        figure at the sidebar's foot that changes pose as agents rest, work, wait and \
+        finish, `moments` answers a finished turn or a waiting session with a shower and \
+        a sound, `words` gives the status line and composer its voice, and \
+        `sidebar.logo_in_dock` puts the logo on the Dock tile. Check the result with \
+        preview_app_theme, which shows every mascot mood.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -8911,6 +9130,14 @@ enum MCPTools {
           description: "Overrides the style's own artwork: \"bubble\", \"dot\", \"spark\", "
             + "\"flake\" or \"ribbon\"."
         ),
+        "sprites": MCPPropertySchema(
+          type: .array,
+          description: "1–4 names from this variant's sprites library, drawn instead of a "
+            + "shape — each particle takes one. A tinted sprite is drawn in each of the "
+            + "colors; a full-colour one keeps its own. State a shape or sprites, not both; "
+            + "[] returns to the shape.",
+          items: MCPArrayItemSchema(type: .string)
+        ),
         "colors": MCPPropertySchema(
           type: .array,
           description: "1–4 inks, each a role name (\"accent\", \"label\", …) resolved "
@@ -9023,7 +9250,202 @@ enum MCPTools {
         type: .boolean,
         description: "True removes the transition: switches into this variant repaint at once."
       ),
+      "sprites": MCPPropertySchema(
+        type: .array,
+        description: """
+          Small pictures this variant's particle blocks may draw instead of a host shape — \
+          paw prints, hearts, a theme's own little character. Up to 8, each normalised to \
+          a 128-pixel PNG. Draw them white-on-transparent and leave tinted true to colour \
+          them per particle; tinted false keeps their own colours. Stating a name the \
+          library holds replaces it; particle blocks name them in `sprites`.
+          """,
+        items: MCPArrayItemSchema(
+          type: .object,
+          properties: [
+            "name": MCPPropertySchema(
+              type: .string,
+              description: "1–24 lowercase letters, digits, - or _."
+            ),
+            "source": MCPPropertySchema(
+              type: .object,
+              description: "{path} or {base64} — any ImageIO format, at most 1 MB. Required "
+                + "for a new name.",
+              properties: appImageSourceSchema
+            ),
+            "tinted": MCPPropertySchema(
+              type: .boolean,
+              description: "True (default) colours the picture's silhouette in each particle "
+                + "ink; false keeps its colours."
+            ),
+          ],
+          required: ["name"]
+        )
+      ),
+      "remove_sprites": MCPPropertySchema(
+        type: .array,
+        description: "Names to take out of the library; no particle block may still name them.",
+        items: MCPArrayItemSchema(type: .string)
+      ),
+      "moments": MCPPropertySchema(
+        type: .object,
+        description: """
+          What this variant does when something happens in the app: a shower of its \
+          particles across the window and/or a short sound of its own. One moment plays at \
+          a time, then the theme stays quiet for 8 seconds, so agents finishing together \
+          are answered once. Particles follow Reduce Motion and the Theme animations \
+          setting; sounds play only while Threading is frontmost, the Theme sounds setting \
+          is on and sounds are not silenced. Each moment merges onto the one stated.
+          """,
+        properties: [
+          "turn_finished": appMomentSchema(
+            "A turn came back: an agent that was working stopped with an answer."
+          ),
+          "needs_attention": appMomentSchema(
+            "A session started waiting for the person — a permission or a question."
+          ),
+        ]
+      ),
+      "remove_moments": MCPPropertySchema(
+        type: .boolean,
+        description: "True removes every moment: the app's events pass silently."
+      ),
+      "words": MCPPropertySchema(
+        type: .object,
+        description: """
+          The theme's voice in the two places a theme may speak: the word a native \
+          conversation's status line shows while a turn runs (dealt one per turn, every \
+          word before any repeats) and the empty new-session composer's invitation. \
+          State words and status text stay the app's own.
+          """,
+        properties: [
+          "working": MCPPropertySchema(
+            type: .array,
+            description: "1–20 one-line words of at most 28 characters, e.g. \"Herding…\". "
+              + "Replaces the app's list.",
+            items: MCPArrayItemSchema(type: .string)
+          ),
+          "remove_working": MCPPropertySchema(
+            type: .boolean,
+            description: "True returns the app's own working words."
+          ),
+          "composer_placeholder": MCPPropertySchema(
+            type: .string,
+            description: "One line of at most 80 characters."
+          ),
+          "remove_composer_placeholder": MCPPropertySchema(
+            type: .boolean,
+            description: "True returns the app's own invitation."
+          ),
+        ]
+      ),
+      "remove_words": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns all of the app's own words."
+      ),
     ]
+  }
+
+  /// `{path}` or `{base64}` for a theme picture — one spelling for every slot that takes one.
+  private static var appImageSourceSchema: [String: MCPPropertySchema] {
+    [
+      "path": MCPPropertySchema(
+        type: .string,
+        description: "Absolute or ~-relative path to an image file on this machine; the host "
+          + "reads, normalises to PNG and stores a copy, so the file need not persist."
+      ),
+      "base64": MCPPropertySchema(
+        type: .string,
+        description: "The image bytes, base64-encoded, when no file exists on disk."
+      ),
+    ]
+  }
+
+  /// One mood's pose of a sidebar mascot.
+  private static var appMascotPoseSchema: MCPPropertySchema {
+    MCPPropertySchema(
+      type: .object,
+      description: "The picture for this mood, how it moves, and what it gives off.",
+      properties: [
+        "source": MCPPropertySchema(
+          type: .object,
+          description: "{path} or {base64}; at most 2 MB, stored at up to 256 pixels.",
+          properties: appImageSourceSchema
+        ),
+        "motion": MCPPropertySchema(
+          type: .string,
+          description: "Looped while the mood lasts: \"breathe\" (slow swell — asleep), "
+            + "\"bob\", \"hop\" (a jump), \"sway\", \"shake\", \"spin\", \"pop\", or \"none\"."
+        ),
+        "every": MCPPropertySchema(
+          type: .number,
+          description: "Seconds from one loop to the next, 0.4–20. Omit for the motion's own rhythm."
+        ),
+        "particles": appParticlesSchema(
+          "Given off as a stream while the mood lasts — a Z sprite for resting, hearts for "
+            + "celebrating. While working the stream follows how busy the agents are."
+        ),
+        "remove_particles": MCPPropertySchema(
+          type: .boolean,
+          description: "True removes this pose's stream."
+        ),
+        "origin": MCPPropertySchema(
+          type: .object,
+          description: "Where particles leave the picture, in its unit square. Default the top centre.",
+          properties: [
+            "x": MCPPropertySchema(type: .number, description: "0–1 from the leading edge."),
+            "y": MCPPropertySchema(type: .number, description: "0–1 from the top."),
+          ]
+        ),
+      ]
+    )
+  }
+
+  private static func appMomentSchema(_ description: String) -> MCPPropertySchema {
+    MCPPropertySchema(
+      type: .object,
+      description: description,
+      properties: [
+        "particles": appParticlesSchema(
+          "A shower across every visible window, born like a transition's but with no wash "
+            + "and a third of its budget."
+        ),
+        "remove_particles": MCPPropertySchema(
+          type: .boolean,
+          description: "True removes the shower and keeps any sound."
+        ),
+        "duration": MCPPropertySchema(
+          type: .number,
+          description: "Seconds the shower lasts, 0.6–2.4. Default 1.4."
+        ),
+        "sound": MCPPropertySchema(
+          type: .object,
+          description: "A short cue of at most 4 seconds and 1 MB: {path} to an .aiff, .caf, "
+            + ".wav, .m4a or .mp3 file, or {base64, format}. Stored with the theme.",
+          properties: [
+            "path": MCPPropertySchema(
+              type: .string,
+              description: "Absolute or ~-relative path; its extension names the format."
+            ),
+            "base64": MCPPropertySchema(
+              type: .string,
+              description: "The sound's bytes, base64-encoded."
+            ),
+            "format": MCPPropertySchema(
+              type: .string,
+              description: "With base64: \"aiff\", \"caf\", \"wav\", \"m4a\" or \"mp3\"."
+            ),
+          ]
+        ),
+        "remove_sound": MCPPropertySchema(
+          type: .boolean,
+          description: "True removes the sound and keeps any shower."
+        ),
+        "remove": MCPPropertySchema(
+          type: .boolean,
+          description: "True removes this moment entirely."
+        ),
+      ]
+    )
   }
 
   private static var appSidebarSchema: [String: MCPPropertySchema] {
@@ -9102,6 +9524,13 @@ enum MCPTools {
             type: .number,
             description: "0–1 over what lies beneath. Default 1."
           ),
+          "alignment": MCPPropertySchema(
+            type: .string,
+            description: "Where a fill or fit picture sits: \"center\" (default), \"top\", "
+              + "\"bottom\", \"leading\", \"trailing\", \"top_leading\", \"top_trailing\", "
+              + "\"bottom_leading\" or \"bottom_trailing\". \"bottom\" with \"fit\" stands an "
+              + "illustration on the region's foot at any height."
+          ),
         ]
       ),
       "remove_image": MCPPropertySchema(
@@ -9127,6 +9556,51 @@ enum MCPTools {
       "remove_navigator_well": MCPPropertySchema(
         type: .boolean,
         description: "True returns the navigator to the transparent sidebar default."
+      ),
+      "mascot": MCPPropertySchema(
+        type: .object,
+        description: """
+          A character standing at the sidebar's foot, beneath the project list, whose pose \
+          follows what the app is doing. Moods: "resting" (nothing running), "idle" (agents \
+          alive, none working), "working", "attention" (a session waits on the person) and \
+          "celebrating" (for ~3 s after a turn comes back). "idle" is required; a mood \
+          without its own pose borrows idle's (attention borrows working's first), and \
+          without a celebrating pose there is no celebration. Pictures are stored at up to \
+          256 pixels; transparent PNGs whose feet touch the bottom edge stand best. Rows \
+          scroll over the mascot and the list keeps its foot clear. Fields merge.
+          """,
+        properties: [
+          "size": MCPPropertySchema(
+            type: .number,
+            description: "Points tall, 32–120. Default 72; the width follows the pictures."
+          ),
+          "placement": MCPPropertySchema(
+            type: .string,
+            description: "\"leading\", \"center\" or \"trailing\" (default) along the column's foot."
+          ),
+          "poses": MCPPropertySchema(
+            type: .object,
+            description: "One pose per mood, keyed by mood name. Each merges onto the pose "
+              + "already stated; a new mood needs a source.",
+            properties: Dictionary(uniqueKeysWithValues: ThemeMascotMood.allCases.map {
+              ($0.rawValue, appMascotPoseSchema)
+            })
+          ),
+          "remove_poses": MCPPropertySchema(
+            type: .array,
+            description: "Moods whose pose to remove; idle cannot be removed while a mascot is stated.",
+            items: MCPArrayItemSchema(type: .string)
+          ),
+        ]
+      ),
+      "remove_mascot": MCPPropertySchema(
+        type: .boolean,
+        description: "True removes the mascot."
+      ),
+      "logo_in_dock": MCPPropertySchema(
+        type: .boolean,
+        description: "True also draws the theme's logo image on the Dock tile, on the theme's "
+          + "own plate, instead of the Threading mark. Needs an image logo; false returns the mark."
       ),
       "logo": MCPPropertySchema(
         type: .stringOrObject,
@@ -9411,6 +9885,13 @@ enum MCPTools {
               "opacity": MCPPropertySchema(
                 type: .number,
                 description: "0–1 over the gradient and ground; default 1."
+              ),
+              "alignment": MCPPropertySchema(
+                type: .string,
+                description: "Where a fill or fit picture sits: \"center\" (default), \"top\", "
+                  + "\"bottom\", \"leading\", \"trailing\", \"top_leading\", \"top_trailing\", "
+                  + "\"bottom_leading\" or \"bottom_trailing\". \"bottom\" with \"fit\" stands an "
+                  + "illustration on the region's foot at any height."
               ),
             ]
           ),

@@ -90,6 +90,66 @@ enum ThemeAssetStore {
         )
     }
 
+    /// Stores one sprite in a variant's library under its name, normalised to a small PNG.
+    static func storeSprite(
+        imageData: Data,
+        for themeID: AppThemeID,
+        name: String,
+        variant: AppTheme.VariantKind
+    ) -> String? {
+        guard ThemeSprite.isValidName(name) else { return nil }
+        return store(
+            imageData: imageData,
+            for: themeID,
+            fileName: ThemeSprite.fileName(for: name, variant: variant),
+            maximumBytes: ThemeSpriteLimits.maximumImageBytes,
+            maximumPixelSize: ThemeSpriteLimits.storedPixelSize
+        )
+    }
+
+    /// Stores the mascot's picture for one mood.
+    static func storeMascotPose(
+        imageData: Data,
+        for themeID: AppThemeID,
+        mood: ThemeMascotMood,
+        variant: AppTheme.VariantKind
+    ) -> String? {
+        store(
+            imageData: imageData,
+            for: themeID,
+            fileName: ThemeMascotLimits.fileName(for: mood, variant: variant),
+            maximumBytes: ThemeMascotLimits.maximumImageBytes,
+            maximumPixelSize: ThemeMascotLimits.storedPixelSize
+        )
+    }
+
+    /// Stores a moment's sound as given — no transcoding — once `NSSound` has proved it is a
+    /// short, playable cue in a container the system reads. Returns the asset name, or nil for
+    /// bytes that are not one.
+    static func storeSound(
+        data: Data,
+        for themeID: AppThemeID,
+        event: ThemeMomentEvent,
+        variant: AppTheme.VariantKind,
+        pathExtension: String
+    ) -> String? {
+        let ext = pathExtension.lowercased()
+        guard data.count <= ThemeMomentLimits.maximumSoundBytes,
+              ThemeMomentLimits.soundExtensions.contains(ext),
+              let sound = NSSound(data: data),
+              sound.duration > 0,
+              sound.duration <= ThemeMomentLimits.maximumSoundSeconds else { return nil }
+        let fileName = ThemeMomentLimits.soundFileName(for: event, variant: variant, extension: ext)
+        guard write(data, fileName: fileName, for: themeID) else { return nil }
+        return fileName
+    }
+
+    /// Where a stored asset lives, for a player that reads it by reference. Nil for a name
+    /// that is not one safe file-name component.
+    static func url(named assetName: String, for themeID: AppThemeID) -> URL? {
+        assetURL(named: assetName, for: themeID)
+    }
+
     private static func store(
         imageData: Data,
         for themeID: AppThemeID,
@@ -98,12 +158,19 @@ enum ThemeAssetStore {
         maximumPixelSize: Int
     ) -> String? {
         guard imageData.count <= maximumBytes,
-              let themeFolder = folder(for: themeID),
-              let target = assetURL(named: fileName, for: themeID),
               let png = ProjectIconStore.normalizedPNGData(
                   from: imageData,
                   maxPixelSize: maximumPixelSize
-              ) else { return nil }
+              ),
+              write(png, fileName: fileName, for: themeID) else { return nil }
+        return fileName
+    }
+
+    /// The one place this store writes a file: the theme's folder made, the bytes written
+    /// atomically, the decoded cache for that name dropped.
+    private static func write(_ data: Data, fileName: String, for themeID: AppThemeID) -> Bool {
+        guard let themeFolder = folder(for: themeID),
+              let target = assetURL(named: fileName, for: themeID) else { return false }
 
         let fileManager = FileManager.default
 
@@ -112,7 +179,7 @@ enum ThemeAssetStore {
                 at: themeFolder,
                 withIntermediateDirectories: true
             )
-            try png.write(
+            try data.write(
                 to: target,
                 options: .atomic
             )
@@ -120,11 +187,11 @@ enum ThemeAssetStore {
             ThreadingLogger.theme.error(
                 "Theme asset write failed theme=\(themeID.rawValue, privacy: .private(mask: .hash)) file=\(fileName, privacy: .private(mask: .hash)) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            return nil
+            return false
         }
 
         cache.removeObject(forKey: cacheKey(themeID, fileName))
-        return fileName
+        return true
     }
 
     /// The decoded asset, cached across the sidebar's redraws. Nil for a name that resolves
@@ -245,13 +312,14 @@ enum ThemeAssetDefaults {
     static let assetDirectoryName = "ThemeAssets"
     static let classicSkinTitleBarFileName = "classic-titlebar.png"
 
-    /// A sidebar background is stored at 2× the sidebar's widest column; a logo at 4× its slot;
-    /// a material backdrop at 2× of a wide pane — enough that Retina rendering never upsamples,
+    /// A sidebar background is stored at 2× the sidebar's widest column; a logo large enough to
+    /// stand on the Dock tile (`SidebarStyle.Brand.dockIcon`), which never upscales a mark; a
+    /// material backdrop at 2× of a wide pane — enough that Retina rendering never upsamples,
     /// small enough that a theme cannot smuggle a wallpaper library into Application Support.
     static func storedPixelSize(for slot: ThemeAssetSlot) -> Int {
         switch slot {
         case .background: return 1024
-        case .logo: return 128
+        case .logo: return 512
         case .backdrop: return 2048
         }
     }

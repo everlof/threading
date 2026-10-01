@@ -219,6 +219,7 @@ final class AppSettingDefinitionTests: XCTestCase {
                 valueType: .boolean
             ),
             .playsThemeMotion: .init(key: "playsThemeMotion", valueType: .boolean),
+            .playsThemeSounds: .init(key: "playsThemeSounds", valueType: .boolean),
             .convertsDroppedImages: .init(key: "convertsDroppedImages", valueType: .boolean),
             .copiesTerminalSelection: .init(key: "copiesTerminalSelection", valueType: .boolean),
             .notifiesOnAttention: .init(key: "notifiesOnAttention", valueType: .boolean),
@@ -534,9 +535,9 @@ final class AppSettingDefinitionTests: XCTestCase {
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
 #if DEBUG || THREADING_INTERNAL
-        XCTAssertEqual(authoredRows.count, 93)
+        XCTAssertEqual(authoredRows.count, 94)
 #else
-        XCTAssertEqual(authoredRows.count, 92)
+        XCTAssertEqual(authoredRows.count, 93)
 #endif
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
@@ -594,8 +595,8 @@ final class AppSettingDefinitionTests: XCTestCase {
             "When writing a prompt, press Return to", "Reset Shortcuts"
         ])
         XCTAssertEqual(actual["themes"], [
-            "App theme", "Classic skins", "Theme animations", "Text size", "App font",
-            "Conversation font"
+            "App theme", "Classic skins", "Theme animations", "Theme sounds", "Text size",
+            "App font", "Conversation font"
         ])
         XCTAssertEqual(actual["profiles"], [
             "Font", "Cursor style", "Blinking cursor", "Keep backgrounds in tune with the theme",

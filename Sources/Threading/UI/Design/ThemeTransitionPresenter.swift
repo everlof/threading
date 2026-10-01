@@ -158,6 +158,11 @@ final class ThemeTransitionPresenter {
         return ThemeTransitionOverlayView.Palette(
             transition: transition,
             particleColors: particleColors,
+            particleSprites: ThemeBackdropAppearance.sprites(
+                transition.particles.sprites,
+                theme: theme,
+                appearance: appearance
+            ),
             wash: wash,
             shimmer: shimmer
         )

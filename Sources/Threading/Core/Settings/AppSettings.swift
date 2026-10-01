@@ -284,6 +284,24 @@ final class AppSettings {
         return AppSettingDefinitions.playsThemeMotion.read(from: .standard) ?? true
     }
 
+    /// Whether a theme may play its own short sounds for its moments — a turn coming back, a
+    /// session starting to wait (`ThemeMoments`).
+    ///
+    /// On by default, like the theme's motion, and narrower than any notification sound: a
+    /// theme sound plays only while Threading is frontmost — outside it, macOS notifications and
+    /// the user's own sound choices speak — and never while every sound is silenced.
+    var playsThemeSounds: Bool {
+        get { Self.playsThemeSounds }
+        set {
+            AppSettingDefinitions.playsThemeSounds.write(newValue, to: defaults)
+        }
+    }
+
+    nonisolated static var playsThemeSounds: Bool {
+        _ = registerStandardDefaults
+        return AppSettingDefinitions.playsThemeSounds.read(from: .standard) ?? true
+    }
+
     /// Whether a session that wants the user posts a macOS notification — blocked on an
     /// approval, finished off screen, or finished while the app was in the background.
     ///

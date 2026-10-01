@@ -161,9 +161,23 @@ public struct AppTheme: Codable, Equatable {
         /// being arrived at. Absent means the switch repaints at once, as it always has.
         public let transition: ThemeTransition?
 
+        /// Small pictures this variant's particle blocks may draw in place of a host shape —
+        /// paw prints, hearts, the theme's own little sheep. Empty means every block draws the
+        /// host's shapes, as all did before sprites existed.
+        public let sprites: [ThemeSprite]
+
+        /// What the variant does when something happens — a turn coming back, a session
+        /// starting to wait on the person. Absent means the app's events pass silently.
+        public let moments: ThemeMoments?
+
+        /// The working words and the composer's invitation, in the theme's voice. Absent
+        /// means the app's own.
+        public let words: ThemeWords?
+
         private enum CodingKeys: String, CodingKey {
             case roles, terminalPalette
             case material, sidebar, chrome, transition
+            case sprites, moments, words
         }
 
         public init(
@@ -172,7 +186,10 @@ public struct AppTheme: Codable, Equatable {
             material: Material,
             sidebar: SidebarStyle? = nil,
             chrome: WindowChromeStyle? = nil,
-            transition: ThemeTransition? = nil
+            transition: ThemeTransition? = nil,
+            sprites: [ThemeSprite] = [],
+            moments: ThemeMoments? = nil,
+            words: ThemeWords? = nil
         ) {
             self.roles = roles
             self.terminalPalette = terminalPalette
@@ -180,6 +197,9 @@ public struct AppTheme: Codable, Equatable {
             self.sidebar = sidebar
             self.chrome = chrome
             self.transition = transition
+            self.sprites = sprites
+            self.moments = moments
+            self.words = words
         }
 
         public init(from decoder: Decoder) throws {
@@ -197,6 +217,9 @@ public struct AppTheme: Codable, Equatable {
             sidebar = try container.decodeIfPresent(SidebarStyle.self, forKey: .sidebar)
             chrome = try container.decodeIfPresent(WindowChromeStyle.self, forKey: .chrome)
             transition = try container.decodeIfPresent(ThemeTransition.self, forKey: .transition)
+            sprites = try container.decodeIfPresent([ThemeSprite].self, forKey: .sprites) ?? []
+            moments = try container.decodeIfPresent(ThemeMoments.self, forKey: .moments)
+            words = try container.decodeIfPresent(ThemeWords.self, forKey: .words)
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -210,6 +233,9 @@ public struct AppTheme: Codable, Equatable {
             try container.encodeIfPresent(sidebar, forKey: .sidebar)
             try container.encodeIfPresent(chrome, forKey: .chrome)
             try container.encodeIfPresent(transition, forKey: .transition)
+            if !sprites.isEmpty { try container.encode(sprites, forKey: .sprites) }
+            try container.encodeIfPresent(moments, forKey: .moments)
+            try container.encodeIfPresent(words, forKey: .words)
         }
 
         // MARK: - Rebuilding
@@ -235,7 +261,10 @@ public struct AppTheme: Codable, Equatable {
                 material: material ?? self.material,
                 sidebar: sidebar,
                 chrome: chrome,
-                transition: transition
+                transition: transition,
+                sprites: sprites,
+                moments: moments,
+                words: words
             )
         }
 
@@ -249,7 +278,10 @@ public struct AppTheme: Codable, Equatable {
                 material: material,
                 sidebar: sidebar,
                 chrome: chrome,
-                transition: transition
+                transition: transition,
+                sprites: sprites,
+                moments: moments,
+                words: words
             )
         }
 
@@ -260,7 +292,30 @@ public struct AppTheme: Codable, Equatable {
                 material: material,
                 sidebar: sidebar,
                 chrome: chrome,
-                transition: transition
+                transition: transition,
+                sprites: sprites,
+                moments: moments,
+                words: words
+            )
+        }
+
+        /// The library, the moments and the words together: the tools patch all three in the
+        /// same pass, and one verb keeps "leave it alone" and "take it away" apart for each.
+        public func replacingCharacter(
+            sprites: [ThemeSprite],
+            moments: ThemeMoments?,
+            words: ThemeWords?
+        ) -> Variant {
+            Variant(
+                roles: roles,
+                terminalPalette: terminalPalette,
+                material: material,
+                sidebar: sidebar,
+                chrome: chrome,
+                transition: transition,
+                sprites: sprites,
+                moments: moments,
+                words: words
             )
         }
 
@@ -271,7 +326,10 @@ public struct AppTheme: Codable, Equatable {
                 material: material,
                 sidebar: sidebar,
                 chrome: chrome,
-                transition: transition
+                transition: transition,
+                sprites: sprites,
+                moments: moments,
+                words: words
             )
         }
     }

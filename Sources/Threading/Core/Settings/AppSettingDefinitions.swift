@@ -34,6 +34,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case discoversAccountAvatars
     case harmonizesTerminalBackgrounds
     case playsThemeMotion
+    case playsThemeSounds
     case convertsDroppedImages
     case copiesTerminalSelection
     case notifiesOnAttention
@@ -895,6 +896,13 @@ enum AppSettingDefinitions {
         presentations: [row("themes", 2, "App", "Theme animations",
                             ["animation", "motion", "particles", "bubbles", "transition"])]
     )
+    static let playsThemeSounds = AppSettingDescriptor<Bool>(
+        identity: .playsThemeSounds,
+        persistenceKey: "playsThemeSounds",
+        absence: .registered(true),
+        presentations: [row("themes", 3, "App", "Theme sounds",
+                            ["sound", "audio", "moments", "bark"])]
+    )
     static let convertsDroppedImages = AppSettingDescriptor<Bool>(
         identity: .convertsDroppedImages,
         persistenceKey: "convertsDroppedImages",
@@ -1495,7 +1503,7 @@ enum AppSettingDefinitions {
         absence: .inherit,
         validation: .maximumBytes(1_024),
         encoding: .removeEmpty,
-        presentations: [row("themes", 4, "Fonts", "App font", ["typeface", "font"])]
+        presentations: [row("themes", 5, "Fonts", "App font", ["typeface", "font"])]
     )
     static let conversationFontFamily = AppSettingDescriptor<String>(
         identity: .conversationFontFamily,
@@ -1503,7 +1511,7 @@ enum AppSettingDefinitions {
         absence: .inherit,
         validation: .maximumBytes(1_024),
         encoding: .removeEmpty,
-        presentations: [row("themes", 5, "Fonts", "Conversation font",
+        presentations: [row("themes", 6, "Fonts", "Conversation font",
                             ["typeface", "font", "chat"])]
     )
     static let appTextSize = AppSettingDescriptor<String>(
@@ -1511,7 +1519,7 @@ enum AppSettingDefinitions {
         persistenceKey: "appTextSize",
         absence: .registered(AppTextSize.standard.rawValue),
         validation: .allowedStrings(Set(AppTextSize.allCases.map(\.rawValue))),
-        presentations: [row("themes", 3, "Fonts", "Text size",
+        presentations: [row("themes", 4, "Fonts", "Text size",
                             ["large text", "text size"])]
     )
 
@@ -1533,7 +1541,7 @@ enum AppSettingDefinitions {
         .init(nativeSidebarGroupByFact),
         .init(nativeSidebarSortByFact), .init(promptReturnKey),
         .init(discoversProjectIcons), .init(discoversAccountAvatars),
-        .init(harmonizesTerminalBackgrounds), .init(playsThemeMotion),
+        .init(harmonizesTerminalBackgrounds), .init(playsThemeMotion), .init(playsThemeSounds),
         .init(convertsDroppedImages),
         .init(copiesTerminalSelection), .init(notifiesOnAttention),
         .init(disabledAttentionAlerts), .init(legacyPlaysAttentionAlertSound),

@@ -4859,6 +4859,29 @@ fraction of the gradient it travels (0.02–0.25). Replacing the gradient withou
 still. Reduce Motion and Low Power Mode keep the colors but stop the movement, and hidden
 screens stop animating. Background pictures remain on the Mac.
 
+A theme can have a **character**, too — ask your agent for one and it can give a theme any of:
+
+- **Its own particles.** Small pictures — paw prints, hearts, a little sheep — that the theme's
+  drifting fields, its arrival and its moments draw instead of bubbles or snowflakes.
+- **A mascot** standing at the foot of the sidebar, under the list. It changes pose with what
+  your agents are doing: resting when nothing runs, idle, working, looking up when a chat needs
+  you, and celebrating for a moment when a turn comes back. The list keeps room at its foot so
+  the last row always scrolls clear of it.
+- **Moments.** When a turn finishes or a chat starts waiting for you, the theme can answer with
+  a short shower of its particles and a sound of its own. One plays at a time, then the theme
+  stays quiet for a few seconds, so several agents finishing together are celebrated once.
+- **Words.** The word a native chat's status line shows while a turn runs ("Herding…" instead
+  of "Thinking…") and the invitation in an empty new-session composer. Status words such as
+  "Waiting for your answer" always stay the app's own.
+- **A Dock icon** made from the theme's logo, drawn on the theme's own plate.
+- **Pictures pinned to an edge.** A sidebar or pane picture can stand on the bottom edge (or
+  any edge or corner) at any window size, rather than always being centred.
+
+**Settings ▸ Themes ▸ Theme animations** stills all of it, and Reduce Motion always does; the
+mascot still changes pose, since that tells you something. **Theme sounds** turns a theme's
+sounds off. They only play while Threading is in front and never while every sound is
+silenced; outside the app, your notification sounds answer as before.
+
 
 The page stays live while an agent works too. You can say, for example, “Use Threading's
 app-theme MCP tools to make my current theme warmer and soften the sidebar.” The agent can inspect

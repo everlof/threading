@@ -179,6 +179,8 @@ final class ComponentGalleryViewController: NSViewController {
         "TerminalStatusBanner",
         "ThreadingMarkView",
         "ThemeLogoView",
+        "ThemeMascotView",
+        "SidebarMascotView",
         "ThemeSwatchImage",
         "ThemeSwatchView",
         "ThemeTransitionOverlayView",
@@ -289,6 +291,7 @@ final class ComponentGalleryViewController: NSViewController {
     private var markSamples: [ThreadingMarkView] = []
     private var particleMarkSamples: [ThreadingMarkView] = []
     private var themeLogoSample: ThemeLogoView?
+    private var themeMascotSample: ThemeMascotView?
     private var themeLogoSampleHovered = false
     private var arrivalStage: ThemedSurfaceView?
     private let appearanceToggle = ThemedToggle()
@@ -3779,6 +3782,21 @@ final class ComponentGalleryViewController: NSViewController {
                     makeThemeLogoSample()
                 ),
                 story(
+                    "ThemeMascotView",
+                    "A theme's mascot in its box. Each button shows that mood's pose: the "
+                        + "picture changes under a short fade and the pose's motion loops from "
+                        + "rest. Reduce Motion and the Theme animations setting keep the pose but "
+                        + "hold it still.",
+                    makeThemeMascotSample()
+                ),
+                story(
+                    "SidebarMascotView",
+                    "The strip at the sidebar's foot where the current theme's mascot stands, "
+                        + "following what the app's agents are doing. Empty, and reserving no "
+                        + "room, under a theme without a mascot — switch the theme above to compare.",
+                    makeSidebarMascotSample()
+                ),
+                story(
                     "ThemeTransitionOverlayView",
                     "How a theme arrives: particles in the incoming theme's colours cross the "
                         + "window while a wash rises to hide the swap and lifts off the new "
@@ -5065,6 +5083,103 @@ final class ComponentGalleryViewController: NSViewController {
         configureThemeLogoSample()
         themeLogoSample?.playLaunch()
         showReceipt(L10n.string("Logo launch played."))
+    }
+
+    /// The app's own icon in every pose, so the story moves under every theme: what changes
+    /// between moods is the motion and the stream, which is what this story is for.
+    private func makeThemeMascotSample() -> NSView {
+        let mascot = ThemeMascotView()
+        themeMascotSample = mascot
+        NSLayoutConstraint.activate([
+            mascot.widthAnchor.constraint(equalToConstant: 72),
+            mascot.heightAnchor.constraint(equalToConstant: 72)
+        ])
+        configureThemeMascotSample(mood: .idle)
+
+        let moods: [(String, Selector)] = [
+            ("Resting", #selector(showMascotResting(_:))),
+            ("Idle", #selector(showMascotIdle(_:))),
+            ("Working", #selector(showMascotWorking(_:))),
+            ("Attention", #selector(showMascotAttention(_:))),
+            ("Celebrating", #selector(showMascotCelebrating(_:)))
+        ]
+        let row = NSStackView(views: [mascot] + moods.map { button($0.0, action: $0.1) })
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Design.Spacing.medium
+        return row
+    }
+
+    /// Restated before every mood: the particles' inks are the current theme's.
+    private func configureThemeMascotSample(mood: ThemeMascotMood) {
+        guard let mascot = themeMascotSample,
+              let image = NSImage(named: NSImage.applicationIconName) else { return }
+        let theme = AppThemePalette.current
+        let appearance = mascot.effectiveAppearance
+        func pose(
+            _ motion: ThemeMascot.Motion,
+            every: Double? = nil,
+            particles: ThemeParticles? = nil
+        ) -> SidebarAppearance.Mascot.Pose {
+            let spec = ThemeMascot.Pose(asset: "sample", motion: motion, every: every, particles: particles)
+            return SidebarAppearance.Mascot.Pose(
+                spec: spec,
+                image: image,
+                particles: particles.map {
+                    ThemeBackdropAppearance.particles($0, theme: theme, appearance: appearance)
+                }
+            )
+        }
+        let poses: [ThemeMascotMood: SidebarAppearance.Mascot.Pose] = [
+            .resting: pose(.breathe, every: 3),
+            .idle: pose(.bob),
+            .working: pose(.hop, particles: ThemeParticles(style: .embers, colors: [.role(.accent)])),
+            .attention: pose(.sway),
+            .celebrating: pose(.pop, every: 1, particles: ThemeParticles(
+                style: .confetti,
+                colors: [.role(.accent), .role(.label)],
+                density: 0.8
+            ))
+        ]
+        let resolved = SidebarAppearance.Mascot(
+            spec: ThemeMascot(poses: poses.mapValues(\.spec)),
+            poses: poses
+        )
+        mascot.configure(resolved, mood: mood, fallbackMood: mood)
+    }
+
+    private func showMascot(_ mood: ThemeMascotMood) {
+        configureThemeMascotSample(mood: mood)
+        showReceipt(L10n.string("Mascot pose changed."))
+    }
+
+    @objc private func showMascotResting(_ sender: Any?) { showMascot(.resting) }
+    @objc private func showMascotIdle(_ sender: Any?) { showMascot(.idle) }
+    @objc private func showMascotWorking(_ sender: Any?) { showMascot(.working) }
+    @objc private func showMascotAttention(_ sender: Any?) { showMascot(.attention) }
+    @objc private func showMascotCelebrating(_ sender: Any?) { showMascot(.celebrating) }
+
+    /// The real strip on a sidebar ground, at a column's width.
+    private func makeSidebarMascotSample() -> NSView {
+        let column = NSView()
+        column.translatesAutoresizingMaskIntoConstraints = false
+        let ground = SidebarBackdropView()
+        let strip = SidebarMascotView()
+        column.addSubview(ground)
+        column.addSubview(strip)
+        NSLayoutConstraint.activate([
+            column.widthAnchor.constraint(equalToConstant: 240),
+            column.heightAnchor.constraint(equalToConstant: 140),
+            ground.topAnchor.constraint(equalTo: column.topAnchor),
+            ground.bottomAnchor.constraint(equalTo: column.bottomAnchor),
+            ground.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            ground.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+            strip.topAnchor.constraint(equalTo: column.topAnchor),
+            strip.bottomAnchor.constraint(equalTo: column.bottomAnchor),
+            strip.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            strip.trailingAnchor.constraint(equalTo: column.trailingAnchor)
+        ])
+        return column
     }
 
     private func makeThemeArrivalSample() -> NSView {

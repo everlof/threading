@@ -2265,3 +2265,183 @@ hold's four states, the logo's hover and working streams, the presenter's palett
 plain-apply fallbacks and its finish-the-first rule, the tool loop through create, get, a merging
 update and removes, the logo schema's `["string", "object"]`, and a preview whose band pixel is
 where the band was drawn (`THREADING_RENDER_OUT` keeps `theme-motion-preview.png`).
+
+## 2026-10-01 — a theme with a character
+
+The case was a Bearded Collie theme authored through the tools for a person who loves the
+breed, and it came back flat. The palette, the band, a drawn logo and paw prints at 5% were all
+the vocabulary could say. What it could not say was the part that makes a theme *theirs*: no
+particle could be a paw print, because a style names host artwork; nothing on screen was a
+character, because the logo answers only the pointer and a launch; nothing answered the app's
+own events, because the only motion a theme triggered was its arrival; a picture could only be
+centred, so an illustration could not stand on the column's foot; and the theme had no voice —
+not the status line's working word, not the composer's invitation, not a sound, not the Dock.
+
+What shipped is six pieces of vocabulary, every one of them data the host interprets under the
+same hold, budgets and gates the moving theme already had:
+
+| Stated in | What it is | Interpreter |
+|---|---|---|
+| `AppTheme.Variant.sprites` + `ThemeParticles.sprites` | a library of up to 8 small pictures, each tinted (a silhouette in each particle ink) or full-colour; any particle block names up to 4 | `ThemeParticleArtwork.cellPictures` / `raster`, `ThemeParticleStill` |
+| `ThemeBackdrop.ImageLayer.alignment` | which edge or corner a `fill` keeps and a `fit` stands against | `ThemeImageAlignment.frame`, `ThemeAlignedPictureLayer` |
+| `SidebarStyle.mascot` (`ThemeMascot`) | a figure at the column's foot with one pose per mood, each with a looping motion and a stream | `SidebarMascotView`, `ThemeMascotView`, `AgentMoodMonitor` |
+| `AppTheme.Variant.moments` (`ThemeMoments`) | a shower and/or a sound for `turn_finished` and `needs_attention` | `ThemeMomentPresenter` over the arrival overlay |
+| `AppTheme.Variant.words` (`ThemeWords`) | the status line's working words and the new-session composer's invitation | `ThemeWording`, `WorkingWordCycle.next(drawingFrom:)` |
+| `SidebarStyle.Brand.dockIcon` | the theme's logo image on the Dock tile, on the theme's plate | `GeneratedAppIcon.logoMark` |
+
+### Sprites keep the particle rule they look like they break
+
+The particle vocabulary was "data, not code": a document named a motion and an artwork the host
+draws, so it could never ship a shader or an unbounded emitter. A sprite hands over a *picture*
+and nothing else. The motion, the per-placement budget, the ambient opacity ceiling and the hold
+stay the host's, and the picture is normalised by the asset store to a 128-pixel PNG
+(`ThemeSpriteLimits`) before any renderer sees it. An emitter cell's cost is its pixel size times
+the particles alive, and the placement's budget already bounds the second factor, so a paw print
+costs what a snowflake did. Cells are one per picture per ink — a tinted sprite in each ink, a
+full-colour one once — and **the block's rate is divided across them**, so four sprites in four
+inks keep exactly the budget one shape in one ink had (`ThemeParticleLimits.maximumSprites` and
+`maximumColors` bound the cells at sixteen).
+
+The library is per variant, like everything else a variant states, and a block may only name
+sprites its own variant holds: a dark block naming a light-only picture would silently draw the
+host shape, so validation refuses it by field name. A block names a shape *or* sprites, never
+both. A sprite whose file is gone is dropped at resolution and a block left with none draws its
+style's shape — the dangling-asset rule every theme picture follows. Rasters are cached per stored
+file, tint and pixel size, and the cache entry keeps the picture it was drawn from, so a sprite
+replaced under the same name is drawn afresh.
+
+### Alignment, not a new mode
+
+`contentsGravity` can only centre an aspect fill, which is why a picture could not stand on a
+column's foot. `ThemeImageAlignment.frame` computes the picture's own frame — larger than the
+region for a `fill`, which its host clips — and `ThemeAlignedPictureLayer` is that picture inside
+the existing clipping layer in both homes (`SidebarBackdropView`, `ThemeBackdropDressingLayer`).
+Tiles are unchanged: they stay the host layer's pattern colour, the one place Core Animation
+tiles. Leading and trailing follow the reading direction; the layer asks its superlayer whether
+its geometry is flipped rather than assuming. An absent key is centre, so every document written
+before alignment existed round-trips byte-identical. The tools also learned to *restyle* a
+picture without re-uploading it: an image patch without a `source` keeps the stored asset.
+
+### The mascot: a mood is state, a pose is the theme's picture of it
+
+The host owns the mood and the theme owns the pictures. `ThemeMascotMood` has five values —
+`resting` (every session dormant), `idle`, `working`, `attention` (a session `awaitingUser` or
+`needsAttention`) and `celebrating` (3.2 s after a turn comes back) — ranked celebrating >
+attention > working > idle > resting. Attention outranks work because a dog that keeps bouncing
+while a session waits on the person is hiding the one thing worth showing. A mood without a pose
+borrows one (attention borrows working's first, everything else idle's); without a celebrating
+pose there is no celebration, and the view shows the monitor's `baseMood` instead.
+
+**`AgentMoodMonitor` is the aggregate nobody published.** `AgentWorkloadMonitor` counted working
+sessions; nothing counted the ones waiting on the person app-wide. The monitor counts both from
+the same sources (`AgentRuntime.runningSessionIDs` and each one's projected activity) on the same
+events (`SessionActivityDidChange`, structural `ProjectsDidChange`), so a recount is O(live
+sessions) and happens only when an activity actually moved — never per byte of output. Moments
+are read as **edges** off `SessionRuntimeDidChange`, which carries the committed before-and-after:
+a finish is `endedTurn` with the process still there, no usage-limit blocker, and a cause other
+than interrupted, refused or limit-parked; a wait is a transition *into* `awaitingUser`. The
+monitor starts lazily — the sidebar mascot or the moment presenter starts it while the theme in
+force states one — so a theme without either costs nothing.
+
+**Beneath the list, never over it.** `SidebarMascotView` sits in the same plane as the band —
+above both grounds, below the scroll view — so rows scroll over the mascot, and it reports the
+height it occupies so the list adds that much bottom breathing (`ThemedScrollView.contentBreathing`)
+and its last row can always be scrolled clear. Like the extension backdrop plane it answers nil
+to every hit test, claims no pointer and is not an accessibility element. A theme's own sidebar
+picture was already uncapped because a theme is a choice made in Settings with the result in
+view; the mascot is the same kind of choice, so it is drawn at full strength. An opaque navigator
+well covers it, as it covers the extension plane.
+
+**The loop runs in the render server.** A pose's motion is one `CAKeyframeAnimation` repeated
+for ever: the motion in the first `duration / every` of the period, rest for the remainder. A mood
+change is the only main-actor work — swap the picture under a `CATransition` fade, rebuild the
+loop from rest, restate the stream — and it is O(1). Motions are presentation-only and end where
+they began; amplitudes are a share of the mascot's height; the stage's anchor is the mascot's
+feet so a sway rocks on them and a breath swells from the ground. Under `ThemeParticleHold`'s
+"no motion" the mascot still changes pose — that is information, not motion — but holds each pose
+still with no stream; while its window is unseen the layer is frozen in time and resumes where it
+stood. Pose streams share the logo's point budget, and a working pose's stream follows the
+agents' intensity as the logo's does.
+
+### Moments: the app's events in the theme's voice
+
+`ThemeMomentPresenter` observes `AgentMomentDidOccur` and plays the current variant's moment
+over every visible main window. **One at a time, then quiet:** the first event plays and every
+event after it — whichever kind — is absorbed for `ThemeMomentLimits.cooldown` (8 s), and none
+plays while an arrival does. That is the rule that makes five agents finishing together one
+celebration rather than five. The shower is the arrival overlay's own timeline with no wash, no
+shimmer and no swap, at `budgetShare` = `momentMaximumAlive / transitionMaximumAlive` (260 of
+700), so its cost is bounded the same way; it obeys the hold like every theme motion.
+
+**Sounds speak only inside the app.** Alerts are played by Notification Center through each
+notification's own sound, resolved through the user's scoped sound choices; a theme adding a
+second voice there would be overriding a choice the person made. So a theme sound plays only
+while Threading is frontmost, the new **Theme sounds** setting (`AppSettings.playsThemeSounds`,
+on by default, Settings ▸ Themes) is on, and the global silence gate is open. Sounds are stored
+as given — no transcoding — after `NSSound` proves them a playable cue of at most 4 s and 1 MB in
+a container the system reads (`aiff`, `caf`, `wav`, `m4a`, `mp3`), and are decoded once per theme
+and dropped on `AppThemeDidChange`.
+
+### Words: two slots, deliberately
+
+A theme may replace the native conversation's working word list and the empty new-session
+composer's invitation, and nothing else. Both are already playful copy — the word is dealt from
+a list for variety, the invitation is a suggestion — while every word a person reads to
+understand *state* ("Waiting for your answer", "Stopped · usage limit reached", accessibility
+labels, control titles) stays the app's own and localized, because a theme that renamed a state
+would be a theme that hid it. `WorkingWordCycle.next(drawingFrom:)` starts a fresh bag when the
+list changes, so a theme switch changes the very next turn's word. Theme words are the author's
+text and are shown as written in every language.
+
+### The Dock tile
+
+`GeneratedAppIcon` already drew a contributed theme's icon mark on the theme's plate in place of
+the Threading mark; `brand.dockIcon` is the same opt-in for a custom theme's own logo image, so
+"the silhouette never changes" keeps its exception list at one shape of exception. The logo slot
+is now stored at 512 pixels so the Dock, which never upscales a mark, gets a sharp one.
+
+### Assets, tools and contributed themes
+
+Every new picture and sound goes through the asset store's one writer (`ThemeAssetStore.write`),
+named per variant: `<variant>-sprite-<name>.png`, `<variant>-mascot-<mood>.png`,
+`<variant>-sound-<event>.<ext>`. The update path's rollback now snapshots by file name, so a
+refused document puts back every sprite, pose and sound it replaced. Files are never deleted
+while parsing — a refused update would otherwise leave the restored document naming nothing — so
+a removed sprite or a sound re-supplied in another container stays in the theme's folder until
+the theme is deleted.
+
+The tools speak every block in the same merge-and-`remove_*` idiom as the rest: `sprites`
+(stating a name the library holds replaces it) and `remove_sprites`, `moments.<event>` with
+`remove_particles`/`remove_sound`/`remove`, `words` with `remove_working` and
+`remove_composer_placeholder`, `sidebar.mascot` with `poses.<mood>` and `remove_poses`, and
+`sidebar.logo_in_dock`. `preview_app_theme` stands the mascot's idle pose at the sample column's
+foot and draws a strip of every mood the theme gives a pose of its own, so an author checks the
+cast without waiting for an agent to finish a turn.
+
+A contributed package's sprites and mascot poses are read at inspection under their own byte and
+pixel budgets, beside the backdrop, background and logo, and duplicating a contributed theme
+materialises them into the copy.
+
+### Left deliberately for later
+
+- **Sounds in contributed packages.** Inspection reads images only; a package's moment sound
+  resolves to nothing and the moment plays silently.
+- **More events.** A commit made in a session's checkout has no app event today
+  (`GitIndexWriter.commit` posts nothing), and a usage limit is visible only as a runtime state.
+  Both are one more `ThemeMomentEvent` once they post.
+- **A mascot anywhere else.** The composer's edge and the empty display panel are natural homes,
+  and nothing in `ThemeMascotView` is sidebar-specific.
+- **Petting.** The mascot sits beneath the list and takes no clicks; answering the pointer would
+  need it above the rows, which is the one place it must not be.
+
+### Tests
+
+`ThemeCharacterTests` holds the wire forms and the older-document decode, the edits carrying the
+new blocks, every gate (sprite names, duplicates, unresolved and shape-plus-sprite references,
+the mascot's idle pose and bounds, an empty moment, word lengths, the Dock icon needing an image
+logo), the alignment frame math (flipped, unflipped, fill, right-to-left), the sprite cells
+sharing one budget and the still frame stamping them, the mood ranking and borrowing, the finish
+and wait edges with every refusing cause, the monitor celebrating and posting, the mascot view's
+poses and its loop under the hold, every loop ending at rest, the presenter's cooldown, the word
+bag switching lists, the tool loop through create, get, a refused sprite removal and a merging
+update, the schema, and a preview of a mascot with two moods.

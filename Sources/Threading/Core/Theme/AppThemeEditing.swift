@@ -119,6 +119,22 @@ public enum AppThemeEditing {
         }
     }
 
+    /// The same three-way statement for the newer variant blocks — the sprite library, the
+    /// moments and the words — in one generic shape rather than a fourth, fifth and sixth enum.
+    public enum BlockChange<Value> {
+        case inherit
+        case remove
+        case set(Value)
+
+        public func applied(to source: Value?) -> Value? {
+            switch self {
+            case .inherit: return source
+            case .remove: return nil
+            case .set(let value): return value
+            }
+        }
+    }
+
     public static func makeVariant(
         named name: String,
         from base: AppTheme,
@@ -128,7 +144,10 @@ public enum AppThemeEditing {
         terminalPalette: TerminalTheme? = nil,
         sidebar: SidebarChange = .inherit,
         chrome: ChromeChange = .inherit,
-        transition: TransitionChange = .inherit
+        transition: TransitionChange = .inherit,
+        sprites: BlockChange<[ThemeSprite]> = .inherit,
+        moments: BlockChange<ThemeMoments> = .inherit,
+        words: BlockChange<ThemeWords> = .inherit
     ) -> AppTheme.Variant {
         let appearance = kind.appearance ?? NSAppearance.currentDrawing()
         let source = base.variant(kind)
@@ -151,7 +170,10 @@ public enum AppThemeEditing {
             material: material ?? source?.material ?? base.material,
             sidebar: sidebar.applied(to: source?.sidebar),
             chrome: chrome.applied(to: source?.chrome),
-            transition: transition.applied(to: source?.transition)
+            transition: transition.applied(to: source?.transition),
+            sprites: sprites.applied(to: source?.sprites) ?? [],
+            moments: moments.applied(to: source?.moments).flatMap { $0.isEmpty ? nil : $0 },
+            words: words.applied(to: source?.words).flatMap { $0.isEmpty ? nil : $0 }
         )
     }
 
@@ -618,6 +640,190 @@ public enum AppThemeEditing {
         if let transition = variant.transition {
             try validate(transition, kind: kind)
         }
+
+        try validateCharacter(variant)
+    }
+
+    // MARK: - Character: sprites, mascot, moments, words
+
+    /// The newer blocks' gates. All are bounds and references rather than contrast: a sprite is
+    /// a particle and inherits the particle ceilings, the mascot stands beneath the list under
+    /// the theme's own legibility (like its sidebar picture), a moment's shower is gone before
+    /// anything under it can be read, and words are checked for length, not meaning.
+    nonisolated private static func validateCharacter(_ variant: AppTheme.Variant) throws {
+        guard variant.sprites.count <= ThemeSpriteLimits.maximumSprites else {
+            throw AppThemeEditingError.invalid(
+                "sprites holds at most \(ThemeSpriteLimits.maximumSprites) pictures per variant."
+            )
+        }
+        var library = Set<String>()
+        for sprite in variant.sprites {
+            guard ThemeSprite.isValidName(sprite.name) else {
+                throw AppThemeEditingError.invalid(
+                    "sprites names are 1 to \(ThemeSpriteLimits.maximumNameLength) lowercase "
+                        + "letters, digits, - or _; \"\(sprite.name)\" is not."
+                )
+            }
+            guard library.insert(sprite.name).inserted else {
+                throw AppThemeEditingError.invalid(
+                    "sprites states \"\(sprite.name)\" twice; each name is one picture."
+                )
+            }
+            guard !sprite.asset.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw AppThemeEditingError.invalid(
+                    "sprites.\(sprite.name) names no stored picture."
+                )
+            }
+        }
+
+        if let mascot = variant.sidebar?.mascot {
+            try validate(mascot)
+        }
+
+        if let moments = variant.moments {
+            for event in ThemeMomentEvent.allCases {
+                guard let moment = moments[event] else { continue }
+                let prefix = "moments.\(event.rawValue)"
+                guard !moment.isEmpty else {
+                    throw AppThemeEditingError.invalid(
+                        "\(prefix) states neither particles nor a sound — remove it instead."
+                    )
+                }
+                if let particles = moment.particles {
+                    try validate(particles, prefix: "\(prefix).particles")
+                }
+                guard ThemeMomentLimits.durationRange.contains(moment.duration) else {
+                    throw AppThemeEditingError.invalid(
+                        "\(prefix).duration must be between "
+                            + "\(ThemeMomentLimits.durationRange.lowerBound) and "
+                            + "\(ThemeMomentLimits.durationRange.upperBound) seconds."
+                    )
+                }
+                if let sound = moment.sound,
+                   sound.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    throw AppThemeEditingError.invalid("\(prefix).sound names no stored sound.")
+                }
+            }
+        }
+
+        if let words = variant.words {
+            try validate(words)
+        }
+
+        // Every sprite a particle block names has to be in this variant's library: the two
+        // halves of an adaptive theme keep libraries of their own, and a dark block naming a
+        // light-only picture would silently draw the host shape instead.
+        for (prefix, particles) in particleBlocks(of: variant) {
+            for name in particles.sprites where !library.contains(name) {
+                throw AppThemeEditingError.invalid(
+                    "\(prefix).sprites names \"\(name)\", which this variant's sprites "
+                        + "library does not hold."
+                )
+            }
+        }
+    }
+
+    /// Every particle block a variant states, with the field name an error should point at.
+    nonisolated static func particleBlocks(
+        of variant: AppTheme.Variant
+    ) -> [(prefix: String, particles: ThemeParticles)] {
+        var blocks: [(String, ThemeParticles)] = []
+        if let particles = variant.sidebar?.background?.particles {
+            blocks.append(("sidebar.particles", particles))
+        }
+        if let particles = variant.sidebar?.brand?.motion?.particles {
+            blocks.append(("sidebar.logo_motion.particles", particles))
+        }
+        if let particles = variant.material.backdrop?.particles {
+            blocks.append(("material.backdrop.particles", particles))
+        }
+        if let particles = variant.transition?.particles {
+            blocks.append(("transition.particles", particles))
+        }
+        if let mascot = variant.sidebar?.mascot {
+            for mood in ThemeMascotMood.allCases {
+                if let particles = mascot.poses[mood]?.particles {
+                    blocks.append(("sidebar.mascot.poses.\(mood.rawValue).particles", particles))
+                }
+            }
+        }
+        for event in ThemeMomentEvent.allCases {
+            if let particles = variant.moments?[event]?.particles {
+                blocks.append(("moments.\(event.rawValue).particles", particles))
+            }
+        }
+        return blocks
+    }
+
+    nonisolated private static func validate(_ mascot: ThemeMascot) throws {
+        guard mascot.poses[.idle] != nil else {
+            throw AppThemeEditingError.invalid(
+                "sidebar.mascot needs an idle pose; every mood without its own borrows it."
+            )
+        }
+        guard ThemeMascotLimits.sizeRange.contains(mascot.size) else {
+            throw AppThemeEditingError.invalid(
+                "sidebar.mascot.size must be between "
+                    + "\(Int(ThemeMascotLimits.sizeRange.lowerBound)) and "
+                    + "\(Int(ThemeMascotLimits.sizeRange.upperBound)) points."
+            )
+        }
+        for mood in ThemeMascotMood.allCases {
+            guard let pose = mascot.poses[mood] else { continue }
+            let prefix = "sidebar.mascot.poses.\(mood.rawValue)"
+            guard !pose.asset.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw AppThemeEditingError.invalid("\(prefix) names no stored picture.")
+            }
+            if let every = pose.every {
+                guard ThemeMascotLimits.everyRange.contains(every) else {
+                    throw AppThemeEditingError.invalid(
+                        "\(prefix).every must be between "
+                            + "\(ThemeMascotLimits.everyRange.lowerBound) and "
+                            + "\(ThemeMascotLimits.everyRange.upperBound) seconds."
+                    )
+                }
+            }
+            if let particles = pose.particles {
+                try validate(particles, prefix: "\(prefix).particles")
+            }
+            if let origin = pose.origin {
+                guard (0...1).contains(origin.x), (0...1).contains(origin.y) else {
+                    throw AppThemeEditingError.invalid(
+                        "\(prefix).origin x and y must be between 0 and 1."
+                    )
+                }
+            }
+        }
+    }
+
+    nonisolated private static func validate(_ words: ThemeWords) throws {
+        guard words.working.count <= ThemeWordsLimits.maximumWorkingWords else {
+            throw AppThemeEditingError.invalid(
+                "words.working takes at most \(ThemeWordsLimits.maximumWorkingWords) words."
+            )
+        }
+        for word in words.working {
+            let clean = word.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !clean.isEmpty,
+                  clean.count <= ThemeWordsLimits.maximumWorkingWordLength,
+                  !clean.contains(where: \.isNewline) else {
+                throw AppThemeEditingError.invalid(
+                    "words.working entries are one line of 1 to "
+                        + "\(ThemeWordsLimits.maximumWorkingWordLength) characters."
+                )
+            }
+        }
+        if let placeholder = words.composerPlaceholder {
+            let clean = placeholder.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !clean.isEmpty,
+                  clean.count <= ThemeWordsLimits.maximumPlaceholderLength,
+                  !clean.contains(where: \.isNewline) else {
+                throw AppThemeEditingError.invalid(
+                    "words.composer_placeholder is one line of 1 to "
+                        + "\(ThemeWordsLimits.maximumPlaceholderLength) characters."
+                )
+            }
+        }
     }
 
     /// A transition's gates are bounds: its particles cross the window for at most
@@ -652,6 +858,16 @@ public enum AppThemeEditing {
         guard particles.colors.count <= ThemeParticleLimits.maximumColors else {
             throw AppThemeEditingError.invalid(
                 "\(prefix).colors takes at most \(ThemeParticleLimits.maximumColors) inks."
+            )
+        }
+        guard particles.sprites.count <= ThemeParticleLimits.maximumSprites else {
+            throw AppThemeEditingError.invalid(
+                "\(prefix).sprites names at most \(ThemeParticleLimits.maximumSprites) pictures."
+            )
+        }
+        guard particles.shape == nil || particles.sprites.isEmpty else {
+            throw AppThemeEditingError.invalid(
+                "\(prefix) states both a shape and sprites — name one or the other."
             )
         }
         guard ThemeParticleLimits.densityRange.contains(particles.density) else {
@@ -953,6 +1169,14 @@ public enum AppThemeEditing {
                             "sidebar.logo_motion.origin x and y must be between 0 and 1."
                         )
                     }
+                }
+            }
+            if brand.dockIcon {
+                guard case .asset = brand.logo else {
+                    throw AppThemeEditingError.invalid(
+                        "sidebar.logo_in_dock puts the theme's own logo image on the Dock tile "
+                            + "— supply a logo image, or turn it off."
+                    )
                 }
             }
             if let title = brand.title {
