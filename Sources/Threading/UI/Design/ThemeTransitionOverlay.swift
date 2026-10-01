@@ -1,6 +1,33 @@
 import AppKit
 import QuartzCore
 
+/// Draws the incoming wash at display time, so a theme colour is never stored in a layer's
+/// backgroundColor. The overlay is removed after one transition.
+private final class ThemeTransitionWashLayer: CALayer {
+    var wash: NSColor = .clear {
+        didSet { setNeedsDisplay() }
+    }
+
+    override init() {
+        super.init()
+        needsDisplayOnBoundsChange = true
+    }
+
+    override init(layer: Any) {
+        super.init(layer: layer)
+        if let other = layer as? ThemeTransitionWashLayer { wash = other.wash }
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    override func draw(in context: CGContext) {
+        context.setFillColor(wash.cgColor)
+        context.fill(bounds)
+    }
+}
+
 // MARK: - Theme Transition Overlay
 
 /// The surface a switch *into* a theme is played on — `ThemeTransition` drawn over one window.
@@ -40,7 +67,7 @@ final class ThemeTransitionOverlayView: NSView, ThemedComponent {
         let shimmer: NSColor
     }
 
-    private let washLayer = CALayer()
+    private let washLayer = ThemeTransitionWashLayer()
     private let shimmerLayer = CAGradientLayer()
     private let emitter = CAEmitterLayer()
 
@@ -86,9 +113,8 @@ final class ThemeTransitionOverlayView: NSView, ThemedComponent {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         washLayer.frame = region
-        // Restated per play — the incoming theme's colour, frozen for the length of one
-        // timeline and discarded with the view.
-        washLayer.backgroundColor = palette.wash.cgColor
+        washLayer.wash = palette.wash
+        washLayer.displayIfNeeded()
         emitter.frame = region
         configureShimmer(palette, in: region)
         let particles = palette.transition.particles

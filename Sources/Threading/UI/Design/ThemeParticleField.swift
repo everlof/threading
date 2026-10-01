@@ -1,6 +1,44 @@
 import AppKit
 import QuartzCore
 
+/// Draws a seamless still tile when motion is off. The image is derived again on every theme
+/// refresh, and drawing it avoids freezing a pattern CGColor in a layer background.
+private final class ThemeParticleStillLayer: CALayer {
+    var tile: CGImage? {
+        didSet { setNeedsDisplay() }
+    }
+    var tileSide: CGFloat = 240
+
+    override init() {
+        super.init()
+        needsDisplayOnBoundsChange = true
+    }
+
+    override init(layer: Any) {
+        super.init(layer: layer)
+        if let other = layer as? ThemeParticleStillLayer {
+            tile = other.tile
+            tileSide = other.tileSide
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    override func draw(in context: CGContext) {
+        guard let tile, tileSide > 0 else { return }
+        context.saveGState()
+        context.clip(to: bounds)
+        for y in stride(from: bounds.minY, to: bounds.maxY, by: tileSide) {
+            for x in stride(from: bounds.minX, to: bounds.maxX, by: tileSide) {
+                context.draw(tile, in: CGRect(x: x, y: y, width: tileSide, height: tileSide))
+            }
+        }
+        context.restoreGState()
+    }
+}
+
 // MARK: - Theme Particle Field
 
 /// An ambient field of a theme's particles under a ground — bubbles rising through the sidebar,
@@ -43,7 +81,7 @@ public final class ThemeParticleFieldLayer: CALayer, ThemeParticleHolding {
     private static let stillTileSide: CGFloat = 240
 
     private let emitter = CAEmitterLayer()
-    private let still = CALayer()
+    private let still = ThemeParticleStillLayer()
 
     private var particles: SidebarAppearance.Background.Particles?
     /// The size the emitter's cells were last derived for.
@@ -182,7 +220,7 @@ public final class ThemeParticleFieldLayer: CALayer, ThemeParticleHolding {
     @MainActor
     private func start(_ particles: SidebarAppearance.Background.Particles) {
         still.isHidden = true
-        still.backgroundColor = nil
+        still.tile = nil
         emitter.isHidden = false
         emitter.speed = 1
         emitter.timeOffset = 0
@@ -279,13 +317,9 @@ public final class ThemeParticleFieldLayer: CALayer, ThemeParticleHolding {
             still.isHidden = true
             return
         }
-        let image = NSImage(
-            cgImage: tile,
-            size: NSSize(width: Self.stillTileSide, height: Self.stillTileSide)
-        )
-        // A pattern colour is how Core Animation tiles at the image's own size; restated on
-        // every refresh like every other frozen colour.
-        still.backgroundColor = NSColor(patternImage: image).cgColor
+        still.tileSide = Self.stillTileSide
+        still.tile = tile
+        still.displayIfNeeded()
         still.isHidden = false
         derivedSize = .zero
         state = .still
