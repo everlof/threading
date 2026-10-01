@@ -559,7 +559,7 @@
         "test": "ThreadingTests/GeneralSettingsRenderTests/testRendersSidebarSettingsToImages"
       },
       "capture": {
-        "glob": "sidebar-*.png"
+        "glob": "sidebar-[0-9]*.png"
       }
     },
     {

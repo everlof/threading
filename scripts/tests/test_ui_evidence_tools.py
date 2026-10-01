@@ -12,11 +12,13 @@ import tempfile
 import unittest
 import zlib
 from pathlib import Path
-
+from unittest.mock import patch
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 GENERATOR = REPOSITORY / "scripts/generate_ui_evidence_report.py"
 APPROVER = REPOSITORY / "scripts/approve_ui_evidence.py"
+sys.path.insert(0, str(REPOSITORY / "scripts"))
+import generate_ui_evidence_report as report_generator
 
 
 def png_chunk(kind: bytes, payload: bytes) -> bytes:
@@ -50,6 +52,18 @@ def write_rgba_png(
         b"\x89PNG\r\n\x1a\n"
         + png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, 1, bit_depth, 6, 0, 0, 0))
         + png_chunk(b"IDAT", zlib.compress(b"\0" + row, compression))
+        + png_chunk(b"IEND", b"")
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+
+
+def write_rgb16_png(path: Path, pixels: list[tuple[int, int, int]]) -> None:
+    row = b"".join(struct.pack(">HHH", *pixel) for pixel in pixels)
+    payload = (
+        b"\x89PNG\r\n\x1a\n"
+        + png_chunk(b"IHDR", struct.pack(">IIBBBBB", len(pixels), 1, 16, 2, 0, 0, 0))
+        + png_chunk(b"IDAT", zlib.compress(b"\0" + row))
         + png_chunk(b"IEND", b"")
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,6 +130,58 @@ class UIEvidenceToolsTests(unittest.TestCase):
         artifact = evidence["entries"][0]["artifacts"][0]
         self.assertEqual(artifact["comparison"], "accepted")
         self.assertEqual(artifact["changedPixels"], 0)
+
+    def test_fast_pixel_diff_matches_stock_python_for_unequal_canvases(self) -> None:
+        if report_generator.np is None:
+            self.skipTest("NumPy is unavailable")
+        write_rgba_png(
+            self.current / "shot.png",
+            [(0, 1, 65_535, 65_535), (4_096, 8_192, 16_384, 32_768)],
+            bit_depth=16, compression=1,
+        )
+        write_rgba_png(
+            self.baseline / "shot.png",
+            [(0, 1, 65_535, 65_535)],
+            bit_depth=16, compression=9,
+        )
+        current = self.current / "shot.png"
+        baseline = self.baseline / "shot.png"
+        fast = report_generator.compare_pixels(current, baseline, "unequal canvas")
+        report_generator.write_diff_png(current, baseline, self.root / "fast.png", "unequal canvas")
+        with patch.object(report_generator, "np", None):
+            slow = report_generator.compare_pixels(current, baseline, "unequal canvas")
+            report_generator.write_diff_png(current, baseline, self.root / "slow.png", "unequal canvas")
+
+        self.assertEqual(fast, (1, 2, (1, 0, 2, 1)))
+        self.assertEqual(fast, slow)
+        self.assertEqual((self.root / "fast.png").read_bytes(), (self.root / "slow.png").read_bytes())
+
+    def test_fast_rgba_decoder_matches_stock_python(self) -> None:
+        if report_generator.np is None or report_generator.Image is None:
+            self.skipTest("NumPy or Pillow is unavailable")
+        image = self.current / "shot.png"
+        write_rgba_png(
+            image, [(0, 1, 128, 255), (255, 64, 2, 17)],
+            bit_depth=8, compression=1,
+        )
+        fast = report_generator.decoded_rgba(image, "RGBA parity")
+        with patch.object(report_generator, "Image", None):
+            slow = report_generator.decoded_rgba(image, "RGBA parity")
+        self.assertEqual(fast, slow)
+
+    def test_fast_rgb16_decoder_matches_stock_python(self) -> None:
+        if report_generator.np is None or report_generator.cv2 is None:
+            self.skipTest("NumPy or OpenCV is unavailable")
+        image = self.current / "shot.png"
+        write_rgb16_png(image, [(0, 1, 65_535), (4_096, 8_192, 16_384)])
+        fast = report_generator.decoded_rgba(image, "RGB16 parity")
+        with patch.object(report_generator, "cv2", None):
+            slow = report_generator.decoded_rgba(image, "RGB16 parity")
+        self.assertEqual(fast, slow)
+        self.assertEqual(
+            fast[2],
+            struct.pack(">HHHHHHHH", 0, 1, 65_535, 65_535, 4_096, 8_192, 16_384, 65_535),
+        )
 
     def test_strict_mode_writes_report_then_fails_on_one_pixel(self) -> None:
         write_rgba_png(

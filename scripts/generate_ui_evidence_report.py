@@ -18,6 +18,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+try:
+    import numpy as np
+except ImportError:  # Keep the checked-in evidence tools usable with stock Python.
+    np = None
+try:
+    from PIL import Image
+except ImportError:  # Pillow is optional for the common 8-bit RGBA capture format.
+    Image = None
+try:
+    import cv2
+except ImportError:  # OpenCV is optional for 16-bit RGB simulator screenshots.
+    cv2 = None
+
 
 SCHEMA_VERSION = 1
 COMPONENT_METADATA_KIND = "threading-component-evidence"
@@ -265,7 +278,7 @@ def paeth_predictor(left: int, above: int, upper_left: int) -> int:
 
 
 def decoded_rgba(path: Path, context: str) -> tuple[int, int, bytes]:
-    """Decode bounded 8/16-bit PNGs without making report generation depend on Pillow.
+    """Decode bounded 8/16-bit PNGs with optional native decoders and a stock Python fallback.
 
     Evidence images come from AppKit, UIKit, or simctl, but baselines can survive toolchain
     upgrades that choose a different lossless PNG encoding. Comparing decoded pixels keeps the
@@ -313,6 +326,23 @@ def decoded_rgba(path: Path, context: str) -> tuple[int, int, bytes]:
         )
     if color_type == 3 and bit_depth != 8:
         raise ValueError(f"{context}: indexed PNG comparison requires 8-bit palette entries")
+    if bit_depth == 8 and color_type == 6 and Image is not None and np is not None:
+        with Image.open(path) as decoded:
+            if decoded.mode != "RGBA" or decoded.size != (width, height):
+                raise ValueError(f"{context}: unexpected RGBA image mode or size in {path}")
+            samples = np.frombuffer(decoded.tobytes(), dtype=np.uint8).astype(np.uint16)
+        samples *= 257
+        return width, height, samples.astype(">u2").tobytes()
+    if (bit_depth == 16 and color_type == 2 and not transparency
+            and cv2 is not None and np is not None):
+        decoded = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+        if (decoded is None or decoded.shape != (height, width, 3)
+                or decoded.dtype != np.uint16):
+            raise ValueError(f"{context}: unexpected 16-bit RGB image in {path}")
+        rgba = np.empty((height, width, 4), dtype=np.uint16)
+        rgba[:, :, :3] = decoded[:, :, ::-1]  # OpenCV gives BGR samples.
+        rgba[:, :, 3] = 65535
+        return width, height, rgba.astype(">u2").tobytes()
     channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[color_type]
     sample_bytes = bit_depth // 8
     bytes_per_pixel = channels * sample_bytes
@@ -594,6 +624,18 @@ def compare_pixels(
         and current_pixels == baseline_pixels
     ):
         return 0, canvas_width * canvas_height, None
+    if np is not None:
+        mask = pixel_difference_mask(
+            current_width, current_height, current_pixels,
+            baseline_width, baseline_height, baseline_pixels,
+        )
+        changed = int(np.count_nonzero(mask))
+        if not changed:
+            return 0, canvas_width * canvas_height, None
+        columns = np.flatnonzero(np.any(mask, axis=0))
+        rows = np.flatnonzero(np.any(mask, axis=1))
+        bounds = (int(columns[0]), int(rows[0]), int(columns[-1]) + 1, int(rows[-1]) + 1)
+        return changed, canvas_width * canvas_height, bounds
     changed = 0
     minimum_x = canvas_width
     minimum_y = canvas_height
@@ -624,6 +666,25 @@ def compare_pixels(
     if changed:
         bounds = (minimum_x, minimum_y, maximum_x + 1, maximum_y + 1)
     return changed, canvas_width * canvas_height, bounds
+
+
+def pixel_difference_mask(
+    current_width: int, current_height: int, current_pixels: bytes,
+    baseline_width: int, baseline_height: int, baseline_pixels: bytes,
+) -> Any:
+    """Compare complete 16-bit RGBA pixels; missing canvas pixels are transparent black."""
+    assert np is not None
+    width = max(current_width, baseline_width)
+    height = max(current_height, baseline_height)
+    current = np.zeros((height, width), dtype="V8")
+    baseline = np.zeros((height, width), dtype="V8")
+    current[:current_height, :current_width] = np.frombuffer(
+        current_pixels, dtype="V8"
+    ).reshape(current_height, current_width)
+    baseline[:baseline_height, :baseline_width] = np.frombuffer(
+        baseline_pixels, dtype="V8"
+    ).reshape(baseline_height, baseline_width)
+    return current != baseline
 
 
 def compare_and_optionally_accept(
@@ -685,29 +746,42 @@ def write_diff_png(current: Path, baseline: Path, destination: Path, context: st
     baseline_width, baseline_height, baseline_pixels = decoded_rgba(baseline, context)
     width = max(current_width, baseline_width)
     height = max(current_height, baseline_height)
-    rows = bytearray()
     unchanged = b"\x00\x00\x00\xff"
     changed = b"\xff\x40\xb0\xff"
-    for y in range(height):
-        rows.append(0)
-        for x in range(width):
-            current_offset = (y * current_width + x) * 8
-            baseline_offset = (y * baseline_width + x) * 8
-            current_pixel = (
-                current_pixels[current_offset:current_offset + 8]
-                if x < current_width and y < current_height
-                else b"\x00" * 8
-            )
-            baseline_pixel = (
-                baseline_pixels[baseline_offset:baseline_offset + 8]
-                if x < baseline_width and y < baseline_height
-                else b"\x00" * 8
-            )
-            rows.extend(unchanged if current_pixel == baseline_pixel else changed)
+    if np is not None:
+        mask = pixel_difference_mask(
+            current_width, current_height, current_pixels,
+            baseline_width, baseline_height, baseline_pixels,
+        )
+        pixels = np.empty((height, width, 4), dtype=np.uint8)
+        pixels[:] = tuple(unchanged)
+        pixels[mask] = tuple(changed)
+        scanlines = np.zeros((height, width * 4 + 1), dtype=np.uint8)
+        scanlines[:, 1:] = pixels.reshape(height, width * 4)
+        rows = scanlines.tobytes()
+    else:
+        fallback_rows = bytearray()
+        for y in range(height):
+            fallback_rows.append(0)
+            for x in range(width):
+                current_offset = (y * current_width + x) * 8
+                baseline_offset = (y * baseline_width + x) * 8
+                current_pixel = (
+                    current_pixels[current_offset:current_offset + 8]
+                    if x < current_width and y < current_height
+                    else b"\x00" * 8
+                )
+                baseline_pixel = (
+                    baseline_pixels[baseline_offset:baseline_offset + 8]
+                    if x < baseline_width and y < baseline_height
+                    else b"\x00" * 8
+                )
+                fallback_rows.extend(unchanged if current_pixel == baseline_pixel else changed)
+        rows = bytes(fallback_rows)
     payload = (
         PNG_SIGNATURE
         + png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
-        + png_chunk(b"IDAT", zlib.compress(bytes(rows), 9))
+        + png_chunk(b"IDAT", zlib.compress(rows, 9))
         + png_chunk(b"IEND", b"")
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
