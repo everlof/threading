@@ -64,6 +64,7 @@ extension ControllerStore {
         guard expectedRevision >= 0, expectedRevision < Int.max else { throw ControllerError.invalidInput("revision") }
         return try db.transaction {
             let _: ControllerWorker = try required("worker", spec.workerID.description)
+            try requireActiveWorker(spec.workerID)
             let old: ControllerAutomation? = try optional("automation", id.description)
             guard (old?.revision ?? 0) == expectedRevision, old?.deleted != true else { throw ControllerError.conflict }
             let value = ControllerAutomation(id: id, revision: expectedRevision + 1, enabled: false,
@@ -80,6 +81,7 @@ extension ControllerStore {
         try db.transaction {
             var value = try automation(id)
             guard value.revision == expectedRevision, !value.deleted, expectedRevision < Int.max else { throw ControllerError.conflict }
+            if enabled { try requireActiveWorker(value.spec.workerID) }
             value.revision += 1; value.enabled = enabled
             value.nextRunAt = enabled ? try value.spec.schedule?.next(after: now) : nil
             try saveAutomation(value)
@@ -216,7 +218,7 @@ extension ControllerStore {
         if let prior = try automationRun(value.id, key: key) { return prior }
         let busy = try value.lastWorkID.map(automationWorkIsActive) ?? false
         let work: WorkItem? = missed || busy ? nil : try enqueue(workerID: value.spec.workerID,
-            key: Self.workKeyPrefix + "\(value.id):\(key)", instruction: value.spec.instruction)
+            key: Self.workKeyPrefix + "\(value.id):\(key)", instruction: value.spec.instruction, source: key.hasPrefix("manual:") ? .request : .schedule)
         if let work { value.lastWorkID = work.id }
         let run = ControllerAutomationRun(id: UUID(), automationID: value.id, revision: value.revision,
             key: key, scheduledAt: due, recordedAt: now, workID: work?.id,

@@ -19,6 +19,15 @@ struct ControllerMain {
     workers [CURSOR]
     worker-add WORKER_UUID NAME
     enqueue WORKER_UUID SOURCE_KEY INSTRUCTION_FILE
+    enqueue-request WORKER_UUID SOURCE_KEY INSTRUCTION_FILE REQUEST_FILE
+    work-message WORK_UUID MESSAGE_UUID PERSON TEXT_FILE
+    work-messages WORK_UUID [CURSOR]
+    work-history WORK_UUID [CURSOR]
+    work-cancel WORK_UUID
+    worker-archive WORKER_UUID
+    worker-reconcile WORKER_UUID EXPECTED_REVISION RECIPE_JSON_FILE
+    worker-sources WORKER_UUID
+    worker-set-sources WORKER_UUID EXPECTED_REVISION request,schedule,event
     claim WORKER_UUID
     work WORK_UUID
     works WORKER_UUID [CURSOR]
@@ -205,6 +214,34 @@ struct ControllerMain {
             try count(2); try output(await store.addWorker(id: WorkerID(args[0]), name: args[1]))
         case "enqueue":
             try count(3); try output(await store.enqueue(workerID: WorkerID(args[0]), key: args[1], instruction: file(args[2])))
+        case "enqueue-request":
+            try count(4); try output(await store.enqueue(workerID: WorkerID(args[0]), key: args[1], instruction: file(args[2]), request: file(args[3])))
+        case "work-message":
+            try count(4)
+            guard let id = UUID(uuidString: args[1]) else { throw ControllerError.invalidInput("message_id") }
+            try output(await store.message(workID: WorkID(args[0]), id: id, author: args[2], text: file(args[3])))
+        case "work-messages":
+            let after = try cursor(1); try output(await store.messages(workID: WorkID(args[0]), after: after))
+        case "work-history":
+            let after = try cursor(1); try output(await store.activities(workID: WorkID(args[0]), after: after))
+        case "work-cancel":
+            try count(1); try output(await store.cancel(workID: WorkID(args[0])))
+        case "worker-archive":
+            try count(1); try output(await store.archiveWorker(WorkerID(args[0])))
+        case "worker-sources":
+            try count(1); try output(await store.workerSources(WorkerID(args[0])))
+        case "worker-set-sources":
+            try count(3)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            let sources = try csv(args[2]).map { text -> WorkSource in
+                guard let source = WorkSource(rawValue: text) else { throw ControllerError.invalidInput("source") }; return source
+            }
+            try output(await store.setWorkerSources(WorkerID(args[0]), expectedRevision: revision, sources: sources))
+        case "worker-reconcile":
+            try count(3)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            let spec = try JSONDecoder().decode(ControllerLaunchSpec.self, from: Data(file(args[2]).utf8))
+            try output(await store.reconcileWorker(WorkerID(args[0]), expectedRevision: revision, spec: spec))
         case "claim":
             try count(1); try output(await store.claim(workerID: WorkerID(args[0])))
         case "work":

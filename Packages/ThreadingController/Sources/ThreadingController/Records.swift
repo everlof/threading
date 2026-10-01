@@ -48,12 +48,16 @@ public struct ControllerWorker: Codable, Equatable, Sendable {
     public let id: WorkerID
     public let name: String
 }
-public enum WorkState: String, Codable, Sendable { case queued, running, waiting, completed, interrupted }
+public enum WorkState: String, Codable, Sendable { case queued, running, waiting, completed, interrupted, cancelled }
+public enum WorkSource: String, Codable, CaseIterable, Sendable { case request, schedule, event }
 public struct WorkItem: Codable, Equatable, Sendable {
     public let id: WorkID
     public let workerID: WorkerID
     public let key: String
     public let instruction: String
+    /// Immutable, application-validated submission envelope; never execution authority.
+    public var request: String?
+    public var source: WorkSource?
     public internal(set) var state: WorkState
     public internal(set) var checkpoint: String
     public internal(set) var executionID: ExecutionID?

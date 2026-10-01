@@ -21,19 +21,22 @@ public actor ControllerStore {
     }
 
     /// The source supplies a stable key. Reusing it with different content is a conflict.
-    public func enqueue(workerID: WorkerID, key: String, instruction: String) throws -> WorkItem {
+    public func enqueue(workerID: WorkerID, key: String, instruction: String, request: String? = nil, source: WorkSource = .request) throws -> WorkItem {
         try Limits.text(key, field: "key", maximum: 256)
         try Limits.text(instruction, field: "instruction")
+        if let request { try Limits.text(request, field: "request") }
         return try db.transaction {
             let _: ControllerWorker = try required("worker", workerID.description)
+            try requireActiveWorker(workerID)
+            try requireWorkSource(workerID, source: source)
             if let row = try db.rows("SELECT payload FROM record WHERE kind='work' AND parent=? AND key=? LIMIT 1",
                                      [.text(workerID.description), .text(key)]).first {
                 let existing: WorkItem = try decode(row.text(0))
-                guard existing.instruction == instruction else { throw ControllerError.conflict }
+                guard existing.instruction == instruction, existing.request == request, (existing.source ?? .request) == source else { throw ControllerError.conflict }
                 return existing
             }
             let work = WorkItem(id: WorkID(), workerID: workerID, key: key, instruction: instruction,
-                                state: .queued, checkpoint: "", executionID: nil)
+                                request: request, source: source, state: .queued, checkpoint: "", executionID: nil)
             try insert("work", work.id.description, parent: workerID.description, key: key,
                        state: work.state.rawValue, value: work)
             try event("work.queued", work.id.description)
@@ -45,6 +48,7 @@ public actor ControllerStore {
     public func claim(workerID: WorkerID) throws -> WorkClaim? {
         try db.transaction {
             let _: ControllerWorker = try required("worker", workerID.description)
+            try requireActiveWorker(workerID)
             guard let row = try db.rows("""
                 SELECT payload FROM record AS work WHERE kind='work' AND parent=? AND state='queued'
                 AND NOT EXISTS (SELECT 1 FROM record AS launch WHERE launch.kind='launch'
@@ -70,7 +74,7 @@ public actor ControllerStore {
             var (work, _) = try running(executionID)
             work.checkpoint = text
             try saveWork(work)
-            try event("work.checkpointed", work.id.description)
+            try event("work.checkpointed", work.id.description, text: text, source: "agent")
             return work
         }
     }
@@ -147,6 +151,9 @@ public actor ControllerStore {
                 return delivery
             }
             var (work, execution) = try running(executionID)
+            guard try db.rows("SELECT id FROM record WHERE kind='message' AND parent=? AND state='pending' LIMIT 1", [.text(work.id.description)]).isEmpty else {
+                throw ControllerError.conflict // Consume messages received before completion, or ask a question.
+            }
             let delivery = WorkDelivery(id: DeliveryID(), workID: work.id, destination: destination,
                                         payload: payload, state: .pending, attemptID: nil, receipt: nil)
             work.state = .completed
@@ -251,9 +258,10 @@ public actor ControllerStore {
         try db.run("UPDATE record SET state=?,payload=? WHERE kind=? AND id=?",
                    [state.map(ControllerDatabase.Value.text) ?? .null, .text(try encode(value)), .text(kind), .text(id)])
     }
-    func event(_ kind: String, _ subject: String) throws {
+    func event(_ kind: String, _ subject: String, text: String? = nil, source: String = "controller") throws {
         try db.run("INSERT INTO event(kind,subject,at) VALUES(?,?,?)",
                    [.text(kind), .text(subject), .text(ISO8601DateFormatter().string(from: Date()))])
+        try recordActivity(kind: kind, subject: subject, text: text, source: source)
     }
     func page<T: Codable & Sendable>(_ kind: String, parent: String? = nil, after: Int64, limit: Int) throws -> ControllerPage<T> {
         try Limits.page(after, limit)

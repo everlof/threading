@@ -45,10 +45,13 @@ if sys.argv[1] == "mcp":
     assert rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
                               "clientInfo": {"name": "fixture", "version": "1"}})["result"]["protocolVersion"] == "2025-11-25"
     rpc("notifications/initialized", identifier=None)
-    assert {tool["name"] for tool in rpc("tools/list")["result"]["tools"]} == {"work_context", "work_questions", "work_checkpoint", "work_ask", "work_finish", "memory_get", "memory_put", "knowledge_get", "knowledge_put"}
+    assert {tool["name"] for tool in rpc("tools/list")["result"]["tools"]} == {"work_context", "work_questions", "work_messages", "work_message_consumed", "work_history", "work_checkpoint", "work_ask", "work_finish", "memory_get", "memory_put", "knowledge_get", "knowledge_put"}
     assert rpc("tools/call", {"name": "knowledge_get", "arguments": {"spaceID": str(uuid.uuid4()), "key": "private"}})["result"]["isError"]
     assert rpc("tools/call", {"name": "work_context", "arguments": {"workerID": str(uuid.uuid4())}})["result"]["isError"]
     assert not rpc("tools/call", {"name": "work_context", "arguments": {}})["result"]["isError"]
+    assert not rpc("tools/call", {"name": "work_messages", "arguments": {"after": 0}})["result"]["isError"]
+    assert not rpc("tools/call", {"name": "work_history", "arguments": {"after": 0}})["result"]["isError"]
+    assert rpc("tools/call", {"name": "work_message_consumed", "arguments": {"id": str(uuid.uuid4())}})["result"]["isError"]
     assert not rpc("tools/call", {"name": "work_finish", "arguments": {"payload": "MCP draft"}})["result"]["isError"]
     assert rpc("tools/call", {"name": "memory_put", "arguments": {"key": "stale", "expectedRevision": 0, "content": "Forbidden"}})["result"]["isError"]
     server.stdin.close()

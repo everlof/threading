@@ -42,6 +42,7 @@ extension ControllerStore {
         }
         return try db.transaction {
             let _: ControllerWorker = try required("worker", workerID.description)
+            try requireActiveWorker(workerID)
             let old: ControllerWorkerPolicy? = try optional("workerPolicy", workerID.description)
             guard (old?.revision ?? 0) == expectedRevision else { throw ControllerError.conflict }
             let policy = ControllerWorkerPolicy(workerID: workerID, revision: expectedRevision + 1, enabled: false,
@@ -52,8 +53,26 @@ extension ControllerStore {
             return WorkerPolicyStatus(policy)
         }
     }
+    /// Trusted owner reconciliation. A response loss can be retried without pausing a worker
+    /// or repeatedly invalidating prepared launches. Never changes the owner's enable intent.
+    public func reconcileWorker(_ workerID: WorkerID, expectedRevision: Int,
+                                spec: ControllerLaunchSpec) throws -> WorkerPolicyStatus {
+        try spec.validate()
+        return try db.transaction {
+            try requireActiveWorker(workerID)
+            let old = try requiredPolicy(workerID)
+            guard old.revision == expectedRevision, expectedRevision < Int.max else { throw ControllerError.conflict }
+            if old.spec == spec { return WorkerPolicyStatus(old) }
+            let policy = ControllerWorkerPolicy(workerID: workerID, revision: old.revision + 1,
+                enabled: old.enabled, maximumConcurrent: old.maximumConcurrent, spec: spec)
+            try update("workerPolicy", workerID.description, value: policy)
+            try event("worker.reconciled", workerID.description)
+            return WorkerPolicyStatus(policy)
+        }
+    }
     public func setWorkerEnabled(_ workerID: WorkerID, expectedRevision: Int, enabled: Bool) throws -> WorkerPolicyStatus {
         try db.transaction {
+            try requireActiveWorker(workerID)
             let old = try requiredPolicy(workerID)
             guard old.revision == expectedRevision, expectedRevision < Int.max else { throw ControllerError.conflict }
             let policy = ControllerWorkerPolicy(workerID: workerID, revision: old.revision + 1, enabled: enabled,

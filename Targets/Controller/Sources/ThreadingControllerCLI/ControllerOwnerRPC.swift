@@ -9,6 +9,7 @@ enum ControllerOwnerRPC {
     static let allowed: Set<String> = [
         "automations", "automation", "automation-configure", "automation-enable", "automation-pause",
         "automation-delete", "automation-run", "automation-runs",
+        "worker-sources", "worker-set-sources", "enqueue-request", "worker-reconcile", "work-message", "work-messages", "work-history", "work-cancel", "worker-archive",
         "workers", "worker-add", "worker-configure", "worker-policy", "worker-enable", "worker-pause", "enqueue", "work", "works",
         "question", "questions", "open-questions", "answer", "delivery", "deliveries", "pending-deliveries",
         "delivery-begin", "delivery-ack", "delivery-uncertain",

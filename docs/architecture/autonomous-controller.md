@@ -1,9 +1,8 @@
 # Autonomous host controller
 
 Status: portable core, owner CLI, ptyd execution and execution-scoped CLI/MCP tools implemented.
-The resident supervisor dispatches queued work and answered continuations. Not embedded in the
-Mac app. Rindabox installs the tested controller as a private VPS user service. The Rindabox consumer now owns authenticated operations UI, SSH owner transport, a daily enqueue
-source and local/PostgreSQL destinations. Native Threading UI integration remains separate. Fixture execution needs no model
+The resident supervisor dispatches queued work and answered continuations on the execution host. Rindabox installs the tested controller as a private VPS user service. The Rindabox consumer now owns authenticated operations UI, SSH owner transport, a daily enqueue
+source and local/PostgreSQL destinations. Native Threading exposes remote automation configuration and history through the owner protocol. Fixture execution needs no model
 account or production data; live model execution is not yet verified.
 
 ## Product and ownership
@@ -16,8 +15,8 @@ continues. Answers supply information, not execution or connector permissions.
 
 `Packages/ThreadingController` compiles without AppKit, providers, networking or PTY transport.
 `Targets/Controller` builds `threading-controller`, an experimental macOS/Linux owner CLI over
-that core. These are independent of the app's Xcode shipping path; the app does not import this
-package yet. The separation earns a package because a Linux process cannot import the app.
+that core. The app imports its portable models; process ownership and storage remain on the execution
+host. The owner CLI has an independent build. The separation earns a package because a Linux process cannot import the app.
 
 The controller owns:
 
@@ -120,8 +119,9 @@ each request has a bounded wait. Prefer noninteractive provider turns for unatte
 The launched child receives the controller executable, database path, execution ID and private
 credential in environment variables. `threading-controller agent REQUEST_JSON_FILE` exposes a
 single typed operation; `agent-mcp` exposes the same operations over newline-delimited stdio MCP:
-`work_context`, `work_questions`, `work_checkpoint`, `work_ask`, `work_finish`, `memory_get`,
-`memory_put`. These adapters have no claim, answer, retry, stop, delivery acknowledgement, arbitrary
+`work_context`, `work_questions`, `work_messages`, `work_history`, `work_message_consumed`,
+`work_checkpoint`, `work_ask`, `work_finish`, `memory_get`, `memory_put`, `knowledge_get`,
+`knowledge_put`. These adapters have no claim, answer, retry, stop, delivery acknowledgement, arbitrary
 SQL or destination-selection tool. Question recipients and output destination come from the
 immutable owner recipe. Memory derives its worker from the execution's work.
 
@@ -210,7 +210,7 @@ network filesystem. Each mutation and its journal entries commit together. Faile
 future-schema stores are errors and are not recreated as empty. Corrupt stores are left in place
 for explicit recovery, rather than automatically moving files under another running process.
 
-Schema v5 stores small typed payload rows with indexes for kind, identity, parent, source key,
+Schema v6 stores small typed payload rows with indexes for kind, identity, parent, source key,
 state and cursor. State indexes and payloads have one write owner. Reads decode only the requested
 page; claims query the indexed queue. No partial read is written back as a complete catalogue.
 Rows are retained in this slice, so source keys and receipts remain durable; retention/quota and
@@ -306,7 +306,7 @@ revision changes and manual ownership, plus four real-process checks for restart
 pause/child survival, refusal circuit breaking and fairness across unavailable hosts.
 
 The general owner protocol, shared knowledge and indexed inbox/outbox reads are implemented below.
-Native Threading controller UI and production deployment/model validation remain outstanding.
+Native Threading remote automation UI is implemented; production deployment/model validation is consumer-owned.
 Database writes, emails and application drafts are destination adapters with
 their own authority and reconciliation contracts, implemented in their owning repositories.
 
@@ -425,3 +425,38 @@ passed nine CLI checks on the VPS, then all ten runtime checks against the insta
 in isolated synthetic state. The private production supervisor is active. Provider flag parsing
 passed; authenticated execution remains unverified because the VPS account is logged out.
 Artifact provenance and the application activation record belong to Rindabox's infra/CONTROLLER.md.
+
+
+## Requests, messages and lifecycle (schema v6)
+
+`worker-reconcile ID REV RECIPE_FILE` atomically updates the trusted recipe while preserving
+pause/enabled intent and concurrency. Repeating an identical recipe is a no-op, including its
+revision. Admission must use this command rather than configure/pause followed by enable:
+a lost response between two mutations must not strand a worker or override a human pause.
+
+`worker-set-sources ID REV request,schedule,event` restricts admission sources. This is owner
+policy, not agent input. Legacy workers without the record keep their previous behavior;
+request-only consumers explicitly configure `request`. Automation due ticks use `schedule`;
+manual owner requests use `request`. Execution MCP cannot change this policy or enqueue work.
+
+`enqueue-request` stores a bounded immutable request envelope alongside the instruction.
+`work-message` appends an idempotent, attributed follow-up to one unfinished task. Agents read
+paged `work_messages`, then acknowledge individual IDs with `work_message_consumed`. Merely
+listing messages is not acknowledgement. Completion and pending-message checks share one
+transaction: a concurrent follow-up is either included before finish or rejected after finish.
+Messages supply context; they do not answer questions or expand execution authority.
+
+`work-history` / scoped `work_history` read an append-only task activity stream. Checkpoint
+text is retained with source and execution identity instead of only replacing the current
+checkpoint. Reads are bounded and indexed by task. History starts with upgraded writes;
+checkpoint text overwritten by older releases cannot be reconstructed.
+
+`work-cancel` retains the request and activity, closes an unanswered question, and rejects
+running work or unresolved launches. Stop/reconcile a process before cancelling it.
+`worker-archive` pauses the worker and retains a tombstone; outstanding tasks, unresolved
+launches and enabled schedules block archival. All future claims, configuration, enabling and
+admission reject archived workers. Schema v6 adds an index to bound the active-schedule check.
+
+These remain host-owned operations. Consumer UI may present requests, forms, history and
+permissions; consumer authentication determines the caller. Neither a message nor a form
+submission becomes a recipe, shell command, recipient attestation or permission grant.

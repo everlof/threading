@@ -4,6 +4,9 @@ import Foundation
 public enum ControllerAgentRequest: Codable, Sendable {
     case context
     case questions(after: Int64)
+    case messages(after: Int64)
+    case messageConsumed(id: UUID)
+    case history(after: Int64)
     case checkpoint(text: String)
     case ask(id: QuestionID, text: String, checkpoint: String)
     case finish(payload: String)
@@ -15,6 +18,9 @@ public enum ControllerAgentRequest: Codable, Sendable {
 
 public struct ControllerAgentResponse: Codable, Sendable {
     public var work: WorkItem?
+    public var messages: ControllerPage<WorkMessage>?
+    public var message: WorkMessage?
+    public var history: ControllerPage<WorkActivity>?
     public var questions: ControllerPage<WorkQuestion>?
     public var question: WorkQuestion?
     public var delivery: WorkDelivery?
@@ -45,6 +51,9 @@ extension ControllerStore {
                 let (work, _) = try running(executionID)
                 switch request {
                 case .context: response.work = work
+                case .messages(let after): response.messages = try messages(workID: work.id, after: after)
+                case .messageConsumed(let id): response.message = try consumeMessage(executionID: executionID, id: id)
+                case .history(let after): response.history = try activities(workID: work.id, after: after)
                 case .questions(let after): response.questions = try questions(workID: work.id, after: after)
                 case .checkpoint(let text): response.work = try checkpoint(executionID: executionID, text: text)
                 case .memoryGet(let key): response.memory = try memory(workerID: work.workerID, key: key)

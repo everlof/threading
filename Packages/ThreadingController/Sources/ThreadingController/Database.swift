@@ -31,7 +31,7 @@ final class ControllerDatabase {
             sqlite3_busy_timeout(handle, 3_000)
             try transaction {
                 let version = try rows("PRAGMA user_version").first?.integers[0]
-                guard let version, (0...5).contains(version) else { throw ControllerError.unsupportedSchema }
+                guard let version, (0...6).contains(version) else { throw ControllerError.unsupportedSchema }
                 if version == 0 {
                     guard try rows("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1").isEmpty else {
                         throw ControllerError.unsupportedSchema
@@ -81,6 +81,10 @@ final class ControllerDatabase {
                     try run("CREATE INDEX automation_due_time ON automation_due(due,id)")
                     try run("PRAGMA user_version=5")
                 }
+            }
+            if try rows("PRAGMA user_version").first?.integers[0] != 6 {
+                try run("CREATE INDEX IF NOT EXISTS automation_worker_active ON record(json_extract(payload,'$.spec.workerID')) WHERE kind='automation' AND json_extract(payload,'$.enabled')=1")
+                try run("PRAGMA user_version=6")
             }
             try run("PRAGMA journal_mode=WAL")
             try run("PRAGMA synchronous=FULL")
