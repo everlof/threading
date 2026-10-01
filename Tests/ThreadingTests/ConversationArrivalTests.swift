@@ -13,11 +13,15 @@ final class ConversationArrivalTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        Design.Motion.reduceMotionOverrideForTesting = false
+        MainActor.assumeIsolated {
+            Design.Motion.reduceMotionOverrideForTesting = false
+        }
     }
 
     override func tearDown() {
-        Design.Motion.reduceMotionOverrideForTesting = nil
+        MainActor.assumeIsolated {
+            Design.Motion.reduceMotionOverrideForTesting = nil
+        }
         super.tearDown()
     }
 

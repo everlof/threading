@@ -34,6 +34,7 @@ final class PhysicalDeviceSessionPipeTests: XCTestCase {
 
     func testCancellationInterruptsBlockedReadAndNextRequestStartsFresh() async throws {
         let pipe = pipe()
+        let device = device
         defer { pipe.stop() }
         let original = try await pipe.request("frame", device: device)
         let blocked = Task { try await pipe.request("block", device: device) }
@@ -55,6 +56,7 @@ final class PhysicalDeviceSessionPipeTests: XCTestCase {
 
     func testStoppingBlockedGenerationDoesNotInvalidateItsReplacement() async throws {
         let pipe = pipe()
+        let device = device
         defer { pipe.stop() }
         _ = try await pipe.request("frame", device: device)
         let blocked = Task { try await pipe.request("block", device: device) }
@@ -70,6 +72,7 @@ final class PhysicalDeviceSessionPipeTests: XCTestCase {
     func testBlockedPreviewDoesNotDelayIndependentInputLane() async throws {
         let preview = pipe()
         let input = pipe()
+        let device = device
         defer { preview.stop(); input.stop() }
         let blocked = Task { try await preview.request("block", device: device) }
         try await Task.sleep(for: .milliseconds(100))

@@ -11,6 +11,24 @@ enum MobileSecretApprovalFailure: Error, Equatable {
     case pairFirst, preview, directConnectionRequired, pinnedConnectionRequired, invalidCode
 }
 
+/// Cancellation and expiry must invalidate the same in-flight Face ID evaluation from their
+/// concurrent callbacks. Only invalidation crosses threads; key use stays in the keys actor.
+private final class CancellableAuthenticationContext: @unchecked Sendable {
+    let value: LAContext
+    private let lock = NSLock()
+    private var invalidated = false
+
+    init(_ value: LAContext) { self.value = value }
+
+    func invalidate() {
+        lock.lock()
+        let shouldInvalidate = !invalidated
+        invalidated = true
+        lock.unlock()
+        if shouldInvalidate { value.invalidate() }
+    }
+}
+
 // MARK: - Keys
 
 /// This phone's two approval keys, one per paired Mac, in the Secure Enclave. Both need Face ID
@@ -66,16 +84,18 @@ actor MobileSecretApprovalKeys {
         else { throw Failure.invalidRequest }
         guard let blobs = try load(hostID: hostID) else { throw Failure.notEnrolled }
         let context = try Self.context()
-        defer { context.invalidate() }
-        let deadline = Task {
-            try? await Task.sleep(for: .seconds(max(0, pending.expiresAt - now)))
-            if !Task.isCancelled { context.invalidate() }
+        let cancellable = CancellableAuthenticationContext(context)
+        defer { cancellable.invalidate() }
+        let expiresIn = max(0, pending.expiresAt - now)
+        let deadline = Task.detached { [cancellable] in
+            try? await Task.sleep(for: .seconds(expiresIn))
+            if !Task.isCancelled { cancellable.invalidate() }
         }
         defer { deadline.cancel() }
         let accepted = try await withTaskCancellationHandler {
             try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)
         } onCancel: {
-            context.invalidate()
+            cancellable.invalidate()
         }
         guard accepted else { throw Failure.faceIDRequired }
         try Task.checkCancellation()
@@ -576,12 +596,13 @@ struct MobileSecretApprovals: View {
 
     /// An answered request's alert has nothing left to say; take it off the lock screen.
     static func clearDeliveredAlerts() {
-        let center = UNUserNotificationCenter.current()
-        center.getDeliveredNotifications { delivered in
+        UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
             let answered = delivered.filter {
                 $0.request.content.threadIdentifier == RemoteNotificationKind.secretApprovalThread
             }.map(\.request.identifier)
-            if !answered.isEmpty { center.removeDeliveredNotifications(withIdentifiers: answered) }
+            if !answered.isEmpty {
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: answered)
+            }
         }
     }
 

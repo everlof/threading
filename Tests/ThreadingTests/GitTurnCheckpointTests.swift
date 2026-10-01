@@ -319,9 +319,9 @@ final class GitTurnCheckpointTests: XCTestCase {
         let session = SessionID()
         var contextAvailable = true
         let context = captureContext(for: root)
-        let store = GitTurnBaselineStore(directory: metadata) { _ in
+        let store = GitTurnBaselineStore(directory: metadata, contextProvider: { _ in
             contextAvailable ? context : nil
-        }
+        })
 
         let firstID = try prepare(store, session: session)
         try write("first\n", to: "first.txt")
@@ -420,7 +420,7 @@ final class GitTurnCheckpointTests: XCTestCase {
         )
 
         let context = captureContext(for: unborn)
-        let store = GitTurnBaselineStore(directory: unbornMetadata) { _ in context }
+        let store = GitTurnBaselineStore(directory: unbornMetadata, contextProvider: { _ in context })
         let session = SessionID()
         _ = try prepare(store, session: session)
         try "after\n".write(
@@ -469,7 +469,7 @@ final class GitTurnCheckpointTests: XCTestCase {
         XCTAssertNotEqual(mainLocation.worktreeIdentity, managedLocation.worktreeIdentity)
 
         let context = captureContext(for: worktree, logicalRoot: root)
-        let store = GitTurnBaselineStore(directory: metadata) { _ in context }
+        let store = GitTurnBaselineStore(directory: metadata, contextProvider: { _ in context })
         let session = SessionID()
         _ = try prepare(store, session: session)
         try "managed change\n".write(
@@ -541,9 +541,9 @@ final class GitTurnCheckpointTests: XCTestCase {
 
         let mainSession = SessionID()
         let worktreeSession = SessionID()
-        let store = GitTurnBaselineStore(directory: metadata) { session in
+        let store = GitTurnBaselineStore(directory: metadata, contextProvider: { session in
             session == worktreeSession ? worktreeContext : mainContext
-        }
+        })
 
         _ = try prepare(store, session: mainSession)
         _ = try prepare(store, session: worktreeSession)
@@ -800,9 +800,9 @@ final class GitTurnCheckpointTests: XCTestCase {
 
         let mine = SessionID()
         let elsewhere = SessionID()
-        let store = GitTurnBaselineStore(directory: metadata) { session in
+        let store = GitTurnBaselineStore(directory: metadata, contextProvider: { session in
             session == elsewhere ? worktreeContext : mainContext
-        }
+        })
 
         _ = try prepare(store, session: mine)
         _ = try prepare(store, session: elsewhere)
@@ -902,8 +902,9 @@ final class GitTurnCheckpointTests: XCTestCase {
         let store = GitTurnBaselineStore(
             directory: metadata,
             maximumPerSession: 2,
-            maximumTotal: 2
-        ) { [context = captureContext(for: root)] _ in context }
+            maximumTotal: 2,
+            contextProvider: { [context = captureContext(for: root)] _ in context }
+        )
 
         for ordinal in 1...3 {
             _ = try prepare(store, session: session)
@@ -1014,9 +1015,9 @@ final class GitTurnCheckpointTests: XCTestCase {
     // MARK: - Helpers
 
     private func makeStore() -> GitTurnBaselineStore {
-        GitTurnBaselineStore(directory: metadata) { [context = captureContext(for: root)] _ in
+        GitTurnBaselineStore(directory: metadata, contextProvider: { [context = captureContext(for: root)] _ in
             context
-        }
+        })
     }
 
     private func captureContext(for checkout: URL, logicalRoot: URL? = nil) -> GitTurnCaptureContext {

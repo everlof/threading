@@ -52,7 +52,8 @@ final class SecretApprovalBrokerTests: XCTestCase {
 
     private func makeBroker(store: MemoryStore = MemoryStore()) -> SecretApprovalBroker {
         let clock = clock
-        return SecretApprovalBroker(store: store, now: { clock.now() }, isEnabled: { [unowned self] in enabled })
+        let enabled = enabled
+        return SecretApprovalBroker(store: store, now: { clock.now() }, isEnabled: { enabled })
     }
 
     private func handle(_ broker: SecretApprovalBroker, _ request: RemoteSecretApproval.Request,

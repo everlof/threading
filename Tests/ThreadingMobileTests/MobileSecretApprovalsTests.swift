@@ -3,6 +3,7 @@ import XCTest
 import ThreadingRemoteKit
 @testable import ThreadingMobile
 
+@MainActor
 final class MobileSecretApprovalsTests: XCTestCase {
     /// The phone and the Mac show one fingerprint for the enrolled key, so a person can compare
     /// them by eye. Same bytes in, same sixteen hex digits out, grouped in fours.
@@ -47,7 +48,7 @@ final class MobileSecretApprovalsTests: XCTestCase {
             MobileSecretApprovalFailure.invalidCode, MobileSecretApprovalKeys.Failure.faceIDRequired,
             MobileSecretApprovalKeys.Failure.invalidRequest, URLError(.timedOut)
         ]
-        let messages = failures.map(MobileSecretApprovals.message(for:))
+        let messages = failures.map { MobileSecretApprovals.message(for: $0) }
         XCTAssertEqual(Set(messages).count, messages.count, "each failure has its own explanation")
         for message in messages {
             XCTAssertFalse(message.localizedCaseInsensitiveContains("approved"), message)

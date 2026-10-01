@@ -10,27 +10,44 @@ import XCTest
 @MainActor
 final class ThemeMotionTests: XCTestCase {
 
-    private var previousTheme: AppTheme!
-    private var previousSettings: DesignSettingsReading!
-    private var previousWindows: (() -> [NSWindow])!
+    private struct Snapshot {
+        let theme: AppTheme
+        let settings: DesignSettingsReading
+        let windows: () -> [NSWindow]
+    }
+
+    /// XCTest's synchronous overrides are nonisolated. Keep their non-Sendable AppKit state on
+    /// the main actor and pass only a Sendable test identity into the setup/teardown closures.
+    private static var snapshots: [ObjectIdentifier: Snapshot] = [:]
 
     override func setUp() {
         super.setUp()
-        previousTheme = AppThemeLibrary.current
-        previousSettings = DesignSettings.current
-        previousWindows = ThemeTransitionPresenter.shared.windowsProvider
-        DesignSettings.current = StubDesignSettings()
-        Design.Motion.reduceMotionOverrideForTesting = false
-        ThemeParticleHold.seenOverrideForTesting = true
+        let testID = ObjectIdentifier(self)
+        MainActor.assumeIsolated {
+            Self.snapshots[testID] = Snapshot(
+                theme: AppThemeLibrary.current,
+                settings: DesignSettings.current,
+                windows: ThemeTransitionPresenter.shared.windowsProvider
+            )
+            DesignSettings.current = StubDesignSettings()
+            Design.Motion.reduceMotionOverrideForTesting = false
+            ThemeParticleHold.seenOverrideForTesting = true
+        }
     }
 
     override func tearDown() {
-        ThemeTransitionPresenter.shared.windowsProvider = previousWindows
-        ThemeParticleHold.seenOverrideForTesting = nil
-        Design.Motion.reduceMotionOverrideForTesting = nil
-        DesignSettings.current = previousSettings
-        AppThemeLibrary.apply(previousTheme)
-        ThemeAssetStore.removeAll(for: Self.scratchThemeID)
+        let testID = ObjectIdentifier(self)
+        MainActor.assumeIsolated {
+            guard let snapshot = Self.snapshots.removeValue(forKey: testID) else {
+                preconditionFailure("theme motion fixture was not installed")
+            }
+            ThemeTransitionPresenter.shared.windowsProvider = snapshot.windows
+            ThemeParticleHold.seenOverrideForTesting = nil
+            Design.Motion.reduceMotionOverrideForTesting = nil
+            DesignSettings.current = snapshot.settings
+            AppThemeLibrary.apply(snapshot.theme)
+            ThemeAssetStore.removeAll(for: Self.scratchThemeID)
+        }
         super.tearDown()
     }
 
@@ -559,6 +576,7 @@ final class ThemeMotionTests: XCTestCase {
     }
 
     func testPreviewDrawsEveryVariantOfATheme() throws {
+        let originalTheme = try XCTUnwrap(Self.snapshots[ObjectIdentifier(self)]?.theme)
         let theme = try dressedTheme(
             band: redBand(ink: white),
             titleColor: white,
@@ -569,7 +587,7 @@ final class ThemeMotionTests: XCTestCase {
         let image = try XCTUnwrap(NSBitmapImageRep(data: png))
         XCTAssertEqual(image.pixelsWide, 1140)
         XCTAssertEqual(image.pixelsHigh, 1410, "two appearances, stacked")
-        XCTAssertEqual(AppThemePalette.current.id, previousTheme.id, "the palette is put back")
+        XCTAssertEqual(AppThemePalette.current.id, originalTheme.id, "the palette is put back")
 
         // The band is where it was drawn: the sidebar's top-left, in the band's red. The PNG is
         // tagged sRGB, so its samples are read as they are — converting an sRGB sample to sRGB
