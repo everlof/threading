@@ -39,7 +39,9 @@ final class CodexTranscriptBoundaryObserverTests: XCTestCase {
         wait(for: [armed], timeout: 3)
         try append(.completed(turnID: "turn-1"), to: fixture.transcript)
 
-        wait(for: [completed], timeout: 3)
+        // FSEvents delivery depends on host scheduling; this checks eventual append wake-up,
+        // not the latency of the terminal-output path. A passing loaded run took 2.26 seconds.
+        wait(for: [completed], timeout: 10)
         XCTAssertEqual(tracker.activity, .needsAttention)
         XCTAssertFalse(tracker.runtimeSnapshot.hasOpenTurn)
     }
