@@ -16,7 +16,14 @@ final class ComponentGalleryWindowController: ThemedWindowController {
         static let minimumSize = NSSize(width: 780, height: 580)
     }
 
-    convenience init(initialGreeting: String? = nil) {
+    /// Stated rather than left to a defaulted parameter: an argument-less call prefers the
+    /// `init()` every `NSWindowController` inherits over a defaulted one, and that builds no
+    /// window — the Component Gallery menu item opened nothing.
+    convenience init() {
+        self.init(initialGreeting: nil)
+    }
+
+    convenience init(initialGreeting: String?) {
         let content = ComponentGalleryViewController(initialGreeting: initialGreeting)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Defaults.size),
