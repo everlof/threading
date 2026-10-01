@@ -802,7 +802,7 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 ),
                 .text(
                     "Your paired iPhone is open in the right panel. Use the hand button to grant "
-                    + "temporary tap and swipe control; typing remains unavailable."
+                    + "temporary tap, swipe, and keyboard control."
                 )
             ]),
             .turnFinished(

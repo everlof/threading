@@ -180,6 +180,7 @@ final class RealDevicePaneViewController: NSViewController {
                 toY: Double(point.y)
             ))
         }
+        screen.onText = { [weak self] text in self?.submitText(text) }
         return screen
     }()
 
@@ -637,6 +638,20 @@ final class RealDevicePaneViewController: NSViewController {
         }
     }
 
+    private func submitText(_ text: String) {
+        guard control.supportsKeyboardInput else { return }
+        do {
+            for input in try PhysicalDeviceKeyboard.inputs(for: text) {
+                submitInput(input)
+            }
+        } catch {
+            inputFailure = L10n.string(
+                "This iPhone keyboard currently supports standard US text and editing keys."
+            )
+            renderState()
+        }
+    }
+
     private func stopInput() {
         inputGeneration += 1
         inputTask?.cancel()
@@ -858,7 +873,10 @@ final class RealDevicePaneViewController: NSViewController {
             screenView.interactionState = .unavailable
             return
         }
-        screenView.interactionState = .ready(touch: true, keyboard: false)
+        screenView.interactionState = .ready(
+            touch: true,
+            keyboard: control.supportsKeyboardInput
+        )
     }
 
     private func deviceEntries() -> [ThemedMenuEntry] {

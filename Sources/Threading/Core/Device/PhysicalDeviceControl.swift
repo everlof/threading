@@ -8,6 +8,7 @@ protocol PhysicalDeviceControlling: Sendable {
     func sendInput(_ input: PhysicalDeviceInput, to device: PhysicalDevice) async throws
     func screenshot(of device: PhysicalDevice) async throws -> Data
     var supportsLiveTouch: Bool { get }
+    var supportsKeyboardInput: Bool { get }
     var frameInterval: Duration { get }
     func stopPreview()
     func stopInput()
@@ -17,6 +18,7 @@ protocol PhysicalDeviceControlling: Sendable {
 
 extension PhysicalDeviceControlling {
     var supportsLiveTouch: Bool { false }
+    var supportsKeyboardInput: Bool { false }
     var frameInterval: Duration { .seconds(1) }
     func stopPreview() {}
     func stopInput() {}
@@ -649,7 +651,7 @@ final class DevicectlPhysicalDeviceControl: PhysicalDeviceControlling, @unchecke
             "--no-color", "developer", "core-device", "universal-hid-service",
         ]
         switch input {
-        case .touchDown, .touchMove, .touchUp:
+        case .touchDown, .touchMove, .touchUp, .key:
             throw PhysicalDeviceControlError.invalidInput
         case .tap(let x, let y):
             return prefix + [

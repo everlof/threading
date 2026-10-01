@@ -1,8 +1,9 @@
 # Physical iPhone pane
 
 **Status:** Active prototype. The preview shipped on 2026-09-28; direct capability probing and the
-first user-controlled tap/drag slice were implemented on 2026-09-30. Persistent DisplayService
-streaming, keyboard/hardware buttons and agent control are not implemented.
+first user-controlled tap/drag slice were implemented on 2026-09-30. Focused user keyboard input
+followed on 2026-10-01. Persistent DisplayService streaming, hardware buttons and agent control
+are not implemented.
 
 The durable contract for the shipping preview is in
 [`../architecture/physical-iphone-pane.md`](../architecture/physical-iphone-pane.md). This draft
@@ -50,22 +51,23 @@ phones revokes it. That user grant does not authorize an agent to operate the ph
 - The hand button asks for a non-persistent, exact-device control grant. Once approved, clicks and
   drags map from the aspect-fitted framebuffer into Universal HID's 16-bit coordinate space.
   Hiding, closing or switching devices revokes the grant and cancels in-flight input.
-- Keyboard, hardware buttons, unlock/passcode automation and agent-driven physical input remain
-  unavailable.
+- Standard US text and editing keys work while the granted pane owns keyboard focus. Hardware
+  buttons, unlock/passcode automation and agent-driven physical input remain unavailable.
 
 This fallback is a proof of the product path, not the eventual transport. It requires the device's
 developer image/services to be available and may be visibly slow over Wi-Fi.
 
-## Persistent backend still required
+## Persistent media backend still required
 
 The reference implementation that motivated this work, [omarchy-iphone-mirror
 v0.1.3](https://github.com/DanielLemky/omarchy-iphone-mirror/releases/tag/v0.1.3), uses Apple's
 RemoteXPC device services: DisplayService supplies the media stream and Universal HID sends input.
-Its active media stream also gates HID availability. Threading now uses the package's CLI for the
-direct probes and one user gesture at a time. That is a safe first control slice, but spawning one
-command per gesture is not the shipping low-latency stream backend.
+Its active media stream also gates HID availability. Threading's app-owned helper now keeps one
+private control session open and delivers warm HID requests in under two milliseconds on the
+measured phone. Preview remains a separate full-resolution screenshot session, though, so the
+picture—not input delivery—is still the latency boundary.
 
-The next implementation therefore needs a version-pinned helper owned by the app, with:
+The next implementation therefore needs to extend that bounded helper with:
 
 1. one bounded stream lease per visible physical-device pane, latest-frame replacement and a hard
    frame/byte budget;
@@ -82,7 +84,7 @@ transport honestly and never imply low latency when the route cannot provide it.
 
 ## Verification gate for the persistent slice
 
-Before replacing the command-per-gesture path, prove on supported iOS versions and on both USB and
+Before replacing the screenshot preview path, prove on supported iOS versions and on both USB and
 Wi-Fi that:
 
 - the active DisplayService stream is necessary and sufficient for HID;

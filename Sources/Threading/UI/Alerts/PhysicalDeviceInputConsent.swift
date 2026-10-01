@@ -68,7 +68,7 @@ final class PhysicalDeviceInputConsentController: PhysicalDeviceInputAuthorizing
             prompt: .controlPhysicalDevice,
             title: L10n.format("Control %@?", device.name),
             message: L10n.string(
-                "Threading will be able to tap and swipe on this exact iPhone while its pane "
+                "Threading will be able to tap, swipe and type on this exact iPhone while its pane "
                     + "is visible. Hiding the pane or switching phones revokes control."
             ),
             confirmTitle: L10n.string("Allow Control"),

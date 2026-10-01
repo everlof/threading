@@ -54952,6 +54952,17 @@
         }
       }
     },
+    "This iPhone keyboard currently supports standard US text and editing keys." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det här iPhone-tangentbordet stöder för närvarande vanlig amerikansk text och redigeringstangenter."
+          }
+        }
+      }
+    },
     "This is a throwaway test account" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56438,13 +56449,13 @@
         }
       }
     },
-    "Threading will be able to tap and swipe on this exact iPhone while its pane is visible. Hiding the pane or switching phones revokes control." : {
+    "Threading will be able to tap, swipe and type on this exact iPhone while its pane is visible. Hiding the pane or switching phones revokes control." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Threading kommer att kunna trycka och svepa på just den här iPhonen medan dess panel är synlig. Om panelen döljs eller om du byter telefon återkallas styrningen."
+            "value" : "Threading kommer att kunna trycka, svepa och skriva på just den här iPhonen medan dess panel är synlig. Om panelen döljs eller om du byter telefon återkallas styrningen."
           }
         }
       }

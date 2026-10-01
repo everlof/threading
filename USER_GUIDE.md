@@ -3649,15 +3649,18 @@ the tab is hidden. Pairing, trusting this Mac or detecting developer services do
 control.
 
 When the phone supports it, press the hand button and approve **Allow Control** for that exact
-iPhone. You can then click the preview to tap and drag across it to swipe. The grant is temporary:
+iPhone. You can then click the preview to tap, drag across it to swipe, and type with the Mac
+keyboard after clicking a text field on the phone. The first keyboard slice supports standard US
+text plus Return, Tab and Delete; Command and Control shortcuts stay on the Mac. The grant is temporary:
 hiding or closing the tab, switching phones or ending the session revokes it. A denial is not
 asked again on every screen click; press the crossed-out hand button to retry explicitly. This
-first control version does not type text or send Home, Lock or volume-button presses, and agents
-cannot use your visible-pane grant to operate the phone.
+control version does not send Home, Lock or volume-button presses, and agents cannot use your
+visible-pane grant to operate the phone.
 
 Modern iPhones keep their preview connection open rather than launching a command for every
-frame. The preview is capped at four frames per second, not full-motion video; initial connection
-setup can still take several seconds. Control has its own persistent connection, and the pane
+frame. The preview requests at most ten frames per second but remains limited by full-resolution
+screenshot capture (about six frames per second on the measured iPhone), not full-motion video;
+initial connection setup can still take several seconds. Control has its own persistent connection, and the pane
 waits for it before accepting input. Drags follow pointer movement instead of replaying after
 release. A disconnect or a change in image dimensions revokes control; approve it again after
 the preview recovers.

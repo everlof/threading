@@ -3,10 +3,10 @@
 Threading has one physical-iPhone pane per session. It lives in the ordinary display panel and
 shares the design-layer device framebuffer with the Simulator, but it does not share the
 Simulator's lease or input authority. The pane provides a bounded screenshot preview and, after
-an explicit grant for the exact selected phone, user-driven taps and drags through CoreDevice's
-DisplayService-authenticated Universal HID route. This note is the shipping contract for that
-first control slice. A persistent low-latency media stream, keyboard and hardware-button input,
-and agent input remain in
+an explicit grant for the exact selected phone, user-driven taps, drags and keyboard input through
+CoreDevice's DisplayService-authenticated Universal HID route. This note is the shipping contract
+for that control slice. A persistent low-latency media stream, hardware-button input and agent
+input remain in
 [`../feature-drafts/physical-iphone-pane.md`](../feature-drafts/physical-iphone-pane.md).
 
 ## Identity and discovery
@@ -54,9 +54,9 @@ read and cannot cancel a newer generation's child.
 
 - no discovery or capture starts for a restored or background-session tab;
 - presenting discovers the selected device and starts at most one screenshot loop;
-- the persistent preview requests at most four frames per second, with one request/decode in
+- the persistent preview requests at most ten frames per second, with one request/decode in
   flight and only the latest local frame retained; the command fallback keeps its one-fps cap;
-  both are screenshot preview, not video;
+  both are screenshot preview, not video, so actual cadence remains capture-limited;
 - hiding, switching away, closing or terminating cancels discovery, the capture loop and its
   current child process;
 - selecting a hardware identity while hidden only records that preference.
@@ -144,19 +144,26 @@ in-flight input process. A denial is remembered so screen clicks cannot repeated
 user; only pressing **Retry iPhone Control** clears it and presents the sheet again. Pairing, Mac
 trust, developer mode, a healthy screenshot and a successful probe are never consent.
 
-The pane supports clicks and drags only. The framebuffer converts the fitted, y-up AppKit
+The pane supports clicks, drags and focused Mac keyboard input. The framebuffer converts the fitted, y-up AppKit
 point into the phone's normalized y-down image space. The device adapter validates finite values
 inside `0...1` and rounds them into Universal HID's `0...65535` coordinate space. After explicit
 consent, a separate persistent `touch_session` opens the DisplayService authentication and HID
-connection. The pane stays noninteractive until its ready acknowledgement. Drag down/move/up
+connection and registers a virtual keyboard surface. The pane stays noninteractive until its ready
+acknowledgement. Drag down/move/up
 phases are delivered while dragging, not replayed at mouse-up. Only adjacent unsent moves may
 coalesce; tap and contact boundaries keep their ordering. The pending queue is capped at 32 and
 overflow visibly revokes control rather than silently dropping a click. Each operation rechecks
 the visible pane, exact device, grant and generation. A preview failure or frame-size change also
 revokes control. EOF/cancellation releases any held contact and closes the session.
 
-The preview and input workers do not block each other. Keyboard input, hardware buttons, passcode
-or unlock automation, lock-screen interaction
+Keyboard characters are translated in the app to bounded USB HID usages, so typed text does not
+become part of the helper's command protocol. The first slice covers the standard US printable
+layout plus Return, Tab and Delete; unsupported composed or non-ASCII text is refused as a unit.
+The screen must own keyboard focus, which a click into the preview establishes, and Command or
+Control chords remain with macOS. The exact-device grant explicitly names typing and is revoked by
+the same visibility and identity boundaries as touch.
+
+The preview and input workers do not block each other. Hardware buttons, passcode or unlock automation, lock-screen interaction
 and agent-driven physical-device input are absent. The latter requires its own separately reviewed
 authority surface; a user grant to click in the pane must never become an agent grant implicitly.
 
@@ -198,9 +205,14 @@ can replace the screenshot fallback.
 Read-only captures on the connected iPhone 16 Pro measured CLI-per-frame times of 10.8583,
 10.9139 and 7.7210 seconds (median 10.8583). Reusing a native DVT session took 9.9257 seconds for
 the first frame, then 0.1655–0.1986 seconds for seven subsequent frames (median 0.16634). These
-measure capture, not end-to-end touch latency. Cold connection remains slow; the four-fps cap is
-intentional and does not claim video smoothness. `PhysicalDeviceSessionPipeTests` covers process
-reuse, cancellation, restart, reply bounds and coordinate validation. `RealDevicePaneTests` covers
-live drag coalescing and ordered queued taps. `scripts/tests/test_physical_device_session.py`
-uses fake transports to prove exact identity and held-contact release on EOF, cancellation and
-protocol failure. Live input/rotation still requires hardware testing.
+measure capture, not end-to-end touch latency. A readiness-only control probe on the same phone
+measured a 4,300.4 ms cold session open including virtual-keyboard registration, then 0.16 ms
+median / 0.31 ms maximum across 19 warm pipe round trips; no touch or key report was sent. This
+isolates the remaining visible delay to the
+screenshot preview rather than HID delivery. Cold connection remains slow; the ten-fps request cap
+does not claim video smoothness and actual full-resolution capture remains about six fps on this
+phone. `PhysicalDeviceSessionPipeTests` covers process reuse, cancellation, restart, reply bounds
+and coordinate validation. `RealDevicePaneTests` covers live drag coalescing, ordered queued taps
+and consent-bounded keyboard routing. `scripts/tests/test_physical_device_session.py` uses fake
+transports to prove exact identity, keyboard press/release, and held-contact release on EOF,
+cancellation and protocol failure. Live keyboard input and rotation still require hardware testing.

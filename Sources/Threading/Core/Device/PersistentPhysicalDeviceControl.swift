@@ -4,7 +4,8 @@ import os
 
 /// One demand-driven preview pipe and one consent-driven input pipe. Frames never queue:
 /// the caller requests its next frame only after publishing the last one. Input has its own
-/// worker, so a capture cannot delay a release. No network listener or keyboard route exists.
+/// worker, so a capture cannot delay a release. No network listener exists; keyboard reports
+/// cross the private pipe as bounded HID usages rather than typed text.
 final class PersistentPhysicalDeviceControl: PhysicalDeviceControlling, @unchecked Sendable {
     private let fallback: any PhysicalDeviceControlling
     private let preview: PhysicalDeviceSessionPipe
@@ -18,7 +19,8 @@ final class PersistentPhysicalDeviceControl: PhysicalDeviceControlling, @uncheck
     }
 
     var supportsLiveTouch: Bool { true }
-    var frameInterval: Duration { legacyPreview.withLock { $0 ? .seconds(1) : .milliseconds(250) } }
+    var supportsKeyboardInput: Bool { true }
+    var frameInterval: Duration { legacyPreview.withLock { $0 ? .seconds(1) : .milliseconds(100) } }
 
     func availableDevices() async throws -> [PhysicalDevice] { try await fallback.availableDevices() }
     func controlSupport(of device: PhysicalDevice) async throws -> PhysicalDeviceControlSupport {
@@ -62,6 +64,12 @@ final class PersistentPhysicalDeviceControl: PhysicalDeviceControlling, @uncheck
         case .touchDown(let x, let y): try await send("down", x, y)
         case .touchMove(let x, let y): try await send("move", x, y)
         case .touchUp(let x, let y): try await send("up", x, y)
+        case .key(let usage, let shift):
+            guard usage < 240 else { throw PhysicalDeviceControlError.invalidInput }
+            _ = try await input.request(
+                "key \(usage) \(shift ? 1 : 0)",
+                device: device.id
+            )
         case .drag:
             // The persistent path consumes live phases, never replays a completed mouse drag.
             throw PhysicalDeviceControlError.invalidInput

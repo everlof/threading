@@ -222,6 +222,45 @@ final class RealDevicePaneTests: HostedStoreTestCase {
         XCTAssertNil(authorizer.decision(for: physicalDeviceTestFixture.id))
     }
 
+    func testApprovedPhysicalDeviceKeyboardTypesOnlyWhilePaneOwnsControl() async throws {
+        let control = RealDeviceControlFake(
+            support: .available(supportedMediaFeatures: 140),
+            liveTouch: true,
+            keyboardInput: true
+        )
+        let controller = RealDevicePaneViewController(
+            control: control,
+            inputAuthorizer: PhysicalDeviceInputAuthorizerFake(approval: true)
+        )
+        _ = controller.view
+        defer { controller.terminate() }
+
+        controller.setPresented(true)
+        try await eventually {
+            controller.frameImageForTesting != nil
+                && controller.controlSupportForTesting != nil
+        }
+        XCTAssertTrue(controller.controlButtonForTesting.performPrimaryAction())
+        try await eventually {
+            controller.screenInteractionStateForTesting == .ready(touch: true, keyboard: true)
+        }
+
+        controller.screenViewForTesting.onText?("Az!")
+        try await eventually { await control.inputs().count == 3 }
+        let typed = await control.inputs()
+        XCTAssertEqual(typed, [
+            .key(usage: 0x04, shift: true),
+            .key(usage: 0x1D, shift: false),
+            .key(usage: 0x1E, shift: true),
+        ])
+
+        controller.setPresented(false)
+        controller.screenViewForTesting.onText?("x")
+        await Task.yield()
+        let afterHide = await control.inputs()
+        XCTAssertEqual(afterHide.count, 3)
+    }
+
     func testFailedProbeOffersExplicitDeveloperSupportPreparation() async throws {
         let control = RealDeviceControlFake(
             support: .unknown(.probeFailed),
@@ -288,6 +327,7 @@ final class RealDevicePaneTests: HostedStoreTestCase {
 
         XCTAssertEqual(presentedRequest?.prompt, .controlPhysicalDevice)
         XCTAssertTrue(presentedRequest?.message.contains("exact iPhone") == true)
+        XCTAssertTrue(presentedRequest?.message.contains("type") == true)
         XCTAssertNil(authorizer.decision(for: physicalDeviceTestFixture.id))
         try XCTUnwrap(presentedCompletion)(true)
         XCTAssertEqual(result, true)
@@ -385,6 +425,7 @@ private let physicalDeviceTestFixture = PhysicalDevice(
 
 private actor RealDeviceControlFake: PhysicalDeviceControlling {
     nonisolated let supportsLiveTouch: Bool
+    nonisolated let supportsKeyboardInput: Bool
     struct Counts: Sendable {
         var available = 0
         var screenshots = 0
@@ -405,7 +446,8 @@ private actor RealDeviceControlFake: PhysicalDeviceControlling {
         preparedSupport: PhysicalDeviceControlSupport? = nil,
         preparationFailure: PhysicalDeviceControlError? = nil,
         screenshotFailure: PhysicalDeviceControlError? = nil,
-        liveTouch: Bool = false
+        liveTouch: Bool = false,
+        keyboardInput: Bool = false
     ) {
         self.failure = failure
         self.support = support
@@ -413,6 +455,7 @@ private actor RealDeviceControlFake: PhysicalDeviceControlling {
         self.preparationFailure = preparationFailure
         self.screenshotFailure = screenshotFailure
         supportsLiveTouch = liveTouch
+        supportsKeyboardInput = keyboardInput
     }
 
     func installTooling() {

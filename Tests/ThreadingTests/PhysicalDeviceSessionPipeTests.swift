@@ -89,4 +89,21 @@ final class PhysicalDeviceSessionPipeTests: XCTestCase {
         XCTAssertThrowsError(try PhysicalDeviceSessionPipe.touchCommand("move", x: .nan, y: 0))
         XCTAssertThrowsError(try PhysicalDeviceSessionPipe.touchCommand("move", x: 0, y: 1.01))
     }
+
+    func testKeyboardTextMapsToBoundedHIDUsagesWithoutCrossingAsText() throws {
+        XCTAssertEqual(
+            try PhysicalDeviceKeyboard.inputs(for: "aA1! \t\r\u{8}"),
+            [
+                .key(usage: 0x04, shift: false),
+                .key(usage: 0x04, shift: true),
+                .key(usage: 0x1E, shift: false),
+                .key(usage: 0x1E, shift: true),
+                .key(usage: 0x2C, shift: false),
+                .key(usage: 0x2B, shift: false),
+                .key(usage: 0x28, shift: false),
+                .key(usage: 0x2A, shift: false),
+            ]
+        )
+        XCTAssertThrowsError(try PhysicalDeviceKeyboard.inputs(for: "å"))
+    }
 }

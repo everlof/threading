@@ -101,7 +101,7 @@ final class DeviceLogToolsTests: XCTestCase {
         let plugin = loadedPlugin()
         let pane = try XCTUnwrap(plugin.paneForTesting)
         pane.installRowsForTesting((0..<3).map { index in
-            DeviceLogRow(time: "13:06:00.000", level: "Debug", process: "apsd",
+            DeviceLogRow(time: "13:06:00.000", level: "Info", process: "apsd",
                          subsystem: nil, message: "line " + String(index))
         })
         let answer = call(plugin, DeviceLogToolNames.visible)

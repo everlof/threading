@@ -1,7 +1,8 @@
 """Threading's private pipe adapter for the separately installed pymobiledevice3.
 
-One exact device and one service per process. No listener, clipboard, keyboard, or
-agent input. The host opens the control lane only after its visible-device grant.
+One exact device and one service per process. No listener, clipboard, text protocol, or
+agent input. The host opens the control lane only after its visible-device grant; keyboard
+input arrives only as validated USB HID usage numbers.
 Requests are bounded ASCII lines; replies are length-prefixed status + bytes.
 """
 import argparse
@@ -66,14 +67,30 @@ async def run(device, lane):
         else:
             from pymobiledevice3.remote.core_device.hid_service import (
                 touch_session, TOUCHSCREEN_STATE_CONTACT, TOUCHSCREEN_STATE_RELEASE,
+                KEY_LEFT_SHIFT,
             )
 
             async with touch_session(rsd) as hid:
                 touching = False
                 last = (0, 0)
+                keyboard = None
                 try:
                     async for command in requests():
                         if command == ["ready"]:
+                            if keyboard is None:
+                                keyboard = await hid.create_keyboard_service()
+                            reply()
+                            continue
+                        if len(command) == 3 and command[0] == "key":
+                            usage, shifted = int(command[1]), int(command[2])
+                            if not (0 <= usage < 240) or shifted not in (0, 1):
+                                raise ValueError("invalid keyboard command")
+                            if keyboard is None:
+                                keyboard = await hid.create_keyboard_service()
+                            usages = (KEY_LEFT_SHIFT, usage) if shifted else (usage,)
+                            await hid.send_keyboard(keyboard, usages)
+                            await asyncio.sleep(0.02)
+                            await hid.send_keyboard(keyboard, ())
                             reply()
                             continue
                         x, y = point(command)
@@ -91,6 +108,8 @@ async def run(device, lane):
                 finally:
                     if touching:
                         await hid.send_touchscreen(TOUCHSCREEN_STATE_RELEASE, *last)
+                    if keyboard is not None:
+                        await hid.send_keyboard(keyboard, ())
 
 
 async def main(device, lane):

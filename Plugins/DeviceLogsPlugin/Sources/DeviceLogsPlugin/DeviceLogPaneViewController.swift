@@ -124,7 +124,9 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// Ring positions an agent's search matched, marked so its reading is something you can see.
     private var agentHits: Set<Int> = []
     private var filter = ""
-    private var minimumSeverity = 0
+    /// Whole-device Debug output is thousands of rows per second on a paired iPhone. Start at
+    /// Info so the pane opens as a useful console; Debug remains one explicit menu choice away.
+    private var minimumSeverity = 1
     private var selectedProcess: String?
     private var processChoices: [String] = []
     private var knownProcesses: Set<String> = []
@@ -352,7 +354,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         for title in ["All levels", "Info and above", "Errors only"] {
             levelPopUp.addItem(withTitle: L10n.string(title))
         }
-        levelPopUp.selectItem(at: 0)
+        levelPopUp.selectItem(at: 1)
         levelPopUp.target = self
         levelPopUp.action = #selector(levelChanged)
 

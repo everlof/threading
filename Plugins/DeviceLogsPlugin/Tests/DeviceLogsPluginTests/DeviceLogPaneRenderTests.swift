@@ -11,6 +11,19 @@ import ThreadingDesignKit
 /// A picture is where that is noticed; the assertions below are what it turned into.
 @MainActor
 final class DeviceLogPaneRenderTests: XCTestCase {
+    func testThePaneStartsAboveDebugNoise() {
+        let controller = DeviceLogPaneViewController(owningSessionID: UUID().uuidString)
+        controller.loadView()
+        controller.installRowsForTesting([
+            DeviceLogRow(time: "", level: "Debug", process: "noisy", subsystem: nil, message: "routine"),
+            DeviceLogRow(time: "", level: "Info", process: "app", subsystem: nil, message: "useful"),
+            DeviceLogRow(time: "", level: "Error", process: "app", subsystem: nil, message: "failed"),
+        ])
+
+        XCTAssertEqual(controller.focusSummary.shown, 2)
+        XCTAssertEqual(controller.visibleRowsForTools(limit: 20).map(\.level), ["Info", "Error"])
+    }
+
     func testProcessPickerAndTypingUseStrictFilteringUntilContextIsRequested() async throws {
         let controller = pane()
         controller.installRowsForTesting([
@@ -35,7 +48,7 @@ final class DeviceLogPaneRenderTests: XCTestCase {
         (0..<24).map { index in
             DeviceLogRow(
                 time: String(format: "13:06:%02d.969", index % 60),
-                level: index % 7 == 0 ? "Error" : "Debug",
+                level: index % 7 == 0 ? "Error" : "Info",
                 process: "apsd",
                 subsystem: "com.apple.uaps",
                 message: "START BUFFER lut.addFirst @ 0x10940c02d,4: entry \(index)"

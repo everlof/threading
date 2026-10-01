@@ -660,7 +660,10 @@ to disclose.
 
 ## Exact app scope and strict filtering (September 2026)
 
-The user-facing default is now **Matches only**, with **Show context** as an explicit choice.
+The user-facing default is now **Matches only** and **Info and above**, with **Show context** and
+whole-device Debug output as explicit choices. A paired iPhone produces thousands of Debug rows a
+second, so opening at All levels made the useful console indistinguishable from a transport stress
+test.
 Typing in the filter returns to strict mode; the agent's existing focus action explicitly selects
 context mode and leaves its visible receipt. An exact process menu distinguishes an app's own
 output from system daemons merely mentioning its name. It is learned incrementally from observed
