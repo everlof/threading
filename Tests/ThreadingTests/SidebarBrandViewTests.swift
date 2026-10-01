@@ -586,15 +586,15 @@ final class SidebarBrandViewTests: XCTestCase {
             "the footer has no titled Settings button"
         )
         let footer = try XCTUnwrap(ancestor(of: settings, as: PaneFooterView.self))
-        let triggers = try XCTUnwrap(
+        let automations = try XCTUnwrap(
             descendants(of: sidebar.view)
                 .compactMap { $0 as? ThemedIconButton }
-                .first { $0.accessibilityTitle() == L10n.string("Triggers") },
-            "the footer has no accessible Triggers destination"
+                .first { $0.accessibilityTitle() == L10n.string("Automations") },
+            "the footer has no accessible Automations destination"
         )
-        XCTAssertEqual(footer, ancestor(of: triggers, as: PaneFooterView.self))
+        XCTAssertEqual(footer, ancestor(of: automations, as: PaneFooterView.self))
         XCTAssertGreaterThanOrEqual(
-            footer.convert(triggers.frame, from: triggers.superview).minX,
+            footer.convert(automations.frame, from: automations.superview).minX,
             footer.convert(settings.frame, from: settings.superview).maxX,
             "the trailing icon actions must leave the leading Settings destination clear"
         )
@@ -622,7 +622,7 @@ final class SidebarBrandViewTests: XCTestCase {
 
         let settingsButton = try XCTUnwrap(buttons.first { $0.title == L10n.string("Settings") })
         XCTAssertNotNil(descendants(of: sidebar.view).compactMap { $0 as? ThemedIconButton }
-            .first { $0.accessibilityTitle() == L10n.string("Triggers") })
+            .first { $0.accessibilityTitle() == L10n.string("Automations") })
         let footer = try XCTUnwrap(ancestor(of: settingsButton, as: PaneFooterView.self))
         XCTAssertFalse(footer.isHidden)
         XCTAssertEqual(

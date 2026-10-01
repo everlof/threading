@@ -917,8 +917,10 @@ final class MCPWireTests: XCTestCase {
 
     let handler = RecordingCommandHandler()
     for descriptor in MCPBuiltInToolRegistry.descriptors {
+      let arguments: [String: Any] = descriptor.tool == .manageAutomation
+        ? ["operation": "list"] : [:]
       let payload = try JSONSerialization.data(
-        withJSONObject: ["name": descriptor.tool.rawValue, "arguments": [:]]
+        withJSONObject: ["name": descriptor.tool.rawValue, "arguments": arguments]
       )
       let command = try JSONDecoder().decode(MCPToolCallParameters.self, from: payload).call
       XCTAssertEqual(command.builtInTool, descriptor.tool)

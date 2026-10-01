@@ -129,8 +129,14 @@ final class UIEvidenceRenderTests: XCTestCase {
                 let sourceText = try String(contentsOf: sourceURL, encoding: .utf8)
                 for selector in source.selectors {
                     let method = try XCTUnwrap(selector.split(separator: "/").last, selector)
+                    let declaration = "func \(method)("
+                    if sourceText.contains(declaration) { continue }
+                    let suite = try XCTUnwrap(selector.split(separator: "/").dropLast().last, selector)
+                    let suiteURL = sourceURL.deletingLastPathComponent()
+                        .appendingPathComponent("\(suite).swift")
+                    let suiteText = try String(contentsOf: suiteURL, encoding: .utf8)
                     XCTAssertTrue(
-                        sourceText.contains("func \(method)("),
+                        suiteText.contains(declaration),
                         "\(context) references missing test \(selector)"
                     )
                 }
