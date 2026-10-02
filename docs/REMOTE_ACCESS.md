@@ -711,6 +711,11 @@ turn and how close it is to its limit. It is the same disc the draft's bar wears
 account, so starting a chat keeps the control where it was; a share or an older host with no
 usage to report gets the mark alone.
 
+The disc takes the usage surface's resolved account badge by default, including the standard
+login when its badge is visible. The phone's Account badge setting can hide this small overlay;
+the menu and VoiceOver still name the login. A monochrome runtime mark uses ink selected against
+the disc's resolved control plate, which may be light even under a dark app theme.
+
 **That menu leads with the same reading it is opened by, drawn rather than spelled out.** Its
 first row is the login, and its glyph is `MobileAccountUsageGauge` — the disc's own rings
 (`MobileAccountUsageRings`, shared by both so one reading cannot be drawn two ways) rendered

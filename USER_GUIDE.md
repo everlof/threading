@@ -2086,8 +2086,9 @@ your existing emoji, then a discovered avatar, then an initial derived from the 
 (or name when no email is known). The background hashes the full email, so accounts sharing an
 initial can still differ. Default accounts omit the sidebar badge unless you enable it.
 The paired iPhone receives the resolved presentation and badge images from the Mac; older hosts
-continue to use the phone's original rendering. The iPhone's local **Account initials** switch
-continues to control whether the session action disc shows its account badge.
+continue to use the phone's original rendering. The iPhone's local **Account badge** switch
+controls whether the session action disc shows its account badge. It is on by default when the
+Mac supplies a visible badge.
 
 Automatic avatars use Gravatar, then GitHub accounts whose public profile email matches.
 **Settings > Sidebar > Discover account avatars** controls these lookups. Chosen images work
@@ -3237,8 +3238,8 @@ by how much of that login's allowance is used, one ring per limit window: the we
 outside, the five hours inside it, and, for a chat running a model the plan meters separately,
 that model's own window innermost. Open the menu and the account row spells out those exact
 percentages followed by their next reset. A model-specific reset such as Codex Spark appears only
-when that chat runs the model it meters. The compact disc does not add an alternate login's badge
-by default; enable **Settings → Appearance → Account initials** to show it. The menu still names
+when that chat runs the model it meters. The compact disc also shows the login's badge when the
+Mac supplies one; **Settings → Appearance → Account badge** can hide it. The menu still names
 the account either way. It is the same disc the New session screen wears, so it
 stays put when a draft becomes a chat. Open it and choose **Workspace** for **Browser**,
 **Review**, **Files**, and **Attachments**; a swipe in from the right edge of the session opens

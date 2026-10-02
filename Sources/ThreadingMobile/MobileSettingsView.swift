@@ -56,7 +56,7 @@ struct MobileSettingsView: View {
                         ThemedRowDivider()
                         SettingsToggleRow(
                             symbol: "person.text.rectangle",
-                            title: "Account initials",
+                            title: "Account badge",
                             detail: "Show on session usage controls",
                             isOn: $showsAccountBadge
                         )

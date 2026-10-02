@@ -457,14 +457,14 @@ enum MobileUsageSeverity {
 
 // MARK: - Mobile Account Disc
 
-/// Device-local presentation of the alternate-login badge on a session's usage/action disc.
+/// Device-local presentation of the login badge on a session's usage/action disc.
 ///
 /// Account identity remains present in the menu and its accessibility content. This preference
-/// controls only the small visual badge layered over the navigation-bar item, where an initial or
-/// custom emoji competes with the provider mark and usage rings. It is deliberately opt-in.
+/// controls only the small visual badge layered over the navigation-bar item. A stored false
+/// still hides it for people who have turned it off.
 enum MobileSessionAccountBadgePreference {
     static let key = "threading.mobile.session-actions.show-account-badge"
-    static let defaultValue = false
+    static let defaultValue = true
 
     static func presentedAccount(
         _ account: RemoteSessionAccountDTO?,
@@ -489,12 +489,8 @@ struct MobileAccountDisc: View {
     /// Nil, or a reading with no rings, draws the mark alone: a share, or a host that does not
     /// report usage.
     let reading: MobileAccountUsageReading?
-    /// The chip a row would wear, for a chat on a login that is not the CLI's default one.
-    ///
-    /// Nil is the ordinary case and the Mac decides it, not this view: `RemoteAccountBridge`
-    /// sends a session's account only when the chat runs somewhere other than the standard
-    /// login, which is exactly when saying *which* login is worth a badge. Passing it here puts
-    /// the disc in the bar under the same rule as the mark in a row.
+    /// The login's resolved usage-surface badge, when the host supplies one. Unlike the row's
+    /// sidebar badge, the usage badge can identify the standard login too.
     ///
     /// **Unlike a row's, this chip is drawn inside the disc rather than hanging off it.** A
     /// navigation bar clips its item at the item's own bounds, so the row's three-point overhang
@@ -508,7 +504,7 @@ struct MobileAccountDisc: View {
         ZStack {
             Circle()
                 .fill(theme.controlResting)
-            MobileAgentMarkGlyph(identity: identity)
+            MobileAgentMarkGlyph(identity: identity, tint: theme.controlForeground)
             if let reading {
                 MobileAccountUsageRings(reading: reading, theme: theme)
             }

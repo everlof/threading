@@ -851,6 +851,13 @@ struct RemoteThemePalette: Equatable {
         return authored.remoteComposited(over: uiGround)
     }
     var uiControlResting: UIColor { uiColor("control_resting", fallback: "#FFFFFF12") }
+    /// Ink for a monochrome mark on a control plate. The plate may be light even in a dark theme.
+    var controlForeground: Color {
+        let surface = uiSurface.remoteComposited(over: uiGround)
+        let plate = uiControlResting.remoteComposited(over: surface)
+        guard let luminance = plate.remoteRelativeLuminance else { return label }
+        return luminance > MobileKeyboardAppearance.lightThreshold ? .black : .white
+    }
     var uiBorder: UIColor { uiColor("border", fallback: "#FFFFFF14") }
     var uiDivider: UIColor { uiColor("divider", fallback: "#FFFFFF0C") }
     var uiLabel: UIColor { uiColor("label", fallback: "#F3F4F6") }

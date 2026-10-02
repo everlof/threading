@@ -1263,13 +1263,13 @@
         }
       }
     },
-    "Account initials" : {
+    "Account badge" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Kontoinitialer"
+            "value" : "Kontomärke"
           }
         }
       }

@@ -396,7 +396,11 @@ struct SessionDetailView: View {
                                 : "Session actions"
                         )
                     )
-                    .accessibilityValue(sessionUsageReading?.summary ?? "")
+                    .accessibilityValue(
+                        [sessionAccount?.visibleName, sessionUsageReading?.summary]
+                            .compactMap { $0 }
+                            .joined(separator: " · ")
+                    )
                 }
             }
         }
@@ -1239,8 +1243,8 @@ struct SessionActionsToolbarIcon: View {
     @ObservedObject var activity: MobileWorkspaceActivity
     let identity: MobileAgentIdentity
     let reading: MobileAccountUsageReading?
-    /// The alternate login, when there is one. Its badge is device-local and opt-in; the menu
-    /// continues to name the account regardless of this compact presentation choice.
+    /// The session's login, when available. The device-local setting can hide its badge; the
+    /// menu continues to name the account regardless of this compact presentation choice.
     let account: RemoteSessionAccountDTO?
 
     @AppStorage(MobileSessionAccountBadgePreference.key)

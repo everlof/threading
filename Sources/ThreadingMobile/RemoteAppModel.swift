@@ -5101,8 +5101,8 @@ final class RemoteAppModel: ObservableObject {
                 terminalTheme: demoTerminalTheme,
                 inheritedTerminalThemeName: demoTerminalTheme.name,
                 inheritedTerminalTheme: demoTerminalTheme,
-                // The standard Codex login is still the routed account, but like the real host
-                // projection it carries no visual chip: the Codex mark already identifies it.
+                // The session row has no default-login chip. Its usage surface receives the
+                // resolved account badge from the catalogue for the toolbar disc.
                 accountID: "default",
                 model: "gpt-5.6-sol"
             )
@@ -5273,22 +5273,28 @@ final class RemoteAppModel: ObservableObject {
         _ agents: [RemoteAgentChoiceDTO]
     ) -> [RemoteAgentChoiceDTO] {
         agents.map { agent in
-            guard agent.id == "claude" else { return agent }
+            guard agent.id == "claude" || agent.id == "codex" else { return agent }
             let accounts = agent.accounts?.map { account in
-                guard account.id == "keller" else { return account }
+                let isClaude = agent.id == "claude" && account.id == "keller"
+                let isCodex = agent.id == "codex" && account.id == "default"
+                guard isClaude || isCodex else { return account }
                 return RemoteAccountChoiceDTO(
                     id: account.id,
                     name: account.name,
                     email: account.email,
                     emoji: account.emoji,
-                    presentation: account.presentation,
+                    presentation: isCodex
+                        ? .init(name: "David", glyph: "D", isEmoji: false, hue: 0.58,
+                                backgroundHex: "#3975BD", foregroundHex: "#FFFFFF",
+                                badgeHidden: false)
+                        : account.presentation,
                     imagePNG: account.imagePNG,
                     appearances: account.appearances,
                     images: account.images,
-                    usageSummary: "5h 31% · 7d 56%",
-                    usageFraction: 0.56,
+                    usageSummary: isClaude ? "5h 31% · 7d 56%" : account.usageSummary,
+                    usageFraction: isClaude ? 0.56 : account.usageFraction,
                     usageError: account.usageError,
-                    usageWindows: marketingClaudeUsageWindows,
+                    usageWindows: isClaude ? marketingClaudeUsageWindows : account.usageWindows,
                     models: account.models,
                     defaultModelID: account.defaultModelID
                 )

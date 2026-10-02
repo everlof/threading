@@ -408,6 +408,45 @@ final class MobileKeyboardAppearanceTests: XCTestCase {
         }
     }
 
+    /// A dark navigation bar may carry a pale control plate. The OpenAI knot sits on that plate,
+    /// so its ink follows the plate rather than the page's secondary label.
+    func testMonochromeControlMarkContrastsWithLightAndTranslucentPlates() throws {
+        let palePlate = RemoteThemePalette(theme(colors: [
+            "surface": "#071625",
+            "control_resting": "#B9C1CF",
+            "secondary_label": "#B9C1CF",
+        ]))
+        XCTAssertEqual(
+            try XCTUnwrap(UIColor(palePlate.controlForeground).remoteRelativeLuminance),
+            0,
+            accuracy: 0.001
+        )
+
+        let darkWash = RemoteThemePalette(theme(colors: [
+            "surface": "#071625",
+            "control_resting": "#FFFFFF12",
+        ]))
+        XCTAssertEqual(
+            try XCTUnwrap(UIColor(darkWash.controlForeground).remoteRelativeLuminance),
+            1,
+            accuracy: 0.001
+        )
+    }
+
+    private func theme(colors: [String: String]) -> RemoteThemeDTO {
+        RemoteThemeDTO(
+            id: "control-mark-test",
+            name: "Control mark test",
+            mode: .dark,
+            colors: colors,
+            material: RemoteThemeDTO.Material(
+                panelRadius: 20,
+                controlRadius: 10,
+                borderWidth: 1
+            )
+        )
+    }
+
     private func theme(accent: String) -> RemoteThemeDTO {
         RemoteThemeDTO(
             id: "test",
