@@ -41992,6 +41992,17 @@
         }
       }
     },
+    "Run this command in a terminal, approve it in the browser signed in as %@, and paste the token it prints. Sessions on this login then sign in with the token. A token runs models only: Remote Control and claude.ai connectors stop working on this login." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör det här kommandot i en terminal, godkänn det i webbläsaren inloggad som %@ och klistra in token som skrivs ut. Sessioner för det här kontot loggar sedan in med token. En token kör bara modeller: Remote Control och claude.ai-kopplingar slutar fungera för det här kontot."
+          }
+        }
+      }
+    },
     "Run this provider's secure sign-in again" : {
       "extractionState" : "manual",
       "localizations" : {

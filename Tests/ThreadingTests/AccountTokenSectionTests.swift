@@ -117,11 +117,56 @@ final class AccountTokenSectionTests: XCTestCase {
         let section = AccountTokenSectionController(vault: vault)
         let note = section.noteContent() as? NSTextField
 
-        for text in [note?.stringValue ?? "", AccountTokenStrings.sheetMessage] {
+        for text in [
+            note?.stringValue ?? "",
+            AccountTokenStrings.sheetMessage(approvingAs: nil),
+            AccountTokenStrings.sheetMessage(approvingAs: "nova@example.com")
+        ] {
             XCTAssertTrue(text.contains("models only"), text)
             XCTAssertTrue(text.contains("Remote Control"), text)
             XCTAssertTrue(text.contains("connectors"), text)
         }
+    }
+
+    /// The browser decides which account a token belongs to, so the sheet names the one to
+    /// approve as when it knows it.
+    func testTheSheetNamesTheAccountToApproveAs() {
+        XCTAssertTrue(
+            AccountTokenStrings.sheetMessage(approvingAs: "nova@example.com")
+                .contains("signed in as nova@example.com")
+        )
+        XCTAssertTrue(
+            AccountTokenStrings.sheetMessage(approvingAs: nil).contains("this login's account")
+        )
+    }
+
+    /// The command runs as the login it is for: an alternate's folder set, the default's left
+    /// alone, and a path a shell would split quoted.
+    func testTheMintCommandRunsAsTheLoginItIsFor() throws {
+        let spec = try XCTUnwrap(AgentKind.claude.longLivedToken)
+
+        XCTAssertEqual(
+            AccountTokenSectionController.mintCommand(for: claude, spec: spec),
+            "CLAUDE_CONFIG_DIR=/tmp/claude-work claude setup-token"
+        )
+        XCTAssertEqual(
+            AccountTokenSectionController.mintCommand(
+                for: AgentAccount(provider: .claude, handle: .standard, configPath: "/Users/x/.claude"),
+                spec: spec
+            ),
+            "claude setup-token"
+        )
+        XCTAssertEqual(
+            AccountTokenSectionController.mintCommand(
+                for: AgentAccount(
+                    provider: .claude,
+                    handle: .named("claude-odd"),
+                    configPath: "/Users/Nova's Mac/.claude-odd"
+                ),
+                spec: spec
+            ),
+            "CLAUDE_CONFIG_DIR='/Users/Nova'\\''s Mac/.claude-odd' claude setup-token"
+        )
     }
 
     func testTheAccountsPageListsTheCardForClaudeLoginsOnly() throws {

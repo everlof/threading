@@ -2113,10 +2113,10 @@ login off when you no longer want it offered.
 **Settings ▸ Agents & Accounts ▸ One-Year Sign-In.** A Claude browser login has to be renewed
 about every month. A one-year token signs a login in for a year instead.
 
-1. Click **Use Token…** on the login's row. The sheet shows the command `claude setup-token`, with
-   **Copy Command**.
-2. Run it in a terminal, and approve it in the browser *as that login's claude.ai account*. The
-   browser decides which account the token belongs to, not the folder the command runs in.
+1. Click **Use Token…** on the login's row. The sheet shows that login's `claude setup-token`
+   command, already pointed at its folder, with **Copy Command**.
+2. Run it in a terminal, and approve it in the browser *signed in as the account the sheet names*.
+   The browser decides which account the token belongs to, not the folder the command runs in.
 3. Paste the `sk-ant-oat01-…` token into the sheet and click **Use Token**.
 
 Sessions on that login start signing in with the token. A session that is already running keeps

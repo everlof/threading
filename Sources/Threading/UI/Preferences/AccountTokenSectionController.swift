@@ -97,6 +97,26 @@ final class AccountTokenSectionController: NSObject {
         return row
     }
 
+    /// The command that mints a token, run as this login: its config folder set, or the
+    /// default's unset. `setup-token` saves no credential either way — it only prints one — but
+    /// the folder supplies the login's own settings, such as an organization it is pinned to.
+    /// It does not choose the account: that is whichever claude.ai account the browser approves
+    /// as, which is why the sheet names it.
+    static func mintCommand(for account: AgentAccount, spec: AgentLongLivedTokenSpec) -> String {
+        guard !account.isDefault, let key = account.provider.accountEnvironmentKey else {
+            return spec.mintCommand
+        }
+        return "\(key)=\(shellWord(account.configPath)) \(spec.mintCommand)"
+    }
+
+    /// A path as one word a person can paste: bare when it needs no quoting, else single-quoted.
+    private static func shellWord(_ value: String) -> String {
+        let plain = value.unicodeScalars.allSatisfy {
+            CharacterSet.alphanumerics.contains($0) || "/._-+@:%".unicodeScalars.contains($0)
+        }
+        return plain ? value : "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     /// The row's one line: how this login signs in, and when that ends.
     static func status(of token: AgentAccountToken?, at now: Date) -> String {
         guard let token else { return AccountTokenStrings.browserSignIn }
@@ -126,18 +146,17 @@ final class AccountTokenSectionController: NSObject {
         field.translatesAutoresizingMaskIntoConstraints = false
         field.widthAnchor.constraint(equalToConstant: AccountTokenLayout.fieldWidth).isActive = true
 
-        let command = NSTextField(labelWithString: spec.mintCommand)
+        let mint = Self.mintCommand(for: account, spec: spec)
+        let command = NSTextField(wrappingLabelWithString: mint)
         command.applyFont(.code())
         command.textColor = Design.Text.label
+        command.translatesAutoresizingMaskIntoConstraints = false
+        command.widthAnchor.constraint(equalToConstant: AccountTokenLayout.fieldWidth).isActive = true
         let copy = SettingsUI.button(AccountTokenStrings.copyCommand, target: self,
                                      action: #selector(copyCommandClicked(_:)), localizes: false)
-        copy.toolTip = spec.mintCommand
-        let commandLine = NSStackView(views: [command, copy])
-        commandLine.orientation = .horizontal
-        commandLine.alignment = .centerY
-        commandLine.spacing = Design.Spacing.medium
+        copy.toolTip = mint
 
-        let accessory = NSStackView(views: [commandLine, field])
+        let accessory = NSStackView(views: [command, copy, field])
         accessory.orientation = .vertical
         accessory.alignment = .leading
         accessory.spacing = Design.Spacing.medium
@@ -145,7 +164,10 @@ final class AccountTokenSectionController: NSObject {
         let request = ConfirmationRequest(
             prompt: .storeAccountToken,
             title: AccountTokenStrings.sheetTitle(account.displayName),
-            message: AccountTokenStrings.sheetMessage,
+            message: AccountTokenStrings.sheetMessage(
+                approvingAs: AccountAvatarStore.cachedEmail(for: account)
+                    ?? AccountEmailProbe.cachedEmail(for: account)
+            ),
             confirmTitle: AccountTokenStrings.confirmButton,
             accessory: accessory
         )
@@ -218,13 +240,22 @@ enum AccountTokenStrings {
     static func sheetTitle(_ name: String) -> String {
         L10n.format("Use a one-year token for %@?", name)
     }
-    static var sheetMessage: String {
-        L10n.string("""
-            Run this command in a terminal, approve it in the browser as this login's account, \
-            and paste the token it prints. Sessions on this login then sign in with the token. \
-            A token runs models only: Remote Control and claude.ai connectors stop working on \
-            this login.
-            """)
+    /// The browser decides which account a token belongs to, so the sheet names the one to
+    /// approve as whenever the login's address is known.
+    static func sheetMessage(approvingAs email: String?) -> String {
+        guard let email else {
+            return L10n.string("""
+                Run this command in a terminal, approve it in the browser as this login's account, \
+                and paste the token it prints. Sessions on this login then sign in with the token. \
+                A token runs models only: Remote Control and claude.ai connectors stop working on \
+                this login.
+                """)
+        }
+        return L10n.format("""
+            Run this command in a terminal, approve it in the browser signed in as %@, and paste \
+            the token it prints. Sessions on this login then sign in with the token. A token runs \
+            models only: Remote Control and claude.ai connectors stop working on this login.
+            """, email)
     }
     static var notSavedTitle: String { L10n.string("The token was not saved") }
 

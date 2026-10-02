@@ -165,7 +165,16 @@ tokens. Remove deletes the item, and Reset Everything erases them all
 **Saving** goes through `ConfirmationPrompt.storeAccountToken`, which is always asked
 (`.securityGrant`): it hands every session on the login a year of unattended sign-in and changes
 what the login can do. The sheet shows the mint command with Copy Command, a masked field, and the
-models-only caveat. The card, `AccountTokenSectionController` on Agents & Accounts, lists every
+models-only caveat.
+
+The command is routed to the login: `CLAUDE_CONFIG_DIR=<its folder> claude setup-token`, or the
+bare command for the default login. Routing is for correctness, not safety. `setup-token` runs the
+browser flow with `inferenceOnly` and a one-year expiry, then only displays the token. It skips the
+step that saves credentials, so an unrouted run never touched the default login. The folder supplies
+that login's settings, such as `forceLoginOrgUUID` and the policy that may forbid long-lived tokens.
+**It does not choose the account.** The authorize URL carries no login hint, so the token belongs to
+whichever claude.ai account the browser approves it as. That is why the sheet names the account by
+its address whenever `AccountAvatarStore` or `AccountEmailProbe` knows it. The card, `AccountTokenSectionController` on Agents & Accounts, lists every
 Claude login with one status line: browser sign-in, until a date, runs out soon, or ran out.
 
 Still open: usage readings for a login that uses a token. `ClaudeUsageFetcher` reads the browser
