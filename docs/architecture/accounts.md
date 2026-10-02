@@ -24,8 +24,9 @@ home from a user-facing name, starts `claude auth login` or `codex login` under 
 environment variable, reads that login's output only for the link described below, then runs
 `claude auth status --json` or `codex login status` in the same environment. Codex setup requests
 its documented file credential store so separate `CODEX_HOME` values remain separate; Threading
-records the location, not `auth.json`. Failed, cancelled, timed-out or unverified attempts are
-never admitted. Settings' **Reconnect** repeats the provider-owned browser login against the same
+records the location, not `auth.json`. A verified Claude login also has the CLI's first-run flag
+set, so the first chat does not ask for the same sign-in again (see below). Failed, cancelled,
+timed-out or unverified attempts are never admitted. Settings' **Reconnect** repeats the provider-owned browser login against the same
 home and does not replace or delete anything on disk.
 
 ### The sign-in link, and why the login's output is read at all
@@ -65,6 +66,35 @@ no longer than a write: `submitPastedCode` sends the line to the child through
 actor — and stores nothing. It is a single-use authorization code, and the PKCE verifier that
 redeems it never leaves the CLI, so this stays a keystroke relay rather than Threading holding a
 credential. On a tty the printed URL is the same one; a PTY buys nothing here and was tried.
+
+### Why Add Login also finishes Claude Code's first run
+
+Adding a Claude login used to cost two sign-ins: one in Settings, then a second in the first chat
+on that login. It was not a different credential or a routing mismatch — the two used the same
+home and the same login. The cause is in the CLI, read from the 2.1.287 bundle and confirmed
+against the backups of a login added through Settings:
+
+- `claude auth login` stores the credential and writes `oauthAccount` into `<home>/.claude.json`,
+  but its browser path never sets `hasCompletedOnboarding`. Its refresh-token path
+  (`CLAUDE_CODE_OAUTH_REFRESH_TOKEN`) does set it. The first backup of a home made through Settings
+  had `oauthAccount` and no flag.
+- An interactive `claude` runs its first-run walkthrough whenever that flag is missing. For a
+  subscription install, the walkthrough always includes the sign-in step, whether or not a
+  credential is already stored. So the first chat showed the theme picker and then "Select login
+  method", and the person signed in again.
+
+So once the status command has verified the login, `AgentAccountSetupProvider.settleFirstRun`
+sets that one key through `ClaudeOnboardingMarker`. This is the only write Threading makes into a
+provider-owned file, and it is deliberately narrow. It sets one key and only after verification.
+It never creates the file, and it refuses a symlink, an oversized file, or anything that is not a
+JSON object. It takes the CLI's own `proper-lockfile` lock (`.claude.json.lock`, which goes stale
+after 10 s) and stays out if a live CLI holds it. It writes atomically with the original file mode.
+Every other key keeps the CLI's value, but not the CLI's formatting or key order, which the CLI does
+not depend on. If the marker cannot be set, the person gets the old second sign-in, never a failed
+login. Skipping the walkthrough also skips its other steps, all of which stay available afterwards: the
+theme picker (the CLI uses its default until `/theme`), the security notes, and the terminal-setup
+offer (`/terminal-setup`).
+Codex is untouched: no repeated sign-in has been seen after `codex login`.
 
 **Where a login is *chosen*, it is named after the person** (`AccountName`), not after the
 alias. An alias is named after the agent — `claude-nhartley`, `claude-ikeller` — so a menu of

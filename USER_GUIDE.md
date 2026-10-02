@@ -2102,9 +2102,11 @@ even when another surface hides or abbreviates its visible label.
 
 **Add Login** creates a bounded isolated home for Claude Code or Codex, launches that provider's
 official browser sign-in, and registers the location only after the provider verifies it. Threading
-never receives or stores the credential. Existing `~/.claude-*` and `~/.codex-*` homes are still
-found automatically. Threading does not delete provider homes; switch a login off when you no
-longer want it offered.
+never receives or stores the credential. A Claude login added this way opens its first chat straight
+away. Claude Code's first-run walkthrough, which would ask you to sign in again, is marked done, so
+its theme picker is skipped too; use `/theme` to change the theme. Existing `~/.claude-*` and
+`~/.codex-*` homes are still found automatically. Threading does not delete provider homes; switch a
+login off when you no longer want it offered.
 
 ### Signing in somewhere other than your default browser
 While a login is running, the card shows **Sign-in link** — the same URL the agent printed when it

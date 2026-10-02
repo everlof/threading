@@ -81,6 +81,25 @@ enum AgentAccountSetupProvider: String, CaseIterable, Sendable {
         case .codex: return false
         }
     }
+
+    /// Settles provider-owned first-run state once a login in this home has been verified, so the
+    /// first conversation there does not ask for the same sign-in again. Does file I/O; call it
+    /// off the main actor.
+    func settleFirstRun(inConfigDirectory path: String) {
+        switch self {
+        case .claude:
+            // A failure here costs the person the old second sign-in, never the login itself.
+            let outcome = ClaudeOnboardingMarker.markComplete(inConfigDirectory: path)
+            if case let .skipped(reason) = outcome {
+                ThreadingLogger.agent.notice(
+                    "Claude first-run marker not set: \(String(describing: reason), privacy: .public)"
+                )
+            }
+        case .codex:
+            // No repeated sign-in has been observed after `codex login`.
+            break
+        }
+    }
 }
 
 struct AgentAccountSetupContext: Equatable, Sendable {
@@ -511,6 +530,9 @@ final class AgentAccountSetupCoordinator {
                 verified = result.termination == .exited(0)
             } catch {
                 verified = false
+            }
+            if verified {
+                context.provider.settleFirstRun(inConfigDirectory: context.configPath)
             }
             Task { @MainActor in
                 guard let self, self.activeAttemptID == attemptID else { return }
