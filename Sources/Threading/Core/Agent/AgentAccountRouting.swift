@@ -45,20 +45,24 @@ enum AgentAccountRouting {
         }
         if account.isDefault {
             prefix.append(flag: "-u", value: accountKey)
-        } else {
+        }
+
+        let tokenSpec = kind.longLivedToken
+        if let tokenSpec, token == nil {
+            prefix.append(flag: "-u", value: tokenSpec.environmentKey)
+        }
+
+        // env stops parsing options at the first assignment, so every -u must come first.
+        if !account.isDefault {
             prefix.append(word: "\(accountKey)=\(account.configPath)")
         }
 
-        guard let spec = kind.longLivedToken else {
-            return Route(command: prefix, credentials: .none)
-        }
-        guard let token else {
-            prefix.append(flag: "-u", value: spec.environmentKey)
+        guard let tokenSpec, let token else {
             return Route(command: prefix, credentials: .none)
         }
         return Route(
             command: prefix,
-            credentials: AgentCredentialEnvironment([spec.environmentKey: token.value])
+            credentials: AgentCredentialEnvironment([tokenSpec.environmentKey: token.value])
         )
     }
 

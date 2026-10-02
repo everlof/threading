@@ -143,7 +143,11 @@ a log line cannot carry the value.
 CLAUDE_CODE_OAUTH_TOKEN` beside its config-directory word. `AgentEnvironment` already drops an
 inherited token, but a login shell's profile can export one again after that. Without the `-u`,
 every Claude session would sign in as the token's account while Threading named and metered the
-one chosen. The `-u` cannot protect the token login itself: a profile export overrides Threading's
+one chosen. All `env` options must precede every `NAME=value` assignment: macOS stops parsing
+options at the first assignment, so a later `-u` is treated as the executable and exits 127 before
+Claude starts. The routing test executes the real shell command for default and alternate homes,
+with and without a saved token, and checks the child's resulting environment.
+The `-u` cannot protect the token login itself: a profile export overrides Threading's
 value there, because the profile runs later. Exporting a token in a shell profile is the documented
 way to use one outside Threading, so the guide says not to combine the two.
 

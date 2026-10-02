@@ -710,7 +710,9 @@ final class AgentLaunchQuotingTests: XCTestCase {
             ShellCommand.executing(command, in: "/tmp/scratch").source
         )
 
-        XCTAssertEqual(Array(words.prefix(2)), ["env", "CLAUDE_CONFIG_DIR=/tmp/claude-alternate"])
+        XCTAssertEqual(Array(words.prefix(4)), [
+            "env", "-u", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR=/tmp/claude-alternate"
+        ])
     }
 
     /// The Codex one-shot: `codexResearchPlan`'s posture plus the scoped MCP overrides, and

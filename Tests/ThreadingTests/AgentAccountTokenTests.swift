@@ -229,6 +229,47 @@ final class AgentAccountTokenTests: XCTestCase {
         }
     }
 
+    /// macOS env stops parsing options at the first assignment. Execute the route rather than
+    /// just checking for -u: an option after CLAUDE_CONFIG_DIR becomes the executable and exits 127.
+    func testClaudeAccountRoutesExecuteWithTheSelectedHomeAndToken() throws {
+        let accountKey = try XCTUnwrap(AgentKind.claude.accountEnvironmentKey)
+        let savedToken = AgentAccountToken(value: token, savedAt: Date())
+
+        for account in [alternate, standard] {
+            for entry in [nil, savedToken] {
+                let route = AgentAccountRouting.route(for: .claude, account: account, token: entry)
+                var command = route.command
+                command.append(word: "/usr/bin/env")
+
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/bin/sh")
+                process.arguments = ["-c", command.source]
+                process.environment = route.credentials.applied(to: [
+                    accountKey: "/tmp/inherited-account",
+                    spec.environmentKey: "profile-exported-token",
+                    "PATH": "/usr/bin:/bin"
+                ])
+                let output = Pipe()
+                process.standardOutput = output
+                process.standardError = output
+                try process.run()
+                let data = output.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+
+                XCTAssertEqual(process.terminationStatus, 0, command.source)
+                let environment: [String: String] = Dictionary(uniqueKeysWithValues:
+                    String(decoding: data, as: UTF8.self).split(separator: "\n").compactMap { line in
+                        let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                        guard parts.count == 2 else { return nil }
+                        return (String(parts[0]), String(parts[1]))
+                    }
+                )
+                XCTAssertEqual(environment[accountKey], account.isDefault ? nil : account.configPath)
+                XCTAssertEqual(environment[spec.environmentKey], entry?.value)
+            }
+        }
+    }
+
     func testARuntimeWithoutTokensIsRoutedExactlyAsBefore() {
         let codex = AgentAccount(provider: .codex, handle: .named("codex-work"), configPath: "/tmp/codex-work")
         let route = AgentAccountRouting.route(for: .codex, account: codex, token: nil)
