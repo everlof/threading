@@ -1764,6 +1764,70 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(try XCTUnwrap(post("/api/project/visibility", bearer: "goodtoken", body: Data("{}".utf8))).status, 400)
     }
 
+    /// The owner's ordered logins for a project: owner-only like visibility, refused when a
+    /// reference names no login this Mac discovered, published to the phone in its order, and
+    /// advertised so an older phone shows nothing and sends nothing.
+    func testProjectDefaultAccountsAreOwnerOnlyValidatedAndPublishedInOrder() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: folder))
+        authority.set(RemoteAuthorization(shareID: "viewer", capability: .view,
+            scope: .allSessions), forToken: "default-accounts-viewer")
+
+        let unknown = try JSONEncoder().encode(RemoteSetProjectDefaultAccountsRequestDTO(
+            projectID: project.id.uuidString,
+            accounts: [RemoteAccountReferenceDTO(agentID: "claude", accountID: "claude-\(UUID().uuidString)")]
+        ))
+        let path = RemoteRouter.projectDefaultAccountsPath
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "default-accounts-viewer", body: unknown)).status, 403)
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "goodtoken", body: unknown)).status, 422)
+        XCTAssertNil(ProjectStore.shared.project(withID: project.id)?.defaultAccounts)
+
+        let listed = [
+            AccountID(provider: .codex, handle: .named("codex-work")),
+            AccountID(provider: .claude, handle: .standard)
+        ]
+        ProjectStore.shared.setDefaultAccounts(listed, forProjectID: project.id)
+        let me = try XCTUnwrap(get("/api/me", bearer: "goodtoken"))
+        let catalogue = try JSONDecoder().decode(RemoteMeDTO.self, from: me.body)
+        XCTAssertTrue(catalogue.features?.contains(RemoteRESTFeature.projectDefaultAccounts.rawValue) == true)
+        XCTAssertEqual(
+            catalogue.newSessionCatalog?.projects.first { $0.id == project.id.uuidString }?.defaultAccounts,
+            [
+                RemoteAccountReferenceDTO(agentID: "codex", accountID: "codex-work"),
+                RemoteAccountReferenceDTO(agentID: "claude", accountID: "default")
+            ]
+        )
+
+        // A login that has vanished from disk since it was listed may still be sent back with the
+        // rest of the list; only a reference the list never held is refused.
+        let vanished = RemoteAccountReferenceDTO(agentID: "codex", accountID: "codex-work")
+        let reordered = try JSONEncoder().encode(RemoteSetProjectDefaultAccountsRequestDTO(
+            projectID: project.id.uuidString,
+            accounts: [vanished]
+        ))
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "goodtoken", body: reordered)).status, 200)
+        XCTAssertEqual(
+            ProjectStore.shared.project(withID: project.id)?.defaultAccounts,
+            [AccountID(provider: .codex, handle: .named("codex-work"))]
+        )
+
+        let clear = try JSONEncoder().encode(RemoteSetProjectDefaultAccountsRequestDTO(
+            projectID: project.id.uuidString,
+            accounts: []
+        ))
+        let cleared = try XCTUnwrap(post(path, bearer: "goodtoken", body: clear))
+        XCTAssertEqual(cleared.status, 200)
+        XCTAssertNil(ProjectStore.shared.project(withID: project.id)?.defaultAccounts)
+        let missing = try JSONEncoder().encode(RemoteSetProjectDefaultAccountsRequestDTO(
+            projectID: UUID().uuidString,
+            accounts: []
+        ))
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "goodtoken", body: missing)).status, 404)
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "goodtoken", body: Data("{}".utf8))).status, 400)
+    }
+
     func testSessionRefreshesRouteThroughInjectedApplicationCommands() throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
             "remote-session-refresh-\(UUID().uuidString)",
@@ -5291,6 +5355,13 @@ private final class RecordingRemoteSessionAccess: RemoteSessionQuerying, RemoteS
 
     func setProjectHidden(_ hidden: Bool, projectID: ProjectID) -> ProjectMutationResult {
         store.setProjectHidden(hidden, projectID: projectID)
+    }
+
+    func setDefaultAccounts(
+        _ accounts: [AccountID]?,
+        forProjectID projectID: ProjectID
+    ) -> ProjectMutationResult {
+        store.setDefaultAccounts(accounts, forProjectID: projectID)
     }
 
     func setPinned(_ pinned: Bool, for sessionID: SessionID) -> ProjectMutationResult {

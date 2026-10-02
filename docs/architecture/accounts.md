@@ -269,8 +269,10 @@ refetches immediately. The inherited default and any explicit in-progress choice
 so changing visibility cannot strand the launch state. iOS deliberately consumes the result but
 does not grow a second management surface.
 
-A fresh composer starts on the enabled login this runtime most recently used, falling back to the
-standard login while it is on and then the first enabled login. Recency comes from
+A fresh composer in a project with [default accounts](#project-default-accounts) starts on that
+list's first login with usage left, runtime included. Everywhere else it starts on the enabled
+login this runtime most recently used, falling back to the standard login while it is on and then
+the first enabled login. Recency comes from
 `AgentSession.lastUsedAt`, not a second preference: moving a conversation after its selected model
 runs out changes that same latest session's `accountHandle`, so the next chat follows the escape
 instead of falling back to the exhausted login. Evidence from disabled or missing logins and from
@@ -1456,6 +1458,67 @@ Two defects the render caught and no assertion would have, both now asserted dir
 - with the label column cut to that width, a one-line caption wrapped into five lines and
   `Claude Code` truncated to `Clau`.
 
+
+## Project default accounts
+
+A project may carry an ordered list of logins, `Project.defaultAccounts: [AccountID]?` — nil,
+never empty, means no list. A new chat there starts on the first listed login that is not out of
+usage. The list is provider-qualified and may cross runtimes ("Claude work, then Claude spare,
+then Codex"), so on a fresh draft it chooses the runtime as well as the login. It is edited from
+the project row's **Default Accounts…** (also the `project.defaultAccounts` command) on the Mac and
+from the project heading's menu on the iPhone, through the owner-only
+`POST api/project/default-accounts`. The list is stored once, in the project's JSON payload, so it
+needs no schema migration; an older build that rewrites the row drops it, the same exposure as
+`curfewRule` and `limitRecoveryPolicy`.
+
+**The list is the consent.** A login not on it is never chosen for that project on the user's
+behalf — not when a draft opens, not at the send, not by limit recovery — though the user can still
+pick any login for one chat. A project without a list behaves exactly as before.
+
+### What "out of usage" means
+
+`ProjectAccountOrder` is the pure rule and `ProjectDefaultAccounts` gathers its live inputs. Each
+listed login is `usable`, `unverified`, `spent(until:cause:)` or `unavailable`:
+
+- **Spent** — an unexpired window metering the chat's model is at or over
+  `ProjectAccountDefaults.spentFraction` (0.92, the critical line) of its **effective** bound,
+  so the user's own lines count, or a hold-tier rule reports `.overLine`.
+- **A stale reading proves exhaustion, never headroom.** Usage only grows inside a window, so a
+  stale 95% is still spent, while a stale 40% is only `unverified`.
+- **Unknown keeps its place.** No reading, a failed one, an expired window or a `.cannotSee`
+  hold is `unverified`, which is pickable. This is deliberately the opposite of
+  `LimitEscapeRanking`: a new chat moves no transcript and is on screen before it is sent, and
+  nothing polls a login that is not on screen, so failing closed would skip the user's first
+  choice most of the time. Unknown is never *shown* as room.
+
+The pick is the first `usable` or `unverified` entry in list order. If every available entry is
+spent, the one whose window resets soonest wins, ties to list order. Provider refusals are not an
+input: `UsageLimitStop.resetHint` is text only and cannot say when a refusal ends.
+
+### Two moments, and why the draft never switches
+
+The draft resolves the list once, when it opens, and asks for forced (still paced) refreshes of
+every listed login. It does **not** switch its login while open — the rule above that readings do
+not silently change an unfinished draft. The send resolves again on whatever has arrived. When
+the draft's login came from the list (`IdentitySource.projectDefault`) and is now proven spent, the
+send moves to the next pickable listed login **of the same runtime**; a different runtime would
+strand the draft's model, effort, permission mode and surface. Model, effort and speed travel where
+the new login offers them (`ProjectDefaultAccounts.carriedRunChoice`). A receipt names both logins
+and an `EventLog` record keeps it. An explicit pick, an adopted scheduled start and any start
+without a list are never moved. A start the list chose does not write `defaultAgentKind`, which
+would otherwise turn every other project's composer to that runtime.
+
+The iPhone draft predicts the same pick from the catalogue's `defaultAccounts` and the capacity
+feed, sends `accountSelection: project-default`, and the Mac makes the same send-time decision
+with its newer readings and the user's own limits (`RemoteProjectDefaultLaunch`), returning
+`accountSubstitution` so the phone can word the receipt. `RemoteProjectDefaultAccounts` holds the
+shared numbers and a test pins the Mac's to them.
+
+Limit recovery follows the same order: see
+[`limit-recovery.md`](limit-recovery.md#project-default-accounts).
+
+The scaling contract is small and fixed: at most 32 entries (discovery's admission cap), resolved
+in O(entries) over in-memory values when a draft opens or sends, never on layout or usage ticks.
 
 ## Account appearance resolution
 

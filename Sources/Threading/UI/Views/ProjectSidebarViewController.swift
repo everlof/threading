@@ -87,6 +87,8 @@ final class ProjectSidebarViewController: NSViewController {
     }()
     private var scrollViewBottomConstraint: NSLayoutConstraint?
     private var emptyStateView: NSView?
+    /// The default-accounts editor while it is open, so a second request replaces it.
+    private var defaultAccountsPopover: ThemedPopover?
 
     private func makeEmptyStateView() -> NSView {
         let title = NSTextField(labelWithString: SidebarStrings.emptyTitle)
@@ -4552,6 +4554,7 @@ extension ProjectSidebarViewController {
                 }
             )))
             entries.append(projectLimitRecoveryEntry(for: projectID, row: row))
+            entries.append(projectDefaultAccountsEntry(for: projectID, row: row))
             if let curfew = projectCurfewEntry(for: projectID, row: row) {
                 entries.append(curfew)
             }
@@ -4791,6 +4794,42 @@ extension ProjectSidebarViewController {
             return
         }
         reload()
+    }
+
+    /// Beside usage-limit recovery, because both answer what happens to this checkout's chats
+    /// when an account runs out: one before the chat starts, the other after it is refused.
+    private func projectDefaultAccountsEntry(for projectID: ProjectID, row: Int) -> ThemedMenuEntry {
+        .item(ThemedMenuItem(
+            title: L10n.string("Default Accounts…"),
+            image: ThemedMenuIcon.symbol("person.2.badge.gearshape"),
+            representedValue: AppCommands.ID.projectDefaultAccounts,
+            onChoose: { [weak self] in
+                self?.presentDefaultAccounts(for: projectID, atRow: row)
+            }
+        ))
+    }
+
+    /// Opens the default-accounts editor beside the project's row.
+    func presentDefaultAccounts(for projectID: ProjectID, atRow row: Int? = nil) {
+        guard projectStore.project(withID: projectID) != nil else { return }
+        defaultAccountsPopover?.close()
+
+        let editor = ProjectDefaultAccountsViewController(projectID: projectID, store: projectStore)
+        editor.onSaveFailure = { [weak self] in
+            self?.presentProjectNotice(L10n.string("The project data could not be saved."))
+        }
+        let popover = HostPopoverFactory.make(.projectDefaultAccounts)
+        popover.behavior = .transient
+        popover.contentViewController = editor
+        popover.onClose = { [weak self] in self?.defaultAccountsPopover = nil }
+        defaultAccountsPopover = popover
+
+        let anchorRow = nodesByKey[.project(projectID)].map { outlineView.row(forItem: $0) } ?? row
+        if let anchorRow, anchorRow >= 0, anchorRow < outlineView.numberOfRows {
+            popover.show(relativeTo: outlineView.rect(ofRow: anchorRow), of: outlineView, preferredEdge: .maxX)
+        } else {
+            popover.show(relativeTo: view.bounds, of: view, preferredEdge: .maxX)
+        }
     }
 
     private func chooseProjectLimitRecovery(_ policy: LimitRecoveryPolicy) {

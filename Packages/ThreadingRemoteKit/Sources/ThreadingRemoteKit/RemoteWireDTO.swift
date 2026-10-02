@@ -744,6 +744,10 @@ public struct RemoteProjectChoiceDTO: Codable, Equatable, Identifiable, Sendable
     /// The repository this checkout belongs to, when it is in one. Absent on older hosts and
     /// for a folder outside any repository.
     public let repository: RemoteRepositoryDTO?
+    /// The logins a new chat here starts on, in the owner's order: the first one that is not out
+    /// of usage. Absent when the project has no list, and from a host that does not advertise
+    /// `RemoteRESTFeature.projectDefaultAccounts` — the feature flag tells the two apart.
+    public let defaultAccounts: [RemoteAccountReferenceDTO]?
 
     public init(
         id: String,
@@ -752,7 +756,8 @@ public struct RemoteProjectChoiceDTO: Codable, Equatable, Identifiable, Sendable
         checkoutLabel: String,
         reportLaunch: RemoteReportLaunchDTO? = nil,
         isHidden: Bool? = nil,
-        repository: RemoteRepositoryDTO? = nil
+        repository: RemoteRepositoryDTO? = nil,
+        defaultAccounts: [RemoteAccountReferenceDTO]? = nil
     ) {
         self.id = id
         self.name = name
@@ -761,6 +766,120 @@ public struct RemoteProjectChoiceDTO: Codable, Equatable, Identifiable, Sendable
         self.reportLaunch = reportLaunch
         self.isHidden = isHidden
         self.repository = repository
+        self.defaultAccounts = defaultAccounts
+    }
+}
+
+/// One login, named the way the new-session catalogue names it: the runtime's `agentID` and
+/// the account's `id` within it (`default`, or an alternate handle).
+///
+/// A reference, not a copy: a phone draws the name, mark and usage from the catalogue's own
+/// account row, and a reference the catalogue does not list is a login the Mac no longer offers.
+public struct RemoteAccountReferenceDTO: Codable, Equatable, Hashable, Sendable {
+    public let agentID: String
+    public let accountID: String
+
+    public init(agentID: String, accountID: String) {
+        self.agentID = agentID
+        self.accountID = accountID
+    }
+}
+
+/// The numbers both sides of a project's default logins agree on.
+///
+/// The Mac decides which login a chat starts on; the phone only predicts it for the draft. The
+/// prediction is worth showing only while it uses the Mac's own line, so the line is stated once
+/// here and the Mac's `ProjectAccountDefaults` is tested against it.
+public enum RemoteProjectDefaultAccounts {
+    /// A listed login whose unexpired window metering the chat's model is at or over this share
+    /// is out of usage.
+    public static let spentFraction = 0.92
+    /// The most logins one project's list may name.
+    public static let maximumEntries = 32
+}
+
+/// Replaces a project's ordered default logins. An empty list clears it.
+public struct RemoteSetProjectDefaultAccountsRequestDTO: Codable, Equatable, Sendable {
+    public let projectID: String
+    public let accounts: [RemoteAccountReferenceDTO]
+
+    public init(projectID: String, accounts: [RemoteAccountReferenceDTO]) {
+        self.projectID = projectID
+        self.accounts = accounts
+    }
+}
+
+/// Where a new chat's login came from, which decides whether the Mac may change it at the send.
+public enum RemoteAccountSelection: RemoteLosslessStringToken {
+    /// The person picked it. Never changed. What an absent field means.
+    case explicit
+    /// The draft took it from the project's list. The Mac starts on it unless it is now proven
+    /// out of usage, and then on the next listed login of the same runtime that is not.
+    case projectDefault
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "explicit": self = .explicit
+        case "project-default": self = .projectDefault
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .explicit: return "explicit"
+        case .projectDefault: return "project-default"
+        case let .unknown(value): return value
+        }
+    }
+}
+
+/// Why the Mac started a chat on a different login than the draft named.
+public enum RemoteAccountSubstitutionReason: RemoteLosslessStringToken {
+    /// The provider's own window was at the line.
+    case spent
+    /// A line the owner drew was, while the provider's window still had room.
+    case ownLimit
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "spent": self = .spent
+        case "own-limit": self = .ownLimit
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .spent: return "spent"
+        case .ownLimit: return "own-limit"
+        case let .unknown(value): return value
+        }
+    }
+}
+
+/// A send that moved off the draft's login, so the phone can say so in its own words.
+public struct RemoteAccountSubstitutionDTO: Codable, Equatable, Sendable {
+    /// The account `id` the draft sent.
+    public let requestedAccountID: String
+    /// The account `id` the chat started on.
+    public let accountID: String
+    public let reason: RemoteAccountSubstitutionReason
+    /// When the requested login's spent window resets, in epoch seconds, when known.
+    public let resetsAt: Double?
+
+    public init(
+        requestedAccountID: String,
+        accountID: String,
+        reason: RemoteAccountSubstitutionReason,
+        resetsAt: Double? = nil
+    ) {
+        self.requestedAccountID = requestedAccountID
+        self.accountID = accountID
+        self.reason = reason
+        self.resetsAt = resetsAt
     }
 }
 
@@ -1387,6 +1506,10 @@ public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
     /// and asks nothing — the alternative was one 404 per Chat Settings screen, reported as a
     /// degraded action for a Mac that is simply older.
     case sessionContinuation = "session-continuation"
+    /// Owner-only: projects carry an ordered `defaultAccounts` list, `project/default-accounts`
+    /// replaces it, and a create may say its login came from that list. A phone paired with a Mac
+    /// that does not say so shows no editor and sends no `accountSelection`.
+    case projectDefaultAccounts = "project-default-accounts"
 }
 
 /// The size a thumbnail is asked at, and the most a Mac will answer with.
@@ -2208,6 +2331,10 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
     /// New clients ask for the one changed row. Absent keeps the original full-catalogue response
     /// for older clients whose decoder requires `me`.
     public let compactResponse: Bool?
+    /// Where `accountHandle` came from. Absent is `.explicit`, which is what every client meant
+    /// before this field existed. Sent only to a host advertising
+    /// `RemoteRESTFeature.projectDefaultAccounts`.
+    public let accountSelection: RemoteAccountSelection?
     public let prompt: String
 
     public init(
@@ -2225,6 +2352,7 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         openingAttachmentScopeID: String? = nil,
         openingAttachmentUploadIDs: [String]? = nil,
         compactResponse: Bool? = nil,
+        accountSelection: RemoteAccountSelection? = nil,
         prompt: String
     ) {
         self.projectID = projectID
@@ -2241,6 +2369,7 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         self.openingAttachmentScopeID = openingAttachmentScopeID
         self.openingAttachmentUploadIDs = openingAttachmentUploadIDs
         self.compactResponse = compactResponse
+        self.accountSelection = accountSelection
         self.prompt = prompt
     }
 }
@@ -2277,23 +2406,32 @@ public struct RemoteCreateSessionResponseDTO: Codable, Equatable, Sendable {
     public let session: RemoteSessionSummaryDTO?
     /// Present with a compact response so the client never infers readiness from a stale row.
     public let startup: RemoteSessionStartupState?
+    /// Present when a `projectDefault` send started on another login than the one it named.
+    public let accountSubstitution: RemoteAccountSubstitutionDTO?
 
-    public init(sessionID: String, me: RemoteMeDTO) {
+    public init(
+        sessionID: String,
+        me: RemoteMeDTO,
+        accountSubstitution: RemoteAccountSubstitutionDTO? = nil
+    ) {
         self.sessionID = sessionID
         self.me = me
         session = nil
         startup = nil
+        self.accountSubstitution = accountSubstitution
     }
 
     public init(
         sessionID: String,
         session: RemoteSessionSummaryDTO,
-        startup: RemoteSessionStartupState
+        startup: RemoteSessionStartupState,
+        accountSubstitution: RemoteAccountSubstitutionDTO? = nil
     ) {
         self.sessionID = sessionID
         me = nil
         self.session = session
         self.startup = startup
+        self.accountSubstitution = accountSubstitution
     }
 }
 

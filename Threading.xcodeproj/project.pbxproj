@@ -137,6 +137,7 @@
 		A71400010000000000000001 /* RemoteNotificationPresentationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71400010000000000000002 /* RemoteNotificationPresentationPolicyTests.swift */; };
 		A71500010000000000000001 /* MobileIdentityPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71500010000000000000002 /* MobileIdentityPickerTests.swift */; };
 		A72100010000000000000001 /* MobileSessionSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72100010000000000000002 /* MobileSessionSettingsTests.swift */; };
+		A72600010000000000000001 /* MobileProjectDefaultAccountsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72600010000000000000002 /* MobileProjectDefaultAccountsTests.swift */; };
 		A71600010000000000000001 /* MobileRefreshPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71600010000000000000002 /* MobileRefreshPolicyTests.swift */; };
 		A72200010000000000000001 /* MobileLiveRoutePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72200010000000000000002 /* MobileLiveRoutePolicyTests.swift */; };
 		A72300010000000000000001 /* MobileSocketRecoveryBackoffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72300010000000000000002 /* MobileSocketRecoveryBackoffTests.swift */; };
@@ -450,6 +451,7 @@
 		A71400010000000000000002 /* RemoteNotificationPresentationPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteNotificationPresentationPolicyTests.swift; sourceTree = "<group>"; };
 		A71500010000000000000002 /* MobileIdentityPickerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileIdentityPickerTests.swift; sourceTree = "<group>"; };
 		A72100010000000000000002 /* MobileSessionSettingsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionSettingsTests.swift; sourceTree = "<group>"; };
+		A72600010000000000000002 /* MobileProjectDefaultAccountsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileProjectDefaultAccountsTests.swift; sourceTree = "<group>"; };
 		A71600010000000000000002 /* MobileRefreshPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileRefreshPolicyTests.swift; sourceTree = "<group>"; };
 		A72200010000000000000002 /* MobileLiveRoutePolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileLiveRoutePolicyTests.swift; sourceTree = "<group>"; };
 		A72300010000000000000002 /* MobileSocketRecoveryBackoffTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSocketRecoveryBackoffTests.swift; sourceTree = "<group>"; };
@@ -497,6 +499,8 @@
 				ThreadingMobile/MobileClipboardWriter.swift,
 				ThreadingMobile/MobileProjectDisclosureStore.swift,
 				ThreadingMobile/MobileProjectChatPreview.swift,
+				ThreadingMobile/MobileProjectDefaultAccounts.swift,
+				ThreadingMobile/MobileProjectDefaultAccountsView.swift,
 				ThreadingMobile/MobileCollaborationPresence.swift,
 				ThreadingMobile/MobileConnectionStatusPanel.swift,
 				ThreadingMobile/MobileConversationQuestionCard.swift,
@@ -895,6 +899,7 @@
 				A71400010000000000000002 /* RemoteNotificationPresentationPolicyTests.swift */,
 				A71500010000000000000002 /* MobileIdentityPickerTests.swift */,
 				A72100010000000000000002 /* MobileSessionSettingsTests.swift */,
+				A72600010000000000000002 /* MobileProjectDefaultAccountsTests.swift */,
 				A71600010000000000000002 /* MobileRefreshPolicyTests.swift */,
 				A72200010000000000000002 /* MobileLiveRoutePolicyTests.swift */,
 				A72300010000000000000002 /* MobileSocketRecoveryBackoffTests.swift */,
@@ -1791,6 +1796,7 @@
 				A71400010000000000000001 /* RemoteNotificationPresentationPolicyTests.swift in Sources */,
 				A71500010000000000000001 /* MobileIdentityPickerTests.swift in Sources */,
 				A72100010000000000000001 /* MobileSessionSettingsTests.swift in Sources */,
+				A72600010000000000000001 /* MobileProjectDefaultAccountsTests.swift in Sources */,
 				A71600010000000000000001 /* MobileRefreshPolicyTests.swift in Sources */,
 				A72200010000000000000001 /* MobileLiveRoutePolicyTests.swift in Sources */,
 				A72300010000000000000001 /* MobileSocketRecoveryBackoffTests.swift in Sources */,

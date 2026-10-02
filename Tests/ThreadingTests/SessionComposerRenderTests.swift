@@ -2245,6 +2245,10 @@ private final class StartRecorder: SessionComposerViewControllerDelegate {
     /// in which the receiver can file them.
     private(set) var attachmentPaths: [[String]] = []
 
+    /// The login each start carried, and each receipt for a send that moved logins.
+    private(set) var accountHandles: [AccountHandle] = []
+    private(set) var substitutions: [ProjectDefaultAccounts.Substitution] = []
+
     func sessionComposer(
         _ composer: SessionComposerViewController,
         startSessionIn projectID: ProjectID,
@@ -2268,6 +2272,7 @@ private final class StartRecorder: SessionComposerViewControllerDelegate {
         managedWorkspacePlans.append(managedWorkspacePlan)
         self.attachmentPaths.append(attachmentPaths)
         curfews.append(curfew)
+        accountHandles.append(accountHandle)
         return starts
     }
 
@@ -2290,4 +2295,152 @@ private final class StartRecorder: SessionComposerViewControllerDelegate {
 
     func sessionComposerDidRequestAddFolder(_ composer: SessionComposerViewController) {}
     func sessionComposerDidRequestNewFolder(_ composer: SessionComposerViewController) {}
+
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        didStartOnNextDefaultAccount substitution: ProjectDefaultAccounts.Substitution
+    ) {
+        substitutions.append(substitution)
+    }
+}
+
+// MARK: - Project Default Accounts
+
+/// A project's ordered logins, as the composer follows them: the list chooses the runtime and the
+/// login a fresh draft opens on, an explicit pick is never changed, and a send moves off a
+/// list-chosen login only when it has been proven out — leaving the app-wide runtime alone.
+extension SessionComposerRenderTests {
+
+    private static let listedWork = AccountID(provider: .codex, handle: .named("codex-work"))
+    private static let listedSpare = AccountID(provider: .codex, handle: .named("codex-spare"))
+
+    private static func listedAccount(_ id: AccountID) -> AgentAccount {
+        AgentAccount(
+            provider: id.provider,
+            handle: id.handle,
+            configPath: "/nonexistent/\(id.handle.name)",
+            displayName: id.handle.name,
+            presentationNameIsResolved: true
+        )
+    }
+
+    /// A list whose first login is `pick`, and whose send moves to `substitute` when one is named.
+    private func projectDefaults(
+        pick: AccountID?,
+        substitute: AccountID? = nil,
+        warmed: @escaping (ProjectID) -> Void = { _ in }
+    ) -> SessionComposerViewController.ProjectDefaults {
+        SessionComposerViewController.ProjectDefaults(
+            resolve: { _ in
+                pick.map {
+                    ProjectAccountOrder.Resolution(
+                        entries: [.init(accountID: $0, state: .unverified)],
+                        chosen: $0
+                    )
+                }
+            },
+            substitution: { _, current, _ in
+                substitute.map {
+                    ProjectDefaultAccounts.Substitution(
+                        from: current,
+                        to: $0,
+                        fromState: .spent(until: nil, cause: .provider)
+                    )
+                }
+            },
+            warm: warmed,
+            account: { Self.listedAccount($0) }
+        )
+    }
+
+    private func startFromTheBox(_ composer: SessionComposerViewController, _ text: String) throws {
+        let prompt = try XCTUnwrap(promptView(in: composer.view))
+        prompt.stringValue = text
+        try startButton(in: composer.view).performClick()
+    }
+
+    func testAProjectListChoosesTheRuntimeAndLoginAndAsksForFreshReadings() throws {
+        AppSettings.shared.defaultAgentKind = .claude
+        var warmed: [ProjectID] = []
+        let composer = SessionComposerViewController(
+            newSessionAccountHandle: { _ in .standard },
+            projectDefaults: projectDefaults(pick: Self.listedWork, warmed: { warmed.append($0) })
+        )
+        _ = composer.view
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: fixtureFolder()))
+        defer { ProjectStore.shared.removeProject(id: project.id) }
+
+        composer.show(projectID: project.id)
+
+        XCTAssertEqual(composer.selectedAgent, .codex)
+        XCTAssertEqual(composer.selectedAccountHandle, Self.listedWork.handle)
+        XCTAssertEqual(composer.identitySource, .projectDefault)
+        XCTAssertEqual(warmed, [project.id])
+    }
+
+    func testWithoutAProjectListTheAppRuleStillDecides() throws {
+        AppSettings.shared.defaultAgentKind = .claude
+        let composer = SessionComposerViewController(
+            newSessionAccountHandle: { _ in .named("claude-recent") },
+            projectDefaults: projectDefaults(pick: nil)
+        )
+        _ = composer.view
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: fixtureFolder()))
+        defer { ProjectStore.shared.removeProject(id: project.id) }
+
+        composer.show(projectID: project.id)
+
+        XCTAssertEqual(composer.selectedAgent, .claude)
+        XCTAssertEqual(composer.selectedAccountHandle, .named("claude-recent"))
+        XCTAssertEqual(composer.identitySource, .appRule)
+    }
+
+    func testASendMovesOffASpentListLoginAndLeavesTheAppRuntimeAlone() throws {
+        AppSettings.shared.defaultAgentKind = .claude
+        let composer = SessionComposerViewController(
+            newSessionAccountHandle: { _ in .standard },
+            projectDefaults: projectDefaults(pick: Self.listedWork, substitute: Self.listedSpare)
+        )
+        _ = composer.view
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: fixtureFolder()))
+        defer {
+            ProjectStore.shared.removeProject(id: project.id)
+            DraftStore.shared.setDraft("", for: project.id)
+        }
+        composer.show(projectID: project.id)
+
+        let recorder = StartRecorder()
+        composer.delegate = recorder
+        try startFromTheBox(composer, "Use whichever work login has room")
+
+        XCTAssertEqual(recorder.accountHandles, [Self.listedSpare.handle])
+        XCTAssertEqual(recorder.substitutions.map(\.to), [Self.listedSpare])
+        XCTAssertEqual(
+            AppSettings.shared.defaultAgentKind,
+            .claude,
+            "a runtime the project's list chose is not the app's new default"
+        )
+    }
+
+    func testAnExplicitPickIsNeverMovedAtTheSend() throws {
+        let composer = SessionComposerViewController(
+            newSessionAccountHandle: { _ in .standard },
+            projectDefaults: projectDefaults(pick: Self.listedWork, substitute: Self.listedSpare)
+        )
+        _ = composer.view
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: fixtureFolder()))
+        defer {
+            ProjectStore.shared.removeProject(id: project.id)
+            DraftStore.shared.setDraft("", for: project.id)
+        }
+        composer.show(projectID: project.id)
+        composer.identitySource = .explicit
+
+        let recorder = StartRecorder()
+        composer.delegate = recorder
+        try startFromTheBox(composer, "Stay where I put you")
+
+        XCTAssertEqual(recorder.accountHandles, [Self.listedWork.handle])
+        XCTAssertTrue(recorder.substitutions.isEmpty)
+    }
 }

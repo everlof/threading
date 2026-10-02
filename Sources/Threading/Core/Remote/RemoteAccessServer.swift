@@ -629,6 +629,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        if request.method == "POST", path == RemoteRouter.projectDefaultAccountsPath {
+            handleProjectDefaultAccounts(request, respond: respond)
+            return
+        }
+
         if request.method == "POST", path == RemoteRouter.appThemePath {
             handleAppTheme(request, respond: respond)
             return
@@ -1811,13 +1816,35 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 managedWorkspacePlan = nil
             }
 
+            // Decided after the request has been validated as sent, so a refusal names what the
+            // phone asked for. Only a login the draft took from the project's list may move, and
+            // only onto proven evidence — see `ProjectDefaultAccounts.substitution`.
+            let substituted = creation.accountSelection == .projectDefault
+                ? RemoteProjectDefaultLaunch.substitute(
+                    projectID: projectID,
+                    kind: kind,
+                    requested: accountHandle,
+                    model: creation.model,
+                    reasoningEffort: creation.reasoningEffort,
+                    fastMode: creation.fastMode,
+                    offered: discoveredAccounts
+                )
+                : nil
+            if let substituted {
+                self.services.eventLog.recordRemoteEvent("Remote session moved to the next default account", [
+                    .share: authorization.shareID,
+                    .agent: creation.agentKind,
+                    .reason: substituted.dto.reason.rawValue,
+                ])
+            }
+
             let launch = RemoteSessionLaunch(
                 projectID: projectID,
                 kind: kind,
-                accountHandle: accountHandle,
-                model: creation.model,
-                reasoningEffort: creation.reasoningEffort,
-                fastMode: creation.fastMode,
+                accountHandle: substituted?.accountHandle ?? accountHandle,
+                model: substituted.map(\.model) ?? creation.model,
+                reasoningEffort: substituted.map(\.reasoningEffort) ?? creation.reasoningEffort,
+                fastMode: substituted.map(\.fastMode) ?? creation.fastMode,
                 permissionMode: permissionMode,
                 usesNativeUI: usesNativeUI,
                 managedWorkspacePlan: managedWorkspacePlan,
@@ -1845,14 +1872,16 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 response = RemoteCreateSessionResponseDTO(
                     sessionID: sessionID.uuidString,
                     session: session,
-                    startup: .starting
+                    startup: .starting,
+                    accountSubstitution: substituted?.dto
                 )
             } else {
                 // Compatibility for installed clients whose response decoder still requires the
                 // complete catalogue. Current clients explicitly ask for the compact row above.
                 response = RemoteCreateSessionResponseDTO(
                     sessionID: sessionID.uuidString,
-                    me: self.services.mirrors.meResponse(for: authorization)
+                    me: self.services.mirrors.meResponse(for: authorization),
+                    accountSubstitution: substituted?.dto
                 )
             }
             respond(.respond(RemoteRouter.json(response, status: 201, reason: "Created")))
@@ -2368,6 +2397,57 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
         DispatchQueue.main.async {
             switch self.services.sessionMutations.setProjectHidden(choice.isHidden, projectID: projectID) {
+            case .applied, .unchanged:
+                self.respondWithCatalogue(for: authorization, request: request, respond: respond)
+            case .targetNotFound:
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+            case .persistenceRefused:
+                respond(.respond(self.persistenceRefusalResponse()))
+            case .unsupportedValue:
+                respond(.respond(RemoteRouter.error(422, "Unsupported Value", code: .unsupportedValue)))
+            }
+        }
+    }
+
+    /// Replaces a project's ordered default logins. Owner-only, like visibility: the list decides
+    /// which login the owner's money is spent from.
+    ///
+    /// Every reference must name a login this Mac has discovered, switched off or not — a
+    /// switched-off one is kept in its place and skipped until it is switched back on, exactly as
+    /// the Mac's own editor keeps it — or one the list already holds. The second clause is what
+    /// lets a phone reorder a list whose login has since vanished from disk: the stale entry is
+    /// the owner's to remove, and refusing every save until they found it would lock the list.
+    /// Anything else is refused rather than stored.
+    private func handleProjectDefaultAccounts(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canManageHost else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+        guard let choice = try? JSONDecoder().decode(
+            RemoteSetProjectDefaultAccountsRequestDTO.self, from: request.body
+        ), let projectID = ProjectID(uuidString: choice.projectID),
+           choice.accounts.count <= RemoteProjectDefaultAccounts.maximumEntries else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+        DispatchQueue.main.async {
+            let accounts = choice.accounts.map(RemoteAccountBridge.accountID(from:))
+            let held = Set(self.services.sessionQueries.project(withID: projectID)?.defaultAccounts ?? [])
+            guard accounts.allSatisfy({ accountID in
+                guard let accountID else { return false }
+                return held.contains(accountID) || ProjectDefaultAccounts.isDiscovered(accountID)
+            }) else {
+                respond(.respond(RemoteRouter.error(422, "Unknown Account", code: .unknownAccount)))
+                return
+            }
+            switch self.services.sessionMutations.setDefaultAccounts(
+                accounts.compactMap { $0 },
+                forProjectID: projectID
+            ) {
             case .applied, .unchanged:
                 self.respondWithCatalogue(for: authorization, request: request, respond: respond)
             case .targetNotFound:

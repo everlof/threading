@@ -1497,6 +1497,21 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         container.showComposer(projectID: project.id)
     }
 
+    /// A send that moved logins is a decision nobody clicked, so it leaves a receipt on screen
+    /// and a line in the durable journal — a chat that quietly started somewhere else is one
+    /// whose usage nobody can reason about afterwards.
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        didStartOnNextDefaultAccount substitution: ProjectDefaultAccounts.Substitution
+    ) {
+        toastPresenter(ProjectDefaultAccountsPresentation.receipt(for: substitution))
+        environment.eventLog.record(.composer, "Session started on the next default account", [
+            "from": substitution.from.rawValue,
+            "to": substitution.to.rawValue,
+            "cause": substitution.wasOwnLimit ? "ownLimit" : "spent"
+        ])
+    }
+
     func sessionComposer(
         _ composer: SessionComposerViewController,
         didSelectProject projectID: ProjectID

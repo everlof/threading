@@ -108,6 +108,23 @@ enum LimitEscapeRanking {
         rank(candidates, metering: model, at: now).first
     }
 
+    /// The first login in the candidates' own order that has room — for an order the user set,
+    /// which outranks pace: a project's default accounts name which login is spent next, and the
+    /// rule that picks the most headroom would reliably pick the one they were saving.
+    ///
+    /// The same eligibility as `rank`, so a login the user fenced off or cannot be read is
+    /// passed over here exactly as it is there.
+    static func firstWithHeadroom(
+        in candidates: [Candidate],
+        metering model: String?,
+        at now: Date = Date()
+    ) -> Ranked? {
+        for candidate in candidates {
+            if let ranked = eligible(candidate, metering: model, at: now) { return ranked }
+        }
+        return nil
+    }
+
     /// Whether a login already chosen still has room — the guard a tap runs again against a
     /// freshly forced reading, so a cached number cannot move a conversation onto a spent login.
     static func hasHeadroom(
@@ -353,7 +370,7 @@ extension LimitEscapeSuggestion {
         let destinations = SessionMigration.destinations(for: session)
         guard !destinations.isEmpty else { return refusalAlone }
 
-        let candidates = destinations.map {
+        let candidate: (AgentAccount) -> LimitEscapeRanking.Candidate = {
             LimitEscapeRanking.Candidate(
                 accountID: $0.id,
                 usage: AccountUsageService.shared.usage(for: $0),
@@ -361,7 +378,15 @@ extension LimitEscapeSuggestion {
             )
         }
 
-        guard let best = LimitEscapeRanking.best(among: candidates, metering: model),
+        // The project's own order first, when it names logins of this runtime: the offer is the
+        // login a new chat here would have started on. Only when none of those has room does it
+        // fall back to the pace ranking over every login — this is an offer for a press, not a
+        // move made on the user's behalf, so it may name a login the order leaves out.
+        let listed = ProjectDefaultAccounts.listedDestinations(destinations, forSessionID: sessionID)
+        let chosen = listed.flatMap {
+            LimitEscapeRanking.firstWithHeadroom(in: $0.map(candidate), metering: model)
+        } ?? LimitEscapeRanking.best(among: destinations.map(candidate), metering: model)
+        guard let best = chosen,
               let account = destinations.first(where: { $0.id == best.accountID })
         else { return refusalAlone }
 

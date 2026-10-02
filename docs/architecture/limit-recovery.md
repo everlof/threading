@@ -405,6 +405,24 @@ conversation goes is testable with no home directory to scan and no network to a
   a number invented from one side of the subtraction. Ties keep the order the candidates arrived
   in, so an unchanged discovery order cannot make the offer flicker between two logins.
 
+### Project default accounts
+
+A project with [default accounts](accounts.md#project-default-accounts) has said which logins may
+be spent next and in what order, so both readers of the ranking honour it when the list names
+logins of the session's runtime (`ProjectDefaultAccounts.listedDestinations`):
+
+- **The automatic policy stays inside the list.** `resumeOnBestAccount` narrows its candidates to
+  the listed destinations and takes the first in list order with headroom
+  (`LimitEscapeRanking.firstWithHeadroom`) instead of the best pace. Its eligibility is unchanged and
+  still fails closed, because this path moves a conversation. A list with no destination of this
+  runtime, or none with room, refuses as `noOtherLogin` / `noLoginWithRoom` rather than leaving the
+  list. A pinned `resumeVia` is the user's explicit answer and ignores the list.
+- **The strip's offer leads with the list but may leave it.** It names the first listed login with
+  room; when there is none it falls back to the pace ranking over every login, because a press is
+  the user's own decision rather than spend made on their behalf.
+
+A moved conversation stays where it landed when the first login's window resets.
+
 ### The strip carries the refusal, not only the escape
 
 `LimitEscapeSuggestion`'s account half is **optional**, and that is the record's whole shape. It

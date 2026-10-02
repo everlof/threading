@@ -110,6 +110,13 @@ struct Project: Codable, Identifiable {
   /// See `LimitRecoveryResolution`.
   var limitRecoveryPolicy: LimitRecoveryPolicy?
 
+  /// The logins a new chat here starts on, in the order the user ranked them: the first one that
+  /// is not out of usage wins. Provider-qualified, so one list can fall back from one runtime to
+  /// another. Nil — never empty — means no list, and the app-wide rule applies. A login that is
+  /// not listed is never chosen for this checkout on the user's behalf. See
+  /// `ProjectAccountOrder`.
+  var defaultAccounts: [AccountID]?
+
   /// Whether this checkout's chats are exempt from the standing quiet hours. Nil inherits the
   /// Settings answer; a chat with an answer of its own overrides it either way. See
   /// `CurfewResolution`.
@@ -166,6 +173,7 @@ struct Project: Codable, Identifiable {
     self.notificationsMuted = nil
     self.soundOverrides = nil
     self.limitRecoveryPolicy = nil
+    self.defaultAccounts = nil
     self.curfewRule = nil
     self.isScratchpad = nil
     self.isAdoptedForCheckoutMove = nil
@@ -178,6 +186,7 @@ struct Project: Codable, Identifiable {
     case notificationsMuted, soundOverrides, limitRecoveryPolicy, isScratchpad
     case curfewRule, isAdoptedForCheckoutMove
     case executionHost, lastKnownRepositoryIdentity
+    case defaultAccounts
   }
 
   init(from decoder: Decoder) throws {
@@ -226,6 +235,14 @@ struct Project: Codable, Identifiable {
       String.self,
       forKey: .limitRecoveryPolicy
     ).flatMap(LimitRecoveryPolicy.init(rawValue:))
+    // Leniently and entry by entry, for the reason `AgentSession` states: a runtime this build
+    // has never heard of costs that entry, never the checkout. Normalised so an empty list and
+    // an absent key are the same stored answer.
+    let storedAccounts =
+      (try? container.decodeIfPresent([String].self, forKey: .defaultAccounts)) ?? nil
+    defaultAccounts = ProjectAccountOrder.normalized(
+      storedAccounts?.compactMap(AccountID.init(rawValue:))
+    )
     // Through the stored form, leniently, for the reason `AgentSession` states: a rule kind
     // this build has never heard of reads as "never chose" instead of costing the checkout and
     // every session inside it.
@@ -265,6 +282,7 @@ struct Project: Codable, Identifiable {
     try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
     try container.encodeIfPresent(soundOverrides, forKey: .soundOverrides)
     try container.encodeIfPresent(limitRecoveryPolicy, forKey: .limitRecoveryPolicy)
+    try container.encodeIfPresent(defaultAccounts, forKey: .defaultAccounts)
     try container.encodeIfPresent(curfewRule, forKey: .curfewRule)
     try container.encodeIfPresent(isScratchpad, forKey: .isScratchpad)
     try container.encodeIfPresent(isAdoptedForCheckoutMove, forKey: .isAdoptedForCheckoutMove)

@@ -664,6 +664,7 @@ public enum RemoteRoute: String, CaseIterable, Sendable {
     case hostedDeviceCredential = "api/hosted-device-credential"
     case settings = "api/settings"
     case projectVisibility = "api/project/visibility"
+    case projectDefaultAccounts = "api/project/default-accounts"
 
     /// The rooted path a host matches an incoming request against.
     public var absolutePath: String { "/" + rawValue }

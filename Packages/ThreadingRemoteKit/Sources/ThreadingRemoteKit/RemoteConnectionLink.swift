@@ -318,6 +318,7 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
     }
 
     public var projectVisibilityURL: URL { routeURL(.projectVisibility) }
+    public var projectDefaultAccountsURL: URL { routeURL(.projectDefaultAccounts) }
 
     public func renameSessionURL(sessionID: String) -> URL {
         sessionActionURL(sessionID: sessionID, action: .rename)

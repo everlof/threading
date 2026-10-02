@@ -1409,6 +1409,28 @@ final class ProjectStore {
         return .applied
     }
 
+    /// Records the logins a new chat in this checkout starts on, in order. Nil or empty clears
+    /// the list, returning the checkout to the app-wide rule.
+    ///
+    /// Normalised before it is compared, so a duplicate or an over-long list is stored as the
+    /// list it means rather than refused: the editors that write here only reorder and remove.
+    @discardableResult
+    func setDefaultAccounts(
+        _ accounts: [AccountID]?,
+        forProjectID projectID: ProjectID
+    ) -> ProjectMutationResult {
+        guard let index = index(ofProject: projectID) else { return .targetNotFound }
+        let normalized = ProjectAccountOrder.normalized(accounts)
+        guard projects[index].defaultAccounts != normalized else { return .unchanged }
+        projects[index].defaultAccounts = normalized
+        guard saveProjectRecord(at: index) else {
+            notifyChanged(sidebarImpact: .projectStructure(projectID))
+            return .persistenceRefused
+        }
+        notifyChanged(sidebarImpact: .projectStructure(projectID))
+        return .applied
+    }
+
     /// Records when one conversation stops being spent. Nil returns it to following its
     /// checkout, and the standing quiet hours beyond that — the same three scopes as the mute
     /// and the limit recovery above, and optional for the same reason.

@@ -859,12 +859,21 @@ final class LimitRecoveryCoordinator {
         let destinations = SessionMigration.destinations(for: session)
         guard !destinations.isEmpty else { return completion(.failure(.noOtherLogin)) }
 
+        // A project that orders its logins has said which ones may be spent next, and in what
+        // order: an automatic move stays inside that list and takes the first with room, rather
+        // than the login with the most headroom, which is reliably the one being saved.
+        let listed = policy.pinnedAccountID == nil
+            ? ProjectDefaultAccounts.listedDestinations(destinations, forSessionID: sessionID)
+            : nil
         let candidates: [AgentAccount]
         if let pinned = policy.pinnedAccountID {
             guard let match = destinations.first(where: { $0.id == pinned }) else {
                 return completion(.failure(.pinnedLoginGone(pinned)))
             }
             candidates = [match]
+        } else if let listed {
+            guard !listed.isEmpty else { return completion(.failure(.noOtherLogin)) }
+            candidates = listed
         } else {
             candidates = destinations
         }
@@ -911,7 +920,10 @@ final class LimitRecoveryCoordinator {
                     return completion(.success(account))
                 }
 
-                guard let best = LimitEscapeRanking.best(among: values, metering: model),
+                let chosen = listed == nil
+                    ? LimitEscapeRanking.best(among: values, metering: model)
+                    : LimitEscapeRanking.firstWithHeadroom(in: values, metering: model)
+                guard let best = chosen,
                       let account = candidates.first(where: { $0.id == best.accountID })
                 else {
                     return completion(.failure(.noLoginWithRoom(heldByOwnLimit: heldByOwnLimit)))

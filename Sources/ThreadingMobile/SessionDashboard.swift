@@ -3176,6 +3176,7 @@ struct SessionDashboard: View {
     @State private var showsSnoozed = false
     @AppStorage("sessionDashboardShowHiddenProjects") private var showsHiddenProjects = false
     @State private var pendingVisibilityProjectIDs = Set<String>()
+    @State private var defaultAccountsRoute: MobileProjectDefaultAccountsRoute?
     @State private var renamingSession: RemoteSessionSummaryDTO?
     @State private var renameText = ""
     @State private var actionError: String?
@@ -3560,6 +3561,15 @@ struct SessionDashboard: View {
                           !pendingVisibilityProjectIDs.contains(project.id) else { return nil }
                     return { toggleProjectVisibility(project) }
                 },
+                editDefaultAccounts: project.flatMap { project in
+                    guard model.canManageProjectDefaultAccounts else { return nil }
+                    return {
+                        defaultAccountsRoute = MobileProjectDefaultAccountsRoute(
+                            projectID: project.id,
+                            list: project.defaultAccounts
+                        )
+                    }
+                },
                 startNewSession: model.canManageSessions && !showsArchived
                     ? { startDraft(in: name) }
                     : nil
@@ -3897,6 +3907,11 @@ struct SessionDashboard: View {
                     MacAppearanceSettingsView()
                 }
                 .mobileTheme(theme)
+            }
+            .sheet(item: $defaultAccountsRoute) { route in
+                MobileProjectDefaultAccountsView(route: route)
+                    .environmentObject(model)
+                    .mobileTheme(theme)
             }
             .sheet(isPresented: $showsUniversalSearch) {
                 NavigationStack {
@@ -4767,6 +4782,9 @@ private struct DashboardProjectHeader: View {
     let toggleExpanded: () -> Void
     var isHidden = false
     var toggleHidden: (() -> Void)? = nil
+    /// Opens the project's Default Accounts editor; nil for a Mac that keeps no lists, or a
+    /// device that may not manage the host.
+    var editDefaultAccounts: (() -> Void)? = nil
     let startNewSession: (() -> Void)?
     @Environment(\.remoteTheme) private var theme
 
@@ -4809,13 +4827,23 @@ private struct DashboardProjectHeader: View {
             .buttonStyle(.plain)
             .accessibilityHint(MobileL10n.string("Shows this project’s sessions"))
             Spacer(minLength: MobileDesign.Spacing.tight)
-            if let toggleHidden {
+            if toggleHidden != nil || editDefaultAccounts != nil {
                 Menu {
-                    Button(action: toggleHidden) {
-                        Label(
-                            MobileL10n.string(isHidden ? "Show Project" : "Hide Project"),
-                            systemImage: isHidden ? "eye" : "eye.slash"
-                        )
+                    if let toggleHidden {
+                        Button(action: toggleHidden) {
+                            Label(
+                                MobileL10n.string(isHidden ? "Show Project" : "Hide Project"),
+                                systemImage: isHidden ? "eye" : "eye.slash"
+                            )
+                        }
+                    }
+                    if let editDefaultAccounts {
+                        Button(action: editDefaultAccounts) {
+                            Label(
+                                MobileL10n.string("Default Accounts"),
+                                systemImage: "person.2.badge.gearshape"
+                            )
+                        }
                     }
                 } label: {
                     Image(systemName: "ellipsis")

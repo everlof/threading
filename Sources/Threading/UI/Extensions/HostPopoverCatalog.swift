@@ -19,6 +19,7 @@ enum HostPopoverID: String, CaseIterable {
     case composerModelEffortPicker = "composer.model-effort-picker"
     case designHelp = "design.help"
     case sessionRunPlan = "session.run-plan"
+    case projectDefaultAccounts = "sidebar.project-default-accounts"
 
     var exposure: HostPopoverExposure {
         switch self {
@@ -83,6 +84,14 @@ enum HostPopoverID: String, CaseIterable {
                     + "attachment renderers through attachments.preview@1; composing a second "
                     + "extension into this transient action surface would mix those authorities. "
                     + "Its hover timing, local-file actions and dismissal stay host-owned."
+            )
+        case .projectDefaultAccounts:
+            return .hostOnly(
+                reason: "Edits which of the owner's logins a project's new chats may spend, in "
+                    + "order. The order is consent to automatic spending, so its persistence, the "
+                    + "usage evidence each row states, accessibility and dismissal stay "
+                    + "host-owned; extensions may read the resulting choice but cannot replace "
+                    + "the surface that grants it."
             )
         case .sessionRunPlan:
             return .hostOnly(

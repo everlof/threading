@@ -794,6 +794,17 @@
         }
       }
     },
+    "%lld. %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld. %2$@"
+          }
+        }
+      }
+    },
     "+%@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1136,6 +1147,17 @@
         }
       }
     },
+    "A new chat in this project starts on the first login that is not out of usage." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En ny chatt i det här projektet startar på den första inloggningen som har användning kvar."
+          }
+        }
+      }
+    },
     "A question for you" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1347,6 +1369,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lägg till"
+          }
+        }
+      }
+    },
+    "Add %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till %@"
           }
         }
       }
@@ -3954,6 +3987,17 @@
         }
       }
     },
+    "Couldn’t save default accounts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att spara standardkontona"
+          }
+        }
+      }
+    },
     "Couldn’t send report" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4235,6 +4279,17 @@
         }
       }
     },
+    "Default Accounts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standardkonton"
+          }
+        }
+      }
+    },
     "Default model" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4479,6 +4534,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Frånkopplad"
+          }
+        }
+      }
+    },
+    "Dismisses this notice" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stänger meddelandet"
           }
         }
       }
@@ -5803,6 +5869,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bilder, dokument och HTML från den här sessionen visas här."
+          }
+        }
+      }
+    },
+    "In Order" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I ordning"
           }
         }
       }
@@ -7276,6 +7353,17 @@
         }
       }
     },
+    "No logins yet. New chats here start on the usual login." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga inloggningar än. Nya chattar här startar på den vanliga inloggningen."
+          }
+        }
+      }
+    },
     "No matches" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7393,6 +7481,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Normal hastighet och förbrukning"
+          }
+        }
+      }
+    },
+    "Not Used Automatically" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Används inte automatiskt"
           }
         }
       }
@@ -8011,6 +8110,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Övrigt"
+          }
+        }
+      }
+    },
+    "Out of usage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Användningen är slut"
+          }
+        }
+      }
+    },
+    "Out until %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slut till %@"
           }
         }
       }
@@ -9902,6 +10023,17 @@
         }
       }
     },
+    "Save" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara"
+          }
+        }
+      }
+    },
     "Saved Macs are unavailable" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11051,6 +11183,61 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Starta experimentet i Mac-inställningar → Fjärråtkomst → Utvecklare och ange den åttasiffriga koden här."
+          }
+        }
+      }
+    },
+    "Started on %@ instead of %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startade på %1$@ i stället för %2$@"
+          }
+        }
+      }
+    },
+    "Started on %@ — %@ is at your limit until %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startade på %1$@ — %2$@ har nått din gräns till %3$@"
+          }
+        }
+      }
+    },
+    "Started on %@ — %@ is out of usage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startade på %1$@ — %2$@ har ingen användning kvar"
+          }
+        }
+      }
+    },
+    "Started on %@ — %@ is out until %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startade på %1$@ — %2$@ är slut till %3$@"
+          }
+        }
+      }
+    },
+    "Started on %@ — %@ reached your limit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startade på %1$@ — %2$@ har nått din gräns"
           }
         }
       }
@@ -13826,6 +14013,17 @@
         }
       }
     },
+    "Unavailable login" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inloggningen är inte tillgänglig"
+          }
+        }
+      }
+    },
     "Uncached input" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14136,6 +14334,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Användning är inte tillgänglig"
+          }
+        }
+      }
+    },
+    "Usage unknown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Användning okänd"
           }
         }
       }
@@ -14781,6 +14990,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Du kan svara medan arbetet fortsätter."
+          }
+        }
+      }
+    },
+    "You can still start any chat on these by choosing the login yourself." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du kan fortfarande starta en chatt på dessa genom att själv välja inloggningen."
           }
         }
       }

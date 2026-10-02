@@ -312,6 +312,7 @@ extension SessionComposerViewController {
     func adopt(_ plan: ScheduledSessionPlan) {
         selectedAgent = plan.kind
         selectedAccountHandle = plan.accountHandle
+        identitySource = .explicit
         selectedModel = plan.model
         selectedReasoningEffort = plan.reasoningEffort
         selectedFastMode = plan.fastMode

@@ -749,6 +749,40 @@
         }
       }
     },
+    "%@ is at your limit until %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ is at your limit until %@."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ har nått din gräns till %@."
+          }
+        }
+      }
+    },
+    "%@ is at your limit." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ is at your limit."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ har nått din gräns."
+          }
+        }
+      }
+    },
     "%@ is close to its own limit now." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -822,6 +856,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ finns inte på den här datorn. Kryssa i ”Det här är ett engångstestkonto” för att spara en inloggning för det."
+          }
+        }
+      }
+    },
+    "%@ is out of usage." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ is out of usage."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ har slut på användning."
+          }
+        }
+      }
+    },
+    "%@ is out until %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ is out until %@."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ har slut till %@."
           }
         }
       }
@@ -5636,6 +5704,23 @@
         }
       }
     },
+    "Add %@ to the order" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add %@ to the order"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till %@ i ordningen"
+          }
+        }
+      }
+    },
     "Add Alert" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7281,6 +7366,40 @@
         }
       }
     },
+    "An account counts as out when a window that meters the chat's model is at 92% of its limit — or of your own limit, when you set a tighter one. An account whose usage is not known yet keeps its place." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An account counts as out when a window that meters the chat's model is at 92% of its limit — or of your own limit, when you set a tighter one. An account whose usage is not known yet keeps its place."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ett konto räknas som slut när ett fönster som mäter chattens modell når 92 % av sin gräns — eller av din egen gräns, när du har satt en snävare. Ett konto vars användning ännu inte är känd behåller sin plats."
+          }
+        }
+      }
+    },
+    "An account that is not in the order is never chosen for this project on your behalf. You can still pick it for one chat in the composer." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An account that is not in the order is never chosen for this project on your behalf. You can still pick it for one chat in the composer."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ett konto som inte finns i ordningen väljs aldrig åt dig för det här projektet. Du kan fortfarande välja det för en enskild chatt i redigeraren."
+          }
+        }
+      }
+    },
     "An agent" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8595,6 +8714,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vid användningsprocent (%@)"
+          }
+        }
+      }
+    },
+    "At your limit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "At your limit"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vid din gräns"
+          }
+        }
+      }
+    },
+    "At your limit until %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "At your limit until %@"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vid din gräns till %@"
           }
         }
       }
@@ -17681,6 +17834,57 @@
         }
       }
     },
+    "Default Accounts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Default Accounts"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standardkonton"
+          }
+        }
+      }
+    },
+    "Default Accounts…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Default Accounts…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standardkonton…"
+          }
+        }
+      }
+    },
+    "Default account %lld for this project" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Default account %lld for this project"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standardkonto %lld för det här projektet"
+          }
+        }
+      }
+    },
     "Default branch" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23742,6 +23946,23 @@
         }
       }
     },
+    "Has room" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Has room"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Har utrymme"
+          }
+        }
+      }
+    },
     "Headings for Lone Branches" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24976,6 +25197,23 @@
         }
       }
     },
+    "In order" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In order"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I ordning"
+          }
+        }
+      }
+    },
     "Include files outside the project" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25803,6 +26041,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den ger endast åtkomst till den valda chatten, med visning, samarbete och godkännande valda var för sig. Inbjudan pekar på en väg in ovan, så personen behöver Threading-appen och en väg in på det nätverket."
+          }
+        }
+      }
+    },
+    "It is next in this project's default accounts." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It is next in this project's default accounts."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det är nästa bland projektets standardkonton."
           }
         }
       }
@@ -27964,6 +28219,23 @@
         }
       }
     },
+    "Login not found" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Login not found"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inloggningen hittades inte"
+          }
+        }
+      }
+    },
     "Logo at rest." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29306,6 +29578,40 @@
         }
       }
     },
+    "Move %@ down" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move %@ down"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flytta ned %@"
+          }
+        }
+      }
+    },
+    "Move %@ up" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move %@ up"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flytta upp %@"
+          }
+        }
+      }
+    },
     "Move App Data Aside…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30249,6 +30555,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ny chatt eller terminal"
+          }
+        }
+      }
+    },
+    "New chats in this project start on the first account here that has usage left." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New chats in this project start on the first account here that has usage left."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nya chattar i det här projektet startar på det första kontot här som har användning kvar."
           }
         }
       }
@@ -31752,6 +32075,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inga tillgängliga"
+          }
+        }
+      }
+    },
+    "None yet. New chats follow the app's own choice." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "None yet. New chats follow the app's own choice."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga ännu. Nya chattar följer appens eget val."
           }
         }
       }
@@ -34438,6 +34778,23 @@
         }
       }
     },
+    "Other accounts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other accounts"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Andra konton"
+          }
+        }
+      }
+    },
     "Other build caches in temporary locations" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34500,6 +34857,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Andra kan titta och behålla utkast."
+          }
+        }
+      }
+    },
+    "Out of usage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Out of usage"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slut på användning"
+          }
+        }
+      }
+    },
+    "Out until %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Out until %@"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slut till %@"
           }
         }
       }
@@ -36442,6 +36833,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Projektkonfigurationens version måste vara %lld."
+          }
+        }
+      }
+    },
+    "Project default" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Project default"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projektets standard"
+          }
+        }
+      }
+    },
+    "Project default · every listed account is out; this one returns first" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Project default · every listed account is out; this one returns first"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projektets standard · alla listade konton är slut; det här kommer tillbaka först"
+          }
+        }
+      }
+    },
+    "Project default · skipped %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Project default · skipped %@"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projektets standard · hoppade över %@"
           }
         }
       }
@@ -39024,6 +39466,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ta bort"
+          }
+        }
+      }
+    },
+    "Remove %@ from the order" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove %@ from the order"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta bort %@ från ordningen"
           }
         }
       }
@@ -47234,6 +47693,23 @@
         }
       }
     },
+    "Started on %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Started on %@"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startade på %@"
+          }
+        }
+      }
+    },
     "Starting" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48364,6 +48840,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Växla till enhetlig diff"
+          }
+        }
+      }
+    },
+    "Switched off" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switched off"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avstängt"
           }
         }
       }
@@ -58962,6 +59455,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Användningssektion"
+          }
+        }
+      }
+    },
+    "Usage unknown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usage unknown"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Okänd användning"
           }
         }
       }

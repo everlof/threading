@@ -531,6 +531,23 @@ navigation and search remain available. Hidden IDs survive the bounded offline d
 legacy wire and cache records default to visible. This extends the existing host-only dashboard:
 identity, persistence, authorization and navigation remain host-owned.
 
+Project default accounts ([`accounts.md`](architecture/accounts.md#project-default-accounts)) are
+published as an optional, ordered `RemoteProjectChoiceDTO.defaultAccounts` of
+`RemoteAccountReferenceDTO {agentID, accountID}` — references into the catalogue's own agent and
+account rows, never copies, so a reference the catalogue does not list renders as an unavailable
+login. The owner-only `POST /api/project/default-accounts` replaces the whole list, refuses any
+reference this Mac has not discovered and the list did not already hold with
+`422 unknownAccount` — so a login that vanished from disk never locks the list — caps it at
+`RemoteProjectDefaultAccounts.maximumEntries`, and answers with the canonical catalogue like
+visibility. `project-default-accounts` advertises both. The phone predicts the draft's login from
+the list and the capacity feed with the Mac's own line (`RemoteProjectDefaultAccounts.spentFraction`)
+and sends `RemoteCreateSessionRequestDTO.accountSelection: project-default`; absent means
+`explicit`, which the Mac never changes. With `project-default` the Mac keeps the sent login unless
+its newer reading or the owner's own limit proves it out, and then starts on the next listed login
+of the same runtime, reporting `RemoteCreateSessionResponseDTO.accountSubstitution` with the reason
+and reset time so the phone words the receipt. An older Mac advertises nothing and is never sent
+the field; an older phone omits it and is treated as explicit.
+
 Scaling: ordinary 1,000-session and stress 5,000-session catalogues retain the existing virtual
 collection viewport. Hidden project IDs are value sets prepared with the catalogue; filtering adds
 constant-time membership per candidate row, before view creation, with no filesystem work, timers

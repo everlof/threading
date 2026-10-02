@@ -833,6 +833,7 @@ final class RemoteSessionMirrorRegistry {
             features.append(RemoteRESTFeature.reportSessionOpening.rawValue)
             features.append(RemoteRESTFeature.sessionDraftAttachmentUploads.rawValue)
             features.append(RemoteRESTFeature.sessionContinuation.rawValue)
+            features.append(RemoteRESTFeature.projectDefaultAccounts.rawValue)
         }
         return features.isEmpty ? nil : features
     }
@@ -935,7 +936,8 @@ final class RemoteSessionMirrorRegistry {
                 checkoutLabel: project.folderURL.lastPathComponent,
                 reportLaunch: reportLaunch(for: project),
                 isHidden: project.isHidden,
-                repository: repositories[project.id]
+                repository: repositories[project.id],
+                defaultAccounts: project.defaultAccounts?.map(RemoteAccountBridge.reference(for:))
             )
         }
 

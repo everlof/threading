@@ -1242,6 +1242,20 @@ struct RemoteClient {
         )
     }
 
+    /// Replaces a project's ordered default logins with `accounts`, the whole list. An empty
+    /// list clears it. The Mac replies with the full catalogue.
+    func setProjectDefaultAccounts(
+        projectID: String,
+        accounts: [RemoteAccountReferenceDTO],
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
+        try await post(
+            RemoteSetProjectDefaultAccountsRequestDTO(projectID: projectID, accounts: accounts),
+            to: link.projectDefaultAccountsURL,
+            requestID: requestID
+        )
+    }
+
     func renameSession(
         sessionID: String,
         title: String,

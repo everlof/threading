@@ -83,6 +83,11 @@ final class RemoteRouteRoundTripTests: XCTestCase {
             switch route {
             case .projectVisibility:
                 XCTAssertEqual(try wirePath(link.projectVisibilityURL), RemoteRouter.projectVisibilityPath)
+            case .projectDefaultAccounts:
+                XCTAssertEqual(
+                    try wirePath(link.projectDefaultAccountsURL),
+                    RemoteRouter.projectDefaultAccountsPath
+                )
             case .me:
                 XCTAssertEqual(try wirePath(link.meURL), RemoteRouter.apiSessionsPath)
             case .search:
@@ -532,7 +537,7 @@ final class RemoteRouteRoundTripTests: XCTestCase {
                 // Composed from segments rather than spelled whole — pinned by the test below.
                 spelledWhole = false
             case .search, .usage, .usageCapacity, .usageLimit, .usageReset, .theme, .notifications, .localDiagnosticsCapture,
-                 .hostedDeviceCredential, .settings, .projectVisibility:
+                 .hostedDeviceCredential, .settings, .projectVisibility, .projectDefaultAccounts:
                 // Native-client surfaces the browser page does not offer. If one of these gains
                 // a browser affordance, move it into the first arm rather than leaving it here.
                 spelledWhole = false

@@ -590,6 +590,14 @@ integer-input alert. Threading retains threshold validation, account/window bind
 arming and lifting, and every hold/interrupt decision. A percentage choice introduces no extension
 authority or data access; the native menu and input remain the fallback under every theme.
 
+The project **Default Accounts** editor (`sidebar.project-default-accounts`) is a host-only
+popover from the project row and its iPhone counterpart is a host-only page from the project
+heading. Its entity is one project's ordered `AccountID` list. The order is consent to automatic
+spending, so Threading owns its persistence, the owner-only remote mutation, the usage state each
+row states, the send-time substitution and its receipt, accessibility and dismissal. Themes style
+the native rows; no extension can read or write the list, replace the editor or grant itself a
+login. A reference to a login that is no longer discovered renders as unavailable and is skipped.
+
 Before adding a component:
 
 1. Name the durable semantic surface and its entity context. For a popover, register its stable

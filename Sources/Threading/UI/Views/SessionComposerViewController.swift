@@ -11,7 +11,56 @@ final class SessionComposerViewController: NSViewController {
 
     typealias NewSessionAccountHandle = @MainActor (AgentKind) -> AccountHandle
 
+    /// Where the draft's runtime and login came from. Only a login the project's list chose may
+    /// be changed at the send, and only a start the user did not route through that list
+    /// becomes the app-wide default runtime.
+    enum IdentitySource: Equatable {
+        /// The app-wide rule: the default runtime and the login it used most recently.
+        case appRule
+        /// The first login of the project's ordered list that is not out of usage.
+        case projectDefault
+        /// Picked in this draft.
+        case explicit
+    }
+
+    /// The project's ordered logins, as the composer asks about them. Injected so a composer test
+    /// can state a list and its readings without a store, a home directory or a usage service.
+    struct ProjectDefaults {
+        /// The project's list resolved against current readings, or nil when it has none.
+        var resolve: @MainActor (ProjectID) -> ProjectAccountOrder.Resolution?
+        /// The login a send should move to instead of the draft's, when that one is now out.
+        var substitution: @MainActor (
+            _ projectID: ProjectID,
+            _ current: AccountID,
+            _ model: String?
+        ) -> ProjectDefaultAccounts.Substitution?
+        /// Asks for fresh readings of the listed logins, so the send decides on new numbers.
+        var warm: @MainActor (ProjectID) -> Void
+        /// The enabled login a substitution names, as a send would launch on it.
+        var account: @MainActor (AccountID) -> AgentAccount? = { accountID in
+            AgentAccountDiscovery.accounts(for: accountID.provider).first { $0.id == accountID }
+        }
+
+        static var live: ProjectDefaults {
+            ProjectDefaults(
+                resolve: { ProjectDefaultAccounts.resolve(projectID: $0) },
+                substitution: { projectID, current, model in
+                    ProjectDefaultAccounts.substitution(
+                        projectID: projectID,
+                        current: current,
+                        model: model
+                    )
+                },
+                warm: { ProjectDefaultAccounts.warmReadings(forProjectID: $0) }
+            )
+        }
+    }
+
     private(set) var projectID: ProjectID?
+
+    /// See `IdentitySource`. Not private: editing a scheduled start puts back a frozen decision,
+    /// which is the user's (`SessionComposerScheduling.adopt`).
+    var identitySource: IdentitySource = .appRule
 
     /// Whether `show(projectID:)` has configured this composer at all yet.
     ///
@@ -33,6 +82,7 @@ final class SessionComposerViewController: NSViewController {
     /// Injected so the account-default lifecycle can be exercised without scanning real homes or
     /// manufacturing a global project store. Production resolves from durable session history.
     private let newSessionAccountHandle: NewSessionAccountHandle
+    private let projectDefaults: ProjectDefaults
     /// Owns the two durable answers a successful start changes. Injected together so composer
     /// tests exercise persistence without touching the running app's defaults or real accounts.
     private let appSettings: AppSettings
@@ -444,11 +494,13 @@ final class SessionComposerViewController: NSViewController {
                 recentlyUsedIn: ProjectStore.shared.projects.lazy.flatMap { $0.sessions }
             )
         },
+        projectDefaults: ProjectDefaults = .live,
         appSettings: AppSettings = .shared,
         accountPreferences: AccountPreferencesStore = .shared
     ) {
         self.customizationLookup = customizationLookup
         self.newSessionAccountHandle = newSessionAccountHandle
+        self.projectDefaults = projectDefaults
         self.appSettings = appSettings
         self.accountPreferences = accountPreferences
         super.init(nibName: nil, bundle: nil)
@@ -925,6 +977,8 @@ final class SessionComposerViewController: NSViewController {
             // switched off.
             self.selectedAccountHandle = identity.account
                 ?? AgentAccountDiscovery.preferredHandle(for: identity.agent)
+            // Picked here, so it is the user's and nothing at the send may change it.
+            self.identitySource = .explicit
             // Model and effort are scoped to this exact provider-qualified login. A remembered
             // model is restored only while that login still publishes it.
             self.restoreNewSessionRunChoice()
@@ -1071,12 +1125,7 @@ final class SessionComposerViewController: NSViewController {
         self.projectID = projectID
         updatePromptCustomization(for: projectID)
 
-        selectedAgent = appSettings.defaultAgentKind
-        // Follow the most recently used enabled login for this runtime. Besides matching the
-        // user's last deliberate account choice, this carries a limit escape forward: moving a
-        // session after its model runs out updates that same latest session record. The resolver
-        // falls back to the standard/first enabled login when there is no usable history.
-        selectedAccountHandle = newSessionAccountHandle(selectedAgent)
+        applyFreshIdentity()
         shouldResolveNewSessionAccount = false
         restoreNewSessionRunChoice()
         selectedFastMode = nil
@@ -1134,11 +1183,84 @@ final class SessionComposerViewController: NSViewController {
     /// cannot safely cross with it. Restore what that exact login last launched instead. A
     /// matching account keeps the previous quick-repeat configuration.
     private func resolveNewSessionAccount() {
+        // A project with a list decides again from the top, runtime included: the start that
+        // consumed this form may have been the one that spent the first login.
+        if let projectID, let pick = projectDefaults.resolve(projectID)?.chosen {
+            identitySource = .projectDefault
+            projectDefaults.warm(projectID)
+            guard pick != AccountID(provider: selectedAgent, handle: selectedAccountHandle) else {
+                return
+            }
+            selectedAgent = pick.provider
+            selectedAccountHandle = pick.handle
+            restoreNewSessionRunChoice()
+            selectedFastMode = nil
+            return
+        }
+        identitySource = .appRule
         let resolved = newSessionAccountHandle(selectedAgent)
         guard resolved != selectedAccountHandle else { return }
         selectedAccountHandle = resolved
         restoreNewSessionRunChoice()
         selectedFastMode = nil
+    }
+
+    /// The runtime and login a fresh draft opens on: the project's list when it has one, the
+    /// app-wide rule otherwise.
+    ///
+    /// The list is resolved once, here, and not again while the draft is open — a chip that
+    /// changed under someone typing would be the draft deciding for them. The readings it asks
+    /// for are for the send, which decides again on whatever has arrived by then.
+    private func applyFreshIdentity() {
+        if let projectID, let pick = projectDefaults.resolve(projectID)?.chosen {
+            selectedAgent = pick.provider
+            selectedAccountHandle = pick.handle
+            identitySource = .projectDefault
+            projectDefaults.warm(projectID)
+            return
+        }
+        selectedAgent = appSettings.defaultAgentKind
+        // Follow the most recently used enabled login for this runtime. Besides matching the
+        // user's last deliberate account choice, this carries a limit escape forward: moving a
+        // session after its model runs out updates that same latest session record. The resolver
+        // falls back to the standard/first enabled login when there is no usable history.
+        selectedAccountHandle = newSessionAccountHandle(selectedAgent)
+        identitySource = .appRule
+    }
+
+    /// Moves a send off a list-chosen login that is now proven out, onto the next listed login of
+    /// the same runtime. Returns what it did, for the receipt; nil when the send keeps its login.
+    ///
+    /// The model and effort travel where the new login offers them and fall back to that login's
+    /// own remembered choice where it does not — a send that had already been accepted is never
+    /// refused for a substitute it did not ask for.
+    private func applySendTimeSubstitution() -> ProjectDefaultAccounts.Substitution? {
+        guard identitySource == .projectDefault, let projectID else { return nil }
+        let current = AccountID(provider: selectedAgent, handle: selectedAccountHandle)
+        let currentAccount = projectDefaults.account(current)
+        guard let substitution = projectDefaults.substitution(
+            projectID,
+            current,
+            selectedModel ?? ProjectDefaultAccounts.defaultModel(for: currentAccount)
+        ), let replacement = projectDefaults.account(substitution.to) else { return nil }
+
+        let carried = ProjectDefaultAccounts.carriedRunChoice(
+            model: selectedModel,
+            reasoningEffort: selectedReasoningEffort,
+            fastMode: selectedFastMode,
+            to: replacement
+        )
+        let keepsModel = selectedModel == nil || carried.model != nil
+        selectedAccountHandle = replacement.handle
+        if keepsModel {
+            selectedReasoningEffort = carried.reasoningEffort
+            selectedFastMode = carried.fastMode
+        } else {
+            restoreNewSessionRunChoice()
+            selectedFastMode = nil
+        }
+        refreshChips()
+        return substitution
     }
 
     /// Applies only a choice today's exact login can still honour. Provider catalogues change;
@@ -1174,7 +1296,11 @@ final class SessionComposerViewController: NSViewController {
     /// abandoned. After it, this provider becomes the global new-session answer and the
     /// model-specific values belong to this exact login.
     func rememberSuccessfulNewSessionChoice() {
-        appSettings.defaultAgentKind = selectedAgent
+        // A runtime the project's list chose is that project's answer, not the app's: writing it
+        // here would turn every other project's composer to it.
+        if identitySource != .projectDefault {
+            appSettings.defaultAgentKind = selectedAgent
+        }
         accountPreferences.setNewSessionRunChoice(
             NewSessionRunChoice(
                 model: selectedModel,
@@ -1736,13 +1862,21 @@ final class SessionComposerViewController: NSViewController {
         }
 
         usageLabel.readings = readings
-        usageLabel.toolTip = usageDetail(
+        let detail = usageDetail(
             accountName: account.presentation(in: .usage).visibleName,
             planLabel: usage.planLabel,
             readings: readings,
             observedAt: usage.observedAt,
             at: now
         )
+        // Where this login came from, when the project's list chose it — the one fact about the
+        // choice the reading itself cannot say.
+        let provenance = identitySource == .projectDefault
+            ? projectID.flatMap {
+                ProjectDefaultAccountsPresentation.provenance(projectDefaults.resolve($0), at: now)
+            }
+            : nil
+        usageLabel.toolTip = [provenance, detail].compactMap { $0 }.joined(separator: "\n")
         usageLabel.isHidden = false
     }
 
@@ -1891,6 +2025,9 @@ final class SessionComposerViewController: NSViewController {
     private func identityItems() -> [ThemedMenuEntry] {
         var grouped: [ThemedMenuEntry] = []
         var bare: [ThemedMenuEntry] = []
+        let projectOrder = projectID.flatMap {
+            ProjectStore.shared.project(withID: $0)?.defaultAccounts
+        } ?? []
 
         for kind in AgentKind.allCases {
             let accounts = kind.supportsAccounts ? AgentAccountDiscovery.accounts(for: kind) : []
@@ -1898,7 +2035,7 @@ final class SessionComposerViewController: NSViewController {
                 bare.append(.item(runtimeItem(for: kind)))
             } else {
                 grouped.append(.header(kind.displayName))
-                grouped += accountItems(for: kind, accounts: accounts)
+                grouped += accountItems(for: kind, accounts: accounts, projectOrder: projectOrder)
             }
         }
 
@@ -1961,7 +2098,14 @@ final class SessionComposerViewController: NSViewController {
 
     /// One runtime's logins, each carrying its mark and what is left of it. See
     /// `identityItems()` for why they are not filed under a heading.
-    private func accountItems(for kind: AgentKind, accounts: [AgentAccount]) -> [ThemedMenuEntry] {
+    ///
+    /// A login the project's default accounts list says where it stands in that order, as help
+    /// rather than as standing text: the readings are what the row is for.
+    private func accountItems(
+        for kind: AgentKind,
+        accounts: [AgentAccount],
+        projectOrder: [AccountID] = []
+    ) -> [ThemedMenuEntry] {
         accounts.map { account in
             let name = account.presentation(in: .chooser).visibleName
             var item = ThemedMenuItem(
@@ -1972,6 +2116,9 @@ final class SessionComposerViewController: NSViewController {
                 representedValue: ComposerIdentity(agent: kind, account: account.handle),
                 isSelected: kind == selectedAgent && account.handle == selectedAccountHandle
             )
+            if let rank = projectOrder.firstIndex(of: account.id) {
+                item.help = L10n.format("Default account %lld for this project", Int64(rank + 1))
+            }
 
             // Which login to start on is decided here, so this is where what is left of each
             // one belongs — not only in the toolbar, which speaks after the choice is made.
@@ -2348,6 +2495,7 @@ final class SessionComposerViewController: NSViewController {
         // sentence is not a handoff anything downstream can recognise, so the images the user
         // attached have to cross this boundary as themselves or they are filed nowhere.
         let attachmentPaths = promptView.attachmentPaths
+        let substitution = applySendTimeSubstitution()
         let started = delegate?.sessionComposer(
             self,
             startSessionIn: projectID,
@@ -2375,6 +2523,9 @@ final class SessionComposerViewController: NSViewController {
         // user can still use them, which is also why `DraftStore` is cleared on the same answer.
         guard started else { return }
         rememberSuccessfulNewSessionChoice()
+        if let substitution {
+            delegate?.sessionComposer(self, didStartOnNextDefaultAccount: substitution)
+        }
         shouldResolveNewSessionAccount = true
         promptView.clear()
     }
@@ -2515,6 +2666,14 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
         branch: String
     )
 
+    /// A send moved off the login its draft showed, because the project's list had chosen it
+    /// and it was out by the time the user sent. Called after the session started, for the
+    /// receipt; the start itself already carried the new login.
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        didStartOnNextDefaultAccount substitution: ProjectDefaultAccounts.Substitution
+    )
+
     /// Conversations the import sheet chose, newest first. Plural because the sheet is: a
     /// project rebuilding its history adopts a search's worth at a time, and one round trip
     /// each would be the whole cost of it.
@@ -2552,6 +2711,11 @@ extension SessionComposerViewControllerDelegate {
         guard ScheduledMessageStore.shared.prepareForImmediateAttempt(id) else { return }
         NotificationCenter.default.post(ScheduledMessageDidBecomeDue(id: id))
     }
+
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        didStartOnNextDefaultAccount substitution: ProjectDefaultAccounts.Substitution
+    ) {}
 }
 
 // MARK: - Project Actions

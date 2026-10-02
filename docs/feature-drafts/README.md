@@ -50,6 +50,12 @@ reshuffling it is a line move.
   and the settle edge `AccountUsageService` already observes for updates. Its account order (B1)
   is the consent the automatic move depends on and must ship before it; the reset keep-alive's
   Claude half (B5) can ship ahead of the rest.
+- [Project default accounts](project-default-accounts.md) — **implemented** 2026-10-02: an
+  ordered list of logins per project; a new chat on Mac or iPhone starts on the first one that is
+  not out of usage, the Mac decides at Send and says when it substituted, and limit recovery
+  follows the same order. The durable record is in
+  [`accounts.md`](../architecture/accounts.md#project-default-accounts). It shares its "the list is
+  the consent" rule with usage-aware accounts §B1, whose app-wide order is still to come.
 ### Next — researched and ready, waiting for a slot
 
 - [Remote execution hosts](remote-execution-hosts.md) — run a session's agent on a Linux machine

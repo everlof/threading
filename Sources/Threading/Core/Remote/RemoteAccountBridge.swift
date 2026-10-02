@@ -15,6 +15,21 @@ enum RemoteAccountBridge {
 
     // MARK: - Public Methods
 
+    /// A login named the way the new-session catalogue names it: the runtime's id and the
+    /// account's id within it.
+    nonisolated static func reference(for accountID: AccountID) -> RemoteAccountReferenceDTO {
+        RemoteAccountReferenceDTO(
+            agentID: accountID.provider.rawValue,
+            accountID: accountID.handle.name
+        )
+    }
+
+    /// The login a catalogue reference names, or nil for a runtime this build does not know.
+    nonisolated static func accountID(from reference: RemoteAccountReferenceDTO) -> AccountID? {
+        guard let provider = AgentKind(rawValue: reference.agentID) else { return nil }
+        return AccountID(provider: provider, handle: AccountHandle(storedName: reference.accountID))
+    }
+
     /// The account identity for a session row, or nil when the row has nothing extra to say.
     ///
     /// Nil in exactly the cases the Mac sidebar draws no chip: a runtime without account routing,

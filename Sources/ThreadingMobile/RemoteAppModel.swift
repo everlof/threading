@@ -60,11 +60,16 @@ enum MobileSessionOpeningStrategy: Equatable {
 struct MobileCreatedSession: Equatable {
     let session: RemoteSessionSummaryDTO
     let openingStrategy: MobileSessionOpeningStrategy
+    /// Present when the Mac started a project-default send on another listed login.
+    var accountSubstitution: RemoteAccountSubstitutionDTO? = nil
 }
 
 struct MobileStartedDraft: Equatable {
     let sessionID: String
     let openingStrategy: MobileSessionOpeningStrategy
+    /// The receipt the opened chat shows for a send the Mac moved to another login, and when it
+    /// stops showing it.
+    var accountReceipt: MobileAccountSubstitutionNotice? = nil
 }
 
 /// The phone's durable navigation subjects.
@@ -2177,6 +2182,7 @@ final class RemoteAppModel: ObservableObject {
         reportOpening: RemoteReportSessionOpeningDTO? = nil,
         openingAttachmentScopeID: String? = nil,
         openingAttachmentUploadIDs: [String] = [],
+        accountSelection: RemoteAccountSelection? = nil,
         prompt: String
     ) async throws -> MobileCreatedSession {
         guard canManageSessions, let host = activeHost else {
@@ -2200,6 +2206,8 @@ final class RemoteAppModel: ObservableObject {
                 ? nil
                 : openingAttachmentUploadIDs,
             compactResponse: true,
+            // A Mac that keeps no project lists is never sent the word; absent is explicit.
+            accountSelection: offersProjectDefaultAccounts ? accountSelection : nil,
             prompt: prompt
         )
         if isDemo {
@@ -2225,7 +2233,8 @@ final class RemoteAppModel: ObservableObject {
                 session: session,
                 // Create owns this launch whether the host answered before or after its surface
                 // became ready. Never begin a second resume transaction for the row it returned.
-                openingStrategy: .awaitCreatedSession
+                openingStrategy: .awaitCreatedSession,
+                accountSubstitution: response.accountSubstitution
             )
         }
         // An older Mac ignored `compactResponse` and returned the original snapshot. Preserve
@@ -2234,7 +2243,11 @@ final class RemoteAppModel: ObservableObject {
               let session = responseMe.sessions.first(where: { $0.id == response.sessionID })
         else { throw RemoteClientError.invalidResponse }
         me = responseMe
-        return MobileCreatedSession(session: session, openingStrategy: .resumeIfNeeded)
+        return MobileCreatedSession(
+            session: session,
+            openingStrategy: .resumeIfNeeded,
+            accountSubstitution: response.accountSubstitution
+        )
     }
 
     func newSessionChoiceIdentity(
@@ -2273,6 +2286,62 @@ final class RemoteAppModel: ObservableObject {
 
     var canManageProjectVisibility: Bool {
         canManageSessions && me?.features?.contains(RemoteRESTFeature.projectVisibility.rawValue) == true
+    }
+
+    /// Whether the paired Mac keeps ordered default logins per project. The draft predicts from
+    /// a project's list and says so in its create request only then.
+    var offersProjectDefaultAccounts: Bool {
+        MobileProjectDefaultAccounts.isOffered(features: me?.features)
+    }
+
+    /// The project heading's Default Accounts editor. The Mac advertises the feature only to an
+    /// owner device that may manage the host (`canManageHost`), so the flag carries that half;
+    /// the session-management check keeps a view-only owner from an editor it could not save.
+    var canManageProjectDefaultAccounts: Bool {
+        Self.canManageProjectDefaultAccounts(in: me)
+    }
+
+    static func canManageProjectDefaultAccounts(in me: RemoteMeDTO?) -> Bool {
+        guard let me else { return false }
+        return me.share.scope == .all
+            && me.share.capability == .interact
+            && me.newSessionCatalog != nil
+            && MobileProjectDefaultAccounts.isOffered(features: me.features)
+    }
+
+    /// Replaces one project's ordered default logins. The Mac answers with the whole catalogue,
+    /// so the list the editor and every draft read is the one the Mac stored.
+    func setProjectDefaultAccounts(
+        projectID: String,
+        accounts: [RemoteAccountReferenceDTO]
+    ) async throws {
+        guard canManageProjectDefaultAccounts, let host = activeHost else {
+            throw RemoteClientError.unauthorized
+        }
+        let hostID = host.id
+        if isDemo { return }
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.setProjectDefaultAccounts(
+                projectID: projectID,
+                accounts: accounts,
+                requestID: requestID
+            )
+        }
+        guard activeHostID == hostID else { throw CancellationError() }
+        me = response
+    }
+
+    /// The model a new chat on this login would run if its draft pinned none: what it last
+    /// started on from this phone, else its own default. The list's prediction meters each login
+    /// against it, as the Mac meters each candidate against its own remembered model.
+    func newSessionDefaultModel(
+        agent: RemoteAgentChoiceDTO,
+        account: RemoteAccountChoiceDTO
+    ) -> String? {
+        newSessionChoiceIdentity(agentID: agent.id, accountID: account.id)
+            .flatMap { rememberedNewSessionChoice(for: $0)?.modelID }
+            ?? account.defaultModelID
+            ?? agent.defaultModelID
     }
 
     func setProjectHidden(_ hidden: Bool, projectID: String) async throws {
@@ -2723,7 +2792,10 @@ final class RemoteAppModel: ObservableObject {
     func noteDraftStarted(_ draft: MobileSessionDraft, creation: MobileCreatedSession) {
         startedDrafts[draft.id] = MobileStartedDraft(
             sessionID: creation.session.id,
-            openingStrategy: creation.openingStrategy
+            openingStrategy: creation.openingStrategy,
+            accountReceipt: creation.accountSubstitution.map {
+                MobileAccountSubstitutionNotice(substitution: $0, shownAt: Date())
+            }
         )
         recordLastRoute()
     }

@@ -22,6 +22,7 @@ final class RemoteRouteVocabularyTests: XCTestCase {
             let expected: String
             switch route {
             case .projectVisibility: expected = "api/project/visibility"
+            case .projectDefaultAccounts: expected = "api/project/default-accounts"
             case .me: expected = "api/me"
             case .search: expected = "api/search"
             case .usage: expected = "api/usage"
@@ -44,7 +45,7 @@ final class RemoteRouteVocabularyTests: XCTestCase {
             XCTAssertEqual(route.absolutePath, "/" + expected)
             XCTAssertEqual(route.prefix, "/" + expected + "/")
         }
-        XCTAssertEqual(RemoteRoute.allCases.count, 16)
+        XCTAssertEqual(RemoteRoute.allCases.count, 17)
     }
 
     func testEverySocketRouteKeepsItsWireSpelling() {
@@ -112,6 +113,9 @@ final class RemoteRouteVocabularyTests: XCTestCase {
             case .projectVisibility:
                 built = link.projectVisibilityURL
                 expected = "\(origin)/api/project/visibility"
+            case .projectDefaultAccounts:
+                built = link.projectDefaultAccountsURL
+                expected = "\(origin)/api/project/default-accounts"
             case .me:
                 built = link.meURL
                 expected = "\(origin)/api/me"

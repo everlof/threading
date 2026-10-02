@@ -25,6 +25,8 @@ struct SessionDraftView: View {
     /// Whether the drafting screen is still mounted. It outlives Start by the length of its
     /// fade, so the chat underneath is revealed rather than cut to.
     @State private var draftIsMounted = true
+    /// Whether the person tapped the account receipt away, or its time ran out.
+    @State private var accountReceiptDismissed = false
 
     private var startedDraft: MobileStartedDraft? {
         model.startedDrafts[draft.id]
@@ -78,6 +80,11 @@ struct SessionDraftView: View {
             }
         }
         .background(theme.ground)
+        .overlay(alignment: .top) { accountReceipt }
+        .animation(
+            reduceMotion ? nil : .easeInOut(duration: SessionDraftMotion.startDuration),
+            value: accountReceiptDismissed
+        )
         // The route's one navigation title, mounted for as long as the drafting screen is.
         // Start does not swap it for the session's: the same morphing label stays in the bar
         // and is told the chat's name, so "New session" morphs into it while the status line
@@ -133,6 +140,31 @@ struct SessionDraftView: View {
         case .online: return theme.positive
         case .connecting: return theme.warning
         case .idle, .offline: return theme.tertiaryLabel
+        }
+    }
+
+    /// The one line a chat opens with when the Mac started it on another of the project's logins
+    /// than the draft showed. It is the started chat's, so it waits for the draft to hand over.
+    @ViewBuilder
+    private var accountReceipt: some View {
+        if !accountReceiptDismissed,
+           let notice = startedDraft?.accountReceipt,
+           let startedSession,
+           notice.expiresAt > Date() {
+            MobileAccountSubstitutionReceipt(
+                text: MobileProjectDefaultAccounts.receipt(
+                    for: notice.substitution,
+                    agentID: startedSession.agentKind,
+                    agents: model.me?.newSessionCatalog?.agents ?? []
+                ),
+                dismiss: { accountReceiptDismissed = true }
+            )
+            .transition(.opacity)
+            .task {
+                let remaining = notice.expiresAt.timeIntervalSinceNow
+                if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
+                accountReceiptDismissed = true
+            }
         }
     }
 
@@ -231,6 +263,11 @@ private struct SessionDraftComposerScreen: View {
     @State private var projectID = ""
     @State private var agentID = ""
     @State private var accountID = ""
+    /// Where `agentID` and `accountID` came from. Only a project list's pick is decided again —
+    /// by moving the draft to another project, and by the Mac at the send.
+    @State private var identitySource = SessionDraftIdentitySource.appRule
+    /// The project the identity was last decided for, so a move re-resolves once.
+    @State private var identityProjectID: String?
     @State private var modelID = ""
     @State private var reasoningID = ""
     /// Last-successful choices are scoped to this exact identity. A catalogue refresh repairs
@@ -395,6 +432,37 @@ private struct SessionDraftComposerScreen: View {
 
     private var selectedAccount: RemoteAccountChoiceDTO? {
         accounts.first { $0.id == accountID }
+    }
+
+    /// The selected project's ordered logins, when the Mac keeps such lists and this project
+    /// has one.
+    private var projectDefaultList: [RemoteAccountReferenceDTO]? {
+        guard appModel.offersProjectDefaultAccounts,
+              let list = selectedProject?.defaultAccounts,
+              !list.isEmpty else { return nil }
+        return list
+    }
+
+    /// The Mac's answer as the phone can predict it: the list in order over the freshest
+    /// readings, each login metered for the model a chat on it would start. Runs on draft open,
+    /// a project change and a hand-picked runtime — never on a usage tick.
+    private func projectDefaultPrediction(
+        runtime: String? = nil
+    ) -> RemoteAccountReferenceDTO? {
+        guard let list = projectDefaultList else { return nil }
+        let agents = (catalog?.agents ?? []).map(appModel.agentWithCurrentUsage)
+        let model: (RemoteAgentChoiceDTO, RemoteAccountChoiceDTO) -> String? = {
+            appModel.newSessionDefaultModel(agent: $0, account: $1)
+        }
+        if let runtime {
+            return MobileProjectDefaultAccounts.predict(
+                list: list,
+                runtime: runtime,
+                agents: agents,
+                model: model
+            )
+        }
+        return MobileProjectDefaultAccounts.predict(list: list, agents: agents, model: model).chosen
     }
 
     /// Every runtime the Mac offers, for the identity picker's strip.
@@ -612,6 +680,12 @@ private struct SessionDraftComposerScreen: View {
                 Task { @MainActor in beginChoosingAttachmentSource() }
             }
 #endif
+        }
+        .onChange(of: projectID) { _, _ in
+            // A draft moved to another project takes that project's list, unless the person has
+            // already chosen who runs it.
+            resolveIdentity()
+            applyAgentDefaults()
         }
         .onChange(of: agentID) { _, _ in
             applyAgentDefaults()
@@ -1213,6 +1287,13 @@ private struct SessionDraftComposerScreen: View {
                 selectedAccountID: accountID,
                 draftModelID: draftModelID,
                 onChooseAgent: { chosen in
+                    identitySource = .explicit
+                    // A hand-picked runtime starts on the first usable login the project lists
+                    // for it, where it lists any; otherwise the app's rule, as before.
+                    if chosen != agentID,
+                       let pick = projectDefaultPrediction(runtime: chosen) {
+                        accountID = pick.accountID
+                    }
                     agentID = chosen
                     // A runtime that routes no second login has nothing further to say, so it
                     // closes the panel the way a login does. The catalogue is asked rather than
@@ -1223,6 +1304,7 @@ private struct SessionDraftComposerScreen: View {
                     }
                 },
                 onChooseAccount: { chosen in
+                    identitySource = .explicit
                     accountID = chosen
                     identityPickerIsPresented = false
                 }
@@ -1637,12 +1719,43 @@ private struct SessionDraftComposerScreen: View {
             draftProjectName: draft.projectName,
             catalog: catalog
         )
+        // Before the runtime is repaired: a list's pick the Mac has withdrawn is replaced by the
+        // list's next answer, not by whichever runtime the repair would fall back to.
+        resolveIdentity()
         agentID = SessionDraftCatalogReconciliation.agentID(
             current: agentID,
             catalog: catalog
         )
         if role == .manager, !offersManager { role = .agent }
         applyAgentDefaults()
+    }
+
+    /// Decides the draft's runtime and login from the project's list, when it is the project's
+    /// to decide: once for each project the draft is in, and never after the person has chosen.
+    /// See `SessionDraftIdentityResolution`.
+    private func resolveIdentity() {
+        let current = SessionDraftIdentity(
+            agentID: agentID,
+            accountID: accountID,
+            source: identitySource,
+            projectID: identityProjectID
+        )
+        let isCurrentOffered = catalog?.agents
+            .first { $0.id == agentID }?
+            .accounts?
+            .contains { $0.id == accountID } == true
+        let resolved = SessionDraftIdentityResolution.resolve(
+            current: current,
+            projectID: projectID,
+            pick: projectDefaultPrediction(),
+            appRuleAgentID: SessionDraftCatalogReconciliation.agentID(current: "", catalog: catalog),
+            isCurrentOffered: isCurrentOffered
+        )
+        guard resolved != current else { return }
+        agentID = resolved.agentID
+        accountID = resolved.accountID
+        identitySource = resolved.source
+        identityProjectID = resolved.projectID
     }
 
     private func applyAgentDefaults() {
@@ -1726,6 +1839,11 @@ private struct SessionDraftComposerScreen: View {
             agentID: agentID,
             accountID: accountID
         )
+        // Only a list's pick may be moved by the Mac, and only a Mac that keeps lists is told.
+        let accountSelection = MobileProjectDefaultAccounts.accountSelection(
+            source: identitySource,
+            features: appModel.me?.features
+        )
         Task {
             do {
                 let creation = try await appModel.createSession(
@@ -1742,6 +1860,7 @@ private struct SessionDraftComposerScreen: View {
                         ? nil
                         : draft.id.uuidString,
                     openingAttachmentUploadIDs: openingAttachmentUploadIDs,
+                    accountSelection: accountSelection,
                     prompt: prompt
                 )
                 if let launchIdentity {

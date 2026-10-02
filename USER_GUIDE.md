@@ -2173,6 +2173,28 @@ Two things are deliberately *not* treated as accounts:
 - **Aliases that set no config directory.** `alias claude='~/.local/bin/claude'` is a path
   shortcut, not a separate account.
 
+### Default accounts for a project
+A project can name the accounts its new chats start on, in order. Right-click the project (or
+use its **⋯** button) and choose **Default Accounts…**; the same command is in **View** and the
+command palette. Add accounts from **Other accounts**, then move them up or down — the first one
+with usage left is where a new chat starts. The list may mix agents: *Claude work, then Claude
+spare, then Codex* falls back to Codex once both Claude logins are spent. Remove every account to
+go back to the app's usual choice.
+
+- **Out of usage** means a window that meters the chat's model is at 92% of its limit, or of
+  your own tighter limit when you set one. An account whose usage is not known yet keeps its
+  place rather than being skipped; the row says *Usage unknown*.
+- **The choice is made when the composer opens and checked again when you send.** If the
+  account it chose ran out in between, the chat starts on the next listed account of the same
+  agent instead, and a notice says so — for example *Started on Spare · Work is out until
+  18:40*. The composer never switches accounts while you are typing.
+- **Picking an account yourself always wins**, and an account that is not in the list is never
+  chosen for that project on your behalf.
+- With **Usage-limit recovery** set to resume on the best account, a chat that runs out moves to
+  the next listed account with room, in your order, and stays there.
+- On the **iPhone**, the project heading's **⋯** menu offers the same list, and a new chat there
+  follows it the same way; the Mac makes the final choice when the chat starts.
+
 ### Why the account sticks
 Conversations are stored per account, so a session resumes under the account it started on.
 Resuming a `claudenh` conversation under the default account would not find it.

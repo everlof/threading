@@ -2567,7 +2567,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menu.addItem(commandItem(AppCommands.ID.toggleSidebar, action: #selector(toggleSidebar)))
         for id in [
             AppCommands.ID.showHiddenProjects, AppCommands.ID.hideProject,
-            AppCommands.ID.projectRemoteHost, AppCommands.ID.triggers
+            AppCommands.ID.projectRemoteHost, AppCommands.ID.projectDefaultAccounts,
+            AppCommands.ID.triggers
         ] {
             let item = commandItem(id, action: #selector(performHostMenuCommand(_:)))
             item.target = self
@@ -3457,6 +3458,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             if let failure = ProjectExecutionHostEditor.edit(projectID: projectID, store: .shared) {
                 return .refused(commandID: id, reason: failure)
             }
+        case AppCommands.ID.projectDefaultAccounts:
+            guard let window = mainWindowController,
+                  let projectID = window.currentProjectID else {
+                return .refused(commandID: id, reason: L10n.string("Select a project first."))
+            }
+            window.sidebarViewController.presentDefaultAccounts(for: projectID)
         case AppCommands.ID.triggers: mainWindowController?.showTriggers()
         case AppCommands.ID.currentTheme: mainWindowController?.toggleCurrentTheme()
         case AppCommands.ID.componentGallery: showComponentGalleryImplementation()

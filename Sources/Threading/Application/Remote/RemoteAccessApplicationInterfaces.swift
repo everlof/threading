@@ -23,6 +23,10 @@ protocol RemoteSessionMutating: Sendable {
 
     func renameSession(id sessionID: SessionID, to title: String?) -> ProjectMutationResult
     func setProjectHidden(_ hidden: Bool, projectID: ProjectID) -> ProjectMutationResult
+    func setDefaultAccounts(
+        _ accounts: [AccountID]?,
+        forProjectID projectID: ProjectID
+    ) -> ProjectMutationResult
     func setPinned(_ pinned: Bool, for sessionID: SessionID) -> ProjectMutationResult
     func setUsesNativeUI(
         _ usesNativeUI: Bool,
