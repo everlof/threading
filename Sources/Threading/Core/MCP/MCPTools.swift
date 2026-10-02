@@ -8047,6 +8047,14 @@ enum MCPTools {
         completion(handler.createAppTheme(arguments))
       },
       description: """
+        Decide how far the theme goes before calling this. A theme has four layers: \
+        palette (`roles`, `terminal_colors`), material (shape, type and control anatomy), \
+        chrome (the theme's own window frame) and character (sounds, a transition, words, \
+        a mascot). A request that names a world — an operating system, a game, a film, an \
+        era, a mood — wants all four, because colours alone read as the same app \
+        recoloured. A request about colours wants the palette. When the request says no \
+        more than "a theme", ask the person how far to go before creating anything, and \
+        recommend all four. The result reports which layers the theme states. \
         Create a custom app-chrome theme from partial light and/or dark variant patches. \
         One variant makes a fixed light or dark theme; both variants with appearance \
         "adaptive" follow macOS automatically. A second variant is optional and can be \
@@ -8212,7 +8220,8 @@ enum MCPTools {
         `backdrop`, leaves it exactly as it was; `chrome.remove` is how a theme hands the \
         window frame back to macOS, `material.remove_backdrop` how it returns the panes \
         to plain grounds, and either exchange happens live when the theme is the active \
-        one.
+        one. The result reports which of the four layers — palette, material, chrome, \
+        character — the theme now states.
         """,
       inputSchema: MCPInputSchema(
         properties: [

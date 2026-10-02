@@ -2445,3 +2445,36 @@ and wait edges with every refusing cause, the monitor celebrating and posting, t
 poses and its loop under the hold, every loop ending at rest, the presenter's cooldown, the word
 bag switching lists, the tool loop through create, get, a refused sprite removal and a merging
 update, the schema, and a preview of a mascot with two moods.
+
+## 2026-10-02 — four layers, and a report instead of a gate
+
+Asked for "a theme", agents recoloured and stopped, even when the person had named a whole world
+("make it look like Windows XP"). The word is the cause: across editors and terminals a theme *is*
+a colour scheme, so the palette is the cheapest answer that counts as finished, and it can break
+nothing. The stock catalogue already refuses that answer (`testEveryStyleHasItsOwnSilhouette`);
+the agent path accepted it silently, because a custom theme inherits its base's geometry and every
+block above `roles` is optional.
+
+The vocabulary now names four layers — **palette** (roles, terminal colours), **material**
+(shape, type, control anatomy, backdrop, the sidebar's ground), **chrome** (the theme's own window
+frame) and **character** (moments, transition, words, sprites, mascot, the brand row's logo,
+wordmark and motion) — in `AppThemeLayer`, and two things use it:
+
+- **The decision leads `create_app_theme`'s description.** A request that names a world wants
+  all four layers; a request about colours wants the palette; a request that says no more than
+  "a theme" is asked how far to go, with all four recommended. Naming a world is enough — the
+  person does not need to know a phrase like "total conversion" to get one.
+- **Every create and update reports the layers.** `AppThemeLayerReport` appends one line of
+  states (`changed`, `from <base>` or `kept`, `none`) and what to do about what is missing. A
+  colours-only theme is told it reads as the app recoloured; a create that recoloured a period
+  style is told whose material and chrome it is wearing, which otherwise passes for having built
+  them.
+
+**A report, not a refusal.** A recolour is sometimes exactly what was asked, and a gate would
+make the agent satisfy the check rather than the person — a one-point radius change would pass.
+The report puts the choice in front of the agent at the moment it makes it, which is what was
+missing.
+
+`AppThemeLayerReportTests` holds the states over System and over a period base, the inherited-
+frame note, a partial theme naming only what is missing, the update wording, a removed layer,
+the report through the create tool, and the decision leading the description.

@@ -4942,6 +4942,14 @@ the active document with `get_app_theme`, duplicate and activate a locked source
 `duplicate_app_theme` and `apply: true`, then patch the editable copy with `update_app_theme`;
 accepted changes appear in the open editor as they happen.
 
+**How far a theme goes.** A theme has four layers: colours (*palette*), shape, type and controls
+(*material*), its own window frame (*chrome*), and personality — sounds, a transition, words, a
+mascot (*character*). Name a look or a world — “make it look like Windows XP”, “a submarine
+control room” — and the agent is told to build all four; ask for colours and it changes the
+colours. Say only “make me a theme” and it asks you how far to go. Every theme it creates or
+updates comes back with a report of which layers it states, so a recolour cannot pass for the
+whole look.
+
 Configure terminal palettes in **Settings > Themes**:
 - 16 ANSI colors (8 normal + 8 bright)
 - Text, Bold Text, background, cursor, and selection colors

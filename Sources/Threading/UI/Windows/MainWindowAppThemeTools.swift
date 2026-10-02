@@ -131,14 +131,19 @@ extension AgentToolCoordinator {
                 variants: variants
             )
             try AppThemeLibrary.create(theme)
+            let layers = AppThemeLayerReport(
+                theme: theme,
+                startingFrom: base,
+                origin: .base(name: base.name)
+            ).text
             if arguments.apply ?? true {
                 ThemeSwitch.apply(theme)
                 return .success(
-                    "Created and applied \(theme.name) (\(theme.id.rawValue))."
+                    "Created and applied \(theme.name) (\(theme.id.rawValue)).\n\n\(layers)"
                 )
             }
             return .success(
-                "Created \(theme.name) (\(theme.id.rawValue)) without applying it."
+                "Created \(theme.name) (\(theme.id.rawValue)) without applying it.\n\n\(layers)"
             )
         } catch {
             ThemeAssetStore.removeAll(for: newID)
@@ -328,7 +333,14 @@ extension AgentToolCoordinator {
             let state = (wasActive || arguments.apply == true)
                 ? " It is active and the app repainted immediately."
                 : " It remains inactive; call set_app_theme to inspect it live."
-            return .success("Updated \(updated.name) (\(updated.id.rawValue)).\(state)")
+            let layers = AppThemeLayerReport(
+                theme: updated,
+                startingFrom: source,
+                origin: .previous
+            ).text
+            return .success(
+                "Updated \(updated.name) (\(updated.id.rawValue)).\(state)\n\n\(layers)"
+            )
         } catch {
             var rollbackFailure: Error?
             for (fileName, data) in replacedAssets {
