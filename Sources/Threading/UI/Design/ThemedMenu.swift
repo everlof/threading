@@ -850,7 +850,12 @@ private final class ThemedMenuSession: NSObject {
             minimum: presentation.minimumWidth,
             selectedEntryIndex: selectedEntryIndex
         )
-        let menuHeight = ThemedMenuMetrics.height(for: presentation.entries)
+        let entries = ThemedMenuMetrics.entries(
+            presentation.entries,
+            fitting: min(menuWidth, max(0, root.bounds.width - ThemedMenuLayout.screenInset * 2)),
+            selectedEntryIndex: selectedEntryIndex
+        )
+        let menuHeight = ThemedMenuMetrics.height(for: entries)
         let anchorRect: NSRect
         let gap: CGFloat
         switch anchor {
@@ -871,13 +876,13 @@ private final class ThemedMenuSession: NSObject {
             flipped: root.isFlipped,
             gap: gap,
             whenClipped: {
-                ThemedMenuMetrics.clippedHeight(for: presentation.entries, atMost: $0)
+                ThemedMenuMetrics.clippedHeight(for: entries, atMost: $0)
             }
         )
         overlay = ThemedMenuOverlayView(
             frame: root.bounds,
             menuFrame: menuFrame,
-            entries: presentation.entries,
+            entries: entries,
             selectedEntryIndex: selectedEntryIndex
         )
 
@@ -1815,10 +1820,12 @@ private final class ThemedMenuOverlayView: ThemedControl {
         if !filterQuery.isEmpty { filterQuery = "" }
         submenuOpenTimer?.invalidate()
 
-        let size = NSSize(
-            width: ThemedMenuMetrics.width(for: entries, minimum: 0),
-            height: ThemedMenuMetrics.height(for: entries)
+        let width = ThemedMenuMetrics.width(for: entries, minimum: 0)
+        let fittedEntries = ThemedMenuMetrics.entries(
+            entries,
+            fitting: min(width, max(0, bounds.width - ThemedMenuLayout.screenInset * 2))
         )
+        let size = NSSize(width: width, height: ThemedMenuMetrics.height(for: fittedEntries))
         let frame = ThemedMenuLayout.submenuFrame(
             parentPanel: columns[columnIndex].host.frame,
             rowFrame: row.convert(row.bounds, to: self),
@@ -1826,10 +1833,10 @@ private final class ThemedMenuOverlayView: ThemedControl {
             in: bounds,
             flipped: isFlipped,
             firstRowInset: ThemedMenuMetrics.verticalOuterInset,
-            whenClipped: { ThemedMenuMetrics.clippedHeight(for: entries, atMost: $0) }
+            whenClipped: { ThemedMenuMetrics.clippedHeight(for: fittedEntries, atMost: $0) }
         )
         let index = addColumn(
-            entries: entries,
+            entries: fittedEntries,
             frame: frame,
             parentRow: row,
             selectedEntryIndex: nil
@@ -2350,9 +2357,8 @@ public enum ThemedMenuMetrics {
     /// against the band's solid fill.
     public static let metricTrackOpacity: CGFloat = 0.45
 
-    /// A 440-point menu cannot carry a provider-sized union of metric columns. Three preserves
-    /// the common account pair plus one additional window while leaving a readable title slot.
-    /// Callers keep omitted values in the row's bounded subtitle/tooltip projection.
+    /// A fixed upper bound on candidate columns. `entries(_:fitting:)` further admits only
+    /// those that leave a readable name at the panel's actual width and text scale.
     public static let maximumMetricColumns = 3
 
     /// The columns this menu reserves, in first-seen order.
@@ -2379,7 +2385,11 @@ public enum ThemedMenuMetrics {
     /// ones put the second column's bar at a different offset on rows whose first column is
     /// absent — and a bar that moves sideways between rows cannot be compared by length.
     public static func metricColumnWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
-        let admitted = Set(metricColumns(entries))
+        metricColumnWidth(entries, columns: metricColumns(entries))
+    }
+
+    private static func metricColumnWidth(_ entries: [ThemedMenuEntry], columns: [String]) -> CGFloat {
+        let admitted = Set(columns)
         let all = entries.flatMap { entry -> [ThemedMenuMetric] in
             guard case .item(let item) = entry else { return [] }
             return item.metrics.filter { admitted.contains($0.label) }
@@ -2410,19 +2420,96 @@ public enum ThemedMenuMetrics {
     /// complete. A name is the one thing on this row a reader can still recognise from its
     /// first half, so the name is what gives way and the numbers never do.
     public static func metricReservation(_ entries: [ThemedMenuEntry]) -> CGFloat {
-        let columns = metricColumns(entries)
-        let columnWidth = metricColumnWidth(entries)
-        let detail = trailingDetailWidth(entries)
+        metricReservation(
+            columns: metricColumns(entries),
+            columnWidth: metricColumnWidth(entries),
+            detailWidth: trailingDetailWidth(entries)
+        )
+    }
+
+    private static func metricReservation(
+        columns: [String], columnWidth: CGFloat, detailWidth: CGFloat
+    ) -> CGFloat {
         var total: CGFloat = 0
         if !columns.isEmpty {
             total += CGFloat(columns.count) * columnWidth
                 + CGFloat(columns.count - 1) * metricColumnGap
         }
-        if detail > 0 {
-            total += (total > 0 ? metricDividerGap * 2 + metricDividerWidth : 0) + detail
+        if detailWidth > 0 {
+            total += (total > 0 ? metricDividerGap * 2 + metricDividerWidth : 0) + detailWidth
         }
         return total > 0 ? total + metricColumnGap : 0
     }
+
+    /// The name remains readable even when the union of different providers' windows grows.
+    /// Overflow readings move to the subtitle before heights or views are constructed. This
+    /// is a value-only, O(entries) pass over at most three candidate columns per menu open.
+    public static func entries(
+        _ entries: [ThemedMenuEntry], fitting width: CGFloat, selectedEntryIndex: Int? = nil
+    ) -> [ThemedMenuEntry] {
+        var columns = metricColumns(entries)
+        let detailWidth = trailingDetailWidth(entries)
+        guard !columns.isEmpty || detailWidth > 0 else { return entries }
+
+        let marks = checkColumn(entries, selectedEntryIndex: selectedEntryIndex)
+        let leading = titleInset(
+            checkColumn: marks,
+            hasImageColumn: hasImageColumn(entries),
+            hasPreviewColumn: hasPreviewColumn(entries)
+        )
+        let shortcuts = shortcutColumnWidth(entries)
+        let trailing = contentInset
+            + (hasSubmenuColumn(entries) ? submenuChevronSlot : 0)
+            + (hasAccessoryColumn(entries) ? accessorySlot : 0)
+            + (shortcuts > 0 ? shortcutGap + shortcuts : 0)
+        let titleFloor = minimumMetricTitleWidth * Design.Typography.scale
+        let budget = max(0, width - outerInset * 2 - leading - trailing - titleFloor)
+
+        while !columns.isEmpty, metricReservation(
+            columns: columns,
+            columnWidth: metricColumnWidth(entries, columns: columns),
+            detailWidth: detailWidth
+        ) > budget {
+            columns.removeLast()
+        }
+        let keepsDetail = metricReservation(
+            columns: columns,
+            columnWidth: metricColumnWidth(entries, columns: columns),
+            detailWidth: detailWidth
+        ) <= budget
+        let admitted = Set(columns)
+
+        return entries.map { entry in
+            guard case .item(var item) = entry else { return entry }
+            let overflow = item.metrics.filter { !admitted.contains($0.label) }
+            let overflowDetail = keepsDetail ? nil : item.trailingDetail
+            guard !overflow.isEmpty || overflowDetail != nil else { return entry }
+
+            var segments = item.subtitleSegments
+                ?? item.subtitle.map { [ThemedMenuSubtitleSegment($0)] }
+                ?? []
+            for metric in overflow {
+                if !segments.isEmpty {
+                    segments.append(ThemedMenuSubtitleSegment(metricOverflowSeparator, .muted))
+                }
+                segments.append(ThemedMenuSubtitleSegment(metric.label + " ", .muted))
+                segments.append(ThemedMenuSubtitleSegment(metric.value, metric.tone))
+            }
+            if let overflowDetail, !overflowDetail.isEmpty {
+                if !segments.isEmpty {
+                    segments.append(ThemedMenuSubtitleSegment(metricOverflowSeparator, .muted))
+                }
+                segments.append(ThemedMenuSubtitleSegment(overflowDetail, .muted))
+            }
+            item.metrics.removeAll { !admitted.contains($0.label) }
+            if !keepsDetail { item.trailingDetail = nil }
+            item.setSubtitle(segments)
+            return .item(item)
+        }
+    }
+
+    private static let minimumMetricTitleWidth: CGFloat = 96
+    private static let metricOverflowSeparator = " · "
 
     /// Where a row's **first line** sits inside a slot of `height`, measured from the slot's
     /// bottom edge.
@@ -2785,6 +2872,9 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         entries: [ThemedMenuEntry],
         selectedEntryIndex: Int?
     ) {
+        let entries = ThemedMenuMetrics.entries(
+            entries, fitting: frame.width, selectedEntryIndex: selectedEntryIndex
+        )
         var madeRows: [Int: ThemedMenuRowView] = [:]
         var views: [NSView] = []
         var selectable: [Int] = []
@@ -4197,7 +4287,7 @@ private final class ThemedMenuRowView: ThemedControl {
                 in: NSRect(
                     x: x,
                     y: subtitleY,
-                    width: textWidth,
+                    width: max(0, bounds.maxX - ThemedMenuMetrics.contentInset - trailingColumns - x),
                     height: subtitleHeight
                 )
             )
@@ -4222,6 +4312,9 @@ private final class ThemedMenuRowView: ThemedControl {
         alpha: CGFloat,
         secondary: NSColor
     ) -> CGFloat {
+        // Plain actions do not belong to the readings table. A shared reservation here hid
+        // their titles too when another provider contributed a third metric column.
+        guard !item.metrics.isEmpty || item.trailingDetail?.isEmpty == false else { return 0 }
         guard !metricColumns.isEmpty || trailingDetailWidth > 0 else { return 0 }
 
         let font = ThemedMenuMetrics.metricFont

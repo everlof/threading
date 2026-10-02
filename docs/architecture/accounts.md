@@ -904,6 +904,14 @@ resolutions:
   a right-aligned column of its own (`7d · 19h 36m`), which is what makes fault 4 structurally
   impossible: the columns are fixed and the *name* is elastic, so a menu at its width cap
   truncates the name — the one thing still recognisable from its first half — and never a number.
+  The name has a 96-point floor, scaled with chrome text. The shared menu admits columns against
+  its actual available width before constructing rows or measuring their heights. A third window
+  such as `30d` must not consume the entire name slot beside `5h`, `7d`, and a reset countdown:
+  overflow readings move to the second line, with the countdown following when it cannot fit
+  either. That line can use the row's full text width; complete readings remain in hover and
+  accessibility text. Plain runtime/action rows reserve no usage columns.
+  This remains host-owned menu layout: destination eligibility, account routing, usage truth,
+  keyboard navigation and accessibility stay Threading's responsibility.
   `resets in` is dropped, since a column of countdowns states what it is by being one, but the
   countdown still **names its window**: it is not always the last column, and a bare one at the
   end of a row is read as belonging to whichever is. The **scoped model windows** are the one

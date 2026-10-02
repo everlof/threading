@@ -2113,6 +2113,41 @@
       "capture": {
         "glob": "hidden-projects-*.png"
       }
+    },
+    {
+      "id": "account-identity-menu",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Account identity menu",
+      "description": "The composer account menu in the shipping main window, with mixed 5h, 7d and 30d windows and reset times. Account names and bare runtime actions retain readable text when usage columns overflow.",
+      "states": [
+        "Mixed provider windows",
+        "Overflow readings",
+        "Account names",
+        "Bare runtime actions"
+      ],
+      "matrix": {
+        "themes": [
+          "System",
+          "Cyberpunk",
+          "Win98"
+        ],
+        "appearances": [
+          "Dark",
+          "Authored"
+        ],
+        "sizes": [
+          "1120×820-point product shell"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AccountIdentityMenuLayoutTests.swift",
+        "test": "ThreadingTests/AccountIdentityMenuLayoutTests/testRendersAccountIdentityMenuInShippingShell"
+      },
+      "capture": {
+        "glob": "account-identity-menu-*.png"
+      }
     }
   ]
 }
