@@ -215,8 +215,6 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         conduct: RowConductSummary? = nil,
         executionHost: String? = nil
     ) {
-        isHeading = false
-
         // Read before the record is replaced: the same project named differently is a
         // rename — or, for a grouped checkout named by its branch, a branch that moved
         // under it. Either is a change to the name already on screen, and worth showing as
@@ -236,19 +234,20 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             showsCreate: true
         )
         bindCreateButton(to: project.id)
-        nameLabel.applyFont(.emphasizedBody)
 
         switch style {
         case .standalone:
-            nativeName = project.name
-            setWorktreePath(nil)
+            let presentation = NavigatorProjectRowPresentation.project(name: project.name)
             // The icon shows on standalone rows only: under a repository heading the same
             // repo's mark would repeat once per checkout and say nothing new.
-            showIcon(for: project)
+            applyNativePresentation(presentation, identityProject: project)
         case .checkout:
-            nativeName = GitInfo.currentBranch(for: project.folderPath) ?? project.name
-            setWorktreePath(project.folderPath)
-            hideIcon()
+            let presentation = NavigatorProjectRowPresentation.checkout(
+                branch: GitInfo.currentBranch(for: project.folderPath),
+                fallbackName: project.name,
+                abbreviatedPath: PathAbbreviation.abbreviatingHome(in: project.folderPath)
+            )
+            applyNativePresentation(presentation, worktreePath: project.folderPath)
         }
 
         setCount(collapsedSessionCount)
@@ -301,32 +300,28 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         count: Int = 0,
         representing project: Project? = nil
     ) {
-        setWorktreePath(nil)
         popoverProject = nil
         dismissPopover()
 
         // A represented root is a row, not a label over one: full ink, like the project rows
         // it sits above. The bare heading below keeps the quiet treatment.
-        isHeading = project == nil
+        let presentation = NavigatorProjectRowPresentation.repository(
+            name: name, hasRepresentative: project != nil)
+        applyNativePresentation(presentation, identityProject: project)
 
         if let project {
-            showIcon(for: project)
             // The repository's name, not the checkout's: the icon is borrowed from a record,
             // the name is not.
             shownProjectName = name
             applyIconImage()
             setHoverControls(moreSymbol: nil, showsCreate: true)
             bindCreateButton(to: project.id)
-            nameLabel.applyFont(.emphasizedBody)
             nativeToolTip = GitInfo.repositoryRoot(for: project.folderPath)?.path
         } else {
-            hideIcon()
             setHoverControls(moreSymbol: nil, showsCreate: false)
-            nameLabel.applyFont(.caption)
             nativeToolTip = nil
         }
 
-        nativeName = name
         setCount(count)
         // A repository has no record and therefore no settings of its own. Cleared explicitly
         // because this view is recycled: a mark left over from the checkout that used the cell
@@ -346,18 +341,14 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// A heading whose branch moved keeps its row (see `SidebarOutlineUpdate.branchRenames`), so
     /// unlike a repository heading this one can be renamed in place and says so by morphing.
     func configureAsBranch(named branch: String, collapsedSessionCount: Int = 0) {
-        isHeading = true
-        setWorktreePath(nil)
         popoverProject = nil
         dismissPopover()
-        hideIcon()
         setHoverControls(
             moreSymbol: SidebarRowDefaults.settingsSymbol,
             moreAccessibility: "Grouping options",
             showsCreate: false
         )
-        nameLabel.applyFont(.caption)
-        nativeName = branch
+        applyNativePresentation(.heading(name: branch))
         setCount(collapsedSessionCount)
         setConductMark(nil)
         setUnavailableCheckoutMark(false)
@@ -371,14 +362,10 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// Shows a provider-defined fact bucket as a quiet, nonselectable heading. Unlike a branch
     /// heading it owns no branch operation, so no hover control is reserved beside its label.
     func configureAsFactGroup(named title: String, collapsedSessionCount: Int = 0) {
-        isHeading = true
-        setWorktreePath(nil)
         popoverProject = nil
         dismissPopover()
-        hideIcon()
         setHoverControls(moreSymbol: nil, moreAccessibility: "", showsCreate: false)
-        nameLabel.applyFont(.caption)
-        nativeName = title
+        applyNativePresentation(.heading(name: title))
         setCount(collapsedSessionCount)
         setConductMark(nil)
         setUnavailableCheckoutMark(false)
@@ -533,14 +520,38 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         _ = customizationHost
     }
 
+    /// Applies only the native content's visual role. The host still owns the row's actions,
+    /// count, selection, accessibility and extension replacement boundary.
+    private func applyNativePresentation(
+        _ presentation: NavigatorProjectRowPresentation,
+        identityProject: Project? = nil,
+        worktreePath: String? = nil
+    ) {
+        isHeading = presentation.isQuietHeading
+        nativeName = presentation.title
+        switch presentation.titleRole {
+        case .emphasizedBody: nameLabel.applyFont(.emphasizedBody)
+        case .caption: nameLabel.applyFont(.caption)
+        }
+        setWorktreePath(worktreePath, displayedAs: presentation.secondaryPath)
+        if presentation.showsIdentityMark, let identityProject {
+            showIcon(for: identityProject)
+        } else {
+            hideIcon()
+        }
+    }
+
     /// One optional label per visible checkout; no discovery or filesystem work on this path.
-    private func setWorktreePath(_ path: String?) {
+    private func setWorktreePath(_ path: String?, displayedAs text: String?) {
         guard let path else {
             worktreePathMinimumWidth?.isActive = false
             worktreePathLabel?.isHidden = true
             nameLabel.setContentHuggingPriority(SidebarRowDefaults.stretchableHugging, for: .horizontal)
             nameLabel.setContentCompressionResistancePriority(.init(1), for: .horizontal)
             return
+        }
+        guard let text else {
+            preconditionFailure("Checkout presentation must provide its path text")
         }
         let label: MorphingTitleLabel
         if let worktreePathLabel {
@@ -563,7 +574,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         }
         nameLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        label.setStringValue("[\(PathAbbreviation.abbreviatingHome(in: path))]", animated: false)
+        label.setStringValue(text, animated: false)
         label.toolTip = path
         label.isHidden = false
         worktreePathMinimumWidth?.isActive = true
@@ -990,10 +1001,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         let insertionIndex = rowContentStack.arrangedSubviews.firstIndex(of: afterTitleSlot)
             ?? rowContentStack.arrangedSubviews.count
         rowContentStack.insertArrangedSubview(indicator, at: insertionIndex)
-        NSLayoutConstraint.activate([
-            indicator.widthAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph),
-            indicator.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph)
-        ])
+        NSLayoutConstraint.activate(indicator.squareSizeConstraints(side: Design.Size.inlineButtonGlyph))
         conductIndicator = indicator
     }
 
@@ -1031,10 +1039,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         let insertionIndex = rowContentStack.arrangedSubviews.firstIndex(of: afterTitleSlot)
             ?? rowContentStack.arrangedSubviews.count
         rowContentStack.insertArrangedSubview(indicator, at: insertionIndex)
-        NSLayoutConstraint.activate([
-            indicator.widthAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph),
-            indicator.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph)
-        ])
+        NSLayoutConstraint.activate(indicator.squareSizeConstraints(side: Design.Size.inlineButtonGlyph))
         executionHostIndicator = indicator
     }
 
@@ -1066,10 +1071,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         let insertionIndex = rowContentStack.arrangedSubviews.firstIndex(of: afterTitleSlot)
             ?? rowContentStack.arrangedSubviews.count
         rowContentStack.insertArrangedSubview(indicator, at: insertionIndex)
-        NSLayoutConstraint.activate([
-            indicator.widthAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph),
-            indicator.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph)
-        ])
+        NSLayoutConstraint.activate(indicator.squareSizeConstraints(side: Design.Size.inlineButtonGlyph))
         unavailableCheckoutIndicator = indicator
     }
 

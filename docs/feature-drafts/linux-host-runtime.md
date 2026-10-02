@@ -1,9 +1,8 @@
 # Native Linux host and UI
 
-> Status: feature draft — gated on making the application/core layers independently compilable,
-> proving a structural UI boundary on macOS, and demonstrating acceptable Linux text, input,
-> accessibility, and virtual-list behavior in a bounded spike. No Linux backend or toolkit is
-> selected.
+> Status: architecture decision record. The Linux preview implementation now lives in
+> [`Platforms/Linux`](../../Platforms/Linux/README.md). It uses SDL2, Pango and a Linux AppKit
+> compatibility module; full production UI parity and release readiness remain open.
 >
 > Measurement snapshot: 2026-08-30, with a measured addendum on 2026-09-18 — see
 > [What the spike measured](#what-the-spike-measured). Re-run the repository health and
@@ -64,15 +63,53 @@ The later native-window probe (`FINDINGS.md` §40) presents the existing rasteri
 SDL2/X11 and exercises real window input against a production-store snapshot. It is diagnostic
 specimen UI, not a backend selection or the product navigator. Later slices share session creation,
 launch command assembly, typed command admission, provider artwork and flat surface painting with
-macOS, and exercise them in the installed preview (see `FINDINGS.md` §§99–109). The next UI boundary
-is shared navigator presentation and assembly; the diagnostic rows still supply their own spacing,
-text composition and colors, and do not consume the production theme or extension environment.
+macOS, and exercise them in the installed preview (see `FINDINGS.md` §§99–109). Subsequent UI
+slices use shared navigator row geometry, project-row presentation and neutral text-ink policy.
+Visible provider marks now mount through the unchanged production `GlyphView`, using Linux image
+and backing-alignment shims, while text uses the Linux `NSTextField` leaf (`FINDINGS.md`
+§§113–117, 129). Visible project rows now use the Mac row's production
+`GeneratedProjectIcon` fallback in that glyph slot, with a bounded image cache. Bounded
+attributed and `NSString` drawing render unchanged production compound readings, a recording
+badge and a highlighted search-match label in fixtures (`FINDINGS.md` §§118–119, 131–132).
+Compact device-pixel clip regions keep navigator row masks proportional to their painted
+rectangles (`FINDINGS.md` §130).
+Visible project rows now place nonzero collapsed counts at the trailing edge while AT-SPI keeps
+the complete agent and terminal totals (`FINDINGS.md` §133). The unchanged production
+`ThemedIconButton` now renders and responds to pointer, keyboard and accessibility input in a
+focused Linux shim fixture and mounts unchanged as the visible project-row `⋯` in the native
+shell. A bounded Linux symbol/theme source and opt-in SDL pointer route supply that control;
+the host keeps project command identity and persistence (`FINDINGS.md` §§134–135).
+The same production icon control now supplies a visible header `+` for the existing-folder
+import route, with pointer, keyboard and AT-SPI admission through the host-owned command gate.
+The installed package passed compositor-injected Wayland header/project-row pointer and
+Shift+F10 Actions checks;
+its `+` role and bounds also passed headless Weston accessibility inspection. The Mac `+`
+now opens the three-entry Add Project menu, including New Project and Scratchpad. Visible
+project rows mount the production `+`/`⋯` pair; the row `+` targets its exact project and
+offers New Chat, New Manager and New Terminal. New Chat uses a Codex/Claude provider choice,
+New Terminal uses the persistent terminal path, and New Manager is visibly unavailable
+(`FINDINGS.md` §§136–138, 140–141).
+The shim now models view-to-window attachment and content-root transfers with callback order
+measured against macOS AppKit (`FINDINGS.md` §124). The native diagnostic host retains one
+window-owned raster root and reuses viewport-bounded row and label views across frames
+(`FINDINGS.md` §125). It has not yet mounted a complete production screen.
+The text shim now measures plain and attributed wrapping labels at their preferred width,
+and `NSView.fittingSize` measures constrained subtrees without moving live frames. Top-gravity
+stacks keep fixed rows compact and give spare height to explicit flexible spacers. These
+layout fixes let the unchanged production `SubagentNavigatorRowView` compile and render in
+a focused Linux fixture with Mac-aligned row geometry; the complete Subagents card and its
+live pane remain unmounted (`FINDINGS.md` §§143–144). The image shim also honors production
+interpolation hints, source rectangles and copy compositing, with focused Mac/Linux raster
+checks; other image and chrome dependencies remain (`FINDINGS.md` §145).
+The diagnostic host still assembles its own rows and uses a fixed
+window palette; it does not consume the production theme or extension environment.
 
-`Spikes/linux-appkit/` is a bounded, wired-to-nothing experiment run on 2026-09-17 and 2026-09-18
-against `swift:6.3.2-noble` — the same image and Swift as `scripts/test-ptyd-linux.sh`. It is
-evidence for this document, not an implementation of it: no Xcode target references it and no gate
-runs it. Its full write-up is `Spikes/linux-appkit/FINDINGS.md`; the numbers below are the parts
-that should change how this draft is read.
+The code now in `Platforms/Linux/` began as a bounded experiment on 2026-09-17 and
+2026-09-18 against `swift:6.3.2-noble` — the same image and Swift as
+`scripts/test-ptyd-linux.sh`. Those initial measurements informed this draft. The same tree now
+builds an installable Ubuntu arm64 preview and carries its own tests; no Xcode target references
+it. Its full write-up is `Platforms/Linux/FINDINGS.md`; the dated numbers below explain the
+initial platform choice and should not be read as the current shim inventory.
 
 **The UI side is a conjunction, not a queue.** Type-checking all 153 files of `UI/Design` against a
 1,048-line drawing shim left 127 with a gap, and 116 distinct missing `NS`/`CA`/`CG`/`CT` symbols.
@@ -128,69 +165,69 @@ longer requires runtime delivery types. Credential custody still needs an explic
 
 The production SQLite wrapper passes nine on-disk Linux contracts, including close/reopen,
 rollback, schema refusal, pinned-WAL moves and typed full-disk recovery. Run
-`Spikes/linux-appkit/coreslice.sh --sqlite`. The full persistence slice now separately passes five
+`Platforms/Linux/coreslice.sh --sqlite`. The full persistence slice now separately passes five
 contracts on arm64 Linux: project/session save and reopen, incremental updates, stale graph
 writer refusal, participant receipt cascade, and refusal of corrupt session payloads without
-row loss. Run `Spikes/linux-appkit/coreslice.sh`; [FINDINGS section 31](../../Spikes/linux-appkit/FINDINGS.md#31-the-real-project-database-runs-on-linux)
+row loss. Run `Platforms/Linux/coreslice.sh`; [FINDINGS section 31](../../Platforms/Linux/FINDINGS.md#31-the-real-project-database-runs-on-linux)
 records the boundaries. This is evidence for `ProjectDatabase` and the exercised stored records,
 not a working Linux `StateManager`, recovery system, agent runtime, or application.
 Three additional recovery contracts now pin commit rollback, probe refusal/retry, and the mandatory
-model reload after a successful SQLite probe. [FINDINGS section 32](../../Spikes/linux-appkit/FINDINGS.md#32-recovery-primitives-preserve-the-graph-across-refusal-and-retry)
+model reload after a successful SQLite probe. [FINDINGS section 32](../../Platforms/Linux/FINDINGS.md#32-recovery-primitives-preserve-the-graph-across-refusal-and-retry)
 details that narrower recovery evidence; host recovery policy remains outside the slice.
 Three migration contracts also verify schema-4 upgrade rollback/retry, retained authority history,
-new receipt storage and post-upgrade uniqueness/cascades; [FINDINGS section 33](../../Spikes/linux-appkit/FINDINGS.md#33-historical-authority-migration-survives-refusal-and-retry-on-linux)
+new receipt storage and post-upgrade uniqueness/cascades; [FINDINGS section 33](../../Platforms/Linux/FINDINGS.md#33-historical-authority-migration-survives-refusal-and-retry-on-linux)
 records the synthetic fixture's scope. Two more contracts verify downgrade refusal through the project-store constructor for
 checkpointed and live-WAL future schemas, including unchanged persisted bytes and continued
-newer-writer operation; [FINDINGS section 34](../../Spikes/linux-appkit/FINDINGS.md#34-downgrades-refuse-future-project-schemas-including-live-wal)
+newer-writer operation; [FINDINGS section 34](../../Platforms/Linux/FINDINGS.md#34-downgrades-refuse-future-project-schemas-including-live-wal)
 records their scope. Two further contracts exercise pinned-WAL refusal and single-file relocation for healthy and
-damaged project stores, preserving recent records and corrupt-row evidence; [FINDINGS section 35](../../Spikes/linux-appkit/FINDINGS.md#35-project-stores-move-safely-after-pinned-readers-release-wal)
+damaged project stores, preserving recent records and corrupt-row evidence; [FINDINGS section 35](../../Platforms/Linux/FINDINGS.md#35-project-stores-move-safely-after-pinned-readers-release-wal)
 records the boundary. The project executable now passes fifteen contracts.
 
 The experiment now also has a runnable `LinuxHost` connecting real project-terminal records to
 the production PTY daemon. Its real-shell smoke lane verifies input/output, cwd, initial geometry,
-exit status, persistence across invocations and ownership/refusal behavior. [FINDINGS section 36](../../Spikes/linux-appkit/FINDINGS.md#36-a-linux-host-connects-durable-project-terminals-to-the-real-pty-daemon)
+exit status, persistence across invocations and ownership/refusal behavior. [FINDINGS section 36](../../Platforms/Linux/FINDINGS.md#36-a-linux-host-connects-durable-project-terminals-to-the-real-pty-daemon)
 records the evidence and limits. This is an experimental command-line storage/runtime connection;
 it does not satisfy the native host-and-UI product contract above.
 The host also reattaches stored terminals after watcher termination, forwards raw keyboard input,
-tracks terminal resize and restores caller terminal mode on exit. [FINDINGS section 37](../../Spikes/linux-appkit/FINDINGS.md#37-terminal-watchers-reconnect-forward-raw-keys-and-follow-window-size)
+tracks terminal resize and restores caller terminal mode on exit. [FINDINGS section 37](../../Platforms/Linux/FINDINGS.md#37-terminal-watchers-reconnect-forward-raw-keys-and-follow-window-size)
 records real PTY and same-child-PID evidence. Native rendering remains unfinished.
 The production launch command values now compile independently of host settings, and Linux's
 `login-run` uses the same login-shell plan factory and argument quoting as macOS. [FINDINGS
-section 38](../../Spikes/linux-appkit/FINDINGS.md#38-linux-and-macos-share-the-login-shell-command-plan)
+section 38](../../Platforms/Linux/FINDINGS.md#38-linux-and-macos-share-the-login-shell-command-plan)
 records real-shell evidence. `CodexLaunchCommand` now also shares resolved provider command
 assembly. The Linux `codex` operation persists a real agent session with explicit Manual/read-only
-policy and spawns its typed identity; [FINDINGS section 39](../../Spikes/linux-appkit/FINDINGS.md#39-managed-codex-sessions-share-production-command-assembly)
+policy and spawns its typed identity; [FINDINGS section 39](../../Platforms/Linux/FINDINGS.md#39-managed-codex-sessions-share-production-command-assembly)
 distinguishes argument-recorder evidence from an authenticated provider run. Account resolution,
 transcript discovery and native UI remain unfinished.
 The later Linux host now also creates a standard-account Claude Code session from the same
 portable fresh/resume command pair used by the macOS remote host. It stores the caller-minted
 UUID and launches through the real daemon; the recorder verifies flags, account environment and
 durable exact-row writes. At that point the native Linux window had no Claude creation/resume
-path, and no authenticated provider run was claimed ([FINDINGS section 86](../../Spikes/linux-appkit/FINDINGS.md#86-a-linux-host-can-create-a-real-claude-session-without-a-second-command-policy)).
+path, and no authenticated provider run was claimed ([FINDINGS section 86](../../Platforms/Linux/FINDINGS.md#86-a-linux-host-can-create-a-real-claude-session-without-a-second-command-policy)).
 The native experiment now starts standard-account Claude sessions and resumes exited ones only
 after finding their exact transcript through the shared project-slug/path policy. This is a
 window and real PTY-daemon journey, not yet a packaged Linux app or an authenticated Claude run
-([FINDINGS section 87](../../Spikes/linux-appkit/FINDINGS.md#87-the-native-linux-window-now-owns-a-claude-create-attach-and-resume-journey)).
+([FINDINGS section 87](../../Platforms/Linux/FINDINGS.md#87-the-native-linux-window-now-owns-a-claude-create-attach-and-resume-journey)).
 The later native lifecycle check records observed agent exits in the exact saved row and surveys
 the daemon before startup restoration. A normal launch follows the selected agent to its project;
 an explicit project target takes precedence
-([FINDINGS section 94](../../Spikes/linux-appkit/FINDINGS.md#94-normal-linux-relaunch-follows-the-saved-agent)).
+([FINDINGS section 94](../../Platforms/Linux/FINDINGS.md#94-normal-linux-relaunch-follows-the-saved-agent)).
 A child that exited while the window was closed no longer opens as a false live attachment;
 explicit picker selection resumes it after transcript preflight. This still does not provide a
 release-grade Linux package or authenticated-provider evidence.
 The observed and offline exit cases are recorded in
-[FINDINGS section 90](../../Spikes/linux-appkit/FINDINGS.md#90-native-linux-agent-exits-survive-window-restarts).
+[FINDINGS section 90](../../Platforms/Linux/FINDINGS.md#90-native-linux-agent-exits-survive-window-restarts).
 The source-tree launcher can also reopen the saved project navigator without a directory after
 the first import; the explicit-directory route still targets that project. A static-Swift preview
 tarball runs this lifecycle on Ubuntu 24.04 arm64 without the Swift toolchain or source checkout.
 The same preview now has an installable `.deb` with a desktop entry. Neither artifact makes a
 compatibility claim for other Linux distributions or a release-grade provider-integration claim.
 The clean-profile and saved-project reopen checks are recorded in
-[FINDINGS section 91](../../Spikes/linux-appkit/FINDINGS.md#91-the-linux-development-app-reopens-from-its-saved-project-list).
+[FINDINGS section 91](../../Platforms/Linux/FINDINGS.md#91-the-linux-development-app-reopens-from-its-saved-project-list).
 The archive-only runtime check is recorded in
-[FINDINGS section 95](../../Spikes/linux-appkit/FINDINGS.md#95-the-linux-window-runs-from-an-ubuntu-arm64-preview-tarball).
+[FINDINGS section 95](../../Platforms/Linux/FINDINGS.md#95-the-linux-window-runs-from-an-ubuntu-arm64-preview-tarball).
 The package installation, non-root desktop launch and reinstall check are recorded in
-[FINDINGS section 96](../../Spikes/linux-appkit/FINDINGS.md#96-the-ubuntu-preview-has-an-installable-desktop-package).
+[FINDINGS section 96](../../Platforms/Linux/FINDINGS.md#96-the-ubuntu-preview-has-an-installable-desktop-package).
 
 ## The boundary to build
 
@@ -347,12 +384,35 @@ single-child selection through the native navigation route. Bounds-change notifi
 comprehensive focus behavior, terminal text selection, screen-reader inspection and other product
 surfaces remain unproven.
 
-The Linux launcher can now open a clean profile into an empty native project list.
-Its Add project row and Ctrl+Shift+P command open a system GTK folder dialog through Zenity;
-the selected directory is imported by the host's canonical, locked store operation on a worker.
-The dialog is a Linux platform leaf for a deliberately host-only import action. This proves a
-first-launch path in the Xvfb shell. The preview archive and installed `.deb` test that path
-without a source checkout; broader Linux desktop compatibility remains unproven.
+The retained AppKit shim tree now has a window-owned first responder and measured focus
+transition rules. An unchanged production `KeyEquivalentScopeView` runs in the Linux fixture
+and confines a chord to its focused subtree, including a field-editor delegate. The native SDL
+window now sends project and Actions row presses through the retained shim tree's hit testing
+and mouse responder path. Up/Down navigator keys now reach the focused shim row; sidebar wheel
+turns, terminal input and other keyboard commands keep their native routes. The production
+Add Project control is interactive in the preview; broader production chrome remains unmounted.
+
+The Linux launcher can open a clean profile into an empty native project list. Its Add project
+row and Ctrl+Shift+P command open a system GTK folder dialog through Zenity; the selected
+directory is imported by the host's canonical, locked store operation on a worker. The header's
+unchanged production `+` control presents the Mac menu's three semantic entries: Start New
+Project, Use an Existing Folder, and, after a separator, New Scratchpad. The first two use
+Zenity's save-style name/place and directory selection dialogs, respectively; Scratchpad is
+made lazily under `~/Threading/Scratchpad`, marked with the production stored project flag,
+and pinned above ordinary projects. The GTK dialogs are Linux platform leaves for host-owned
+folder operations. A focused X11 fixture passed pointer and AT-SPI menu entry, New Project
+folder creation, and repeated Scratchpad identity and file preservation. The `.deb` now depends
+on Git so the non-root Ubuntu install can initialize the Scratchpad and seed its README and
+`.gitignore`. The full installed package suite passes the three choices, right-click focus
+restoration, and terminal input ownership; headless Weston passes Add Project AT-SPI and physical
+pointer input. Broader Linux desktop compatibility remains unproven.
+
+The same source window now mounts a second production icon button beside each visible
+project-row actions button. Its create menu keeps the row's project ID through pointer and
+AT-SPI entry. The focused X11 fixture passed while another project was selected, including
+the nested provider list, Escape navigation, a disabled Manager reason, and a terminal
+created for the target row. The complete source agent suite passed; installed and Wayland
+checks for this row-create revision are recorded in `FINDINGS.md` §141.
 
 ## Evidence required
 
@@ -384,8 +444,15 @@ Open decisions before implementation:
 
 - Which Linux distribution, compositor, packaging, and update floor is supported?
 - Which text/IME/accessibility stack passes the spike, and who owns its long-term maintenance?
-  Still open, and still the largest single risk: the spike deliberately did not touch it, because
-  a shimmed `NSTextField` would have moved fifty files while proving nothing about shaping or IME.
+  Still open, and still the largest single risk. The bounded `NSTextField`, attributed and
+  `NSString` leaves now prove Pango shaping and pixels for specific labels, and a production
+  storage outline fixture exercises font metrics, a typed accessibility group, and first/deep
+  viewport painting for 170 cleanup rows. An unchanged production sparkline now draws through
+  inherited light/dark `NSAppearance` in a Linux fixture. Retained named colours and their alpha
+  variants re-resolve on that appearance; a bounded system ink set matches measured AppKit
+  light/dark values. The installed host still has no system-appearance bridge or complete
+  dynamic `NSColor` catalogue. These fixtures do not prove
+  general text editing, IME composition in controls, or screen-reader parity.
 - **Where do agent-account credentials live without a Keychain?** Twelve files in the core reach
   `Security`, and this is the only slice-2 blocker that is a promise rather than a port. It gates
   the headless core, so it is due first.

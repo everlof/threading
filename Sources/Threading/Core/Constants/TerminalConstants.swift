@@ -470,10 +470,16 @@ public enum SidebarRowDefaults {
     // other row in the app. They were each measured against this one list rather than chosen,
     // which is how the `⋯` came to sit at a different inset from the `×` beside it in the
     // toolbar. On the scale now, at the nearest step in each case.
-    public static let horizontalSpacing: CGFloat = Design.Spacing.small
+    /// Resolved metrics also consumed by the Linux navigator's mounted bitmap rows.
+    static let geometry = NavigatorRowGeometry(
+        leadingInset: Design.Spacing.tight,
+        iconSlotWidth: 16,
+        contentGap: Design.Spacing.small
+    )
+    public static let horizontalSpacing: CGFloat = geometry.contentGap
     /// The outline view places the cell almost flush against the disclosure chevron, so the
     /// gap between them is owned here.
-    public static let leadingInset: CGFloat = Design.Spacing.tight
+    public static let leadingInset: CGFloat = geometry.leadingInset
     public static let trailingInset: CGFloat = Design.Spacing.small
 
     /// The same two gutters at `SidebarDefaults.tightDensityWidth` — see `SidebarDensity`. One
@@ -485,7 +491,7 @@ public enum SidebarRowDefaults {
     public static let iconSize: CGFloat = 13
     /// Wider than `iconSize` so a 12pt emoji, whose glyph outgrows its font size, is not
     /// clipped at the slot's edges.
-    public static let iconSlotWidth: CGFloat = 16
+    public static let iconSlotWidth: CGFloat = geometry.iconSlotWidth
 
     /// One trailing column: the width of a row's status mark, and of each hover control beside it.
     ///

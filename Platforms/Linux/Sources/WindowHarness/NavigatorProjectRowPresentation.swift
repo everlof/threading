@@ -1,0 +1,1 @@
+../Harness/Vendored/NavigatorProjectRowPresentation.swift

@@ -1,0 +1,605 @@
+import Foundation
+
+/// A baseline's position in the solver's top-down local coordinates. A centred text line moves
+/// by half the extra height its view receives; keeping that fraction in the linear expression
+/// lets baseline constraints remain correct when another constraint stretches the label.
+public struct NSBaselineMetric: Equatable, Sendable {
+    public let heightFraction: CGFloat
+    public let offset: CGFloat
+
+    public init(heightFraction: CGFloat, offset: CGFloat) {
+        precondition(heightFraction.isFinite && (0...1).contains(heightFraction)
+                     && offset.isFinite, "invalid baseline metric")
+        self.heightFraction = heightFraction
+        self.offset = offset
+    }
+}
+
+@MainActor
+open class NSResponder: Equatable {
+    public init() {}
+    nonisolated public static func == (lhs: NSResponder, rhs: NSResponder) -> Bool { lhs === rhs }
+    open var acceptsFirstResponder: Bool { false }
+    open func becomeFirstResponder() -> Bool { true }
+    open func resignFirstResponder() -> Bool { true }
+    open func mouseDown(with event: NSEvent) {}
+    open func mouseDragged(with event: NSEvent) {}
+    open func mouseUp(with event: NSEvent) {}
+    open func mouseEntered(with event: NSEvent) {}
+    open func mouseExited(with event: NSEvent) {}
+    open func rightMouseDown(with event: NSEvent) {}
+    open func keyDown(with event: NSEvent) {}
+    open func performKeyEquivalent(with event: NSEvent) -> Bool { false }
+}
+
+/// The retained view tree: frames, a subview list, an override point for drawing, and the
+/// invalidation flag. This is the *structural* half the Linux draft calls the real portability
+/// project — not the widgets, which `UI/Design` already owns.
+///
+/// Auto Layout is present now, and it is the largest thing the shim has taken on: see
+/// `Layout/`. The solver is a from-scratch simplex re-solved per pass, which is correct and not
+/// incremental — deliberately, so that "expressible and correct" and "fast enough" stay two
+/// separate measurements.
+@MainActor
+open class NSView: NSResponder, NSLayoutItem {
+
+    // MARK: - Geometry
+
+    open var frame: NSRect {
+        didSet {
+            needsDisplay = true
+            needsLayout = true
+        }
+    }
+
+    /// The engine's way in. Assigning `frame` from inside a solve would mark layout dirty again
+    /// and, on a real invalidation loop, never settle.
+    func setLaidOutFrame(_ rect: NSRect) {
+        if frame != rect {
+            frame = rect
+            needsLayout = true
+        }
+    }
+
+    open var bounds: NSRect {
+        get { NSRect(origin: .zero, size: frame.size) }
+        set { frame = NSRect(origin: frame.origin, size: newValue.size) }
+    }
+
+    /// AppKit's default is y-up; a flipped view draws top-down. Both appear in `UI/Design`.
+    open var isFlipped: Bool { false }
+
+    open var alphaValue: CGFloat = 1
+    open var isHidden: Bool = false {
+        didSet {
+            guard isHidden != oldValue else { return }
+            (superview as? NSStackView)?.arrangedSubviewVisibilityDidChange(self)
+            needsDisplay = true
+            setNeedsLayout()
+        }
+    }
+    open var isHiddenOrHasHiddenAncestor: Bool {
+        var ancestor: NSView? = self
+        while let view = ancestor {
+            if view.isHidden { return true }
+            ancestor = view.superview
+        }
+        return false
+    }
+    open var needsDisplay: Bool = true
+    open var needsLayout: Bool = true
+    open var needsUpdateConstraints: Bool = true
+    open var wantsLayer: Bool = false
+    open var wantsUpdateLayer: Bool { false }
+    open var identifier: NSUserInterfaceItemIdentifier?
+    open var toolTip: String?
+
+    /// An explicit appearance overrides the inherited one. AppKit calls the hook for each
+    /// affected descendant when that effective value changes, including after reparenting.
+    open var appearance: NSAppearance? {
+        didSet {
+            let previous = oldValue?.name ?? superview?.effectiveAppearance.name
+                ?? NSAppearance.applicationDefault.name
+            notifyEffectiveAppearanceChanged(from: previous)
+        }
+    }
+
+    open var effectiveAppearance: NSAppearance {
+        appearance ?? superview?.effectiveAppearance ?? NSAppearance.applicationDefault
+    }
+
+    open func viewDidChangeEffectiveAppearance() {}
+
+    func notifyEffectiveAppearanceChanged(from previous: NSAppearance.Name) {
+        guard effectiveAppearance.name != previous else { return }
+        viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+        for child in subviews where child.appearance == nil {
+            child.notifyEffectiveAppearanceChanged(from: previous)
+        }
+    }
+
+    // MARK: - Tree
+
+    public private(set) var subviews: [NSView] = []
+    public private(set) weak var superview: NSView?
+    weak var contentWindow: NSWindow?
+
+    /// The content root is owned by its window; descendants inherit that owner through parents.
+    open var window: NSWindow? { superview?.window ?? contentWindow }
+    open func viewWillMove(toWindow newWindow: NSWindow?) {}
+    open func viewDidMoveToWindow() {}
+
+    func notifyWillMove(toWindow newWindow: NSWindow?) {
+        viewWillMove(toWindow: newWindow)
+        for child in subviews { child.notifyWillMove(toWindow: newWindow) }
+    }
+
+    func notifyDidMoveToWindow() {
+        for child in subviews { child.notifyDidMoveToWindow() }
+        viewDidMoveToWindow()
+        if superview == nil {
+            if window == nil { clearTrackingEntriesInSubtree() }
+            else { updateTrackingAreasInSubtree() }
+        }
+    }
+
+    public init(frame frameRect: NSRect) {
+        frame = frameRect
+        super.init()
+    }
+
+    public override convenience init() { self.init(frame: .zero) }
+
+    public required init?(coder: NSCoder) {
+        frame = .zero
+        super.init()
+    }
+
+    /// A plain child passes an unhandled press up the view responder chain, as AppKit does.
+    /// This lets an image inside a row leave the row in charge of the gesture.
+    open override func mouseDown(with event: NSEvent) {
+        superview?.mouseDown(with: event)
+    }
+
+    open override func keyDown(with event: NSEvent) {
+        superview?.keyDown(with: event)
+    }
+
+    open func addSubview(_ view: NSView) {
+        precondition(!isDescendant(of: view), "cannot add a view to its own descendant")
+        let previousWindow = view.window
+        let destinationWindow = window
+        if previousWindow !== destinationWindow {
+            previousWindow?.focusDidLeave(view)
+        }
+        let announcesWindowMove = previousWindow != nil || destinationWindow != nil
+        if announcesWindowMove { view.notifyWillMove(toWindow: destinationWindow) }
+        let previousAppearance = view.effectiveAppearance.name
+        view.detachFromSuperview(notifyAppearance: false, notifyWindow: false)
+        if let contentWindow = view.contentWindow {
+            contentWindow.detachContentRootWithoutNotification(view)
+            view.contentWindow = nil
+        }
+        view.superview = self
+        subviews.append(view)
+        view.notifyEffectiveAppearanceChanged(from: previousAppearance)
+        needsDisplay = true
+        setNeedsLayout()
+        if announcesWindowMove { view.notifyDidMoveToWindow() }
+        view.updateTrackingAreasInSubtree()
+    }
+
+    open func removeFromSuperview() {
+        detachFromSuperview(notifyAppearance: true, notifyWindow: true)
+    }
+
+    /// Includes the receiver itself, as AppKit's containment query does.
+    open func isDescendant(of view: NSView) -> Bool {
+        var ancestor: NSView? = self
+        while let candidate = ancestor {
+            if candidate === view { return true }
+            ancestor = candidate.superview
+        }
+        return false
+    }
+
+    func detachFromSuperview(notifyAppearance: Bool, notifyWindow: Bool) {
+        guard let superview else { return }
+        let previousWindow = window
+        if let previousWindow { discardCursorRectsInSubtree(from: previousWindow) }
+        if notifyWindow { previousWindow?.focusDidLeave(self) }
+        if notifyWindow && previousWindow != nil { notifyWillMove(toWindow: nil) }
+        let previousAppearance = effectiveAppearance.name
+        (superview as? NSStackView)?.arrangedSubviewRemovedFromHierarchy(self)
+        superview.subviews.removeAll { $0 === self }
+        superview.setNeedsLayout()
+        self.superview = nil
+        if notifyAppearance {
+            notifyEffectiveAppearanceChanged(from: previousAppearance)
+        }
+        if notifyWindow && previousWindow != nil { notifyDidMoveToWindow() }
+        clearTrackingEntriesInSubtree()
+    }
+
+    /// AppKit offers key equivalents to descendants even when they do not own keyboard focus.
+    /// The focused container decides whether its own shortcut should answer the event.
+    open override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard !isHidden else { return false }
+        for child in subviews where !child.isHidden {
+            if child.performKeyEquivalent(with: event) { return true }
+        }
+        return false
+    }
+
+    // MARK: - Auto Layout
+
+    public var layoutSuperview: NSView? { superview }
+
+    /// AppKit's default is true, and so is this one. A view only joins the solve as a solved
+    /// rectangle once its owner says so — which is why forgetting this line produces a view pinned
+    /// to a stale frame rather than a crash, on both platforms.
+    open var translatesAutoresizingMaskIntoConstraints: Bool = true
+
+    var activeConstraints: [NSLayoutConstraint] = []
+    public private(set) var layoutGuides: [NSLayoutGuide] = []
+
+    public var constraints: [NSLayoutConstraint] { activeConstraints }
+
+    open func addConstraint(_ constraint: NSLayoutConstraint) { constraint.isActive = true }
+    open func addConstraints(_ constraints: [NSLayoutConstraint]) { NSLayoutConstraint.activate(constraints) }
+    open func removeConstraint(_ constraint: NSLayoutConstraint) { constraint.isActive = false }
+    open func removeConstraints(_ constraints: [NSLayoutConstraint]) { NSLayoutConstraint.deactivate(constraints) }
+
+    open func addLayoutGuide(_ guide: NSLayoutGuide) {
+        guide.owningView = self
+        layoutGuides.append(guide)
+        setNeedsLayout()
+    }
+
+    public static let noIntrinsicMetric: CGFloat = -1
+    open var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
+    /// Ask Auto Layout for the smallest size satisfying this subtree's constraints at
+    /// fitting-size compression priority. The measurement does not change the live frames.
+    open var fittingSize: NSSize { LayoutEngine.fittingSize(of: self) }
+
+    /// Plain views have no text baseline; their first and last anchors remain their top and
+    /// bottom edges. Text views override these with measured font metrics from their renderer.
+    open var firstBaselineMetric: NSBaselineMetric { NSBaselineMetric(heightFraction: 0, offset: 0) }
+    open var lastBaselineMetric: NSBaselineMetric { NSBaselineMetric(heightFraction: 1, offset: 0) }
+
+    open func invalidateIntrinsicContentSize() { setNeedsLayout() }
+
+    open func setFrameSize(_ newSize: NSSize) {
+        frame = NSRect(origin: frame.origin, size: newSize)
+    }
+
+    public enum LayoutConstraintOrientation: Sendable { case horizontal, vertical }
+
+    private var hugging: [Bool: NSLayoutConstraint.Priority] = [:]
+    private var compression: [Bool: NSLayoutConstraint.Priority] = [:]
+
+    open func setContentHuggingPriority(_ priority: NSLayoutConstraint.Priority, for orientation: LayoutConstraintOrientation) {
+        hugging[orientation == .horizontal] = priority
+        setNeedsLayout()
+    }
+
+    open func contentHuggingPriority(for orientation: LayoutConstraintOrientation) -> NSLayoutConstraint.Priority {
+        hugging[orientation == .horizontal] ?? .defaultLow
+    }
+
+    open func setContentCompressionResistancePriority(_ priority: NSLayoutConstraint.Priority, for orientation: LayoutConstraintOrientation) {
+        compression[orientation == .horizontal] = priority
+        setNeedsLayout()
+    }
+
+    open func contentCompressionResistancePriority(for orientation: LayoutConstraintOrientation) -> NSLayoutConstraint.Priority {
+        compression[orientation == .horizontal] ?? .defaultHigh
+    }
+
+    open func setNeedsLayout() {
+        needsLayout = true
+        superview?.setNeedsLayout()
+    }
+
+    open func updateConstraints() {}
+
+    /// Solve this subtree if anything in it is dirty. AppKit runs this from the window's update
+    /// cycle; the spike runs it from the render walk, which is the same contract with a much
+    /// simpler clock.
+    @discardableResult
+    open func layoutSubtreeIfNeeded() -> LayoutEngine.Diagnosis? {
+        guard needsLayout else { return nil }
+        let diagnosis = LayoutEngine.layout(self)
+        clearNeedsLayout()
+        updateTrackingAreasInSubtree()
+        return diagnosis
+    }
+
+    private func clearNeedsLayout() {
+        needsLayout = false
+        for subview in subviews { subview.clearNeedsLayout() }
+    }
+
+    public var leadingAnchor: NSLayoutXAxisAnchor { NSLayoutXAxisAnchor(item: self, attribute: .leading) }
+    public var trailingAnchor: NSLayoutXAxisAnchor { NSLayoutXAxisAnchor(item: self, attribute: .trailing) }
+    public var leftAnchor: NSLayoutXAxisAnchor { NSLayoutXAxisAnchor(item: self, attribute: .left) }
+    public var rightAnchor: NSLayoutXAxisAnchor { NSLayoutXAxisAnchor(item: self, attribute: .right) }
+    public var centerXAnchor: NSLayoutXAxisAnchor { NSLayoutXAxisAnchor(item: self, attribute: .centerX) }
+    public var topAnchor: NSLayoutYAxisAnchor { NSLayoutYAxisAnchor(item: self, attribute: .top) }
+    public var bottomAnchor: NSLayoutYAxisAnchor { NSLayoutYAxisAnchor(item: self, attribute: .bottom) }
+    public var centerYAnchor: NSLayoutYAxisAnchor { NSLayoutYAxisAnchor(item: self, attribute: .centerY) }
+    public var firstBaselineAnchor: NSLayoutYAxisAnchor { NSLayoutYAxisAnchor(item: self, attribute: .firstBaseline) }
+    public var lastBaselineAnchor: NSLayoutYAxisAnchor { NSLayoutYAxisAnchor(item: self, attribute: .lastBaseline) }
+    public var widthAnchor: NSLayoutDimension { NSLayoutDimension(item: self, attribute: .width) }
+    public var heightAnchor: NSLayoutDimension { NSLayoutDimension(item: self, attribute: .height) }
+
+    // MARK: - Drawing
+
+    open func draw(_ dirtyRect: NSRect) {}
+
+    open func layout() {}
+
+    open func setNeedsDisplay(_ rect: NSRect) { needsDisplay = true }
+
+    /// Walks the tree the way AppKit does for a layer-free view: the view's own `draw(_:)`, then
+    /// its subviews in order, each under a translated origin, a clipped bounds, and its own alpha.
+    public func render(in context: NSGraphicsContext) {
+        guard !isHidden, alphaValue > 0 else { return }
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layoutSubtreeIfNeeded()
+            context.saveGraphicsState()
+            defer { context.restoreGraphicsState() }
+
+            let previousContext = NSGraphicsContext.current
+            NSGraphicsContext.current = context
+            defer { NSGraphicsContext.current = previousContext }
+
+            context.translateBy(x: frame.minX, y: frame.minY)
+            // A child's coordinates differ from its parent's only when their flipped states
+            // differ. Flipping every flipped descendant makes a label inside a flipped stack
+            // draw upside down (and prevents the Pango label from drawing at all).
+            if isFlipped != (superview?.isFlipped ?? false) {
+                context.flipVertically(in: frame.height)
+            }
+            context.alpha = context.alpha * alphaValue
+
+            layout()
+            draw(bounds)
+            for subview in subviews { subview.render(in: context) }
+        }
+    }
+
+    // MARK: - Hit testing
+
+    open func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, frame.contains(point) else { return nil }
+        let local = NSPoint(x: point.x - frame.minX, y: point.y - frame.minY)
+        for subview in subviews.reversed() {
+            if let hit = subview.hitTest(local) { return hit }
+        }
+        return self
+    }
+
+    // MARK: - Pointer tracking and cursor claims
+
+    private var installedTrackingAreas: [NSTrackingArea] = []
+    private var lastTrackedPath: [WeakTrackingView] = []
+
+    /// Ancestor clipping is converted into this view's local coordinates. The intersection is
+    /// bounded by this view's own bounds even when an offscreen host has no clipping surface.
+    open var visibleRect: NSRect {
+        var visible = bounds
+        var ancestor = superview
+        while let view = ancestor {
+            let p = convert(view.bounds.origin, from: view)
+            let q = convert(NSPoint(x: view.bounds.maxX, y: view.bounds.maxY), from: view)
+            let clip = NSRect(x: min(p.x, q.x), y: min(p.y, q.y),
+                              width: abs(q.x - p.x), height: abs(q.y - p.y))
+            visible = visible.intersection(clip)
+            if visible.isEmpty { break }
+            ancestor = view.superview
+        }
+        return visible
+    }
+
+    open func updateTrackingAreas() {}
+    open func resetCursorRects() {}
+
+    open func addTrackingArea(_ area: NSTrackingArea) {
+        guard !installedTrackingAreas.contains(where: { $0 === area }) else { return }
+        installedTrackingAreas.append(area)
+    }
+
+    open func removeTrackingArea(_ area: NSTrackingArea) {
+        installedTrackingAreas.removeAll { $0 === area }
+        area.isEntered = false
+    }
+
+    open func addCursorRect(_ rect: NSRect, cursor: NSCursor) {
+        guard !rect.isEmpty else { return }
+        window?.registerCursorRect(rect, cursor: cursor, for: self)
+    }
+
+    /// Called only after geometry changes. A moving parent can leave a child hovered even when
+    /// the pointer stays still, so every descendant gets the same stale-state check.
+    func updateTrackingAreasInSubtree() {
+        updateTrackingAreas()
+        window?.invalidateCursorRects(for: self)
+        for child in subviews { child.updateTrackingAreasInSubtree() }
+    }
+
+    private func discardCursorRectsInSubtree(from window: NSWindow) {
+        window.discardCursorRects(for: self)
+        for child in subviews { child.discardCursorRectsInSubtree(from: window) }
+    }
+
+    private func clearTrackingEntriesInSubtree() {
+        for area in installedTrackingAreas { area.isEntered = false }
+        for child in subviews { child.clearTrackingEntriesInSubtree() }
+    }
+
+    /// The host delivers one window-coordinate position per pointer event. Only the hit path and
+    /// the previous path are inspected; rows elsewhere in a file-backed navigator do no work.
+    public func pointerMoved(toWindowPoint point: NSPoint, event: NSEvent) {
+        layoutSubtreeIfNeeded()
+        let hit = hitTest(point)
+        var newPath: [NSView] = []
+        var current = hit
+        while let view = current {
+            newPath.append(view)
+            if view === self { break }
+            current = view.superview
+        }
+        let newIDs = Set(newPath.map(ObjectIdentifier.init))
+        var visited = Set<ObjectIdentifier>()
+        for view in lastTrackedPath.compactMap(\.view) + newPath {
+            let id = ObjectIdentifier(view)
+            guard visited.insert(id).inserted else { continue }
+            view.deliverOwnTracking(at: point, onHitPath: newIDs.contains(id), event: event)
+        }
+        lastTrackedPath = newPath.map(WeakTrackingView.init)
+    }
+
+    private func deliverOwnTracking(at point: NSPoint, onHitPath: Bool, event: NSEvent) {
+        let local = convert(point, from: nil)
+        for area in installedTrackingAreas {
+            guard area.options.contains(.mouseEnteredAndExited) else { continue }
+            let rect = area.options.contains(.inVisibleRect) ? visibleRect : area.rect
+            let active = !area.options.contains(.activeInKeyWindow) || window?.isKeyWindow == true
+            let inside = active && !isHiddenOrHasHiddenAncestor
+                && onHitPath && rect.contains(local)
+            guard inside != area.isEntered else { continue }
+            area.isEntered = inside
+            if inside { area.owner?.mouseEntered(with: event) }
+            else { area.owner?.mouseExited(with: event) }
+        }
+    }
+
+    /// The same screen-space and visibility rule used by the production hover-staleness helper.
+    open var isPointerInside: Bool {
+        guard let window, window.isKeyWindow, !isHiddenOrHasHiddenAncestor else { return false }
+        return visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+    }
+
+    open func hoverIsStale(_ isHovered: Bool) -> Bool { isHovered && !isPointerInside }
+
+    private func pointInRoot(_ point: NSPoint) -> NSPoint {
+        guard let superview else {
+            return NSPoint(x: frame.minX + point.x,
+                           y: frame.minY + (isFlipped ? frame.height - point.y : point.y))
+        }
+        let y = isFlipped == superview.isFlipped ? point.y : frame.height - point.y
+        return superview.pointInRoot(NSPoint(x: frame.minX + point.x, y: frame.minY + y))
+    }
+
+    private func pointFromRoot(_ point: NSPoint) -> NSPoint {
+        guard let superview else {
+            return NSPoint(x: point.x - frame.minX,
+                           y: isFlipped ? frame.height - (point.y - frame.minY)
+                                        : point.y - frame.minY)
+        }
+        let parent = superview.pointFromRoot(point)
+        let y = parent.y - frame.minY
+        return NSPoint(x: parent.x - frame.minX,
+                       y: isFlipped == superview.isFlipped ? y : frame.height - y)
+    }
+
+    open func convert(_ point: NSPoint, to view: NSView?) -> NSPoint {
+        let root = pointInRoot(point)
+        return view?.pointFromRoot(root) ?? root
+    }
+
+    open func convert(_ point: NSPoint, from view: NSView?) -> NSPoint {
+        pointFromRoot(view?.pointInRoot(point) ?? point)
+    }
+
+    open func convert(_ rect: NSRect, to view: NSView?) -> NSRect {
+        let first = convert(rect.origin, to: view)
+        let second = convert(NSPoint(x: rect.maxX, y: rect.maxY), to: view)
+        return NSRect(x: min(first.x, second.x), y: min(first.y, second.y),
+                      width: abs(second.x - first.x), height: abs(second.y - first.y))
+    }
+
+    open func convert(_ rect: NSRect, from view: NSView?) -> NSRect {
+        let first = convert(rect.origin, from: view)
+        let second = convert(NSPoint(x: rect.maxX, y: rect.maxY), from: view)
+        return NSRect(x: min(first.x, second.x), y: min(first.y, second.y),
+                      width: abs(second.x - first.x), height: abs(second.y - first.y))
+    }
+
+    // MARK: - Accessibility
+
+    private var accessibilityIsElement = true
+    private var accessibilityLabelValue: String?
+    private var accessibilityRoleValue: NSAccessibility.Role?
+    private var accessibilityIdentifierValue: String?
+    private var accessibilityStoredValue: Any?
+    private var accessibilityTitleValue: String?
+    private var accessibilityHelpValue: String?
+
+    open func setAccessibilityElement(_ isElement: Bool) { accessibilityIsElement = isElement }
+    open func isAccessibilityElement() -> Bool { accessibilityIsElement }
+    open func setAccessibilityLabel(_ label: String?) { accessibilityLabelValue = label }
+    open func accessibilityLabel() -> String? { accessibilityLabelValue }
+    open func setAccessibilityRole(_ role: NSAccessibility.Role?) { accessibilityRoleValue = role }
+    open func accessibilityRole() -> NSAccessibility.Role? { accessibilityRoleValue }
+    open func setAccessibilityIdentifier(_ identifier: String?) { accessibilityIdentifierValue = identifier }
+    open func accessibilityIdentifier() -> String? { accessibilityIdentifierValue }
+    open func setAccessibilityValue(_ value: Any?) { accessibilityStoredValue = value }
+    open func accessibilityValue() -> Any? { accessibilityStoredValue }
+    open func accessibilityPerformPress() -> Bool { false }
+    open func isAccessibilityEnabled() -> Bool { true }
+    open func setAccessibilityTitle(_ title: String?) { accessibilityTitleValue = title }
+    open func accessibilityTitle() -> String? { accessibilityTitleValue }
+    open func setAccessibilityHelp(_ help: String?) { accessibilityHelpValue = help }
+    open func accessibilityHelp() -> String? { accessibilityHelpValue }
+    open func accessibilityPerformShowMenu() -> Bool { false }
+
+    open nonisolated func accessibilityHitTest(_ point: NSPoint) -> Any? {
+        struct Result: @unchecked Sendable { let value: NSView? }
+        return MainActor.assumeIsolated {
+            Result(value: accessibleHitTest(point))
+        }.value
+    }
+
+    private func accessibleHitTest(_ screenPoint: NSPoint) -> NSView? {
+        let local = convert(window?.convertPoint(fromScreen: screenPoint) ?? screenPoint, from: nil)
+        guard !isHiddenOrHasHiddenAncestor,
+              bounds.intersection(visibleRect).contains(local) else { return nil }
+        for child in subviews.reversed() {
+            if let hit = child.accessibleHitTest(screenPoint) { return hit }
+        }
+        return isAccessibilityElement() ? self : nil
+    }
+
+    // MARK: - Animation
+
+    /// The proxy `NSAnimationContext` drives. Unanimated here: the spike renders one frame, and
+    /// what it needs to prove is that the *call sites* compile and that a value set through the
+    /// animator still lands on the view.
+    open func animator() -> Self { self }
+}
+
+public struct NSUserInterfaceItemIdentifier: RawRepresentable, Hashable, Sendable {
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public init(_ rawValue: String) { self.rawValue = rawValue }
+}
+
+public enum NSAccessibility {
+    public enum Role: String, Hashable, Sendable {
+        case staticText
+        case button
+        case group
+    }
+}
+
+@MainActor
+private final class WeakTrackingView {
+    weak var view: NSView?
+    init(_ view: NSView) { self.view = view }
+}

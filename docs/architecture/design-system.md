@@ -3563,6 +3563,26 @@ tier is drawn under System exactly as it is under a styled theme, and System is 
 these numbers was. `SessionAttachmentComparisonTests.testARowsQuietestWordsReadOnTheirOwnRowSelectedOrNot`
 measures the same claim on the raster, and `testRendersTheChronology` is the picture.
 
+`Design.Text.on(_:)` uses `NeutralInk` for finite, normalized sRGB grounds. The leaf returns
+only a black/white base choice and the four alpha rungs, including whether each rung was
+strengthened. The Mac adapter preserves the authored color representation for unchanged rungs
+and the existing sRGB representation for strengthened ones. Role floors and the 24-step count
+retain their existing Mac API names as aliases of Foundation-only `TextLegibilityPolicy`. The
+Linux adapter reads that same owner without importing the theme engine; there is no second
+palette or accessibility setting.
+Contrast keeps `ThemeContrast`'s 0.03928 breakpoint and its white-wins tie. Compositing preserves
+the ground's alpha, and contrast continues to ignore alpha after that composition.
+
+Failed color-space conversion, non-finite or extended components, and a required perceptual
+fallback retain the original Mac policy. This slice does not move the Oklab engine or general
+`LabelLegibility` implementation. The value leaf has no theme state, cache, I/O, or view owner;
+future backends resolve it once per actual ground, not once per label or from a selected flag.
+A normal row, selected row, header, and each action-button state can have different grounds.
+The existing surfaces and their interaction remain host-owned; this adds no extension surface
+or public theme API. `ThreadingDesignKit` compiles the same internal source through its symlink.
+`NeutralInkTests` retains the pre-extraction policy as an independent reference for both contrast
+settings, appearances, translucent and unsupported inputs, and the authored color representation.
+
 ## 2026-08-26 — A floating target needs an isolated silhouette, not only an opaque face
 
 The scroll-to-end target in Conversation and Git Review was opaque, but a full-width live row

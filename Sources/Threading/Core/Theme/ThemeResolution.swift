@@ -87,7 +87,7 @@ public enum ThemeContrast {
     /// deliberate aesthetic choice and holding it to body-text contrast would reject palettes
     /// people genuinely use — Solarized Dark included. This rejects the unreadable, not the
     /// low-contrast.
-    public static let minimumRatio: CGFloat = 3.0
+    public static let minimumRatio: CGFloat = TextLegibilityPolicy.glanceRatio
 
     public static func isLegible(foreground: NSColor, background: NSColor) -> Bool {
         ratio(foreground, background) >= minimumRatio

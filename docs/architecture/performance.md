@@ -43,7 +43,7 @@ separately from wall time. These are algorithm measurements, not Linux Release l
 Reproduce the isolated comparison and mask attribution with:
 
 ```bash
-python3 Spikes/linux-appkit/tests/raster_bounds/run.py \
+python3 Platforms/Linux/tests/raster_bounds/run.py \
   --output /tmp/threading-raster-bounds --optimization O --cpu-timings --profile-mask
 ```
 
@@ -62,6 +62,29 @@ accessibility journey with both optimizations. The startup and selected-terminal
 also passed, with unchanged deadlines, and the resulting native screenshots were inspected.
 The final Debug terminal-return raster took 1,088 ms in that run. Host scheduling load varied,
 so this observation does not establish a stable Linux Release latency bound.
+
+## Linux preview bounded clip storage, 2026-10-01
+
+The direct-mask change above still allocated one full-window `CGFloat` array for every clip.
+The navigator clips each visible row and its title, so a 22-point row at 1280×900 reserved a
+1280×900 mask and nested title clips multiplied another full frame. The context now stores the
+quantized mask only inside the path's device-pixel bounds, intersected with its parent clip.
+Saved graphics states share that immutable region; a transparency group still applies the
+parent clip once when it rejoins the destination. The worst case of a window-sized clip is
+unchanged, while a row's storage follows its visible rectangle.
+
+The standalone raster fixture was updated for the current production glyph and text shims.
+Its macOS compiler supplies a test-only font-metrics trap because this raster-only path never
+calls Linux Pango. All eight pre-change image/mask hashes matched the bounded implementation,
+and an optimized run also matched the frozen raster oracle byte-for-byte. In three isolated
+`-Onone` CPU samples, the 960×600/11-row median fell from 4,025.93 to 2,547.53 ms and the
+1280×900/17-row median from 9,916.03 to 5,253.77 ms. Docker activity made wall time noisy;
+these are process CPU measurements of the standalone renderer, not native frame latency or an
+installed Release bound. The original full-window mask API remains in the fixture so its raw
+fractional-mask oracle still exercises exactly the old data format.
+The full source-built X11 suite and the rebuilt Swift-free Ubuntu Release installed-package
+suite passed with the compact clip representation; its fresh project-list capture was inspected.
+The installed Wayland frame and AT-SPI Actions checks passed, and their captures were inspected.
 
 ## Startup checkpoint reconciliation, 2026-09-25
 
@@ -5611,7 +5634,7 @@ requested recent window. The UI still mounts only its existing visible rows. The
 contract is newest-first saved-agent navigation and project counts, including when older payloads
 cannot decode; the connection's whole-graph save fence remains in force for this partial read.
 
-The opt-in `Spikes/linux-appkit/coreslice.sh --navigation-stress` generated 5,100 sessions in two
+The opt-in `Platforms/Linux/coreslice.sh --navigation-stress` generated 5,100 sessions in two
 projects with about 165-byte titles. On arm64 Linux, a Release build took five warmed samples of
 each read on the same store. Full-graph read: **45.3 ms median, 50.7 ms max**. Bounded navigation:
 **8.1 ms median, 8.7 ms max**, decoding 612 payloads while counting 5,100 indexed rows. Fixture

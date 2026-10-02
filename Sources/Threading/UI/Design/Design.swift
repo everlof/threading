@@ -1530,6 +1530,31 @@ public enum Design {
         /// authorship: there the colour is the theme's own decision about its own ground, here it
         /// is a constant this file picked.
         public static func on(_ background: NSColor) -> Design.Ink {
+            if let ground = background.usingColorSpace(.sRGB),
+               let ink = NeutralInk.resolve(
+                   on: .init(red: ground.redComponent, green: ground.greenComponent,
+                             blue: ground.blueComponent, alpha: ground.alphaComponent),
+                   increasedContrast: Accessibility.increasesContrast,
+                   readingRatio: LabelLegibility.Defaults.readingRatio,
+                   glanceRatio: LabelLegibility.Defaults.glanceRatio,
+                   strengthSteps: LabelLegibility.Defaults.strengthSteps
+               ) {
+                let base: NSColor = ink.base == .white ? .white : .black
+                func color(_ rung: NeutralInk.Rung) -> NSColor {
+                    let resolved = rung.strengthened ? (base.usingColorSpace(.sRGB) ?? base) : base
+                    return resolved.withAlphaComponent(rung.alpha)
+                }
+                return Design.Ink(
+                    base: base, label: color(ink.label), secondary: color(ink.secondary),
+                    tertiary: color(ink.tertiary), quaternary: color(ink.quaternary)
+                )
+            }
+            return inkRequiringPlatformResolution(on: background)
+        }
+
+        /// Unsupported color spaces, extended components, and perceptual fallback retain the
+        /// original policy. The value leaf must not silently clamp or replace those inputs.
+        private static func inkRequiringPlatformResolution(on background: NSColor) -> Design.Ink {
             let light = ThemeContrast.ratio(.white, background) >= ThemeContrast.ratio(.black, background)
             let base: NSColor = light ? .white : .black
             // The tiers are further apart on a dark ground than a light one: black fades to

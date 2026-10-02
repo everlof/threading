@@ -51,6 +51,27 @@ jobs:
       - name: Run the quality gate
         run: scripts/ci.sh
 
+  linux-preview-shim:
+    # Compile and render the AppKit shim on the same architecture as the Ubuntu preview.
+    # This stays separate from the Mac quality gate so Mac builds do not require Docker.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Check the native ARM64 runner and Docker
+        run: |
+          test "$(uname -m)" = aarch64
+          docker info >/dev/null
+
+      - name: Build and render the Linux AppKit shim
+        run: Platforms/Linux/shim-smoke.sh
+
   activity-inbox-wasi:
     # Xcode Swift cannot consume Swift.org cross-compilation SDKs on macOS. This job deliberately
     # uses the matching open-source toolchain for the guest, then Xcode Swift for the exact host

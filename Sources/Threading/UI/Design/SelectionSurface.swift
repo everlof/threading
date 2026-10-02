@@ -230,7 +230,7 @@ extension SelectionSurface {
         /// where holding a deliberate aesthetic to body-text contrast would reject Solarized. A
         /// row's title is body text in the app's own chrome, and the app is not entitled to the
         /// latitude it extends to somebody else's palette.
-        public static let minimumLabelRatio: CGFloat = 4.5
+        public static let minimumLabelRatio: CGFloat = TextLegibilityPolicy.readingRatio
 
         /// How far apart, as CIE76 ΔE, a run of selected text stands from the ground under it.
         ///
