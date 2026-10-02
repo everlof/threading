@@ -17,17 +17,24 @@ import AppKit
 /// finishing together are celebrated once, not five times. Particles obey `ThemeParticleHold`
 /// like every other theme motion; a sound obeys the app's own silence gate and the user's
 /// explicit sound choices, which always win over a theme's.
+///
+/// **Not every event may shower.** Which ones can is the event's own fact
+/// (`ThemeMomentEvent.showsParticles`), held here: a moment stored, decoded or patched for an
+/// event that takes no shower loses its particles on the way in, so no document, tool or
+/// contributed package can put one back.
 public struct ThemeMoments: Equatable {
 
-    public var moments: [ThemeMomentEvent: Moment]
+    public private(set) var moments: [ThemeMomentEvent: Moment] = [:]
 
     public init(moments: [ThemeMomentEvent: Moment] = [:]) {
-        self.moments = moments
+        for (event, moment) in moments {
+            self[event] = moment
+        }
     }
 
     public subscript(event: ThemeMomentEvent) -> Moment? {
         get { moments[event] }
-        set { moments[event] = newValue }
+        set { moments[event] = newValue.flatMap { $0.answering(event) } }
     }
 
     public var isEmpty: Bool { moments.values.allSatisfy(\.isEmpty) }
@@ -54,6 +61,15 @@ public struct ThemeMoments: Equatable {
         }
 
         public var isEmpty: Bool { particles == nil && sound == nil }
+
+        /// This moment as `event` may play it. An event that takes no shower keeps only the
+        /// sound, at the default duration since nothing is timed by it; a moment that was a
+        /// shower and nothing else answers that event with nothing at all.
+        func answering(_ event: ThemeMomentEvent) -> Moment? {
+            guard !event.showsParticles else { return self }
+            if particles != nil, sound == nil { return nil }
+            return Moment(sound: sound)
+        }
     }
 }
 
@@ -65,6 +81,20 @@ public enum ThemeMomentEvent: String, Codable, CaseIterable, Sendable {
     case turnFinished = "turn_finished"
     /// A session started waiting for the person — a permission, a question.
     case needsAttention = "needs_attention"
+
+    /// Whether a theme may answer this event with a shower across the window.
+    ///
+    /// A turn comes back many times an hour across every running session, so a window-wide
+    /// burst on each one is the theme shouting over the work it is reporting. It is answered
+    /// by a sound alone, and the sidebar mascot's celebrating pose — which stays in its own
+    /// corner — is its picture. A session starting to wait is rarer and is the person's cue
+    /// to act, so it keeps its shower.
+    public var showsParticles: Bool {
+        switch self {
+        case .turnFinished: false
+        case .needsAttention: true
+        }
+    }
 }
 
 // MARK: - Codable
@@ -73,13 +103,12 @@ extension ThemeMoments: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let raw = try container.decode([String: Moment].self)
-        var moments: [ThemeMomentEvent: Moment] = [:]
         for (key, moment) in raw {
             // A newer document's event, read by an older host: skipped, never fatal.
             guard let event = ThemeMomentEvent(rawValue: key) else { continue }
-            moments[event] = moment
+            // An older document's shower on an event that no longer takes one: dropped here.
+            self[event] = moment
         }
-        self.moments = moments
     }
 
     public func encode(to encoder: Encoder) throws {

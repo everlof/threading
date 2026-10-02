@@ -1,0 +1,9 @@
+{
+  "formatVersion": 1,
+  "identifier": "codes.threading.examples.music-spectrum",
+  "name": "Music Spectrum",
+  "version": "0.1.0",
+  "runtime": "webAssembly",
+  "executable": "bin/music-spectrum.wasm",
+  "capabilities": ["ui.components", "ui.rendering.metal"]
+}

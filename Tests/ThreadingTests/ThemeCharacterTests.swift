@@ -148,7 +148,8 @@ final class ThemeCharacterTests: XCTestCase {
                 )
             ),
             moments: ThemeMoments(moments: [
-                .turnFinished: .init(particles: ThemeParticles(style: .sparkle), duration: 1.8)
+                .needsAttention: .init(particles: ThemeParticles(style: .sparkle), duration: 1.8),
+                .turnFinished: .init(sound: "dark-sound-turn_finished.caf")
             ]),
             words: ThemeWords(working: ["Herding…"], composerPlaceholder: "Woof?")
         )
@@ -255,6 +256,14 @@ final class ThemeCharacterTests: XCTestCase {
         assertRefused(
             try variant(sidebar: SidebarStyle(brand: SidebarStyle.Brand(logo: .mark, dockIcon: true))),
             mentioning: "logo_in_dock"
+        )
+        // An opaque well is painted over the region the mascot stands in.
+        assertRefused(
+            try variant(sidebar: SidebarStyle(
+                navigatorWell: .init(fill: NSColor(hex: "#061321")!, bevel: .none),
+                mascot: ThemeMascot(poses: [.idle: .init(asset: "i.png")])
+            )),
+            mentioning: "remove_navigator_well"
         )
     }
 
@@ -504,7 +513,7 @@ final class ThemeCharacterTests: XCTestCase {
 
     func testAMomentPlaysOnceThenCoolsDown() throws {
         let stated = theme(try variant(moments: ThemeMoments(moments: [
-            .turnFinished: .init(particles: ThemeParticles(style: .confetti))
+            .needsAttention: .init(particles: ThemeParticles(style: .confetti))
         ])))
         AppThemePalette.set(stated)
 
@@ -514,16 +523,106 @@ final class ThemeCharacterTests: XCTestCase {
         presenter.windowsProvider = { [] }
         presenter.isAppActive = { false }
 
-        XCTAssertEqual(presenter.handle(.needsAttention), .nothingStated)
-        XCTAssertEqual(presenter.handle(.turnFinished), .played(particles: false, sound: false))
+        XCTAssertEqual(presenter.handle(.turnFinished), .nothingStated)
+        XCTAssertEqual(presenter.handle(.needsAttention), .played(particles: false, sound: false))
         clock += 2
-        XCTAssertEqual(presenter.handle(.turnFinished), .coolingDown)
+        XCTAssertEqual(presenter.handle(.needsAttention), .coolingDown)
         clock += ThemeMomentLimits.cooldown
-        XCTAssertEqual(presenter.handle(.turnFinished), .played(particles: false, sound: false))
+        XCTAssertEqual(presenter.handle(.needsAttention), .played(particles: false, sound: false))
 
         AppThemePalette.set(AppTheme.system)
         presenter.resetCooldown()
-        XCTAssertEqual(presenter.handle(.turnFinished), .noTheme)
+        XCTAssertEqual(presenter.handle(.needsAttention), .noTheme)
+    }
+
+    func testAFinishedTurnIsAnsweredBySoundAlone() throws {
+        XCTAssertFalse(ThemeMomentEvent.turnFinished.showsParticles)
+        XCTAssertTrue(ThemeMomentEvent.needsAttention.showsParticles)
+
+        let shower = ThemeParticles(style: .confetti)
+        var moments = ThemeMoments(moments: [
+            .turnFinished: .init(particles: shower, duration: 2, sound: "s.caf"),
+            .needsAttention: .init(particles: shower, duration: 2)
+        ])
+        XCTAssertEqual(moments[.turnFinished], .init(sound: "s.caf"))
+        XCTAssertEqual(moments[.needsAttention]?.particles, shower)
+        moments[.turnFinished] = .init(particles: shower)
+        XCTAssertNil(moments[.turnFinished], "a moment that was only a shower answers with nothing")
+
+        // A document written while a finished turn could still shower loses it on read, and a
+        // block that held nothing else reads as none.
+        let particlesJSON = try XCTUnwrap(
+            String(data: try JSONEncoder().encode(shower), encoding: .utf8)
+        )
+        let older = Data("""
+            {"turn_finished":{"duration":1.6,"particles":\(particlesJSON),"sound":"t.caf"}}
+            """.utf8)
+        XCTAssertEqual(
+            try JSONDecoder().decode(ThemeMoments.self, from: older)[.turnFinished],
+            .init(sound: "t.caf")
+        )
+        let plain = try XCTUnwrap(AppThemeStyles.threading.variant(.dark))
+        var document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(plain)) as? [String: Any]
+        )
+        document["moments"] = ["turn_finished": [
+            "duration": 1.6,
+            "particles": try JSONSerialization.jsonObject(with: Data(particlesJSON.utf8))
+        ]]
+        let reread = try JSONDecoder().decode(
+            AppTheme.Variant.self,
+            from: JSONSerialization.data(withJSONObject: document)
+        )
+        XCTAssertNil(reread.moments)
+    }
+
+    func testAnAgentCannotGiveAFinishedTurnAShower() throws {
+        let refused: [AppThemeMomentArguments] = [
+            AppThemeMomentArguments(particles: AppThemeParticlesArguments(style: "confetti")),
+            AppThemeMomentArguments(duration: 1.6)
+        ]
+        for patch in refused {
+            XCTAssertThrowsError(try AppThemeToolParsing.moments(
+                AppThemeMomentsArguments(turnFinished: patch),
+                remove: nil,
+                base: nil,
+                themeID: AppThemeID("custom-character-\(UUID().uuidString)"),
+                kind: .dark
+            )) {
+                XCTAssertTrue($0.localizedDescription.contains("takes a sound only"))
+            }
+        }
+
+        // The schema never offers the fields the parser refuses.
+        let tool = try XCTUnwrap(MCPTools.definitions.first { $0.name == MCPTools.createAppTheme })
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(tool)) as? [String: Any]
+        )
+        let turnFinished = try XCTUnwrap(firstObject(named: "turn_finished", in: json))
+        let attention = try XCTUnwrap(firstObject(named: "needs_attention", in: json))
+        let offered = { (moment: [String: Any]) in
+            Set(((moment["properties"] as? [String: Any]) ?? [:]).keys)
+        }
+        XCTAssertTrue(
+            offered(turnFinished).isDisjoint(with: ["particles", "remove_particles", "duration"])
+        )
+        XCTAssertTrue(offered(turnFinished).contains("sound"))
+        XCTAssertTrue(offered(attention).isSuperset(of: ["particles", "duration", "sound"]))
+    }
+
+    /// The first object stored under `name` anywhere in a decoded JSON tree.
+    private func firstObject(named name: String, in node: Any) -> [String: Any]? {
+        if let object = node as? [String: Any] {
+            if let match = object[name] as? [String: Any] { return match }
+            for value in object.values {
+                if let match = firstObject(named: name, in: value) { return match }
+            }
+        } else if let array = node as? [Any] {
+            for value in array {
+                if let match = firstObject(named: name, in: value) { return match }
+            }
+        }
+        return nil
     }
 
     // MARK: - Words
@@ -578,6 +677,8 @@ final class ThemeCharacterTests: XCTestCase {
                     alignment: "bottom"
                 ),
                 logo: .image(picture),
+                // Threading's own well would cover the mascot; an author removes it.
+                removeNavigatorWell: true,
                 mascot: AppThemeMascotArguments(
                     size: 64,
                     placement: "center",
@@ -597,7 +698,7 @@ final class ThemeCharacterTests: XCTestCase {
             ),
             sprites: [AppThemeSpriteArguments(name: "paw", source: picture)],
             moments: AppThemeMomentsArguments(
-                turnFinished: AppThemeMomentArguments(
+                needsAttention: AppThemeMomentArguments(
                     particles: AppThemeParticlesArguments(style: "confetti", sprites: ["paw"]),
                     duration: 1.6
                 )
@@ -631,7 +732,7 @@ final class ThemeCharacterTests: XCTestCase {
         XCTAssertEqual(dark.sidebar?.mascot?.placement, .center)
         XCTAssertEqual(dark.sidebar?.background?.image?.alignment, .bottom)
         XCTAssertEqual(dark.sidebar?.brand?.dockIcon, true)
-        XCTAssertEqual(dark.moments?[.turnFinished]?.duration, 1.6)
+        XCTAssertEqual(dark.moments?[.needsAttention]?.duration, 1.6)
         XCTAssertEqual(dark.words?.composerPlaceholder, "Woof?")
 
         let get = coordinator().getAppTheme(AppThemeReferenceArguments(themeID: stored.id.rawValue))
@@ -716,10 +817,13 @@ final class ThemeCharacterTests: XCTestCase {
             mode: nil,
             summary: nil,
             variants: ["dark": AppThemeVariantArguments(
-                sidebar: AppThemeSidebarArguments(mascot: AppThemeMascotArguments(poses: [
-                    "idle": AppThemeMascotPoseArguments(source: picture),
-                    "attention": AppThemeMascotPoseArguments(source: picture)
-                ]))
+                sidebar: AppThemeSidebarArguments(
+                    removeNavigatorWell: true,
+                    mascot: AppThemeMascotArguments(poses: [
+                        "idle": AppThemeMascotPoseArguments(source: picture),
+                        "attention": AppThemeMascotPoseArguments(source: picture)
+                    ])
+                )
             )],
             roles: nil,
             material: nil,

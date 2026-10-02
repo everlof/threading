@@ -106,23 +106,30 @@ public struct SidebarStyle: Codable, Equatable {
         /// drawn on the theme's own plate — the opt-in a contributed theme's icon mark already
         /// had. Needs an image logo.
         public var dockIcon: Bool
+        /// Explicitly replaces the brand with a host-owned analyzer under any material.
+        /// Audio is the user-enabled live spectrum; absent preserves the material's default.
+        public var analyzer: Analyzer?
+
+        public enum Analyzer: String, Codable, CaseIterable { case workload, audio }
 
         public init(
             logo: Logo = .mark,
             title: Title? = nil,
             band: Band? = nil,
             motion: LogoMotion? = nil,
-            dockIcon: Bool = false
+            dockIcon: Bool = false,
+            analyzer: Analyzer? = nil
         ) {
             self.logo = logo
             self.title = title
             self.band = band
             self.motion = motion
             self.dockIcon = dockIcon
+            self.analyzer = analyzer
         }
 
         public var isEmpty: Bool {
-            logo == .mark && title == nil && band == nil && motion == nil && !dockIcon
+            logo == .mark && title == nil && band == nil && motion == nil && !dockIcon && analyzer == nil
         }
 
         public enum Logo: Equatable {
@@ -283,7 +290,7 @@ public struct SidebarStyle: Codable, Equatable {
 
 extension SidebarStyle.Brand: Codable {
     private enum CodingKeys: String, CodingKey {
-        case logo, title, band, motion, dockIcon
+        case logo, title, band, motion, dockIcon, analyzer
     }
 
     public init(from decoder: Decoder) throws {
@@ -293,6 +300,7 @@ extension SidebarStyle.Brand: Codable {
         band = try container.decodeIfPresent(Band.self, forKey: .band)
         motion = try container.decodeIfPresent(LogoMotion.self, forKey: .motion)
         dockIcon = try container.decodeIfPresent(Bool.self, forKey: .dockIcon) ?? false
+        analyzer = try container.decodeIfPresent(Analyzer.self, forKey: .analyzer)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -302,6 +310,7 @@ extension SidebarStyle.Brand: Codable {
         try container.encodeIfPresent(band, forKey: .band)
         try container.encodeIfPresent(motion, forKey: .motion)
         if dockIcon { try container.encode(dockIcon, forKey: .dockIcon) }
+        try container.encodeIfPresent(analyzer, forKey: .analyzer)
     }
 }
 

@@ -4,6 +4,56 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## Chat selection and FSEvents registration, 2026-10-02
+
+The installed Release revision `27202a76e8` recorded a 9,384.9 ms stall at 07:59:21–07:59:30
+local time. Selection had just marked a chat seen; the incident's active-operation list was
+empty. No stack was captured during that particular freeze, so its exact owner remains unproven.
+A subsequent live chat-switch sample at 08:03:34 caught 17 main-thread samples (5 ms sampling
+interval) in `requestSessionPresentation -> show(sessionID:) -> updateGitChangeMonitor ->
+GitCheckoutWatcher.start -> FSEventStreamStart -> f2d_register_rpc -> mach_msg2_trap`.
+The same switch path also registered the project-script watcher synchronously. The host had
+load averages above 200 on ten cores, about 36 GiB used swap, and a busy fseventsd; those facts
+are context, not proof that every observed freeze had this owner.
+
+The scaling contract is one selected Git status watcher, one active project-script watcher,
+plus retained review/branch watchers. Stress is 1,000 rapid start/stop admissions while daemon
+registration is blocked. Main admission and revocation are O(1). `FileSystemEventStream` shares
+one serial utility lifecycle lane, retains one desired generation per watcher, rejects retired
+generations both before the main hop and at delivery, and preserves stop/invalidate/release
+ordering. It retains one debounce item per stream and performs filtering on a shared utility
+delivery queue. An initial notification after successful arming closes the registration gap.
+
+`FileSystemEventStreamTests` blocks the registration and teardown backend deterministically and
+checks that main continues, queued callbacks are revoked, rapid restarts coalesce, and owner
+disposal cleans up an in-flight registration. Native FSEvents coverage uses the production
+project-script watcher and atomic file replacement. The main-actor latency lint also recognizes
+`FSEventStreamStart` and `FSEventStreamStop` as blocking calls. A matched standalone fixture
+compiled the production stream with the same backend deliberately delaying registration by one
+second. Three synchronous-baseline repetitions held main for 1,004.711 ms median / 1,005.120 ms
+maximum; worker admission returned in 0.026 ms median / 0.121 ms maximum. These are simulated
+daemon waits, not measured installed-app switch latencies. A fresh installed Release chat-switch
+sample is still required to establish the after latency under this host's real load. Other
+FSEvents owners (Codex rollout and extension-theme watchers), synchronous Git metadata reads,
+and project-script catalog loading retain their existing boundaries; this repair does not claim
+that all chat-selection work is now off-main.
+
+Validation used a detached checkout of the installed revision with the production watcher patch:
+44 focused tests passed across stream lifecycle, Git filtering, branch following, and project
+scripts, including native atomic replacement. The latency lint and its self-tests passed. An
+expanded Git Review run also reported two layout-test failures outside the edited watcher code.
+The required `scripts/profile_threading.sh full` attempt stopped at compilation because concurrent
+account-preferences changes referenced an unavailable `AccountTokenSectionController`; none of
+its stress phases completed. The running installed app was not replaced, so installed Release
+after timings and the complete sweep remain unverified.
+
+At 09:02 the host had 64 GiB RAM, about 45 GiB used swap, a one-minute load average of 594 on ten
+cores, and fseventsd with roughly 10 GiB resident at one core's CPU usage. The kernel reported
+normal memory pressure; a short VM-counter interval showed no swap-outs. High retained swap
+alone therefore does not establish active memory thrashing as the cause of each stall. The
+filesystem-daemon wait captured on main is direct evidence of an app-side latency boundary
+failure under this system load.
+
 ## Startup checkpoint reconciliation, 2026-09-25
 
 The installed Release HUD recorded three launch stalls of 681, 274 and 299 ms. The first had
@@ -5602,3 +5652,19 @@ the machine this landed on was running at a load average near 600 from unrelated
 makes any frame or energy figure meaningless. The next person to profile should run
 `scripts/profile_threading.sh full` with a fizzing custom theme applied and record the
 compositor's share beside the idle baseline here.
+
+## Music-reactive presentation budget
+
+The feed has one 30 Hz capture/analysis loop for all consumers. A callback downmixes at most
+4,096 frames across at most eight channels into a fixed 2,048-float ring; lock contention drops
+a callback instead of blocking Core Audio. FFT and HAL discovery run on a worker actor. The
+main actor receives only an eight-band immutable snapshot, and draw-time extension bindings
+read cached scalars. Expected discovery is tens of audio processes; 256 is the hard object
+limit and 32 the source-list limit. No raw samples or per-frame messages reach an extension.
+Hidden, clipped, occluded and motion-disabled consumers release their demand; the last one
+stops capture. `AudioSpectrumTests/testAnalysisBudgetForThirtySecondsOfAudio` measures 900
+fixed-window analyses, while presentation tests exercise viewport lifetime and the real GPU
+fallback. See [`audio-spectrum.md`](audio-spectrum.md) for all ownership and frequency bounds.
+
+The first hosted debug run measured 900 analyses in 0.557 seconds, roughly 0.62 ms per
+snapshot. This does not establish compositor/energy cost; unrelated machine load was high.

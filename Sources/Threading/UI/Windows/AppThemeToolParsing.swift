@@ -187,7 +187,7 @@ enum AppThemeToolParsing {
             let statesAnything = patch.gradient != nil || patch.image != nil
                 || patch.logo != nil || patch.title != nil || patch.navigatorWell != nil
                 || patch.particles != nil || patch.band != nil || patch.logoMotion != nil
-                || patch.mascot != nil || patch.logoInDock != nil
+                || patch.mascot != nil || patch.logoInDock != nil || patch.analyzer != nil
             guard !statesAnything else {
                 throw AppThemeEditingError.invalid(
                     "sidebar cannot set fields and remove in the same patch."
@@ -348,6 +348,16 @@ enum AppThemeToolParsing {
         }
 
         if let inDock = patch.logoInDock { brand.dockIcon = inDock }
+        if let raw = patch.analyzer {
+            if raw == "default" {
+                brand.analyzer = nil
+            } else {
+                guard let analyzer = SidebarStyle.Brand.Analyzer(rawValue: raw) else {
+                    throw AppThemeEditingError.invalid("sidebar.analyzer must be audio, workload or default.")
+                }
+                brand.analyzer = analyzer
+            }
+        }
 
         if patch.removeMascot == true {
             style.mascot = nil
@@ -424,6 +434,7 @@ enum AppThemeToolParsing {
                 document["logo_motion"] = Self.document(motion)
             }
             if brand.dockIcon { document["logo_in_dock"] = true }
+            if let analyzer = brand.analyzer { document["analyzer"] = analyzer.rawValue }
         }
         if let mascot = sidebar.mascot {
             document["mascot"] = Self.document(mascot)
@@ -998,6 +1009,13 @@ enum AppThemeToolParsing {
                 "\(field) cannot set sound and remove_sound in the same patch."
             )
         }
+        guard event.showsParticles || (patch.particles == nil && patch.duration == nil) else {
+            throw AppThemeEditingError.invalid(
+                "\(field) takes a sound only — turns finish many times an hour, so a shower "
+                    + "across the window on each one is too much. The sidebar mascot's "
+                    + "celebrating pose is the picture of a finished turn."
+            )
+        }
         var moment = base ?? ThemeMoments.Moment()
         if patch.removeParticles == true {
             moment.particles = nil
@@ -1087,7 +1105,9 @@ enum AppThemeToolParsing {
         var document: [String: Any] = [:]
         for event in ThemeMomentEvent.allCases {
             guard let moment = moments[event] else { continue }
-            var fields: [String: Any] = ["duration": moment.duration]
+            var fields: [String: Any] = [:]
+            // Duration times a shower; an event that takes none has nothing to report.
+            if event.showsParticles { fields["duration"] = moment.duration }
             if let particles = moment.particles { fields["particles"] = Self.document(particles) }
             if let sound = moment.sound { fields["sound"] = ["asset": sound] }
             document[event.rawValue] = fields

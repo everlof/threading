@@ -206,6 +206,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Autonomous host work, durable questions/continuations, delivery receipts, worker memory and the portable owner CLI | [`autonomous-controller.md`](docs/architecture/autonomous-controller.md) |
 | The first-launch walkthrough: window deferral and the terminate trap, the completed flag, the global conversation scan, the notifications opt-in | [`onboarding.md`](docs/architecture/onboarding.md) |
 | Terminal themes, app themes, the three assignment scopes, the MCP theme tools, glow and clipping | [`themes.md`](docs/architecture/themes.md) |
+| Music-reactive themes, system-audio consent, process taps, FFT bounds and shared spectrum signals | [`audio-spectrum.md`](docs/architecture/audio-spectrum.md) |
 | Agent marks, account chips, project icons, icon discovery and research | [`icons.md`](docs/architecture/icons.md) |
 | Opening a checkout or a file in another app: the registry, LaunchServices detection, line numbers, the header's split control | [`external-apps.md`](docs/architecture/external-apps.md) |
 | Multiple logins per CLI, discovery and naming, migrating a conversation between accounts, usage readings, the usage-window poke | [`accounts.md`](docs/architecture/accounts.md) |

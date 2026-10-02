@@ -19,12 +19,12 @@ enum ExtensionHostSignals {
 
     /// Every signal this build answers. Pinned against `ExtensionHostSignal.all` by
     /// `ExtensionHostSignalsTests`, so the SDK cannot name a signal the host forgot.
-    nonisolated static let supported: Set<ExtensionHostSignal> = [
+    nonisolated static let supported: Set<ExtensionHostSignal> = Set<ExtensionHostSignal>([
         .activeAccountUsageRemaining,
         .workloadIntensity,
         .workloadWorkingCount,
         .timeOfDayFraction
-    ]
+    ]).union(ExtensionHostSignal.audioSignals)
 
     /// The one signal only a window can answer. Which account is "active" is the toolbar's
     /// account item's to say, so `MainWindowController` installs the reading when it builds
@@ -37,6 +37,7 @@ enum ExtensionHostSignals {
     /// The workload monitor's current envelope. A seam so a test can state a fleet without
     /// starting sessions.
     static var intensity: () -> AgentIntensity = { AgentWorkloadMonitor.shared.intensity }
+    static var audio: () -> AudioSpectrum? = { AudioSpectrumService.shared.reading() }
     /// The monotonic clock the envelope decays against.
     static var uptime: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     /// The wall clock the day fraction is read from.
@@ -64,8 +65,15 @@ enum ExtensionHostSignals {
         case .timeOfDayFraction:
             return dayFraction(of: now(), in: calendar())
 
+        case .audioAvailable: return audio() == nil ? 0 : 1
+        case .audioLevel: return audio()?.level
+        case .audioBass: return audio()?.bass
+        case .audioMids: return audio()?.mids
+        case .audioTreble: return audio()?.treble
+
         default:
-            return nil
+            guard let index = ExtensionHostSignal.audioBands.firstIndex(of: signal) else { return nil }
+            return audio()?.bands[index]
         }
     }
 

@@ -4443,12 +4443,13 @@ final class ThemedControlTests: HostedStoreTestCase {
             )
         }
 
+        let hostedSurfaces: [(String, Bool?)] = [("settings", false), ("accountless", nil)]
         for (name, appearanceName) in [
             ("light", NSAppearance.Name.aqua),
             ("dark", .darkAqua)
         ] {
             let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
-            for (surface, anonymous) in [("settings", false), ("accountless", true)] {
+            for (surface, anonymous) in hostedSurfaces {
                 var png: Data?
                 appearance.performAsCurrentDrawingAppearance {
                     let controller = RemoteAccessPreferencesViewController(
@@ -8030,6 +8031,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "ThemedSplitView",
                 "ThemedStackedBandChartView",
                 "ThemedStatusReceiptButton",
+                "ThemedStickerBadge",
                 "ThemedTimeSeriesChartView",
                 "ChartCardView",
                 "ListSelectionStrength",

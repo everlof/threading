@@ -1314,9 +1314,8 @@ float4 threadingExtensionFragment(
 
 The host supplies `ThreadingSurfaceUniforms` with `float2 size`, `float time`, one padding float,
 and `float values[8]`. Values use the declaration order in `ExtensionMetalSurface.inputs`;
-binding names are documentation and stable source identifiers, not shader reflection. The only
-v1 live signal is `active-account.usage-remaining`, a `0...1` fraction with the binding's
-fallback used when no active account reading exists. The host owns the `MTKView`, pipeline
+binding names are documentation and stable source identifiers, not shader reflection. Use
+the live-signal table below; unavailable readings use the binding's fallback. The host owns the `MTKView`, pipeline
 wrapper, command queue, fullscreen geometry, transparency, hit testing, frame cadence and
 reduced-motion behavior. Shader source is limited to 256 KiB at the actual opened-file read (a
 package-size preflight is not trusted) and frame rate to 60 fps.
@@ -1390,9 +1389,24 @@ refuses a patch that names a signal it cannot answer, so bind only these:
 | `workload.intensity` | `0…1` | The app-wide activity envelope the sidebar's workload analyzer draws: a floor from how many sessions are working, raised by recent output, decaying with quiet. |
 | `workload.working-count` | `0…` | The exact number of working sessions, as a count. State an `inputMaximum` in the mapping — eight is a busy Mac — so your surface decides what "many" means. |
 | `time.day-fraction` | `0…1` | Midnight to midnight in the user's own calendar, so a surface can follow the hour without reading a clock. |
+| `audio.available` | `0` or `1` | A fresh capture reading exists. Silence is available; off, waiting, denied, unsupported and stale capture are unavailable. |
+| `audio.level` | `0…1` | Smoothed RMS loudness in an absolute −60…0 dBFS display range. Unavailable uses the mapping fallback. |
+| `audio.bass`, `audio.mids`, `audio.treble` | `0…1` | Means of bands 0–1, 2–4 and 5–7, respectively. Unavailable uses the mapping fallback. |
+| `audio.band.0` … `audio.band.7` | `0…1` | Eight low-to-high spectrum ranges: 20–80, 80–200, 200–500, 500–1,200, 1,200–3,000, 3,000–6,000, 6,000–12,000, 12,000–20,000 Hz. |
 
 Every signal is cheap and read once per frame; none reaches a store, a file or a process, and
 none identifies a session, an account or a person.
+
+Audio bindings are presentation only: Threading owns the explicit **Motion → Music-reactive
+themes** opt-in, audio-source selection, macOS 14.2+ system-audio permission, local analysis,
+and capture lifetime. Capture runs only for visible consumers that pass Reduce Motion,
+Theme animations and Low Power Mode gates. Audio surfaces use their fallback and a zero clock
+when motion is disabled. No raw audio, source identity, recording or high-frequency IPC is
+provided to an extension. Use zero fallback for silence/unavailability and avoid inventing
+music-driven movement when readings are missing. The complete safe Wasm example is
+`Packages/ThreadingExtensionKit/Examples/MusicSpectrumExtension`; it uses the existing eight
+input slots and draws beneath an intact sidebar. Ordinary theme documents may instead use
+`sidebar.brand.analyzer: "audio"` for the host's compact native analyzer.
 
 Buttons in a selected full-content replacement arrive as
 `ExtensionComponentActionRequest`. Return an `ExtensionActionResponse` with the matching

@@ -229,6 +229,40 @@ enum AppThemePreviewService {
         column.addSubview(band)
         column.addSubview(header)
 
+        // The real sidebar's stacking, bottom to top: the ground and its dressing, the mascot
+        // standing on the column's foot, the navigator well, then the rows. A preview that drew
+        // the mascot over the well showed a dog the real window hid.
+        let appearance = NSAppearance.currentDrawing()
+        if let mascot = SidebarAppearance.mascot(for: appearance) {
+            let figure = mascotFigure(mascot, mood: .idle)
+            column.addSubview(figure)
+            let inset = Design.Spacing.medium
+            var constraints = [
+                figure.bottomAnchor.constraint(equalTo: column.bottomAnchor, constant: -Design.Spacing.small)
+            ]
+            switch mascot.spec.placement {
+            case .leading:
+                constraints.append(figure.leadingAnchor.constraint(equalTo: column.leadingAnchor, constant: inset))
+            case .center:
+                constraints.append(figure.centerXAnchor.constraint(equalTo: column.centerXAnchor))
+            case .trailing:
+                constraints.append(figure.trailingAnchor.constraint(equalTo: column.trailingAnchor, constant: -inset))
+            }
+            NSLayoutConstraint.activate(constraints)
+        }
+        if let well = SidebarAppearance.navigatorWell(for: appearance) {
+            let wellView = ThemedSurfaceView()
+            wellView.translatesAutoresizingMaskIntoConstraints = false
+            wellView.applySurface(fill: well.fill, radius: .fixed(0), bevel: well.bevel)
+            column.addSubview(wellView)
+            NSLayoutConstraint.activate([
+                wellView.topAnchor.constraint(equalTo: header.bottomAnchor),
+                wellView.bottomAnchor.constraint(equalTo: column.bottomAnchor),
+                wellView.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+                wellView.trailingAnchor.constraint(equalTo: column.trailingAnchor)
+            ])
+        }
+
         let rows = NSStackView(views: sampleRows())
         rows.orientation = .vertical
         rows.alignment = .leading
@@ -252,25 +286,6 @@ enum AppThemePreviewService {
             rows.leadingAnchor.constraint(equalTo: column.leadingAnchor),
             rows.trailingAnchor.constraint(equalTo: column.trailingAnchor)
         ])
-
-        // The mascot at the column's foot, in its idle pose — the real sidebar's strip.
-        if let mascot = SidebarAppearance.mascot(for: NSAppearance.currentDrawing()) {
-            let figure = mascotFigure(mascot, mood: .idle)
-            column.addSubview(figure)
-            let inset = Design.Spacing.medium
-            var constraints = [
-                figure.bottomAnchor.constraint(equalTo: column.bottomAnchor, constant: -Design.Spacing.small)
-            ]
-            switch mascot.spec.placement {
-            case .leading:
-                constraints.append(figure.leadingAnchor.constraint(equalTo: column.leadingAnchor, constant: inset))
-            case .center:
-                constraints.append(figure.centerXAnchor.constraint(equalTo: column.centerXAnchor))
-            case .trailing:
-                constraints.append(figure.trailingAnchor.constraint(equalTo: column.trailingAnchor, constant: -inset))
-            }
-            NSLayoutConstraint.activate(constraints)
-        }
         return column
     }
 

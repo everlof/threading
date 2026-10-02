@@ -525,7 +525,9 @@ extension TerminalTheme {
     /// which is the shipped default and is *not* "follow macOS"), and it is rxvt's long-standing
     /// convention that vim, less and delta read too. It is deliberately only a *fallback*: a
     /// person who has set a theme by hand keeps it, because this describes the terminal rather
-    /// than choosing for the program.
+    /// than choosing for the program. Choosing for Claude is a separate decision with its own
+    /// setting — `ClaudeTerminalTheme` states an ANSI theme in the session's settings file so
+    /// Claude's TUI draws in this palette rather than in colours of its own.
     ///
     /// The value is `<foreground>;<background>` as ANSI indices, and only the background is ever
     /// read — every consumer takes the last field and asks whether it is a dark slot. Reporting

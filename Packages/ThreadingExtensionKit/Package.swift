@@ -37,6 +37,7 @@ let package = Package(
             name: "SidebarAuroraExtensionExample",
             targets: ["SidebarAuroraExtensionExample"]
         ),
+        .executable(name: "MusicSpectrumExtensionExample", targets: ["MusicSpectrumExtensionExample"]),
         .executable(
             name: "SessionInfoExtensionExample",
             targets: ["SessionInfoExtensionExample"]
@@ -140,6 +141,13 @@ let package = Package(
             dependencies: ["ThreadingExtensionKit"],
             path: "Examples/SidebarAuroraExtension",
             exclude: ["threading-extension.json", "Resources"],
+            plugins: ["ThreadingExtensionPolicyPlugin"]
+        ),
+        .executableTarget(
+            name: "MusicSpectrumExtensionExample",
+            dependencies: ["ThreadingExtensionKit"],
+            path: "Examples/MusicSpectrumExtension",
+            exclude: ["threading-extension.json", "Resources", "README.md"],
             plugins: ["ThreadingExtensionPolicyPlugin"]
         ),
         .executableTarget(

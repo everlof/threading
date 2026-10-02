@@ -40,6 +40,7 @@ final class SidebarBrandView: NSView, ThemedComponent {
     private let customLogo = ThemeLogoView()
     private let wordmark = MorphingTitleLabel()
     private let workloadAnalyzer = AgentWorkloadAnalyzerView()
+    private let audioAnalyzer = AudioSpectrumView()
     private let stack = NSStackView()
     private let appEvents = AppEventObservations()
     private var pointerTracking: NSTrackingArea?
@@ -64,6 +65,7 @@ final class SidebarBrandView: NSView, ThemedComponent {
         stack.addArrangedSubview(customLogo)
         stack.addArrangedSubview(wordmark)
         stack.addArrangedSubview(workloadAnalyzer)
+        stack.addArrangedSubview(audioAnalyzer)
         addSubview(stack)
 
         NSLayoutConstraint.activate([
@@ -76,12 +78,15 @@ final class SidebarBrandView: NSView, ThemedComponent {
             customLogo.widthAnchor.constraint(equalToConstant: Layout.logoSide),
             customLogo.heightAnchor.constraint(equalToConstant: Layout.logoSide),
             workloadAnalyzer.widthAnchor.constraint(equalToConstant: Design.WorkloadAnalyzer.size.width),
-            workloadAnalyzer.heightAnchor.constraint(equalToConstant: Design.WorkloadAnalyzer.size.height)
+            workloadAnalyzer.heightAnchor.constraint(equalToConstant: Design.WorkloadAnalyzer.size.height),
+            audioAnalyzer.widthAnchor.constraint(equalToConstant: Design.AudioSpectrum.size.width),
+            audioAnalyzer.heightAnchor.constraint(equalToConstant: Design.AudioSpectrum.size.height)
         ])
 
         mark.setAccessibilityElement(false)
         customLogo.setAccessibilityElement(false)
         wordmark.setAccessibilityElement(false)
+        audioAnalyzer.setAccessibilityElement(false)
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
 
@@ -96,6 +101,7 @@ final class SidebarBrandView: NSView, ThemedComponent {
             self.customLogo.setWorkingIntensity(Self.logoIntensity(event.intensity))
             self.updateAccessibility()
         }
+        appEvents.observe(AudioSpectrumDidChange.self) { [weak self] _ in self?.updateAccessibility() }
     }
 
     @available(*, unavailable)
@@ -130,13 +136,13 @@ final class SidebarBrandView: NSView, ThemedComponent {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        guard workloadAnalyzer.isHidden else { return }
+        guard workloadAnalyzer.isHidden, audioAnalyzer.isHidden else { return }
         mark.setHovered(true)
         customLogo.setHovered(true)
     }
 
     override func mouseExited(with event: NSEvent) {
-        guard workloadAnalyzer.isHidden else { return }
+        guard workloadAnalyzer.isHidden, audioAnalyzer.isHidden else { return }
         mark.setHovered(false)
         customLogo.setHovered(false)
     }
@@ -145,7 +151,7 @@ final class SidebarBrandView: NSView, ThemedComponent {
     /// it names the window rather than opening anything, and a logo that acknowledges being
     /// pressed is the whole of what was asked of it.
     override func mouseDown(with event: NSEvent) {
-        guard workloadAnalyzer.isHidden else { return }
+        guard workloadAnalyzer.isHidden, audioAnalyzer.isHidden else { return }
         if customLogo.isHidden {
             mark.playPress()
         } else {
@@ -169,7 +175,7 @@ final class SidebarBrandView: NSView, ThemedComponent {
     /// One-shot, host-invoked, and a no-op under Reduce Motion — the reduced launch is the
     /// finished row simply being there.
     func playLaunchAnimation() {
-        guard workloadAnalyzer.isHidden, !Design.Motion.reducesMotion else { return }
+        guard workloadAnalyzer.isHidden, audioAnalyzer.isHidden, !Design.Motion.reducesMotion else { return }
 
         if customLogo.isHidden {
             mark.playDrawIn()
@@ -191,13 +197,20 @@ final class SidebarBrandView: NSView, ThemedComponent {
 
     // MARK: - Private Methods
 
+    override func accessibilityValue() -> Any? {
+        if !audioAnalyzer.isHidden { return audioAnalyzer.accessibilityValue() }
+        return super.accessibilityValue()
+    }
+
     private func configure(animated: Bool) {
         let brand = SidebarAppearance.brand(for: effectiveAppearance)
-        let showsWorkloadAnalyzer = Design.Chart.style == .spectrum
+        let analyzer = brand.analyzer ?? (Design.Chart.style == .spectrum ? .workload : nil)
+        let showsWorkloadAnalyzer = analyzer == .workload
 
         workloadAnalyzer.setPresented(showsWorkloadAnalyzer)
+        audioAnalyzer.setPresented(analyzer == .audio)
 
-        if showsWorkloadAnalyzer {
+        if analyzer != nil {
             mark.isHidden = true
             mark.setHovered(false)
             customLogo.isHidden = true
@@ -255,7 +268,13 @@ final class SidebarBrandView: NSView, ThemedComponent {
     }
 
     private func updateAccessibility() {
-        guard Design.Chart.style == .spectrum else { return }
+        if !audioAnalyzer.isHidden {
+            setAccessibilityLabel(L10n.string("Audio spectrum"))
+            setAccessibilityValue(audioAnalyzer.accessibilityValue())
+            toolTip = L10n.string("Live audio spectrum")
+            return
+        }
+        guard !workloadAnalyzer.isHidden else { return }
 
         let count = workloadIntensity.workload.workingCount
         let countSummary: String

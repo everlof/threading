@@ -87,9 +87,9 @@ public enum BuildChannel: String, CaseIterable {
     /// nothing the distribution method withholds. They stay off until the person turns Remote
     /// Access on.
     ///
-    /// Public builds enroll with a private installation secret, so Developer ID distribution
-    /// does not require the Sign in with Apple entitlement. Development builds keep their
-    /// existing Apple and isolated development authentication paths.
+    /// Production enrollment uses a private installation secret on every channel, including
+    /// local development builds. Only the explicitly selected development service or loopback
+    /// authentication uses the isolated developer paths; no ordinary setup needs Apple sign-in.
     ///
     /// `.dev` is the channel every uninjected build lands on, so working on Hosted Direct needs
     /// no flag: build it the ordinary way and it is there.

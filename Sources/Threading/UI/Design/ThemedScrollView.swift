@@ -540,6 +540,8 @@ public final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
         switch scrollerAppearance {
         case .automatic:
             drawPill(inkSource.ink.secondary, in: knob)
+        case .pill:
+            drawCapsule(Design.Surface.accent, in: knob)
         case .aqua, .aquaTiger:
             drawAquaGel(in: knob, pressed: false)
         case .platinum:
@@ -2387,6 +2389,15 @@ public final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
     private func positiveUnit(_ value: CGFloat) -> CGFloat {
         let remainder = value.truncatingRemainder(dividingBy: 1)
         return remainder >= 0 ? remainder : remainder + 1
+    }
+
+    /// A true capsule whatever the material's control radius: `drawPill` follows the theme's
+    /// corner, which squares the thumb under a squarish material, while the `pill` appearance
+    /// promises a round-ended handle.
+    private func drawCapsule(_ color: NSColor, in rect: NSRect) {
+        let radius = min(rect.width, rect.height) / 2
+        color.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
     }
 
     private func drawPill(_ color: NSColor, in rect: NSRect) {

@@ -209,6 +209,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedSpinner",
         "ThemedSplitView",
         "ThemedStatusReceiptButton",
+        "ThemedStickerBadge",
         "ThemedBarSparklineView",
         "ThemedStackedBandChartView",
         "ThemedTimeSeriesChartView",
@@ -2129,6 +2130,12 @@ final class ComponentGalleryViewController: NSViewController {
                     statusReceipt
                 ),
                 story(
+                    "ThemedStickerBadge",
+                    "A count or a branch name set as a tilted price sticker — what a theme "
+                        + "whose badges are stickers shows in place of a quiet mark.",
+                    makeStickerBadgeSample()
+                ),
+                story(
                     "DiffSkeletonView",
                     "The ghost a review row holds while its diff is deferred. Each file's "
                         + "own added and removed counts split the changed run, so the "
@@ -3429,6 +3436,13 @@ final class ComponentGalleryViewController: NSViewController {
             screen.heightAnchor.constraint(equalToConstant: 390)
         ])
         return screen
+    }
+
+    private func makeStickerBadgeSample() -> NSView {
+        let row = NSStackView(views: ["3", "12", "main"].map { ThemedStickerBadge(text: $0) })
+        row.orientation = .horizontal
+        row.spacing = Design.Spacing.medium
+        return row
     }
 
     private func makeRecordingBadgeSample() -> NSView {

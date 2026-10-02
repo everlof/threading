@@ -780,8 +780,18 @@ than making one, and only `index`, `HEAD`, `refs/` and their kin mean the diff c
 is also the second reason `--no-optional-locks` matters: without it a read would refresh the
 index, the watcher would see it, and the pane would re-read itself forever.
 
-Teardown follows FSEvents' required order: stop, invalidate, release. `Stop` synchronously
-prevents another callback and `Invalidate` removes the dispatch-queue schedule. Clearing the
+`FileSystemEventStream` owns registration and teardown on one shared utility lane. Selecting a
+chat must not synchronously register with fseventsd: an installed-app chat-switch sample on
+2026-10-02 caught main waiting in `GitCheckoutWatcher.start -> FSEventStreamStart ->
+f2d_register_rpc`. Stop revokes the delivery generation immediately, including notifications
+already queued on main; daemon cleanup finishes off-main. Rapid start/stop requests retain only
+the latest desired generation per watcher, and discarded owners still clean up registrations
+that were in flight. A catch-up notification after successful registration covers writes made
+between the caller's initial read and asynchronous arming. Event filtering and debounce remain
+off-main, with one pending notification per stream.
+
+Teardown follows FSEvents' required order: stop, invalidate, release. `Invalidate` removes the
+dispatch-queue schedule. Clearing the
 queue explicitly before invalidating is not an extra safety step — the framework documents
 that state as an error, and it has crashed inside FSEvents while releasing a long-lived stream.
 

@@ -46,6 +46,7 @@ enum SystemPrivacyPermission: String, CaseIterable, Sendable {
     case notifications
     case accessibility
     case screenRecording
+    case systemAudio
 
     var title: String {
         switch self {
@@ -53,6 +54,7 @@ enum SystemPrivacyPermission: String, CaseIterable, Sendable {
         case .notifications: return L10n.string("Notifications")
         case .accessibility: return L10n.string("Accessibility")
         case .screenRecording: return L10n.string("Screen Recording")
+        case .systemAudio: return L10n.string("System Audio Recording")
         }
     }
 
@@ -65,6 +67,7 @@ enum SystemPrivacyPermission: String, CaseIterable, Sendable {
         case .notifications: return "Notifications"
         case .accessibility: return "Accessibility"
         case .screenRecording: return "Screen Recording"
+        case .systemAudio: return "System Audio Recording"
         }
     }
 
@@ -74,6 +77,7 @@ enum SystemPrivacyPermission: String, CaseIterable, Sendable {
         case .notifications: return "bell"
         case .accessibility: return "figure.wave"
         case .screenRecording: return "rectangle.inset.filled.and.person.filled"
+        case .systemAudio: return "waveform"
         }
     }
 
@@ -101,6 +105,8 @@ enum SystemPrivacyPermission: String, CaseIterable, Sendable {
                 "Only for an extension companion that captures the screen. The built-in "
                     + "interface inspector draws from Threading's own view tree and needs nothing."
             )
+        case .systemAudio:
+            return L10n.string("Music-reactive themes analyze playing audio locally and receive only spectrum levels. Enable audio sharing in Motion settings to use it.")
         }
     }
 
@@ -117,6 +123,8 @@ enum SystemPrivacyPermission: String, CaseIterable, Sendable {
             return L10n.string(
                 "You allow Threading in System Settings, then reload the extension."
             )
+        case .systemAudio:
+            return L10n.string("macOS asks when you enable audio sharing and a visible surface needs it.")
         }
     }
 
@@ -134,6 +142,9 @@ enum SystemPrivacyPermission: String, CaseIterable, Sendable {
             return URL(string: Self.privacyPane + "Privacy_Accessibility")
         case .screenRecording:
             return URL(string: Self.privacyPane + "Privacy_ScreenCapture")
+        case .systemAudio:
+            // Screen recording and audio-only recording share this System Settings pane.
+            return URL(string: Self.privacyPane + "Privacy_ScreenCapture")
         }
     }
 
@@ -141,7 +152,7 @@ enum SystemPrivacyPermission: String, CaseIterable, Sendable {
     var isStatusReadable: Bool {
         switch self {
         case .accessibility, .screenRecording, .notifications: return true
-        case .filesAndFolders: return false
+        case .filesAndFolders, .systemAudio: return false
         }
     }
 
@@ -201,7 +212,7 @@ struct SystemPrivacyStatusReader {
             return accessibilityTrusted() ? .allowed : .notAllowed
         case .screenRecording:
             return screenRecordingAllowed() ? .allowed : .notAllowed
-        case .notifications, .filesAndFolders:
+        case .notifications, .filesAndFolders, .systemAudio:
             return nil
         }
     }
@@ -218,6 +229,7 @@ struct SystemPrivacyStatusReader {
     ) {
         var statuses: [SystemPrivacyPermission: SystemPrivacyStatus] = [
             .filesAndFolders: .askedWhenNeeded,
+            .systemAudio: .askedWhenNeeded,
             .accessibility: accessibilityTrusted() ? .allowed : .notAllowed,
             .screenRecording: screenRecordingAllowed() ? .allowed : .notAllowed
         ]

@@ -203,6 +203,9 @@ final class UsageWindowGridView: NSView {
             } else {
                 progressTint.setFill()
                 fill.fill()
+                if progressStyle == .striped {
+                    ThemedProgressDrawing.drawStripes(in: fill)
+                }
             }
 
             NSGraphicsContext.restoreGraphicsState()

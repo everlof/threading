@@ -134,6 +134,7 @@ public enum SidebarAppearance {
         public let band: Band?
         /// How the logo moves, with its particles' inks already resolved.
         public let motion: LogoMotion?
+        public var analyzer: SidebarStyle.Brand.Analyzer? = nil
 
         public struct Band: Equatable {
             public let gradient: Background.Gradient
@@ -204,7 +205,8 @@ public enum SidebarAppearance {
             ),
             titleColor: title?.color ?? band?.ink,
             band: band,
-            motion: motion
+            motion: motion,
+            analyzer: stated?.analyzer
         )
     }
 

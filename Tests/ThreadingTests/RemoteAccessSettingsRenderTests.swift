@@ -321,13 +321,26 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         )
     }
 
-    /// A public build cannot carry Sign in with Apple, so its page has no Hosted Direct row, no
-    /// Apple sign-in button, and no Threading Direct segment — even when it is handed a
-    /// presentation that says this Mac is signed in. The local ways in are unchanged.
-    func testAPublicBuildOmitsHostedDirectAndKeepsTheLocalWaysIn() throws {
+    /// Ordinary local builds use the same accountless production service as public builds.
+    /// A deliberately hosted-disabled controller still omits its controls and segment.
+    func testDefaultPageOffersAccountlessAccessAndHostedDisabledPageKeepsTheLocalWaysIn() throws {
         let development = page(state: .lanBound)
         XCTAssertNotNil(help(in: development.view, titled: L10n.string("Hosted Direct")))
+        XCTAssertNil(view(in: development.view, id: "settings.remote-access.hosted-sign-in"))
+        let enable = try XCTUnwrap(button(
+            in: development.view, id: "settings.remote-access.hosted-enable"
+        ))
+        XCTAssertEqual(enable.title, L10n.string("Enable Hosted Access"))
+        XCTAssertFalse(isEffectivelyHidden(enable))
+
+        // Settings caches the controller: switching services must replace its existing
+        // controls in both directions rather than requiring a new page or app restart.
+        development.controller.apply(hostedAnonymous: false)
         XCTAssertNotNil(view(in: development.view, id: "settings.remote-access.hosted-sign-in"))
+        XCTAssertNil(view(in: development.view, id: "settings.remote-access.hosted-enable"))
+        development.controller.apply(hostedAnonymous: true)
+        XCTAssertNil(view(in: development.view, id: "settings.remote-access.hosted-sign-in"))
+        XCTAssertNotNil(view(in: development.view, id: "settings.remote-access.hosted-enable"))
 
         let publicBuild = page(
             state: .lanBound,

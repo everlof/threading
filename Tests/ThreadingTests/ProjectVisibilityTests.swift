@@ -44,6 +44,58 @@ final class ProjectVisibilityTests: HostedStoreTestCase {
         XCTAssertEqual(ProjectVisibility.visible([hidden, visible], showHidden: true).map(\.id), [hidden.id, visible.id])
     }
 
+    func testSearchRevealsHiddenProjectChatAndTerminalWithoutUnhidingProject() throws {
+        let settings = AppSettings.shared
+        let priorShown = settings.showsHiddenProjects
+        let priorNavigator = settings.workspaceNavigatorSelection
+        let priorMotion = Design.Motion.reduceMotionOverrideForTesting
+        Design.Motion.reduceMotionOverrideForTesting = true
+        defer {
+            settings.showsHiddenProjects = priorShown
+            settings.workspaceNavigatorSelection = priorNavigator
+            Design.Motion.reduceMotionOverrideForTesting = priorMotion
+        }
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(folderURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-hidden-\(UUID())")))
+        let chat = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let terminal = try XCTUnwrap(store.addTerminal(to: project.id))
+        XCTAssertTrue(store.setProjectHidden(true, projectID: project.id).succeeded)
+        settings.showsHiddenProjects = false
+
+        let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+        let sidebar = controller.sidebarViewController
+        sidebar.mountInitialTreeIfNeeded()
+        // Exercise the shipping search and outline routes without launching a provider or shell.
+        sidebar.delegate = nil
+        let sidebarItem = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+        let destinations: [(SidebarNodeKey, () -> Bool)] = [
+            (.project(project.id), { controller.openSearchProject(project.id) }),
+            (.session(chat.id), { controller.openSearchSession(chat.id, projectID: project.id) }),
+            (.terminal(terminal.id), { controller.openSearchTerminal(terminal.id, projectID: project.id) }),
+        ]
+        for (destination, open) in destinations {
+            settings.showsHiddenProjects = false
+            controller.selectWorkspaceNavigator(.extensionNavigator(
+                extensionIdentifier: "test.navigator", navigatorID: "alternate"
+            ))
+            controller.splitViewController.setCollapsed(true, on: sidebarItem, animated: false)
+            XCTAssertTrue(open())
+            XCTAssertTrue(settings.showsHiddenProjects)
+            XCTAssertEqual(sidebar.selectedRowKey, destination)
+            XCTAssertFalse(sidebarItem.isCollapsed)
+            XCTAssertEqual(controller.effectiveWorkspaceNavigatorSelection, .native)
+            XCTAssertEqual(settings.workspaceNavigatorSelection, .native)
+            XCTAssertTrue(try XCTUnwrap(store.project(withID: project.id)).isHidden)
+        }
+
+        settings.showsHiddenProjects = false
+        XCTAssertFalse(controller.openSearchProject(ProjectID()))
+        XCTAssertFalse(controller.openSearchSession(chat.id, projectID: ProjectID()))
+        XCTAssertFalse(controller.openSearchTerminal(terminal.id, projectID: ProjectID()))
+        XCTAssertFalse(settings.showsHiddenProjects, "Invalid destinations must not change the filter")
+    }
+
     func testVisibilityProjectionAtTwentyFiveThousandProjects() {
         let projects = (0..<25_000).map { index in
             var project = Project(name: "Project \(index)", folderURL: URL(fileURLWithPath: "/tmp/project-\(index)"))
@@ -63,11 +115,13 @@ final class ProjectVisibilityTests: HostedStoreTestCase {
         let settings = AppSettings.shared
         let priorShown = settings.showsHiddenProjects
         let priorTheme = AppThemePalette.current
+        let priorNavigator = settings.workspaceNavigatorSelection
         let priorMotion = Design.Motion.reduceMotionOverrideForTesting
         Design.Motion.reduceMotionOverrideForTesting = true
         defer {
             settings.showsHiddenProjects = priorShown
             AppThemePalette.set(priorTheme)
+            settings.workspaceNavigatorSelection = priorNavigator
             Design.Motion.reduceMotionOverrideForTesting = priorMotion
         }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hidden-projects-\(UUID())")
@@ -75,6 +129,7 @@ final class ProjectVisibilityTests: HostedStoreTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let active = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: directory.appendingPathComponent("Daily work")))
         let hidden = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: directory.appendingPathComponent("Occasional work")))
+        let chat = try XCTUnwrap(ProjectStore.shared.addSession(to: hidden.id, kind: .claude))
         XCTAssertTrue(ProjectStore.shared.setProjectHidden(true, projectID: hidden.id).succeeded)
         settings.showsHiddenProjects = false
         let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
@@ -97,13 +152,26 @@ final class ProjectVisibilityTests: HostedStoreTestCase {
         ] {
             AppThemePalette.set(theme)
             for showHidden in [false, true] {
-                settings.showsHiddenProjects = showHidden
+                settings.showsHiddenProjects = false
+                if showHidden {
+                    XCTAssertTrue(controller.openSearchProject(hidden.id))
+                    XCTAssertEqual(controller.currentProjectID, hidden.id)
+                    XCTAssertEqual(controller.sidebarViewController.selectedRowKey, .project(hidden.id))
+                    XCTAssertTrue(try XCTUnwrap(ProjectStore.shared.project(withID: hidden.id)).isHidden)
+                } else {
+                    controller.projectSidebar(controller.sidebarViewController, didSelectProject: active.id)
+                }
                 content.appearance = NSAppearance(named: appearance)
                 AppThemeRefresh.repaint(content)
                 content.layoutSubtreeIfNeeded()
                 let projectIDs = (0..<outline.numberOfRows).compactMap { (outline.item(atRow: $0) as? ProjectNode)?.projectID }
                 XCTAssertEqual(projectIDs.contains(hidden.id), showHidden)
                 XCTAssertTrue(projectIDs.contains(active.id))
+                if showHidden {
+                    XCTAssertTrue((0..<outline.numberOfRows).contains {
+                        (outline.item(atRow: $0) as? SessionNode)?.sessionID == chat.id
+                    }, "A project search result must expand its chats")
+                }
                 let hideButton = try XCTUnwrap(descendants(content).first {
                     $0.accessibilityIdentifier() == "sidebar.show-hidden-projects"
                 } as? ThemedIconButton)

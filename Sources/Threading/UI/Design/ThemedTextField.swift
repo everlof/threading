@@ -1,5 +1,16 @@
 import AppKit
 
+// MARK: - Outlined Field
+
+/// The measure of `FieldStyle.outlined`, shared by the text fields and the composer's prompt so
+/// a theme's search-bar outline is one weight wherever text is typed.
+@MainActor
+enum OutlinedField {
+    /// Two points at rest — heavy enough to read as the field's identity rather than as its
+    /// border — and never thinner than Increase Contrast makes every control's edge.
+    static var borderWidth: CGFloat { max(2, Design.Radius.controlBorder) }
+}
+
 /// An editable field drawn from the theme, replacing a bezelled `NSTextField`.
 ///
 /// The one themed control that is *not* a `ThemedControl`: a field needs `NSTextField`'s field
@@ -299,14 +310,28 @@ public class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary
             return
         }
 
-        // A text well is carved into the surface, not resting on it — the one place a bevel
-        // material reads sunken rather than raised.
-        let shape = ThemedSurface.draw(
-            bounds,
-            fill: wellFill,
-            border: isEditing ? Design.Surface.accent : Design.Surface.border,
-            bevel: .sunken
-        )
+        let shape: ThemedSurface.Shape
+        if AppThemePalette.current.material(for: effectiveAppearance).fieldStyle == .outlined {
+            // A search bar: a capsule outlined in the accent at rest, never bevelled. Focus is
+            // still told by the inner ring below, which an unfocused outlined field never has.
+            shape = ThemedSurface.draw(
+                bounds,
+                fill: wellFill,
+                border: isEnabled ? Design.Surface.accent : Design.Surface.border,
+                radius: bounds.height / 2,
+                borderWidth: OutlinedField.borderWidth,
+                bevel: .none
+            )
+        } else {
+            // A text well is carved into the surface, not resting on it — the one place a
+            // bevel material reads sunken rather than raised.
+            shape = ThemedSurface.draw(
+                bounds,
+                fill: wellFill,
+                border: isEditing ? Design.Surface.accent : Design.Surface.border,
+                bevel: .sunken
+            )
+        }
 
         guard isEditing else { return }
         // A second pass just inside the border rather than a wider single stroke: half of a

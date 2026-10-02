@@ -23,10 +23,11 @@ struct RemoteCredentialStoragePresentation: Equatable {
 final class RemoteAccessPreferencesViewController: NSViewController {
 
     private let credentialStorageIsShellReachable: Bool
-    /// Whether this build offers Hosted Direct. Public builds enroll without an account;
-    /// development builds keep the existing sign-in controls.
+    /// Whether this build offers Hosted Direct. Its controls follow the configured service's
+    /// authentication, so local production builds offer the same accountless enrollment.
     private let hostedDirectIsOffered: Bool
-    private let hostedAnonymous: Bool
+    private let hostedAnonymousOverride: Bool?
+    private var hostedAnonymous: Bool
 
     // MARK: - Controls
 
@@ -136,7 +137,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
     private var copiedReset: DispatchWorkItem?
     private var pairedDeviceIDs: [String] = []
-    private let hostedAppleSignIn: RemoteHostedAppleSignIn?
+    private var hostedAppleSignIn: RemoteHostedAppleSignIn?
     private var hostedAccountTask: Task<Void, Never>?
     private var hostedAccountError: String?
     private let appEvents = AppEventObservations()
@@ -150,8 +151,9 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     ) {
         self.credentialStorageIsShellReachable = credentialStorageIsShellReachable
         self.hostedDirectIsOffered = hostedDirectIsOffered
+        hostedAnonymousOverride = hostedAnonymous
         self.hostedAnonymous = hostedDirectIsOffered
-            && (hostedAnonymous ?? (AppInfo.buildChannel != .dev))
+            && (hostedAnonymous ?? RemoteAccessCoordinator.shared.hostedUsesAnonymousEnrollment)
         hostedAppleSignIn = hostedDirectIsOffered && !self.hostedAnonymous
             ? RemoteHostedAppleSignIn() : nil
         super.init(nibName: nil, bundle: nil)
@@ -1187,6 +1189,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         copiedReset = nil
 
         let coordinator = RemoteAccessCoordinator.shared
+        apply(hostedAnonymous: hostedAnonymousOverride ?? coordinator.hostedUsesAnonymousEnrollment)
         let doors = doorsPresentation(coordinator)
         inputControlDefault.selectedIndex = RemoteInputControlDefault.allCases.firstIndex(
             of: AppSettings.shared.remoteInputControlDefault
@@ -1574,6 +1577,20 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         identityPrepareButton.isEnabled = identity.canPrepareRotation && identityTask == nil
         identityActivateButton.isEnabled = identity.canActivateRotation && identityTask == nil
         identityResetButton.isEnabled = identityTask == nil
+    }
+
+    /// Settings retains the page when the selected service changes. Rebuild only this fixed
+    /// row's controls so its authentication stays in step with the service behind it.
+    func apply(hostedAnonymous anonymous: Bool) {
+        guard hostedDirectIsOffered, hostedAnonymous != anonymous else { return }
+        hostedAnonymous = anonymous
+        hostedAppleSignIn = anonymous ? nil : RemoteHostedAppleSignIn()
+        hostedAccountError = nil
+        for control in hostedAccountControls.arrangedSubviews {
+            hostedAccountControls.removeArrangedSubview(control)
+            control.removeFromSuperview()
+        }
+        configureHostedAccountControls()
     }
 
     private func updateHostedAccount(_ coordinator: RemoteAccessCoordinator) {

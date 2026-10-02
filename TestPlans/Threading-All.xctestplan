@@ -11,6 +11,14 @@
   "defaultOptions" : {
     "environmentVariableEntries" : [
       {
+        "key" : "THREADING_TEST_AUDIO_TONE_APP",
+        "value" : "$(THREADING_TEST_AUDIO_TONE_APP)"
+      },
+      {
+        "key" : "THREADING_TEST_LIVE_AUDIO",
+        "value" : "$(THREADING_TEST_LIVE_AUDIO)"
+      },
+      {
         "key" : "THREADING_AUTOMATION_STRESS",
         "value" : "$(THREADING_AUTOMATION_STRESS)"
       },

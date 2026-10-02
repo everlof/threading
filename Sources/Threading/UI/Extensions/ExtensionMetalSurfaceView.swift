@@ -25,7 +25,7 @@ enum ExtensionMetalSurfaceError: LocalizedError {
 /// command queue, drawable, uniform buffer, frame cadence, transparency and input mapping.
 /// No Metal or AppKit object crosses the extension process boundary.
 @MainActor
-final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate {
+final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHolding {
     typealias SignalProvider = @MainActor (ExtensionHostSignal) -> Double?
 
     private static let maximumInputs = 8
@@ -37,6 +37,8 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate {
     private let commandQueue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     private let beganAt = ProcessInfo.processInfo.systemUptime
+    private let audioDemand: AudioSpectrumDemand?
+    private var audioViewportObserver: AudioSpectrumViewportObserver?
     /// Whether the view has decided to hold its frames because nobody could see them.
     ///
     /// Separate from `isPaused` so a test can ask *why* the view is paused, and so the
@@ -57,6 +59,10 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate {
             throw ExtensionMetalSurfaceError.metalUnavailable
         }
         self.specification = specification
+        self.audioDemand = specification.inputs.contains {
+            if case .signal(let signal, _) = $0.value { return signal.requiresAudioCapture }
+            return false
+        } ? AudioSpectrumDemand() : nil
         self.signalProvider = signalProvider
         self.commandQueue = commandQueue
 
@@ -99,6 +105,8 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate {
         wantsLayer = true
         layer?.isOpaque = false
         setAccessibilityElement(false)
+        if audioDemand != nil { ThemeParticleHold.shared.register(self) }
+        updateVisibilityHold()
     }
 
     @available(*, unavailable)
@@ -122,6 +130,11 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate {
     /// is; `snapshotImage` draws on request regardless.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if audioDemand != nil {
+            audioViewportObserver = AudioSpectrumViewportObserver(view: self) { [weak self] in
+                self?.updateVisibilityHold()
+            }
+        }
         NotificationCenter.default.removeObserver(self)
         if let window {
             for name in [
@@ -161,7 +174,21 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate {
             $0.occlusionState.contains(.visible) && !$0.isMiniaturized
         } ?? false
         isHeldForVisibility = !windowVisible || isHiddenOrHasHiddenAncestor
-        isPaused = isHeldForVisibility
+        let holdsAudioMotion = audioDemand != nil && !ThemeParticleHold.motionAllowed
+        let wasPaused = isPaused
+        isPaused = isHeldForVisibility || holdsAudioMotion
+            || (audioDemand != nil && !AudioSpectrumViewportObserver.intersectsViewport(self))
+        audioDemand?.setActive(!isHeldForVisibility && ThemeParticleHold.motionAllowed
+                               && ThemeParticleHold.isSeen(self)
+                               && AudioSpectrumViewportObserver.intersectsViewport(self))
+        if holdsAudioMotion, !isHeldForVisibility, !wasPaused { draw() }
+    }
+
+    func refreshParticleMotion() { updateVisibilityHold() }
+
+    override func layout() {
+        super.layout()
+        updateVisibilityHold()
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -273,7 +300,7 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate {
         var result: [Float] = [
             Float(size.width),
             Float(size.height),
-            time,
+            audioDemand != nil && !ThemeParticleHold.motionAllowed ? 0 : time,
             0
         ]
         result.append(contentsOf: specification.inputs.map { input in
@@ -293,6 +320,7 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate {
         case .constant(let value):
             return value
         case .signal(let signal, let mapping):
+            if signal.requiresAudioCapture, !ThemeParticleHold.motionAllowed { return mapping.fallback }
             guard let raw = signalProvider(signal) else { return mapping.fallback }
             let position = min(max(
                 (raw - mapping.inputMinimum)

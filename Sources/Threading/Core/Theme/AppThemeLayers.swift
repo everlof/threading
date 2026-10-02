@@ -108,6 +108,13 @@ struct AppThemeLayerReport: Equatable {
 
     let states: [AppThemeLayer: State]
     let origin: Origin
+    /// Variants whose chrome colours changed while their terminal palette stayed what it was.
+    ///
+    /// The palette layer counts as changed when either half moved, so a theme that recoloured
+    /// its chrome and inherited its base's terminal reported "palette: changed" and nothing
+    /// else — while the largest surface in the window, the one agents' TUIs draw in, still
+    /// wore the base. Named separately so the agent hears it.
+    let terminalLeftBehind: [AppTheme.VariantKind]
 
     /// A layer is stated when any variant states it, and changed when this call changed it in
     /// any variant. A variant the starting theme lacks is compared with the one the editor patched
@@ -131,6 +138,15 @@ struct AppThemeLayerReport: Equatable {
         }
         self.states = states
         self.origin = origin
+        self.terminalLeftBehind = theme.availableVariants.filter { kind in
+            guard let after = theme.variant(kind) else { return false }
+            let prior = before.variant(kind) ?? fallback
+            // System stores no variants; what a variant made from it inherits is its pair.
+            let priorPalette = prior?.terminalPalette
+                ?? (kind == .dark ? TerminalTheme.systemDark : TerminalTheme.systemLight)
+            let rolesChanged = prior.map { $0.roles != after.roles } ?? !after.roles.isEmpty
+            return rolesChanged && Self.sameColours(after.terminalPalette, priorPalette)
+        }
     }
 
     /// The report as it is appended to the tool result: a line naming every layer's state, then
@@ -184,6 +200,7 @@ struct AppThemeLayerReport: Equatable {
             sentences.append("All four layers are stated.")
         }
         if let inherited = inheritedNote { sentences.append(inherited) }
+        if let terminal = terminalNote { sentences.append(terminal) }
         sentences.append("Check it with preview_app_theme.")
         return sentences.joined(separator: " ")
     }
@@ -198,6 +215,27 @@ struct AppThemeLayerReport: Equatable {
         guard !kept.isEmpty else { return nil }
         return "Only the colours are new; the "
             + Self.joined(kept.map(\.rawValue)) + " \(kept.count == 1 ? "is" : "are") \(name)'s."
+    }
+
+    /// New chrome colours around the old terminal. The terminal is the largest surface in the
+    /// window and the one agents' TUIs draw in, so a palette that stops at the chrome is the
+    /// half a person sees least of.
+    private var terminalNote: String? {
+        guard !terminalLeftBehind.isEmpty else { return nil }
+        let kinds = Self.joined(terminalLeftBehind.map(\.rawValue))
+        let whose: String
+        switch origin {
+        case .base(let name): whose = "is still \(name)'s"
+        case .previous: whose = "did not change"
+        }
+        return "The chrome has new colours but the terminal palette \(whose) in \(kinds) — the "
+            + "largest surface in the window, and the one agents' TUIs draw in. State "
+            + "terminal_colors to match unless the person asked to keep it."
+    }
+
+    /// Two palettes that draw the same, whatever they are called.
+    private static func sameColours(_ lhs: TerminalTheme, _ rhs: TerminalTheme) -> Bool {
+        ThemeColorKey.allCases.allSatisfy { lhs[$0] == rhs[$0] }
     }
 
     private static func glossed(_ layers: [AppThemeLayer]) -> String {

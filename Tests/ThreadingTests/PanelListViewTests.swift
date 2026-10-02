@@ -97,4 +97,30 @@ final class PanelListViewTests: XCTestCase {
         XCTAssertEqual(label.lineBreakMode, .byWordWrapping)
         XCTAssertEqual(label.maximumNumberOfLines, 0)
     }
+
+    /// With a mouse attached the system scroller style is legacy, and a legacy scroller that
+    /// is not told to autohide stays up over a list with nothing to scroll — the full-height
+    /// empty trough the Automations page shipped beside its one-line note.
+    func testALegacyScrollerAppearsOnlyWhenTheRowsOverflow() throws {
+        let (host, list) = makeHostedList()
+        let scrollView = try XCTUnwrap(list.subviews.compactMap { $0 as? NSScrollView }.first)
+        scrollView.scrollerStyle = .legacy
+
+        list.addSection("Configured automations")
+        list.addNote("Create an automation here.")
+        host.layoutSubtreeIfNeeded()
+        scrollView.tile()
+        XCTAssertEqual(scrollView.verticalScroller?.isHidden, true)
+
+        let overflow = Int(Fixture.height / Fixture.rowHeight) + 1
+        for _ in 0..<overflow {
+            let row = NSView()
+            row.translatesAutoresizingMaskIntoConstraints = false
+            row.heightAnchor.constraint(equalToConstant: Fixture.rowHeight).isActive = true
+            list.addRow(row)
+        }
+        host.layoutSubtreeIfNeeded()
+        scrollView.tile()
+        XCTAssertEqual(scrollView.verticalScroller?.isHidden, false)
+    }
 }

@@ -218,7 +218,9 @@ public struct AppTheme: Codable, Equatable {
             chrome = try container.decodeIfPresent(WindowChromeStyle.self, forKey: .chrome)
             transition = try container.decodeIfPresent(ThemeTransition.self, forKey: .transition)
             sprites = try container.decodeIfPresent([ThemeSprite].self, forKey: .sprites) ?? []
+            // A block left empty once an event's dropped shower is taken out reads as none.
             moments = try container.decodeIfPresent(ThemeMoments.self, forKey: .moments)
+                .flatMap { $0.isEmpty ? nil : $0 }
             words = try container.decodeIfPresent(ThemeWords.self, forKey: .words)
         }
 
@@ -539,6 +541,14 @@ public struct AppTheme: Codable, Equatable {
         /// sliding switch; compact hardware themes may state a labelled latching button.
         public var toggleStyle: ToggleStyle = .automatic
 
+        /// The construction of a text field and the composer's prompt. The sunken well is every
+        /// theme's answer so far; an outlined field is a shop app's search bar.
+        public var fieldStyle: FieldStyle = .well
+
+        /// How a count or status badge is set. Plain keeps the app's quiet marks; a sticker
+        /// gives a theme with a shop's voice its price stickers.
+        public var badgeStyle: BadgeStyle = .plain
+
         public enum Typeface: String, Codable, CaseIterable {
             /// SF Sans — the platform default, and the System theme's answer.
             case standard = "default"
@@ -581,8 +591,12 @@ public struct AppTheme: Codable, Equatable {
             /// Mac OS X 10.4 Tiger's slimmer Aqua control: the blue gel belongs to the
             /// thumb while the two neutral arrow buttons sit together at the scrolling end.
             case aquaTiger = "aqua_tiger"
+            /// The modern scroller with its thumb as a full capsule in the accent — a shop
+            /// app's bright handle instead of a quiet gray one. It keeps the user's
+            /// overlay/legacy preference and AppKit's geometry, so it is not a period control.
+            case pill
 
-            public var usesLegacyPresentation: Bool { self != .automatic }
+            public var usesLegacyPresentation: Bool { self != .automatic && self != .pill }
 
             /// Classic Macintosh, OPENSTEP, and Amiga put both arrows together at the
             /// scrolling end. The others bookend the track.
@@ -616,6 +630,10 @@ public struct AppTheme: Codable, Equatable {
             /// edge rather than either the modern line or Win32's separated blocks.
             case irix
             case amiga
+            /// A capsule track filled with the accent and crossed by diagonal light stripes —
+            /// the "almost sold out" meter of a shop app. Taller than the continuous rail so
+            /// the stripes read, and still: the stripes are pattern, not motion.
+            case striped
         }
 
         public enum ChartStyle: String, Codable, CaseIterable {
@@ -646,6 +664,32 @@ public struct AppTheme: Codable, Equatable {
             case recessedTick = "recessed_tick"
             case windows98Tick = "windows_98_tick"
             case beOSCross = "beos_cross"
+            /// A modern gadget cut round: a circle that fills with the accent and takes the
+            /// selected-text tick when checked — the cart-row check of a shop app. Modern in every other
+            /// respect (size, hover plate, disabled dimming), so it is not a historical gadget.
+            case round
+
+            /// Whether the gadget is a reconstructed period control, drawn at its measured size
+            /// with its own disabled state rather than the modern one.
+            public var isHistorical: Bool { self != .automatic && self != .round }
+        }
+
+        public enum FieldStyle: String, Codable, CaseIterable {
+            /// The sunken well: the field fill, the structural border, and the theme's sunken
+            /// bevel where it has one.
+            case well
+            /// A search bar's construction: a capsule with no bevel and a thick accent outline
+            /// at rest, so the field announces itself before it is focused. Focus adds the inner
+            /// ring every field draws, which is what still tells the two states apart.
+            case outlined
+        }
+
+        public enum BadgeStyle: String, Codable, CaseIterable {
+            /// The app's quiet marks: a bare count, a small rounded pill.
+            case plain
+            /// A price sticker: a slightly tilted plate in the negative status colour with bold
+            /// white type, the way a shop marks a deal.
+            case sticker
         }
 
         public enum ToggleStyle: String, Codable, CaseIterable {
@@ -715,6 +759,11 @@ public struct AppTheme: Codable, Equatable {
                 /// The material bevel when one exists, otherwise the structural border.
                 case material
                 case none
+                /// A ticket torn from a coupon book: the structural border walked around a
+                /// body whose two sides are bitten by a row of half-circle scallops. It is a
+                /// pop-up's edge rather than a card's, so menus and alerts wear it too, and it
+                /// needs a stemless popover — a ticket has no arrow.
+                case coupon
             }
 
             public enum Shadow: String, Codable, CaseIterable {
@@ -1119,7 +1168,9 @@ public struct AppTheme: Codable, Equatable {
             chartStyle: ChartStyle = .continuous,
             choiceStyle: ChoiceStyle = .chip,
             checkboxStyle: CheckboxStyle = .automatic,
-            toggleStyle: ToggleStyle = .automatic
+            toggleStyle: ToggleStyle = .automatic,
+            fieldStyle: FieldStyle = .well,
+            badgeStyle: BadgeStyle = .plain
         ) {
             self.panelRadius = panelRadius
             self.controlRadius = controlRadius
@@ -1147,6 +1198,8 @@ public struct AppTheme: Codable, Equatable {
             self.choiceStyle = choiceStyle
             self.checkboxStyle = checkboxStyle
             self.toggleStyle = toggleStyle
+            self.fieldStyle = fieldStyle
+            self.badgeStyle = badgeStyle
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -1157,6 +1210,7 @@ public struct AppTheme: Codable, Equatable {
             case fontFallbacks
             case scrollerPlacement, scrollerTrackStyle, scrollerAppearance, menuAppearance
             case progressStyle, chartStyle, choiceStyle, checkboxStyle, toggleStyle
+            case fieldStyle, badgeStyle
         }
 
         /// Every field is optional on the wire: a document written before a field existed
@@ -1231,6 +1285,14 @@ public struct AppTheme: Codable, Equatable {
                 ToggleStyle.self,
                 forKey: .toggleStyle
             ) ?? .automatic
+            fieldStyle = try container.decodeIfPresent(
+                FieldStyle.self,
+                forKey: .fieldStyle
+            ) ?? .well
+            badgeStyle = try container.decodeIfPresent(
+                BadgeStyle.self,
+                forKey: .badgeStyle
+            ) ?? .plain
         }
     }
 

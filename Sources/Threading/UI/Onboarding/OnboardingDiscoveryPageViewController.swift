@@ -362,8 +362,10 @@ enum OnboardingCLIDefaults {
             return "npm install -g @xai-official/grok"
         case AgentDefaults.openCodeExecutable:
             return "npm install -g opencode-ai"
+        case AgentDefaults.cursorExecutable:
+            return "curl https://cursor.com/install -fsS | bash"
         default:
-            return "npm install -g @anthropic-ai/claude-code"
+            return "curl -fsSL https://claude.ai/install.sh | bash"
         }
     }
 }

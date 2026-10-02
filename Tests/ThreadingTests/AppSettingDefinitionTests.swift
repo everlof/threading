@@ -218,6 +218,10 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "harmonizesTerminalBackgrounds",
                 valueType: .boolean
             ),
+            .agentsUseTerminalPalette: .init(
+                key: "agentsUseTerminalPalette",
+                valueType: .boolean
+            ),
             .playsThemeMotion: .init(key: "playsThemeMotion", valueType: .boolean),
             .playsThemeSounds: .init(key: "playsThemeSounds", valueType: .boolean),
             .convertsDroppedImages: .init(key: "convertsDroppedImages", valueType: .boolean),
@@ -379,6 +383,8 @@ final class AppSettingDefinitionTests: XCTestCase {
                 valueType: .boolean
             ),
             .workingOrbStyle: .init(key: "workingOrbStyle", valueType: .string),
+            .sharesThemeAudio: .init(key: "sharesThemeAudio", valueType: .boolean),
+            .themeAudioSource: .init(key: "themeAudioSource", valueType: .string),
             .chatNameMorphStyle: .init(key: "chatNameMorphStyle", valueType: .string),
             .chromeFontFamily: .init(key: "chromeFontFamily", valueType: .string),
             .conversationFontFamily: .init(key: "conversationFontFamily", valueType: .string),
@@ -535,9 +541,9 @@ final class AppSettingDefinitionTests: XCTestCase {
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
 #if DEBUG || THREADING_INTERNAL
-        XCTAssertEqual(authoredRows.count, 94)
+        XCTAssertEqual(authoredRows.count, 98)
 #else
-        XCTAssertEqual(authoredRows.count, 93)
+        XCTAssertEqual(authoredRows.count, 97)
 #endif
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
@@ -565,7 +571,7 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Reopen the last session at launch", "Bring back at launch",
             "Stop idle agents after", "Keep idle agents running", "Hidden extension messages",
             "Updates you receive", "Check for updates automatically",
-            "Keep this Mac awake while agents work"
+            "Agent tools", "Keep this Mac awake while agents work"
         ])
         // The four pages General was split into, each in the order it draws.
         XCTAssertEqual(actual["sidebar"], [
@@ -600,10 +606,11 @@ final class AppSettingDefinitionTests: XCTestCase {
         ])
         XCTAssertEqual(actual["profiles"], [
             "Font", "Cursor style", "Blinking cursor", "Keep backgrounds in tune with the theme",
-            "Lines kept", "Copy selected text to the clipboard",
+            "Agents use the theme's colours", "Lines kept", "Copy selected text to the clipboard",
             "Convert dropped images agents can't open"
         ])
-        XCTAssertEqual(actual["motion"], ["Working indicator", "Chat name transition"])
+        XCTAssertEqual(actual["motion"], ["Working indicator", "Chat name transition",
+                                         "Music-reactive themes", "Audio source"])
         XCTAssertEqual(actual["tools"], ["Agents may move chats between checkouts"])
         XCTAssertEqual(actual["usage-windows"], [
             "Open a window before I start", "I start at", "I stop at", "Days",

@@ -1165,7 +1165,10 @@ final class ExtensionContractTests: XCTestCase {
                 .activeAccountUsageRemaining,
                 .workloadIntensity,
                 .workloadWorkingCount,
-                .timeOfDayFraction
+                .timeOfDayFraction,
+                .audioAvailable, .audioLevel, .audioBass, .audioMids, .audioTreble,
+                .audioBand0, .audioBand1, .audioBand2, .audioBand3,
+                .audioBand4, .audioBand5, .audioBand6, .audioBand7
             ]
         )
     }

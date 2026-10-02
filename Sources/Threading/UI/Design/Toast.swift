@@ -321,6 +321,8 @@ final class ToastView: NSView {
     /// Pressed the action. The presenter dismisses the band; the caller performs the response.
     var onAction: (() -> Void)?
 
+    private let themeEvents = AppEventObservations()
+
     /// Asked for the band to go now — the ✕, or a throw that carried far enough to commit.
     ///
     /// It reports *how* it was sent away rather than only that it was, so the departure finishes
@@ -419,6 +421,11 @@ final class ToastView: NSView {
         configureClose()
         installContent()
         applyBandSurface()
+        // Whether the band is a coupon is decided by the theme, and the recorded surface only
+        // re-resolves colours; a switch into or out of a coupon theme has to restate it.
+        themeEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.applyBandSurface()
+        }
 
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
@@ -985,12 +992,36 @@ final class ToastView: NSView {
     }
 
     private func applyBandSurface() {
+        // A coupon band is drawn in `draw` along its scalloped outline. The layer keeps the
+        // glow — clear behind the drawing, so the shadow is cast from the coupon's own alpha —
+        // because masking the band would clip the glow that sits on this same layer.
+        let coupon = wearsCoupon
         applySurface(
-            fill: Design.Surface.elevated,
+            fill: coupon ? .clear : Design.Surface.elevated,
             radius: .panel,
-            border: Design.Surface.border,
+            border: coupon ? nil : Design.Surface.border,
             glow: true
         )
+        needsDisplay = true
+    }
+
+    private var wearsCoupon: Bool {
+        CouponOutline.isWorn(by: AppThemePalette.current.material(for: effectiveAppearance))
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard wearsCoupon else { return }
+        let width = Design.Radius.border
+        let outline = CouponOutline.path(
+            in: bounds.insetBy(dx: width / 2, dy: width / 2),
+            cornerRadius: Design.Radius.panel
+        )
+        Design.Surface.elevated.setFill()
+        outline.fill()
+        Design.Surface.border.setStroke()
+        outline.lineWidth = width
+        outline.stroke()
     }
 
     @objc private func actionPressed() {

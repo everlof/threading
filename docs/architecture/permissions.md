@@ -291,3 +291,12 @@ discovery may ask GitHub about the organisation implied by a project's origin re
 follow a repository-declared homepage. Account avatar discovery sends an email hash to Gravatar
 and, after a miss, the email to GitHub's public-user search. Both rows point back to their General
 switches, and a non-GitHub website is contacted only after **Use Website Favicon…** names it.
+
+Music-reactive themes add a separate **System Audio Recording** inventory row. The existing
+screen-recording preflight is not evidence of this grant, and there is no public nonprompting
+audio preflight, so this row reports **Asked when needed**. Both capture rows open the shared
+Screen & System Audio Recording pane. `NSAudioCaptureUsageDescription`
+explains the local spectrum analysis. Only the off-by-default Motion switch plus a visible
+consumer can start a private process tap; source enumeration and opening settings cannot
+prompt. No microphone or physical aggregate-device input is opened. See
+[`audio-spectrum.md`](audio-spectrum.md) for lifecycle, denial/retry and the extension boundary.

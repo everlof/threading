@@ -252,6 +252,8 @@ final class WindowChromeButton: ThemedControl {
                 // ground becoming a tiny mechanical edge around the depressed face.
                 (isPressed ? bounds.insetBy(dx: 1, dy: 1) : bounds).fill()
             }
+        case .pill:
+            drawPillPlate(in: bounds, resolved: resolved)
         }
         if anatomy.outlinedInBorder {
             Design.Surface.border.setStroke()
@@ -275,6 +277,11 @@ final class WindowChromeButton: ThemedControl {
         // the one thing `glyphInk` cannot say: every other value names a colour to paint
         // with, and this one is decided by whichever plate is under the pointer.
         if case .reverseVideo = anatomy.plate, isHovered || isPressed {
+            ink = bandGround(of: resolved)
+        }
+        // A pill's figure is cut out of its plate, so it shows the band behind it — at rest
+        // as well as under the pointer.
+        if case .pill = anatomy.plate {
             ink = bandGround(of: resolved)
         }
 
@@ -309,10 +316,40 @@ final class WindowChromeButton: ThemedControl {
                 )
             }
         }
-        drawKeyboardFocus(around: ThemedSurface.Shape(
-            rect: bounds,
-            radius: Design.Radius.control(fitting: bounds.size)
-        ))
+        let focusRadius: CGFloat
+        if case .pill = anatomy.plate {
+            focusRadius = min(bounds.width, bounds.height) / 2
+        } else {
+            focusRadius = Design.Radius.control(fitting: bounds.size)
+        }
+        drawKeyboardFocus(around: ThemedSurface.Shape(rect: bounds, radius: focusRadius))
+    }
+
+    /// The round plate of the `pills` family: the band's ink as a disc, a step lighter under
+    /// the pointer and darkened under a press the way Aqua's glass is, so the three states
+    /// read without the plate ever changing colour family.
+    private func drawPillPlate(
+        in rect: NSRect,
+        resolved: WindowChromeAppearance.Resolved?
+    ) {
+        let side = min(rect.width, rect.height)
+        let disc = NSRect(
+            x: rect.midX - side / 2,
+            y: rect.midY - side / 2,
+            width: side,
+            height: side
+        ).insetBy(dx: Self.pillPlateInset, dy: Self.pillPlateInset)
+        let plate = NSBezierPath(ovalIn: disc)
+        let ink = bandInk(of: resolved)
+        let face = isHovered && !isPressed
+            ? ink.withAlphaComponent(ink.alphaComponent * Self.pillHoverAlpha)
+            : ink
+        face.setFill()
+        plate.fill()
+        if isPressed {
+            NSColor.black.withAlphaComponent(Self.pillPressedShade).setFill()
+            plate.fill()
+        }
     }
 
     /// Draws either the exact sprite from a user-imported `.wsz` sheet or the stock
@@ -992,6 +1029,13 @@ final class WindowChromeButton: ThemedControl {
         static let inset: CGFloat = 0.28
         static let strokeWidth: CGFloat = 1.5
     }
+
+    /// Half a point keeps the disc's antialiased rim inside the slot it is hit-tested in.
+    private static let pillPlateInset: CGFloat = 0.5
+    /// A hovered pill shows a step of the band through it rather than changing colour.
+    private static let pillHoverAlpha: CGFloat = 0.82
+    /// The press darkens the disc by the same amount Aqua's pressed glass does.
+    private static let pillPressedShade: CGFloat = 0.24
 
     // MARK: - Accessibility
 

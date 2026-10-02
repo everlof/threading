@@ -200,16 +200,16 @@ final class RemoteAccessHostedDisabledCoordinatorTests: HostedStoreTestCase {
         XCTAssertEqual(try store.load()?.withValue { $0 }, secret.withValue { $0 })
     }
 
-    func testPublicHostedEnrollmentWaitsForItsOwnOptIn() throws {
+    func testDefaultHostedEnrollmentWaitsForItsOwnOptIn() throws {
         let settings = try publicBuildSettings(hostedDirectIsOffered: true)
         let hosted = RemoteHostedServiceController(
             installationSecretStore: TestInstallationSecretStore(),
             endpoint: nil,
             localDevelopmentAuthentication: false,
-            developmentBrowserAuthentication: false,
-            anonymousAuthentication: true
+            developmentBrowserAuthentication: false
         )
         let coordinator = makeCoordinator(settings, hostedService: hosted)
+        XCTAssertTrue(coordinator.hostedUsesAnonymousEnrollment)
 
         coordinator.setEnabled(true)
         waitForListening(coordinator)

@@ -419,6 +419,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
 
     override func layout() {
         super.layout()
+        shapeCouponMask()
         guard copyStack != nil, bounds.width > 1 else { return }
         // The copy stack's width is partly answered by these labels' intrinsic widths. Reading
         // that frame here and feeding it straight back through preferredMaxLayoutWidth creates
@@ -741,7 +742,11 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         // semantic surface. Aqua's Help Tag is pale yellow; an Empty Trash sheet remains the
         // authored floating gray/white sheet, so alerts always consume floatingSurface here.
         let fill = AppThemePalette.color(.floatingSurface)
-        let edge: NSColor? = popover.edge == .none ? nil : Design.Surface.border
+        // A coupon's border follows its scallops, so it is stroked in `draw` rather than left
+        // to the layer's rectangular one.
+        let edge: NSColor? = popover.edge == .none || popover.edge == .coupon
+            ? nil
+            : Design.Surface.border
         let bevel: SurfaceBevel = popover.edge == .material
             ? .automatic
             : .none
@@ -753,6 +758,36 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
             border: edge,
             bevel: bevel
         )
+        shapeCouponMask()
+        needsDisplay = true
+    }
+
+    /// A coupon theme's alert is a ticket like its popovers and menus. The panel's window shadow
+    /// follows this view's alpha, so masking it is all the scallops need to cast their shadow.
+    private var wearsCoupon: Bool {
+        CouponOutline.isWorn(by: AppThemePalette.current.material(for: effectiveAppearance))
+    }
+
+    private func shapeCouponMask() {
+        guard wearsCoupon else {
+            if layer?.mask != nil { layer?.mask = nil }
+            return
+        }
+        let mask = (layer?.mask as? CAShapeLayer) ?? CAShapeLayer()
+        mask.frame = bounds
+        mask.path = CouponOutline.path(in: bounds, cornerRadius: Design.Radius.panel)
+            .threadingCGPath
+        layer?.mask = mask
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard wearsCoupon else { return }
+        // Twice the border width on the mask's own path: the mask keeps the inner half.
+        let outline = CouponOutline.path(in: bounds, cornerRadius: Design.Radius.panel)
+        outline.lineWidth = Design.Radius.border * 2
+        Design.Surface.border.setStroke()
+        outline.stroke()
     }
 }
 

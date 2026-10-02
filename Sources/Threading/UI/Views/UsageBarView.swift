@@ -124,7 +124,9 @@ final class UsageBarView: NSView {
                     ? ThemedProgressDrawing.irixHeight
                     : (usesClassicProgress
                         ? ThemedProgressDrawing.classicHeight
-                        : UsageBarDefaults.height))
+                        : (usesStripedProgress
+                            ? ThemedProgressDrawing.stripedHeight
+                            : UsageBarDefaults.height)))
         )
     }
 
@@ -276,7 +278,8 @@ final class UsageBarView: NSView {
     override func layout() {
         super.layout()
 
-        if usesHistoricalProgress {
+        if usesHistoricalProgress || usesStripedProgress {
+            // Both are painted in `draw`; the striped meter keeps its own capsule there.
             layer?.cornerRadius = 0
             layer?.backgroundColor = nil
             fillView.isHidden = true
@@ -303,6 +306,12 @@ final class UsageBarView: NSView {
             )
         } else if usesClassicProgress {
             ThemedProgressDrawing.drawSegmented(
+                in: bounds,
+                fraction: displayedFraction,
+                tint: fillColor()
+            )
+        } else if usesStripedProgress {
+            ThemedProgressDrawing.drawStriped(
                 in: bounds,
                 fraction: displayedFraction,
                 tint: fillColor()
@@ -384,6 +393,10 @@ final class UsageBarView: NSView {
 
     private var usesHistoricalProgress: Bool {
         usesClassicProgress || usesWorkbenchProgress || usesIRIXProgress
+    }
+
+    private var usesStripedProgress: Bool {
+        AppThemePalette.current.material(for: effectiveAppearance).progressStyle == .striped
     }
 
     private var workbenchProgressBlue: NSColor {

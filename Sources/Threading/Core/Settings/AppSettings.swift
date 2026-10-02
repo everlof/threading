@@ -265,6 +265,25 @@ final class AppSettings {
         return AppSettingDefinitions.harmonizesTerminalBackgrounds.read(from: .standard) ?? true
     }
 
+    /// Whether a Claude terminal session draws its TUI in the terminal palette.
+    ///
+    /// On by default, because without it a theme's paired terminal palette reaches only the
+    /// ground and plain text: Claude's ordinary themes paint their own 24-bit colours over it.
+    /// On, a terminal launch states the ANSI variant matching the session's palette in its
+    /// per-session settings file (`ClaudeTerminalTheme`); off leaves the account's own `theme`
+    /// in force. Read at launch and resume, so it reaches a running session when it next starts.
+    var agentsUseTerminalPalette: Bool {
+        get { Self.agentsUseTerminalPalette }
+        set {
+            AppSettingDefinitions.agentsUseTerminalPalette.write(newValue, to: defaults)
+        }
+    }
+
+    nonisolated static var agentsUseTerminalPalette: Bool {
+        _ = registerStandardDefaults
+        return AppSettingDefinitions.agentsUseTerminalPalette.read(from: .standard) ?? true
+    }
+
     /// Whether the motion a theme defines plays: its moving backgrounds, its logo's gestures
     /// and particles, and the transition it arrives with.
     ///
@@ -889,6 +908,17 @@ final class AppSettings {
     }
 
     /// The working indicator shown for each newly-started conversation turn.
+    /// Audio capture is an explicit user choice. Hosted tests use the quarantined suite.
+    var sharesThemeAudio: Bool {
+        get { AppSettingDefinitions.sharesThemeAudio.read(from: userChoiceDefaults) ?? false }
+        set { AppSettingDefinitions.sharesThemeAudio.write(newValue, to: userChoiceDefaults) }
+    }
+
+    var themeAudioSource: String {
+        get { AppSettingDefinitions.themeAudioSource.read(from: userChoiceDefaults) ?? AudioSpectrumSource.systemID }
+        set { AppSettingDefinitions.themeAudioSource.write(newValue, to: userChoiceDefaults) }
+    }
+
     var workingOrbStyle: WorkingOrbStyle {
         get {
             AppSettingDefinitions.workingOrbStyle.read(from: defaults)

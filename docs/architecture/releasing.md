@@ -122,12 +122,15 @@ Sparkle's nested bundles inside-out, which the export otherwise does for free.
 
 Nothing working was lost by removing it: the entitlement had never been in a distributed build,
 because it never could be. Optional Apple sign-in would need a web flow with a Services ID. The
-public Hosted Direct path instead enrolls with a locally stored installation secret.
+production Hosted Direct path instead enrolls with a locally stored installation secret on every
+channel, including ordinary local and internal builds.
 
 **What public builds offer.** Release, beta and nightly builds offer Remote Access's local ways
 in and Hosted Direct. `BuildChannel.offersHostedDirect` is true on every channel. A public build
 uses the production service with an accountless installation secret and never constructs Apple's
-native sign-in control. The service must deploy the matching anonymous-host route before these
+native sign-in control. Local `dev` builds use that same path; only the explicitly selected isolated
+development service or loopback authentication retains developer authentication. The service must
+deploy the matching anonymous-host route before these
 builds are distributed. No Sign in with Apple entitlement is needed.
 
 **What this bought.** It was the only `com.apple.developer.*` key in the entitlements file, so
@@ -978,6 +981,43 @@ remains), and a dev build no longer schedules checks against the stable feed
 
 ## Agent CLI release notices
 
+General Settings also carries an **Agent tools** row with an explicit **Check Now** action.
+It reuses the bounded checker regardless of the automatic-check preference or daily cadence,
+retains the result with the cached settings page, and lists the fixed `AgentKind` inventory.
+Each installed tool's help names the resolved executable path, making a stale installation
+earlier on `PATH` distinguishable from the one the person just updated elsewhere.
+Missing executables, failed version reads, unreachable release sources and successful checks
+remain distinct; a failed source never produces an *Up to date* label. Each row links to its
+provider's installation guide, including package-manager alternatives. An available **Update**
+uses the same fresh local preflight and visible standalone-terminal runner as the daily receipt.
+The app does not install a missing CLI on its own. Running agents must be restarted after an
+update to use the new executable; checking again refreshes the Settings result.
+
+**Model releases and CLI releases are related but not interchangeable.** The provider's model
+configuration documentation distinguishes alias changes from explicit minimum versions.
+`AgentCLIModelRequirement` records only explicit documented minimums (verified 2026-10-02):
+Fable 5.1 requires 2.1.257, Opus 5.5 requires 2.1.280, and Sonnet 5.5 requires 2.1.284.
+Settings explains unmet requirements and links to the live
+[model configuration documentation](https://code.claude.com/docs/en/model-config).
+The daily receipt names models when the offered update crosses one of those minimums.
+These facts are guidance, never a replacement model catalog or an account-access gate.
+Unknown models and provider deployments remain the CLI's decision; update these authored
+minimums when the official documentation publishes another one.
+
+Opus 4.7 was announced in
+[Claude Code 2.1.111](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21111),
+including its Extra High effort support. An announcement alone is not evidence of a hard
+minimum for an explicitly selected API model. A screenshot of a TUI running Opus 4.7 beside a
+Sonnet 4.6 picker row proves neither a stale CLI nor a model switch: those are different families.
+Claude aliases can resolve differently by version, provider and environment configuration.
+Observed alias labels remain owned by `ModelAliasResolutionStore`, as described in `accounts.md`.
+
+The manual surface is host-only: the host owns release sources, executable identity, requirement
+provenance, action routing and update execution. Its existing Settings rows and buttons follow
+the ordinary theme boundary. One check still performs at most six bounded local children and
+five capped requests; mounting and repainting read only the small completed report and construct
+at most eight rows, including an update-launch failure. There is no background probe when the page appears.
+
 The same **Check for updates automatically** setting also authorizes a separate daily health
 check for installed agent TUIs. Sparkle cannot answer this question: each provider owns its tool,
 version scheme, release source and update command. `AgentKind.cliUpdateDefinition` therefore makes
@@ -996,6 +1036,12 @@ npm-published agents commonly use a `#!/usr/bin/env node` launcher: an absolute 
 still exits 127 if its interpreter directories are missing. Missing executables remain distinct
 from failed or unreadable version commands, and inherited agent identity is removed from every
 child.
+
+The live checker creates that resolver per sweep. A resolver retained with the checker cached
+the first login `PATH` for the lifetime of the daily coordinator or Settings page, so checking
+again after changing an installation path kept reading the previous executable. The regression
+test runs the same checker twice against a fixture shell whose exported path changes, proves
+both resolved executable/version pairs, and observes exactly one environment child per sweep.
 
 Only installed tools reach the network. Their HTTPS reads run concurrently with a ten-second
 timeout and a 256 KiB response cap enforced against the transfer rather than the result, so a

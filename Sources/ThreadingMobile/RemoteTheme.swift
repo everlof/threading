@@ -863,6 +863,19 @@ struct RemoteThemePalette: Equatable {
     var uiLabel: UIColor { uiColor("label", fallback: "#F3F4F6") }
     var uiSecondaryLabel: UIColor { uiColor("secondary_label", fallback: "#A7ABB4") }
     var uiTertiaryLabel: UIColor { uiColor("tertiary_label", fallback: "#747983") }
+    /// An input hint is a sentence to read, so it starts at the theme's secondary ink. Keep
+    /// translucent custom ink when it reads on the composer, raising only its opacity when the
+    /// panel beneath it would otherwise make it too faint.
+    var uiInputPlaceholder: UIColor {
+        let composerGround = uiPanel.remoteComposited(over: uiGround)
+        return uiSecondaryLabel.remoteHeldForReading(over: composerGround, fallback: uiLabel)
+    }
+    var uiInputPlaceholderOnControl: UIColor {
+        let panel = uiPanel.remoteComposited(over: uiGround)
+        let control = uiControlResting.remoteComposited(over: panel)
+        return uiSecondaryLabel.remoteHeldForReading(over: control, fallback: uiLabel)
+    }
+    var inputPlaceholder: Color { Color(uiInputPlaceholder) }
     var uiAccent: UIColor { uiColor("accent", fallback: "#FFFFFF") }
     var uiAccentForeground: UIColor {
         guard let luminance = uiAccent.remoteRelativeLuminance else {
@@ -1216,5 +1229,30 @@ extension UIColor {
             blue: composite(foregroundBlue, over: groundBlue),
             alpha: alpha
         )
+    }
+
+    /// Keep the theme's hue and the least opacity that gives body-sized text 4.5:1 contrast.
+    fileprivate func remoteHeldForReading(over ground: UIColor, fallback: UIColor) -> UIColor {
+        func contrast(_ ink: UIColor) -> CGFloat? {
+            guard let foreground = ink.remoteComposited(over: ground).remoteRelativeLuminance,
+                  let background = ground.remoteRelativeLuminance else { return nil }
+            return (max(foreground, background) + 0.05) / (min(foreground, background) + 0.05)
+        }
+
+        guard let initial = contrast(self), initial < 4.5 else { return self }
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return self }
+        for step in 1...24 {
+            let raised = alpha + (1 - alpha) * CGFloat(step) / 24
+            let candidate = UIColor(red: red, green: green, blue: blue, alpha: raised)
+            if let ratio = contrast(candidate), ratio >= 4.5 { return candidate }
+        }
+        if let fallbackRatio = contrast(fallback), fallbackRatio >= 4.5 { return fallback }
+        let blackRatio = contrast(.black) ?? 0
+        let whiteRatio = contrast(.white) ?? 0
+        return blackRatio >= whiteRatio ? .black : .white
     }
 }

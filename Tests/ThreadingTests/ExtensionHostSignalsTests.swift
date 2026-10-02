@@ -13,6 +13,7 @@ final class ExtensionHostSignalsTests: XCTestCase {
     private var previousNow: (() -> Date)!
     private var previousCalendar: (() -> Calendar)!
     private var previousUsage: (() -> Double?)!
+    private var previousAudio: (() -> AudioSpectrum?)!
 
     override func setUp() async throws {
         try await super.setUp()
@@ -21,6 +22,7 @@ final class ExtensionHostSignalsTests: XCTestCase {
         previousNow = ExtensionHostSignals.now
         previousCalendar = ExtensionHostSignals.calendar
         previousUsage = ExtensionHostSignals.activeAccountUsageRemaining
+        previousAudio = ExtensionHostSignals.audio
     }
 
     override func tearDown() async throws {
@@ -29,6 +31,7 @@ final class ExtensionHostSignalsTests: XCTestCase {
         ExtensionHostSignals.now = previousNow
         ExtensionHostSignals.calendar = previousCalendar
         ExtensionHostSignals.activeAccountUsageRemaining = previousUsage
+        ExtensionHostSignals.audio = previousAudio
         try await super.tearDown()
     }
 
@@ -91,5 +94,27 @@ final class ExtensionHostSignalsTests: XCTestCase {
     @MainActor
     func testAnUnknownSignalIsNilRatherThanAGuess() {
         XCTAssertNil(ExtensionHostSignals.value(ExtensionHostSignal(rawValue: "future.signal")))
+    }
+
+    func testAudioSignalsDistinguishUnavailableFromRealSilence() {
+        ExtensionHostSignals.audio = { nil }
+        XCTAssertEqual(ExtensionHostSignals.value(.audioAvailable), 0)
+        for signal in ExtensionHostSignal.audioSignals where signal != .audioAvailable {
+            XCTAssertNil(ExtensionHostSignals.value(signal))
+        }
+        ExtensionHostSignals.audio = { .silence }
+        XCTAssertEqual(ExtensionHostSignals.value(.audioAvailable), 1)
+        for signal in ExtensionHostSignal.audioSignals where signal != .audioAvailable {
+            XCTAssertEqual(ExtensionHostSignals.value(signal), 0)
+        }
+        let snapshot = AudioSpectrum(level: 0.8, bands: [0.2, 0.4, 0.6, 0.8, 1, 0.1, 0.2, 0.3])
+        ExtensionHostSignals.audio = { snapshot }
+        XCTAssertEqual(ExtensionHostSignals.value(.audioLevel), 0.8)
+        XCTAssertEqual(ExtensionHostSignals.value(.audioBass), snapshot.bass)
+        XCTAssertEqual(ExtensionHostSignals.value(.audioMids), snapshot.mids)
+        XCTAssertEqual(ExtensionHostSignals.value(.audioTreble), snapshot.treble)
+        for (index, signal) in ExtensionHostSignal.audioBands.enumerated() {
+            XCTAssertEqual(ExtensionHostSignals.value(signal), snapshot.bands[index])
+        }
     }
 }

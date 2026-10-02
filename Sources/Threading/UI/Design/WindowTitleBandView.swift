@@ -1190,7 +1190,38 @@ final class WindowTitleBandView: NSView, ThemedComponent {
                 y += texture.spacing
                 line += 1
             }
+        case .gloss:
+            drawGloss(texture, in: rect)
         }
+    }
+
+    /// The sheen of a glossy plastic header: the stated light at full strength along the top,
+    /// gone by the band's middle, with a crisp one-point specular line on the very edge. It is
+    /// the one soft texture, so it turns antialiasing back on that the hard kinds switch off,
+    /// and it finds "top" from the context's flip for the reason `.rule` does.
+    private func drawGloss(
+        _ texture: WindowChromeAppearance.Resolved.Texture,
+        in rect: NSRect
+    ) {
+        NSGraphicsContext.current?.shouldAntialias = true
+        let flipped = NSGraphicsContext.current?.isFlipped ?? false
+        let half = rect.height / 2
+        let sheen = NSRect(
+            x: rect.minX,
+            y: flipped ? rect.minY : rect.maxY - half,
+            width: rect.width,
+            height: half
+        )
+        let clear = texture.color.withAlphaComponent(0)
+        NSGradient(starting: texture.color, ending: clear)?
+            .draw(in: sheen, angle: flipped ? 90 : 270)
+        texture.color.withAlphaComponent(min(1, texture.color.alphaComponent * 2)).setFill()
+        NSRect(
+            x: rect.minX,
+            y: flipped ? rect.minY : rect.maxY - 1,
+            width: rect.width,
+            height: 1
+        ).fill()
     }
 
     /// Two compact raised rails, used by small hardware-like caption bands. Their endpoints

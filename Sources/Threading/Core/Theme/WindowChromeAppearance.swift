@@ -197,9 +197,14 @@ public enum WindowChromeAppearance {
         fallbackInk: NSColor
     ) -> Resolved.Texture? {
         guard let stated else { return nil }
+        // A sheen is light whatever the band's ink is; deriving it from a dark ink would draw
+        // a shadow across the top of the band instead.
+        let derived = stated.kind == .gloss
+            ? NSColor.white.withAlphaComponent(WindowChromeStyleLimits.defaultGlossAlpha)
+            : fallbackInk.withAlphaComponent(0.42)
         return Resolved.Texture(
             kind: stated.kind,
-            color: stated.color ?? fallbackInk.withAlphaComponent(0.42),
+            color: stated.color ?? derived,
             spacing: CGFloat(stated.spacing ?? WindowChromeStyleLimits.defaultTextureSpacing)
         )
     }

@@ -94,6 +94,44 @@ final class AgentCLIUpdateCheckerTests: XCTestCase {
 
     // MARK: - Complete check
 
+    func testRepeatedLiveChecksRefreshTheLoginPATHOncePerSweep() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentCLIRefresh-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pathFile = root.appendingPathComponent("path")
+        let callsFile = root.appendingPathComponent("calls")
+        let shell = root.appendingPathComponent("shell")
+        let pathWord = ShellCommand(word: pathFile.path).source
+        let callsWord = ShellCommand(word: callsFile.path).source
+        try Data("""
+        #!/bin/sh
+        PATH=$(/bin/cat \(pathWord))
+        export PATH
+        /usr/bin/printf 'probe\\n' >> \(callsWord)
+        exec /bin/sh -c "$3"
+        """.utf8).write(to: shell)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shell.path)
+
+        let checker = AgentCLIUpdateChecker.live(shell: shell.path, transport: { _ in
+            AgentCLIUpdateHTTPResponse(data: Data(#"{"version":"2.1.284"}"#.utf8), statusCode: 200)
+        })
+        for version in ["2.1.220", "2.1.284"] {
+            let bin = root.appendingPathComponent(version, isDirectory: true)
+            try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+            let executable = bin.appendingPathComponent(AgentDefaults.claudeExecutable)
+            try Data("#!/bin/sh\n/usr/bin/printf '\(version)\\n'\n".utf8).write(to: executable)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+            try Data("\(bin.path):/usr/bin:/bin".utf8).write(to: pathFile)
+
+            let report = await checker.check()
+            XCTAssertEqual(report.installed.map(\.version), [version])
+            XCTAssertEqual(report.installed.map(\.executablePath), [executable.path])
+            XCTAssertEqual(report.missingCount, AgentKind.allCases.count - 1)
+        }
+        XCTAssertEqual(try String(contentsOf: callsFile, encoding: .utf8), "probe\nprobe\n")
+    }
+
     func testCheckReportsInstalledMissingOutdatedAndUnreadableToolsInCatalogOrder() async {
         let definitions = [
             definition(id: "old", package: "old"),
@@ -123,6 +161,7 @@ final class AgentCLIUpdateCheckerTests: XCTestCase {
         let report = await checker.check()
 
         XCTAssertEqual(report.installed.map(\.id), ["old", "current"])
+        XCTAssertEqual(report.installed.map(\.executablePath), ["/tools/old", "/tools/current"])
         XCTAssertEqual(report.updates.map(\.id), ["old"])
         XCTAssertEqual(report.updates.first?.installedVersion, "1.0.0")
         XCTAssertEqual(report.updates.first?.latestVersion, "1.1.0")

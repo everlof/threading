@@ -12,6 +12,8 @@ import AppKit
 /// without the box eating the pane.
 final class PromptView: NSView, ThemedComponent {
 
+    private let surfaceThemeEvents = AppEventObservations()
+
     // MARK: - Properties
 
     private let contentStack = NSStackView()
@@ -420,6 +422,12 @@ final class PromptView: NSView, ThemedComponent {
 
     private func setupViews() {
         updateSurface()
+        // The recorded surface re-resolves its colours on a theme switch, but whether the
+        // prompt is a well or an outlined search bar is the theme's to decide, so a switch
+        // restates the construction itself.
+        surfaceThemeEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.updateSurface()
+        }
 
         setupTextView()
         setupAttachmentStrip()
@@ -1600,8 +1608,25 @@ final class PromptView: NSView, ThemedComponent {
         // travelling thumbnail already says a drop is happening, the surface only answers
         // *here* — and a wash rather than a plate, because a draft may be under it.
         let isEmphasized = isTextFocused || isDropTarget
+        let fill = isDropTarget ? Design.Surface.fieldDropTarget : Design.Surface.field
+        if AppThemePalette.current.material(for: effectiveAppearance).fieldStyle == .outlined {
+            // A search bar's outline, there at rest and never bevelled. Focus and a drop
+            // thicken it by a point past the focus ring's own width, so the emphasised state
+            // still reads as more than the resting one.
+            applySurface(
+                fill: fill,
+                radius: .panel,
+                border: Design.Surface.accent,
+                borderWidth: isEmphasized
+                    ? Design.Accessibility.focusRingWidth + 1
+                    : OutlinedField.borderWidth,
+                glow: true,
+                bevel: .none
+            )
+            return
+        }
         applySurface(
-            fill: isDropTarget ? Design.Surface.fieldDropTarget : Design.Surface.field,
+            fill: fill,
             radius: .panel,
             border: isEmphasized ? Design.Surface.accent : Design.Surface.border,
             borderWidth: isEmphasized

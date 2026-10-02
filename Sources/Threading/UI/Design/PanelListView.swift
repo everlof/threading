@@ -49,6 +49,11 @@ final class PanelListView: NSView {
         scrollView.contentView = clipView
         scrollView.documentView = stack
         scrollView.hasVerticalScroller = true
+        // A legacy scroller — a mouse attached, or "Always show scroll bars" — otherwise stays
+        // up with nothing to scroll: a full-height empty trough beside a list of two lines.
+        // The stack's width follows the scroll view rather than the clip, so the scroller
+        // coming and going cannot re-wrap the rows and flip itself back.
+        scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
         addSubview(scrollView)
 

@@ -35,6 +35,7 @@ final class MotionPreferencesViewController: NSViewController {
     private let orbPreview = WorkingOrbView()
     private let nameStylePopUp = ThemedPopUp()
     private let namePreview = MorphingTitleLabel()
+    private let audioPreferences = ThemeAudioPreferences()
     private var previewNameIndex = 0
 
     /// One live preview per choice, made up front and handed to the menu item.
@@ -242,7 +243,8 @@ final class MotionPreferencesViewController: NSViewController {
 
         let page = SettingsUI.page(title: "Motion", sections: [
             SettingsUI.section("Working", indicatorCard),
-            SettingsUI.section("Chat names", transitionCard)
+            SettingsUI.section("Chat names", transitionCard),
+            audioPreferences.section()
         ], hostPage: .motion)
 
         page.translatesAutoresizingMaskIntoConstraints = false
@@ -277,6 +279,12 @@ final class MotionPreferencesViewController: NSViewController {
         // The row itself reports a closing menu, so this covers only the page going away with a
         // dropdown still open.
         stopDemonstration()
+        audioPreferences.disappeared()
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        audioPreferences.appeared()
     }
 
     // MARK: - Actions

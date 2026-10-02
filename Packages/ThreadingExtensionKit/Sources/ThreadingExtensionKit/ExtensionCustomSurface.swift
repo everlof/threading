@@ -269,6 +269,35 @@ public struct ExtensionHostSignal: RawRepresentable, Codable, Hashable, Sendable
     /// the hour without the extension ever reading the clock.
     public static let timeOfDayFraction: Self = "time.day-fraction"
 
+    /// The user-enabled, host-analyzed audio feed. Availability is 0 or 1; all other values
+    /// are normalized 0...1 and resolve to the binding's fallback when capture is unavailable.
+    /// A binding grants no recording, microphone, source selection or raw-audio authority.
+    public static let audioAvailable: Self = "audio.available"
+    public static let audioLevel: Self = "audio.level"
+    public static let audioBass: Self = "audio.bass"
+    public static let audioMids: Self = "audio.mids"
+    public static let audioTreble: Self = "audio.treble"
+    public static let audioBand0: Self = "audio.band.0"
+    public static let audioBand1: Self = "audio.band.1"
+    public static let audioBand2: Self = "audio.band.2"
+    public static let audioBand3: Self = "audio.band.3"
+    public static let audioBand4: Self = "audio.band.4"
+    public static let audioBand5: Self = "audio.band.5"
+    public static let audioBand6: Self = "audio.band.6"
+    public static let audioBand7: Self = "audio.band.7"
+
+    /// Bands run from bass to treble: 20–80, 80–200, 200–500, 500–1,200, 1,200–3,000,
+    /// 3,000–6,000, 6,000–12,000 and 12,000–20,000 Hz (bounded by the source's Nyquist limit).
+    public static let audioBands: [Self] = [
+        .audioBand0, .audioBand1, .audioBand2, .audioBand3,
+        .audioBand4, .audioBand5, .audioBand6, .audioBand7
+    ]
+    public static let audioSignals: [Self] = [
+        .audioAvailable, .audioLevel, .audioBass, .audioMids, .audioTreble
+    ] + audioBands
+
+    public var requiresAudioCapture: Bool { Self.audioSignals.contains(self) }
+
     /// Every signal this SDK release names. A host may supply fewer — it refuses a patch naming
     /// one it cannot answer — and never more without a new SDK release naming them here.
     public static let all: [Self] = [
@@ -276,7 +305,7 @@ public struct ExtensionHostSignal: RawRepresentable, Codable, Hashable, Sendable
         .workloadIntensity,
         .workloadWorkingCount,
         .timeOfDayFraction
-    ]
+    ] + audioSignals
 }
 
 public struct ExtensionScalarMapping: Codable, Equatable, Sendable {

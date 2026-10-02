@@ -534,6 +534,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
     }
 
+    var hostedUsesAnonymousEnrollment: Bool { hostedService.usesAnonymousEnrollment }
+
     var hostedAnonymousEnrollmentIsDisabled: Bool {
         hostedService.usesAnonymousEnrollment
             && (!appSettings.remoteHostedEnrollmentEnabled

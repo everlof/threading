@@ -27,8 +27,14 @@ enum AgentCLIUpdateToast {
             }
         )
 
+        let newModels = updates.flatMap { AgentCLIModelRequirement.enabledBy($0) }.map(\.model)
+        let detail = newModels.isEmpty ? nil : L10n.format(
+            "This Claude Code update supports %@. Restart running agents after updating.",
+            newModels.joined(separator: ", ")
+        )
         return ToastRequest(
             message: message,
+            detail: detail,
             comparison: comparison,
             actionTitle: updates.count == 1
                 ? L10n.format("Update %@", updates[0].displayName)

@@ -34,6 +34,9 @@ private let readMembers: Set<String> = [
     "availableData", "readDataToEndOfFile", "readToEnd"
 ]
 
+// These are daemon RPCs, even when callbacks are scheduled on a background dispatch queue.
+private let blockingFunctions: Set<String> = ["FSEventStreamStart", "FSEventStreamStop"]
+
 private let mainActorBaseTypes: Set<String> = [
     "NSApplication", "NSApplicationDelegate", "NSCollectionView", "NSControl",
     "NSDocument", "NSMenu", "NSResponder", "NSTableView", "NSTextView", "NSView",
@@ -61,13 +64,15 @@ final class LatencyVisitor: SyntaxVisitor {
         let labels = node.arguments.map { ($0.label?.text ?? "_") + ":" }.joined()
         if let reference = node.calledExpression.as(DeclReferenceExprSyntax.self) {
             let name = reference.baseName.text
-            if isExpensiveInitializer(name: name, labels: labels) {
+            if blockingFunctions.contains(name) || isExpensiveInitializer(name: name, labels: labels) {
                 report(node, symbol: "\(name)(\(labels))")
             }
         } else if let member = node.calledExpression.as(MemberAccessExprSyntax.self) {
             let name = member.declName.baseName.text
             let base = member.base?.trimmedDescription ?? ""
-            if isExpensiveMember(name: name, base: base, labels: labels) {
+            if blockingFunctions.contains(name) {
+                report(node, symbol: "\(name)(\(labels))")
+            } else if isExpensiveMember(name: name, base: base, labels: labels) {
                 report(node, symbol: normalizedSymbol(name: name, labels: labels))
             }
         }
@@ -356,7 +361,10 @@ func runSelfTest() -> Bool {
         ("@MainActor final class C { nonisolated func load() { _ = Data(contentsOf: url) } }", 0),
         ("final class C: NSViewController { func load() { _ = FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) } }", 1),
         ("@MainActor class Base {} final class C: Base {} extension C { func load() { _ = Data(contentsOf: url) } }", 1),
-        ("final class C { func load() { _ = Data(contentsOf: url) } }", 0)
+        ("final class C { func load() { _ = Data(contentsOf: url) } }", 0),
+        ("@MainActor final class C { func watch() { FSEventStreamStart(stream); FSEventStreamStop(stream) } }", 2),
+        ("@MainActor final class C { func watch() { queue.async { FSEventStreamStart(stream) } } }", 0),
+        ("@MainActor final class C { func watch() { CoreServices.FSEventStreamStart(stream) } }", 1)
     ]
     for (index, fixture) in fixtures.enumerated() {
         let actorTypes = mainActorTypes(in: [fixture.0])

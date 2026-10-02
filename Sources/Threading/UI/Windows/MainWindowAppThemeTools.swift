@@ -668,7 +668,7 @@ extension AgentToolCoordinator {
                         "chrome.title_bar.button_glyph_style must be \"squares\", "
                             + "\"platinum\", \"beos\", \"openstep\", \"irix\", "
                             + "\"amiga\", \"aqua\", \"aqua_tiger\", \"classic_player\", "
-                            + "\"tui\", or \"plain\"."
+                            + "\"tui\", \"pills\", or \"plain\"."
                     )
                 }
                 style.titleBar.buttonGlyphStyle = parsed
@@ -788,7 +788,8 @@ extension AgentToolCoordinator {
             guard let parsed = WindowChromeStyle.TitleBar.Texture.Kind(rawValue: rawKind) else {
                 throw AppThemeEditingError.invalid(
                     "\(path).kind must be \"pinstripes\", \"caption_rails\", "
-                        + "\"aqua_pinstripes\", \"dither\", \"brushed_metal\", or \"rule\"."
+                        + "\"aqua_pinstripes\", \"dither\", \"brushed_metal\", \"rule\", "
+                        + "or \"gloss\"."
                 )
             }
             kind = parsed
@@ -996,7 +997,8 @@ extension AgentToolCoordinator {
             if let raw = cleaned(popoverPatch.edge) {
                 guard let parsed = AppTheme.Material.PopoverStyle.Edge(rawValue: raw) else {
                     throw AppThemeEditingError.invalid(
-                        "material.popover_style.edge must be \"flat\", \"material\", or \"none\"."
+                        "material.popover_style.edge must be \"flat\", \"material\", "
+                            + "\"coupon\", or \"none\"."
                     )
                 }
                 style.edge = parsed
@@ -1058,9 +1060,9 @@ extension AgentToolCoordinator {
                 rawValue: rawAppearance
             ) else {
                 throw AppThemeEditingError.invalid(
-                    "material.scroller_appearance must be \"automatic\", \"windows_98\", "
-                        + "\"platinum\", \"beos\", \"openstep\", \"irix\", \"amiga\", "
-                        + "\"aqua\", or \"aqua_tiger\"."
+                    "material.scroller_appearance must be \"automatic\", \"pill\", "
+                        + "\"windows_98\", \"platinum\", \"beos\", \"openstep\", \"irix\", "
+                        + "\"amiga\", \"aqua\", or \"aqua_tiger\"."
                 )
             }
             material.scrollerAppearance = parsed
@@ -1079,7 +1081,7 @@ extension AgentToolCoordinator {
             guard let parsed = AppTheme.Material.ProgressStyle(rawValue: rawProgress) else {
                 throw AppThemeEditingError.invalid(
                     "material.progress_style must be \"continuous\", \"segmented\", \"irix\", "
-                        + "or \"amiga\"."
+                        + "\"amiga\", or \"striped\"."
                 )
             }
             material.progressStyle = parsed
@@ -1097,7 +1099,7 @@ extension AgentToolCoordinator {
             guard let parsed = AppTheme.Material.CheckboxStyle(rawValue: rawCheckbox) else {
                 throw AppThemeEditingError.invalid(
                     "material.checkbox_style must be \"automatic\", \"recessed_tick\", "
-                        + "\"windows_98_tick\", or \"beos_cross\"."
+                        + "\"windows_98_tick\", \"beos_cross\", or \"round\"."
                 )
             }
             material.checkboxStyle = parsed
@@ -1109,6 +1111,22 @@ extension AgentToolCoordinator {
                 )
             }
             material.toggleStyle = parsed
+        }
+        if let rawField = cleaned(patch.fieldStyle) {
+            guard let parsed = AppTheme.Material.FieldStyle(rawValue: rawField) else {
+                throw AppThemeEditingError.invalid(
+                    "material.field_style must be \"well\" or \"outlined\"."
+                )
+            }
+            material.fieldStyle = parsed
+        }
+        if let rawBadge = cleaned(patch.badgeStyle) {
+            guard let parsed = AppTheme.Material.BadgeStyle(rawValue: rawBadge) else {
+                throw AppThemeEditingError.invalid(
+                    "material.badge_style must be \"plain\" or \"sticker\"."
+                )
+            }
+            material.badgeStyle = parsed
         }
 
         if patch.removeButtonStyle == true {
@@ -1631,7 +1649,9 @@ extension AgentToolCoordinator {
             "progress_style": material.progressStyle.rawValue,
             "choice_style": material.choiceStyle.rawValue,
             "checkbox_style": material.checkboxStyle.rawValue,
-            "toggle_style": material.toggleStyle.rawValue
+            "toggle_style": material.toggleStyle.rawValue,
+            "field_style": material.fieldStyle.rawValue,
+            "badge_style": material.badgeStyle.rawValue
         ]
         if let width = material.controlBorderWidth {
             document["control_border_width"] = Double(width)

@@ -19,6 +19,8 @@ final class TerminalContainerViewController: NSViewController {
 
     typealias SessionComposerFactory = @MainActor () -> SessionComposerViewController
 
+    var runAgentCLIUpdates: (@MainActor (AgentCLIUpdateExecutionPlan) -> Bool)?
+
     private let placeholderView = SessionPlaceholderView()
 
     /// The pane a failed launch gets instead of the dormant placeholder. Built lazily: most
@@ -724,6 +726,11 @@ final class TerminalContainerViewController: NSViewController {
         let cached = settingsPageCache[id]
         let page = cached ?? {
             let made = definition.make()
+            if let general = made as? GeneralPreferencesViewController {
+                general.agentTools.runUpdates = { [weak self] plan in
+                    self?.runAgentCLIUpdates?(plan) ?? false
+                }
+            }
             settingsPageCache[id] = made
             return made
         }()

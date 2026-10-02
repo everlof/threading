@@ -125,6 +125,29 @@ Three decisions carry it:
   stay legible against the ground *and* apart from each other, which eleven roles cannot answer —
   derivation gives eight near-hues. Writing it out is what makes the pairing a decision taken
   while the theme is designed.
+- **Claude's TUI draws in the palette, by default.** Claude's ordinary themes — `auto` (its
+  shipped default), `dark`, `light`, the colour-blind pair — paint accents, borders and diffs in
+  fixed 24-bit colours, so a paired palette reached only the ground and plain text and the program
+  filling the terminal kept its own look inside every theme. Its two "ANSI colors only" themes draw
+  in the sixteen slots instead: against CLI 2.1.287 in a PTY, `auto` and `dark` open with `38;2;…`
+  foregrounds and no sixteen-colour ones, `dark-ansi` and `light-ansi` the reverse. A terminal
+  launch therefore states one in the per-session `--settings` file (`ClaudeTerminalTheme`), which
+  outranks the account's `theme` without editing it, picked by the same paper-or-ink test as
+  `COLORFGBG` from the palette that session resolves to. The TUI then names slots rather than
+  colours, so a later palette change recolours it live; only the dark-or-light choice of slots
+  waits for the next launch or resume. **Agents use the theme's colours** (Settings ▸ Profiles,
+  `AppSettings.agentsUseTerminalPalette`, on) turns it off for anyone who prefers Claude's own
+  palette. Native conversations draw no TUI and carry no key. **Left for later:** a remote-host
+  launch writes a settings file only when it has a tool route, so it does not state the theme yet,
+  and the other runtimes' TUIs have not been measured.
+- **An agent hears when it left the terminal behind.** The palette layer counts as changed when
+  either half moves, so a theme that recoloured its chrome and inherited its base's terminal used to
+  report "palette: changed" and nothing more — and agents did exactly that, leaving the largest
+  surface in the window on Threading's own palette. `AppThemeLayerReport.terminalLeftBehind` names
+  the variants whose roles moved while their terminal colours did not, and the create/update result
+  says so. The schema says it too: `terminal_colors` describes what each slot carries (red, green
+  and yellow for errors, diffs and warnings; `bright_black` for dim text) and asks for it in every
+  variant.
 - **`Rosé Moon` is the warm muted built-in.** The four original ramps are saturated primaries
   (`Basic`, `Pro`, `Homebrew`) or Nord's cool blue-grey (`Ocean`); `Rosé Moon` fills the warm
   low-saturation register — a blue-black ground, cool lavender text, and Rosé-Pine rose/gold/
@@ -2285,7 +2308,7 @@ same hold, budgets and gates the moving theme already had:
 | `AppTheme.Variant.sprites` + `ThemeParticles.sprites` | a library of up to 8 small pictures, each tinted (a silhouette in each particle ink) or full-colour; any particle block names up to 4 | `ThemeParticleArtwork.cellPictures` / `raster`, `ThemeParticleStill` |
 | `ThemeBackdrop.ImageLayer.alignment` | which edge or corner a `fill` keeps and a `fit` stands against | `ThemeImageAlignment.frame`, `ThemeAlignedPictureLayer` |
 | `SidebarStyle.mascot` (`ThemeMascot`) | a figure at the column's foot with one pose per mood, each with a looping motion and a stream | `SidebarMascotView`, `ThemeMascotView`, `AgentMoodMonitor` |
-| `AppTheme.Variant.moments` (`ThemeMoments`) | a shower and/or a sound for `turn_finished` and `needs_attention` | `ThemeMomentPresenter` over the arrival overlay |
+| `AppTheme.Variant.moments` (`ThemeMoments`) | a sound for `turn_finished`; a shower and/or a sound for `needs_attention` | `ThemeMomentPresenter` over the arrival overlay |
 | `AppTheme.Variant.words` (`ThemeWords`) | the status line's working words and the new-session composer's invitation | `ThemeWording`, `WorkingWordCycle.next(drawingFrom:)` |
 | `SidebarStyle.Brand.dockIcon` | the theme's logo image on the Dock tile, on the theme's plate | `GeneratedAppIcon.logoMark` |
 
@@ -2350,7 +2373,10 @@ and its last row can always be scrolled clear. Like the extension backdrop plane
 to every hit test, claims no pointer and is not an accessibility element. A theme's own sidebar
 picture was already uncapped because a theme is a choice made in Settings with the result in
 view; the mascot is the same kind of choice, so it is drawn at full strength. An opaque navigator
-well covers it, as it covers the extension plane.
+well is painted over exactly the region it stands in, so validation refuses a mascot beside a
+well in the same variant (`remove_navigator_well`). The first Beardie lost its dog that way — the
+well was inherited from the base theme — while `preview_app_theme`, which drew no well, showed it
+standing there; the preview now stacks ground, mascot, well and rows the way the sidebar does.
 
 **The loop runs in the render server.** A pose's motion is one `CAKeyframeAnimation` repeated
 for ever: the motion in the first `duration / every` of the period, rest for the remainder. A mood
@@ -2372,6 +2398,17 @@ plays while an arrival does. That is the rule that makes five agents finishing t
 celebration rather than five. The shower is the arrival overlay's own timeline with no wash, no
 shimmer and no swap, at `budgetShare` = `momentMaximumAlive / transitionMaximumAlive` (260 of
 700), so its cost is bounded the same way; it obeys the hold like every theme motion.
+
+**A finished turn is answered by sound alone.** Moments first let both events shower, and in use
+that was too much: turns come back many times an hour across every running session, and the
+cooldown only thins a burst — it does not make a window-wide shower on most finished turns of the
+day any quieter. Which events may shower is now the event's own fact,
+`ThemeMomentEvent.showsParticles`, and `ThemeMoments` holds it at every way in: its initialiser,
+its subscript and its decoder drop a `turn_finished` shower (and a moment that was nothing else),
+so an older document reads without one and a contributed package cannot put one back. The tools
+refuse `particles` and `duration` on `turn_finished` and the schema does not offer them. The
+sidebar mascot's celebrating pose is the finished turn's picture: it stays in its own corner. A
+session starting to wait keeps its shower, because it is rarer and is the person's cue to act.
 
 **Sounds speak only inside the app.** Alerts are played by Notification Center through each
 notification's own sound, resolved through the user's scoped sound choices; a theme adding a
@@ -2412,7 +2449,7 @@ the theme is deleted.
 
 The tools speak every block in the same merge-and-`remove_*` idiom as the rest: `sprites`
 (stating a name the library holds replaces it) and `remove_sprites`, `moments.<event>` with
-`remove_particles`/`remove_sound`/`remove`, `words` with `remove_working` and
+`remove_particles` (where the event takes a shower)/`remove_sound`/`remove`, `words` with `remove_working` and
 `remove_composer_placeholder`, `sidebar.mascot` with `poses.<mood>` and `remove_poses`, and
 `sidebar.logo_in_dock`. `preview_app_theme` stands the mascot's idle pose at the sample column's
 foot and draws a strip of every mood the theme gives a pose of its own, so an author checks the
@@ -2478,3 +2515,67 @@ missing.
 `AppThemeLayerReportTests` holds the states over System and over a period base, the inherited-
 frame note, a partial theme naming only what is missing, the update wording, a removed layer,
 the report through the create tool, and the decision leading the description.
+
+## 2026-10-02 — a shop app's vocabulary
+
+The four-layer report made a gap visible: a custom theme modelled on a modern shop app (the
+local TEMU theme) stated every layer and still drew stock modern controls in nine components,
+because every non-default value the vocabulary had for menus, scrollers, checks, progress and
+the window's buttons reproduced a *period* desktop. A shop app is neither the System look nor a
+1990s desktop. Eight values close the gap, each generic — named for what it draws, never for a
+theme — so any theme can state them:
+
+| Field | Value | What it draws |
+|---|---|---|
+| `popover_style.edge` | `coupon` | A ticket: the sides bitten by a row of half-circle scallops. Worn by every app-owned pop-up — popovers, the modern menu family, alerts and toasts — and needs `arrow: none`, like `material`. |
+| `chrome.title_bar.active_texture.kind` | `gloss` | A soft sheen over the band's upper half with a one-point specular top line. White unless a colour is stated; the one soft texture. |
+| `chrome.title_bar.button_glyph_style` | `pills` | Round plates in the band's ink, each figure cut out in the band's ground. |
+| `material.checkbox_style` | `round` | The modern gadget cut round: an accent-filled circle with the selected-text tick. |
+| `material.progress_style` | `striped` | A capsule meter crossed by still diagonal light stripes, 8pt tall. |
+| `material.scroller_appearance` | `pill` | The modern scroller with an accent capsule thumb. |
+| `material.field_style` | `outlined` | Text fields as capsules and the composer as its panel, both outlined in the accent at rest and never bevelled. New field; `well` is the default. |
+| `material.badge_style` | `sticker` | Collapsed-session counts and Git ref labels as tilted price stickers. New field; `plain` is the default. |
+
+Decisions worth knowing before touching one:
+
+- **Two of the eight are not period controls and say so in the model.** `CheckboxStyle.round`
+  and `ScrollerAppearance.pill` are modern in every respect but their silhouette, so
+  `CheckboxStyle.isHistorical` and `ScrollerAppearance.usesLegacyPresentation` exclude them:
+  before that split, any non-`automatic` value meant "reconstructed period hardware", and a
+  round check would have come out at the 13pt historical size with no hover plate or disabled
+  dimming, and a pill scroller with period arrows in persistent legacy space.
+- **One outline, four owners.** `CouponOutline` is the only place the scallops are built. The
+  popover fills and strokes it through its single outline, so fill, border, window shadow and
+  material shadow all follow it. Menus and alerts are layer-backed `applySurface` plates, so
+  they mask to it and stroke it in `draw` at twice the border width (the mask keeps the inner
+  half); their shadows come from the menu chassis and the alert's window, which follow alpha.
+  A toast carries its glow on its own layer, which a mask would clip, so a coupon toast draws
+  its plate in `draw` over a clear layer instead and the glow is cast from that alpha.
+  Embedded floating cards keep their rectangle and the coupon's flat border.
+- **A sticker is drawn, not styled.** A tilted plate cannot be a styled label — a label's own
+  layer would carry the plate in front of its text, and AppKit owns a layer-backed view's
+  geometry. `ThemedStickerBadge` draws plate and type in one rotated pass and reports the rotated
+  box as its intrinsic size. The project row creates it beside its count label rather than
+  restyling the label, and restates the count on a theme switch.
+- **A switch restates construction, not only colour.** The composer, the toast band and the
+  project count each observe `AppThemeDidChange`: a recorded surface re-resolves its colours,
+  but whether it is a well or an outline, a plate or a coupon, is the theme's to decide.
+- **The design kit compiles some of these files by symlink.** `CouponOutline.swift` is linked
+  into `Packages/ThreadingDesignKit/.../Shared` because the shared popover and menu use it.
+
+`ShopVocabularyTests` holds the bite spacing and silhouette, the popover outline and content
+clearance, the stemless rule, the gloss default and its pixels, the pill plate's ink and
+cut-out, the round check against the modern one, the striped meter's height and stripes, the
+pill scroller's modern geometry, the outlined field's resting edge, the sticker's size and
+accessibility, the project count's sticker and switch back, old documents decoding to the quiet
+defaults, and a tool round trip of all eight values.
+
+## Opt-in music spectrum
+
+`sidebar.brand.analyzer` can explicitly choose `audio` or `workload` independently of the
+material's chart style. Absence preserves the existing material default. The MCP theme tools
+use the flat `sidebar.analyzer` field and accept `default` to clear it. The native audio
+analyzer and extension Metal `audio.*` bindings share one locally analyzed reading; neither
+can enable capture, choose a source, or obtain raw audio. Permission, motion/visibility gates,
+the fixed eight-band contract and measured budgets are owned by
+[`audio-spectrum.md`](audio-spectrum.md).

@@ -95,106 +95,43 @@ final class ProjectScriptService {
 /// Path-based rather than inode-based: editors replace JSON files atomically, so the watch must
 /// survive the old inode disappearing. Filtering happens before the main-queue hop, and changes
 /// are coalesced so a save produces one bounded parse.
-final class ProjectScriptConfigurationWatcher: @unchecked Sendable {
-    private let root: String
-    private let configurationPath: String
-    private let onChange: @MainActor @Sendable () -> Void
-    private let queue = DispatchQueue(label: "codes.threading.project-script-watch", qos: .utility)
+final class ProjectScriptConfigurationWatcher: Sendable {
+    private enum Defaults {
+        static let latency: CFTimeInterval = 0.2
+        static let coalesce: TimeInterval = 0.35
+    }
 
-    private var stream: FSEventStreamRef?
-    private var coalesceItem: DispatchWorkItem?
+    private let events: FileSystemEventStream
 
-    init(repositoryRoot: URL, onChange: @escaping @MainActor @Sendable () -> Void) {
-        root = repositoryRoot.standardizedFileURL.path
-        configurationPath = repositoryRoot
+    init(
+        repositoryRoot: URL,
+        backend: (any FileSystemEventStreamBackend)? = nil,
+        onChange: @escaping @MainActor @Sendable () -> Void
+    ) {
+        let root = repositoryRoot.standardizedFileURL.path
+        let configurationPath = repositoryRoot
             .appendingPathComponent(ProjectScriptDefaults.configurationFileName)
             .standardizedFileURL.path
-        self.onChange = onChange
-    }
-
-    deinit { stop() }
-
-    func start() {
-        guard stream == nil else { return }
-
-        var context = FSEventStreamContext(
-            version: 0,
-            info: Unmanaged.passUnretained(self).toOpaque(),
-            retain: { pointer in
-                guard let pointer else { return nil }
-                return UnsafeRawPointer(
-                    Unmanaged<ProjectScriptConfigurationWatcher>
-                        .fromOpaque(pointer).retain().toOpaque()
-                )
+        events = FileSystemEventStream(
+            paths: [root],
+            latency: Defaults.latency,
+            coalesce: Defaults.coalesce,
+            isRelevant: { paths, flags in
+                paths.indices.contains { index in
+                    Self.isRelevant(
+                        path: paths[index],
+                        flags: index < flags.count ? flags[index] : 0,
+                        configurationPath: configurationPath
+                    )
+                }
             },
-            release: { pointer in
-                guard let pointer else { return }
-                Unmanaged<ProjectScriptConfigurationWatcher>.fromOpaque(pointer).release()
-            },
-            copyDescription: nil
+            onChange: onChange,
+            backend: backend
         )
-
-        let callback: FSEventStreamCallback = { _, info, count, rawPaths, rawFlags, _ in
-            guard let info else { return }
-            let watcher = Unmanaged<ProjectScriptConfigurationWatcher>
-                .fromOpaque(info).takeUnretainedValue()
-            let paths = unsafeBitCast(rawPaths, to: NSArray.self) as? [String] ?? []
-            let flags = (0..<count).map { rawFlags[$0] }
-            watcher.handle(paths: paths, flags: flags)
-        }
-
-        let flags = UInt32(
-            kFSEventStreamCreateFlagUseCFTypes
-                | kFSEventStreamCreateFlagFileEvents
-                | kFSEventStreamCreateFlagNoDefer
-        )
-        guard let stream = FSEventStreamCreate(
-            kCFAllocatorDefault,
-            callback,
-            &context,
-            [root] as CFArray,
-            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
-            0.2,
-            flags
-        ) else { return }
-
-        FSEventStreamSetDispatchQueue(stream, queue)
-        FSEventStreamStart(stream)
-        self.stream = stream
     }
 
-    func stop() {
-        coalesceItem?.cancel()
-        coalesceItem = nil
-        guard let stream else { return }
-        FSEventStreamStop(stream)
-        FSEventStreamInvalidate(stream)
-        FSEventStreamRelease(stream)
-        self.stream = nil
-    }
-
-    private func handle(paths: [String], flags: [FSEventStreamEventFlags]) {
-        guard paths.indices.contains(where: { index in
-            Self.isRelevant(
-                path: paths[index],
-                flags: index < flags.count ? flags[index] : 0,
-                configurationPath: configurationPath
-            )
-        }) else { return }
-
-        DispatchQueue.main.async { [weak self] in self?.scheduleNotification() }
-    }
-
-    private func scheduleNotification() {
-        coalesceItem?.cancel()
-        let item = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.coalesceItem = nil
-            MainActor.assumeIsolated { self.onChange() }
-        }
-        coalesceItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: item)
-    }
+    func start() { events.start() }
+    func stop() { events.stop() }
 
     static func isRelevant(
         path: String,

@@ -2816,10 +2816,12 @@ error becomes visible again.
     tailnet address directly. Turning it on publishes this Mac's name and your tailnet name in
     public certificate logs, so it is off unless you want the browser. Its own status line says
     where it is serving, or which admin-console setting is missing, with the button that opens it.
-- **Threading Direct** (development builds only). Available after signing in under **Hosted
-  Direct**. Paired iPhones and invited chat guests can connect across networks without a VPN while
-  this Mac is online and awake. Release, beta and nightly builds do not include Hosted Direct: their
-  page has no Hosted Direct row, and a phone pairs over This network, a VPN or Tailscale.
+- **Threading Direct** (every build). Choose **Enable Hosted Access** under **Connection →
+  Hosted Direct** and wait for **Ready**. No Apple sign-in is required, including in local and
+  internal builds using Production. Paired iPhones and invited chat guests can connect across
+  networks without a VPN while this Mac is online and awake. An existing phone pairing receives
+  its hosted credentials when it next refreshes over a working connection to the Mac; enable
+  hosted access before leaving home, or pair with the hosted code once it is ready.
 
 In a Debug build or Threading's internal `/Applications` build, **Advanced > Developer Settings >
 Hosted service** selects **Production** or the isolated **Development** service. Switching it
@@ -2883,7 +2885,7 @@ webpage with **Continue in browser** and **Open in Threading**. Browser guests d
 account or installed app. Keep the link or bookmark the joined page to return to that chat from
 the same browser; clearing its site data removes the saved access.
 
-With **Hosted Direct** ready (development builds only), a chat invitation works across networks
+With **Hosted Direct** ready, a chat invitation works across networks
 without Tailscale. Otherwise, and always in release, beta and nightly builds, the sheet says the
 recipient needs access to your Wi-Fi or tailnet, and a browser guest opens the client this Mac
 serves over that network. The Mac must remain online and awake. **View** follows the chat; **Collaborate** also allows typing and sending prompts.
@@ -3335,8 +3337,8 @@ Threading does not claim to detect secrets; leave it off for the generic **Finis
 body. Opening one goes directly to its chat;
 permission details and Allow/Deny stay behind the authenticated chat rather than appearing on the
 lock screen. Terminal UI prompts are not parsed, so use the app's **@** control when a person
-needs attention. With Hosted Direct's push service (development builds) the notification reaches a
-suspended phone; otherwise, and always with a release, beta or nightly Mac, the settings page marks
+needs attention. With Hosted Direct's push service the notification reaches a
+suspended phone; otherwise, the settings page marks
 the connection **Live only**: notifications arrive while Threading on iPhone is connected. For `notify_user`, “me” follows
 whoever wrote the current turn; an explicit request can instead target the owner, everyone in
 this chat, or a named member. Open sessions show the device-aware live roster and **Name is
@@ -4920,9 +4922,11 @@ A theme can have a **character**, too — ask your agent for one and it can give
   your agents are doing: resting when nothing runs, idle, working, looking up when a chat needs
   you, and celebrating for a moment when a turn comes back. The list keeps room at its foot so
   the last row always scrolls clear of it.
-- **Moments.** When a turn finishes or a chat starts waiting for you, the theme can answer with
-  a short shower of its particles and a sound of its own. One plays at a time, then the theme
-  stays quiet for a few seconds, so several agents finishing together are celebrated once.
+- **Moments.** When a turn finishes, the theme can answer with a sound of its own. When a chat
+  starts waiting for you, it can add a short shower of its particles too. A finished turn never
+  gets a shower: turns finish all day, and confetti on every one is too much, so the mascot's
+  celebration in the sidebar is its only picture. One moment plays at a time, then the theme
+  stays quiet for a few seconds, so several agents finishing together are answered once.
 - **Words.** The word a native chat's status line shows while a turn runs ("Herding…" instead
   of "Thinking…") and the invitation in an empty new-session composer. Status words such as
   "Waiting for your answer" always stay the app's own.
@@ -4949,6 +4953,12 @@ control room” — and the agent is told to build all four; ask for colours and
 colours. Say only “make me a theme” and it asks you how far to go. Every theme it creates or
 updates comes back with a report of which layers it states, so a recolour cannot pass for the
 whole look.
+
+A theme can also borrow a shop app's furniture rather than a period desktop's: pop-ups, menus,
+alerts and toasts cut as coupons with scalloped sides; a glossy title bar with round window
+buttons; round checkboxes; striped progress bars; a bright pill-shaped scrollbar; text fields
+and the message box outlined like a search bar; and counts and branch labels set as tilted
+price stickers. Ask an agent for any of them, or for a look that needs them.
 
 Configure terminal palettes in **Settings > Themes**:
 - 16 ANSI colors (8 normal + 8 bright)
@@ -5183,6 +5193,7 @@ Configure in **Preferences > Profiles**:
 - Cursor style: Block, Underline, or Bar
 - Cursor blink toggle
 - **Keep backgrounds in tune with the theme** (default: on)
+- **Agents use the theme's colours** (default: on)
 - Scrollback buffer size (default: 10,000 lines)
 - **Convert dropped images agents can't open** (default: on)
 
@@ -5200,6 +5211,18 @@ backgrounds are affected — text colour and syntax highlighting are left alone 
 that use the ordinary palette were already in tune and are untouched.
 
 Turn it off to see exactly the bytes a program sent.
+
+**Agents use the theme's colours.** Claude normally paints its own interface — its accents,
+borders and diffs — in fixed colours of its own, so a theme only reached the terminal's
+background and plain text while Claude itself looked the same in every theme. With this on, a
+Claude chat in the terminal starts in Claude's ANSI colour mode, which draws with the terminal's
+sixteen colours: the palette of whatever theme that chat's terminal uses, light or dark to
+match. Change the palette later and Claude's colours follow at once; whether it uses its light or
+dark arrangement of them is settled when the chat starts or resumes.
+
+It only applies inside Threading — your Claude settings are never edited — and it reaches a
+chat that is already open the next time it starts or resumes. Turn it off to keep whichever
+theme you chose in Claude itself.
 
 **Convert dropped images agents can't open.** Neither CLI reads a HEIC or a TIFF, so dropping
 one on a session left a path in the prompt that looked exactly like a drop that had worked. With
@@ -5372,6 +5395,16 @@ How Threading plugs into each agent CLI's own configuration. Under **Agents** in
 
 ### Motion
 
+- **Music-reactive themes** is off by default. Enable it to let themes react to playing audio,
+  then choose an **Audio source**: all system audio, or a listed app. All system audio includes
+  calls and alerts. The **Live spectrum** preview shows the same eight bands themes receive.
+  macOS 14.2 or later and System Audio Recording permission are required; after a refused
+  grant, allow Threading in System Settings and press **Retry**. Threading analyzes output
+  locally and shares only levels with themes. Capture stops when no visible surface needs it,
+  with Reduce Motion, Theme animations off, or Low Power Mode. A theme can adopt the compact
+  sidebar analyzer or use the live signals in a custom backdrop; existing themes keep their
+  usual presentation until they adopt the feed. App helpers may appear separately, and some
+  protected playback may not supply audio.
 - **Working indicator** defaults to **Random**, choosing a new orb for each turn without
   immediately repeating the last one. Choose a named orb to use that animation every time. The
   nine named choices are Working, Searching, Solving, Listening, Connecting, Weaving, Composing,
@@ -5524,6 +5557,16 @@ tools you actually have installed. Switch this traffic off under
 **Settings ▸ General ▸ Software Updates**;
 **Help ▸ Check for Updates…** still checks Threading when it is off, so turning off background
 traffic never means losing the ability to look for a new app release.
+
+**Settings ▸ General ▸ Software Updates ▸ Agent tools ▸ Check Now** checks installed agent
+versions and their official release sources, even when automatic checking is off. Results stay
+on the page: each tool has an **Installation Guide**, and an available update has an **Update**
+button that opens the visible update terminal. After updating, restart the agent in your chat
+and choose **Check Now** again to refresh the installed version. Package-manager installations
+may need their package manager's update command; the installation guide explains those paths.
+Claude's **Model support** row explains known minimum CLI versions and links to Anthropic's
+current **Model Requirements**. Tool version, account access and provider availability all matter;
+the model picker follows what the runtime actually reports.
 
 Threading updates are handled through **Sparkle**, only after you agree. Agent tool updates never
 run as part of the background check: a sidebar receipt aligns the now/latest versions in a compact
@@ -6244,6 +6287,8 @@ On iPhone, use the **…** beside a project heading for **Hide Project** or **Sh
 Under the dashboard’s **… → Sessions**, toggle **Show Hidden Projects** to include them again.
 Project visibility is shared with the Mac; the Show Hidden Projects display toggle is local to
 each device. Direct chat links and search remain available while a project is hidden.
+On Mac, opening a hidden project's project, chat or terminal search result turns on **Show Hidden
+Projects** and reveals the destination in the sidebar. The project stays marked hidden.
 In **Settings → Sidebar → Layout**, enable **Unhide projects when writing in their chats** to
 restore a hidden project when you type in one of its chats (off by default).
 

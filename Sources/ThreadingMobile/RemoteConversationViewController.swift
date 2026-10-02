@@ -644,7 +644,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         )
         textView.textColor = theme.uiLabel
         textView.tintColor = theme.uiAccent
-        placeholderLabel.textColor = theme.uiTertiaryLabel
+        placeholderLabel.textColor = theme.uiInputPlaceholder
         capabilityButton.backgroundColor = theme.uiControlResting
         capabilityButton.tintColor = theme.uiLabel
         attachButton.backgroundColor = theme.uiControlResting

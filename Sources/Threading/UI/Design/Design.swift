@@ -1099,6 +1099,14 @@ public enum Design {
         public static let peakHeight: CGFloat = 1
     }
 
+    public enum AudioSpectrum {
+        public static let size = NSSize(width: 86, height: 24)
+        public static let inset = Spacing.tight
+        public static let bandGap: CGFloat = 2
+        public static let cellGap: CGFloat = 1
+        public static let cellCount = 6
+    }
+
     public enum UsageDashboard {
         public static let metricCardHeight: CGFloat = 76
 

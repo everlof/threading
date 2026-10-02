@@ -19,10 +19,10 @@ import Foundation
 /// registry that does exist is `CheckoutBranchFollower`'s, which keeps a single *branch-scoped*
 /// watcher per checkout for the app's lifetime — cheap enough to, because that scope watches
 /// one file.
-final class GitCheckoutWatcher: @unchecked Sendable {
+final class GitCheckoutWatcher: Sendable {
 
     /// What the watcher listens for.
-    enum Scope {
+    enum Scope: Sendable {
         /// Everything a diff depends on: the worktree's content plus the git metadata that
         /// changes what a read would say.
         case checkout
@@ -33,186 +33,62 @@ final class GitCheckoutWatcher: @unchecked Sendable {
         case branch
     }
 
-    // MARK: - Properties
+    private let events: FileSystemEventStream
 
-    /// The roots handed to FSEvents.
-    private let watchedPaths: [String]
-
-    /// Git metadata directories among them, whose contents are noise except for a few entries.
-    private let gitDirectories: [String]
-
-    private let scope: Scope
-
-    private let onChange: @MainActor @Sendable () -> Void
-
-    private var stream: FSEventStreamRef?
-    private var coalesceItem: DispatchWorkItem?
-
-    private let queue = DispatchQueue(label: "codes.threading.git-watch", qos: .utility)
-
-    // MARK: - Initialization
-
-    /// Fails when the path is not inside a repository — there is then nothing a review pane
-    /// could refresh to.
+    /// Fails when the path is not inside a repository. The cached Git identity determines the
+    /// fixed watch roots; all daemon registration and teardown happen on the shared worker.
     init?(
         root: URL,
         scope: Scope = .checkout,
+        backend: (any FileSystemEventStreamBackend)? = nil,
         onChange: @escaping @MainActor @Sendable () -> Void
     ) {
         guard let location = GitInfo.worktreeLocation(for: root.path) else { return nil }
-        self.scope = scope
-
+        let gitDirectories: [String]
+        let watchedPaths: [String]
+        let coalesce: TimeInterval
         switch scope {
         case .checkout:
-            let gitDirectories = [location.worktreeIdentity, location.repositoryIdentity]
-            self.gitDirectories = Array(Set(gitDirectories)).map { $0.standardizedPath }
-            self.watchedPaths = Self.pruningContained(
-                ([location.root.path] + gitDirectories).map { $0.standardizedPath }
-            )
+            gitDirectories = Array(Set([location.worktreeIdentity, location.repositoryIdentity]))
+                .map { $0.standardizedPath }
+            watchedPaths = GitWatchFilter.pruningContained([location.root.path] + gitDirectories)
+            coalesce = GitWatchDefaults.coalesce
         case .branch:
-            // A branch switch is a write to the worktree's *own* `HEAD` — for a linked
-            // worktree that file lives in `<repo>/.git/worktrees/<name>`, so the worktree
-            // identity is the one directory that needs watching in either layout.
-            self.gitDirectories = [location.worktreeIdentity.standardizedPath]
-            self.watchedPaths = self.gitDirectories
+            gitDirectories = [location.worktreeIdentity.standardizedPath]
+            watchedPaths = gitDirectories
+            coalesce = GitWatchDefaults.branchCoalesce
         }
-        self.onChange = onChange
-    }
 
-    deinit {
-        // `stop` only releases the stream and cancels a work item; both are safe from any queue.
-        stop()
-    }
-
-    // MARK: - Public Methods
-
-    /// Begins watching. Idempotent, so a pane that is shown twice does not open two streams.
-    func start() {
-        guard stream == nil, !watchedPaths.isEmpty else { return }
-
-        // The stream holds a strong reference for as long as it lives, so a callback already
-        // in flight on the watch queue cannot be running against a freed watcher. The cycle
-        // this makes is broken by `stop`, which every path to going away calls.
-        var context = FSEventStreamContext(
-            version: 0,
-            info: Unmanaged.passUnretained(self).toOpaque(),
-            retain: { pointer in
-                guard let pointer else { return nil }
-                return UnsafeRawPointer(Unmanaged<GitCheckoutWatcher>.fromOpaque(pointer).retain().toOpaque())
+        events = FileSystemEventStream(
+            paths: watchedPaths,
+            latency: GitWatchDefaults.latency,
+            coalesce: coalesce,
+            isRelevant: { paths, flags in
+                paths.indices.contains { index in
+                    let eventFlags = index < flags.count ? flags[index] : 0
+                    let unreliable = FSEventStreamEventFlags(
+                        kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagRootChanged
+                    )
+                    if eventFlags & unreliable != 0 { return true }
+                    switch scope {
+                    case .checkout:
+                        return GitWatchFilter.isRelevant(paths[index], gitDirectories: gitDirectories)
+                    case .branch:
+                        return GitWatchFilter.isBranchRelevant(paths[index], gitDirectories: gitDirectories)
+                    }
+                }
             },
-            release: { pointer in
-                guard let pointer else { return }
-                Unmanaged<GitCheckoutWatcher>.fromOpaque(pointer).release()
-            },
-            copyDescription: nil
+            onChange: onChange,
+            backend: backend
         )
-
-        // File-level events, because the filtering below is per file: a directory-level report
-        // of `.git` says only that something in it moved, which is true of every git command.
-        let flags = UInt32(
-            kFSEventStreamCreateFlagUseCFTypes
-                | kFSEventStreamCreateFlagFileEvents
-                | kFSEventStreamCreateFlagNoDefer
-        )
-
-        let callback: FSEventStreamCallback = { _, info, count, rawPaths, rawFlags, _ in
-            guard let info else { return }
-            let watcher = Unmanaged<GitCheckoutWatcher>.fromOpaque(info).takeUnretainedValue()
-            let paths = unsafeBitCast(rawPaths, to: NSArray.self) as? [String] ?? []
-            let flags = (0..<count).map { rawFlags[$0] }
-            watcher.handle(paths: paths, flags: flags)
-        }
-
-        guard let stream = FSEventStreamCreate(
-            kCFAllocatorDefault,
-            callback,
-            &context,
-            watchedPaths as CFArray,
-            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
-            GitWatchDefaults.latency,
-            flags
-        ) else {
-            ThreadingLogger.git.error(
-                "FSEvents stream could not be created for \(self.watchedPaths.first ?? "", privacy: .private(mask: .hash))"
-            )
-            return
-        }
-
-        FSEventStreamSetDispatchQueue(stream, queue)
-        FSEventStreamStart(stream)
-        self.stream = stream
     }
 
-    /// Stops watching and drops any coalesced notification still pending.
-    func stop() {
-        coalesceItem?.cancel()
-        coalesceItem = nil
+    /// Idempotent admission. An initial notification follows successful asynchronous arming.
+    func start() { events.start() }
 
-        guard let stream else { return }
-        FSEventStreamStop(stream)
-        // Stop synchronously guarantees that the callback will not run again; invalidate then
-        // unschedules the stream from its dispatch queue. Do not clear the queue first:
-        // FSEvents documents invalidating an already-unscheduled stream as an error.
-        FSEventStreamInvalidate(stream)
-        FSEventStreamRelease(stream)
-        self.stream = nil
-    }
+    /// Revokes queued notifications synchronously; daemon teardown runs off main.
+    func stop() { events.stop() }
 
-    // MARK: - Private Methods
-
-    /// Runs on `queue`. A batch that says nothing about the diff is dropped here, before it
-    /// costs a main-queue hop.
-    private func handle(paths: [String], flags: [FSEventStreamEventFlags]) {
-        let matters = paths.indices.contains { index in
-            isRelevant(paths[index], flags: index < flags.count ? flags[index] : 0)
-        }
-        guard matters else { return }
-
-        DispatchQueue.main.async { [weak self] in
-            self?.scheduleNotification()
-        }
-    }
-
-    /// How long the tree must be quiet before this watcher reports. See `GitWatchDefaults`.
-    private var coalesce: TimeInterval {
-        switch scope {
-        case .checkout: return GitWatchDefaults.coalesce
-        case .branch: return GitWatchDefaults.branchCoalesce
-        }
-    }
-
-    /// The trailing edge of a burst. An agent's turn writes a file at a time and git's own
-    /// commands rewrite the index repeatedly, so the interesting moment is the quiet after
-    /// them, not the first write into them.
-    private func scheduleNotification() {
-        coalesceItem?.cancel()
-
-        let item = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.coalesceItem = nil
-            MainActor.assumeIsolated { self.onChange() }
-        }
-        coalesceItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + coalesce, execute: item)
-    }
-
-    private func isRelevant(_ path: String, flags: FSEventStreamEventFlags) -> Bool {
-        // A dropped-events or moved-root report carries no usable path; re-read rather than
-        // silently show a stale diff.
-        let unreliable = FSEventStreamEventFlags(
-            kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagRootChanged
-        )
-        if flags & unreliable != 0 { return true }
-
-        switch scope {
-        case .checkout: return GitWatchFilter.isRelevant(path, gitDirectories: gitDirectories)
-        case .branch: return GitWatchFilter.isBranchRelevant(path, gitDirectories: gitDirectories)
-        }
-    }
-
-    private static func pruningContained(_ paths: [String]) -> [String] {
-        GitWatchFilter.pruningContained(paths)
-    }
 }
 
 // MARK: - Filter

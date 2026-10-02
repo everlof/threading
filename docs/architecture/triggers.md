@@ -82,6 +82,12 @@ does, since a wrapping label has no intrinsic width to hug with and a spacer bes
 detail line after two words. `TriggerCenterRenderTests` renders at a real wide pane and asserts
 both measures, because none of this was visible at the fixture width that shipped.
 
+Opening the destination clears the project sidebar's selection (`setTriggersMode(true)` calls
+`clearSelection()`). The page belongs to no row, and a session left highlighted beside it was
+worse than a wrong picture: `NSOutlineView` posts no selection change for a click on the row
+already selected, so clicking that session to go back did nothing. Back still returns to it,
+because history replays the sidebar's own `select`.
+
 This destination and its approval sheets are host-only security surfaces. Extensions may observe
 only future explicitly published facts; they cannot replace credentials, authority or run-state
 presentation. The built-in MCP tools are the supported agent automation seam: three lists,

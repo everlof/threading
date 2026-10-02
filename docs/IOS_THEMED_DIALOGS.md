@@ -534,6 +534,13 @@ transition scene and flash before settling on the destination. It explicitly ass
 light/dark answer from the resolved colour scheme before becoming first responder. This keeps the
 keyboard in the push without delaying focus or changing the composer's entrance choreography.
 
+Input placeholders are readable instructions, so the new-session and conversation composers use
+the remote theme's `secondary_label` over its composited panel. `RemoteThemePalette` preserves an
+authored colour that already reads and raises translucent ink only as far as the 4.5:1 body-text
+floor requires. The question card measures its placeholder over the control fill instead. This
+mobile check is needed because the Mac projects authored label roles, while its own
+`Design.Text` legibility ladder runs only when AppKit draws them.
+
 What *is* ours is the strip above the keyboard. `TerminalKeyBar` is fully themed, and each
 device-local key chooses its top or bottom row while the host keeps the action controls fixed.
 Apple Color Emoji outgrows the text face's nominal line box, so a compact cap preserves a

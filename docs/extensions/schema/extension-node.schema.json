@@ -438,7 +438,12 @@
           "properties": {
             "type": { "const": "signal" },
             "signal": {
-              "enum": ["active-account.usage-remaining"]
+              "enum": [
+                "active-account.usage-remaining", "workload.intensity", "workload.working-count",
+                "time.day-fraction", "audio.available", "audio.level", "audio.bass", "audio.mids",
+                "audio.treble", "audio.band.0", "audio.band.1", "audio.band.2", "audio.band.3",
+                "audio.band.4", "audio.band.5", "audio.band.6", "audio.band.7"
+              ]
             },
             "mapping": { "$ref": "#/$defs/scalarMapping" }
           }

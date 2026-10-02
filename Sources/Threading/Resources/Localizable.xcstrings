@@ -430,6 +430,17 @@
         }
       }
     },
+    "%@ (not running)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (körs inte)"
+          }
+        }
+      }
+    },
     "%@ (remote host)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1198,6 +1209,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ rapporterat + uppskattat"
+          }
+        }
+      }
+    },
+    "%@ requires Claude Code %@ or later" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ requires Claude Code %@ or later"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ kräver Claude Code %@ eller senare"
           }
         }
       }
@@ -4107,6 +4135,17 @@
         }
       }
     },
+    "A count or a branch name set as a tilted price sticker — what a theme whose badges are stickers shows in place of a quiet mark." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ett antal eller ett grennamn satt som en lutande prislapp — det som ett tema vars märken är prislappar visar i stället för en diskret markering."
+          }
+        }
+      }
+    },
     "A curfew ends a session's spending at a time you choose — from the composer when you start a session, or from a session's menu. Before it, Threading asks the agent to wrap up; at the time it stops sending on its own; after a grace it interrupts whatever is still running. You keep the conversation and can continue it by hand. Quiet hours are a curfew every session follows daily unless it is exempt." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6810,6 +6849,17 @@
         }
       }
     },
+    "Agents use the theme's colours" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenter använder temats färger"
+          }
+        }
+      }
+    },
     "Agents will need to ask again before using these websites in Threading's signed-in browser. Chat-wide grants are also revoked. One-time grants are unaffected." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7010,6 +7060,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Alla ytor"
+          }
+        }
+      }
+    },
+    "All system audio" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allt systemljud"
+          }
+        }
+      }
+    },
+    "All system audio includes calls and alerts." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allt systemljud omfattar samtal och aviseringar."
           }
         }
       }
@@ -7565,6 +7637,17 @@
         }
       }
     },
+    "Analyzing audio locally." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analyserar ljud lokalt."
+          }
+        }
+      }
+    },
     "Animation, determinate progress, and theme-weighted rules." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7903,6 +7986,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Applogg"
+          }
+        }
+      }
+    },
+    "App sources include processes with the same bundle identifier. Browser helper processes may appear separately. Some protected playback may not provide audio." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Appkällor omfattar processer med samma paketidentifierare. Webbläsarens hjälpprocesser kan visas separat. Viss skyddad uppspelning kanske inte tillhandahåller ljud."
           }
         }
       }
@@ -8902,6 +8996,78 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppmärksam"
+          }
+        }
+      }
+    },
+    "Audio level %lld percent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ljudnivå %lld procent"
+          }
+        }
+      }
+    },
+    "Audio sharing is off." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ljuddelning är avstängd."
+          }
+        }
+      }
+    },
+    "Audio source" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ljudkälla"
+          }
+        }
+      }
+    },
+    "Audio sources could not be refreshed. Try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audio sources could not be refreshed. Try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ljudkällorna kunde inte uppdateras. Försök igen."
+          }
+        }
+      }
+    },
+    "Audio spectrum" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ljudspektrum"
+          }
+        }
+      }
+    },
+    "Audio unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ljud är inte tillgängligt"
           }
         }
       }
@@ -11182,6 +11348,39 @@
         }
       }
     },
+    "Capture runs only while a visible theme or preview needs it. Reduce Motion, Theme animations, and Low Power Mode stop music-driven decoration." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ljudinsamling pågår bara när ett synligt tema eller en förhandsvisning behöver den. Reducera rörelse, Temaanimationer och Strömsparläge stoppar musikstyrd dekoration."
+          }
+        }
+      }
+    },
+    "Capture this app’s audio output." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Samla in den här appens ljudutmatning."
+          }
+        }
+      }
+    },
+    "Capture unavailable. Check system audio permission, then Retry." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ljudinsamling är inte tillgänglig. Kontrollera behörigheten för systemljud och försök igen."
+          }
+        }
+      }
+    },
     "Captured details" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11805,6 +12004,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kontrollerar igen när stunden kommer, står över en gång om fönstret har flyttats, och skickar sedan."
+          }
+        }
+      }
+    },
+    "Checks the tools on your login shell’s PATH and their official release sources. You can check here even when automatic updates are off." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checks the tools on your login shell’s PATH and their official release sources. You can check here even when automatic updates are off."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollerar verktygen i ditt inloggningsskals PATH och deras officiella versionskällor. Du kan kontrollera här även när automatiska uppdateringar är avstängda."
           }
         }
       }
@@ -12658,6 +12874,17 @@
         }
       }
     },
+    "Claude draws its interface in the terminal's palette." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude ritar sitt gränssnitt i terminalens palett."
+          }
+        }
+      }
+    },
     "Claude hooks" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12676,6 +12903,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Claude saknas"
+          }
+        }
+      }
+    },
+    "Claude otherwise paints its accents, borders and diffs in fixed colours of its own, so a theme reaches only the background and plain text. With this on, Claude starts in its ANSI colour mode and draws with the terminal's sixteen colours — the theme's palette, light or dark to match." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Annars målar Claude sina accenter, ramar och diffar i egna fasta färger, så ett tema når bara bakgrunden och den vanliga texten. När detta är på startar Claude i sitt ANSI-färgläge och ritar med terminalens sexton färger — temats palett, ljus eller mörk efter den."
           }
         }
       }
@@ -15010,6 +15248,17 @@
         }
       }
     },
+    "Connecting to the audio source…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ansluter till ljudkällan…"
+          }
+        }
+      }
+    },
     "Connecting…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16613,6 +16862,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte nå den. Försöker igen om %lld s."
+          }
+        }
+      }
+    },
+    "Couldn’t read the installed version" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t read the installed version"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte läsa den installerade versionen"
           }
         }
       }
@@ -20702,6 +20968,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Utesluten av din gräns"
+          }
+        }
+      }
+    },
+    "Executable used for new sessions: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Executable used for new sessions: %@"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körbar fil för nya sessioner: %@"
           }
         }
       }
@@ -25869,6 +26152,57 @@
         }
       }
     },
+    "Installed %@ · Couldn’t check for updates" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installed %@ · Couldn’t check for updates"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installerad %@ · Kunde inte söka efter uppdateringar"
+          }
+        }
+      }
+    },
+    "Installed %@ · Latest %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installed %@ · Latest %@"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installerad %@ · Senaste %@"
+          }
+        }
+      }
+    },
+    "Installed %@ · Up to date" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installed %@ · Up to date"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installerad %@ · Aktuell"
+          }
+        }
+      }
+    },
     "Installed at %@." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25876,6 +26210,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Installerad på %@."
+          }
+        }
+      }
+    },
+    "Installed versions, updates and installation guides." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installed versions, updates and installation guides."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installerade versioner, uppdateringar och installationsguider."
           }
         }
       }
@@ -26140,6 +26491,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Isolerat worktree"
+          }
+        }
+      }
+    },
+    "It applies when a chat starts or resumes, and only inside Threading: your Claude settings are not changed. Turn it off to keep the theme you chose in Claude." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gäller när en chatt startar eller återupptas, och bara i Threading: dina Claude-inställningar ändras inte. Stäng av det för att behålla temat du valde i Claude."
           }
         }
       }
@@ -28065,6 +28427,17 @@
         }
       }
     },
+    "Live audio spectrum" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ljudspektrum i realtid"
+          }
+        }
+      }
+    },
     "Live capacity, observed limit history, cost, tokens, and provider coverage." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28105,6 +28478,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Live delat minne"
+          }
+        }
+      }
+    },
+    "Live spectrum" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spektrum i realtid"
           }
         }
       }
@@ -29479,6 +29863,23 @@
         }
       }
     },
+    "Model Requirements" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Model Requirements"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modellkrav"
+          }
+        }
+      }
+    },
     "Model and effort" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29486,6 +29887,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Modell och nivå"
+          }
+        }
+      }
+    },
+    "Model availability also depends on your account and provider." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Model availability also depends on your account and provider."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vilka modeller som är tillgängliga beror också på ditt konto och din leverantör."
+          }
+        }
+      }
+    },
+    "Model support" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Model support"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modellstöd"
           }
         }
       }
@@ -30015,6 +30450,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Flyttar ”%@” till %@ efter den här turen"
+          }
+        }
+      }
+    },
+    "Music" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Musik"
+          }
+        }
+      }
+    },
+    "Music-reactive themes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Musikreaktiva teman"
+          }
+        }
+      }
+    },
+    "Music-reactive themes analyze playing audio locally and receive only spectrum levels. Enable audio sharing in Motion settings to use it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Musikreaktiva teman analyserar uppspelat ljud lokalt och får bara spektrumnivåer. Aktivera ljuddelning i inställningarna för Rörelse för att använda funktionen."
           }
         }
       }
@@ -30719,6 +31187,23 @@
         }
       }
     },
+    "New models may require a newer agent tool. Updates run in a visible terminal when you choose Update. Restart the agent in your chat after updating; already running agents keep their old version. Package-manager installs may need their package manager’s update command; see Installation Guide." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New models may require a newer agent tool. Updates run in a visible terminal when you choose Update. Restart the agent in your chat after updating; already running agents keep their old version. Package-manager installs may need their package manager’s update command; see Installation Guide."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nya modeller kan kräva ett nyare agentverktyg. Uppdateringar körs i en synlig terminal när du väljer Uppdatera. Starta om agenten i din chatt efter uppdateringen; agenter som redan körs behåller sin gamla version. Installationer via en pakethanterare kan behöva uppdateras med dess eget kommando; se Installationsguide."
+          }
+        }
+      }
+    },
     "New session" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30792,6 +31277,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nytt år, nya trådar."
+          }
+        }
+      }
+    },
+    "Newer Claude Code versions are required for %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Newer Claude Code versions are required for %@."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nyare versioner av Claude Code krävs för %@."
           }
         }
       }
@@ -32444,6 +32946,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hittas inte"
+          }
+        }
+      }
+    },
+    "Not found on your login shell’s PATH" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not found on your login shell’s PATH"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hittades inte i ditt inloggningsskals PATH"
           }
         }
       }
@@ -39183,6 +39702,17 @@
         }
       }
     },
+    "Refresh audio sources" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdatera ljudkällor"
+          }
+        }
+      }
+    },
     "Refresh iPhones" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40466,6 +40996,28 @@
         }
       }
     },
+    "Requires macOS 14.2 or later." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kräver macOS 14.2 eller senare."
+          }
+        }
+      }
+    },
+    "Requires macOS 14.2 or later. If permission is refused, allow Threading in System Settings → Privacy & Security → Screen & System Audio Recording, then press Retry." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kräver macOS 14.2 eller senare. Om behörighet nekas, tillåt Threading i Systeminställningar → Integritet och säkerhet → Skärm- och systemljudinspelning och tryck sedan på Försök igen."
+          }
+        }
+      }
+    },
     "Requires the Threading app and access to your Wi-Fi or tailnet." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40928,6 +41480,23 @@
         }
       }
     },
+    "Restart the agent in your chat after updating. Already running agents keep their old version." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restart the agent in your chat after updating. Already running agents keep their old version."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starta om agenten i din chatt efter uppdateringen. Agenter som redan körs behåller sin gamla version."
+          }
+        }
+      }
+    },
     "Restarting terminal…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41189,6 +41758,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Försök med simulatorstyrning igen"
+          }
+        }
+      }
+    },
+    "Retry audio capture" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Försök samla in ljud igen"
           }
         }
       }
@@ -45071,6 +45651,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dela en gratisvecka med Claude Code till vänner"
+          }
+        }
+      }
+    },
+    "Share audio levels with themes; requires system audio permission." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela ljudnivåer med teman; kräver behörighet för systemljud."
           }
         }
       }
@@ -49110,6 +49701,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "System"
+          }
+        }
+      }
+    },
+    "System Audio Recording" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inspelning av systemljud"
           }
         }
       }
@@ -54894,6 +55496,17 @@
         }
       }
     },
+    "ThemedStickerBadge" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemedStickerBadge"
+          }
+        }
+      }
+    },
     "ThemedSurface, ThemeRedraw & recorded layers" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -55264,6 +55877,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Chatten hör inte till något projekt"
+          }
+        }
+      }
+    },
+    "This Claude Code update supports %@. Restart running agents after updating." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This Claude Code update supports %@. Restart running agents after updating."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här Claude Code-uppdateringen stöder %@. Starta om agenter som körs efter uppdateringen."
           }
         }
       }
@@ -56513,6 +57143,17 @@
         }
       }
     },
+    "Threading analyzes the selected app’s output locally. Themes receive only loudness and eight frequency bands; audio is never saved or sent to extensions." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading analyserar den valda appens utmatning lokalt. Teman får bara ljudstyrka och åtta frekvensband; ljud sparas aldrig eller skickas till tillägg."
+          }
+        }
+      }
+    },
     "Threading and this session's agent will be able to tap, swipe, type, and press buttons on this exact device while it is adopted in the right panel. Threading remembers this choice for this device." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56916,6 +57557,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading kunde inte öppna uppdateringsterminalen."
+          }
+        }
+      }
+    },
+    "Threading couldn’t open the update terminal. Use the Installation Guide to update." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading couldn’t open the update terminal. Use the Installation Guide to update."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kunde inte öppna uppdateringsterminalen. Använd installationsguiden för att uppdatera."
           }
         }
       }
@@ -60885,6 +61543,17 @@
         }
       }
     },
+    "Waiting for a visible music-reactive surface." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på en synlig musikreaktiv yta."
+          }
+        }
+      }
+    },
     "Waiting for an answer" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60903,6 +61572,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Väntar på godkännande i Systeminställningar ▸ Allmänt ▸ Inloggningsobjekt"
+          }
+        }
+      }
+    },
+    "Waiting for audio. Check the source and system permission." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for audio. Check the source and system permission."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på ljud. Kontrollera källan och systembehörigheten."
           }
         }
       }
@@ -60970,6 +61656,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Väntar på installationskontrollen."
+          }
+        }
+      }
+    },
+    "Waiting for the selected app to play audio." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på att den valda appen spelar ljud."
           }
         }
       }
@@ -65132,6 +65829,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "macOS frågar första gången ett projekt på någon av de platserna läses."
+          }
+        }
+      }
+    },
+    "macOS asks when you enable audio sharing and a visible surface needs it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS frågar när du aktiverar ljuddelning och en synlig yta behöver den."
           }
         }
       }

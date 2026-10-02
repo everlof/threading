@@ -930,6 +930,8 @@ struct AppThemeMaterialArguments: Codable, Sendable {
   let choiceStyle: String?
   let checkboxStyle: String?
   let toggleStyle: String?
+  let fieldStyle: String?
+  let badgeStyle: String?
 
   private enum CodingKeys: String, CodingKey {
     case panelRadius = "panel_radius"
@@ -968,6 +970,8 @@ struct AppThemeMaterialArguments: Codable, Sendable {
     case choiceStyle = "choice_style"
     case checkboxStyle = "checkbox_style"
     case toggleStyle = "toggle_style"
+    case fieldStyle = "field_style"
+    case badgeStyle = "badge_style"
   }
 }
 
@@ -1493,6 +1497,7 @@ struct AppThemeSidebarArguments: Codable, Sendable {
   let mascot: AppThemeMascotArguments?
   let removeMascot: Bool?
   let logoInDock: Bool?
+  let analyzer: String?
   let remove: Bool?
 
   init(
@@ -1514,6 +1519,7 @@ struct AppThemeSidebarArguments: Codable, Sendable {
     mascot: AppThemeMascotArguments? = nil,
     removeMascot: Bool? = nil,
     logoInDock: Bool? = nil,
+    analyzer: String? = nil,
     remove: Bool? = nil
   ) {
     self.gradient = gradient
@@ -1534,6 +1540,7 @@ struct AppThemeSidebarArguments: Codable, Sendable {
     self.mascot = mascot
     self.removeMascot = removeMascot
     self.logoInDock = logoInDock
+    self.analyzer = analyzer
     self.remove = remove
   }
 
@@ -1556,6 +1563,7 @@ struct AppThemeSidebarArguments: Codable, Sendable {
     case mascot
     case removeMascot = "remove_mascot"
     case logoInDock = "logo_in_dock"
+    case analyzer
     case remove
   }
 }
@@ -8055,6 +8063,11 @@ enum MCPTools {
         recoloured. A request about colours wants the palette. When the request says no \
         more than "a theme", ask the person how far to go before creating anything, and \
         recommend all four. The result reports which layers the theme states. \
+        The palette is two halves: `roles` colour the chrome, and `terminal_colors` colour \
+        the terminal, which is the largest surface in the window and the one agents' TUIs \
+        draw in — Claude draws its whole interface in those sixteen colours by default. \
+        State both halves in every variant; a theme that recolours the chrome and inherits \
+        its base's terminal reads as two themes side by side. \
         Create a custom app-chrome theme from partial light and/or dark variant patches. \
         One variant makes a fixed light or dark theme; both variants with appearance \
         "adaptive" follow macOS automatically. A second variant is optional and can be \
@@ -8077,8 +8090,8 @@ enum MCPTools {
         bevel_shadow roles. A theme can also have a character: `sprites` gives its particle \
         blocks pictures of their own (paw prints, hearts), `sidebar.mascot` stands a \
         figure at the sidebar's foot that changes pose as agents rest, work, wait and \
-        finish, `moments` answers a finished turn or a waiting session with a shower and \
-        a sound, `words` gives the status line and composer its voice, and \
+        finish, `moments` answers a finished turn with a sound and a waiting session with \
+        a shower and a sound, `words` gives the status line and composer its voice, and \
         `sidebar.logo_in_dock` puts the logo on the Dock tile. Check the result with \
         preview_app_theme, which shows every mascot mood.
         """,
@@ -9092,15 +9105,26 @@ enum MCPTools {
     for key in ThemeColorKey.allCases {
       let role: String
       switch key {
-      case .foreground: role = "Default text colour."
+      case .foreground: role = "Default text colour: most of what a program writes."
       case .boldForeground:
         role = """
           Bold text: what SGR 1 text drawn with the default foreground uses. \
           Terminal.app's Bold Text.
           """
-      case .background: role = "The terminal's ground."
+      case .background: role = "The terminal's ground, under everything a program draws."
       case .cursor: role = "The caret."
       case .selection: role = "The fill behind selected text."
+      case .red, .brightRed:
+        role = "ANSI \(key.displayName.lowercased()): errors and removed diff lines."
+      case .green, .brightGreen:
+        role = "ANSI \(key.displayName.lowercased()): success and added diff lines."
+      case .yellow, .brightYellow:
+        role = "ANSI \(key.displayName.lowercased()): warnings."
+      case .black, .brightBlack:
+        role = """
+          ANSI \(key.displayName.lowercased()). bright_black is where programs put dim \
+          text — hints, comments, secondary detail — so keep it readable on the ground.
+          """
       default: role = "ANSI \(key.displayName.lowercased())."
       }
 
@@ -9197,8 +9221,18 @@ enum MCPTools {
       "terminal_colors": MCPPropertySchema(
         type: .object,
         description: """
-          Paired terminal palette used by “Follow App Theme” in this appearance. \
-          Omitted colours inherit from the base variant.
+          The terminal half of the palette, used by “Follow App Theme” (the default) in \
+          this appearance. It colours the largest surface in the window, and agents' TUIs \
+          draw in it: Claude's whole interface uses these sixteen slots by default, so an \
+          accent, a border or a diff in Claude is one of them. State it in every variant \
+          alongside `roles` — omitted colours inherit from the base variant, which leaves \
+          the base's terminal inside the new chrome. Build it from the theme: background \
+          and foreground from its ground and label, cursor and selection from its accent, \
+          and the eight hues tinted toward the theme while red, green and yellow stay \
+          recognisable, because errors, diffs and warnings rely on them. Every slot a \
+          program writes text in — including black and bright_black on a dark ground, and \
+          white and bright_white on a light one — must stay readable on the background. \
+          preview_app_theme draws a sample terminal with it.
           """,
         properties: paletteSchema
       ),
@@ -9303,19 +9337,24 @@ enum MCPTools {
       "moments": MCPPropertySchema(
         type: .object,
         description: """
-          What this variant does when something happens in the app: a shower of its \
-          particles across the window and/or a short sound of its own. One moment plays at \
-          a time, then the theme stays quiet for 8 seconds, so agents finishing together \
-          are answered once. Particles follow Reduce Motion and the Theme animations \
-          setting; sounds play only while Threading is frontmost, the Theme sounds setting \
-          is on and sounds are not silenced. Each moment merges onto the one stated.
+          What this variant does when something happens in the app: a short sound of its \
+          own and, for a session that needs attention, a shower of its particles across \
+          the window. One moment plays at a time, then the theme stays quiet for 8 \
+          seconds, so agents finishing together are answered once. Particles follow \
+          Reduce Motion and the Theme animations setting; sounds play only while \
+          Threading is frontmost, the Theme sounds setting is on and sounds are not \
+          silenced. Each moment merges onto the one stated.
           """,
         properties: [
           "turn_finished": appMomentSchema(
-            "A turn came back: an agent that was working stopped with an answer."
+            "A turn came back: an agent that was working stopped with an answer. Answered by "
+              + "a sound only — turns finish many times an hour, so a shower on each would be "
+              + "too much; the sidebar mascot's celebrating pose is its picture.",
+            event: .turnFinished
           ),
           "needs_attention": appMomentSchema(
-            "A session started waiting for the person — a permission or a question."
+            "A session started waiting for the person — a permission or a question.",
+            event: .needsAttention
           ),
         ]
       ),
@@ -9414,52 +9453,58 @@ enum MCPTools {
     )
   }
 
-  private static func appMomentSchema(_ description: String) -> MCPPropertySchema {
-    MCPPropertySchema(
-      type: .object,
-      description: description,
-      properties: [
-        "particles": appParticlesSchema(
-          "A shower across every visible window, born like a transition's but with no wash "
-            + "and a third of its budget."
-        ),
-        "remove_particles": MCPPropertySchema(
-          type: .boolean,
-          description: "True removes the shower and keeps any sound."
-        ),
-        "duration": MCPPropertySchema(
-          type: .number,
-          description: "Seconds the shower lasts, 0.6–2.4. Default 1.4."
-        ),
-        "sound": MCPPropertySchema(
-          type: .object,
-          description: "A short cue of at most 4 seconds and 1 MB: {path} to an .aiff, .caf, "
-            + ".wav, .m4a or .mp3 file, or {base64, format}. Stored with the theme.",
-          properties: [
-            "path": MCPPropertySchema(
-              type: .string,
-              description: "Absolute or ~-relative path; its extension names the format."
-            ),
-            "base64": MCPPropertySchema(
-              type: .string,
-              description: "The sound's bytes, base64-encoded."
-            ),
-            "format": MCPPropertySchema(
-              type: .string,
-              description: "With base64: \"aiff\", \"caf\", \"wav\", \"m4a\" or \"mp3\"."
-            ),
-          ]
-        ),
-        "remove_sound": MCPPropertySchema(
-          type: .boolean,
-          description: "True removes the sound and keeps any shower."
-        ),
-        "remove": MCPPropertySchema(
-          type: .boolean,
-          description: "True removes this moment entirely."
-        ),
-      ]
-    )
+  /// One event's moment. An event that takes no shower (`ThemeMomentEvent.showsParticles`)
+  /// offers no particles and no duration, so an author is never shown a field it will refuse.
+  private static func appMomentSchema(
+    _ description: String,
+    event: ThemeMomentEvent
+  ) -> MCPPropertySchema {
+    var properties: [String: MCPPropertySchema] = [
+      "sound": MCPPropertySchema(
+        type: .object,
+        description: "A short cue of at most 4 seconds and 1 MB: {path} to an .aiff, .caf, "
+          + ".wav, .m4a or .mp3 file, or {base64, format}. Stored with the theme.",
+        properties: [
+          "path": MCPPropertySchema(
+            type: .string,
+            description: "Absolute or ~-relative path; its extension names the format."
+          ),
+          "base64": MCPPropertySchema(
+            type: .string,
+            description: "The sound's bytes, base64-encoded."
+          ),
+          "format": MCPPropertySchema(
+            type: .string,
+            description: "With base64: \"aiff\", \"caf\", \"wav\", \"m4a\" or \"mp3\"."
+          ),
+        ]
+      ),
+      "remove_sound": MCPPropertySchema(
+        type: .boolean,
+        description: event.showsParticles
+          ? "True removes the sound and keeps any shower."
+          : "True removes the sound."
+      ),
+      "remove": MCPPropertySchema(
+        type: .boolean,
+        description: "True removes this moment entirely."
+      ),
+    ]
+    if event.showsParticles {
+      properties["particles"] = appParticlesSchema(
+        "A shower across every visible window, born like a transition's but with no wash "
+          + "and a third of its budget."
+      )
+      properties["remove_particles"] = MCPPropertySchema(
+        type: .boolean,
+        description: "True removes the shower and keeps any sound."
+      )
+      properties["duration"] = MCPPropertySchema(
+        type: .number,
+        description: "Seconds the shower lasts, 0.6–2.4. Default 1.4."
+      )
+    }
+    return MCPPropertySchema(type: .object, description: description, properties: properties)
   }
 
   private static var appSidebarSchema: [String: MCPPropertySchema] {
@@ -9615,6 +9660,12 @@ enum MCPTools {
         type: .boolean,
         description: "True also draws the theme's logo image on the Dock tile, on the theme's "
           + "own plate, instead of the Threading mark. Needs an image logo; false returns the mark."
+      ),
+      "analyzer": MCPPropertySchema(
+        type: .string,
+        description: "Replace the sidebar brand with \"audio\" (the opt-in live music spectrum) "
+          + "or \"workload\". \"default\" restores the material's usual brand. Works with every chrome; "
+          + "capture requires the user's Music-reactive themes consent in Motion settings."
       ),
       "logo": MCPPropertySchema(
         type: .stringOrObject,
@@ -10021,8 +10072,11 @@ enum MCPTools {
           ),
           "edge": MCPPropertySchema(
             type: .string,
-            description: "\"flat\" (default), \"material\" to consume the theme bevel, or \"none\". "
-              + "A material edge requires a stemless popover so one coherent silhouette owns it."
+            description: "\"flat\" (default), \"material\" to consume the theme bevel, "
+              + "\"coupon\" for a ticket whose two sides are bitten by half-circle scallops — "
+              + "worn by every app-owned pop-up: popovers, menus and alerts — or \"none\". "
+              + "A material or coupon edge requires a stemless popover so one coherent "
+              + "silhouette owns it."
           ),
           "shadow": MCPPropertySchema(
             type: .string,
@@ -10306,9 +10360,11 @@ enum MCPTools {
       "scroller_appearance": MCPPropertySchema(
         type: .string,
         description: "Scrollbar anatomy: \"automatic\" (modern proportional thumb), "
-          + "\"windows_98\", \"platinum\", \"beos\", \"openstep\", \"irix\", "
-          + "\"amiga\", \"aqua\", or \"aqua_tiger\". Period appearances include their own arrow layout, "
-          + "track relief, and thumb construction and therefore use persistent legacy space."
+          + "\"pill\" (the modern scroller with a full capsule thumb in the accent — a shop "
+          + "app's bright handle), \"windows_98\", \"platinum\", \"beos\", \"openstep\", "
+          + "\"irix\", \"amiga\", \"aqua\", or \"aqua_tiger\". Period appearances include "
+          + "their own arrow layout, track relief, and thumb construction and therefore use "
+          + "persistent legacy space; automatic and pill keep the user's scroller preference."
       ),
       "menu_appearance": MCPPropertySchema(
         type: .string,
@@ -10321,8 +10377,10 @@ enum MCPTools {
         type: .string,
         description: "Determinate progress treatment: \"continuous\" (the default), "
           + "\"segmented\" for the classic Win32 recessed block control, \"irix\" for "
-          + "Indigo Magic's measured slanted-edge scale, or \"amiga\" for Workbench's "
-          + "source-inferred hard horizontal gauge filled from active title blue."
+          + "Indigo Magic's measured slanted-edge scale, \"amiga\" for Workbench's "
+          + "source-inferred hard horizontal gauge filled from active title blue, or "
+          + "\"striped\" for a capsule meter filled with the accent and crossed by diagonal "
+          + "light stripes — a shop app's \"almost sold out\" bar."
       ),
       "choice_style": MCPPropertySchema(
         type: .string,
@@ -10335,15 +10393,29 @@ enum MCPTools {
         type: .string,
         description: "Binary check-gadget anatomy: \"automatic\" (modern, with backwards-compatible "
           + "classic inference), \"recessed_tick\" for an Intuition-style sunken tick box, "
-          + "\"windows_98_tick\" for Win32's disabled gray field, or \"beos_cross\" for "
-          + "BeOS's white nested box and X mark. The same family colours the separate radio "
-          + "gadget, whose period geometry is a circular well and dot."
+          + "\"windows_98_tick\" for Win32's disabled gray field, \"beos_cross\" for "
+          + "BeOS's white nested box and X mark, or \"round\" for a modern circle that fills "
+          + "with the accent and takes a tick — a shop app's cart check. The same family "
+          + "colours the separate radio gadget, whose period geometry is a circular well and dot."
       ),
       "toggle_style": MCPPropertySchema(
         type: .string,
         description: "Immediate binary-toggle anatomy: \"automatic\" keeps the modern sliding "
           + "track and knob; \"on_off_button\" draws a compact raised/sunken hardware latch "
           + "with one-bit OFF/ON labels and a status lamp."
+      ),
+      "field_style": MCPPropertySchema(
+        type: .string,
+        description: "Text-field and composer construction: \"well\" (the default sunken "
+          + "well) or \"outlined\" — a search bar's capsule with no bevel and a thick accent "
+          + "outline at rest, the field announcing itself before it is focused."
+      ),
+      "badge_style": MCPPropertySchema(
+        type: .string,
+        description: "How counts and small status badges are set: \"plain\" (the default "
+          + "quiet count and pill) or \"sticker\" — a slightly tilted plate in the negative "
+          + "status colour with bold white type, a shop's price sticker. It reaches the "
+          + "sidebar's collapsed-session counts and the Git review's branch and tag labels."
       ),
       "bevel": MCPPropertySchema(
         type: .object,
@@ -10427,7 +10499,8 @@ enum MCPTools {
     }
     let texture = MCPPropertySchema(
       type: .object,
-      description: "A repeated, hard-edged treatment drawn over the title-band fill.",
+      description: "A treatment drawn over the title-band fill: a repeated, hard-edged "
+        + "pattern, or the one soft kind, a gloss.",
       properties: [
         "kind": MCPPropertySchema(
           type: .string,
@@ -10436,7 +10509,10 @@ enum MCPTools {
             + "\"aqua_pinstripes\" draws Cheetah's four-row glass rib; \"dither\" draws "
             + "a one-bit checker stipple; \"brushed_metal\" draws Tiger's fine silver "
             + "horizontal grain; \"rule\" draws one line along the band's bottom edge, "
-            + "the seam a text-mode interface puts under its header row."
+            + "the seam a text-mode interface puts under its header row; \"gloss\" draws "
+            + "a soft sheen over the band's upper half with a specular line along the top — "
+            + "a glossy plastic header — in white unless a colour is stated, and ignores "
+            + "spacing."
         ),
         "color": MCPPropertySchema(
           type: .string,
@@ -10521,8 +10597,10 @@ enum MCPTools {
               + "gadgets), \"aqua\" (early Mac OS X traffic-light gems), "
               + "\"aqua_tiger\" (10.4's tighter glass), \"tui\" (hairline text-mode "
               + "cells that invert under the pointer), \"classic_player\" (compact "
-              + "clean-room player cells; local .wsz artwork is import-only), or "
-              + "\"plain\" (bare glyphs in the band's ink)."
+              + "clean-room player cells; local .wsz artwork is import-only), \"pills\" "
+              + "(round plates filled with the band's ink, each figure cut out in the band's "
+              + "ground — a modern app's solid caption), or \"plain\" (bare glyphs in the "
+              + "band's ink)."
           ),
           "button_placement": MCPPropertySchema(
             type: .string,

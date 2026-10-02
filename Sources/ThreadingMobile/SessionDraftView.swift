@@ -1023,7 +1023,7 @@ private struct SessionDraftComposerScreen: View {
             if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(promptPlaceholder)
                     .font(.body)
-                    .foregroundStyle(theme.tertiaryLabel)
+                    .foregroundStyle(theme.inputPlaceholder)
                     .lineLimit(1)
                     .padding(
                         .top,

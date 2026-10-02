@@ -147,6 +147,60 @@ final class AppThemeLayerReportTests: XCTestCase {
         XCTAssertTrue(result.text.contains("Colours only"), result.text)
     }
 
+    func testNewChromeColoursAroundTheBasesTerminalAreNamed() throws {
+        let base = AppThemeStyles.win98
+        let original = try XCTUnwrap(base.variant(.light))
+        let recoloured = original.replacing(roles: [.accent: .systemGreen])
+        let report = AppThemeLayerReport(
+            theme: custom(variant: recoloured),
+            startingFrom: base,
+            origin: .base(name: base.name)
+        )
+        XCTAssertEqual(report.states[.palette], .changed, "one half moving counts as the layer")
+        XCTAssertEqual(report.terminalLeftBehind, [.light])
+        XCTAssertTrue(report.text.contains("terminal palette is still \(base.name)'s"), report.text)
+        XCTAssertTrue(report.text.contains("terminal_colors"), report.text)
+
+        // A renamed copy of the same colours is still the base's terminal.
+        let renamed = original.terminalPalette.identified(
+            TerminalThemeID("layer-report-renamed"),
+            named: "Renamed"
+        )
+        XCTAssertEqual(
+            AppThemeLayerReport(
+                theme: custom(variant: recoloured.replacing(terminalPalette: renamed)),
+                startingFrom: base,
+                origin: .base(name: base.name)
+            ).terminalLeftBehind,
+            [.light]
+        )
+
+        var paired = original.terminalPalette
+        paired[.background] = .systemGreen
+        let both = AppThemeLayerReport(
+            theme: custom(variant: recoloured.replacing(terminalPalette: paired)),
+            startingFrom: base,
+            origin: .base(name: base.name)
+        )
+        XCTAssertTrue(both.terminalLeftBehind.isEmpty)
+        XCTAssertFalse(both.text.contains("terminal palette"), both.text)
+
+        let terminalOnly = AppThemeLayerReport(
+            theme: custom(variant: original.replacing(terminalPalette: paired)),
+            startingFrom: base,
+            origin: .base(name: base.name)
+        )
+        XCTAssertTrue(terminalOnly.terminalLeftBehind.isEmpty, "only new chrome colours ask")
+    }
+
+    func testTheSchemaAsksForTheTerminalInEveryVariant() throws {
+        let create = try XCTUnwrap(MCPTools.definitions.first { $0.name == MCPTools.createAppTheme })
+        XCTAssertTrue(create.description.contains("State both halves in every variant"))
+        let json = try XCTUnwrap(String(data: try JSONEncoder().encode(create), encoding: .utf8))
+        XCTAssertTrue(json.contains("agents' TUIs"), "terminal_colors says who draws in it")
+        XCTAssertTrue(json.contains("errors and removed diff lines"), "slots say what they carry")
+    }
+
     func testTheToolDescriptionsAskForADecisionAboutDepth() {
         let create = MCPTools.definitions.first { $0.name == MCPTools.createAppTheme }
         let update = MCPTools.definitions.first { $0.name == MCPTools.updateAppTheme }

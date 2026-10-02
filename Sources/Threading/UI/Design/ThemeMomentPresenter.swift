@@ -2,10 +2,12 @@ import AppKit
 
 // MARK: - Theme Moment Presenter
 
-/// Plays the current theme's answer to an app event (`ThemeMoments`): a shower of its particles
-/// across every visible main window, and its own short sound.
+/// Plays the current theme's answer to an app event (`ThemeMoments`): its own short sound and,
+/// for an event that takes one, a shower of its particles across every visible main window. A
+/// finished turn never carries a shower (`ThemeMomentEvent.showsParticles`); the model drops it
+/// before it reaches here.
 ///
-/// **One at a time, then quiet.** Agents finish together more often than not, and five showers
+/// **One at a time, then quiet.** Agents finish together more often than not, and five answers
 /// in five seconds would be a theme shouting. The first event plays; everything after it is
 /// absorbed until `ThemeMomentLimits.cooldown` has passed, whichever event it was. A moment never
 /// interrupts a theme's arrival either — while a transition plays, events are absorbed too.

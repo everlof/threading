@@ -587,9 +587,15 @@ public enum ThemedPopoverLayout {
             anchorGap = compact ? compactAnchorGap : ThemedPopoverLayout.anchorGap
             screenInset = compact ? compactScreenInset : ThemedPopoverLayout.screenInset
             let baseInset = compact ? compactBorderInset : ThemedPopoverLayout.borderInset
-            borderInset = style.edge == .material
-                ? max(baseInset, bevelWidth ?? baseInset)
-                : baseInset
+            switch style.edge {
+            case .material:
+                borderInset = max(baseInset, bevelWidth ?? baseInset)
+            case .coupon:
+                // The bites reach into the body; content keeps clear of them.
+                borderInset = max(baseInset, CouponOutline.depth + baseInset)
+            case .flat, .none:
+                borderInset = baseInset
+            }
             let materialDepth = style.shadow == .material
                 || (style.shadow == .automatic && hasMaterialShadow)
             shadowGutter = materialDepth && hasMaterialShadow ? Design.Size.glowGutter : 0
@@ -613,6 +619,9 @@ public enum ThemedPopoverLayout {
     ) -> NSBezierPath {
         let inset = strokeWidth / 2
         let rect = placement.bodyFrame.insetBy(dx: inset, dy: inset)
+        if placement.style.edge == .coupon, !placement.hasArrow {
+            return CouponOutline.path(in: rect, cornerRadius: cornerRadius)
+        }
         let radius = max(0, min(cornerRadius, min(rect.width, rect.height) / 2))
         let half = placement.arrowBreadth / 2
 
@@ -921,7 +930,9 @@ public final class ThemedPopoverChromeView: NSView, ThemedComponent {
 
 /// `NSBezierPath.cgPath` starts at macOS 14, while Threading still supports macOS 13. Keep the
 /// presentation path identical on both rather than dropping the material shadow on Ventura.
-private extension NSBezierPath {
+/// Internal rather than private because the coupon edge masks menus and alerts with a path
+/// built the same way.
+extension NSBezierPath {
     var threadingCGPath: CGPath {
         let result = CGMutablePath()
         var points = [NSPoint](repeating: .zero, count: 3)

@@ -168,6 +168,44 @@ final class MobileFloatingSurfaceTests: XCTestCase {
     }
 }
 
+final class MobileInputPlaceholderTests: XCTestCase {
+    func testLegibleAuthoredSecondaryInkIsPreserved() {
+        let palette = theme(secondary: "#B3A292", tertiary: "#303030")
+        XCTAssertEqual(palette.uiInputPlaceholder, UIColor(remoteHex: "#B3A292"))
+        XCTAssertNotEqual(palette.uiInputPlaceholder, palette.uiTertiaryLabel)
+    }
+
+    func testTranslucentSecondaryInkIsStrengthenedOverThePanel() throws {
+        let palette = theme(secondary: "#FFFFFF33", tertiary: "#303030")
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        XCTAssertTrue(palette.uiInputPlaceholder.getRed(&red, green: &green, blue: &blue, alpha: &alpha))
+        XCTAssertGreaterThan(alpha, 0.2)
+        XCTAssertLessThan(alpha, 1)
+        XCTAssertEqual(red, 1, accuracy: 0.001)
+        XCTAssertEqual(green, 1, accuracy: 0.001)
+        XCTAssertEqual(blue, 1, accuracy: 0.001)
+    }
+
+    func testOpaqueUnreadableSecondaryFallsBackToThemeLabel() {
+        let palette = theme(secondary: "#303030", tertiary: "#303030")
+        XCTAssertEqual(palette.uiInputPlaceholder, palette.uiLabel)
+    }
+
+    private func theme(secondary: String, tertiary: String) -> RemoteThemePalette {
+        RemoteThemePalette(RemoteThemeDTO(
+            id: "placeholder-test", name: "Placeholder test", mode: .dark,
+            colors: [
+                "ground": "#101010", "panel": "#202020", "label": "#FFFFFF",
+                "secondary_label": secondary, "tertiary_label": tertiary,
+            ],
+            material: .init(panelRadius: 12, controlRadius: 8, borderWidth: 1)
+        ))
+    }
+}
+
 @MainActor
 final class MobileThemedPopoverChromeTests: XCTestCase {
     func testThemeDoesNotReplaceUIKitManagedShadowPath() throws {

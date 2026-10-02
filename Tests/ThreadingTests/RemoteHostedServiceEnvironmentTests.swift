@@ -22,6 +22,50 @@ final class RemoteHostedServiceEnvironmentTests: XCTestCase {
         try super.tearDownWithError()
     }
 
+    func testProductionEnrollmentDefaultsToAccountlessInLocalBuilds() throws {
+        let controller = RemoteHostedServiceController(
+            endpoint: try PeerControlPlaneServiceEndpoint(
+                XCTUnwrap(URL(string: "https://remote.threading.codes"))
+            ),
+            localDevelopmentAuthentication: false,
+            developmentBrowserAuthentication: false
+        )
+
+        XCTAssertTrue(controller.usesAnonymousEnrollment)
+    }
+
+    func testExplicitDevelopmentAuthenticationKeepsItsOwnEnrollment() throws {
+        let local = RemoteHostedServiceController(
+            endpoint: try PeerControlPlaneServiceEndpoint(
+                XCTUnwrap(URL(string: "http://127.0.0.1:8787"))
+            ),
+            localDevelopmentAuthentication: true,
+            developmentBrowserAuthentication: false
+        )
+        let development = RemoteHostedServiceController(
+            endpoint: try PeerControlPlaneServiceEndpoint(
+                RemoteHostedServiceEnvironment.developmentServiceURL
+            ),
+            localDevelopmentAuthentication: false,
+            developmentBrowserAuthentication: true
+        )
+
+        XCTAssertFalse(local.usesAnonymousEnrollment)
+        XCTAssertFalse(development.usesAnonymousEnrollment)
+    }
+
+    func testALocalAuthenticationFlagCannotDisableAccountlessProductionEnrollment() throws {
+        let controller = RemoteHostedServiceController(
+            endpoint: try PeerControlPlaneServiceEndpoint(
+                XCTUnwrap(URL(string: "https://remote.threading.codes"))
+            ),
+            localDevelopmentAuthentication: true,
+            developmentBrowserAuthentication: false
+        )
+
+        XCTAssertTrue(controller.usesAnonymousEnrollment)
+    }
+
     func testABrokerThatDoesNotKnowFaceIDApprovalsIsNeverSentOne() {
         // Protocol 2 answers 400 to an unknown kind: the Mac must not send one at all.
         XCTAssertFalse(RemoteNotificationBrokerCompatibility.delivers(.secretApproval, brokerVersion: 2))

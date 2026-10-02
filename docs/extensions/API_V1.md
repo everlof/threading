@@ -99,7 +99,11 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   cap a surface's cadence; `sidebar.backdrop@1` does both and admits the `backdrop` image role,
   a fill that no earlier contract accepts. Surfaces bind host signals by name —
   `active-account.usage-remaining`, `workload.intensity`, `workload.working-count`,
-  `time.day-fraction` — and a host refuses a patch naming one it cannot answer.
+  `time.day-fraction`, `audio.available`, `audio.level`, `audio.bass`, `audio.mids`,
+  `audio.treble`, and `audio.band.0` through `.7` — and a host refuses a patch naming one
+  it cannot answer. Audio levels require the user's Motion-settings opt-in and a visible
+  consumer; bindings never enable capture or select its source. Only normalized cached
+  levels cross this seam, with unavailable readings using the binding's fallback.
 - Optional advanced companion apps with independently reviewed OS capabilities, declared
   operations, and bounded remote surfaces rendered inside host-owned views.
 - Brokered HTTPS fetches (`network.brokered`) against origins declared in the manifest's

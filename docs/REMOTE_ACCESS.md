@@ -34,10 +34,11 @@ works away from home.
     the switch. **Serve's origin is never advertised to a phone**: it is terminated by a
     certificate this Mac does not hold, and a phone told to pin it would fail at the next renewal.
 - **Hosted Direct** is offered on every channel. After the person chooses **Enable Hosted
-  Access**, a public Mac creates a private installation secret and enrolls; no Apple sign-in is required. It
+  Access**, the Mac creates a private installation secret and enrolls; no Apple sign-in is required. It
   uses Threading's service for enrollment, ICE signaling and TURN fallback. Ordinary traffic goes
-  directly between iPhone and Mac whenever ICE succeeds. Development builds retain their
-  separate Apple and development-authentication routes.
+  directly between iPhone and Mac whenever ICE succeeds. Local and internal builds use the same
+  accountless production path. Only explicitly selected loopback authentication or the isolated
+  development service uses the separate development-authentication routes.
 - **Relay is gone.** The Cloudflare Quick Tunnel's address changed every launch, which is fatal to
   "pair once, reconnect tomorrow", and a third party terminated its TLS. Nothing starts it, nothing
   advertises it, and `cloudflared` is no longer a dependency of anything. It was the only public
@@ -1499,7 +1500,7 @@ Pairing and sharing are deliberately different actions:
   name the network/certificate requirement. Universal Links require the updated iPhone entitlement, provisioning and deployed
   association; the same page also offers the custom-scheme handoff.
 
-  A build without Hosted Direct — every release, beta and nightly build — still wraps its
+  A Mac without Hosted Direct ready still wraps its
   private-route invitations this way. The wrapper names no account and carries no service
   credential, the Worker never receives the fragment, and the Mac never contacts the service to
   write it. The recipient still needs this Mac's Wi-Fi, VPN or tailnet, and the share sheet says
@@ -2340,7 +2341,7 @@ None of this can reach a Mac that is asleep: a phone away from home finds it onl
 and online. The settings page says so where it is configured; see
 [A sleeping Mac answers no way in](#a-sleeping-mac-answers-no-way-in).
 
-Public builds use the production service after an explicit Hosted Direct opt-in. An existing LAN
+Every channel uses accountless production enrollment after an explicit Hosted Direct opt-in. An existing LAN
 choice never turns into Internet reachability merely because the app updates. The accountless
 installation secret stays in the Mac's Keychain and is saved before the first enrollment request, so a lost response can
 be retried without changing the host's service identity. Removing hosted access revokes its
@@ -2348,6 +2349,15 @@ service account and devices, and records an opt-out locally until the person ena
 The initial pilot admits at most 100 accountless installations and eight active device
 credentials per installation, enforced by D1 triggers. Each installation is bound to its one
 host ID.
+
+The enrollment method follows the configured service rather than the build channel. A local
+`dev` build talking to Production therefore shares the anonymous credential namespace and the
+**Enable Hosted Access** controls with public builds. Explicit loopback authentication and the
+isolated development service keep their existing developer credentials. The Settings page reads
+the controller's resolved method and updates its cached controls when the service changes, so it
+cannot request Apple sign-in for an accountless service. Enrollment, credential custody,
+removal and reachability remain host-owned; this is a
+fixed-size setup form and introduces no new per-device work or network callback.
 
 Physical-device development uses a separate `dev.remote.threading.codes` Worker and D1 database.
 A Debug Mac or Threading's internal auto-installed Release selects it under **Settings > Advanced
@@ -2786,7 +2796,7 @@ Remote Access ships on every channel. Release, beta and nightly builds offer its
 the Threading iPhone app can pair with a notarized Mac. The master switch is off by default
 everywhere. `BuildChannel.offersHostedDirect` now includes public channels:
 
-- **Public Hosted Direct is accountless.** A fresh Mac enrolls with a private installation secret
+- **Production Hosted Direct is accountless on every channel.** A fresh Mac enrolls with a private installation secret
   instead of the Sign in with Apple entitlement that Developer ID cannot carry. The Settings page
   shows the Hosted Direct row and the Threading Direct way in without an Apple button. The person
   can remove its hosted identity and re-enable enrollment later.
@@ -2799,7 +2809,7 @@ everywhere. `BuildChannel.offersHostedDirect` now includes public channels:
 - **Share links keep their invitation wrapper.** Private-route invitations are still written as
   `https://remote.threading.codes/join#…`: the wrapper names no account and carries no credential,
   and the payload stays in the fragment.
-- **Notifications are Live only.** Push to a suspended iPhone needs the hosted broker, and the
+- **Without Hosted Direct, notifications are Live only.** Push to a suspended iPhone needs the hosted broker, and the
   `THREADING_APNS_*` override is compiled only into Debug and internal builds. Live notifications
   over the authenticated events socket work in every build.
 - **Not yet observed on a notarized build:** the Local Network prompt for Bonjour discovery, the
@@ -2825,9 +2835,8 @@ once more. An owner paired over the tailnet reconnects after a Mac or app restar
 rescanning as long as Tailscale is running on both devices.
 
 **Public guest invitations open the browser client or Threading app.** With Hosted Direct ready,
-which only a development build can be, chat guests can connect across networks through an
-encrypted peer connection. A private-route invitation — every invitation a release, beta or
-nightly build writes — still requires access to the Mac’s network. The Mac must remain online.
+chat guests can connect across networks through an encrypted peer connection on every channel.
+A private-route invitation still requires access to the Mac’s network. The Mac must remain online.
 
 On iPhone, Tailscale must be connected before this Mac's tailnet address or MagicDNS name is
 reachable. iOS permits only one active packet-tunnel VPN at a time, so another VPN may prevent that

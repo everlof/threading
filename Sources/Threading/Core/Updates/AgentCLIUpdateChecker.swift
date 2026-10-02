@@ -158,6 +158,14 @@ struct AgentCLIInstalledTool: Equatable, Sendable {
     let id: String
     let displayName: String
     let version: String
+    let executablePath: String?
+
+    init(id: String, displayName: String, version: String, executablePath: String? = nil) {
+        self.id = id
+        self.displayName = displayName
+        self.version = version
+        self.executablePath = executablePath
+    }
 }
 
 /// One CLI as resolved through the user's login environment.
@@ -507,22 +515,35 @@ struct AgentCLIUpdateChecker: Sendable {
 
     /// Constructs the live reader with the login shell already resolved on the main actor.
     /// Background probes must not reach back through `ProfileStorage` to ask for it later.
-    static func live(shell: String) -> AgentCLIUpdateChecker {
-        let resolver = AgentCLILocalResolver(shell: shell)
+    static func live(
+        shell: String,
+        transport: @escaping Transport = { request in try await liveTransport(request) }
+    ) -> AgentCLIUpdateChecker {
         return AgentCLIUpdateChecker(
             definitions: AgentCLIUpdateCatalog.all,
-            localReader: { definition in resolver.resolve(definition) },
-            transport: { request in try await liveTransport(request) }
+            localReaderFactory: {
+                let resolver = AgentCLILocalResolver(shell: shell)
+                return { definition in resolver.resolve(definition) }
+            },
+            transport: transport
         )
     }
 
     private let definitions: [AgentCLIUpdateDefinition]
-    private let localReader: LocalReader
+    private let localReaderFactory: @Sendable () -> LocalReader
     private let transport: Transport
 
     init(
         definitions: [AgentCLIUpdateDefinition],
         localReader: @escaping LocalReader,
+        transport: @escaping Transport
+    ) {
+        self.init(definitions: definitions, localReaderFactory: { localReader }, transport: transport)
+    }
+
+    private init(
+        definitions: [AgentCLIUpdateDefinition],
+        localReaderFactory: @escaping @Sendable () -> LocalReader,
         transport: @escaping Transport
     ) {
         // Truncating here would defeat `cliUpdateDefinition`'s exhaustive switch: the compiler
@@ -534,15 +555,18 @@ struct AgentCLIUpdateChecker: Sendable {
             "An update check cannot exceed the runtime inventory"
         )
         self.definitions = definitions
-        self.localReader = localReader
+        self.localReaderFactory = localReaderFactory
         self.transport = transport
     }
 
     func check() async -> AgentCLIUpdateReport {
-        await withTaskGroup(of: IndexedOutcome.self) { group in
+        // Capture PATH once per sweep, not once for the lifetime of a cached Settings page or
+        // the daily coordinator. Installing a tool can change the user's login environment.
+        let localReader = localReaderFactory()
+        return await withTaskGroup(of: IndexedOutcome.self) { group in
             for (index, definition) in definitions.enumerated() {
                 group.addTask {
-                    let outcome = await check(definition)
+                    let outcome = await check(definition, localReader: localReader)
                     return IndexedOutcome(index: index, outcome: outcome)
                 }
             }
@@ -582,8 +606,8 @@ struct AgentCLIUpdateChecker: Sendable {
         }
     }
 
-    private func check(_ definition: AgentCLIUpdateDefinition) async -> Outcome {
-        let localResult = await readLocalVersion(definition)
+    private func check(_ definition: AgentCLIUpdateDefinition, localReader: @escaping LocalReader) async -> Outcome {
+        let localResult = await readLocalVersion(definition, reader: localReader)
         let resolvedCLI: ResolvedAgentCLI
         switch localResult {
         case .success(nil):
@@ -614,7 +638,8 @@ struct AgentCLIUpdateChecker: Sendable {
         let installed = AgentCLIInstalledTool(
             id: definition.id,
             displayName: definition.displayName,
-            version: installedVersion.display
+            version: installedVersion.display,
+            executablePath: resolvedCLI.executablePath
         )
 
         let latestVersionText: String
@@ -685,9 +710,9 @@ struct AgentCLIUpdateChecker: Sendable {
     }
 
     private func readLocalVersion(
-        _ definition: AgentCLIUpdateDefinition
+        _ definition: AgentCLIUpdateDefinition,
+        reader: @escaping LocalReader
     ) async -> Result<ResolvedAgentCLI?, AgentCLIUpdateFailure.Reason> {
-        let reader = localReader
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 continuation.resume(returning: reader(definition))

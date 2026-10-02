@@ -845,6 +845,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         let contentStarted = DispatchTime.now().uptimeNanoseconds
         containerViewController.delegate = self
+        containerViewController.runAgentCLIUpdates = { [weak self] plan in
+            self?.runAgentCLIUpdates(plan) != nil
+        }
 
         containerViewController.composerDelegate = sessionCoordinator
         let contentItem = NSSplitViewItem(viewController: containerViewController)
@@ -3621,11 +3624,15 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return false
         }
 
-        // The page title is the explicit reveal route and may hand the keyboard to the sidebar.
+        return revealInSidebar(destination, focusingSidebar: focusingSidebar)
+    }
+
+    private func revealInSidebar(_ destination: SidebarNodeKey, focusingSidebar: Bool) -> Bool {
+        // Explicit navigation may hand the keyboard to the sidebar when the caller requests it.
         // Promote a hover reveal to ordinary persistent visibility before doing either.
         sidebarEdgeRevealCoordinator.cancelTemporaryReveal()
 
-        // The title names a native sidebar row. An extension navigator may currently occupy the
+        // The destination names a native sidebar row. An extension navigator may occupy the
         // column, so selecting inside the hidden native controller alone reveals nothing. Switch
         // the column first and persist that explicit navigation choice.
         selectWorkspaceNavigator(.native)
@@ -4796,10 +4803,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }
 
     func openSearchProject(_ projectID: ProjectID) -> Bool {
-        guard environment.projectStore.project(withID: projectID) != nil else { return false }
-        exitSettingsForNavigation()
+        guard prepareSearchProjectNavigation(projectID) else { return false }
         sidebarViewController.select(projectID: projectID)
-        return true
+        sidebarViewController.setExpanded(true, forProject: projectID)
+        return revealInSidebar(.project(projectID), focusingSidebar: false)
     }
 
     func openSearchSession(_ sessionID: SessionID, projectID: ProjectID) -> Bool {
@@ -4809,9 +4816,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         else {
             return false
         }
-        exitSettingsForNavigation()
+        guard prepareSearchProjectNavigation(projectID) else { return false }
         sidebarViewController.select(sessionID: sessionID)
-        return true
+        return revealInSidebar(.session(sessionID), focusingSidebar: false)
     }
 
     func openSearchConversationWindow(_ window: ConversationWindow) -> Bool {
@@ -4878,8 +4885,21 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         else {
             return false
         }
-        exitSettingsForNavigation()
+        guard prepareSearchProjectNavigation(projectID) else { return false }
         sidebarViewController.select(terminalID: terminalID)
+        return revealInSidebar(.terminal(terminalID), focusingSidebar: false)
+    }
+
+    /// Search indexes the whole catalogue, including projects absent from the sidebar. Reveal
+    /// those through the existing display filter before selecting a row; visiting must never
+    /// change the project's durable hidden flag. Discovery and indexing remain off this path.
+    private func prepareSearchProjectNavigation(_ projectID: ProjectID) -> Bool {
+        guard let project = environment.projectStore.project(withID: projectID) else { return false }
+        exitSettingsForNavigation()
+        if project.isHidden && !environment.settings.showsHiddenProjects {
+            environment.settings.showsHiddenProjects = true
+        }
+        sidebarViewController.mountInitialTreeIfNeeded()
         return true
     }
 

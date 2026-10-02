@@ -155,6 +155,17 @@ enum AgentLauncher {
         return ["\(AgentDefaults.claudeRendererEnvironmentKey)=\(value)"]
     }
 
+    /// Claude's UI theme for a terminal launch: the ANSI variant that draws its TUI in the
+    /// palette this session's terminal resolves to, or nil to leave the account's own theme.
+    ///
+    /// Read from the session's own assignment chain (`ThemeAssignments.theme(for:)`), so two
+    /// sessions on different palettes may launch with different variants. Terminal launches
+    /// only — a native conversation draws no TUI.
+    static func terminalTheme(for session: AgentSession) -> String? {
+        guard AppSettings.shared.agentsUseTerminalPalette else { return nil }
+        return ClaudeTerminalTheme.ansi(for: ThemeAssignments.theme(for: session.id))
+    }
+
     /// Whether this launch explicitly starts in Fast or Standard, or leaves speed to the CLI.
     ///
     /// Resolution is conversation override, then the app-wide default for this runtime, then
@@ -958,16 +969,17 @@ enum AgentLauncher {
 
         // Optional lifecycle hooks only. A terminal session raises the CLI's own permission
         // prompt, which the user can see and answer — intercepting it would replace a working
-        // prompt with a second one. With reporting off, no Remote Control override and no
-        // status-line override, `writeHookSettings` returns nil and the terminal launches
-        // with no settings file.
+        // prompt with a second one. With reporting off, no Remote Control override, no
+        // status-line override and the TUI left on the account's own theme,
+        // `writeHookSettings` returns nil and the terminal launches with no settings file.
         if let settingsPath = MCPSessionRegistry.writeHookSettings(
             for: session.id,
             brokersPermissions: false,
             reportsLifecycle: AppSettings.shared.reportsClaudeLifecycleEvents,
             remoteControl: remoteControlAtStartup(for: session),
             fastMode: fastModeAtStartup(for: session),
-            statusLineOverride: statusLineOverride(for: session, in: project)
+            statusLineOverride: statusLineOverride(for: session, in: project),
+            theme: terminalTheme(for: session)
         ) {
             command.append(flag: "--settings", value: settingsPath)
         }

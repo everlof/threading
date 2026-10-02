@@ -144,6 +144,17 @@ final class GitReviewCommitRow: NSView {
         let isTag = ref.hasPrefix(GitReviewCommitRowDefaults.tagPrefix)
         let name = isTag ? String(ref.dropFirst(GitReviewCommitRowDefaults.tagPrefix.count)) : ref
 
+        // A theme that sets its badges as stickers labels branches and tags the way a shop
+        // labels a deal; the sticker sizes itself, tilt included.
+        if ThemedStickerBadge.isWorn(in: NSApp.effectiveAppearance) {
+            let sticker = ThemedStickerBadge(text: name)
+            sticker.translatesAutoresizingMaskIntoConstraints = false
+            sticker.setContentHuggingPriority(.required, for: .horizontal)
+            sticker.setContentCompressionResistancePriority(.required, for: .horizontal)
+            sticker.setAccessibilityLabel(name)
+            return sticker
+        }
+
         let label = NSTextField(labelWithString: name)
         label.applyFont(.caption)
         label.textColor = ref == GitReviewCommitRowDefaults.headRef ? Design.Text.label : Design.Text.secondary

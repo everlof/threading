@@ -270,6 +270,10 @@ enum MCPSessionRegistry {
     /// Claude launches when Threading chose Standard or Fast, and absent when speed belongs to
     /// the account's own settings.
     ///
+    /// `theme` is Claude's own UI theme, stated only for a terminal launch: the ANSI variant
+    /// that makes its TUI draw in the session's terminal palette (`ClaudeTerminalTheme`). Nil
+    /// leaves the account's choice in force.
+    ///
     /// Hook commands read both routes from the launch environment. This file therefore stays
     /// independent of listener timing, while a failed socket can retry the same payload over the
     /// loopback port selected for that launch.
@@ -279,7 +283,8 @@ enum MCPSessionRegistry {
         reportsLifecycle: Bool,
         remoteControl: Bool? = nil,
         fastMode: Bool? = nil,
-        statusLineOverride: String? = nil
+        statusLineOverride: String? = nil,
+        theme: String? = nil
     ) -> String? {
         // This is what makes terminal opt-out complete rather than an empty hooks dictionary
         // still carried through `--settings`.
@@ -289,7 +294,8 @@ enum MCPSessionRegistry {
             reportsLifecycle: reportsLifecycle,
             remoteControl: remoteControl,
             fastMode: fastMode,
-            statusLineOverride: statusLineOverride
+            statusLineOverride: statusLineOverride,
+            theme: theme
         ) else {
             removeSettingsFile(for: sessionID)
             return nil
@@ -323,11 +329,13 @@ enum MCPSessionRegistry {
         reportsLifecycle: Bool,
         remoteControl: Bool? = nil,
         fastMode: Bool? = nil,
-        statusLineOverride: String? = nil
+        statusLineOverride: String? = nil,
+        theme: String? = nil
     ) -> [String: Any]? {
         let needsListener = brokersPermissions || reportsLifecycle
 
-        if !needsListener, remoteControl == nil, fastMode == nil, statusLineOverride == nil {
+        if !needsListener, remoteControl == nil, fastMode == nil, statusLineOverride == nil,
+           theme == nil {
             return nil
         }
 
@@ -351,6 +359,9 @@ enum MCPSessionRegistry {
         }
         if let fastMode {
             settings[AgentDefaults.claudeFastModeKey] = fastMode
+        }
+        if let theme {
+            settings[ClaudeTerminalTheme.settingsKey] = theme
         }
         if let statusLineOverride {
             // Must stay `type: "command"`: the CLI schema-validates this file and rejects it

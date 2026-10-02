@@ -279,7 +279,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(anna.collaborationParticipantID, "member-anna")
     }
 
-    func testHostedServiceRequiresConfigurationAndSignInBeforeStarting() throws {
+    func testExplicitAppleAuthenticationRequiresConfigurationAndSignInBeforeStarting() throws {
         let unconfigured = RemoteHostedServiceController(
             store: HostedServiceStore(record: nil),
             endpoint: nil,
@@ -297,7 +297,8 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             store: HostedServiceStore(record: nil),
             endpoint: endpoint,
             hostID: "host-test",
-            hostName: "Test Mac"
+            hostName: "Test Mac",
+            anonymousAuthentication: false
         )
         signedOut.start(targetPort: 9_876)
         XCTAssertEqual(signedOut.state, .signInRequired)

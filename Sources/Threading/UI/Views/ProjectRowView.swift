@@ -26,6 +26,12 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// three constraints, creating this eagerly pays AppKit's cold monospaced-digit font setup
     /// in the first sidebar layout. Materialize it only when there are digits to show.
     private var countLabel: NSTextField?
+    /// The same count set as a price sticker, for a theme whose badges are stickers. Created on
+    /// the same terms as the label and shown in its place; the label is never restyled into one,
+    /// because a tilted plate cannot sit behind a label's own text.
+    private var countSticker: ThemedStickerBadge?
+    private var displayedCount = 0
+    private let badgeThemeEvents = AppEventObservations()
     /// Says this checkout's chats behave differently unless they answered for themselves.
     /// Materialized only when one does; see `setConductMark`.
     private var conductIndicator: NSImageView?
@@ -419,13 +425,19 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             setHoverButtonVisible(presentsHoverControls, animated: false)
         } else {
             hoverControls.alphaValue = 0
-            countLabel?.alphaValue = 1
+            setCountAlpha(1, animated: false)
         }
     }
 
     // MARK: - Private Methods
 
     private func setupViews() {
+        // A theme decides whether the count is a quiet number or a sticker, so a switch
+        // restates the count rather than only recolouring it.
+        badgeThemeEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            guard let self else { return }
+            self.setCount(self.displayedCount)
+        }
         iconView.imageScaling = .scaleProportionallyDown
         iconView.symbolConfiguration = NSImage.SymbolConfiguration(
             pointSize: SidebarRowDefaults.iconSize,
@@ -914,14 +926,26 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
         guard animated else {
             hoverControls.alphaValue = visible ? 1 : 0
-            countLabel?.alphaValue = visible ? 0 : 1
+            setCountAlpha(visible ? 0 : 1, animated: false)
             return
         }
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Design.Motion.quick
             hoverControls.animator().alphaValue = visible ? 1 : 0
-            countLabel?.animator().alphaValue = visible ? 0 : 1
+            setCountAlpha(visible ? 0 : 1, animated: true)
+        }
+    }
+
+    /// The count crossfades with the hover controls in whichever form it takes.
+    private func setCountAlpha(_ alpha: CGFloat, animated: Bool) {
+        let forms: [NSView?] = [countLabel, countSticker]
+        for view in forms.compactMap({ $0 }) {
+            if animated {
+                view.animator().alphaValue = alpha
+            } else {
+                view.alphaValue = alpha
+            }
         }
     }
 
@@ -941,15 +965,45 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
     private func setCount(_ count: Int) {
         hasCount = count > 0
-        if count > 0 {
+        displayedCount = count
+        let asSticker = ThemedStickerBadge.isWorn(in: effectiveAppearance)
+        if count > 0, asSticker {
+            let sticker = countStickerForPresentation()
+            sticker.text = String(count)
+            sticker.isHidden = false
+            countLabel?.isHidden = true
+        } else if count > 0 {
             let label = countLabelForPresentation()
             label.stringValue = String(count)
             label.isHidden = false
-        } else if let countLabel {
-            countLabel.stringValue = ""
-            countLabel.isHidden = true
+            countSticker?.isHidden = true
+        } else {
+            countLabel?.stringValue = ""
+            countLabel?.isHidden = true
+            countSticker?.text = ""
+            countSticker?.isHidden = true
         }
         updateTrailingSlotVisibility()
+    }
+
+    /// Crosses the sticker boundary once, on the label's terms: below the hover controls in the
+    /// crossfade, and against the same trailing edge.
+    private func countStickerForPresentation() -> ThemedStickerBadge {
+        if let countSticker { return countSticker }
+
+        let sticker = ThemedStickerBadge()
+        sticker.translatesAutoresizingMaskIntoConstraints = false
+        sticker.setContentHuggingPriority(.required, for: .horizontal)
+        sticker.setContentCompressionResistancePriority(.required, for: .horizontal)
+        sticker.setAccessibilityIdentifier("sidebar.project.count")
+        sticker.alphaValue = countLabel?.alphaValue ?? 1
+        trailingSlot.addSubview(sticker, positioned: .below, relativeTo: hoverControls)
+        NSLayoutConstraint.activate([
+            sticker.trailingAnchor.constraint(equalTo: trailingSlot.trailingAnchor),
+            sticker.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor)
+        ])
+        countSticker = sticker
+        return sticker
     }
 
     var countLabelIsMaterialized: Bool { countLabel != nil }

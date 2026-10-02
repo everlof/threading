@@ -68,7 +68,11 @@ base project's file. Non-git projects use the selected folder as their root.
 
 Only one `ProjectScriptConfigurationWatcher` exists for the active root. It uses a path-based
 FSEvents stream because editors replace JSON files atomically; it filters for `.threading.json`
-before hopping to the main queue and coalesces save bursts. A refresh reparses the bounded file,
+before hopping to the main queue and coalesces save bursts. Its `FileSystemEventStream` registers
+and unregisters with the daemon on the shared utility lane, so selection never waits for those
+RPCs. Stop immediately revokes the callback generation. One catch-up reload after registration
+covers file replacement between the initial catalog read and asynchronous arming.
+A refresh reparses the bounded file,
 compares the catalog, and atomically replaces `project.script.<id>` registry entries. It never
 starts a process. Changing selection stops the old watcher, and changing a config updates the
 Project ▸ Scripts menu and an open command palette predictably.

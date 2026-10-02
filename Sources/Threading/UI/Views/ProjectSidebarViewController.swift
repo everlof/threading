@@ -3022,6 +3022,10 @@ extension ProjectSidebarViewController {
     func setTriggersMode(_ on: Bool) {
         triggersButton.isSelected = on
         if on, isSettingsMode { setSettingsMode(false) }
+        // Automations is a destination of its own, not any row's. A session left selected
+        // claimed the pane was still showing it, and clicking that row to go back changed no
+        // selection, so no notification fired and the page stayed put.
+        if on { clearSelection() }
     }
 
     private func makeSettingsSidebar() -> SettingsSidebar {

@@ -11,6 +11,8 @@ import UniformTypeIdentifiers
 /// contribute to this page through `ExtensionHostSettingsPage.general`.
 final class GeneralPreferencesViewController: NSViewController {
 
+    let agentTools = AgentCLISettingsViewController()
+
     // MARK: - Controls
 
     private let restoreSessionToggle = ThemedToggle()
@@ -224,6 +226,7 @@ final class GeneralPreferencesViewController: NSViewController {
             )
         ])
 
+        addChild(agentTools)
         let page = SettingsUI.page(title: "General", sections: [
             SettingsUI.section("Startup", startup),
             SettingsUI.section("Idle Agents", idleAgents),
@@ -238,6 +241,7 @@ final class GeneralPreferencesViewController: NSViewController {
                 )
             ),
             SettingsUI.section("Software Updates", updatesCard()),
+            SettingsUI.section(nil, agentTools.view),
             SettingsUI.section("This Mac", thisMacCard())
         ], hostPage: .general)
 

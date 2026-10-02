@@ -2844,8 +2844,10 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
             radius: .panel,
             // The two indexed classic frames are painted below. Leaving the generic layer
             // border/bevel in place antialiases Windows' square four-tone edge and repaints
-            // Platinum's measured black/#222 containment rule with the theme border.
-            border: paintsIndexedFrame ? nil : Design.Surface.border,
+            // Platinum's measured black/#222 containment rule with the theme border. A coupon's
+            // border is drawn along its scalloped outline instead, which a layer border cannot
+            // follow.
+            border: paintsIndexedFrame || wearsCoupon ? nil : Design.Surface.border,
             glow: ThemedMenuMetrics.panelHasGlow,
             bevel: paintsIndexedFrame ? .none : .automatic
         )
@@ -2912,12 +2914,44 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         case .platinum:
             ThemedMenuPanelArtwork.drawPlatinumFrame(in: bounds)
         default:
-            break
+            if wearsCoupon {
+                // Stroked on the mask's own path at twice the border width: the mask keeps the
+                // inner half, which is exactly one border's width inside the scalloped edge.
+                let outline = couponOutline
+                outline.lineWidth = Design.Radius.border * 2
+                Design.Surface.border.setStroke()
+                outline.stroke()
+            }
         }
+    }
+
+    /// A coupon theme's menu is a ticket like its popovers. Only the modern family wears it: the
+    /// historical families keep the measured frames they reproduce.
+    private var wearsCoupon: Bool {
+        ThemedMenuMetrics.appearance == .automatic
+            && CouponOutline.isWorn(by: AppThemePalette.current.material(for: effectiveAppearance))
+    }
+
+    private var couponOutline: NSBezierPath {
+        CouponOutline.path(in: bounds, cornerRadius: Design.Radius.panel)
+    }
+
+    /// Masks the panel to the coupon. The menu's shadow lives on the chassis around this view
+    /// and follows its alpha, so the scallops cast their own shadow without a second path.
+    private func shapeCouponMask() {
+        guard wearsCoupon else {
+            if layer?.mask != nil { layer?.mask = nil }
+            return
+        }
+        let mask = (layer?.mask as? CAShapeLayer) ?? CAShapeLayer()
+        mask.frame = bounds
+        mask.path = couponOutline.threadingCGPath
+        layer?.mask = mask
     }
 
     override func layout() {
         super.layout()
+        shapeCouponMask()
         // Wider at the ends than at the sides under a broad corner — see `verticalOuterInset`.
         let inset = ThemedMenuMetrics.outerInset
         var content = bounds.insetBy(dx: inset, dy: ThemedMenuMetrics.verticalOuterInset)

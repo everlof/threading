@@ -54,7 +54,7 @@ final class ThemedCheckbox: ThemedControl {
             : .automatic
     }
 
-    private var usesHistoricalGadget: Bool { checkboxStyle != .automatic }
+    private var usesHistoricalGadget: Bool { checkboxStyle.isHistorical }
 
     private var boxSize: CGFloat {
         usesHistoricalGadget ? Layout.historicalBox : Layout.modernBox
@@ -205,7 +205,7 @@ final class ThemedCheckbox: ThemedControl {
                 switch checkboxStyle {
                 case .beOSCross:
                     drawBeOSCross(in: box, mixed: state == .mixed)
-                case .recessedTick, .windows98Tick, .automatic:
+                case .recessedTick, .windows98Tick, .automatic, .round:
                     if checkboxStyle == .windows98Tick {
                         drawWindows98Tick(in: box, mixed: state == .mixed)
                     } else {
@@ -214,7 +214,9 @@ final class ThemedCheckbox: ThemedControl {
                 }
             }
         } else {
-            corner = Design.Radius.control(fitting: box.size)
+            corner = checkboxStyle == .round
+                ? box.width / 2
+                : Design.Radius.control(fitting: box.size)
             let material = AppThemePalette.current.material(for: effectiveAppearance)
             let emptyBorder = material.controlGlow == nil
                 ? Design.Surface.border
@@ -410,7 +412,7 @@ final class ThemedRadioButton: ThemedControl {
             : .automatic
     }
 
-    private var usesHistoricalGadget: Bool { checkboxStyle != .automatic }
+    private var usesHistoricalGadget: Bool { checkboxStyle.isHistorical }
     private var boxSize: CGFloat { usesHistoricalGadget ? Layout.historicalBox : Layout.modernBox }
 
     let title: String

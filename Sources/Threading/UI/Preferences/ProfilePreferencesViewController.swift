@@ -45,6 +45,12 @@ final class ProfilePreferencesViewController: NSViewController {
         action: #selector(backgroundHarmonyChanged)
     )
 
+    private lazy var agentPaletteToggle: ThemedToggle = SettingsUI.toggle(
+        isOn: AppSettings.shared.agentsUseTerminalPalette,
+        target: self,
+        action: #selector(agentPaletteChanged)
+    )
+
     private lazy var droppedImageToggle: ThemedToggle = SettingsUI.toggle(
         isOn: AppSettings.shared.convertsDroppedImages,
         target: self,
@@ -122,6 +128,21 @@ final class ProfilePreferencesViewController: NSViewController {
                         + "exactly as readable."
                 ),
                 control: backgroundHarmonyToggle
+            ),
+            SettingsUI.row(
+                title: "Agents use the theme's colours",
+                subtitle: "Claude draws its interface in the terminal's palette.",
+                help: SettingsUI.help(
+                    "Agents use the theme's colours",
+                    "Claude otherwise paints its accents, borders and diffs in fixed colours of "
+                        + "its own, so a theme reaches only the background and plain text. With "
+                        + "this on, Claude starts in its ANSI colour mode and draws with the "
+                        + "terminal's sixteen colours — the theme's palette, light or dark to match.",
+                    "It applies when a chat starts or resumes, and only inside Threading: your "
+                        + "Claude settings are not changed. Turn it off to keep the theme you chose "
+                        + "in Claude."
+                ),
+                control: agentPaletteToggle
             )
         ])
 
@@ -261,6 +282,12 @@ final class ProfilePreferencesViewController: NSViewController {
     @objc private func backgroundHarmonyChanged() {
         AppSettings.shared.harmonizesTerminalBackgrounds = backgroundHarmonyToggle.state == .on
         NotificationCenter.default.post(ProfileDidChange(profile: currentProfile))
+    }
+
+    /// No re-post: nothing on an open terminal changes. A Claude launch reads the setting, so
+    /// the next chat to start or resume obeys it.
+    @objc private func agentPaletteChanged() {
+        AppSettings.shared.agentsUseTerminalPalette = agentPaletteToggle.state == .on
     }
 
     /// No re-post needed, unlike the harmony toggle above: nothing is installed on the terminal

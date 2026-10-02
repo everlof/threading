@@ -200,6 +200,11 @@ public struct WindowChromeStyle: Codable, Equatable {
             /// With no imported sheet, the shared component draws original one-bit fallback
             /// figures; an imported sheet supplies the exact resting and pressed sprites.
             case classicPlayer = "classic_player"
+            /// Round plates filled with the band's ink, the figure knocked out of each in the
+            /// band's own ground — the solid, toy-like caption a modern shop or game app wears.
+            /// Unlike Aqua's gems the plates are always present and take no fixed colour of
+            /// their own, so any band and ink pair produces a legible cluster.
+            case pills
         }
 
         public enum ButtonPlacement: String, Codable, CaseIterable {
@@ -288,6 +293,12 @@ public struct WindowChromeStyle: Codable, Equatable {
                 /// `spacing` — there is one line, not a field of them — and it is the only
                 /// texture whose job is to *end* the band rather than fill it.
                 case rule
+                /// A soft sheen over the band's upper half that fades out by its middle, with a
+                /// one-point specular line along the very top — the glossy plastic of a modern
+                /// shop or game app's header. Its colour defaults to white rather than to the
+                /// ink, because a highlight is light whatever the band's ink is, and it ignores
+                /// `spacing`. It is the one soft texture; every other kind is hard-edged.
+                case gloss
             }
         }
 
@@ -525,6 +536,9 @@ public enum WindowChromeStyleLimits {
     /// Points between title-band texture strokes. One collapses into a solid fill; past eight
     /// the treatment stops reading as a texture tied to the chrome.
     public static let textureSpacingRange: ClosedRange<Double> = 2...8
+    /// What a `gloss` texture states when it names no colour: white at a third, which reads
+    /// as a lit surface on a saturated band without washing out the title set across it.
+    public static let defaultGlossAlpha: CGFloat = 0.34
     public static let defaultTextureSpacing: Double = 2
     /// Points. Narrower cannot hold two caption boxes and a useful title; wider stops reading
     /// as a tab. The default follows the compact BeOS application-window proportions.

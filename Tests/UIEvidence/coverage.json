@@ -4,6 +4,41 @@
   "platform": "macOS",
   "entries": [
     {
+      "id": "theme-audio-spectrum",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Music-reactive themes",
+      "description": "Opt-in music controls and eight measured bands in the native sidebar analyzer, rendered inside the shipping main window.",
+      "states": [
+        "Measured spectrum",
+        "Audio unavailable",
+        "Permission and source controls"
+      ],
+      "matrix": {
+        "themes": [
+          "System",
+          "Classic Player",
+          "Neo Brutalism"
+        ],
+        "appearances": [
+          "Light",
+          "Dark",
+          "Authored"
+        ],
+        "sizes": [
+          "1400×1100-point main window"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AudioSpectrumPresentationTests.swift",
+        "test": "ThreadingTests/AudioSpectrumPresentationTests/testRendersMusicSettingsAndAnalyzerInShippingWindow"
+      },
+      "capture": {
+        "glob": "theme-audio-*.png"
+      }
+    },
+    {
       "id": "theme-gradient-motion",
       "kind": "surface",
       "status": "implemented",
@@ -529,6 +564,38 @@
       },
       "capture": {
         "glob": "general-*.png"
+      }
+    },
+    {
+      "id": "agent-tools-settings",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Agent tool updates and model support",
+      "description": "The installed-version check in General Settings inside the real main window, including available updates, failed release checks, missing tools, official install paths and Claude model requirements.",
+      "states": [
+        "Mixed installed, update, missing and failed-source results"
+      ],
+      "matrix": {
+        "themes": [
+          "System",
+          "Cyberpunk",
+          "Neo Brutalism"
+        ],
+        "appearances": [
+          "Light",
+          "Dark"
+        ],
+        "sizes": [
+          "Product shell"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AgentCLISettingsTests.swift",
+        "test": "ThreadingTests/AgentCLISettingsTests/testRendersAgentToolsInTheProductSettingsShell"
+      },
+      "capture": {
+        "glob": "agent-tools-*.png"
       }
     },
     {

@@ -166,7 +166,7 @@ Components so far:
 | `BrowserAnnotationChrome` / `BrowserAnnotationSurfaceView` | Shared opaque light/dark edge for annotations over arbitrary website pixels. Pins and badges retain a themed opaque face; outlines retain an unpainted interior; the inline editor has an opaque floating face. The edge uses both polarities independently of the website or theme accent, grows under Increase Contrast, and requires no page sampling. |
 | `BrowserAnnotationEditor` | The single native note form inside `BrowserAnnotationOverlay`. It opens beside a pin without a sheet or WebKit resize, clamps to the viewport, and uses the themed field and buttons. Enter saves, Escape cancels one edit, and the overlay routes pointer/accessibility input to its children while preserving native page scroll dispatch. The browser owns page identity, drafts, and note provenance. |
 | `ThemedSearchField` | The same field with a magnifier, replacing `NSSearchField`. Its trailing run rides *inside* the field: the ✕ every search field owes its reader, and an optional owner-installed action in front of it (Settings' Ask AI), both acting on what was typed the way the magnifier does. The query yields room for whatever is visible there, and so does the pointer — the field's I-beam stops where the run begins, since `NSTextField`'s own claim is its whole bounds and would otherwise promise text over a button. See the [2026-08-21 note](#2026-08-21--the-carets-cursor-claims-the-whole-field-buttons-and-all). |
-| `PanelListView` | The display panel's list vocabulary: a scrolling stack of full-width rows under quiet section headings, with wrapped notes for a section that has no rows. Extracted after the Info and Sharing panes each built the same scroll–clip–stack by hand with silently different insets, which is how one pane's headings stopped lining up with anything above them. The geometry is stated once — content ink at `Spacing.inset`, on the pane header's own column — and `rowSpacing` is the one density decision a pane keeps. A heading never carries the count of its rows: the rows make the count apparent, a decision the Sharing pane made first and the component keeps panes from re-deciding apart. Two quiet voices under a heading: a *note* speaks for a section with no rows (`addNote`, the subheading face), a *footnote* speaks about rows already there (`addFootnote`, the detail face) — provenance under a receipt, not a substitute for one. |
+| `PanelListView` | The display panel's list vocabulary: a scrolling stack of full-width rows under quiet section headings, with wrapped notes for a section that has no rows. Extracted after the Info and Sharing panes each built the same scroll–clip–stack by hand with silently different insets, which is how one pane's headings stopped lining up with anything above them. The geometry is stated once — content ink at `Spacing.inset`, on the pane header's own column — and `rowSpacing` is the one density decision a pane keeps. A heading never carries the count of its rows: the rows make the count apparent, a decision the Sharing pane made first and the component keeps panes from re-deciding apart. Two quiet voices under a heading: a *note* speaks for a section with no rows (`addNote`, the subheading face), a *footnote* speaks about rows already there (`addFootnote`, the detail face) — provenance under a receipt, not a substitute for one. Its scroller autohides: under the legacy scroller style a mouse brings, one left standing drew a full-height empty trough beside the Automations page's one-line note. |
 | `SearchMatchLabel` | The other half of a search field: a line of text that says which of its own words the query accounts for. **Two signals, always both** — the matched run takes its role's `emphasized` weight *and* `Design.Surface.searchMatch`, an accent held at `Opacity.searchMatchGround` behind it. Weight alone vanishes in a list where several rows matched; a tint alone is the first thing Differentiate Without Colour takes away. It is a component rather than a call to `NSTextField.label(attributed:)` because an attributed string freezes its fonts and inks and `AppThemeRefresh`'s sweep re-resolves a *recorded role*, which it cannot reach inside — so this rebuilds on `AppThemeDidChange`, the same wiring `ThemedTextField`'s placeholder carries. `SearchTextMatch` is where "a query landed here" is decided, and filters may read its `comparisonOptions` so a result cannot be admitted by a more forgiving spelling than the mark uses. Its second rule is the one to know: **a token containing the whole line marks all of it**, which is what makes a row showing eight characters of a session id answer honestly to a pasted thirty-six-character one. |
 | `SearchResultRowView` | One destination a search turned up, with where it lives: a `SearchMatchLabel` title over a quiet caption path line — the settings sidebar's "Alert sound / Notifications" under the General row. A component of its own rather than a taller `ThemedTabItemView`: a tab names a *place* and holds one line forever, while a result names a thing the reader just asked for and owes them the path to it; what the two share (hover plate, press, keyboard activation, focus ring, ink source) they share through `BackdropThemedControl`. The host hands it the leading inset of the rows above so results align with the page row's title ink. Choosing one reports page **and** row, because the row is the answer — the settings sidebar routes that through `SettingsRowReveal`, which scrolls the built page to the anchored row (`SettingsRowAnchor`, the tag `SettingsUI` puts on every titled row) and stands the wash below on it. |
 | `RevealHighlightView` | The wash a search leaves on the row it just scrolled to: `Design.Surface.searchMatch` — the same ground `SearchMatchLabel` puts behind matched text, so "the query landed here" is one signal at both scales — fading in, standing `Design.Motion.revealHold`, and leaving. Decorative by contract: `hitTest` nil, not an accessibility element (the reveal posts its own announcement), drawn in `draw(_:)` so a live theme switch re-resolves it. The fades collapse under Reduce Motion; the hold does not, because a hold is not movement and being seen standing still is its whole job. |
@@ -3901,3 +3901,35 @@ ancestor visibility, accessibility and power lifecycle without drawing, hit test
 content. `MobileThemeBackdropView` owns the equivalent dashboard ground. Neither installs a
 frame callback into the product tree. The policy and wire compatibility live in
 [themes.md](themes.md#portable-gradient-drift).
+
+## 2026-10-02 — Coupon edges, sticker badges, and three modern control anatomies
+
+The shop vocabulary in [`themes.md`](themes.md) added design-system parts a component author
+should know about:
+
+- **`CouponOutline`** is the one builder of the scalloped ticket silhouette. A pop-up that
+  learns the coupon edge uses it — never a second scallop path — and keeps its content at least
+  `CouponOutline.depth` clear of the sides.
+- **`ThemedStickerBadge`** is the drawn sticker a `badge_style: sticker` theme shows in place of
+  a quiet count or pill. A host chooses between its own mark and the sticker with
+  `ThemedStickerBadge.isWorn(in:)` and lays the sticker out by its intrinsic size, which already
+  includes the tilt. It carries its text as its accessibility value; the host names it.
+- **Round checks, striped meters and pill scrollers are modern controls.** Code that branches
+  on "is this a period control" asks `CheckboxStyle.isHistorical` or
+  `ScrollerAppearance.usesLegacyPresentation`, never `!= .automatic`.
+- **A determinate gauge that paints its own fill** calls `ThemedProgressDrawing.drawStriped`
+  (or `drawStripes` over a fill it has already clipped) under `progress_style: striped`, the way
+  it already calls the segmented and period recipes.
+- **An outlined field** shares its weight through `OutlinedField.borderWidth`, so the text
+  fields and the composer outline at one weight.
+
+## Music spectrum presentation
+
+`AudioSpectrumView` is the Design owner of the native eight-band analyzer. It draws fixed
+columns/cells using `Design.AudioSpectrum` metrics and existing surface/accent tokens, reports
+loudness or unavailable status to accessibility, and accepts no pointer input. The sidebar
+brand and Motion preview share this component. Its demand lease follows the window, hidden
+ancestors, enclosing clip views and `ThemeParticleHold`; there is no per-view sampling timer.
+The Motion page uses the normal Settings kit for its host-only consent/source/retry rows.
+Long permission and privacy explanations live behind the section help button. Capture and
+public signal authority are described in [`audio-spectrum.md`](audio-spectrum.md).

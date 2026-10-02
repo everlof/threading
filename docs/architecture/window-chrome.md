@@ -1395,3 +1395,27 @@ composer edits, accepted remote prompts and terminal input consult it through an
 lookup; provider output, loading a draft and merely visiting a chat do not unhide it. Only the
 first input while hidden writes the project row. Hidden-project incremental events are ignored
 by the native sidebar until the visibility flag changes.
+
+Universal Search covers hidden projects too. Opening a project, chat or terminal destination
+enables Show Hidden Projects when needed before selecting its row, then reveals and scrolls the
+native sidebar. A project result expands its chats. This changes the local display filter, never
+`Project.isHidden`; failed locator validation changes neither. Navigation reports success only
+when the exact destination row is selected. Project visibility tests exercise all three routes
+and render the project landing in the shipping shell.
+
+## 2026-10-02 — a gloss and pill buttons
+
+Two values for a modern shop or game app's header rather than a period desktop's (the full
+vocabulary is in [`themes.md`](themes.md), *a shop app's vocabulary*):
+
+- **`gloss`** is the first soft texture. Every other kind is hard-edged, so `drawTexture`
+  switches antialiasing off for all of them; `drawGloss` turns it back on for itself. It draws
+  the stated colour fading from the band's top to its middle plus a one-point specular line, and
+  finds "top" from the context's flip for the reason `.rule` does. Its colour defaults to white
+  at `WindowChromeStyleLimits.defaultGlossAlpha` rather than to the ink: a highlight derived from
+  a dark ink would draw a shadow. Textures are outside the band's contrast gate, so a stated
+  gloss colour is the author's to keep legible.
+- **`pills`** is one more anatomy row and one more `Plate` case, `.pill`: a disc in the band's
+  ink (dimmed with the window, so `plateFollowsKeyState`), lifted on hover, darkened on press,
+  with the figure drawn in the band's ground the way an inverted TUI cell's is. The focus ring
+  takes the disc's radius instead of the control radius.

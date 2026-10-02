@@ -33,7 +33,11 @@ public struct ThemedFloatingSurfaceChrome {
     /// edge construction and depth remain the one floating-surface contract.
     public func apply(to view: NSView, radius radiusOverride: SurfaceRadius? = nil) {
         let materialEdge = style.edge == .material && material.bevel != nil
-        let flatEdge = style.edge == .flat || (style.edge == .material && !materialEdge)
+        // A coupon is a pop-up's silhouette; an embedded floating card keeps its rectangle and
+        // the flat border the coupon is drawn with.
+        let flatEdge = style.edge == .flat
+            || style.edge == .coupon
+            || (style.edge == .material && !materialEdge)
         let materialShadow = material.glow != nil
             && (style.shadow == .material || style.shadow == .automatic)
         let systemShadow = style.shadow == .system

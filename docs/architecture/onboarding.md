@@ -85,6 +85,11 @@ truth: a machine with several installs (a native `~/.local/bin/claude` beside a 
 `/usr/local/bin` npm one) shows whichever the *login shell* resolves, because that is the one
 a session will actually run.
 
+The install hints use each tool's own installer: Claude's recommended native installer and
+Cursor's installer have explicit entries, rather than letting Cursor fall through to Claude's
+npm command. General Settings ▸ Agent tools keeps provider installation guides available after
+the walkthrough, alongside an explicit installed-version and update check.
+
 The account page is also a complete way in for somebody who has no alternate config homes yet.
 `AccountSetupCardViewController` is shared with Settings ▸ Agents & Accounts and puts the
 supported-agent roster before discovery's result, so the empty state never hides what can be

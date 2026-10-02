@@ -1085,6 +1085,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         )
         AgentRuntime.shared.terminateAll()
         ExtensionManager.shared.terminateAll()
+        AudioSpectrumService.shared.stop()
         macNotificationActivityMonitor.stop()
         // Stops the tunnel child and closes remote sockets before the listeners go, so nothing
         // spawned for remote access outlives the app.

@@ -328,10 +328,20 @@ final class RemoteHostedServiceController {
         localDevelopmentAuthentication: Bool = RemoteHostedServiceController
             .configuredLocalDevelopmentAuthentication(),
         developmentBrowserAuthentication: Bool? = nil,
-        anonymousAuthentication: Bool = AppInfo.buildChannel != .dev,
+        anonymousAuthentication: Bool? = nil,
         connectivity: (any RemoteHostedConnectivityObserving)? = nil
     ) {
-        self.store = store ?? Self.defaultStore(endpoint: endpoint)
+        // Production enrollment is the same on every channel. Only a selected developer
+        // protocol opts out; the resolved method also chooses the credential namespace.
+        let browserAuthentication = developmentBrowserAuthentication
+            ?? Self.configuredDevelopmentBrowserAuthentication(endpoint: endpoint)
+        let localAuthentication = localDevelopmentAuthentication && endpoint?.isLoopback == true
+        let anonymousAuthentication = anonymousAuthentication
+            ?? !(localAuthentication || browserAuthentication)
+        self.store = store ?? Self.defaultStore(
+            anonymousAuthentication: anonymousAuthentication,
+            developmentBrowserAuthentication: browserAuthentication
+        )
         self.installationSecretStore = installationSecretStore
             ?? (AutomatedRun.isUnderway
                 ? InMemoryRemoteHostedInstallationSecretStore()
@@ -341,8 +351,7 @@ final class RemoteHostedServiceController {
         self.hostName = hostName
         self.connectivity = connectivity ?? RemoteHostedConnectivityMonitor()
         self.localDevelopmentAuthentication = localDevelopmentAuthentication
-        self.developmentBrowserAuthentication = developmentBrowserAuthentication
-            ?? Self.configuredDevelopmentBrowserAuthentication(endpoint: endpoint)
+        self.developmentBrowserAuthentication = browserAuthentication
         self.anonymousAuthentication = anonymousAuthentication
         do {
             let loaded = try self.store.load()
@@ -1338,13 +1347,14 @@ final class RemoteHostedServiceController {
     }
 
     private static func defaultStore(
-        endpoint: PeerControlPlaneServiceEndpoint?
+        anonymousAuthentication: Bool,
+        developmentBrowserAuthentication: Bool
     ) -> RemoteHostedServicePersisting {
         !AutomatedRun.isUnderway
             ? RemoteHostedServiceKeychainStore(
-                account: AppInfo.buildChannel != .dev
+                account: anonymousAuthentication
                     ? RemoteHostedServiceDefaults.anonymousRecordKeychainAccount
-                    : (configuredDevelopmentBrowserAuthentication(endpoint: endpoint)
+                    : (developmentBrowserAuthentication
                         ? RemoteHostedServiceDefaults.developmentKeychainAccount
                         : RemoteHostedServiceDefaults.keychainAccount)
             )
@@ -1363,7 +1373,8 @@ final class RemoteHostedServiceController {
             store: InMemoryRemoteHostedServiceStore(),
             endpoint: nil,
             localDevelopmentAuthentication: false,
-            developmentBrowserAuthentication: false
+            developmentBrowserAuthentication: false,
+            anonymousAuthentication: false
         )
     }
 

@@ -137,10 +137,11 @@ final class PrivacyPreferencesTests: XCTestCase {
         )
         XCTAssertEqual(
             Set(urls.map(\.absoluteString)).count,
-            urls.count,
-            "two permissions point at the same pane, so one of them sends the user to the wrong "
-                + "switch"
+            urls.count - 1,
+            "screen and audio-only grants share one System Settings pane"
         )
+        XCTAssertEqual(SystemPrivacyPermission.screenRecording.settingsURL,
+                       SystemPrivacyPermission.systemAudio.settingsURL)
         for url in urls {
             XCTAssertEqual(url.scheme, "x-apple.systempreferences")
         }

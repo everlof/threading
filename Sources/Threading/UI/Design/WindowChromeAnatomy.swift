@@ -62,6 +62,12 @@ struct WindowChromeCaptionAnatomy {
         /// and it is the one plate whose *glyph* ink is decided by the plate rather than by
         /// `glyphInk`.
         case reverseVideo
+        /// A round plate filled with the band's own ink — dimmed with the window, the way the
+        /// figure on a bare band would be — and the figure cut out of it in the band's ground.
+        /// Like an inverted cell, the plate rather than `glyphInk` decides the figure's ink;
+        /// unlike one, the plate is there at rest, so the cluster reads as buttons before the
+        /// pointer arrives. Hover lifts it a step and a press darkens it.
+        case pill
     }
 
     /// Where the figure's ink comes from.
@@ -166,6 +172,7 @@ struct WindowChromeCaptionAnatomy {
     /// asks this to know which families must change pixels on `resignKey`.
     var plateFollowsKeyState: Bool {
         if case .band(dimsWithWindow: true, _) = plate { return true }
+        if case .pill = plate { return true }
         return false
     }
 
@@ -401,6 +408,23 @@ struct WindowChromeCaptionAnatomy {
                 clusterVerticalOffset: -0.5,
                 leadingEdgeInset: 6,
                 trailingEdgeInset: 2
+            )
+        case .pills:
+            // A modern app's solid caption rather than a period's: round plates a little
+            // larger than Aqua's gems, with room between them, and the ordinary vector
+            // figures — at this size the hairline-free strokes are what keeps the cut-out
+            // figure legible against a saturated band.
+            return WindowChromeCaptionAnatomy(
+                slotSize: NSSize(width: 16, height: 16),
+                rendering: .smooth,
+                plate: .pill,
+                outlinedInBorder: false,
+                glyphInk: .band,
+                glyphsRequireHover: false,
+                pressedGlyphOffset: .zero,
+                clusterSpacing: Design.Spacing.small,
+                titleGap: Design.Spacing.medium,
+                alphabet: .vector
             )
         }
     }

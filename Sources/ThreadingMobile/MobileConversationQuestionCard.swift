@@ -130,7 +130,7 @@ final class MobileConversationQuestionCard: UIView, UITextFieldDelegate {
         progress.textColor = theme.uiSecondaryLabel
         other.textColor = theme.uiLabel; other.backgroundColor = theme.uiControlResting
         other.layer.cornerRadius = theme.controlRadius
-        other.attributedPlaceholder = NSAttributedString(string: MobileL10n.string("Write your answer…"), attributes: [.foregroundColor: theme.uiTertiaryLabel])
+        other.attributedPlaceholder = NSAttributedString(string: MobileL10n.string("Write your answer…"), attributes: [.foregroundColor: theme.uiInputPlaceholderOnControl])
         other.tintColor = theme.uiAccent; other.isEnabled = request.canAnswer
         other.keyboardAppearance = MobileKeyboardAppearance.over(theme.uiGround)
         style(back, title: MobileL10n.string("Back"))

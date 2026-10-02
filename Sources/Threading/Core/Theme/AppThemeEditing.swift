@@ -452,6 +452,12 @@ public enum AppThemeEditing {
                     + "one coherent silhouette."
             )
         }
+        guard popover.edge != .coupon || popover.arrow == .none else {
+            throw AppThemeEditingError.invalid(
+                "popover_style.edge \"coupon\" requires arrow \"none\": the scalloped sides "
+                    + "are the ticket's silhouette, and a ticket has no stem."
+            )
+        }
         if let radius = popover.cornerRadius {
             guard (0...24).contains(radius) else {
                 throw AppThemeEditingError.invalid(
@@ -677,6 +683,16 @@ public enum AppThemeEditing {
         }
 
         if let mascot = variant.sidebar?.mascot {
+            // The mascot stands beneath the list and an opaque navigator well is painted over
+            // exactly that region, so the pair would accept a mascot nobody can see — which is
+            // how one was first lost, inherited from a base theme's well.
+            guard variant.sidebar?.navigatorWell == nil else {
+                throw AppThemeEditingError.invalid(
+                    "sidebar.mascot stands beneath the project list, and this variant's opaque "
+                        + "sidebar.navigator_well would cover it — add remove_navigator_well, or "
+                        + "remove the mascot."
+                )
+            }
             try validate(mascot)
         }
 

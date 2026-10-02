@@ -468,7 +468,9 @@ public final class ThemedProgressBar: NSView, ThemedComponent {
                 ? ThemedProgressDrawing.workbenchHeight
                 : (usesIRIXProgress
                     ? ThemedProgressDrawing.irixHeight
-                    : (usesClassicProgress ? ThemedProgressDrawing.classicHeight : Layout.height))
+                    : (usesClassicProgress
+                        ? ThemedProgressDrawing.classicHeight
+                        : (usesStripedProgress ? ThemedProgressDrawing.stripedHeight : Layout.height)))
         )
     }
 
@@ -498,6 +500,14 @@ public final class ThemedProgressBar: NSView, ThemedComponent {
         }
         if usesClassicProgress {
             drawClassicProgress()
+            return
+        }
+        if usesStripedProgress {
+            ThemedProgressDrawing.drawStriped(
+                in: bounds,
+                fraction: progress,
+                tint: Design.Surface.accent
+            )
             return
         }
         Design.Surface.controlResting.setFill()
@@ -532,6 +542,10 @@ public final class ThemedProgressBar: NSView, ThemedComponent {
         AppThemePalette.current.material(for: effectiveAppearance).progressStyle == .irix
     }
 
+    private var usesStripedProgress: Bool {
+        AppThemePalette.current.material(for: effectiveAppearance).progressStyle == .striped
+    }
+
     private var workbenchProgressBlue: NSColor {
         WindowChromeAppearance.resolve()?.activeGradient.colors.first
             ?? Design.Surface.accent
@@ -550,9 +564,59 @@ public enum ThemedProgressDrawing {
     /// The Indigo Magic scale's measured native figure is a compact fourteen-pixel well,
     /// matching the source crop's outer frame rather than the modern three-pixel rail.
     public static let irixHeight: CGFloat = 14
+    /// Tall enough for the stripes to read as stripes rather than as a dotted rail.
+    public static let stripedHeight: CGFloat = 8
+    /// Centre-to-centre distance of the stripes, and the share of it each light band covers.
+    private static let stripePitch: CGFloat = 8
+    private static let stripeShare: CGFloat = 0.5
+    /// How much lighter a stripe is than the fill it crosses.
+    private static let stripeLight: CGFloat = 0.28
     private static let edge: CGFloat = 2
     private static let segmentWidth: CGFloat = 7
     private static let segmentGap: CGFloat = 2
+
+    /// The striped meter: a capsule trough in the control surface, the filled share a capsule of
+    /// `tint`, and diagonal bands of white light across the fill. The bands lean the way the
+    /// meter fills, so the eye reads them as travelling toward the end even though nothing moves.
+    public static func drawStriped(in bounds: NSRect, fraction: Double, tint: NSColor) {
+        let radius = bounds.height / 2
+        let trough = NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius)
+        Design.Surface.controlResting.setFill()
+        trough.fill()
+
+        let clamped = min(max(fraction, 0), 1)
+        guard clamped > 0 else { return }
+        // Never narrower than its own height, so a sliver of progress is a dot, not a crescent.
+        let width = max(bounds.height, bounds.width * clamped)
+        let filled = NSRect(x: bounds.minX, y: bounds.minY, width: width, height: bounds.height)
+        let fill = NSBezierPath(roundedRect: filled, xRadius: radius, yRadius: radius)
+        tint.setFill()
+        fill.fill()
+
+        NSGraphicsContext.current?.saveGraphicsState()
+        defer { NSGraphicsContext.current?.restoreGraphicsState() }
+        fill.addClip()
+        drawStripes(in: filled)
+    }
+
+    /// The diagonal light bands alone, over a fill the caller has already painted and clipped
+    /// to — what a gauge that computes its own filled rect (the usage-window grid) shares with
+    /// the meter above.
+    public static func drawStripes(in rect: NSRect) {
+        NSColor.white.withAlphaComponent(stripeLight).setFill()
+        let band = stripePitch * stripeShare
+        var x = rect.minX - rect.height
+        while x < rect.maxX {
+            let stripe = NSBezierPath()
+            stripe.move(to: NSPoint(x: x, y: rect.minY))
+            stripe.line(to: NSPoint(x: x + band, y: rect.minY))
+            stripe.line(to: NSPoint(x: x + band + rect.height, y: rect.maxY))
+            stripe.line(to: NSPoint(x: x + rect.height, y: rect.maxY))
+            stripe.close()
+            stripe.fill()
+            x += stripePitch
+        }
+    }
 
     public static func drawSegmented(in bounds: NSRect, fraction: Double, tint: NSColor) {
         _ = ThemedSurface.draw(

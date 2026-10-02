@@ -33,8 +33,11 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case discoversProjectIcons
     case discoversAccountAvatars
     case harmonizesTerminalBackgrounds
+    case agentsUseTerminalPalette
     case playsThemeMotion
     case playsThemeSounds
+    case sharesThemeAudio
+    case themeAudioSource
     case convertsDroppedImages
     case copiesTerminalSelection
     case notifiesOnAttention
@@ -889,6 +892,13 @@ enum AppSettingDefinitions {
         presentations: [row("profiles", 3, "Text & Colour", "Keep backgrounds in tune with the theme",
                             ["background", "colour", "colors"])]
     )
+    static let agentsUseTerminalPalette = AppSettingDescriptor<Bool>(
+        identity: .agentsUseTerminalPalette,
+        persistenceKey: "agentsUseTerminalPalette",
+        absence: .registered(true),
+        presentations: [row("profiles", 4, "Text & Colour", "Agents use the theme's colours",
+                            ["Claude", "TUI", "ANSI", "palette", "colour", "colors", "theme"])]
+    )
     static let playsThemeMotion = AppSettingDescriptor<Bool>(
         identity: .playsThemeMotion,
         persistenceKey: "playsThemeMotion",
@@ -907,7 +917,7 @@ enum AppSettingDefinitions {
         identity: .convertsDroppedImages,
         persistenceKey: "convertsDroppedImages",
         absence: .registered(true),
-        presentations: [row("profiles", 6, "Behaviour",
+        presentations: [row("profiles", 7, "Behaviour",
                             "Convert dropped images agents can't open",
                             ["dropped images", "HEIC", "TIFF"])]
     )
@@ -915,7 +925,7 @@ enum AppSettingDefinitions {
         identity: .copiesTerminalSelection,
         persistenceKey: "copiesTerminalSelection",
         absence: .falseValue,
-        presentations: [row("profiles", 5, "Behaviour",
+        presentations: [row("profiles", 6, "Behaviour",
                             "Copy selected text to the clipboard",
                             ["copy on select", "clipboard", "terminal selection"])]
     )
@@ -1477,7 +1487,7 @@ enum AppSettingDefinitions {
         persistenceKey: "preventsIdleSystemSleepWhileAgentsWork",
         absence: .registered(false),
         presentations: [row(
-            "general", 7, "This Mac", "Keep this Mac awake while agents work",
+            "general", 8, "This Mac", "Keep this Mac awake while agents work",
             ["sleep", "awake", "lid", "battery", "energy", "active turn"]
         )]
     )
@@ -1488,6 +1498,21 @@ enum AppSettingDefinitions {
         validation: .allowedStrings(Set(WorkingOrbStyle.allCases.map(\.rawValue))),
         presentations: [row("motion", 0, "Working", "Working indicator",
                             ["orb", "animation", "spinner"])]
+    )
+    static let sharesThemeAudio = AppSettingDescriptor<Bool>(
+        identity: .sharesThemeAudio,
+        persistenceKey: "sharesThemeAudio",
+        absence: .registered(false),
+        presentations: [row("motion", 2, "Music", "Music-reactive themes",
+                            ["music", "audio", "spectrum", "equalizer", "visualizer"])]
+    )
+    static let themeAudioSource = AppSettingDescriptor<String>(
+        identity: .themeAudioSource,
+        persistenceKey: "themeAudioSource",
+        absence: .registered(AudioSpectrumSource.systemID),
+        validation: .maximumBytes(1_024),
+        presentations: [row("motion", 3, "Music", "Audio source",
+                            ["music", "audio", "source", "player", "Spotify"])]
     )
     static let chatNameMorphStyle = AppSettingDescriptor<String>(
         identity: .chatNameMorphStyle,
@@ -1541,7 +1566,8 @@ enum AppSettingDefinitions {
         .init(nativeSidebarGroupByFact),
         .init(nativeSidebarSortByFact), .init(promptReturnKey),
         .init(discoversProjectIcons), .init(discoversAccountAvatars),
-        .init(harmonizesTerminalBackgrounds), .init(playsThemeMotion), .init(playsThemeSounds),
+        .init(harmonizesTerminalBackgrounds), .init(agentsUseTerminalPalette),
+        .init(playsThemeMotion), .init(playsThemeSounds),
         .init(convertsDroppedImages),
         .init(copiesTerminalSelection), .init(notifiesOnAttention),
         .init(disabledAttentionAlerts), .init(legacyPlaysAttentionAlertSound),
@@ -1582,12 +1608,15 @@ enum AppSettingDefinitions {
         .init(secretApprovalsEnabled),
         .init(updateChannelSubscription),
         .init(automaticUpdateChecksEnabled), .init(preventsIdleSystemSleepWhileAgentsWork),
-        .init(workingOrbStyle),
+        .init(workingOrbStyle), .init(sharesThemeAudio), .init(themeAudioSource),
         .init(chatNameMorphStyle), .init(chromeFontFamily), .init(conversationFontFamily),
         .init(appTextSize)
     ]
 
     private static let surfaceDefinitions: [AppSettingDefinition] = [
+        surfaced("general.agentTools", pageID: "general", order: 7,
+                  section: "Software Updates", title: "Agent tools",
+                  "install", "update", "CLI", "TUI", "Claude", "Codex", "model", "version"),
         surfaced("keyboard.resetShortcuts", pageID: "keyboard", order: 1, section: nil,
                   title: "Reset Shortcuts", "reset", "defaults"),
         surfaced("themes.appTheme", pageID: "themes", order: 0, section: "App",
@@ -1601,7 +1630,7 @@ enum AppSettingDefinitions {
                   title: "Cursor style", "cursor", "block", "underline", "bar"),
         surfaced("profiles.cursorBlink", pageID: "profiles", order: 2, section: "Text & Colour",
                   title: "Blinking cursor", "cursor", "blink"),
-        surfaced("profiles.scrollback", pageID: "profiles", order: 4, section: "Behaviour",
+        surfaced("profiles.scrollback", pageID: "profiles", order: 5, section: "Behaviour",
                   title: "Lines kept", "scrollback", "history"),
         surfaced("usageWindows.openBeforeStart", pageID: "usage-windows", order: 0,
                   section: "Schedule", title: "Open a window before I start", "poke", "schedule"),

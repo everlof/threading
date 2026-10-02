@@ -1854,8 +1854,10 @@ final class ThemeToolTests: XCTestCase {
             (materialProperties["progress_style"] as? [String: Any])?["description"] as? String,
             "Determinate progress treatment: \"continuous\" (the default), \"segmented\" for "
                 + "the classic Win32 recessed block control, \"irix\" for Indigo Magic's "
-                + "measured slanted-edge scale, or \"amiga\" for Workbench's source-inferred "
-                + "hard horizontal gauge filled from active title blue."
+                + "measured slanted-edge scale, \"amiga\" for Workbench's source-inferred "
+                + "hard horizontal gauge filled from active title blue, or \"striped\" for a "
+                + "capsule meter filled with the accent and crossed by diagonal light stripes — "
+                + "a shop app's \"almost sold out\" bar."
         )
         XCTAssertNotNil(materialProperties["choice_style"])
         XCTAssertNotNil(materialProperties["checkbox_style"])
