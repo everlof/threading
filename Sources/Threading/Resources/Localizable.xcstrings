@@ -4287,6 +4287,17 @@
         }
       }
     },
+    "A one-year token signs a Claude login in without the browser sign-in that has to be repeated about every month. Make one by running claude setup-token in a terminal and approving it in the browser as that login's account." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En ettårstoken loggar in ett Claude-konto utan inloggningen i webbläsaren som måste göras om ungefär varje månad. Skapa en genom att köra claude setup-token i en terminal och godkänna den i webbläsaren som det kontots användare."
+          }
+        }
+      }
+    },
     "A paired device can see and manage your chats, send prompts, and review permission requests." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4828,6 +4839,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "A till Ö"
+          }
+        }
+      }
+    },
+    "A token can only run models. Remote Control and claude.ai connectors, such as Gmail or Google Drive, stop working on that login. MCP servers you set up yourself keep working." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En token kan bara köra modeller. Remote Control och claude.ai-kopplingar, som Gmail eller Google Drive, slutar fungera för det kontot. MCP-servrar som du själv har konfigurerat fortsätter att fungera."
+          }
+        }
+      }
+    },
+    "A token runs models only: Remote Control and claude.ai connectors stop working on that login." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En token kör bara modeller: Remote Control och claude.ai-kopplingar slutar fungera för det kontot."
           }
         }
       }
@@ -15524,6 +15557,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kopiera samarbetspartnerlänk"
+          }
+        }
+      }
+    },
+    "Copy Command" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera kommando"
           }
         }
       }
@@ -33200,6 +33244,28 @@
         }
       }
     },
+    "One-year sign-in" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inloggning för ett år"
+          }
+        }
+      }
+    },
+    "One-year token until %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ettårstoken till %@"
+          }
+        }
+      }
+    },
     "Online" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34940,6 +35006,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Klistra in koden som sidan visar. Threading skickar den direkt till agenten."
+          }
+        }
+      }
+    },
+    "Paste the token claude setup-token printed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Klistra in token som claude setup-token skrev ut."
           }
         }
       }
@@ -39479,6 +39556,17 @@
         }
       }
     },
+    "Replace…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ersätt…"
+          }
+        }
+      }
+    },
     "Replay" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41265,6 +41353,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kör resten av raden som ett ordagrant skalkommando"
+          }
+        }
+      }
+    },
+    "Run this command in a terminal, approve it in the browser as this login's account, and paste the token it prints. Sessions on this login then sign in with the token. A token runs models only: Remote Control and claude.ai connectors stop working on this login." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör det här kommandot i en terminal, godkänn det i webbläsaren som det här kontots användare och klistra in token som skrivs ut. Sessioner för det här kontot loggar sedan in med token. En token kör bara modeller: Remote Control och claude.ai-kopplingar slutar fungera för det här kontot."
           }
         }
       }
@@ -45880,6 +45979,17 @@
         }
       }
     },
+    "Signs in through the browser" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loggar in via webbläsaren"
+          }
+        }
+      }
+    },
     "Silence" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48919,6 +49029,17 @@
         }
       }
     },
+    "That is not a Claude setup token. It starts with sk-ant-oat01-." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det där är ingen Claude setup-token. En sådan börjar med sk-ant-oat01-."
+          }
+        }
+      }
+    },
     "That is the most marks one report carries (%lld)." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49047,6 +49168,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den inställningssidan är inte längre tillgänglig."
+          }
+        }
+      }
+    },
+    "That token looks incomplete. Copy the whole token claude setup-token printed and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token ser ofullständig ut. Kopiera hela token som claude setup-token skrev ut och försök igen."
           }
         }
       }
@@ -53295,6 +53427,17 @@
         }
       }
     },
+    "The token was not saved" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token sparades inte"
+          }
+        }
+      }
+    },
     "The transport a host-owned media player wears: play/pause, the scrubber and a monospaced-digit reading. It owns no clock — it states what it was told and raises what the user did." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -55123,6 +55266,17 @@
         }
       }
     },
+    "This login does not take a one-year token." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det här kontot kan inte använda en ettårstoken."
+          }
+        }
+      }
+    },
     "This machine has no systemd user session, which Threading needs to keep a host running there." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56042,6 +56196,17 @@
         }
       }
     },
+    "Threading could not write to your Keychain." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kunde inte skriva till din nyckelring."
+          }
+        }
+      }
+    },
     "Threading couldn’t open the update terminal." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56313,6 +56478,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading körs men svarar inte"
+          }
+        }
+      }
+    },
+    "Threading keeps the token in your Keychain and gives it only to that login's sessions, through their environment rather than their command line. Remove takes it away, as does Reset Everything. The year is counted from when you save it, and the row says when it is about to run out." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading sparar token i din nyckelring och ger den bara till det kontots sessioner, via deras miljö och aldrig på deras kommandorad. Ta bort tar bort den, liksom Återställ allt. Året räknas från när du sparar den, och raden visar när den håller på att gå ut."
           }
         }
       }
@@ -57072,6 +57248,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tokenfördelning"
+          }
+        }
+      }
+    },
+    "Token ran out %@. Replace it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token gick ut %@. Ersätt den."
+          }
+        }
+      }
+    },
+    "Token runs out %@. Replace it soon." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token går ut %@. Ersätt den snart."
           }
         }
       }
@@ -58999,6 +59197,28 @@
         }
       }
     },
+    "Use Token" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd token"
+          }
+        }
+      }
+    },
+    "Use Token…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd token…"
+          }
+        }
+      }
+    },
     "Use Website Favicon" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59039,6 +59259,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använd en inloggning som redan finns på denna Mac eller lägg till en här. Leverantörens eget CLI hanterar den säkra webbläsarinloggningen och behåller inloggningsuppgiften."
+          }
+        }
+      }
+    },
+    "Use a one-year token for %@?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använda en ettårstoken för %@?"
           }
         }
       }

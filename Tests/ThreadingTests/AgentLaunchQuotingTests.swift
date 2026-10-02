@@ -678,7 +678,9 @@ final class AgentLaunchQuotingTests: XCTestCase {
         )
 
         XCTAssertEqual(words, [
-            "env", "-u", "CLAUDE_CONFIG_DIR",
+            // The second `-u` keeps a token a shell profile exports from signing this login in
+            // as someone else; this login has no token of its own.
+            "env", "-u", "CLAUDE_CONFIG_DIR", "-u", "CLAUDE_CODE_OAUTH_TOKEN",
             AgentDefaults.claudeExecutable,
             "--model", AgentDefaults.claudeResearchModel,
             "--print",

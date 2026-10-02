@@ -62,6 +62,9 @@ enum AppDataResetFlow {
             // inside Application Support and are moved aside below; their Keychain secrets do
             // not, so Reset Everything must erase them explicitly.
             try TriggerSourceCredentialStore.deleteAll()
+            // Long-lived sign-in tokens are the third: Threading keeps them because the CLI
+            // does not, so nothing but this line would ever remove them.
+            try AgentAccountTokenVault.shared.removeAll()
             // The 1Password references deliberately have *no* line here. They live in the
             // preferences domain, which `AppDataReset` snapshots into the backup and then
             // removes — so clearing them first would delete them from the recovery copy and lose

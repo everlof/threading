@@ -313,7 +313,7 @@ final class UsageWindowPoker {
             result = try BoundedChildProcess.run(
                 executable: plan.executable,
                 arguments: plan.arguments,
-                environment: AgentEnvironment.launchEnvironment(),
+                environment: plan.launchEnvironment(),
                 timeout: UsageWindowDefaults.pokeTimeout,
                 maximumOutputBytes: UsageWindowPokeDefaults.maximumOutputBytes
             )

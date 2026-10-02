@@ -26,16 +26,25 @@ struct AgentLaunchPlan {
     /// cannot pick up the plan and silently drop what it asked for.
     let environmentOverrides: [String: String]
 
+    /// Credentials this launch's child needs, such as a login's long-lived token.
+    ///
+    /// Unlike `environmentOverrides`, every transport merges these — terminal and native, local
+    /// PTY and `threading-ptyd` alike — because a terminal cannot state them the way it states
+    /// its other variables: as `env NAME=value` words, they would land in `EventLog` and `ps`.
+    let credentialEnvironment: AgentCredentialEnvironment
+
     init(
         executable: String,
         arguments: [String],
         resumeState: ResumeState,
-        environmentOverrides: [String: String] = [:]
+        environmentOverrides: [String: String] = [:],
+        credentialEnvironment: AgentCredentialEnvironment = .none
     ) {
         self.executable = executable
         self.arguments = arguments
         self.resumeState = resumeState
         self.environmentOverrides = environmentOverrides
+        self.credentialEnvironment = credentialEnvironment
     }
 
     /// Pure command composition; the host resolves its login shell and environment separately.
@@ -44,14 +53,16 @@ struct AgentLaunchPlan {
         in folder: String,
         shellPath: String,
         resumeState: ResumeState,
-        environmentOverrides: [String: String] = [:]
+        environmentOverrides: [String: String] = [:],
+        credentialEnvironment: AgentCredentialEnvironment = .none
     ) -> AgentLaunchPlan {
         let source = ShellCommand.executing(command, in: folder)
         return AgentLaunchPlan(
             executable: shellPath,
             arguments: ["-l", "-c", source.source],
             resumeState: resumeState,
-            environmentOverrides: environmentOverrides
+            environmentOverrides: environmentOverrides,
+            credentialEnvironment: credentialEnvironment
         )
     }
 }

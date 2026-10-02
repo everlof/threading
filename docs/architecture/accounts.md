@@ -96,6 +96,79 @@ theme picker (the CLI uses its default until `/theme`), the security notes, and 
 offer (`/terminal-setup`).
 Codex is untouched: no repeated sign-in has been seen after `codex login`.
 
+### One-year tokens
+
+A Claude browser login has to be renewed about monthly. `claude setup-token` mints a token that
+lasts a year, and the CLI reads it from `CLAUDE_CODE_OAUTH_TOKEN`. The CLI never stores it: it
+prints the token and leaves keeping it to whoever asked. So a login that should skip the monthly
+sign-in needs Threading to hold the token, and this is the **one credential Threading keeps**.
+Browser logins are unchanged: their credentials stay with the CLI, and Threading still never reads
+them.
+
+What was measured or read from the 2.1.287 bundle, and what each fact decided:
+
+- **A token outranks the stored login, and it does not fall back.** On a 401 the CLI logs that it
+  is "keeping the user-supplied CLAUDE_CODE_OAUTH_TOKEN instead of adopting the stored
+  credential". So an expired token breaks its login until it is replaced or removed. The row says
+  when it runs out. Expiry is counted from saving, because the token is opaque, and the warning
+  starts 21 days ahead.
+- **`claude auth status` accepts any token.** With a made-up value it answered `loggedIn: true`,
+  `authMethod: oauth_token` and no `email`. So saving checks only the token's shape
+  (`AgentAccountTokenFormat`); whether a token works shows in the first conversation. An
+  alternate login keeps its name, because `AccountName` reads `.claude.json`. `AccountEmailProbe`
+  does not inject the token, so the default login's address still comes from its browser login.
+- **A token can only run models.** Per the CLI's documentation it cannot start Remote Control or
+  fetch claude.ai connectors; MCP servers configured locally still work. That decides whether a
+  token is wanted at all, so it is stated where the choice is made and stays visible on the card.
+- **The CLI can also read the token from an inherited descriptor**
+  (`CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR`). A fake token sent that way reached the server and
+  came back 401. It is not used: a `threading-ptyd` spawn takes an environment, not descriptors,
+  and the login shell sits between Threading and the CLI.
+- **The CLI withholds `CLAUDE_CODE_OAUTH_TOKEN` from the commands it runs.** The variable is on
+  the bundle's list of credentials it strips from child processes. This was read from the code,
+  not yet measured with a real token.
+
+**Delivery is through the environment, never the command line.** `AgentAccountRouting.route`
+decides once per launch and returns the `env` words plus an `AgentCredentialEnvironment`. The
+plan carries that as `AgentLaunchPlan.credentialEnvironment`, which every transport merges: the
+local PTY, a local `threading-ptyd` spawn (a remote host gets none, since it is not routed to a
+login on this Mac), the native stream, the usage-window poke, and Settings research with its
+`auth status` check. The command line is what `EventLog` records at every launch, what the info
+panel and the daemon's journal derive from, and what `ps` shows. `ShellCommand` can only emit
+quoted words, so the token could not be expanded there safely, and it never is. The credential
+types print `<redacted>` in their descriptions and mirrors, so a plan or launch interpolated into
+a log line cannot carry the value.
+
+**Every other login unsets the variable.** A login without a token gets `env -u
+CLAUDE_CODE_OAUTH_TOKEN` beside its config-directory word. `AgentEnvironment` already drops an
+inherited token, but a login shell's profile can export one again after that. Without the `-u`,
+every Claude session would sign in as the token's account while Threading named and metered the
+one chosen. The `-u` cannot protect the token login itself: a profile export overrides Threading's
+value there, because the profile runs later. Exporting a token in a shell profile is the documented
+way to use one outside Threading, so the guide says not to combine the two.
+
+**Storage.** `AgentAccountTokenStore` is one Keychain item per login. The service is
+`codes.threading.agent-account-token.v1`, the account is `AccountID.rawValue`, and the secret is a
+versioned JSON document holding the token and when it was saved, so the date cannot drift from the
+secret. It uses the protected data-protection Keychain where the build can, which is out of reach
+of an agent's `security` command. `AgentAccountTokenVault` reads the listed logins on a utility
+queue at startup and whenever the Accounts page opens. A launch, which is built synchronously on the
+main actor, then answers from memory. A launch that beats that read reads its one item inline, as a
+backstop. A hosted test gets a vault backed by memory, so no test reads or writes the developer's
+tokens. Remove deletes the item, and Reset Everything erases them all
+(`AppDataResetFlow`), since nothing else would.
+
+**Saving** goes through `ConfirmationPrompt.storeAccountToken`, which is always asked
+(`.securityGrant`): it hands every session on the login a year of unattended sign-in and changes
+what the login can do. The sheet shows the mint command with Copy Command, a masked field, and the
+models-only caveat. The card, `AccountTokenSectionController` on Agents & Accounts, lists every
+Claude login with one status line: browser sign-in, until a date, runs out soon, or ran out.
+
+Still open: usage readings for a login that uses a token. `ClaudeUsageFetcher` reads the browser
+login's credential, and that credential stops being refreshed once the token replaces it. Whether
+the usage endpoint accepts a token decides whether the fetcher should use it, and that needs a real
+token to measure.
+
 **Where a login is *chosen*, it is named after the person** (`AccountName`), not after the
 alias. An alias is named after the agent — `claude-nhartley`, `claude-ikeller` — so a menu of
 them asks the user to tell two logins apart by four characters in the middle of a word, and

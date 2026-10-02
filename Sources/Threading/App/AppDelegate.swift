@@ -864,6 +864,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             NotificationCenter.default.post(AccountPreferencesDidChange())
         }
 
+        // Long-lived sign-in tokens, read once off the main actor before session restore below
+        // can launch anything, so a launch builds its environment from memory.
+        AgentAccountTokenVault.shared.prepare(
+            AgentKind.allCases
+                .filter { $0.supports(.longLivedAccountToken) }
+                .flatMap { AgentAccountDiscovery.allAccounts(for: $0) }
+                .map(\.id)
+        )
+
         // Session restore waits for the listener, because a launch reads the port to build the
         // session's `--mcp-config`. The callback runs whether the server came up or not, so a
         // failed listener costs the restored session its display panel and nothing else.

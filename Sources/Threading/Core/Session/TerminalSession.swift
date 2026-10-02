@@ -588,7 +588,7 @@ final class TerminalSession: NSObject {
         terminalView.startProcess(
             executable: plan.executable,
             args: plan.arguments,
-            environment: buildEnvironment(),
+            environment: plan.credentialEnvironment.applied(toEntries: buildEnvironment()),
             execName: (plan.executable as NSString).lastPathComponent
         )
 
@@ -641,7 +641,7 @@ final class TerminalSession: NSObject {
                 executable: plan.executable,
                 arguments: plan.arguments,
                 execName: (plan.executable as NSString).lastPathComponent,
-                environment: hostSpawnEnvironment(),
+                environment: hostSpawnEnvironment(for: plan),
                 cwd: nil,
                 // A persistent session launch is authoritative for its durable identity. The
                 // daemon serializes any old incarnation out before spawning this one, including
@@ -1026,10 +1026,13 @@ final class TerminalSession: NSObject {
     /// the whole of what the child knows about the palette before it draws anything.
     /// The environment a host-backed spawn is handed: this Mac's composition for a local daemon,
     /// the host's own plus this session's palette hint for a remote one.
-    private func hostSpawnEnvironment() -> [String] {
+    ///
+    /// A plan's credentials go to a local daemon only. They are a login on *this* Mac, and a
+    /// remote host's launch is not routed to one.
+    private func hostSpawnEnvironment(for plan: AgentLaunchPlan) -> [String] {
         switch hostPlacement {
         case .local:
-            return buildEnvironment()
+            return plan.credentialEnvironment.applied(toEntries: buildEnvironment())
         case .remote(let environment):
             return environment + ["\(EnvironmentKeys.colorFGBG)=\(profile.theme.colorFGBG)"]
         }

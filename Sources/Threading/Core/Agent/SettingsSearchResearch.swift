@@ -180,7 +180,10 @@ enum SettingsSearchResearch {
         shell: String,
         timeout: TimeInterval
     ) -> Bool {
-        var command = AgentAccountRouting.prefix(for: account.provider, account: account)
+        // A token login is signed in by its token; asked without it, status would answer for
+        // the browser sign-in the token replaced.
+        let route = AgentAccountRouting.route(for: account.provider, account: account)
+        var command = route.command
         switch account.provider {
         case .claude:
             command.append(word: AgentDefaults.claudeExecutable)
@@ -198,7 +201,7 @@ enum SettingsSearchResearch {
         guard let result = try? BoundedChildProcess.run(
             executable: shell,
             arguments: ["-l", "-c", command.source],
-            environment: AgentEnvironment.launchEnvironment(),
+            environment: route.credentials.applied(to: AgentEnvironment.launchEnvironment()),
             timeout: timeout,
             maximumOutputBytes: AccountProbeDefaults.maximumOutputBytes,
             output: .standardOutput
@@ -370,7 +373,7 @@ enum SettingsSearchResearch {
             result = try BoundedChildProcess.run(
                 executable: plan.executable,
                 arguments: plan.arguments,
-                environment: AgentEnvironment.launchEnvironment(),
+                environment: plan.launchEnvironment(),
                 timeout: SettingsResearchDefaults.timeout,
                 maximumOutputBytes: SettingsResearchDefaults.maximumOutputBytes
             )

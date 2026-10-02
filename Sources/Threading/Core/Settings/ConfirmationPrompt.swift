@@ -62,6 +62,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case revokeAllWebsiteAccess
     case revokeAllManagerRoles
     case storeTestCredential
+    case storeAccountToken
 
     // MARK: Irreversible
 
@@ -326,6 +327,10 @@ enum ConfirmationPrompt: String, CaseIterable {
              // did with it. It is scoped to one origin and revocable in Settings ▸ Tools,
              // which is exactly the shape this branch describes.
              .storeTestCredential,
+             // Saving a long-lived token hands every session on that login a year of unattended
+             // sign-in, and changes what the login can do — a token runs models only — so the
+             // sheet that says so is asked every time rather than remembered.
+             .storeAccountToken,
              // The capability here is macOS's to give, not Threading's — but the thing being
              // handed out is the same: a program gets to reach past the app for something the
              // user has not agreed to yet. It cannot be switched off for a reason the other

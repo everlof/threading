@@ -42,6 +42,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "revokeAllWebsiteAccess",
             "revokeAllManagerRoles",
             "storeTestCredential",
+            "storeAccountToken",
             "removeProject",
             "revokeChatAccess",
             "revokePairedDevice",

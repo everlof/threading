@@ -17,6 +17,9 @@ final class AccountsPreferencesViewController: NSViewController {
         case emptyAccount
         case account(Int)
         case accountNote
+        case tokenCaption
+        case token(Int)
+        case tokenNote
         case limit(AccountLimitsSectionController.PresentationRow)
         case extensionCaption(Int)
         case extensionField(section: Int, field: Int)
@@ -49,6 +52,9 @@ final class AccountsPreferencesViewController: NSViewController {
     /// open, and a fold that closed every time a rule was added would be the page arguing with
     /// the person using it.
     private let limits: AccountLimitsSectionController
+
+    /// The one-year sign-in card.
+    private let tokens = AccountTokenSectionController()
 
     private lazy var tableView: ThemedGroupedTableView = {
         let table = ThemedGroupedTableView()
@@ -117,6 +123,10 @@ final class AccountsPreferencesViewController: NSViewController {
         // posted the structural event by the time this runs.
         setupController.onAccountReady = { [weak self] _ in self?.reload() }
         limits.onPresentationChange = { [weak self] in self?.reloadPresentationRows() }
+        tokens.onRowsChange = { [weak self] in self?.restampTokenRows() }
+        refreshEvents.observe(AgentAccountTokensDidChange.self) { [weak self] _ in
+            self?.restampTokenRows()
+        }
         refreshEvents.observe(CodexModelRefreshDidChange.self) { [weak self] _ in
             guard let self,
                   let row = self.presentationRows.firstIndex(where: {
@@ -182,6 +192,7 @@ final class AccountsPreferencesViewController: NSViewController {
         // disabled account has to appear, since it is where it is switched back on.
         accounts = accountsProvider()
         limits.reload(accounts: accounts)
+        tokens.prepare(accounts)
         extensionSections = ExtensionSettingsRenderer.hostSectionModels(for: .accounts)
         reloadPresentationRows()
     }
@@ -202,6 +213,12 @@ final class AccountsPreferencesViewController: NSViewController {
             rows.append(contentsOf: accounts.indices.map(PresentationRow.account))
         }
         rows.append(.accountNote)
+        let tokenIndices = tokens.eligibleIndices(in: accounts)
+        if !tokenIndices.isEmpty {
+            rows.append(.tokenCaption)
+            rows.append(contentsOf: tokenIndices.map(PresentationRow.token))
+            rows.append(.tokenNote)
+        }
         rows.append(contentsOf: limits.presentationRows.map(PresentationRow.limit))
         for (sectionIndex, section) in extensionSections.enumerated() {
             if section.visibleTitle != nil {
@@ -237,6 +254,7 @@ final class AccountsPreferencesViewController: NSViewController {
         let previous = accounts.map(\.id)
         accounts = accountsProvider()
         limits.reload(accounts: accounts)
+        _ = tokens.eligibleIndices(in: accounts)
 
         // Discovery answering with a different roster is a page-shaped change, not a
         // presentation one: a login was added or removed while Settings stood open, and every
@@ -250,6 +268,8 @@ final class AccountsPreferencesViewController: NSViewController {
         for (row, presentation) in presentationRows.enumerated() {
             switch presentation {
             case .account(let accountIndex) where accountIndex == index:
+                affected.insert(row)
+            case .token(let accountIndex) where accountIndex == index:
                 affected.insert(row)
             case .limit(let limitRow) where limits.namesAccount(accountID, in: limitRow):
                 affected.insert(row)
@@ -273,6 +293,21 @@ final class AccountsPreferencesViewController: NSViewController {
                 row: row,
                 makeIfNecessary: false
             ) as? ThemedVirtualTableCell else { continue }
+            install(rowAt: row, into: host)
+        }
+    }
+
+    /// Re-installs the one-year sign-in rows after a token was saved, replaced or removed. Their
+    /// height does not change, so the cells are handed new content rather than reloaded — the
+    /// same restamp a rename uses.
+    private func restampTokenRows() {
+        for (row, presentation) in presentationRows.enumerated() {
+            guard case .token = presentation,
+                  let host = tableView.view(
+                      atColumn: 0,
+                      row: row,
+                      makeIfNecessary: false
+                  ) as? ThemedVirtualTableCell else { continue }
             install(rowAt: row, into: host)
         }
     }
@@ -694,6 +729,12 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
             return makeAccountRow(for: accounts[index], row: index)
         case .accountNote:
             return SettingsUI.note(AccountsPreferencesStrings.explanation)
+        case .tokenCaption:
+            return tokens.captionContent()
+        case .token(let index):
+            return tokens.rowContent(forAccountAt: index)
+        case .tokenNote:
+            return tokens.noteContent()
         case .limit(let row):
             return limits.content(for: row)
         case .extensionCaption(let sectionIndex):
@@ -716,9 +757,10 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
     private func topInset(forRowAt index: Int) -> CGFloat {
         guard presentationRows.indices.contains(index) else { return 0 }
         switch presentationRows[index] {
-        case .appearanceDefaults, .modelRefresh, .setup, .accountCaption, .accountNote:
+        case .appearanceDefaults, .modelRefresh, .setup, .accountCaption, .accountNote,
+             .tokenCaption, .tokenNote:
             return Design.Spacing.large
-        case .emptyAccount, .account:
+        case .emptyAccount, .account, .token:
             return Design.Spacing.small
         case .limit(let row):
             switch row {
@@ -742,7 +784,7 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
     private func bottomInset(forRowAt index: Int) -> CGFloat {
         guard presentationRows.indices.contains(index) else { return 0 }
         switch presentationRows[index] {
-        case .accountCaption, .extensionCaption:
+        case .accountCaption, .tokenCaption, .extensionCaption:
             return Design.Spacing.small
         default:
             return index == presentationRows.count - 1 ? Design.Spacing.large : 0
@@ -751,6 +793,7 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
 
     private func updateCardDecorations() {
         var accountBounds: (first: Int, last: Int)?
+        var tokenBounds: (first: Int, last: Int)?
         var limitBounds: [Int: (first: Int, last: Int)] = [:]
         var extensionBounds: [Int: (first: Int, last: Int)] = [:]
 
@@ -762,6 +805,13 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
                     accountBounds = bounds
                 } else {
                     accountBounds = (index, index)
+                }
+            case .token:
+                if var bounds = tokenBounds {
+                    bounds.last = index
+                    tokenBounds = bounds
+                } else {
+                    tokenBounds = (index, index)
                 }
             case .limit(let limitRow):
                 guard let scopeIndex = limits.cardScopeIndex(for: limitRow) else { continue }
@@ -778,7 +828,8 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
                 } else {
                     extensionBounds[sectionIndex] = (index, index)
                 }
-            case .appearanceDefaults, .modelRefresh, .setup, .accountCaption, .accountNote, .extensionCaption:
+            case .appearanceDefaults, .modelRefresh, .setup, .accountCaption, .accountNote,
+                 .tokenCaption, .tokenNote, .extensionCaption:
                 break
             }
         }
@@ -787,6 +838,12 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
         if let accountBounds {
             decorations.append(ThemedTableCardDecoration(
                 rows: accountBounds.first...accountBounds.last,
+                topInset: Design.Spacing.small
+            ))
+        }
+        if let tokenBounds {
+            decorations.append(ThemedTableCardDecoration(
+                rows: tokenBounds.first...tokenBounds.last,
                 topInset: Design.Spacing.small
             ))
         }

@@ -437,6 +437,12 @@ enum SettingsUI {
         return label
     }
 
+    /// A caption with the card's "?" beside it, for a virtualized page whose caption is a row of
+    /// its own rather than the head of a `section`.
+    static func caption(_ text: String, help: HelpTopic) -> NSView {
+        titleLine(caption(text), help: help)
+    }
+
     static func caption(_ text: String, localizes: Bool = true) -> NSTextField {
         let label = NSTextField(
             labelWithString: localized(text, if: localizes).localizedUppercase

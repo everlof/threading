@@ -375,6 +375,20 @@ struct AgentCapabilities: OptionSet {
   /// reading this Mac's files or running their CLI here, which a remote child is not visible to.
   /// See `docs/feature-drafts/remote-execution-hosts.md`.
   static let remoteExecutionHostLaunch = Self(rawValue: 1 << 39)
+
+  /// A login can be signed in with a long-lived token instead of the browser sign-in, delivered
+  /// to that login's processes through `AgentKind.longLivedToken`. Claude only: `claude
+  /// setup-token` mints a one-year token the CLI reads from `CLAUDE_CODE_OAUTH_TOKEN`. Codex has
+  /// API keys, but those bill differently and are not a substitute for a subscription login.
+  static let longLivedAccountToken = Self(rawValue: 1 << 40)
+}
+
+/// How a runtime accepts a long-lived sign-in token: the variable its CLI reads, what every such
+/// token starts with, and the command that mints one.
+struct AgentLongLivedTokenSpec: Equatable, Sendable {
+  let environmentKey: String
+  let prefix: String
+  let mintCommand: String
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -467,7 +481,8 @@ enum AgentKind: String, Codable, CaseIterable {
         .anchoredUsageWindow, .transcriptUsageLimitRecord, .transcriptRefusedTurnRecord,
         .transcriptInterruptedMessageRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .checkoutScopedConversationStorage, .lifecycleReportedWorkingDirectory,
-        .modelAliasResolution, .selectableTerminalRenderer, .remoteExecutionHostLaunch
+        .modelAliasResolution, .selectableTerminalRenderer, .remoteExecutionHostLaunch,
+        .longLivedAccountToken
       ]
     case .codex:
       return [
@@ -610,6 +625,25 @@ enum AgentKind: String, Codable, CaseIterable {
     case .grok: return "GROK_HOME"
     case .openCode: return "OPENCODE_CONFIG_DIR"
     case .cursor: return nil
+    }
+  }
+
+  /// The long-lived token this runtime accepts, where it claims `.longLivedAccountToken`.
+  ///
+  /// Claude's was measured against 2.1.287: `CLAUDE_CODE_OAUTH_TOKEN` outranks the stored browser
+  /// login, and `claude auth status` then reports `authMethod: oauth_token` with no email —
+  /// without checking the token, so status cannot prove one works.
+  var longLivedToken: AgentLongLivedTokenSpec? {
+    guard supports(.longLivedAccountToken) else { return nil }
+    switch self {
+    case .claude:
+      return AgentLongLivedTokenSpec(
+        environmentKey: "CLAUDE_CODE_OAUTH_TOKEN",
+        prefix: "sk-ant-oat01-",
+        mintCommand: "claude setup-token"
+      )
+    case .codex, .grok, .openCode, .cursor:
+      return nil
     }
   }
 }

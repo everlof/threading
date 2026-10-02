@@ -63,7 +63,7 @@ enum AgentLauncher {
         }
 
         return launchPlan(
-            command: routed(command, for: session, rendersTerminalUI: true),
+            route: routed(command, for: session, rendersTerminalUI: true),
             in: executionProject.folderPath,
             resumeState: resumeState
         )
@@ -303,7 +303,7 @@ enum AgentLauncher {
         }
 
         return launchPlan(
-            command: routed(command, for: session, brokersPermissions: true),
+            route: routed(command, for: session, brokersPermissions: true),
             in: project.folderPath,
             resumeState: resumeState
         )
@@ -340,7 +340,7 @@ enum AgentLauncher {
         command.append(flag: "--listen", value: "stdio://")
 
         return launchPlan(
-            command: routed(command, for: session, brokersPermissions: true),
+            route: routed(command, for: session, brokersPermissions: true),
             in: project.folderPath,
             resumeState: session.resumeState
         )
@@ -364,7 +364,7 @@ enum AgentLauncher {
         command.append(word: "stdio")
 
         return launchPlan(
-            command: routed(command, for: session),
+            route: routed(command, for: session),
             in: project.folderPath,
             resumeState: session.resumeState
         )
@@ -394,7 +394,7 @@ enum AgentLauncher {
         command.append(word: AgentDefaults.cursorACPSubcommand)
 
         return launchPlan(
-            command: routed(command, for: session),
+            route: routed(command, for: session),
             in: project.folderPath,
             resumeState: session.resumeState,
             environmentOverrides: AgentDefaults.cursorLaunchEnvironment
@@ -491,7 +491,12 @@ enum AgentLauncher {
             binding: MCPSessionRegistry.binding(for: sessionID, decision: mcpDecision)
         ) else { return nil }
 
-        return launchPlan(command: command, in: folder, resumeState: .unavailable)
+        return launchPlan(
+            command: command,
+            in: folder,
+            resumeState: .unavailable,
+            credentials: AgentAccountRouting.route(for: kind, account: account).credentials
+        )
     }
 
     /// Internal for the tests: the command line is the contract with two CLIs, and the
@@ -579,7 +584,14 @@ enum AgentLauncher {
         guard let command = usageWindowPokeCommand(kind: kind, account: account) else {
             return nil
         }
-        return launchPlan(command: command, in: folder, resumeState: .unavailable)
+        // A token login's window has to be opened with its token: its browser sign-in may long
+        // have expired, and a poke that cannot authenticate opens nothing.
+        return launchPlan(
+            command: command,
+            in: folder,
+            resumeState: .unavailable,
+            credentials: AgentAccountRouting.route(for: kind, account: account).credentials
+        )
     }
 
     /// Builds the one-shot run that opens an account's usage window: the smallest legal message
@@ -602,15 +614,7 @@ enum AgentLauncher {
     ) -> ShellCommand? {
         guard kind.supports(.anchoredUsageWindow), account.provider == kind else { return nil }
 
-        var command = ShellCommand()
-        command.append(word: "env")
-        if let accountKey = kind.accountEnvironmentKey {
-            if account.isDefault {
-                command.append(flag: "-u", value: accountKey)
-            } else {
-                command.append(word: "\(accountKey)=\(account.configPath)")
-            }
-        }
+        var command = AgentAccountRouting.prefix(for: kind, account: account)
 
         switch kind {
         case .claude:
@@ -817,7 +821,7 @@ enum AgentLauncher {
         for session: AgentSession,
         brokersPermissions: Bool = false,
         rendersTerminalUI: Bool = false
-    ) -> ShellCommand {
+    ) -> AgentAccountRouting.Route {
         var routed = ShellCommand()
         // Asked once here rather than inside each branch below: every path that states an
         // environment states this one too, and the early return has to know whether there is
@@ -828,7 +832,7 @@ enum AgentLauncher {
 
         if !session.kind.supportsAccounts, !session.kind.supportsThreadingBridge,
            rendererWords.isEmpty {
-            return command
+            return AgentAccountRouting.Route(command: command, credentials: .none)
         }
 
         if !session.kind.supportsAccounts {
@@ -841,7 +845,7 @@ enum AgentLauncher {
             routed.append(words: rendererWords)
             routed.append(contentsOf: command)
             appendMCPFlags(for: session, to: &routed)
-            return routed
+            return AgentAccountRouting.Route(command: routed, credentials: .none)
         }
 
         guard let account = AgentAccountDiscovery.account(
@@ -857,10 +861,11 @@ enum AgentLauncher {
             routed.append(words: rendererWords)
             routed.append(contentsOf: command)
             appendMCPFlags(for: session, to: &routed)
-            return routed
+            return AgentAccountRouting.Route(command: routed, credentials: .none)
         }
 
-        routed = AgentAccountRouting.prefix(for: session.kind, account: account)
+        let route = AgentAccountRouting.route(for: session.kind, account: account)
+        routed = route.command
         appendHookEnvironment(
             for: session,
             brokersPermissions: brokersPermissions,
@@ -869,7 +874,7 @@ enum AgentLauncher {
         routed.append(words: rendererWords)
         routed.append(contentsOf: command)
         appendMCPFlags(for: session, to: &routed)
-        return routed
+        return AgentAccountRouting.Route(command: routed, credentials: route.credentials)
     }
 
     /// Exports the endpoints and the session's token, which is how a hook finds its way back to
@@ -1365,14 +1370,32 @@ enum AgentLauncher {
         command: ShellCommand,
         in folder: String,
         resumeState: ResumeState,
-        environmentOverrides: [String: String] = [:]
+        environmentOverrides: [String: String] = [:],
+        credentials: AgentCredentialEnvironment = .none
     ) -> AgentLaunchPlan {
         AgentLaunchPlan.inLoginShell(
             command: command,
             in: folder,
             shellPath: loginShellPath,
             resumeState: resumeState,
-            environmentOverrides: environmentOverrides
+            environmentOverrides: environmentOverrides,
+            credentialEnvironment: credentials
+        )
+    }
+
+    /// The same, for a command `routed` has already sent to the session's account.
+    private static func launchPlan(
+        route: AgentAccountRouting.Route,
+        in folder: String,
+        resumeState: ResumeState,
+        environmentOverrides: [String: String] = [:]
+    ) -> AgentLaunchPlan {
+        launchPlan(
+            command: route.command,
+            in: folder,
+            resumeState: resumeState,
+            environmentOverrides: environmentOverrides,
+            credentials: route.credentials
         )
     }
 
@@ -1391,12 +1414,12 @@ enum AgentLauncher {
 // Host environment resolution stays outside the portable command-plan value.
 extension AgentLaunchPlan {
     /// The environment this plan's child is spawned with: the shared one, then this plan's own
-    /// entries on top.
+    /// entries on top, then its credentials.
     func launchEnvironment() -> [String: String] {
         var environment = AgentEnvironment.launchEnvironment()
         for (key, value) in environmentOverrides {
             environment[key] = value
         }
-        return environment
+        return credentialEnvironment.applied(to: environment)
     }
 }

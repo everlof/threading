@@ -2108,6 +2108,34 @@ its theme picker is skipped too; use `/theme` to change the theme. Existing `~/.
 `~/.codex-*` homes are still found automatically. Threading does not delete provider homes; switch a
 login off when you no longer want it offered.
 
+### One-year sign-in for Claude
+
+**Settings ▸ Agents & Accounts ▸ One-Year Sign-In.** A Claude browser login has to be renewed
+about every month. A one-year token signs a login in for a year instead.
+
+1. Click **Use Token…** on the login's row. The sheet shows the command `claude setup-token`, with
+   **Copy Command**.
+2. Run it in a terminal, and approve it in the browser *as that login's claude.ai account*. The
+   browser decides which account the token belongs to, not the folder the command runs in.
+3. Paste the `sk-ant-oat01-…` token into the sheet and click **Use Token**.
+
+Sessions on that login start signing in with the token. A session that is already running keeps
+the sign-in it started with.
+
+**A token can only run models.** Remote Control and claude.ai connectors, such as Gmail or Google
+Drive, stop working on a login that uses one. MCP servers you set up yourself keep working. If you
+need those claude.ai features on a login, leave it on the browser sign-in.
+
+Threading keeps the token in your Keychain and gives it only to that login's sessions. It is passed
+through their environment, never their command line. Threading counts the year from when you save
+the token. The row says when it runs out and warns three weeks ahead; **Replace…** takes a new
+token, and **Remove** takes it away, so the login goes back to the browser sign-in. Reset
+Everything erases saved tokens too.
+
+Don't also export `CLAUDE_CODE_OAUTH_TOKEN` in your shell profile. Threading clears it for every
+login without a token, so one account can't quietly pay for another. On a login *with* a token,
+though, your profile's token would replace the one you saved here.
+
 ### Signing in somewhere other than your default browser
 While a login is running, the card shows **Sign-in link** — the same URL the agent printed when it
 opened your browser — with **Copy Link** and **Open**. Use it to finish the sign-in wherever you
