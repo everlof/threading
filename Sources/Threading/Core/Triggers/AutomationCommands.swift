@@ -10,6 +10,8 @@ struct AutomationToolArguments: Codable, Sendable {
     var remote: RemoteAutomationEndpoint?
     var remoteSpec: ControllerAutomationSpec?
     var cursor: Int64?
+    /// `addProject` only: the absolute path of an existing folder.
+    var folder: String?
 }
 
 struct AutomationSnapshot: Codable, Sendable {

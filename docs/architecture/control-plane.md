@@ -222,7 +222,12 @@ space and is absent for half the runtimes.
 agent asked to set up an automation could not supply a valid one, and the unknown id came back
 as "The trigger record no longer exists." It is the caller's own project only, the same scope as
 the rows. An unknown id is now refused with `AutomationToolActions.Refusal.unknownProject`, which
-names `list_sessions`. `AutomationProjectDiscoveryTests` holds both halves.
+names `list_sessions`. `AutomationProjectDiscoveryTests` holds both halves. For any other
+project, `manage_automation` has `projects` (every project's id, paged like `hosts`) and
+`addProject` (an existing absolute folder, through the sidebar's idempotent
+`ProjectStore.addProject`), so setting up an automation in a new folder needs no one to read an
+id out of the app. `addProject` is refused to automated runs like every other mutation, and a
+project starts nothing; enable and run keep their approval sheet. See `AutomationProjectToolTests`.
 
 This closes the gap [`sessions.md`](sessions.md) records under side chats, from both ends: a
 fork can send its conclusion back to its parent (`list_sessions` names the parent beside

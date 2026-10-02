@@ -8754,6 +8754,9 @@ enum MCPTools {
           exact revision in a Threading approval sheet and wait for their answer; a refusal is final.
           Never put credentials in instructions. Automated runs cannot mutate automations.
           Local taskReadOnly/taskLocalEdits run ordinary instructions; assess modes retain the two-stage workflow.
+          projects lists Threading projects with the id configure takes. When the user wants an automation to
+          run in a folder that is not a project yet, addProject adds it (idempotent); it starts nothing.
+          taskLocalEdits with projectCheckout refuses a dirty git checkout; a folder that is not a git repository counts as clean.
           For a VPS first use hosts to discover configured connections and workers to discover the target worker IDs.
           Pass remote with the host ID only; Threading uses the controller paths the user connected on the
           Automations ▸ Remote page, and refuses a host that has none.

@@ -9,13 +9,18 @@ enum AutomationToolActions {
         case remotePathsDiffer
         case unknownProject
         case unknownHost
+        case folderRequired
+        case projectNotSaved
 
         var errorDescription: String? {
             switch self {
             case .automatedRun: "Automated runs cannot reconfigure automations."
             case .noApprovalWindow: "No Threading window is available for approval."
             case .unknownProject:
-                "projectID is not a current Threading project. list_sessions prints this project's id in its heading."
+                "projectID is not a current Threading project. The projects operation lists them, and list_sessions prints this session's own in its heading."
+            case .folderRequired:
+                "addProject needs folder: the absolute path of an existing directory."
+            case .projectNotSaved: "The project could not be saved."
             case .unknownHost:
                 "hostID is not a configured remote host. The hosts operation lists the configured ones."
             case .remoteNotConnected:
@@ -42,10 +47,20 @@ enum AutomationToolActions {
                     let data = try await Task.detached(priority: .utility) { try JSONEncoder().encode(page) }.value
                     completion(.success(String(decoding: data, as: UTF8.self))); return
                 }
+                if arguments.operation == "projects" {
+                    let page = projectsPage(projects.projects, cursor: arguments.cursor)
+                    let data = try await Task.detached(priority: .utility) { try JSONEncoder().encode(page) }.value
+                    completion(.success(String(decoding: data, as: UTF8.self))); return
+                }
                 let mutating = !["list", "get", "runs", "workers"].contains(arguments.operation)
                 if mutating, let run = try await TriggerStore.shared.run(sessionID: sessionID),
                    [.received, .assessing, .fixQueued, .fixing, .running, .finishing].contains(run.state) {
                     throw Refusal.automatedRun
+                }
+                if arguments.operation == "addProject" {
+                    let added = try await addProject(folder: arguments.folder, to: projects)
+                    let data = try await Task.detached(priority: .utility) { try JSONEncoder().encode(added) }.value
+                    completion(.success(String(decoding: data, as: UTF8.self))); return
                 }
                 let needsApproval = AutomationApprovalRequest.Operation(rawValue: arguments.operation) != nil
                 if needsApproval, approve == nil { throw Refusal.noApprovalWindow }
@@ -62,6 +77,62 @@ enum AutomationToolActions {
                 }
             } catch { completion(.failure(error.localizedDescription)) }
         }
+    }
+
+    struct ProjectEntry: Encodable, Sendable {
+        let id: String
+        let name: String
+        let folder: String
+        let scratchpad: Bool
+
+        init(_ project: Project) {
+            id = project.id.uuidString.lowercased()
+            name = project.name
+            folder = project.folderPath
+            scratchpad = project.isScratchpad == true
+        }
+    }
+
+    struct ProjectsPage: Encodable, Sendable {
+        let items: [ProjectEntry]
+        let next: Int?
+    }
+
+    struct AddedProject: Encodable, Sendable {
+        let project: ProjectEntry
+        /// False when the folder already was a project; adding is idempotent.
+        let added: Bool
+    }
+
+    /// Every project's id, so an agent can name where an automation runs without the person
+    /// reading an id out of the app. The same 25-row page as `hosts`.
+    static func projectsPage(_ projects: [Project], cursor: Int64?) -> ProjectsPage {
+        let offset = Int(max(0, min(cursor ?? 0, Int64(projects.count))))
+        let items = projects.dropFirst(offset).prefix(25).map(ProjectEntry.init)
+        let next = offset + items.count
+        return ProjectsPage(items: items, next: next < projects.count ? next : nil)
+    }
+
+    /// Adds an existing folder through the sidebar's own `ProjectStore.addProject`, which
+    /// returns the existing project for a folder already added. A project starts nothing: work
+    /// in it still needs a configured automation whose enable or run the person approves.
+    static func addProject(folder: String?, to store: ProjectStore) async throws -> AddedProject {
+        let path = folder?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard path.hasPrefix("/") else { throw Refusal.folderRequired }
+        // The directory check and symlink resolution touch the filesystem, so they run on a
+        // worker; the main actor receives only the resolved path.
+        let resolved: String? = await Task.detached(priority: .utility) {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { return nil }
+            return URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath().path
+        }.value
+        guard let resolved else { throw Refusal.folderRequired }
+        let existed = store.projects.contains { $0.folderPath == resolved }
+        guard let project = store.addProject(folderURL: URL(fileURLWithPath: resolved, isDirectory: true)) else {
+            throw Refusal.projectNotSaved
+        }
+        return AddedProject(project: ProjectEntry(project), added: !existed)
     }
 
     /// An unknown project is the caller's mistake, not a vanished record: saying "no longer

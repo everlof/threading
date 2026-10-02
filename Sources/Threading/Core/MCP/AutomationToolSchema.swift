@@ -17,7 +17,7 @@ enum AutomationToolSchema {
         "archiveOnSuccess": .init(type: .boolean, description: "Archive only after successful completion; preserve history")
     ], required: ["missedRunPolicy", "archiveOnSuccess"])
     static let configuration = MCPPropertySchema(type: .object, description: "Complete local automation replacement. Configure leaves it paused; enable the returned revision when requested by the user.", properties: [
-        "name": string("Short name"), "projectID": string("Existing Threading project UUID; list_sessions prints this project's id in its heading"),
+        "name": string("Short name"), "projectID": string("Existing Threading project UUID: from projects or addProject; list_sessions prints this session's own"),
         "instructions": string("Saved task instructions; no credentials"), "agent": string("Native agent kind, e.g. codex or claude"),
         "account": string("Optional account handle"), "model": string("Optional model"), "reasoningEffort": string("Optional effort"),
         "executionMode": string("taskReadOnly, taskLocalEdits, assessOnly, or assessThenFix"),
@@ -39,11 +39,12 @@ enum AutomationToolSchema {
         "archiveOnSuccess": .init(type: .boolean, description: "Archive after work completion, confirmed delivery and stopped process")
     ], required: ["name", "workerID", "instruction", "missedPolicy", "archiveOnSuccess"])
     static let input = MCPInputSchema(properties: [
-        "operation": string("hosts, workers (remote), list, get, configure, enable, pause, delete, run, or runs"),
+        "operation": string("hosts, workers (remote), projects, addProject, list, get, configure, enable, pause, delete, run, or runs"),
         "id": string("Automation UUID. Supply a new UUID for remote configure."),
         "expectedRevision": string("Current local revision UUID or remote integer revision as a string. Remote creation uses 0."),
         "requestKey": string("Stable unique request key for run; reuse on retry"),
-        "cursor": integer("Next page cursor from list/runs"), "configuration": configuration,
+        "cursor": integer("Next page cursor from list/runs/projects"), "configuration": configuration,
+        "folder": string("addProject: absolute path of an existing folder; returns the existing project if already added"),
         "remote": .init(type: .object, description: "Omit for this Mac. Remote operations execute through the controller the user connected for that host, over existing SSH.", properties: [
             "hostID": string("Configured Threading remote host UUID"),
             "executable": string("Optional; must match the host's saved controller executable"),
