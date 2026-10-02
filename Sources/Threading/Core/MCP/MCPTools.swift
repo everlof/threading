@@ -7033,7 +7033,9 @@ enum MCPTools {
         when you were asked to report a conclusion back.
 
         The ids this prints are what send_to_session addresses. It sees only this \
-        project — other projects' sessions do not exist as far as this tool is concerned.
+        project — other projects' sessions do not exist as far as this tool is concerned. \
+        The heading also names the project's own id: the projectID manage_automation \
+        takes and the project_id create_trigger_draft takes.
         """,
       inputSchema: MCPInputSchema(properties: [:], required: [])
     ),
@@ -8880,7 +8882,7 @@ enum MCPTools {
             ),
             "project_id": MCPPropertySchema(
               type: .string,
-              description: "Threading project id in which the agent will work."
+              description: "Threading project id in which the agent will work; list_sessions prints this project's id in its heading."
             ),
             "instructions": MCPPropertySchema(
               type: .string,

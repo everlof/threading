@@ -17,9 +17,10 @@ extension AgentToolCoordinator {
         case .failure(let refusal):
             return .failure(Self.words(for: refusal))
         case .success(let rows):
-            let project = dependencies.projects.project(forSessionID: sessionID)
-            let heading = project.map { "Sessions in “\($0.name)” (\(rows.count)):" }
-                ?? "Sessions in this project (\(rows.count)):"
+            let heading = Self.sessionListingHeading(
+                project: dependencies.projects.project(forSessionID: sessionID),
+                count: rows.count
+            )
 
             let lines = rows.map { row in
                 var line = "• “\(row.title)” — \(row.kind.displayName), \(Self.words(for: row))"
@@ -36,6 +37,14 @@ extension AgentToolCoordinator {
                 : "This session is the only one here; there is no one to message yet."
             return .success(([heading] + lines + [footer]).joined(separator: "\n"))
         }
+    }
+
+    /// The heading carries the project's own id because it is the one agent-visible place that
+    /// can: `manage_automation`'s `projectID` and `create_trigger_draft`'s `project_id` take
+    /// exactly this value, and no other tool prints it.
+    static func sessionListingHeading(project: Project?, count: Int) -> String {
+        guard let project else { return "Sessions in this project (\(count)):" }
+        return "Sessions in “\(project.name)” (\(count)) — project id \(project.id.uuidString.lowercased()):"
     }
 
     // MARK: Sending

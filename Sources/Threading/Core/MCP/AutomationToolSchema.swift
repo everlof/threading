@@ -17,7 +17,7 @@ enum AutomationToolSchema {
         "archiveOnSuccess": .init(type: .boolean, description: "Archive only after successful completion; preserve history")
     ], required: ["missedRunPolicy", "archiveOnSuccess"])
     static let configuration = MCPPropertySchema(type: .object, description: "Complete local automation replacement. Configure leaves it paused; enable the returned revision when requested by the user.", properties: [
-        "name": string("Short name"), "projectID": string("Existing Threading project UUID"),
+        "name": string("Short name"), "projectID": string("Existing Threading project UUID; list_sessions prints this project's id in its heading"),
         "instructions": string("Saved task instructions; no credentials"), "agent": string("Native agent kind, e.g. codex or claude"),
         "account": string("Optional account handle"), "model": string("Optional model"), "reasoningEffort": string("Optional effort"),
         "executionMode": string("taskReadOnly, taskLocalEdits, assessOnly, or assessThenFix"),

@@ -176,7 +176,9 @@ enum TriggerToolActions {
             return
         }
         guard projects.project(withID: projectID) != nil else {
-            completion(.failure("project_id is not a current Threading project."))
+            completion(.failure(
+                "project_id is not a current Threading project. list_sessions prints this project's id in its heading."
+            ))
             return
         }
         guard let agent = AgentKind(rawValue: arguments.agent ?? "codex"),

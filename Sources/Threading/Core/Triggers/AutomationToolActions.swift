@@ -7,11 +7,17 @@ enum AutomationToolActions {
         case noApprovalWindow
         case remoteNotConnected
         case remotePathsDiffer
+        case unknownProject
+        case unknownHost
 
         var errorDescription: String? {
             switch self {
             case .automatedRun: "Automated runs cannot reconfigure automations."
             case .noApprovalWindow: "No Threading window is available for approval."
+            case .unknownProject:
+                "projectID is not a current Threading project. list_sessions prints this project's id in its heading."
+            case .unknownHost:
+                "hostID is not a configured remote host. The hosts operation lists the configured ones."
             case .remoteNotConnected:
                 "This host has no saved controller connection. Ask the user to connect it under Automations ▸ Remote first."
             case .remotePathsDiffer:
@@ -45,18 +51,24 @@ enum AutomationToolActions {
                 if needsApproval, approve == nil { throw Refusal.noApprovalWindow }
                 let approve: AutomationApprover = approve ?? { _ in false }
                 if let remote = arguments.remote {
-                    guard let host = RemoteHostStore.shared.host(withID: remote.hostID) else { throw TriggerStore.StoreError.missing }
+                    guard let host = RemoteHostStore.shared.host(withID: remote.hostID) else { throw Refusal.unknownHost }
                     var resolved = arguments
                     resolved.remote = try endpoint(for: host, requested: remote)
                     completion(.success(try await AutomationCommands.remote(resolved, destination: host.sshDestination,
                         hostName: host.displayName, approve: approve)))
                 } else {
-                    if let config = arguments.configuration,
-                       projects.project(withID: config.projectID) == nil { throw TriggerStore.StoreError.missing }
+                    try requireKnownProject(arguments.configuration) { projects.project(withID: $0) != nil }
                     completion(.success(try await AutomationCommands.execute(arguments, proposedBy: sessionID, approve: approve)))
                 }
             } catch { completion(.failure(error.localizedDescription)) }
         }
+    }
+
+    /// An unknown project is the caller's mistake, not a vanished record: saying "no longer
+    /// exists" sent agents hunting for an automation they had never created.
+    static func requireKnownProject(_ configuration: AutomationConfiguration?,
+                                    exists: (ProjectID) -> Bool) throws {
+        if let configuration, !exists(configuration.projectID) { throw Refusal.unknownProject }
     }
 
     /// The controller an agent reaches is the one the person connected from the Remote page,

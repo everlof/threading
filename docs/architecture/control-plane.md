@@ -216,6 +216,14 @@ to one project. `send_to_session` addresses targets by **Threading id** only —
 app-side surface keys on — never a provider transcript id, which lives in a different identity
 space and is absent for half the runtimes.
 
+`list_sessions`' heading also prints the caller's **project id**
+(`AgentToolCoordinator.sessionListingHeading`). `manage_automation` (`projectID`) and
+`create_trigger_draft` (`project_id`) require it, and until 2026-10-02 no tool printed it: an
+agent asked to set up an automation could not supply a valid one, and the unknown id came back
+as "The trigger record no longer exists." It is the caller's own project only, the same scope as
+the rows. An unknown id is now refused with `AutomationToolActions.Refusal.unknownProject`, which
+names `list_sessions`. `AutomationProjectDiscoveryTests` holds both halves.
+
 This closes the gap [`sessions.md`](sessions.md) records under side chats, from both ends: a
 fork can send its conclusion back to its parent (`list_sessions` names the parent beside
 "side chat of"), and the row's **Send Result to Parent** action lets the user ask for exactly
