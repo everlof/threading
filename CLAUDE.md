@@ -21,11 +21,12 @@ conversation can be resumed later by its agent-assigned identifier.
 
 ## Build & Run Commands
 
-The application is **Xcode-only** — a single `Threading.xcodeproj`, no root SwiftPM manifest. (SwiftTerm
-stays a local Swift package that the Xcode project references; the app's own `Package.swift` was
-removed so there is one application build system.) Standalone portable helpers have their own
-build entry points; the C proxy's CMake path is documented in
-[`proxy-engine.md`](docs/architecture/proxy-engine.md).
+The macOS app is **Xcode-only** — a single `Threading.xcodeproj`, no root SwiftPM manifest.
+(SwiftTerm stays a local Swift package that the Xcode project references; the app's own
+`Package.swift` was removed so there is one application build system.) Standalone portable
+helpers have their own build entry points; the C proxy's CMake path is documented in
+[`proxy-engine.md`](docs/architecture/proxy-engine.md). The maintained Linux preview has a
+separate SwiftPM package in [`Platforms/Linux`](Platforms/Linux/README.md).
 
 ```bash
 # Build the app
@@ -38,6 +39,8 @@ scripts/test.sh ui       # app-level XCUITest scenarios in an isolated Cocoa hom
 scripts/test-connectivity.sh software  # focused Mac + iOS Simulator connectivity contracts
 scripts/test-ptyd-linux.sh             # static Linux threading-ptyd (with its suite) and threading-mcp-bridge, in Docker (pty-host.md#linux)
 python3 scripts/test-proxy.py          # standalone C proxy: native macOS/Linux/Windows build, socket tests and dependency provenance
+python3 -m unittest discover -s Platforms/Linux/tests  # Linux runner failure contracts, no Docker
+Platforms/Linux/bundle-smoke.sh        # build and test the installable Ubuntu arm64 Linux preview in Docker
 scripts/test-connectivity.sh hardware --device <name-or-UDID> --scenario automatic --non-interactive  # unattended device lifecycle lane
 
 # Run the built app (never the bare binary — build with xcodebuild, then open the bundle)

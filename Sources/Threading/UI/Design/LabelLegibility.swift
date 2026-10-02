@@ -95,7 +95,7 @@ public enum LabelLegibility {
         /// Twenty-four, matching `SelectionSurface.Defaults.holdBackSteps`, and for the same
         /// reason: it puts the granularity under a percentage point of alpha across the widest
         /// range a tier can travel, which is finer than any authored value is meaningful to.
-        public static let strengthSteps = 24
+        public static let strengthSteps = TextLegibilityPolicy.strengthSteps
 
         /// Entries kept before the table is dropped and rebuilt.
         ///

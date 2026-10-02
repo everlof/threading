@@ -115,6 +115,7 @@ struct ProjectNavigationEntry {
     let id: ProjectID
     let name: String
     let folderPath: String
+    let isScratchpad: Bool
     let sessionCount: Int
     let terminalCount: Int
     let recentSessions: [AgentSession]
@@ -383,6 +384,7 @@ final class ProjectDatabase {
                 id: project.id,
                 name: project.name,
                 folderPath: project.folderPath,
+                isScratchpad: project.isTheScratchpad,
                 sessionCount: countsByProject.removeValue(forKey: project.id) ?? 0,
                 terminalCount: project.terminals.count,
                 recentSessions: decoded[project.id] ?? [],

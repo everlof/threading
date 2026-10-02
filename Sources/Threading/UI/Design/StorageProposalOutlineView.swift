@@ -25,6 +25,7 @@ final class StorageProposalOutlineView: NSView, ThemedComponent {
 
     /// Every drawable line, flattened once: the fold is the model's decision, not a per-draw one.
     private let lines: [Line]
+    private var cachedLayout: RowLayout?
 
     // MARK: - Initialization
 
@@ -54,17 +55,42 @@ final class StorageProposalOutlineView: NSView, ThemedComponent {
     override var isFlipped: Bool { true }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: height(with: Metrics()))
+        NSSize(width: NSView.noIntrinsicMetric, height: layout(for: Metrics()).height)
     }
 
     /// The height this outline needs, which a host asks for before it has a width: every line is
     /// one line tall whatever the width, because a path truncates rather than wraps.
     func fittingHeight() -> CGFloat {
-        height(with: Metrics())
+        layout(for: Metrics()).height
     }
 
-    private func height(with metrics: Metrics) -> CGFloat {
-        lines.reduce(Layout.verticalInset * 2) { $0 + metrics.height(of: $1.kind) }
+    /// Text geometry changes with the resolved fonts, including a live theme switch. The
+    /// outline itself is immutable, so one measured row index can serve every scroll repaint.
+    private func layout(for metrics: Metrics) -> RowLayout {
+        let fonts = metrics.fontKey
+        if let cachedLayout, cachedLayout.fonts == fonts { return cachedLayout }
+
+        var rowTops = [CGFloat]()
+        rowTops.reserveCapacity(lines.count + 1)
+        var y = Layout.verticalInset
+        var sizeColumn: CGFloat = 0
+        for line in lines {
+            rowTops.append(y)
+            y += metrics.height(of: line.kind)
+            sizeColumn = max(
+                sizeColumn,
+                line.size.width(in: metrics.font(for: line.kind, column: .size))
+            )
+        }
+        rowTops.append(y)
+        let measured = RowLayout(
+            fonts: fonts,
+            rowTops: rowTops,
+            sizeColumn: min(Layout.maximumSizeColumn, sizeColumn),
+            height: y + Layout.verticalInset
+        )
+        cachedLayout = measured
+        return measured
     }
 
     // MARK: - Drawing
@@ -76,16 +102,26 @@ final class StorageProposalOutlineView: NSView, ThemedComponent {
         guard !visible.isEmpty, bounds.width > 0 else { return }
 
         let metrics = Metrics()
-        let sizeColumn = min(
-            Layout.maximumSizeColumn,
-            lines.map { $0.size.width(in: metrics.font(for: $0.kind, column: .size)) }.max() ?? 0
-        )
+        let layout = layout(for: metrics)
         let content = bounds.insetBy(dx: Layout.horizontalInset, dy: 0)
 
-        var y = Layout.verticalInset
-        for line in lines {
-            let rowHeight = metrics.height(of: line.kind)
-            defer { y += rowHeight }
+        // Find the first row whose bottom is below the clip. Repaints visit the viewport,
+        // regardless of how many directories the proposal asks the person to review.
+        var low = 0
+        var high = lines.count
+        while low < high {
+            let middle = (low + high) / 2
+            if layout.rowTops[middle + 1] <= visible.minY {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+        for index in low..<lines.count {
+            let y = layout.rowTops[index]
+            if y >= visible.maxY { break }
+            let line = lines[index]
+            let rowHeight = layout.rowTops[index + 1] - y
 
             // The gap a heading opens a section with belongs *above* it, not under its own
             // baseline: sections that run together read as one list with a stray bold line in it.
@@ -97,7 +133,24 @@ final class StorageProposalOutlineView: NSView, ThemedComponent {
                 height: rowHeight - gap
             )
             guard rect.intersects(visible) else { continue }
-            draw(line, in: rect, sizeColumn: sizeColumn, metrics: metrics)
+            draw(line, in: rect, sizeColumn: layout.sizeColumn, metrics: metrics)
+        }
+    }
+
+    private struct RowLayout {
+        let fonts: [FontKey]
+        let rowTops: [CGFloat]
+        let sizeColumn: CGFloat
+        let height: CGFloat
+    }
+
+    private struct FontKey: Equatable {
+        let name: String
+        let pointSize: CGFloat
+
+        init(_ font: NSFont) {
+            name = font.fontName
+            pointSize = font.pointSize
         }
     }
 
@@ -224,10 +277,15 @@ final class StorageProposalOutlineView: NSView, ThemedComponent {
         let row = Design.FontRole.body.resolved()
         let note = Design.FontRole.caption.resolved()
         let size = Design.FontRole.numericDetail().resolved()
+        let headingSize = Design.FontRole.numericBody.resolved()
+
+        var fontKey: [FontKey] {
+            [heading, subheading, row, note, size, headingSize].map(FontKey.init)
+        }
 
         func font(for kind: LineKind, column: Column) -> NSFont {
             switch column {
-            case .size: return kind == .heading ? Design.FontRole.numericBody.resolved() : size
+            case .size: return kind == .heading ? headingSize : size
             case .note: return note
             case .label:
                 switch kind {

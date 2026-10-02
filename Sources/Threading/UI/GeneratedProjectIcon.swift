@@ -23,7 +23,13 @@ enum GeneratedProjectIcon {
 
     // MARK: - Properties
 
-    private static let cache = NSCache<NSString, NSImage>()
+    private static let cache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        // Only mounted sidebar rows ask for tiles. Keep recent names warm across scrolling,
+        // while a store with thousands of projects cannot retain one image per project.
+        cache.countLimit = 256
+        return cache
+    }()
 
     // MARK: - Public Methods
 
