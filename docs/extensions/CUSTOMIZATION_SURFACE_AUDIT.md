@@ -122,6 +122,15 @@ last-moment activation/pause checks. Agents configure it through typed MCP tools
 only inert drafts and invoke a host approval; extensions do not get a second presentation or
 mutation path that could claim a different rule is active.
 
+The approval review those sheets show (`AutomationReview`, drawn by `AutomationReviewView` through
+the shared `FactSheetView`) stays host-only for the same reason. It is the receipt for one exact
+revision: project by name and folder, timing, agent with model and effort, the login a run
+resolves to — flagged when nothing was chosen or the chosen login is missing, since a run once
+silently started on an expired default — permissions, time limit, after-success behaviour, the
+revision identity, and the full instructions in the sheet's single scrolling column. Event,
+source and conditions appear only for event rules. Themes style the labels and scroller; no
+extension can reword, reorder or omit a fact.
+
 The two command-line-tool surfaces remain host-only for the same reason as the rows above them,
 one step sharper: both write outside anything Threading owns. One creates and deletes a symlink in
 the user's own `~/.local/bin` and reads what their login shell exports; the other changes the

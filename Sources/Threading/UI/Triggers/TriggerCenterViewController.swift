@@ -653,22 +653,30 @@ final class TriggerCenterViewController: NSViewController {
         on pair: (definition: TriggerDefinition, revision: TriggerRevision)
     ) {
         if pair.definition.draftRevisionID == pair.revision.id {
-            let request = ConfirmationRequest(
-                prompt: .approveTriggerActivation,
-                title: L10n.format("Activate “%@”?", pair.definition.name),
-                message: L10n.string(
-                    "Review the schedule or event, project, instructions, and permissions below. Enabling permits future runs with these settings."
-                ),
-                confirmTitle: L10n.string("Activate"),
-                accessory: Self.reviewAccessory(for: pair.revision)
-            )
-            ConfirmationAlert.ask(request, in: view.window) { [weak self] approved in
-                guard approved else { return }
-                Task { @MainActor in
-                    try? await self?.store.activate(
-                        triggerID: pair.definition.id,
-                        revisionID: pair.revision.id
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let sourceName = pair.revision.automation?.schedule == nil
+                    ? (try? await self.store.source(id: pair.revision.sourceInstallationID))?.displayName
+                    : nil
+                let request = ConfirmationRequest(
+                    prompt: .approveTriggerActivation,
+                    title: L10n.format("Activate “%@”?", pair.definition.name),
+                    message: L10n.string(
+                        "Review the schedule or event, project, instructions, and permissions below. Enabling permits future runs with these settings."
+                    ),
+                    confirmTitle: L10n.string("Activate"),
+                    accessory: Self.reviewAccessory(
+                        for: pair.revision, purpose: .activate, context: .live(sourceName: sourceName)
                     )
+                )
+                ConfirmationAlert.ask(request, in: self.view.window) { [weak self] approved in
+                    guard approved else { return }
+                    Task { @MainActor in
+                        try? await self?.store.activate(
+                            triggerID: pair.definition.id,
+                            revisionID: pair.revision.id
+                        )
+                    }
                 }
             }
             return
@@ -685,62 +693,12 @@ final class TriggerCenterViewController: NSViewController {
 
     /// The exact revision under review: shared by the Activate sheet and the sheet an agent's
     /// enable or run request raises, so both show the same facts before anything runs.
-    static func reviewAccessory(for revision: TriggerRevision) -> NSView {
-        let facts = NSTextField(wrappingLabelWithString: L10n.format(
-            "Source: %@\nEvent: %@\nProject: %@\nAgent: %@\nMode: %@\nCheckout: %@\nMaximum concurrent runs: %lld",
-            revision.sourceInstallationID.uuidString,
-            revision.eventKind,
-            revision.projectID.uuidString,
-            revision.agentKind.displayName,
-            revision.executionMode.displayTitle,
-            revision.checkoutPolicy.displayTitle,
-            Int64(revision.limits.maximumConcurrentRuns)
-        ))
-        if let options = revision.automation {
-            let timing = options.schedule?.summary ?? revision.eventKind
-            facts.stringValue += "\n" + timing + "\n" + L10n.string(options.archiveOnSuccess ? "Archive successful runs" : "Keep successful runs visible")
-        }
-        facts.applyFont(.detail())
-        facts.textColor = Design.Text.secondary
-
-        let conditionsTitle = NSTextField(labelWithString: L10n.string("Match conditions"))
-        conditionsTitle.applyFont(.emphasizedBody)
-        conditionsTitle.textColor = Design.Text.label
-        let conditions = ThemedTextView.scrolling()
-        conditions.textView.string = revision.conditions.isEmpty
-            ? L10n.string("Any event of this kind")
-            : revision.conditions.map(\.reviewDescription).joined(separator: "\n")
-        conditions.textView.isEditable = false
-        conditions.textView.isSelectable = true
-        conditions.translatesAutoresizingMaskIntoConstraints = false
-
-        let instructionsTitle = NSTextField(labelWithString: L10n.string("Agent instructions"))
-        instructionsTitle.applyFont(.emphasizedBody)
-        instructionsTitle.textColor = Design.Text.label
-        let instructions = ThemedTextView.scrolling()
-        instructions.textView.string = revision.instructions
-        instructions.textView.isEditable = false
-        instructions.textView.isSelectable = true
-        instructions.translatesAutoresizingMaskIntoConstraints = false
-
-        let stack = NSStackView(views: [
-            facts,
-            conditionsTitle,
-            conditions,
-            instructionsTitle,
-            instructions,
-        ])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.small
-        NSLayoutConstraint.activate([
-            stack.widthAnchor.constraint(equalToConstant: 520),
-            conditions.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            conditions.heightAnchor.constraint(equalToConstant: 90),
-            instructions.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            instructions.heightAnchor.constraint(equalToConstant: 150),
-        ])
-        return stack
+    static func reviewAccessory(
+        for revision: TriggerRevision,
+        purpose: AutomationReview.Purpose = .activate,
+        context: AutomationReview.Context = .live()
+    ) -> NSView {
+        AutomationReviewView(review: .make(revision, purpose: purpose, context: context))
     }
 
     private static let relativeDate: RelativeDateTimeFormatter = {
@@ -750,7 +708,7 @@ final class TriggerCenterViewController: NSViewController {
     }()
 }
 
-private extension TriggerCheckoutPolicy {
+extension TriggerCheckoutPolicy {
     var displayTitle: String {
         switch self {
         case .projectCheckout: return L10n.string("Existing project checkout")
@@ -841,7 +799,7 @@ private final class TriggerCenterRowView: NSView {
     @objc private func secondaryPressed() { onSecondaryAction?() }
 }
 
-private extension TriggerExecutionMode {
+extension TriggerExecutionMode {
     var displayTitle: String {
         switch self {
         case .taskReadOnly: return L10n.string("Read-only task")
@@ -852,7 +810,7 @@ private extension TriggerExecutionMode {
     }
 }
 
-private extension TriggerCondition {
+extension TriggerCondition {
     var reviewDescription: String {
         let comparisonText = comparison.rawValue
         guard let value else { return "\(attribute)  \(comparisonText)" }
