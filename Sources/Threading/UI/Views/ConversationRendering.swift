@@ -123,6 +123,14 @@ extension ConversationViewController {
                 checkpointID: settlingGitCheckpointID
             )
 
+        case .modelReported(let model):
+            // Claude's first `system/init` arrives after the opening prompt was written, so it
+            // lands inside that turn. Ready there would end the turn for the runtime as well as
+            // the status line, and an unattended automation run was settled as having ended
+            // without a result within a second of starting while its agent went on working.
+            guard !isTurnInFlight else { return }
+            apply(.status(.ready(model: model, lastTurn: nil)))
+
         case .adoptedSessionID(let agentSessionID):
             // The CLI's own identifier wins: a resume can settle on one other than the
             // identifier we asked for, and resuming again must use what it actually used.

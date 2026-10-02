@@ -38,7 +38,7 @@ struct RemoteConversationRowProjection {
             rows[index] = Self.dto(for: timelineRows[index], at: index)
             revision &+= 1
 
-        case .streaming, .status, .runProgress, .turnSettled, .adoptedSessionID:
+        case .streaming, .status, .runProgress, .turnSettled, .adoptedSessionID, .modelReported:
             return
         }
     }

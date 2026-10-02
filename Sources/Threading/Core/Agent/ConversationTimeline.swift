@@ -167,6 +167,10 @@ struct ConversationTimeline {
         /// The identifier the CLI settled on, which for a resume is not necessarily the one we
         /// asked for.
         case adoptedSessionID(TranscriptID)
+
+        /// The session named the model it runs. Not a turn boundary: it can arrive while a turn
+        /// is in flight, where reading it as Ready ended the opening turn of every Claude launch.
+        case modelReported(String)
     }
 
     // MARK: - Properties
@@ -230,10 +234,12 @@ struct ConversationTimeline {
                 changes.append(.adoptedSessionID(agentSessionID))
             }
             // A transport can restate the active thread while resuming or reconnecting, so this
-            // may fire mid-conversation too. Only a reported model promotes the status — calling
-            // it Ready unconditionally would overwrite Working while the model is still running.
+            // may fire mid-conversation too, and Claude sends its first `system/init` only once
+            // it starts the opening prompt. Initialisation is therefore never a turn boundary:
+            // the model is reported as a fact, and the view, which knows whether a turn is in
+            // flight, decides whether that makes the session Ready.
             if let model {
-                changes.append(.status(.ready(model: model, lastTurn: nil)))
+                changes.append(.modelReported(model))
             }
             return changes
 

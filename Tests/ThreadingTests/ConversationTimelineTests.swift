@@ -908,8 +908,21 @@ final class ConversationTimelineTests: XCTestCase {
 
         XCTAssertEqual(changes, [
             .adoptedSessionID(transcriptID),
-            .status(.ready(model: "opus", lastTurn: nil))
+            .modelReported("opus")
         ])
+    }
+
+    func testClaudesFirstInitIsNotATurnBoundary() {
+        // Claude sends `system/init` only once it starts the opening prompt, so the event lands
+        // inside that turn. The timeline reports the model as a fact and never a Ready status:
+        // a Ready here ended the opening turn and settled unattended automation runs at launch.
+        var timeline = ConversationTimeline(sessionID: SessionID())
+        _ = timeline.appendUserMessage(ConversationUserMessage(text: "Run the automation"))
+
+        let changes = timeline.apply(.initialised(sessionID: TranscriptID("t"), model: "claude-opus-5-5"))
+
+        XCTAssertFalse(changes.contains { if case .status = $0 { return true } else { return false } })
+        XCTAssertTrue(changes.contains(.modelReported("claude-opus-5-5")))
     }
 
     func testCodexThreadRestartsDoNotOverwriteWorking() {

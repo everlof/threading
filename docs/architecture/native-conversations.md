@@ -352,7 +352,17 @@ that every slash row is a skill. Authoritative membership replaces that provisio
 as soon as `system/init` arrives. An opening prompt may arrive during this handshake, so the
 session accepts and holds one prompt until initialization succeeds, fails, or reaches the
 startup control timeout. This avoids a second probe process (which would run hooks and discover
-a different session) and avoids losing the first turn. Claude executes a selected action by
+a different session) and avoids losing the first turn.
+
+**`system/init` is not a turn boundary.** The CLI writes its first `system/init` only once it
+starts the opening prompt: measured on 2026-10-02 with CLI 2.1.287, an `initialize` control
+request alone returns its `control_response` and no `system/init`. A background launch
+(automations, scheduled messages, supervision) sends the opening prompt at once, so the init
+lands inside that turn. `ConversationTimeline` used to turn a model-bearing init into
+`.status(.ready)`, which ended the opening turn for the runtime too: an unattended automation
+run was settled as having ended without a result about a second after it started, while its
+agent kept working. The timeline now reports `.modelReported`, and the view applies Ready only
+when no turn is in flight (`ConversationOpeningTurnTests`). Claude executes a selected action by
 sending the exact `/name arguments` text back through its ordinary stream. Successful commands
 such as `/context` can return their only useful text on the terminal `result`; the timeline adds
 that result only when the turn did not already produce an assistant message.
