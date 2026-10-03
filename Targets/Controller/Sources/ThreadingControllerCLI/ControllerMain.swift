@@ -95,6 +95,9 @@ struct ControllerMain {
     mailbox ADDRESS [CURSOR]
     mail-history ADDRESS [CURSOR]
     mail-sent ADDRESS
+    mail-forward OLD | mail-forward-revision OLD
+    mail-forward-set OLD NEW REVISION | mail-forward-clear OLD REVISION
+    mail-move OLD NEW   (moves OLD's unacknowledged mail to NEW, keeping message ids)
     mail-get MESSAGE_UUID
     mail-send FROM_ADDRESS TO_ADDRESS MESSAGE_UUID TEXT_FILE [normal|interrupt]
     mail-ack ADDRESS MESSAGE_UUID
@@ -278,6 +281,21 @@ struct ControllerMain {
             let after = try cursor(0); try output(await store.mailContacts(after: after))
         case "mailbox":
             let after = try cursor(1); try output(await store.inbox(MailAddress(args[0]), after: after))
+        case "mail-forward":
+            try count(1); try output(await store.mailForward(MailAddress(args[0])))
+        case "mail-forward-set":
+            try count(3)
+            guard let revision = Int(args[2]) else { throw ControllerError.invalidInput("revision") }
+            try output(await store.setMailForward(from: MailAddress(args[0]), to: MailAddress(args[1]), expectedRevision: revision))
+        case "mail-forward-clear":
+            try count(2)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            try await store.clearMailForward(MailAddress(args[0]), expectedRevision: revision)
+            try output(await store.mailForwardRevision(MailAddress(args[0])))
+        case "mail-forward-revision":
+            try count(1); try output(await store.mailForwardRevision(MailAddress(args[0])))
+        case "mail-move":
+            try count(2); try output(await store.moveMail(from: MailAddress(args[0]), to: MailAddress(args[1])))
         case "mail-sent":
             try count(1); try output(await store.recentSentMail(MailAddress(args[0])))
         case "mail-history":

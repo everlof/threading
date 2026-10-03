@@ -257,6 +257,75 @@ struct ControllerMailTests {
         _ = senderAddress
     }
 
+    // MARK: - Moving a mailbox
+
+    @Test func movingASessionMovesOpenMailOnceAndForwardsLateMailWithoutRelaying() async throws {
+        let (d1, d2, mac, vps, macID, vpsID) = try await twoHosts()
+        defer { try? FileManager.default.removeItem(at: d1); try? FileManager.default.removeItem(at: d2) }
+        let session = UUID()
+        let old = MailAddress(host: macID, kind: .session, id: session)
+        let new = MailAddress(host: vpsID, kind: .session, id: session)
+        let sibling = MailAddress(host: macID, kind: .session, id: UUID())
+        _ = try await mac.registerMailbox(old, name: "Deploy")
+        _ = try await mac.registerMailbox(sibling, name: "Review")
+        _ = try await vps.registerMailbox(new, name: "Deploy")
+        let open = try await mac.sendMail(from: sibling, to: old, id: UUID(), text: "before the move", replyTo: nil, priority: .normal, ownerAdmitted: true)
+        let read = try await mac.sendMail(from: sibling, to: old, id: UUID(), text: "already read", replyTo: nil, priority: .normal, ownerAdmitted: true)
+        _ = try await mac.acknowledgeMail(mailbox: old, ids: [read.envelope.id])
+
+        // The new store's forward is the owner's consent; without it a forwarded copy is refused.
+        #expect(try await mac.moveMail(from: old, to: new) == 1)
+        #expect(try await mac.mail(open.envelope.id).state == .moved)
+        #expect(try await mac.mail(read.envelope.id).state == .acked, "acknowledged mail stays")
+        #expect(try await mac.inbox(old).items.isEmpty)
+        #expect(try await mac.moveMail(from: old, to: new) == 0, "a second move finds nothing open")
+        let batch = try await mac.outboundBatch(for: vpsID)
+        #expect(batch.envelopes.map(\.forwardedFrom) == [old])
+        let unexpected = try await vps.handleMailRPC(MailRPCRequest(push: MailPush(from: macID, messages: batch.envelopes)), peer: macID)
+        #expect(unexpected.results?.first?.outcome == .refused, "no grant and no forward written here")
+        _ = try await vps.setMailForward(from: old, to: new, expectedRevision: 0)
+        let expected = try await vps.handleMailRPC(MailRPCRequest(push: MailPush(from: macID, messages: batch.envelopes)), peer: macID)
+        #expect(expected.results?.first?.outcome == .accepted)
+        #expect(try await vps.inbox(new).items.map(\.message.envelope.id) == [open.envelope.id])
+        // Pushing the same ids again is a duplicate, not a second copy.
+        let again = try await vps.handleMailRPC(MailRPCRequest(push: MailPush(from: macID, messages: batch.envelopes)), peer: macID)
+        #expect(again.results?.map(\.outcome) == [.duplicate])
+        try await mac.applyPushResults(again.results ?? [], peer: vpsID)
+        #expect(try await mac.mail(open.envelope.id).state == .moved)
+
+        // Mail still addressed to the old address is forwarded once, as the same message.
+        let late = try await mac.sendMail(from: sibling, to: old, id: UUID(), text: "after the move", replyTo: nil, priority: .normal, ownerAdmitted: true)
+        #expect(late.state == .moved && late.envelope.recipient == new && late.envelope.forwardedFrom == old)
+
+        // Back again: the host forwards to the Mac; the Mac accepts only because it wrote the forward.
+        let worker = try await fixture.seed(vps, key: "w")
+        let workerAddress = try await vps.mailAddress(worker: worker.workerID)
+        _ = try await vps.setMailGrant(recipient: new, sender: workerAddress.description, expectedRevision: 0, mode: .notify, allowsInterrupt: false)
+        let claim = try #require(await vps.claim(workerID: worker.workerID))
+        let fromWorker = try await vps.sendMail(executionID: claim.execution.id, to: new, id: UUID(), text: "from a worker", replyTo: nil, priority: .normal)
+        // Moving back: the Mac's own forward for the old address is cleared first.
+        try await mac.clearMailForward(old, expectedRevision: try await mac.mailForwardRevision(old))
+        #expect(try await vps.moveMail(from: new, to: old) == 2)
+        let back = try await vps.outboundBatch(for: macID).envelopes
+        #expect(back.contains { $0.id == fromWorker.envelope.id })
+        let refused = try await mac.handleMailRPC(MailRPCRequest(push: MailPush(from: vpsID, messages: back.filter { $0.id == fromWorker.envelope.id })), peer: vpsID)
+        #expect(refused.results?.first?.outcome == .refused, "a worker on the host is not the host's to vouch for without a forward here")
+        _ = try await mac.setMailForward(from: new, to: old, expectedRevision: 0)
+        let accepted = try await mac.handleMailRPC(MailRPCRequest(push: MailPush(from: vpsID, messages: back.filter { $0.id == fromWorker.envelope.id })), peer: vpsID)
+        #expect(accepted.results?.first?.outcome == .accepted)
+        #expect(try await mac.inbox(old).items.map(\.message.envelope.text).contains("from a worker"))
+
+        // Never relayed onward: a forwarded copy for an address that is itself forwarded is refused.
+        _ = try await mac.setMailForward(from: old, to: new, expectedRevision: try await mac.mailForwardRevision(old))
+        let onward = back.first { $0.id == fromWorker.envelope.id }!
+        let replay = MailEnvelope(id: UUID(), sender: onward.sender, senderName: onward.senderName, recipient: old, text: "loop",
+                                  priority: .normal, replyTo: nil, questionID: nil, chainID: UUID(), depth: 0, sentAt: "now")
+        var looped = replay
+        looped.forwardedFrom = new
+        let relay = try await mac.handleMailRPC(MailRPCRequest(push: MailPush(from: vpsID, messages: [looped])), peer: vpsID)
+        #expect(relay.results?.first?.outcome == .refused)
+    }
+
     @Test func pullCollectsHeldMailAndReportsRefusalsBack() async throws {
         let (d1, d2, mac, vps, macID, vpsID) = try await twoHosts()
         defer { try? FileManager.default.removeItem(at: d1); try? FileManager.default.removeItem(at: d2) }

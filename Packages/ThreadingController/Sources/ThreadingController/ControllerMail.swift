@@ -59,6 +59,9 @@ public struct MailEnvelope: Codable, Equatable, Sendable {
     public let chainID: UUID
     public let depth: Int
     public let sentAt: String
+    /// Set on the one copy a forward makes: the address it was first accepted for. A message
+    /// carrying it is never forwarded again (`ControllerMailForward.swift`).
+    public var forwardedFrom: MailAddress? = nil
 
     func validate() throws {
         try Limits.text(text, field: "mail_text")
@@ -79,10 +82,12 @@ public enum MailState: String, Codable, Sendable {
     case inbox, noticed, acked
     /// Held by the sender's host for a peer: waiting, handed to its host, refused by its host.
     case outbound, forwarded, bounced
+    /// Re-addressed by the owner to the mailbox's new address and handed on from here.
+    case moved
 }
 
 public struct MailMessage: Codable, Equatable, Sendable {
-    public let envelope: MailEnvelope
+    public internal(set) var envelope: MailEnvelope
     public internal(set) var state: MailState
     public internal(set) var acceptedAt: String?
     /// Whether the grant that admitted it lets it start work for an idle recipient.
@@ -410,7 +415,10 @@ extension ControllerStore {
     func accept(_ envelope: MailEnvelope, peer: HostID? = nil, ownerAdmitted: Bool = false) throws -> MailMessage {
         try envelope.validate()
         let local = try host().id
-        if let peer { guard envelope.sender.host == peer else { throw ControllerError.forbidden } }
+        // A peer vouches only for senders on itself — or, for a forwarded copy, for the old
+        // address on itself that this store's owner agreed to take mail for.
+        let expectedForward = try expectsForward(envelope, from: peer)
+        if let peer { guard envelope.sender.host == peer || expectedForward else { throw ControllerError.forbidden } }
         guard envelope.recipient.host == local else { throw ControllerError.forbidden }
         if let prior: MailMessage = try optional("mail", envelope.id.uuidString.lowercased()) {
             guard prior.envelope.sameRequest(as: envelope), prior.envelope.sentAt == envelope.sentAt || peer == nil else {
@@ -419,14 +427,20 @@ extension ControllerStore {
             return prior
         }
         try requireLocalMailbox(envelope.recipient)
+        // The owner who wrote the forward on this store vouches for mail admitted at the old one.
+        let ownerAdmitted = ownerAdmitted || expectedForward
         let isReply = try isReplyToOwnMail(envelope)
         let grant = try matchingGrant(recipient: envelope.recipient, sender: envelope.sender)
-        if !isReply && !(ownerAdmitted && peer == nil) {
+        if !isReply && !(ownerAdmitted && (peer == nil || expectedForward)) {
             guard let grant, let mode = grant.mode else { throw ControllerError.forbidden }
             if envelope.questionID != nil { guard mode.rank >= MailMode.ask.rank else { throw ControllerError.forbidden } }
         }
-        if envelope.priority == .interrupt, !(ownerAdmitted && peer == nil) {
+        if envelope.priority == .interrupt, !(ownerAdmitted && (peer == nil || expectedForward)) {
             guard grant?.allowsInterrupt == true else { throw ControllerError.forbidden }
+        }
+        // Admitted by the old address's own rules; a forwarded address passes the message on once.
+        if let forward = try mailForward(envelope.recipient) {
+            return try forwardOnce(envelope, along: forward, peer: peer, ownerAdmitted: true)
         }
         let open = try db.rows("SELECT COUNT(*) FROM (SELECT 1 FROM record WHERE kind='mail' AND parent=? AND state IN ('inbox','noticed') LIMIT ?)",
                                [.text(envelope.recipient.description), .integer(Int64(MailLimits.openInbox))])

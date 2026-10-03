@@ -239,6 +239,26 @@ class MailTests(unittest.TestCase):
         notice = subprocess.run([CONTROLLER, "agent-notice", "session-start"], input="{}", capture_output=True, text=True, timeout=15, env=env)
         self.assertEqual((notice.returncode, notice.stdout), (0, ""))
 
+    def test_a_moved_session_keeps_its_unread_mail_and_late_mail_is_forwarded_once(self):
+        session = str(uuid.uuid4())
+        old, new = self.mac.id + "/session/" + session, self.vps.id + "/session/" + session
+        sibling = self.mac.id + "/session/" + str(uuid.uuid4())
+        self.mac.call("mail-register", old, "Deploy")
+        self.mac.call("mail-register", sibling, "Review")
+        self.vps.call("mail-register", new, "Deploy")
+        self.mac.call("mail-grant-set", old, sibling, "0", "notify", "normal")
+        self.mac.call("mail-send", sibling, old, str(uuid.uuid4()), self.mac.file("m1", "unread before the move"))
+        # The owner writes the forward on both stores, then moves the unread mail in one operation.
+        self.vps.call("mail-forward-set", old, new, "0")
+        self.assertEqual(self.mac.call("mail-move", old, new), 1)
+        self.assertEqual(self.mac.call("mail-move", old, new), 0)
+        self.assertEqual(self.mac.call("mail-sync")["pushed"], 1)
+        late = self.mac.call("mail-send", sibling, old, str(uuid.uuid4()), self.mac.file("m2", "after the move"))
+        self.assertEqual((late["state"], late["envelope"]["recipient"]), ("moved", new))
+        self.mac.call("mail-sync")
+        self.assertEqual([i["message"]["envelope"]["text"] for i in self.vps.call("mailbox", new)["items"]],
+                         ["unread before the move", "after the move"])
+
     def test_the_receiving_end_refuses_unknown_peers_and_spoofed_senders(self):
         stranger = str(uuid.uuid4())
         request = json.dumps({"pull": {"after": 0}})

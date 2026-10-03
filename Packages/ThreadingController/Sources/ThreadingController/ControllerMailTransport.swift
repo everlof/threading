@@ -149,6 +149,14 @@ extension ControllerStore {
     private func settle(sequence: Int64, id: UUID, refusal: String?) throws {
         try db.run("DELETE FROM mail_outbound WHERE sequence=?", [.integer(sequence)])
         var message: MailMessage = try required("mail", id.uuidString.lowercased())
+        if message.state == .moved {
+            // A moved copy stays `moved`; only a refusal is recorded on it.
+            guard let refusal else { return }
+            message.bounce = refusal
+            try update("mail", id.uuidString.lowercased(), state: message.state.rawValue, value: message)
+            try event("mail.move_bounced", id.uuidString.lowercased())
+            return
+        }
         guard message.state == .outbound else { return }
         message.state = refusal == nil ? .forwarded : .bounced
         message.bounce = refusal
