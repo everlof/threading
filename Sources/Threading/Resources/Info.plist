@@ -2,6 +2,25 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Advertise editor capability without claiming an OS default. Only Settings opt-in does so. -->
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>net.daringfireball.markdown</string>
+			<key>UTTypeDescription</key>
+			<string>Markdown Document</string>
+			<key>UTTypeConformsTo</key>
+			<array><string>public.plain-text</string></array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array><string>md</string><string>markdown</string></array>
+				<key>public.mime-type</key>
+				<string>text/markdown</string>
+			</dict>
+		</dict>
+	</array>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Let your themes react to playing audio. Threading analyzes sound locally and shares only spectrum levels with themes.</string>
 	<key>CFBundleDevelopmentRegion</key>
@@ -144,6 +163,16 @@
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
+			<string>Markdown Document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array><string>net.daringfireball.markdown</string><string>codes.threading.markdown-mc</string></array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
 			<string>Threading Window Configuration</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
@@ -175,6 +204,19 @@
 	</array>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>codes.threading.markdown-mc</string>
+			<key>UTTypeDescription</key>
+			<string>Markdown Document (.mc)</string>
+			<key>UTTypeConformsTo</key>
+			<array><string>public.plain-text</string></array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array><string>mc</string></array>
+			</dict>
+		</dict>
 		<dict>
 			<key>UTTypeConformsTo</key>
 			<array>

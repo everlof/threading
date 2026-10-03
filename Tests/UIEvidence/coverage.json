@@ -2148,6 +2148,83 @@
       "capture": {
         "glob": "account-identity-menu-*.png"
       }
+    },
+    {
+      "id": "markdown-editor",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Standalone Markdown editor",
+      "description": "The shipping document window with editable source beside the native conversation Markdown renderer.",
+      "states": [
+        "Editable source and native preview",
+        "System light",
+        "System dark",
+        "Cyberpunk",
+        "Windows 98"
+      ],
+      "matrix": {
+        "themes": [
+          "System",
+          "Cyberpunk",
+          "Windows 98"
+        ],
+        "appearances": [
+          "Light",
+          "Dark",
+          "Authored"
+        ],
+        "sizes": [
+          "1100×740-point document window"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/MarkdownEditorTests.swift",
+        "tests": [
+          "ThreadingTests/MarkdownEditorRenderTests/testRendersEditorInShippingWindow",
+          "ThreadingTests/MarkdownSettingsRenderTests/testRendersFileAssociationSettingsInShippingShell"
+        ]
+      },
+      "capture": {
+        "glob": "markdown-*.png"
+      }
+    },
+    {
+      "id": "markdown-quicklook",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Markdown Quick Look",
+      "description": "The production data-based preview HTML rendered by WebKit, with the shipping extension declaration checked. OS provider activation is checked separately.",
+      "states": [
+        "Readable Markdown document",
+        "System light",
+        "System dark",
+        "Cyberpunk",
+        "Windows 98"
+      ],
+      "matrix": {
+        "themes": [
+          "System",
+          "Cyberpunk",
+          "Windows 98"
+        ],
+        "appearances": [
+          "Light",
+          "Dark",
+          "Authored"
+        ],
+        "sizes": [
+          "900×700-point Quick Look content"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/MarkdownQuickLookRenderTests.swift",
+        "test": "ThreadingTests/MarkdownQuickLookRenderTests/testRendersProductionQuickLookHTML"
+      },
+      "capture": {
+        "glob": "quicklook-markdown-*.png"
+      }
     }
   ]
 }

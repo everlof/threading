@@ -1538,6 +1538,17 @@
         }
       }
     },
+    "%@ — Markdown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — Markdown"
+          }
+        }
+      }
+    },
     "%@ — open Threading on the iPhone and approve it with Face ID. %@ left." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12136,6 +12147,17 @@
         }
       }
     },
+    "Choose Threading as the default app for .md files." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj Threading som standardapp för .md-filer."
+          }
+        }
+      }
+    },
     "Choose a .threadingextension package or an unpacked development directory." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12231,6 +12253,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj ett projekt…"
+          }
+        }
+      }
+    },
+    "Choose a regular Markdown text file." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj en vanlig Markdown-textfil."
           }
         }
       }
@@ -18211,6 +18244,17 @@
         }
       }
     },
+    "Default App" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standardapp"
+          }
+        }
+      }
+    },
     "Default account %lld for this project" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19177,6 +19221,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fråga inte"
+          }
+        }
+      }
+    },
+    "Don't Save" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara inte"
           }
         }
       }
@@ -28983,6 +29038,17 @@
         }
       }
     },
+    "Make Default" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd som standard"
+          }
+        }
+      }
+    },
     "Make Manager" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29309,6 +29375,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Markera i den här bilden"
+          }
+        }
+      }
+    },
+    "Markdown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markdown"
+          }
+        }
+      }
+    },
+    "Markdown Preview" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markdown-förhandsvisning"
+          }
+        }
+      }
+    },
+    "Markdown Source" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markdown-källtext"
+          }
+        }
+      }
+    },
+    "Markdown files" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markdown-filer"
           }
         }
       }
@@ -30979,6 +31089,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ny manager…"
+          }
+        }
+      }
+    },
+    "New Markdown Document" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nytt Markdown-dokument"
           }
         }
       }
@@ -34477,6 +34598,17 @@
         }
       }
     },
+    "Open .mc files in Threading" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna .mc-filer i Threading"
+          }
+        }
+      }
+    },
     "Open Automation Profile" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34561,6 +34693,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppna inloggningsobjekt…"
+          }
+        }
+      }
+    },
+    "Open Markdown Document…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna Markdown-dokument…"
+          }
+        }
+      }
+    },
+    "Open Markdown files in Threading" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna Markdown-filer i Threading"
           }
         }
       }
@@ -37092,6 +37246,34 @@
         }
       }
     },
+    "Preview is paused because a Markdown block exceeds 32 KB. Your source is kept in full." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förhandsvisningen är pausad eftersom ett Markdown-block är större än 32 KB. Hela källtexten finns kvar."
+          }
+        }
+      }
+    },
+    "Preview is paused because the document exceeds 1 MB. Your source is kept in full." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preview is paused because the document exceeds 1 MB. Your source is kept in full."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förhandsvisningen är pausad eftersom dokumentet överstiger 1 MB. Hela källtexten finns kvar."
+          }
+        }
+      }
+    },
     "Preview patch" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37099,6 +37281,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Förhandsgranska patch"
+          }
+        }
+      }
+    },
+    "Preview paused" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förhandsvisning pausad"
           }
         }
       }
@@ -42935,6 +43128,28 @@
         }
       }
     },
+    "Save Markdown Document" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara Markdown-dokument"
+          }
+        }
+      }
+    },
+    "Save Markdown Document As…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara Markdown-dokument som…"
+          }
+        }
+      }
+    },
     "Save Screenshot" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43019,6 +43234,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spara ändringar"
+          }
+        }
+      }
+    },
+    "Save changes to %@?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara ändringar i %@?"
           }
         }
       }
@@ -44097,6 +44323,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj Terminal.app-temafil att importera"
+          }
+        }
+      }
+    },
+    "Select a Markdown document first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj ett Markdown-dokument först."
           }
         }
       }
@@ -50586,6 +50823,17 @@
         }
       }
     },
+    "The Markdown editor supports files up to 1 MB." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markdown-redigeraren stöder filer upp till 1 MB."
+          }
+        }
+      }
+    },
     "The PDF could not be decoded." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56504,6 +56752,17 @@
         }
       }
     },
+    "This file changed on disk. Save a copy to keep both versions." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filen har ändrats på disk. Spara en kopia för att behålla båda versionerna."
+          }
+        }
+      }
+    },
     "This file could not be previewed." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56522,6 +56781,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Filen kunde inte läsas som ett ljud."
+          }
+        }
+      }
+    },
+    "This file is not valid UTF-8 text." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filen innehåller inte giltig UTF-8-text."
           }
         }
       }
@@ -56555,6 +56825,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det här är ett engångstestkonto"
+          }
+        }
+      }
+    },
+    "This is opt-in. macOS may ask you to confirm the change. To choose another app later, use Finder's Get Info → Open With → Change All." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du väljer själv om detta ska aktiveras. macOS kan be dig bekräfta ändringen. Välj en annan app senare via Visa info → Öppna med → Ändra alla i Finder."
           }
         }
       }
@@ -58931,6 +59212,17 @@
         }
       }
     },
+    "Treat .mc files as Markdown documents." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Behandla .mc-filer som Markdown-dokument."
+          }
+        }
+      }
+    },
     "Trigger fix ready to verify" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59941,6 +60233,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tills %@-fönstret återställs"
+          }
+        }
+      }
+    },
+    "Untitled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Namnlös"
           }
         }
       }
@@ -63500,6 +63803,17 @@
         }
       }
     },
+    "Your changes will be lost if you close without saving." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändringarna går förlorade om du stänger utan att spara."
+          }
+        }
+      }
+    },
     "Your device" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -64732,6 +65046,17 @@
         }
       }
     },
+    "default app" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "standardapp"
+          }
+        }
+      }
+    },
     "delete" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -64860,6 +65185,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "dyld-cache"
+          }
+        }
+      }
+    },
+    "editor" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "redigerare"
           }
         }
       }
@@ -65003,6 +65339,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "snabbläge"
+          }
+        }
+      }
+    },
+    "file association" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "filassociation"
           }
         }
       }
@@ -65921,6 +66268,17 @@
         }
       }
     },
+    "markdown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "markdown"
+          }
+        }
+      }
+    },
     "matches %lld baseline candidates and %lld current ones, so nothing is claimed about it" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -65961,6 +66319,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "kan innehålla ändringar från 1 annan chatt"
+          }
+        }
+      }
+    },
+    "mc" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "mc"
+          }
+        }
+      }
+    },
+    "md" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "md"
           }
         }
       }

@@ -579,6 +579,18 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+The standalone Markdown editor and its Markdown Settings page are host-only document surfaces.
+The entity is one user-opened or unsaved document, independent of projects and sessions. Threading
+owns source, file identity, undo/dirty state, UTF-8 and size validation, conflict-checked saves,
+close/quit decisions and explicit LaunchServices registration. Themes style shared Design parts;
+there is no extension replacement slot, file-data exposure or new mutation authority. The native
+renderer is also the fallback under every theme. See `architecture/markdown-editor.md`.
+
+Finder's Markdown Quick Look preview is a host-only, read-only OS extension. macOS owns its
+window and provider selection; Threading owns bounded file decoding, Markdown interpretation
+and the presentation snapshot shared with the sandboxed preview. Theme customization cannot
+change source, add scripts or file authority, or select the system's default editor.
+
 The physical-iPhone tooling helper is host-only setup UI for the selected device. Its existing
 Settings destination, explicit download decision, successful-install retry, visibility demand
 and separate input consent remain host-owned. Themes style its native labels and action; no

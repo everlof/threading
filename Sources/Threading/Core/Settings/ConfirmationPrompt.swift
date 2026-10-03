@@ -50,6 +50,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     /// prompt — nothing is running — but it belongs beside them because the subject is one
     /// session and the answer changes what that session is.
     case conversationRepairOutcome
+    case closeMarkdownDocument
 
     // MARK: Recoverable elsewhere
 
@@ -358,6 +359,8 @@ enum ConfirmationPrompt: String, CaseIterable {
         // There is no answer to remember: a box saying "always accept what an agent proposes
         // about my conversations" is the setting this deliberately cannot have.
         case .conversationRepairOutcome:
+            return .alwaysAsks(.newQuestionEachTime)
+        case .closeMarkdownDocument:
             return .alwaysAsks(.newQuestionEachTime)
         }
     }

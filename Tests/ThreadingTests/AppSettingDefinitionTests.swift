@@ -546,9 +546,13 @@ final class AppSettingDefinitionTests: XCTestCase {
         XCTAssertEqual(authoredRows.count, 97)
 #endif
         XCTAssertEqual(
-            SettingsPages.builtIn.flatMap(\.entries).count,
+            // Markdown associations are OS-owned actions, not persisted AppSettings.
+            SettingsPages.builtIn.filter { $0.id != SettingsPages.markdownID }.flatMap(\.entries).count,
             authoredRows.count
         )
+        XCTAssertEqual(SettingsPages.page(id: SettingsPages.markdownID)?.entries.map(\.title), [
+            L10n.string("Open Markdown files in Threading"), L10n.string("Open .mc files in Threading")
+        ])
         XCTAssertEqual(
             SettingsPages.page(id: SettingsPages.remoteAccessID)?.entries.map(\.title),
             authoredRows.filter { $0.pageID == SettingsPages.remoteAccessID }

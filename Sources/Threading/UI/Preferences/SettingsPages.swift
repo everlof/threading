@@ -142,6 +142,7 @@ enum SettingsPages {
     /// No `hostPage` on the four pages split out of General: extensions that contribute to
     /// General keep contributing there, and none of these subjects is a door an extension needs.
     static let sidebarID = "sidebar"
+    static let markdownID = "markdown"
     static let chatsID = "chats"
     static let notificationsID = "notifications"
     static let integrationID = "integration"
@@ -270,6 +271,23 @@ enum SettingsPages {
             // The two standing decisions. The command inventories are dynamic disclosure
             // cards, so they stay page-level.
         ) { KeyboardPreferencesViewController() },
+        Page(
+            id: markdownID,
+            hostPage: nil,
+            title: L10n.string("Markdown"),
+            symbol: "doc.text",
+            group: appGroup,
+            searchTerms: terms("markdown", "editor", "md", "mc", "default app", "file association"),
+            entries: [SettingsEntry(
+                title: L10n.string("Open Markdown files in Threading"),
+                section: nil,
+                terms: ["md", "default app", "file association"]
+            ), SettingsEntry(
+                title: L10n.string("Open .mc files in Threading"),
+                section: nil,
+                terms: ["mc", "default app", "file association"]
+            )]
+        ) { MarkdownPreferencesViewController() },
         // MARK: Appearance
         Page(
             id: themesID,

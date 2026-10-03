@@ -1509,7 +1509,7 @@ public final class ThemedDocumentTableView: NSView, ThemedComponent {
     }
 
     public override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: canvas.frame.height)
+        NSSize(width: NSView.noIntrinsicMetric, height: scrollView.heightToFitContent(canvas.frame.height))
     }
 }
 

@@ -2834,6 +2834,17 @@ public class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBounda
     /// A table with a header makes AppKit insert a second clip view beside `contentView`.
     /// It is framework-owned and cannot be replaced through the public API, but its stock
     /// background is still ours to neutralise.
+    /// A finite document block reserves the space consumed by non-overlay scrollbars.
+    /// Its content height alone would hide the last line in themes with classic scrollers.
+    public func heightToFitContent(_ height: CGFloat) -> CGFloat {
+        Self.frameSize(
+            forContentSize: NSSize(width: 0, height: height),
+            horizontalScrollerClass: hasHorizontalScroller ? ThemedScroller.self : nil,
+            verticalScrollerClass: hasVerticalScroller ? ThemedScroller.self : nil,
+            borderType: borderType, controlSize: .regular, scrollerStyle: scrollerStyle
+        ).height + contentInsets.top + contentInsets.bottom
+    }
+
     public override func tile() {
         super.tile()
         if AppThemePalette.current.material(

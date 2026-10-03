@@ -188,6 +188,10 @@ enum AppCommands {
         static let searchEverywhere = "edit.searchEverywhere"
         static let openIn = "session.openIn"
         static let commandPalette = "app.commandPalette"
+        static let newMarkdown = "markdown.new"
+        static let openMarkdown = "markdown.open"
+        static let saveMarkdown = "markdown.save"
+        static let saveMarkdownAs = "markdown.saveAs"
 
         static let toggleSidebar = "view.sidebar"
         static let groupByBranch = "view.groupByBranch"
@@ -250,6 +254,14 @@ enum AppCommands {
 
     /// Threading's own commands, in the order the page lists them.
     static let editable: [AppCommand] = [
+        AppCommand(id: ID.newMarkdown, group: .system, title: "New Markdown Document",
+                   defaultShortcut: nil, isEditable: true, iconName: "doc.badge.plus"),
+        AppCommand(id: ID.openMarkdown, group: .system, title: "Open Markdown Document…",
+                   defaultShortcut: nil, isEditable: true, iconName: "doc.text"),
+        AppCommand(id: ID.saveMarkdown, group: .system, title: "Save Markdown Document",
+                   defaultShortcut: nil, isEditable: true),
+        AppCommand(id: ID.saveMarkdownAs, group: .system, title: "Save Markdown Document As…",
+                   defaultShortcut: nil, isEditable: true),
         AppCommand(id: ID.refreshModels, group: .system, title: "Refresh Models",
                    detail: "Reload available models for all enabled Codex accounts.",
                    defaultShortcut: nil, isEditable: true, iconName: "arrow.clockwise"),
@@ -304,9 +316,8 @@ enum AppCommands {
                    defaultShortcut: KeyboardShortcut(key: "o", modifiers: .command), isEditable: true,
                    scope: .project),
 
-        // Bare ⌘S: the sidebar toggle is the most-pressed window command here, and this app
-        // has no documents, so the platform's Save never claimed the chord. ⌃⌘S remains free
-        // for anyone who preferred the window-structure layer to rebind.
+        // Bare ⌘S toggles the main window's sidebar. A standalone Markdown document claims
+        // the platform's document keys locally before the application menu sees them.
         AppCommand(id: ID.toggleSidebar, group: .view, title: "Toggle Sidebar",
                    defaultShortcut: KeyboardShortcut(key: "s", modifiers: .command), isEditable: true),
         // Xcode's Go Back chords, for Xcode's gesture: retrace the window's page selection.
@@ -451,8 +462,7 @@ enum AppCommands {
         // view of anything, it works with no window on screen, and it is the one quiet switch
         // macOS cannot supply — a Focus silences the notification sounds that ride a posted
         // `UNNotificationSound`, but not the bell, which this app plays itself through
-        // `NSSound`. ⇧⌘S is free: ⌘S is Toggle Sidebar, and this app has no documents for the
-        // platform's Save As to have claimed the chord.
+        // `NSSound`. Standalone Markdown windows claim ⇧⌘S locally for Save As.
         AppCommand(id: ID.silenceSounds, group: .system, title: "Silence Sounds",
                    detail: "Holds every sound Threading makes — notification alerts and the "
                        + "terminal bell alike — without changing what either is set to.",

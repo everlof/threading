@@ -20,9 +20,15 @@ final class MarkdownView: NSStackView {
     private let blockPages: [[String]]
     private let restyle = AppEventObservations()
 
-    init(markdown: String, style: @autoclosure @escaping () -> MarkdownStyle = .assistant) {
+    convenience init(markdown: String, style: @autoclosure @escaping () -> MarkdownStyle = .assistant) {
+        self.init(preparedPages: Self.preparePages(markdown), style: style())
+    }
+
+    /// The editor prepares source boundaries on its bounded worker; only the active page is
+    /// styled and mounted here, through the same renderer used by native conversations.
+    init(preparedPages: [[String]], style: @autoclosure @escaping () -> MarkdownStyle = .assistant) {
         self.style = style
-        blockPages = MarkdownView.sourcePages(Markdown.sourceBlocks(markdown))
+        blockPages = preparedPages
         super.init(frame: .zero)
 
         orientation = .vertical
@@ -92,7 +98,11 @@ final class MarkdownView: NSStackView {
     /// must not all become the first page merely because each one is a single Markdown block.
     /// Source-line counting is a byte scan (newline is ASCII), so page planning creates no styled
     /// strings or AppKit objects for content outside the active page.
-    private static func sourcePages(_ sources: [String]) -> [[String]] {
+    nonisolated static func preparePages(_ markdown: String) -> [[String]] {
+        sourcePages(Markdown.sourceBlocks(markdown))
+    }
+
+    nonisolated private static func sourcePages(_ sources: [String]) -> [[String]] {
         guard !sources.isEmpty else { return [[]] }
 
         let maximumBlocks = MarkdownDefaults.maximumBlocksPerPage
@@ -379,6 +389,7 @@ final class MarkdownView: NSStackView {
             scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -pad),
             scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: pad),
             scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -pad),
+            scroll.heightAnchor.constraint(equalToConstant: scroll.heightToFitContent(field.intrinsicContentSize.height)),
 
             field.topAnchor.constraint(equalTo: document.topAnchor),
             field.bottomAnchor.constraint(equalTo: document.bottomAnchor),

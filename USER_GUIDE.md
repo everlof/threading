@@ -3488,6 +3488,32 @@ never silently switches to the Mac, and iOS writes stay local to that device. If
 of your iOS devices have this chat open, leave it open only on the intended device.
 Images, files and copying while ThreadingMobile is in the background are not supported.
 
+## Markdown Editor
+
+**File ▸ New Markdown Document** opens a separate themed window with editable source on the left
+and a live native preview on the right. Drag the vertical divider to resize either side. The
+preview uses the same Markdown rendering as native chats. **File ▸ Open Markdown Document…**
+opens `.md`, `.markdown` or `.mc` files, and reopening a file raises its existing window.
+
+Inside the editor, **⌘N** creates a document, **⌘O** opens one, **⌘S** saves, **⌘⇧S** saves as a
+new file, and **⌘W** closes. The main window keeps its existing shortcuts. The source header
+also has a Save button; Undo and Redo work through the Edit menu. Closing or quitting with
+unsaved edits offers Save, Don't Save and Cancel. Drafts stay in memory until saved.
+
+Files must be UTF-8 text and at most 1 MB. If the file changed on disk since you opened or saved
+it, saving refuses to overwrite it; use Save As to preserve both versions. A Markdown block
+larger than 32 KB pauses the preview while keeping the complete source editable and saveable.
+
+**Settings ▸ Markdown** lets you explicitly make Threading the default application for `.md`
+files or, separately, `.mc` files treated as Markdown. Both are opt-in; macOS may ask for
+confirmation. To change the default later, use Finder's **Get Info ▸ Open With ▸ Change All**.
+
+In Finder, select a Markdown file and press **Space** to read a rendered Quick Look preview.
+The bundled Threading preview extension shows headings, lists, quotes, tables and code, using
+your last saved Threading theme. It works while Threading is closed and uses System appearance
+until a theme snapshot is available. Large documents show an excerpt notice. macOS controls
+which Quick Look extension is enabled; this is independent of your default editor.
+
 ## Display Panel
 
 A terminal can only draw text. The display panel is the way around that: a third pane on

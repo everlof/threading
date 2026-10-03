@@ -170,6 +170,10 @@ public class ThemedTextView: NSTextView, ThemedComponent {
 /// by this factory never needs a runtime cast to reach the text view it created.
 public final class ThemedTextScrollView: ThemedScrollView {
     public let textView: ThemedTextView
+    /// Document editors keep even an empty page clickable across the complete viewport.
+    public var fillsViewport = false {
+        didSet { tile() }
+    }
 
     public init() {
         textView = ThemedTextView(frame: .zero, textContainer: nil)
@@ -182,6 +186,19 @@ public final class ThemedTextScrollView: ThemedScrollView {
 
         documentView = textView
         hasVerticalScroller = true
+    }
+
+    public override func tile() {
+        super.tile()
+        guard fillsViewport else { return }
+        // The clip gets its final size during tiling, after its controller's layout callback.
+        let height = contentView.bounds.height
+        if textView.minSize.height != height {
+            textView.minSize = NSSize(width: 0, height: height)
+        }
+        if textView.frame.height < height {
+            textView.setFrameSize(NSSize(width: textView.frame.width, height: height))
+        }
     }
 
     @available(*, unavailable)

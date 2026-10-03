@@ -5668,3 +5668,29 @@ fallback. See [`audio-spectrum.md`](audio-spectrum.md) for all ownership and fre
 
 The first hosted debug run measured 900 analyses in 0.557 seconds, roughly 0.62 ms per
 snapshot. This does not establish compositor/energy cost; unrelated machine load was high.
+
+## Standalone Markdown documents and Quick Look (2026-10-03)
+
+The editor's expected input is a 1–64 KiB note; regular UTF-8 file reads are bounded at 1 MiB
+plus one sentinel byte. A serial worker prepares source pages after a 180 ms editing debounce,
+and a generation check discards stale results. Only the current native renderer page is
+mounted: 48 blocks / 96 source lines, with the existing nested list/table budgets. A block over
+32 KiB pauses styling while preserving the complete editable source. File reads, decoding,
+coordinated conflict checks, encoding and atomic writes run off-main. Resize and scrolling do
+no file work or whole-document scans.
+
+`MarkdownEditorTests.testStressPreviewKeepsOnlyOneBoundedNativePage` exercised 560,000 bytes
+and 20,000 blocks through the production window. The hosted Debug run measured 85 ms for
+worker preparation, 14 ms for main-actor mounting, 119 ms end-to-end including source assignment,
+and 0.011 ms for the subsequent layout, with 110 live preview views. These are observations
+under concurrent machine load, not Release latency guarantees. Empty-document and divider
+resize tests cover the viewport path; rendered evidence covers System light/dark, Cyberpunk
+and Windows 98, including complete code/table content above classic scrollbar chrome.
+
+The separate sandboxed Quick Look provider uses the same parser. Its serial worker reads the
+same bounded file and selects at most 256 blocks, 128 KiB of preview source and 32 KiB per
+block before main-actor inline styling. Larger documents show an explicit excerpt notice.
+Theme publication coalesces rare changes and writes at most 16 KiB of presentation-only JSON;
+the preview neither starts the app nor reads sessions. Package tests exercise invalid UTF-8,
+oversized files, long blocks and the 256-block stress limit. See
+[`markdown-editor.md`](markdown-editor.md) for document and OS authority.

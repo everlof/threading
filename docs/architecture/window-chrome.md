@@ -1225,7 +1225,7 @@ those three controls live in AppKit's toolbar *above* the content view the scrim
 the wash over them instead would dim and swallow the close, minimize and zoom sitting in the same
 row, which is the one thing the scrim is not allowed to do.
 
-**Scope.** Main window only. The Component Gallery, Onboarding and detached browser windows keep
+**Scope.** Main window only. The Component Gallery, Onboarding, Markdown editor and detached browser windows keep
 native chrome under every theme — the last for the same reason as the first two, and because a
 takeover there would need its own `TitlebarActionWindow` plus a full app-drawn content root
 (band, drag handle, close button, overlay hosting) rather than a flag; `ThemedAlertPanel`/`ThemedPopover` were already frameless and app-drawn.

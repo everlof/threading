@@ -179,6 +179,10 @@
 		61A0CE010000000000000004 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011; };
 		61A0CE010000000000000005 /* ThreadingGlance.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 61A0CE010000000000000006; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C11B04010000000000000001 /* MobileClipboardWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C11B04010000000000000002 /* MobileClipboardWriterTests.swift */; };
+		4D4400010000000000000003 /* ThreadingMarkdownKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4400010000000000000002; };
+		4D4400010000000000000004 /* ThreadingMarkdownKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4400010000000000000002; };
+		4D4400010000000000000013 /* ThreadingMarkdownKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4400010000000000000002; };
+		4D4400010000000000000006 /* ThreadingMarkdownPreview.appex in Embed Markdown Preview */ = {isa = PBXBuildFile; fileRef = 4D4400010000000000000005; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -330,6 +334,7 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		61A0CE010000000000000008 /* Embed App Extensions */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (61A0CE010000000000000005, ); name = "Embed App Extensions"; runOnlyForDeploymentPostprocessing = 0; };
+		4D4400010000000000000007 /* Embed Markdown Preview */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (4D4400010000000000000006, ); name = "Embed Markdown Preview"; runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -476,6 +481,7 @@
 		F446C4C52994905237C3BE9B /* threading-extension-helper-network.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-extension-helper-network.entitlements"; sourceTree = "<group>"; };
 		61A0CE010000000000000006 /* ThreadingGlance.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ThreadingGlance.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C11B04010000000000000002 /* MobileClipboardWriterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileClipboardWriterTests.swift; sourceTree = "<group>"; };
+		4D4400010000000000000005 /* ThreadingMarkdownPreview.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = ThreadingMarkdownPreview.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -607,6 +613,7 @@
 		B1792448FB880E01F5D9086C /* Tests/ThreadingTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Tests/ThreadingTests; sourceTree = "<group>"; };
 		C0D100010000000000000003 /* Tests/ThreadingUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Tests/ThreadingUITests; sourceTree = "<group>"; };
 		61A0CE010000000000000007 /* Targets/ThreadingGlance */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Targets/ThreadingGlance; sourceTree = "<group>"; };
+		4D4400010000000000000008 /* Targets/ThreadingMarkdownPreview */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Targets/ThreadingMarkdownPreview; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -633,6 +640,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4D4400010000000000000013 /* ThreadingMarkdownKit in Frameworks */,
 				E50000010000000000000013 /* Sentry in Frameworks */,
 				D7C100010000000000000002 /* ThreadingPTYClient in Frameworks */,
 				7C000005000000000000A012 /* ThreadingPTYHostKit in ThreadingTests Frameworks */,
@@ -716,6 +724,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4D4400010000000000000003 /* ThreadingMarkdownKit in Frameworks */,
 				E50000010000000000000011 /* Sentry in Frameworks */,
 				F1000001000000000000036 /* SwiftTerm in Frameworks */,
 				F1000001000000000000037 /* ThinkingOrbs in Frameworks */,
@@ -737,6 +746,7 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		61A0CE010000000000000009 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (61A0CE010000000000000003, 61A0CE010000000000000004, ); runOnlyForDeploymentPostprocessing = 0; };
+		4D440001000000000000000A /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (4D4400010000000000000004, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -950,6 +960,7 @@
 		F5000001000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				4D4400010000000000000008 /* Targets/ThreadingMarkdownPreview */,
 				63D8F4952EE47C9A007F49BD /* Sources */,
 				5CC000010000000000000003 /* Bundled scc */,
 				A20000010000000000000014 /* Sources/ThreadingMobile */,
@@ -974,6 +985,7 @@
 		F5000001000000000000020 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				4D4400010000000000000005 /* ThreadingMarkdownPreview.appex */,
 				F2000001000000000000038 /* Threading.app */,
 				A20000010000000000000002 /* ThreadingMobile.app */,
 				61A0CE010000000000000006 /* ThreadingGlance.appex */,
@@ -1081,6 +1093,7 @@
 			);
 			name = ThreadingTests;
 			packageProductDependencies = (
+				4D4400010000000000000002 /* ThreadingMarkdownKit */,
 				E50000010000000000000001 /* Sentry */,
 				7C000007000000000000C0F1 /* ThreadingPluginKit */,
 				F4000001000000000000007 /* ThreadingExtensionKit */,
@@ -1302,6 +1315,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = F7000001000000000000003 /* Build configuration list for PBXNativeTarget "Threading" */;
 			buildPhases = (
+				4D4400010000000000000007 /* Embed Markdown Preview */,
 				C0D3A1100000000000000001 /* Enforce Repository Boundaries */,
 				F6000001000000000000002 /* Sources */,
 				F3000001000000000000001 /* Frameworks */,
@@ -1317,6 +1331,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				4D4400010000000000000010 /* Markdown Preview Dependency */,
 				7C000009000000000000E005 /* PBXTargetDependency */,
 				7C00000B000000000000E005 /* PBXTargetDependency */,
 				A2F10D84B314A37BF2F55C73 /* PBXTargetDependency */,
@@ -1332,6 +1347,7 @@
 			);
 			name = Threading;
 			packageProductDependencies = (
+				4D4400010000000000000002 /* ThreadingMarkdownKit */,
 				E50000010000000000000001 /* Sentry */,
 				F4000001000000000000001 /* SwiftTerm */,
 				F4000001000000000000003 /* ThinkingOrbs */,
@@ -1365,6 +1381,19 @@
             packageProductDependencies = (61A0CE010000000000000002, A20000010000000000000011, );
             productName = ThreadingGlance;
             productReference = 61A0CE010000000000000006;
+            productType = "com.apple.product-type.app-extension";
+        };
+		4D440001000000000000000C /* ThreadingMarkdownPreview */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = 4D440001000000000000000D;
+            buildPhases = (4D4400010000000000000009, 4D440001000000000000000A, 4D440001000000000000000B, );
+            buildRules = ();
+            dependencies = ();
+            fileSystemSynchronizedGroups = (4D4400010000000000000008, );
+            name = ThreadingMarkdownPreview;
+            packageProductDependencies = (4D4400010000000000000002, );
+            productName = ThreadingMarkdownPreview;
+            productReference = 4D4400010000000000000005;
             productType = "com.apple.product-type.app-extension";
         };
 /* End PBXNativeTarget section */
@@ -1412,6 +1441,7 @@
 			);
 			mainGroup = F5000001000000000000001;
 			packageReferences = (
+				4D4400010000000000000001 /* ThreadingMarkdownKit */,
 				E50000010000000000000020 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				61A0CE010000000000000011 /* ThreadingGlanceKit */,
 				F4000001000000000000002 /* XCLocalSwiftPackageReference "Packages/Vendor/SwiftTerm" */,
@@ -1437,6 +1467,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				4D440001000000000000000C /* ThreadingMarkdownPreview */,
 				61A0CE01000000000000000C /* ThreadingGlance */,
 				F6000001000000000000001 /* Threading */,
 				7C000009000000000000E001 /* DeviceLogsPlugin */,
@@ -1503,6 +1534,7 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		61A0CE01000000000000000B /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		4D440001000000000000000B /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
@@ -1844,6 +1876,7 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		61A0CE01000000000000000A /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		4D4400010000000000000009 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -1924,6 +1957,7 @@
 			targetProxy = D2E000010000000000000007 /* PBXContainerItemProxy */;
 		};
 		61A0CE01000000000000000E /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 61A0CE01000000000000000C /* ThreadingGlance */; };
+		4D4400010000000000000010 /* Markdown Preview Dependency */ = {isa = PBXTargetDependency; target = 4D440001000000000000000C; };
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -2880,6 +2914,54 @@
             };
             name = Release;
         };
+		4D440001000000000000000E /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                APPLICATION_EXTENSION_API_ONLY = YES;
+                CODE_SIGN_ENTITLEMENTS = Targets/ThreadingMarkdownPreview.entitlements;
+                CODE_SIGN_STYLE = Automatic;
+                CURRENT_PROJECT_VERSION = 0.0.0;
+                DEVELOPMENT_TEAM = "";
+                ENABLE_APP_SANDBOX = YES;
+                ENABLE_HARDENED_RUNTIME = YES;
+                GENERATE_INFOPLIST_FILE = NO;
+                INFOPLIST_FILE = "Targets/ThreadingMarkdownPreview-Info.plist";
+                LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@executable_path/../../../../Frameworks", );
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MARKETING_VERSION = 0.0.0;
+                PRODUCT_BUNDLE_IDENTIFIER = codes.threading.markdown-preview;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                SDKROOT = macosx;
+                SKIP_INSTALL = YES;
+                SWIFT_STRICT_CONCURRENCY = complete;
+                SWIFT_VERSION = 5.0;
+            };
+            name = Debug;
+        };
+		4D440001000000000000000F /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                APPLICATION_EXTENSION_API_ONLY = YES;
+                CODE_SIGN_ENTITLEMENTS = Targets/ThreadingMarkdownPreview.entitlements;
+                CODE_SIGN_STYLE = Automatic;
+                CURRENT_PROJECT_VERSION = 0.0.0;
+                DEVELOPMENT_TEAM = SMQ3E8Y57T;
+                ENABLE_APP_SANDBOX = YES;
+                ENABLE_HARDENED_RUNTIME = YES;
+                GENERATE_INFOPLIST_FILE = NO;
+                INFOPLIST_FILE = "Targets/ThreadingMarkdownPreview-Info.plist";
+                LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@executable_path/../../../../Frameworks", );
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MARKETING_VERSION = 0.0.0;
+                PRODUCT_BUNDLE_IDENTIFIER = codes.threading.markdown-preview;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                SDKROOT = macosx;
+                SKIP_INSTALL = YES;
+                SWIFT_STRICT_CONCURRENCY = complete;
+                SWIFT_VERSION = 5.0;
+            };
+            name = Release;
+        };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -3028,6 +3110,7 @@
 			defaultConfigurationName = Release;
 		};
 		61A0CE01000000000000000D = {isa = XCConfigurationList; buildConfigurations = (61A0CE01000000000000000F, 61A0CE010000000000000010, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		4D440001000000000000000D /* Preview configuration list */ = {isa = XCConfigurationList; buildConfigurations = (4D440001000000000000000E, 4D440001000000000000000F, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -3093,6 +3176,7 @@
 			relativePath = Packages/Vendor/BorderBeamKit;
 		};
 		61A0CE010000000000000011 /* ThreadingGlanceKit */ = {isa = XCLocalSwiftPackageReference; relativePath = Packages/ThreadingGlanceKit; };
+		4D4400010000000000000001 /* ThreadingMarkdownKit */ = {isa = XCLocalSwiftPackageReference; relativePath = Packages/ThreadingMarkdownKit; };
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -3256,6 +3340,7 @@
 			productName = BorderBeamKit;
 		};
 		61A0CE010000000000000002 /* ThreadingGlanceKit */ = {isa = XCSwiftPackageProductDependency; productName = ThreadingGlanceKit; };
+		4D4400010000000000000002 /* ThreadingMarkdownKit */ = {isa = XCSwiftPackageProductDependency; productName = ThreadingMarkdownKit; };
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = F8000001000000000000001 /* Project object */;

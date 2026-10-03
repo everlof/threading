@@ -152,6 +152,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var pendingCheckoutMovesHaveSettled = false
     private var componentGalleryWindowController: ComponentGalleryWindowController?
     private var aboutWindowController: AboutWindowController?
+    private let markdownWindows = MarkdownEditorWindows()
+    private let markdownPreviewThemePublisher = MarkdownQuickLookThemePublisher()
     private var componentCustomizationRegistry: ComponentCustomizationRegistry?
     private var hostFactPipeline: HostFactPipeline?
     private var workspaceNavigatorMenu: NSMenu?
@@ -502,6 +504,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         AppThemeRefresh.startObservingAccessibilityDisplayOptions()
         AppThemeRefresh.startObservingSystemAppearance()
         AppThemeRefresh.startObservingFontOverrides()
+        markdownPreviewThemePublisher.start()
 
         // After the restore, so the first Dock tile is the theme the user actually launched
         // into rather than System's for one frame.
@@ -995,6 +998,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // process never began.
         guard ownsSingleInstanceLock else { return .terminateNow }
 
+        // Document review happens before heartbeat, agents or stores begin shutting down.
+        guard markdownWindows.permitsQuit() else { return .terminateCancel }
+
         // Stopped on every path out of the owning process, including the startup fixture's:
         // a beat written while the app is tearing down says the main thread is turning for a
         // launch that is nearly gone.
@@ -1375,6 +1381,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     private func openDroppedURLs(_ urls: [URL]) {
         for url in urls {
+            if MarkdownFileAssociation.accepts(url) {
+                markdownWindows.open(url)
+                continue
+            }
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
                 continue
@@ -2191,6 +2201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let mainMenu = NSMenu()
 
         mainMenu.addItem(makeApplicationMenuItem())
+        mainMenu.addItem(makeMarkdownMenuItem())
         mainMenu.addItem(makeProjectMenuItem())
         mainMenu.addItem(makeEditMenuItem())
         mainMenu.addItem(makeViewMenuItem())
@@ -2475,6 +2486,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             action: #selector(performHostMenuCommand(_:))
         ))
 
+        let item = NSMenuItem()
+        item.submenu = menu
+        return item
+    }
+
+    private func makeMarkdownMenuItem() -> NSMenuItem {
+        let menu = NSMenu(title: L10n.string("File"))
+        for id in [
+            AppCommands.ID.newMarkdown, AppCommands.ID.openMarkdown,
+            AppCommands.ID.saveMarkdown, AppCommands.ID.saveMarkdownAs
+        ] {
+            if id == AppCommands.ID.saveMarkdown { menu.addItem(.separator()) }
+            let entry = commandItem(id, action: #selector(performHostMenuCommand(_:)))
+            entry.target = self
+            menu.addItem(entry)
+        }
         let item = NSMenuItem()
         item.submenu = menu
         return item
@@ -3193,6 +3220,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
 
         switch command.id {
+        case AppCommands.ID.saveMarkdown, AppCommands.ID.saveMarkdownAs:
+            guard markdownWindows.active != nil else {
+                return .unavailable(L10n.string("Select a Markdown document first."))
+            }
         case AppCommands.ID.closeTab:
             guard mainWindowController?.canCloseActiveTab == true else {
                 return .unavailable(L10n.string("There is no tab to close."))
@@ -3385,6 +3416,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
 
         switch id {
+        case AppCommands.ID.newMarkdown: markdownWindows.newDocument()
+        case AppCommands.ID.openMarkdown: markdownWindows.openDocument()
+        case AppCommands.ID.saveMarkdown: markdownWindows.active?.save()
+        case AppCommands.ID.saveMarkdownAs: markdownWindows.active?.save(asCopy: true)
         case AppCommands.ID.commandPalette: showCommandPalette()
         case AppCommands.ID.newSession: mainWindowController?.newSession()
         case AppCommands.ID.newManager: mainWindowController?.newManager()

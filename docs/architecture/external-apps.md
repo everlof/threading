@@ -4,13 +4,18 @@ Handing a checkout, or one file of it, to the app the work is actually done in.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
-Threading is where an agent is *watched*, not where its output is edited. Every session already
+In the session workspace, Threading is where an agent is *watched*, not where its output is edited. Every session already
 ends with the user going somewhere else — an editor, a terminal, Finder — and before this that
 crossing was a copied path. So the way out is a first-class control rather than a menu item
 buried three levels down: the content pane's header carries it beside the session's actions,
-and ⌘O is bound to it, which is the platform's Open and the only opening this app does.
+and the main window's ⌘O is bound to it.
 
-That sentence is a decision, not a description, and it has been re-tested against the obvious
+Standalone Markdown documents now have their own explicitly requested editor window; see
+[`markdown-editor.md`](markdown-editor.md). This does not alter the checkout's Open In action or
+the Git Review file-opening contract. The editor claims document shortcuts only while its own
+window is key; the main window's ⌘O still opens the active checkout externally.
+
+The session workspace's external-editor contract is a decision, and it has been re-tested against the obvious
 counter-proposal: an editable file preview inside the app.
 [`docs/decisions/editable-file-previews.md`](../decisions/editable-file-previews.md) rejects one for
 the Mac — a deliberately limited editor competing with the good one a press away, at the cost of a

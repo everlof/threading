@@ -183,6 +183,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | The MCP server, tool routing by session token, launch flags, the display panel and its web view | [`mcp-and-display.md`](docs/architecture/mcp-and-display.md) |
 | The opt-in paired-iPhone evidence path, automatic error screenshots, bounded Mac cache and iOS checkup tools | [`ios-local-diagnostics.md`](docs/architecture/ios-local-diagnostics.md) |
 | The opt-in Sentry crash, hang and performance channel, its process boundary, sanitizer, consent and symbolication gate | [`sentry-diagnostics.md`](docs/architecture/sentry-diagnostics.md) |
+| Standalone Markdown editor, shared native parser, Finder Quick Look, explicit saves and opt-in file associations | [`markdown-editor.md`](docs/architecture/markdown-editor.md) |
 | iOS usage widgets, the bounded capacity feed, App Group publication, freshness and usage deep links | [`ios-glanceable-surfaces.md`](docs/architecture/ios-glanceable-surfaces.md) |
 | The session-owned in-panel iOS Simulator, CoreSimulator lifecycle, direct framebuffer/input helper, leases and agent route | [`simulator-pane.md`](docs/architecture/simulator-pane.md) |
 | The paired physical-iPhone pane, CoreDevice identity, bounded screenshot fallback, explicit preparation and exact-device user touch authority | [`physical-iphone-pane.md`](docs/architecture/physical-iphone-pane.md) |
