@@ -13,7 +13,15 @@ final class WorkspacePlaceholderPane {
     private(set) var actionTitle = ""
 
     private let window = NSWindow(backingScaleFactor: 2)
-    private let root = SessionPlaceholderView(frame: .zero)
+    private let placeholderRoot = SessionPlaceholderView(frame: .zero)
+    private let composerRoot = NSView(frame: .zero)
+    private let composerHero = SessionPlaceholderView(frame: .zero)
+    private let composerEditor = ThemedTextView.scrolling()
+    private var showsComposer = false
+    private var root: NSView { showsComposer ? composerRoot : placeholderRoot }
+    private var actionAnchor: ThemedButton {
+        showsComposer ? composerHero.actionAnchor : placeholderRoot.actionAnchor
+    }
     private var presentedSize = NSSize.zero
     private var needsPresentation = true
 
@@ -22,24 +30,103 @@ final class WorkspacePlaceholderPane {
             Design.Symbol.image(name, slot: PlaceholderDefaults.iconSize,
                                 pointSize: 36, weight: .regular)
         }
-        root.onAction = onAction
-        window.contentView = root
+        placeholderRoot.onAction = onAction
+        composerHero.onAction = onAction
+        composerRoot.addSubview(composerHero)
+        composerRoot.addSubview(composerEditor)
+        composerEditor.textView.drawsBackground = true
+        composerEditor.textView.backgroundColor = LinuxTheme.color("fieldSurface")
+        composerEditor.textView.textContainerInset = NSSize(width: 10, height: 8)
+        window.contentView = placeholderRoot
         setThemeAppearance()
         configure(hasProjects: hasProjects)
     }
 
     func setThemeAppearance() {
-        root.appearance = LinuxTheme.appearance
+        placeholderRoot.appearance = LinuxTheme.appearance
+        composerRoot.appearance = LinuxTheme.appearance
         needsPresentation = true
     }
 
     func configure(hasProjects: Bool) {
+        showsComposer = false
+        window.contentView = placeholderRoot
         title = hasProjects ? "No Session Selected" : "No Projects Yet"
         detail = hasProjects ? "Select a session in the sidebar, or start one here."
                              : "Add a project folder to start a session."
         actionTitle = hasProjects ? "New Session" : "Add Project"
-        root.configure(symbolName: "terminal", title: title, detail: detail,
+        placeholderRoot.configure(symbolName: "terminal", title: title, detail: detail,
                        actionTitle: actionTitle)
+        needsPresentation = true
+    }
+
+    func showComposer(projectName: String, providerName: String) {
+        showsComposer = true
+        title = "Start a \(providerName) session"
+        detail = "In \(projectName). Write a brief below."
+        actionTitle = "Start Session"
+        composerHero.configure(symbolName: "terminal", title: title, detail: detail,
+                               actionTitle: actionTitle)
+        composerEditor.textView.string = ""
+        window.contentView = composerRoot
+        _ = window.makeFirstResponder(composerEditor.textView)
+        needsPresentation = true
+    }
+
+    var isComposing: Bool { showsComposer }
+    var editorHasFocus: Bool { showsComposer && window.firstResponder === composerEditor.textView }
+    var composedPrompt: String { composerEditor.textView.string }
+
+    func focusEditor() {
+        guard showsComposer else { return }
+        _ = window.makeFirstResponder(composerEditor.textView)
+        needsPresentation = true
+    }
+
+    func focusAction() {
+        guard showsComposer else { return }
+        _ = window.makeFirstResponder(actionAnchor)
+        needsPresentation = true
+    }
+
+    func selectAllText() {
+        guard showsComposer else { return }
+        let length = (composerEditor.textView.string as NSString).length
+        composerEditor.textView.setSelectedRange(NSRange(location: 0, length: length))
+        needsPresentation = true
+    }
+
+    var selectedText: String? {
+        guard showsComposer else { return nil }
+        let range = composerEditor.textView.selectedRange()
+        guard range.length > 0 else { return nil }
+        return (composerEditor.textView.string as NSString).substring(with: range)
+    }
+
+    func deleteSelection() {
+        guard showsComposer else { return }
+        composerEditor.textView.insertText("",
+            replacementRange: composerEditor.textView.selectedRange())
+        needsPresentation = true
+    }
+
+    func insertCommittedText(_ text: String) {
+        guard showsComposer else { return }
+        composerEditor.textView.insertText(text,
+            replacementRange: NSRange(location: NSNotFound, length: 0))
+        needsPresentation = true
+    }
+
+    func updatePreedit(_ text: String, selectedRange: NSRange) {
+        guard showsComposer else { return }
+        composerEditor.textView.setMarkedText(text, selectedRange: selectedRange,
+            replacementRange: NSRange(location: NSNotFound, length: 0))
+        needsPresentation = true
+    }
+
+    func handleEditorKey(_ event: NSEvent) {
+        guard showsComposer else { return }
+        _ = window.dispatchToContent(event)
         needsPresentation = true
     }
 
@@ -74,7 +161,7 @@ final class WorkspacePlaceholderPane {
 
     @discardableResult
     func pressAction() -> Bool {
-        let pressed = root.actionAnchor.accessibilityPerformPress()
+        let pressed = actionAnchor.accessibilityPerformPress()
         needsPresentation = true
         return pressed
     }
@@ -84,9 +171,19 @@ final class WorkspacePlaceholderPane {
         let size = NSSize(width: CGFloat(width) / 2, height: CGFloat(height) / 2)
         guard needsPresentation || presentedSize != size else { return }
         root.frame = NSRect(origin: .zero, size: size)
+        if showsComposer {
+            let horizontalInset: CGFloat = 24
+            let bottomInset: CGFloat = 8
+            let editorHeight = min(108, max(44, size.height * 0.25))
+            let heroBottom = bottomInset + editorHeight + 4
+            composerEditor.frame = NSRect(x: horizontalInset, y: bottomInset,
+                width: max(1, size.width - horizontalInset * 2), height: editorHeight)
+            composerHero.frame = NSRect(x: 0, y: heroBottom,
+                width: size.width, height: max(0, size.height - heroBottom))
+        }
         window.layoutIfNeeded()
 
-        let button = root.actionAnchor.convert(root.actionAnchor.bounds, to: root)
+        let button = actionAnchor.convert(actionAnchor.bounds, to: root)
         let scale = window.backingScaleFactor
         let buttonX = originX + Int((button.minX * scale).rounded())
         let buttonY = Int(((root.bounds.height - button.maxY) * scale).rounded())
@@ -108,6 +205,39 @@ final class WorkspacePlaceholderPane {
                         Int32(buttonX), Int32(buttonY), Int32(buttonWidth), Int32(buttonHeight))
                 }
             }
+        }
+        if showsComposer {
+            let view = composerEditor.textView
+            let value = view.string
+            let byteCount = value.utf8.prefix(65_537).count
+            let frame = composerEditor.convert(composerEditor.bounds, to: root)
+            let editorX = originX + Int((frame.minX * scale).rounded())
+            let editorY = Int(((root.bounds.height - frame.maxY) * scale).rounded())
+            if editorHasFocus {
+                let caret = view.convert(view.insertionPointRect, to: root)
+                tw_text_input_rect(nativeWindow,
+                    Int32(originX + Int((caret.minX * scale).rounded())),
+                    Int32((root.bounds.height - caret.maxY) * scale),
+                    Int32(max(1, (caret.width * scale).rounded())),
+                    Int32(max(1, (caret.height * scale).rounded())))
+            }
+            if byteCount <= 65_536 {
+                let source = value as NSString
+                let selection = view.selectedRange()
+                let start = source.substring(to: selection.location).unicodeScalars.count
+                let end = source.substring(to: NSMaxRange(selection)).unicodeScalars.count
+                value.withCString { text in
+                    tw_accessibility_composer_editor(nativeWindow, text, Int32(byteCount),
+                        Int32(start), Int32(end), editorHasFocus ? 1 : 0,
+                        Int32(editorX), Int32(editorY),
+                        Int32((frame.width * scale).rounded()),
+                        Int32((frame.height * scale).rounded()))
+                }
+            } else {
+                tw_accessibility_composer_editor(nativeWindow, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+            }
+        } else {
+            tw_accessibility_composer_editor(nativeWindow, nil, 0, 0, 0, 0, 0, 0, 0, 0)
         }
         presentedSize = size
         needsPresentation = false

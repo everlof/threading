@@ -44,6 +44,15 @@ open class NSResponder: Equatable {
 @MainActor
 open class NSView: NSResponder, NSLayoutItem {
 
+    public struct AutoresizingMask: OptionSet, Sendable {
+        public let rawValue: UInt
+        public init(rawValue: UInt) { self.rawValue = rawValue }
+        public static let width = AutoresizingMask(rawValue: 1 << 0)
+        public static let height = AutoresizingMask(rawValue: 1 << 1)
+    }
+
+    open var autoresizingMask: AutoresizingMask = []
+
     // MARK: - Geometry
 
     /// The macOS 26 region vocabulary used by unchanged pane bands. The Linux host places
@@ -68,6 +77,20 @@ open class NSView: NSResponder, NSLayoutItem {
 
     open var frame: NSRect {
         didSet {
+            let widthDelta = frame.width - oldValue.width
+            let heightDelta = frame.height - oldValue.height
+            if widthDelta != 0 || heightDelta != 0 {
+                for child in subviews {
+                    var resized = child.frame
+                    if child.autoresizingMask.contains(.width) {
+                        resized.size.width = max(0, resized.width + widthDelta)
+                    }
+                    if child.autoresizingMask.contains(.height) {
+                        resized.size.height = max(0, resized.height + heightDelta)
+                    }
+                    if resized != child.frame { child.frame = resized }
+                }
+            }
             needsDisplay = true
             needsLayout = true
         }
@@ -721,6 +744,7 @@ public struct NSUserInterfaceItemIdentifier: RawRepresentable, Hashable, Sendabl
 public enum NSAccessibility {
     public enum Role: String, Hashable, Sendable {
         case staticText
+        case textArea
         case button
         case group
         case menu

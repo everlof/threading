@@ -1691,6 +1691,9 @@ struct WindowHarness {
             return row
         }
         var placeholderActionRequested = false
+        var composerSubmitRequested = false
+        var composerChoice: (projectID: String, kind: AgentKind)?
+        var pendingComposerProjectID: String?
         var idlePane = launch.map { _ in
             WorkspacePlaceholderPane(hasProjects: !projects.isEmpty,
                                      onAction: { placeholderActionRequested = true })
@@ -1723,7 +1726,13 @@ struct WindowHarness {
             if !focus { contentWindow.makeFirstResponder(nil) }
             guard changed else { return }
             activePane?.focus(!focus, window: window)
-            if activePane == nil { idlePane?.focus(!focus) }
+            if activePane == nil {
+                idlePane?.focus(!focus)
+                if !focus, idlePane?.isComposing == true {
+                    idlePane?.focusEditor()
+                    _ = tw_workspace_editor_focus(window, 1)
+                }
+            }
             if focus { tw_title(window, navigatorTitle) }
             dirty = true
         }
@@ -1821,6 +1830,86 @@ struct WindowHarness {
             fflush(nil)
         }
         func routeTerminalInput(_ event: TWEvent) -> Bool {
+            if event.kind == 46 || event.kind == 47 || event.kind == 48 {
+                guard activePane == nil, let idlePane, idlePane.isComposing else { return true }
+                if event.kind == 46 {
+                    var committed = event
+                    if let value = String(validatingCString: tw_event_text(&committed)) {
+                        idlePane.insertCommittedText(value)
+                    }
+                } else if event.kind == 47 {
+                    var preedit = event
+                    if let value = String(validatingCString: tw_event_text(&preedit)) {
+                        let units = value.unicodeScalars.map { String($0).utf16.count }
+                        let start = min(max(0, Int(event.textCursor)), units.count)
+                        let end = min(start + max(0, Int(event.textSelectionLength)), units.count)
+                        let range = NSRange(location: units.prefix(start).reduce(0, +),
+                            length: units[start..<end].reduce(0, +))
+                        idlePane.updatePreedit(value, selectedRange: range)
+                    }
+                } else if event.action != 3 {
+                    if Int(event.key) == TW_KEY_ESCAPE {
+                        composerChoice = nil
+                        idlePane.configure(hasProjects: !projects.isEmpty)
+                        _ = tw_workspace_editor_focus(window, 0)
+                        focusSidebar(true)
+                        return true
+                    }
+                    let modifierShortcut = event.modifiers & (4 | 8) != 0
+                    if modifierShortcut, let letter = UnicodeScalar(Int(event.key)) {
+                        switch letter {
+                        case "a": idlePane.selectAllText(); return true
+                        case "c", "x":
+                            if let selected = idlePane.selectedText {
+                                let bytes = Array(selected.utf8)
+                                if bytes.count <= 1_048_576 {
+                                    let wrote = bytes.withUnsafeBufferPointer {
+                                        tw_clipboard_write($0.baseAddress, Int32($0.count))
+                                    }
+                                    if letter == "x", wrote == 0 { idlePane.deleteSelection() }
+                                }
+                            }
+                            return true
+                        case "v":
+                            var bytes = [UInt8](repeating: 0, count: 65_536)
+                            let count = bytes.withUnsafeMutableBufferPointer {
+                                tw_clipboard_read($0.baseAddress, Int32($0.count))
+                            }
+                            if count > 0, let value = String(bytes: bytes.prefix(Int(count)), encoding: .utf8) {
+                                idlePane.insertCommittedText(value)
+                            }
+                            return true
+                        default: break
+                        }
+                    }
+                    if Int(event.key) == TW_KEY_TAB {
+                        idlePane.focusAction()
+                        _ = tw_workspace_editor_focus(window, 0)
+                    } else {
+                        let keyCode: UInt16
+                        let characters: String
+                        switch Int(event.key) {
+                        case TW_KEY_ENTER: keyCode = 36; characters = "\n"
+                        case TW_KEY_BACKSPACE: keyCode = 51; characters = "\u{7f}"
+                        case TW_KEY_DELETE: keyCode = 117; characters = "\u{7f}"
+                        case TW_KEY_LEFT: keyCode = 123; characters = ""
+                        case TW_KEY_RIGHT: keyCode = 124; characters = ""
+                        case TW_KEY_DOWN: keyCode = 125; characters = ""
+                        case TW_KEY_UP: keyCode = 126; characters = ""
+                        default:
+                            keyCode = 0
+                            characters = UnicodeScalar(Int(event.key)).map(String.init) ?? ""
+                        }
+                        var modifiers: NSEvent.ModifierFlags = []
+                        if event.modifiers & 1 != 0 { modifiers.insert(.shift) }
+                        if event.modifiers & 4 != 0 { modifiers.insert(.control) }
+                        if event.modifiers & 8 != 0 { modifiers.insert(.command) }
+                        idlePane.handleEditorKey(NSEvent(type: .keyDown, modifierFlags: modifiers,
+                            keyCode: keyCode, charactersIgnoringModifiers: characters))
+                    }
+                }
+                return true
+            }
             if event.kind == 41 || event.kind == 42 || event.kind == 43 {
                 guard let pane = activePane else { return true }
                 switch event.kind {
@@ -1850,12 +1939,17 @@ struct WindowHarness {
                 if event.kind == 39 {
                     if event.action == 1 { focusSidebar(false) }
                     idlePane.handle(event)
+                    if idlePane.isComposing {
+                        _ = tw_workspace_editor_focus(window, idlePane.editorHasFocus ? 1 : 0)
+                    }
                 } else {
                     _ = idlePane.pressAction()
                 }
                 if placeholderActionRequested {
                     placeholderActionRequested = false
-                    if projects.isEmpty { openAddProjectMenu() }
+                    if idlePane.isComposing {
+                        composerSubmitRequested = true
+                    } else if projects.isEmpty { openAddProjectMenu() }
                     else if projects.indices.contains(selected),
                             let id = ProjectID(uuidString: projects[selected].id) {
                         openProjectCreateMenu(for: id, returnToSidebar: false)
@@ -1938,6 +2032,37 @@ struct WindowHarness {
             tw_title(window, "Threading terminal - starting")
             dirty = true
         }
+        func beginAgent(_ kind: AgentKind, prompt: String?) throws {
+            guard let launch, !projects.isEmpty else { return }
+            let executable = kind == .codex ? agentExecutable : claudeExecutable
+            guard let executable else { return }
+            let accountHandle: AccountHandle = kind == .codex ? codexAccount : claudeAccount
+            guard terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
+                tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
+                return
+            }
+            guard let projectID = ProjectID(uuidString: projects[selected].id) else {
+                throw WindowFailure("invalid project identity")
+            }
+            let id = SessionID()
+            let savedID = String(describing: id)
+            let session = GraphicalTerminal()
+            restoredRuntimes[.agent(savedID)] = session
+            pendingAgentProjects[savedID] = projectID
+            session.startAgent(store: launch[0], socket: launch[1], directory: projects[selected].path,
+                               shell: launch[2], kind: kind, executable: executable,
+                               accountHandle: accountHandle, id: id,
+                               width: terminalWidth,
+                               height: max(1, height - WorkspaceTerminalPane.headerPixelHeight),
+                               prompt: prompt)
+            try activate(session, pageName: kind.displayName, pageIdentity: savedID,
+                pageIcon: ProviderMarks.image(for: kind, selected: false),
+                pageTarget: NavigatorOutlineItem(kind: .agent,
+                    projectID: projects[selected].id, id: savedID,
+                    projectIndex: selected, childIndex: -1))
+            composerChoice = nil
+            dirty = true
+        }
         func reconcileTerminals() -> Bool {
             let selection: (projectID: String, terminalID: String)?
             if let picker = savedPicker, !picker.isAgent,
@@ -2009,6 +2134,27 @@ struct WindowHarness {
                     projectID: projects[selected].id, id: id, projectIndex: selected, childIndex: row))
         }
         while true {
+            if composerSubmitRequested {
+                composerSubmitRequested = false
+                if let choice = composerChoice, let idlePane, idlePane.isComposing,
+                   projects.indices.contains(selected), projects[selected].id == choice.projectID {
+                    let prompt = idlePane.composedPrompt
+                    if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        tw_title(window, "Threading composer - write a brief first")
+                    } else {
+                        try beginAgent(choice.kind, prompt: prompt)
+                    }
+                } else {
+                    tw_title(window, "Threading composer - selected project changed")
+                }
+            }
+            if let choice = composerChoice,
+               (!projects.indices.contains(selected) || projects[selected].id != choice.projectID) {
+                composerChoice = nil
+                idlePane?.configure(hasProjects: !projects.isEmpty)
+                _ = tw_workspace_editor_focus(window, 0)
+                dirty = true
+            }
             if let activePane {
                 if let adopted = activePane.session.takeInitialViewport() {
                     width = adopted.0 + sidebarWidth
@@ -2030,7 +2176,11 @@ struct WindowHarness {
                 case .success(let imported?):
                     projects = imported.projects
                     projectIndexes = Dictionary(uniqueKeysWithValues: projects.enumerated().map { ($0.element.id, $0.offset) })
-                    if activePane == nil { idlePane?.configure(hasProjects: !projects.isEmpty) }
+                    if activePane == nil {
+                        composerChoice = nil
+                        _ = tw_workspace_editor_focus(window, 0)
+                        idlePane?.configure(hasProjects: !projects.isEmpty)
+                    }
                     selected = imported.selectedProjectIndex
                     first = 0
                     inlineSelection = nil
@@ -2941,6 +3091,10 @@ struct WindowHarness {
                             returnToSidebar: menu.returnToSidebar)
                         continue
                     }
+                    if menu.kind == .chatProviders, !menu.returnToSidebar,
+                       (command == .newCodex || command == .newClaude) {
+                        pendingComposerProjectID = menu.projectID?.uuidString
+                    }
                     if ![.addProject, .newProject, .newScratchpad].contains(command),
                        let target = menu.projectID,
                        let targetIndex = projectIndexes[target.uuidString],
@@ -2968,6 +3122,7 @@ struct WindowHarness {
                                                state: { actionState() }) {
                 case .invoked: break
                 case .refused(_, let reason):
+                    pendingComposerProjectID = nil
                     tw_title(window, "Threading experiment - " + reason)
                     print("ACTION_REFUSED \(command.rawValue) \(reason)"); fflush(nil)
                     continue
@@ -2979,7 +3134,13 @@ struct WindowHarness {
                 if event.action == 1, sidebarFocused, accountPicker == nil,
                    savedPicker == nil, let launch {
                     pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1])
-                } else { focusSidebar(event.action == 1) }
+                } else {
+                    focusSidebar(event.action == 1)
+                    if event.action == 0, idlePane?.isComposing == true {
+                        idlePane?.focusEditor()
+                        _ = tw_workspace_editor_focus(window, 1)
+                    }
+                }
                 continue
             }
             if routeTerminalInput(event) { continue }
@@ -2992,8 +3153,15 @@ struct WindowHarness {
                 } else if savedPicker != nil {
                     savedPicker = nil
                     dirty = true
-                } else if activePane != nil { focusSidebar(false) }
-                else { return }
+                } else if activePane != nil {
+                    focusSidebar(false)
+                } else if idlePane?.isComposing == true {
+                    composerChoice = nil
+                    idlePane?.configure(hasProjects: !projects.isEmpty)
+                    _ = tw_workspace_editor_focus(window, 0)
+                    focusSidebar(true)
+                    dirty = true
+                } else { return }
             case 1:
                 try updateSurface(event)
             case 2:
@@ -3193,33 +3361,24 @@ struct WindowHarness {
                 pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1],
                     choice: event.kind == 31 ? .new : .scratchpad)
             case 13, 21:
-                guard accountPicker == nil, savedPicker == nil, let launch, !projects.isEmpty else { break }
+                let composerTargetID = pendingComposerProjectID
+                pendingComposerProjectID = nil
+                guard accountPicker == nil, savedPicker == nil, launch != nil,
+                      !projects.isEmpty else { break }
                 let kind: AgentKind = event.kind == 13 ? .codex : .claude
-                guard let executable = event.kind == 13 ? agentExecutable : claudeExecutable else { break }
-                let accountHandle: AccountHandle = event.kind == 13 ? codexAccount : claudeAccount
-                guard terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
-                    tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
+                if let targetID = composerTargetID,
+                   targetID == projects[selected].id, let idlePane {
+                    composerChoice = (targetID, kind)
+                    idlePane.showComposer(projectName: projects[selected].name,
+                        providerName: kind.displayName)
+                    focusSidebar(false)
+                    guard tw_workspace_editor_focus(window, 1) == 0 else {
+                        throw WindowFailure("native editor focus unavailable")
+                    }
+                    dirty = true
                     break
                 }
-                guard let projectID = ProjectID(uuidString: projects[selected].id) else {
-                    throw WindowFailure("invalid project identity")
-                }
-                let id = SessionID()
-                let savedID = String(describing: id)
-                let session = GraphicalTerminal()
-                restoredRuntimes[.agent(savedID)] = session
-                pendingAgentProjects[savedID] = projectID
-                session.startAgent(store: launch[0], socket: launch[1], directory: projects[selected].path,
-                                   shell: launch[2], kind: kind, executable: executable,
-                                   accountHandle: accountHandle, id: id,
-                                   width: terminalWidth,
-                                   height: max(1, height - WorkspaceTerminalPane.headerPixelHeight))
-                try activate(session, pageName: kind.displayName, pageIdentity: savedID,
-                    pageIcon: ProviderMarks.image(for: kind, selected: false),
-                    pageTarget: NavigatorOutlineItem(kind: .agent,
-                        projectID: projects[selected].id, id: savedID,
-                        projectIndex: selected, childIndex: -1))
-                dirty = true
+                try beginAgent(kind, prompt: nil)
             case 3, 4:
                 if event.action == 1, accountPicker == nil, savedPicker == nil,
                    !projects.isEmpty {

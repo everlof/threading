@@ -73,6 +73,7 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/native_outline_smoke.py:/native_outline_smoke.py:ro" \
   -v "$PWD/tests/project_actions_smoke.py:/project_actions_smoke.py:ro" \
   -v "$PWD/tests/project_create_menu_smoke.py:/project_create_menu_smoke.py:ro" \
+  -v "$PWD/tests/composer_smoke.py:/composer_smoke.py:ro" \
   -v "$PWD/tests/add_project_button_smoke.py:/add_project_button_smoke.py:ro" \
   -v "$PWD/tests/actions_smoke.py:/actions_smoke.py:ro" \
   -v "$PWD/tests/session_actions_smoke.py:/session_actions_smoke.py:ro" \

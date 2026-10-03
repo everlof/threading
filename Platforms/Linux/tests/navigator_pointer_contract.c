@@ -44,6 +44,143 @@ static void button(Uint32 type, Uint8 which, int x, int y) {
     assert(SDL_PushEvent(&event) == 1);
 }
 
+static void editor_input_contract(TWWindow *window) {
+    TWEvent event;
+    assert(!tw_workspace_editor_focused(window));
+    assert(tw_workspace_editor_focus(window, 1) == -1);
+    tw_workspace_placeholder_mode(window, 1);
+    assert(tw_workspace_editor_focus(window, 1) == 0);
+    assert(tw_workspace_editor_focused(window));
+    assert(SDL_IsTextInputActive());
+    settle();
+
+    SDL_Event input = {.type = SDL_TEXTINPUT};
+    strcpy(input.text.text, "draft");
+    assert(SDL_PushEvent(&input) == 1);
+    event = next(window, 46, 0, 0, 0);
+    assert(strcmp(event.text, "draft") == 0);
+
+    SDL_Event preedit = {.type = SDL_TEXTEDITING};
+    strcpy(preedit.edit.text, "かな");
+    preedit.edit.start = 1;
+    preedit.edit.length = 1;
+    assert(SDL_PushEvent(&preedit) == 1);
+    event = next(window, 47, 0, 0, 0);
+    assert(strcmp(event.text, "かな") == 0);
+    assert(event.textCursor == 1 && event.textSelectionLength == 1);
+
+    SDL_Event key = {.type = SDL_KEYDOWN};
+    key.key.keysym.sym = SDLK_RETURN;
+    key.key.keysym.scancode = SDL_SCANCODE_RETURN;
+    assert(SDL_PushEvent(&key) == 1);
+    assert(tw_next_timeout(window, &event, 30) == 0);
+    strcpy(input.text.text, "漢");
+    assert(SDL_PushEvent(&input) == 1);
+    event = next(window, 46, 1, 0, 0);
+    assert(strcmp(event.text, "漢") == 0);
+    key.type = SDL_KEYUP;
+    assert(SDL_PushEvent(&key) == 1);
+    assert(tw_next_timeout(window, &event, 30) == 0);
+
+    SDL_Event extended = {.type = SDL_TEXTEDITING_EXT};
+    extended.editExt.text = SDL_strdup("長い入力の未確定文字列");
+    assert(extended.editExt.text);
+    extended.editExt.start = 3;
+    extended.editExt.length = 2;
+    assert(SDL_PushEvent(&extended) == 1);
+    event = next(window, 47, 0, 0, 0);
+    assert(strcmp(event.text, "長い入力の未確定文字列") == 0);
+    assert(event.textCursor == 3 && event.textSelectionLength == 2);
+    preedit.edit.text[0] = 0;
+    preedit.edit.start = preedit.edit.length = 0;
+    assert(SDL_PushEvent(&preedit) == 1);
+    next(window, 47, 0, 0, 0);
+
+    key.type = SDL_KEYDOWN;
+    key.key.keysym.mod = KMOD_SHIFT;
+    assert(SDL_PushEvent(&key) == 1);
+    event = next(window, 48, 1, 0, 0);
+    assert(event.key == TW_KEY_ENTER && event.modifiers == 1);
+    strcpy(input.text.text, "\n");
+    assert(SDL_PushEvent(&input) == 1);
+    assert(tw_next_timeout(window, &event, 30) == 0);
+    key.type = SDL_KEYUP;
+    assert(SDL_PushEvent(&key) == 1);
+    event = next(window, 48, 3, 0, 0);
+    assert(event.key == TW_KEY_ENTER);
+
+    const struct { SDL_Keycode symbol; SDL_Scancode scancode; int semantic; const char *text; }
+        controls[] = {
+            {SDLK_TAB, SDL_SCANCODE_TAB, TW_KEY_TAB, "\t"},
+            {SDLK_BACKSPACE, SDL_SCANCODE_BACKSPACE, TW_KEY_BACKSPACE, "\b"}
+        };
+    for (size_t index = 0; index < sizeof(controls) / sizeof(controls[0]); index++) {
+        key.type = SDL_KEYDOWN;
+        key.key.keysym.sym = controls[index].symbol;
+        key.key.keysym.scancode = controls[index].scancode;
+        key.key.keysym.mod = KMOD_NONE;
+        assert(SDL_PushEvent(&key) == 1);
+        event = next(window, 48, 1, 0, 0);
+        assert(event.key == controls[index].semantic);
+        strcpy(input.text.text, controls[index].text);
+        assert(SDL_PushEvent(&input) == 1);
+        assert(tw_next_timeout(window, &event, 30) == 0);
+        key.type = SDL_KEYUP;
+        assert(SDL_PushEvent(&key) == 1);
+        event = next(window, 48, 3, 0, 0);
+        assert(event.key == controls[index].semantic);
+    }
+
+    key.type = SDL_KEYDOWN;
+    key.key.keysym.sym = SDLK_a;
+    key.key.keysym.scancode = SDL_SCANCODE_A;
+    key.key.keysym.mod = KMOD_CTRL;
+    assert(SDL_PushEvent(&key) == 1);
+    event = next(window, 48, 1, 0, 0);
+    assert(event.key == 'a' && event.modifiers == 4);
+    key.type = SDL_KEYUP;
+    assert(SDL_PushEvent(&key) == 1);
+    event = next(window, 48, 3, 0, 0);
+    assert(event.key == 'a');
+
+    key.type = SDL_KEYDOWN;
+    key.key.keysym.sym = SDLK_F10;
+    key.key.keysym.scancode = SDL_SCANCODE_F10;
+    key.key.keysym.mod = KMOD_SHIFT;
+    assert(SDL_PushEvent(&key) == 1);
+    event = next(window, 48, 1, 0, 0);
+    assert(event.key == TW_KEY_F10);
+    key.type = SDL_KEYUP;
+    assert(SDL_PushEvent(&key) == 1);
+    next(window, 48, 3, 0, 0);
+
+    assert(tw_workspace_editor_focus(window, 0) == 0);
+    assert(!tw_workspace_editor_focused(window));
+    assert(!SDL_IsTextInputActive());
+    tw_workspace_editor_focus(window, 1);
+    tw_workspace_focus(window, 1);
+    assert(!tw_workspace_editor_focused(window));
+    assert(!SDL_IsTextInputActive());
+    settle();
+    strcpy(input.text.text, "must-not-enter-editor");
+    assert(SDL_PushEvent(&input) == 1);
+    assert(tw_next_timeout(window, &event, 30) == 0);
+
+    assert(tw_workspace_editor_focus(window, 1) == 0);
+    tw_workspace_placeholder_mode(window, 0);
+    assert(!tw_workspace_editor_focused(window));
+    assert(SDL_IsTextInputActive());
+    settle();
+    strcpy(input.text.text, "terminal");
+    assert(SDL_PushEvent(&input) == 1);
+    event = next(window, 6, 0, 0, 0);
+    assert(strcmp(event.text, "terminal") == 0);
+    assert(tw_workspace_editor_focus(window, 1) == -1);
+    tw_workspace_focus(window, 1);
+    settle();
+    puts("PASS editor input/preedit/key ownership and terminal isolation");
+}
+
 int main(int argc, char **argv) {
     const int noBus = argc == 2 && strcmp(argv[1], "--no-bus") == 0;
     if (noBus) assert(getenv("DBUS_SESSION_BUS_ADDRESS") == NULL);
@@ -93,6 +230,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     tw_workspace_mode(window, 320, 1);
+    editor_input_contract(window);
     tw_actions_button(window, "Actions", 1, 208, 8, 100, 36);
     settle();
 

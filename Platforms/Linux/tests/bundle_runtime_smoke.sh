@@ -130,6 +130,8 @@ dbus-run-session -- python3 /project_actions_smoke.py "$bin/WindowHarness" "$bin
   "$bin/threading-ptyd" "$fixture" /evidence/restart-out/project-actions
 dbus-run-session -- python3 /project_create_menu_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture" /evidence/restart-out/project-create-menu
+dbus-run-session -- python3 /composer_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/composer.sock" "$fixture" /evidence/restart-out/composer
 dbus-run-session -- python3 /add_project_button_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture" /evidence/restart-out/add-project-button
 dbus-run-session -- python3 /provider_marks_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \

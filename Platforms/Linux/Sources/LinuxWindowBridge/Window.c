@@ -16,7 +16,7 @@ struct TWWindow {
     int terminalHeaderTextureWidth, terminalHeaderTextureHeight;
     SDL_Rect sessionMenuBounds;
     int sessionMenuTracking, sessionMenuHovered;
-    int sidebarWidth, sidebarFocused, terminalTopInset, placeholderMode;
+    int sidebarWidth, sidebarFocused, terminalTopInset, placeholderMode, editorFocused;
     uint32_t terminalButtons;
     int terminalHeaderTracking, terminalHeaderHovered;
     int placeholderTracking, placeholderHovered;
@@ -31,6 +31,61 @@ static int tw_modifiers(SDL_Keymod mods) {
     return ((mods & KMOD_SHIFT) ? 1 : 0) | ((mods & KMOD_ALT) ? 2 : 0)
         | ((mods & KMOD_CTRL) ? 4 : 0) | ((mods & KMOD_GUI) ? 8 : 0)
         | ((mods & KMOD_CAPS) ? 16 : 0) | ((mods & KMOD_NUM) ? 32 : 0);
+}
+static int tw_function_key(SDL_Keycode key) {
+    switch (key) {
+    case SDLK_ESCAPE: return TW_KEY_ESCAPE;
+    case SDLK_RETURN: case SDLK_KP_ENTER: return TW_KEY_ENTER;
+    case SDLK_TAB: return TW_KEY_TAB;
+    case SDLK_BACKSPACE: return TW_KEY_BACKSPACE;
+    case SDLK_DELETE: return TW_KEY_DELETE;
+    case SDLK_UP: return TW_KEY_UP;
+    case SDLK_DOWN: return TW_KEY_DOWN;
+    case SDLK_LEFT: return TW_KEY_LEFT;
+    case SDLK_RIGHT: return TW_KEY_RIGHT;
+    case SDLK_HOME: return TW_KEY_HOME;
+    case SDLK_END: return TW_KEY_END;
+    case SDLK_PAGEUP: return TW_KEY_PAGE_UP;
+    case SDLK_PAGEDOWN: return TW_KEY_PAGE_DOWN;
+    case SDLK_F1: return TW_KEY_F1;
+    case SDLK_F2: return TW_KEY_F2;
+    case SDLK_F3: return TW_KEY_F3;
+    case SDLK_F4: return TW_KEY_F4;
+    case SDLK_F5: return TW_KEY_F5;
+    case SDLK_F6: return TW_KEY_F6;
+    case SDLK_F7: return TW_KEY_F7;
+    case SDLK_F8: return TW_KEY_F8;
+    case SDLK_F9: return TW_KEY_F9;
+    case SDLK_F10: return TW_KEY_F10;
+    case SDLK_F11: return TW_KEY_F11;
+    case SDLK_F12: return TW_KEY_F12;
+    default: return 0;
+    }
+}
+static int tw_editor_control_text(const char *text, size_t capacity) {
+    const size_t length = strnlen(text, capacity);
+    if (!length) return 0;
+    for (size_t index = 0; index < length; index++) {
+        const unsigned char character = (unsigned char)text[index];
+        if (character != '\r' && character != '\n' && character != '\t' &&
+            character != '\b' && character != 127) return 0;
+    }
+    return 1;
+}
+static void tw_reset_text_input(TWWindow *w, int active) {
+    w->composing = 0;
+    SDL_ClearComposition();
+    SDL_StopTextInput();
+    SDL_FlushEvent(SDL_TEXTINPUT);
+    SDL_FlushEvent(SDL_TEXTEDITING);
+    // SDL allocates extended preedit text. Discard queued data before the new owner can
+    // mistake it for its own composition, and free each discarded allocation.
+    SDL_Event event;
+    while (SDL_PeepEvents(&event, 1, SDL_GETEVENT,
+                          SDL_TEXTEDITING_EXT, SDL_TEXTEDITING_EXT) == 1) {
+        SDL_free(event.editExt.text);
+    }
+    if (active) SDL_StartTextInput();
 }
 const char *tw_error(void) { return SDL_GetError(); }
 static double tw_startup_milliseconds(void) {
@@ -318,7 +373,8 @@ void tw_workspace_focus(TWWindow *w, int sidebarFocused) {
     if (!w || !w->sidebarWidth) return;
     const int next = sidebarFocused != 0;
     const int terminalFocused = !next && !w->placeholderMode;
-    if (w->sidebarFocused == next && w->terminal == terminalFocused) return;
+    if (w->sidebarFocused == next && w->terminal == terminalFocused &&
+        (!next || !w->editorFocused)) return;
     // A gesture belongs to the terminal that received its press. Once navigation takes focus,
     // a later release must not be delivered to a different session selected in that sidebar.
     if (next) {
@@ -330,16 +386,28 @@ void tw_workspace_focus(TWWindow *w, int sidebarFocused) {
     }
     w->sidebarFocused = next;
     w->terminal = terminalFocused;
-    w->composing = 0;
+    if (next || terminalFocused) w->editorFocused = 0;
     // Cancel the platform's composition before changing destinations; a later text event from
     // that cancelled composition must not become project navigation or terminal input.
-    SDL_ClearComposition();
-    SDL_StopTextInput();
-    SDL_FlushEvent(SDL_TEXTINPUT);
-    SDL_FlushEvent(SDL_TEXTEDITING);
-    if (terminalFocused) SDL_StartTextInput();
+    tw_reset_text_input(w, terminalFocused || w->editorFocused);
     tw_accessibility_workspace_changed(w);
 }
+int tw_workspace_editor_focus(TWWindow *w, int focused) {
+    if (!w) return -1;
+    if (!focused) {
+        if (!w->editorFocused) return 0;
+        w->editorFocused = 0;
+        tw_reset_text_input(w, w->terminal);
+        return 0;
+    }
+    if (!w->sidebarWidth || !w->placeholderMode) return -1;
+    tw_workspace_focus(w, 0);
+    if (w->editorFocused) return 0;
+    w->editorFocused = 1;
+    tw_reset_text_input(w, 1);
+    return 0;
+}
+int tw_workspace_editor_focused(TWWindow *w) { return w && w->editorFocused; }
 void tw_workspace_placeholder_mode(TWWindow *w, int enabled) {
     if (!w || !w->sidebarWidth || w->placeholderMode == (enabled != 0)) return;
     if (w->sessionMenuTexture) tw_hide_session_menu(w);
@@ -354,13 +422,9 @@ void tw_workspace_placeholder_mode(TWWindow *w, int enabled) {
     w->terminalHeaderTextureWidth = w->terminalHeaderTextureHeight = 0;
     w->placeholderMode = enabled != 0;
     w->terminal = !w->sidebarFocused && !w->placeholderMode;
-    w->composing = 0;
+    w->editorFocused = 0;
     memset(w->suppressedKeyups, 0, sizeof(w->suppressedKeyups));
-    SDL_ClearComposition();
-    SDL_StopTextInput();
-    SDL_FlushEvent(SDL_TEXTINPUT);
-    SDL_FlushEvent(SDL_TEXTEDITING);
-    if (w->terminal) SDL_StartTextInput();
+    tw_reset_text_input(w, w->terminal);
     tw_accessibility_page_title(w, NULL, NULL, 0, 0, 0, 0);
     tw_accessibility_terminal_text(w, NULL, 0, -1, NULL, 0);
     tw_accessibility_placeholder(w, w->placeholderMode ? "" : NULL,
@@ -391,6 +455,7 @@ void tw_workspace_mode(TWWindow *w, int sidebarWidth, int sidebarFocused) {
     if (w->placeholderTracking) SDL_CaptureMouse(SDL_FALSE);
     w->placeholderTracking = w->placeholderHovered = 0;
     w->placeholderMode = 0;
+    w->editorFocused = 0;
     tw_accessibility_placeholder(w, NULL, NULL, NULL, 0, 0, 0, 0);
     w->terminalTopInset = 0;
     if (w->navigatorTracking) {
@@ -435,6 +500,7 @@ void tw_terminal_mode(TWWindow *w) {
     }
     w->navigatorHovered = 0;
     w->terminal = 1;
+    w->editorFocused = 0;
     w->composing = 0;
     memset(w->suppressedKeyups, 0, sizeof(w->suppressedKeyups));
     SDL_Rect caret = {0, 0, 10, 22};
@@ -445,12 +511,13 @@ void tw_project_navigation(TWWindow *w, int enabled) { w->projectNavigation = en
 void tw_project_mode(TWWindow *w) {
     if (w->sidebarWidth) { tw_workspace_focus(w, 1); return; }
     w->terminal = 0;
+    w->editorFocused = 0;
     w->composing = 0;
     memset(w->suppressedKeyups, 0, sizeof(w->suppressedKeyups));
     SDL_StopTextInput();
 }
 void tw_text_input_rect(TWWindow *w, int x, int y, int width, int height) {
-    if (!w || !w->terminal) return;
+    if (!w || (!w->terminal && !w->editorFocused)) return;
     SDL_Rect caret = {x, y, width, height};
     SDL_SetTextInputRect(&caret);
 }
@@ -504,7 +571,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             if (milliseconds == 0 || (milliseconds < 0 && wait < 0)) return 0;
             continue;
         }
-        if (!w->terminal && e.type == SDL_TEXTEDITING_EXT) {
+        if (!w->terminal && !w->editorFocused && e.type == SDL_TEXTEDITING_EXT) {
             SDL_free(e.editExt.text);
             continue;
         }
@@ -532,7 +599,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 if (w->suppressActivation == e.key.keysym.sym) w->suppressActivation = 0;
                 continue;
             }
-            if (!w->terminal && e.type == SDL_KEYDOWN)
+            if (!w->terminal && !w->editorFocused && e.type == SDL_KEYDOWN)
                 w->suppressedKeyups[e.key.keysym.scancode] = 1;
         }
         if (w->navigatorSuppressLeftUp && e.type == SDL_MOUSEBUTTONUP &&
@@ -714,7 +781,8 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 ? (w->actionsTracking ? 2 : 1) : 0;
             if (state == w->actionsState) continue;
             w->actionsState = state; out->kind = 26; out->action = state;
-        } else if (w->actionsVisible && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
+        } else if (!w->editorFocused && w->actionsVisible &&
+                   (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
                    e.key.keysym.sym == SDLK_SPACE && (e.key.keysym.mod & KMOD_CTRL) &&
                    (e.key.keysym.mod & KMOD_SHIFT)) {
             if (e.type != SDL_KEYDOWN || e.key.repeat) continue;
@@ -723,7 +791,8 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 w->suppressedKeyups[e.key.keysym.scancode] = 1;
             if (!w->actionsEnabled) continue;
             actions_activate(w, out);
-        } else if (!w->terminal && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
+        } else if (!w->terminal && !w->editorFocused &&
+                   (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
                    ((e.key.keysym.sym == SDLK_F10 && (e.key.keysym.mod & KMOD_SHIFT)) ||
                     e.key.keysym.sym == SDLK_APPLICATION)) {
             // Keyboard access cannot depend on an AT-SPI bus. The host owns the selected
@@ -819,7 +888,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         } else if (w->sidebarWidth && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
                    ((e.key.keysym.sym == SDLK_p && (e.key.keysym.mod & KMOD_CTRL) &&
                      (e.key.keysym.mod & KMOD_SHIFT)) ||
-                    (!w->terminal && e.key.keysym.sym == SDLK_TAB))) {
+                    (!w->terminal && !w->editorFocused && e.key.keysym.sym == SDLK_TAB))) {
             if (e.type != SDL_KEYDOWN || e.key.repeat) continue;
             const int sidebar = e.key.keysym.sym == SDLK_p;
             tw_workspace_focus(w, sidebar);
@@ -827,7 +896,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             if (e.key.keysym.scancode >= 0 && e.key.keysym.scancode < SDL_NUM_SCANCODES)
                 w->suppressedKeyups[e.key.keysym.scancode] = 1;
             out->kind = 24; out->action = sidebar;
-        } else if (w->placeholderMode && !w->sidebarFocused &&
+        } else if (w->placeholderMode && !w->sidebarFocused && !w->editorFocused &&
                    e.type == SDL_KEYDOWN && !e.key.repeat &&
                    (e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER ||
                     e.key.keysym.sym == SDLK_SPACE)) {
@@ -932,16 +1001,16 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         } else if (w->suppressActivation && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)
                    && e.key.keysym.sym == w->suppressActivation) {
             if (e.type == SDL_KEYUP) w->suppressActivation = 0;
-        } else if (w->terminal && e.type == SDL_TEXTEDITING) {
-            out->kind = 19;
+        } else if ((w->terminal || w->editorFocused) && e.type == SDL_TEXTEDITING) {
+            out->kind = w->editorFocused ? 47 : 19;
             memcpy(out->text, e.edit.text, sizeof(e.edit.text));
             out->text[sizeof(e.edit.text) - 1] = 0;
             out->textCursor = e.edit.start;
             out->textSelectionLength = e.edit.length;
             w->composing = out->text[0] != 0;
-        } else if (w->terminal && e.type == SDL_TEXTEDITING_EXT) {
+        } else if ((w->terminal || w->editorFocused) && e.type == SDL_TEXTEDITING_EXT) {
             const size_t length = strnlen(e.editExt.text, sizeof(out->text));
-            out->kind = 19;
+            out->kind = w->editorFocused ? 47 : 19;
             if (length == sizeof(out->text)) {
                 // This is visible as an explicit preview refusal. Committed input still arrives
                 // through the complete TEXTINPUT stream, never as a truncated prefix here.
@@ -955,16 +1024,22 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             }
             w->composing = out->text[0] != 0;
             SDL_free(e.editExt.text);
-        } else if (w->terminal && w->suppressActivation
+        } else if ((w->terminal || w->editorFocused) && w->suppressActivation
                    && e.type == SDL_TEXTINPUT) {
-            // A shortcut must not also type its printable key into the PTY.
-        } else if (w->terminal && e.type == SDL_TEXTINPUT) {
-            out->kind = 6;
+            // A shortcut must not also type its printable key into either owner.
+        } else if ((w->terminal || w->editorFocused) && e.type == SDL_TEXTINPUT) {
+            // The editor handles control keys through kind48. Some input backends also send
+            // their control character as TEXTINPUT; never insert or submit it a second time.
+            // A committed IME result remains text, even when it contains such a character.
+            if (w->editorFocused && !w->composing &&
+                tw_editor_control_text(e.text.text, sizeof(e.text.text))) continue;
+            out->kind = w->editorFocused ? 46 : 6;
             out->action = w->composing ? 1 : 0;
             w->composing = 0;
             memcpy(out->text, e.text.text, sizeof(e.text.text));
             out->text[sizeof(e.text.text) - 1] = 0;
-        } else if (w->terminal && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)
+        } else if ((w->terminal || w->editorFocused) &&
+                   (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)
                    && (w->composing || (e.key.keysym.scancode >= 0 && e.key.keysym.scancode < SDL_NUM_SCANCODES
                                          && w->suppressedKeyups[e.key.keysym.scancode]))) {
             // Enter, Backspace and arrows are IME editing gestures until commit/cancel. Their
@@ -972,6 +1047,20 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             if (e.key.keysym.scancode >= 0 && e.key.keysym.scancode < SDL_NUM_SCANCODES) {
                 w->suppressedKeyups[e.key.keysym.scancode] = e.type == SDL_KEYDOWN;
             }
+        } else if (w->editorFocused && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)) {
+            if ((e.key.keysym.mod & KMOD_ALT) && e.key.keysym.sym == SDLK_F4) {
+                if (e.type == SDL_KEYDOWN) { out->kind = 5; return 1; }
+                continue;
+            }
+            out->action = e.type == SDL_KEYUP ? 3 : (e.key.repeat ? 2 : 1);
+            out->modifiers = tw_modifiers(e.key.keysym.mod);
+            out->key = tw_function_key(e.key.keysym.sym);
+            if (!out->key && (e.key.keysym.mod & (KMOD_CTRL | KMOD_GUI)) &&
+                ((e.key.keysym.sym >= SDLK_a && e.key.keysym.sym <= SDLK_z) ||
+                 (e.key.keysym.sym >= SDLK_0 && e.key.keysym.sym <= SDLK_9))) {
+                out->key = e.key.keysym.sym;
+            }
+            if (out->key) out->kind = 48;
         } else if (w->terminal && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)) {
             if (e.key.keysym.sym == SDLK_v && (e.key.keysym.mod & KMOD_CTRL)
                 && (e.key.keysym.mod & KMOD_SHIFT)) {
@@ -998,34 +1087,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             }
             out->action = e.type == SDL_KEYUP ? 3 : (e.key.repeat ? 2 : 1);
             out->modifiers = tw_modifiers(e.key.keysym.mod);
-            switch (e.key.keysym.sym) {
-            case SDLK_ESCAPE: out->key = TW_KEY_ESCAPE; break;
-            case SDLK_RETURN: case SDLK_KP_ENTER: out->key = TW_KEY_ENTER; break;
-            case SDLK_TAB: out->key = TW_KEY_TAB; break;
-            case SDLK_BACKSPACE: out->key = TW_KEY_BACKSPACE; break;
-            case SDLK_DELETE: out->key = TW_KEY_DELETE; break;
-            case SDLK_UP: out->key = TW_KEY_UP; break;
-            case SDLK_DOWN: out->key = TW_KEY_DOWN; break;
-            case SDLK_LEFT: out->key = TW_KEY_LEFT; break;
-            case SDLK_RIGHT: out->key = TW_KEY_RIGHT; break;
-            case SDLK_HOME: out->key = TW_KEY_HOME; break;
-            case SDLK_END: out->key = TW_KEY_END; break;
-            case SDLK_PAGEUP: out->key = TW_KEY_PAGE_UP; break;
-            case SDLK_PAGEDOWN: out->key = TW_KEY_PAGE_DOWN; break;
-            case SDLK_F1: out->key = TW_KEY_F1; break;
-            case SDLK_F2: out->key = TW_KEY_F2; break;
-            case SDLK_F3: out->key = TW_KEY_F3; break;
-            case SDLK_F4: out->key = TW_KEY_F4; break;
-            case SDLK_F5: out->key = TW_KEY_F5; break;
-            case SDLK_F6: out->key = TW_KEY_F6; break;
-            case SDLK_F7: out->key = TW_KEY_F7; break;
-            case SDLK_F8: out->key = TW_KEY_F8; break;
-            case SDLK_F9: out->key = TW_KEY_F9; break;
-            case SDLK_F10: out->key = TW_KEY_F10; break;
-            case SDLK_F11: out->key = TW_KEY_F11; break;
-            case SDLK_F12: out->key = TW_KEY_F12; break;
-            default: break;
-            }
+            out->key = tw_function_key(e.key.keysym.sym);
             if (out->key) out->kind = 7;
             else if (e.type == SDL_KEYDOWN && (e.key.keysym.mod & KMOD_CTRL)
                      && e.key.keysym.sym >= SDLK_a && e.key.keysym.sym <= SDLK_z) {
