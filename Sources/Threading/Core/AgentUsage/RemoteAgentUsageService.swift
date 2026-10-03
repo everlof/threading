@@ -131,6 +131,15 @@ actor RemoteAgentUsageService {
         }
         if !force, let lastRefreshAt, date.timeIntervalSince(lastRefreshAt) < RemoteAgentUsageDefaults.refreshInterval { return }
         lastRefreshAt = date
+        await read(hosts)
+    }
+
+    /// Re-reads one host now — the worker page's Refresh — without touching the others.
+    func refresh(host: RemoteAgentUsageHost) async {
+        await read([host])
+    }
+
+    private func read(_ hosts: [RemoteAgentUsageHost]) async {
         let pending = hosts.filter { !inFlight.contains($0.id) }
         guard !pending.isEmpty else { return }
         inFlight.formUnion(pending.map(\.id))

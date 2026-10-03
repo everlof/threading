@@ -107,6 +107,9 @@ enum ConfirmationPrompt: String, CaseIterable {
     case approveAgentExtensionInstall
     case connectTriggerSource
     case approveTriggerActivation
+    /// An owner-set daily token budget for a remote host's worker. Raising or removing it lets
+    /// a machine that runs without this Mac start more paid work unattended.
+    case changeWorkerBudget
     case shareChatLink
     case approveSystemPermissionPrompt
     case conferManagerRole
@@ -306,6 +309,9 @@ enum ConfirmationPrompt: String, CaseIterable {
              .approveAgentExtensionInstall,
              .connectTriggerSource,
              .approveTriggerActivation,
+             // A budget is spend authority for a host that keeps working while this Mac is
+             // away; the sheet names the worker, the host and the exact new limit each time.
+             .changeWorkerBudget,
              .shareChatLink,
              .conferManagerRole,
              .controlSimulatorDevice,

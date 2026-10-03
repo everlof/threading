@@ -37,8 +37,10 @@ final class RemoteAutomationsViewController: NSViewController {
         let previous = button("First page", #selector(firstPressed))
         let next = button("Next", #selector(nextPressed))
         refresh.setAccessibilityIdentifier("automation.remote.connect")
-        connectionActions = [refresh, create, previous, next]
-        let actions = NSStackView(views: [refresh, create, NSView(), previous, next]); actions.orientation = .horizontal
+        let usage = button("Agent usage…", #selector(usagePressed))
+        usage.setAccessibilityIdentifier("automation.remote.usage")
+        connectionActions = [refresh, create, usage, previous, next]
+        let actions = NSStackView(views: [refresh, create, usage, NSView(), previous, next]); actions.orientation = .horizontal
         form.addArrangedSubview(actions)
         status.applyFont(.detail()); status.textColor = Design.Text.secondary
         form.addArrangedSubview(status); form.addArrangedSubview(list)
@@ -83,6 +85,14 @@ final class RemoteAutomationsViewController: NSViewController {
         return (endpoint, host)
     }
     @objc private func refreshPressed() { refresh() }
+    /// What this host's workers spent, from its own ledger (RemoteWorkerUsageViewController).
+    @objc private func usagePressed() {
+        do {
+            let (endpoint, host) = try endpoint()
+            presentAsSheet(RemoteWorkerUsageViewController(host: RemoteAgentUsageHost(
+                id: host.id, name: host.displayName, endpoint: endpoint, destination: host.sshDestination)))
+        } catch { status.stringValue = error.localizedDescription }
+    }
     @objc private func firstPressed() { cursor = 0; refresh() }
     @objc private func nextPressed() { cursor = nextCursor; refresh() }
     private func refresh() {
