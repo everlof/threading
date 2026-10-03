@@ -75,6 +75,22 @@ def selected(row):
     return row.get_state_set().contains(Atspi.StateType.SELECTED)
 
 
+def extents(item):
+    return item.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+
+
+def move_pointer(window, item, leading_offset=None):
+    rect = extents(item)
+    x = rect.x + (rect.width // 2 if leading_offset is None else leading_offset)
+    xdo('mousemove', '--window', window, str(x), str(rect.y + rect.height // 2))
+
+
+def header_actions(app):
+    frame = app.get_child_at_index(0)
+    return next(frame.get_child_at_index(index) for index in range(frame.get_child_count())
+                if frame.get_child_at_index(index).get_accessible_id() == 'linux.actions')
+
+
 def capture(window, name):
     path = output / name
     subprocess.run(['import', '-window', window, str(path)], check=True, timeout=5)
@@ -137,50 +153,63 @@ try:
                             'native window', process).splitlines()[0]
         xdo('windowfocus', '--sync', window)
         actions = []
+        creates = []
         for index, row in enumerate(rows):
+            row_rect = extents(row)
+            assert (row_rect.x, row_rect.y, row_rect.width, row_rect.height) == (
+                12, 86 + index * 48, 776, 44)
             assert row.get_child_count() == 2
             create = row.get_child_at_index(0)
             assert create.get_role_name() == 'push button'
             assert create.get_name() == 'New chat or terminal'
             assert create.get_accessible_id() == 'sidebar.project.create.' + row.get_accessible_id()
             assert create.get_action_iface().get_n_actions() == 1
-            create_rect = create.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+            create_rect = extents(create)
             assert (create_rect.x, create_rect.y, create_rect.width, create_rect.height) == (
-                692, 58 + index * 48, 40, 40)
+                row_rect.x + row_rect.width - 96, row_rect.y + 2, 40, 40)
+            creates.append(create)
             button = row.get_child_at_index(1)
             assert button.get_role_name() == 'push button'
             assert button.get_name() == 'Project actions'
             assert button.get_accessible_id() == 'sidebar.project.actions.' + row.get_accessible_id()
             assert button.get_state_set().contains(Atspi.StateType.ENABLED)
             assert button.get_action_iface().get_n_actions() == 1
-            rect = button.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-            assert (rect.x, rect.y, rect.width, rect.height) == (736, 58 + index * 48, 40, 40)
+            rect = extents(button)
+            assert (rect.x, rect.y, rect.width, rect.height) == (
+                row_rect.x + row_rect.width - 52, row_rect.y + 2, 40, 40)
             actions.append(button)
 
         normal = capture(window, 'project-actions-normal.png')
         before_frame = log_path.read_text().count('NAVIGATOR_TEXT mounted=')
-        xdo('mousemove', '--window', window, '100', '78')
+        move_pointer(window, rows[0], leading_offset=88)
         eventually(lambda: log_path.read_text().count('NAVIGATOR_TEXT mounted=') > before_frame,
                    'row hover repaint', process)
         row_hovered = capture(window, 'project-actions-row-hover.png')
         before_frame = log_path.read_text().count('NAVIGATOR_TEXT mounted=')
-        xdo('mousemove', '--window', window, '756', '78')
+        move_pointer(window, actions[0])
         eventually(lambda: log_path.read_text().count('NAVIGATOR_TEXT mounted=') > before_frame,
                    'control hover repaint within the same row', process)
         hovered = capture(window, 'project-actions-hover.png')
-        assert changed_pixels(normal, hovered, 736, 58, 776, 98) >= 8, \
+        action_rect = extents(actions[0])
+        create_rect = extents(creates[0])
+        action_crop = (action_rect.x, action_rect.y,
+                       action_rect.x + action_rect.width, action_rect.y + action_rect.height)
+        assert changed_pixels(normal, hovered, *action_crop) >= 8, \
             'production ellipsis did not become visible on hover'
-        assert changed_pixels(row_hovered, hovered, 736, 58, 776, 98) >= 8, \
+        assert changed_pixels(row_hovered, hovered, *action_crop) >= 8, \
             'production control hover plate did not update within the same row'
-        assert dark_pixels(hovered, 748, 68, 766, 88) >= 5, \
+        assert dark_pixels(hovered, action_rect.x + 12, action_rect.y + 10,
+                           action_rect.x + 30, action_rect.y + 30) >= 5, \
             'ellipsis glyph is not centered inside its production hover plate'
-        assert dark_pixels(row_hovered, 704, 68, 724, 88) >= 5, \
+        assert dark_pixels(row_hovered, create_rect.x + 12, create_rect.y + 10,
+                           create_rect.x + 32, create_rect.y + 30) >= 5, \
             'plus glyph is not centered in the companion 20-point target'
-        assert dark_pixels(hovered, 720, 88, 736, 100) == 0, \
+        assert dark_pixels(hovered, action_rect.x - 16, action_rect.y + 30,
+                           action_rect.x, action_rect.y + 42) == 0, \
             'ellipsis glyph leaked outside its 20-point target'
         assert selected(project_rows(app)[0]) and not selected(project_rows(app)[1])
 
-        xdo('mousemove', '--window', window, '756', '126')
+        move_pointer(window, actions[1])
         xdo('click', '--window', window, '1')
         eventually(lambda: listing(app).get_name() == 'Project actions' and
                    title(window).endswith('/BetaAction'), 'Beta row pointer menu', process)
@@ -202,8 +231,12 @@ try:
         xdo('key', 'Escape')
         eventually(lambda: project_rows(app), 'return from keyboard menu', process)
 
-        # The pre-existing labeled header remains an independent pointer target.
-        xdo('mousemove', '--window', window, '738', '26')
+        # The production header icon remains an independent pointer target.
+        header_button = header_actions(app)
+        header_rect = extents(header_button)
+        assert (header_rect.x, header_rect.y, header_rect.width, header_rect.height) == (
+            744, 20, 40, 40)
+        move_pointer(window, header_button)
         xdo('click', '--window', window, '1')
         eventually(lambda: listing(app).get_name() == 'Project actions',
                    'header Actions pointer menu', process)
@@ -212,7 +245,8 @@ try:
 
         # The row's secondary click reaches the same exact-project menu without moving
         # selection; its ordinary keyboard equivalent remains Shift+F10.
-        xdo('mousemove', '--window', window, '100', '126')
+        rows = eventually(lambda: project_rows(app), 'projects before secondary click', process)
+        move_pointer(window, rows[1], leading_offset=88)
         xdo('click', '--window', window, '3')
         eventually(lambda: listing(app).get_name() == 'Project actions' and
                    title(window).endswith('/BetaAction'), 'Beta row context menu', process)
@@ -222,11 +256,11 @@ try:
 
         # A held press can enter the newly opened host menu. Releasing on Open shell must
         # target Beta even though Alpha was still selected when the menu opened.
-        xdo('mousemove', '--window', window, '756', '126')
+        move_pointer(window, rows[1].get_child_at_index(1))
         xdo('mousedown', '--window', window, '1')
         eventually(lambda: listing(app).get_name() == 'Project actions' and
                    title(window).endswith('/BetaAction'), 'Beta drag menu', process)
-        xdo('mousemove', '--window', window, '100', '126')
+        move_pointer(window, listing(app).get_child_at_index(1), leading_offset=88)
         eventually(lambda: listing(app).get_child_at_index(1).get_state_set().contains(
             Atspi.StateType.SELECTED), 'drag highlighted Open shell', process)
         xdo('mouseup', '--window', window, '1')

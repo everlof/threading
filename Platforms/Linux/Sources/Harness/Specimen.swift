@@ -103,6 +103,8 @@ enum Specimen {
 
     final class Window: NSView {
         static let titleHeight: CGFloat = 26
+        var headerHeight: CGFloat = Window.titleHeight
+        var hasMountedHeader = false
         var title = "Threading on Linux"
         var separatesScratchpad = false
         let bodyInk = Ink(on: Specimen.bodyGround)
@@ -234,12 +236,12 @@ enum Specimen {
                 // The third Add Project choice owns no project folder. Keep its visual
                 // separation in this diagnostic shell, outside all actionable row bounds.
                 bodyInk.secondary.setFill()
-                NSRect(x: bounds.minX + 8, y: bounds.maxY - 75,
+                NSRect(x: bounds.minX + 8, y: bounds.maxY - headerHeight - 49,
                        width: max(0, bounds.width - 16), height: 0.5).fill()
             }
             // Title bar.
-            let bar = NSRect(x: bounds.minX, y: bounds.maxY - Self.titleHeight,
-                             width: bounds.width, height: Self.titleHeight)
+            let bar = NSRect(x: bounds.minX, y: bounds.maxY - headerHeight,
+                             width: bounds.width, height: headerHeight)
             Specimen.headerGround.setFill()
             bar.fill()
             NSColor(white: 0.45, alpha: 1).setStroke()
@@ -249,6 +251,7 @@ enum Specimen {
 
             // An em-dash is not in the face, and the real file answers that by returning false
             // rather than drawing a blank — which is exactly what it did here on the first run.
+            guard !hasMountedHeader else { return }
             PlatinumBitmapFont.draw(
                 title,
                 penX: bounds.minX + 12,

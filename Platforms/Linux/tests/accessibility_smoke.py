@@ -126,12 +126,12 @@ with log_path.open('w+') as log:
             value = component.get_extents(coordinates)
             return value.x, value.y, value.width, value.height
         assert rect(frame_component) == (0, 0, 800, 480)
-        assert rect(list_component) == (0, 52, 800, 428)
-        assert rect(first_component) == (12, 56, 776, 44)
+        assert rect(list_component) == (0, 82, 800, 398)
+        assert rect(first_component) == (12, 86, 776, 44)
         assert rect(first_component, Atspi.CoordType.PARENT) == (12, 4, 776, 44)
         assert list_component.get_accessible_at_point(
-            40, 78, Atspi.CoordType.WINDOW).get_accessible_id() == first.get_accessible_id()
-        assert list_component.get_accessible_at_point(40, 101, Atspi.CoordType.WINDOW) is None
+            40, 108, Atspi.CoordType.WINDOW).get_accessible_id() == first.get_accessible_id()
+        assert list_component.get_accessible_at_point(40, 131, Atspi.CoordType.WINDOW) is None
         geometry = subprocess.run(['xdotool', 'getwindowgeometry', '--shell', window_id],
                                   capture_output=True, text=True, check=True, timeout=5)
         window_geometry = dict(re.findall(r'^(X|Y|WIDTH|HEIGHT)=(-?\d+)$',
@@ -139,7 +139,7 @@ with log_path.open('w+') as log:
         assert rect(frame_component, Atspi.CoordType.SCREEN) == (
             int(window_geometry['X']), int(window_geometry['Y']), 800, 480)
         assert rect(first_component, Atspi.CoordType.SCREEN) == (
-            int(window_geometry['X']) + 12, int(window_geometry['Y']) + 56, 776, 44)
+            int(window_geometry['X']) + 12, int(window_geometry['Y']) + 86, 776, 44)
         before_pixels = pixels(window_id)
         before_rasters = log_path.read_text().count('stage=raster.begin')
         before_repaints = log_path.read_text().count('stage=repaint.end')
@@ -156,24 +156,30 @@ with log_path.open('w+') as log:
                    if selection.is_child_selected(1) else None, 'AT-SPI list selected-child projection')
         assert selection.get_n_selected_children() == 1
         assert not selection.is_child_selected(0)
-        subprocess.run(['xdotool', 'mousemove', '--window', window_id, '40', '124', 'click', '1'],
-                       check=True, timeout=5)
-        eventually(lambda: window_title().endswith('/Project02'), 'second row native click')
-        subprocess.run(['xdotool', 'mousemove', '--window', window_id, '40', '78', 'click', '1'],
+        subprocess.run(['xdotool', 'mousemove', '--window', window_id, '40', '108', 'click', '1'],
                        check=True, timeout=5)
         eventually(lambda: window_title().endswith('/Project01'), 'first row native click')
         eventually(lambda: selection.is_child_selected(0), 'pointer selection projected through AT-SPI')
+        second_bounds = rect(listed.get_child_at_index(1).get_component_iface())
+        second_center = (second_bounds[0] + second_bounds[2] // 2,
+                         second_bounds[1] + second_bounds[3] // 2)
+        subprocess.run(['xdotool', 'mousemove', '--window', window_id,
+                        *map(str, second_center), 'click', '1'], check=True, timeout=5)
+        eventually(lambda: window_title().endswith('/Project02'), 'second row native click')
+        subprocess.run(['xdotool', 'mousemove', '--window', window_id, '40', '108', 'click', '1'],
+                       check=True, timeout=5)
+        eventually(lambda: window_title().endswith('/Project01'), 'restored first row selection')
         subprocess.run(['import', '-window', window_id,
                         str(Path.cwd() / 'out' / 'accessibility-list.png')], check=True, timeout=5)
         subprocess.run(['xdotool', 'windowsize', window_id, '801', '481'], check=True, timeout=5)
         eventually(lambda: rect(list_component) if rect(list_component) ==
-                   (0, 52, 801, 429) else None, 'odd-size navigator frame')
-        assert rect(first_component) == (12, 56, 776, 44)
+                   (0, 82, 801, 399) else None, 'odd-size navigator frame')
+        assert rect(first_component) == (12, 86, 776, 44)
         subprocess.run(['import', '-window', window_id,
                         str(Path.cwd() / 'out' / 'accessibility-list-odd.png')], check=True, timeout=5)
         subprocess.run(['xdotool', 'windowsize', window_id, '800', '480'], check=True, timeout=5)
         eventually(lambda: rect(list_component) if rect(list_component) ==
-                   (0, 52, 800, 428) else None, 'restored navigator frame')
+                   (0, 82, 800, 398) else None, 'restored navigator frame')
         assert first.get_state_set().contains(Atspi.StateType.FOCUSABLE)
         eventually(lambda: first if first.get_state_set().contains(Atspi.StateType.FOCUSED)
                    else None, 'selected project keyboard focus')
@@ -228,12 +234,12 @@ with log_path.open('w+') as log:
         assert terminal_component is not None
         eventually(lambda: rect(frame_component) == (0, 0, 1120, 480)
                    and rect(terminal_component) == (320, 0, 800, 480)
-                   and rect(list_component) == (0, 52, 320, 428), 'simultaneous workspace geometry')
-        assert rect(selected.get_component_iface()) == (12, 56 + target_index * 48, 296, 44)
+                   and rect(list_component) == (0, 82, 320, 398), 'simultaneous workspace geometry')
+        assert rect(selected.get_component_iface()) == (12, 86 + target_index * 48, 296, 44)
         assert frame_component.get_accessible_at_point(
-            360, 78, Atspi.CoordType.WINDOW).get_role_name() == 'terminal'
+            360, 108, Atspi.CoordType.WINDOW).get_role_name() == 'terminal'
         assert frame_component.get_accessible_at_point(
-            40, 78, Atspi.CoordType.WINDOW).get_role_name() == 'list'
+            40, 108, Atspi.CoordType.WINDOW).get_role_name() == 'list'
         eventually(lambda: terminal if terminal.get_state_set().contains(Atspi.StateType.FOCUSED)
                    else None, 'terminal keyboard focus after row action')
         assert not selected.get_state_set().contains(Atspi.StateType.FOCUSED)
@@ -305,13 +311,16 @@ with log_path.open('w+') as log:
         assert character_rect(updated.index('UPDATED')) == (320, 0, 10, 22)
         invalid = character_rect(len(updated))
         assert invalid[0] < 0 and invalid[1] == -1 and invalid[3] == -1, invalid
-        subprocess.run(['xdotool', 'windowsize', window_id, '1280', '600'], check=True, timeout=5)
+        # Keep the resized window wholly on the Xvfb screen; ImageMagick otherwise captures
+        # only the visible right edge after SDL's initially centered window grows.
+        subprocess.run(['xdotool', 'windowmove', window_id, '0', '0',
+                        'windowsize', window_id, '1280', '600'], check=True, timeout=5)
         eventually(lambda: re.search(r'TERMINAL_FRAME 960x600', log_path.read_text()),
                    'resized terminal frame')
         eventually(lambda: rect(terminal_component) if rect(terminal_component) ==
                    (320, 0, 960, 600) else None, 'resized terminal component')
         assert rect(frame_component) == (0, 0, 1280, 600)
-        assert rect(list_component) == (0, 52, 320, 548)
+        assert rect(list_component) == (0, 82, 320, 518)
         assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'terminal', 'push button', 'push button']
         assert frame.get_child_at_index(2).get_accessible_id() == 'linux.actions'
         assert frame.get_child_at_index(3).get_accessible_id() == 'linux.add-project'

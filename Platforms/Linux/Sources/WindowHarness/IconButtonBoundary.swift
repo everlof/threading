@@ -92,10 +92,12 @@ public class BackdropThemedControl: ThemedControl {
     }
 }
 
+#if !THREADING_WINDOW_HARNESS && !THREADING_PANE_HEADER_HARNESS
 @MainActor public protocol OpticalInsetProviding {
     var opticalHorizontalInset: CGFloat { get }
     func opticalVerticalInset(forFrameHeight frameHeight: CGFloat) -> CGFloat
 }
+#endif
 @MainActor public protocol ThemedMenuPresentationObserving {
     func themedMenuPresentationDidChange(isPresented: Bool)
 }

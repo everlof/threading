@@ -86,20 +86,22 @@ def pixel(rgb, x, y):
     return tuple(rgb[offset:offset + 3])
 
 
-def trailing_ink(rgb, row):
-    y0 = 56 + row * 48
-    background = pixel(rgb, 700, y0 + 22)
+def trailing_ink(rgb, rect):
+    row_right = rect.x + rect.width
+    background = pixel(rgb, row_right - 88, rect.y + rect.height // 2)
     return sum(max(abs(channel - ground) for channel, ground in
                    zip(pixel(rgb, x, y), background)) > 35
-               for y in range(y0 + 10, y0 + 37) for x in range(748, 779))
+               for y in range(rect.y + 10, rect.y + 37)
+               for x in range(row_right - 40, row_right - 9))
 
 
-def slot_ink(rgb, row, x0, x1):
-    y0 = 56 + row * 48
-    background = pixel(rgb, 700, y0 + 22)
+def slot_ink(rgb, rect, trailing_start, trailing_end):
+    row_right = rect.x + rect.width
+    background = pixel(rgb, row_right - 88, rect.y + rect.height // 2)
     return sum(max(abs(channel - ground) for channel, ground in
                    zip(pixel(rgb, x, y), background)) > 35
-               for y in range(y0 + 10, y0 + 37) for x in range(x0, x1))
+               for y in range(rect.y + 10, rect.y + 37)
+               for x in range(row_right - trailing_start, row_right - trailing_end))
 
 
 process = None
@@ -117,24 +119,29 @@ try:
         assert first.get_name().startswith('AlphaCount [0 agents, 1 terminals]')
         assert second.get_name().startswith('BetaEmpty [0 agents, 0 terminals]')
         assert selected(listed, 0) and not selected(listed, 1)
+        row_rects = [row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+                     for row in (first, second)]
+        for index, rect in enumerate(row_rects):
+            assert (rect.x, rect.y, rect.width, rect.height) == (12, 86 + index * 48, 776, 44)
         window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid',
                                         str(process.pid), '--name', '^Threading experiment - '),
                             'native window', process).splitlines()[0]
         eventually(lambda: log_path.read_text().count('NAVIGATOR_TEXT mounted=') >= 1,
                    'initial neutral project frame', process)
         initial = capture(window, 'project-count-alpha.png')
-        assert trailing_ink(initial, 0) >= 8, 'nonzero count absent from trailing slot'
-        assert trailing_ink(initial, 1) == 0, 'zero count painted in trailing slot'
+        assert trailing_ink(initial, row_rects[0]) >= 8, 'nonzero count absent from trailing slot'
+        assert trailing_ink(initial, row_rects[1]) == 0, 'zero count painted in trailing slot'
 
         before_hover = log_path.read_text().count('NAVIGATOR_TEXT mounted=')
-        xdo('mousemove', '--window', window, '100', '78')
+        rect = row_rects[0]
+        xdo('mousemove', '--window', window, str(rect.x + 88), str(rect.y + rect.height // 2))
         eventually(lambda: log_path.read_text().count('NAVIGATOR_TEXT mounted=') > before_hover,
                    'counted row hover repaint', process)
         hovered = capture(window, 'project-count-alpha-hover.png')
-        assert slot_ink(initial, 0, 768, 778) >= 4, 'baseline count digits missing'
-        assert slot_ink(hovered, 0, 768, 778) == 0, 'count did not yield its trailing slot'
-        assert slot_ink(hovered, 0, 746, 766) >= 5, 'project ellipsis absent on row hover'
-        assert slot_ink(hovered, 0, 700, 728) >= 5, 'project creation plus absent on row hover'
+        assert slot_ink(initial, rect, 20, 10) >= 4, 'baseline count digits missing'
+        assert slot_ink(hovered, rect, 20, 10) == 0, 'count did not yield its trailing slot'
+        assert slot_ink(hovered, rect, 42, 22) >= 5, 'project ellipsis absent on row hover'
+        assert slot_ink(hovered, rect, 88, 60) >= 5, 'project creation plus absent on row hover'
         assert project_list(app).get_child_at_index(0).get_name().startswith(
             'AlphaCount [0 agents, 1 terminals]'), 'hover changed AT-SPI totals'
         xdo('mousemove', '--window', window, '400', '300')
@@ -143,10 +150,10 @@ try:
         eventually(lambda: selected(listed, 1) and not selected(listed, 0),
                    'keyboard selected the empty project', process)
         after_key = capture(window, 'project-count-beta-selected.png')
-        assert trailing_ink(after_key, 0) >= 8, 'count disappeared when selection moved'
-        assert trailing_ink(after_key, 1) == 0, 'selected empty project painted a count'
+        assert trailing_ink(after_key, row_rects[0]) >= 8, 'count disappeared when selection moved'
+        assert trailing_ink(after_key, row_rects[1]) == 0, 'selected empty project painted a count'
 
-        xdo('mousemove', '--window', window, '70', '78')
+        xdo('mousemove', '--window', window, str(rect.x + 58), str(rect.y + rect.height // 2))
         xdo('click', '--window', window, '1')
         eventually(lambda: selected(listed, 0) and not selected(listed, 1),
                    'row click selected the counted project', process)

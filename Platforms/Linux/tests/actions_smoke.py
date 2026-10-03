@@ -13,7 +13,7 @@ import gi
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
 
-from actions_mark_contract import assert_disclosure_mark
+from actions_mark_contract import assert_actions_mark
 
 binary, host, daemon, endpoint, fixture = sys.argv[1:]
 root = Path(fixture) / 'actions-fixture'
@@ -54,14 +54,6 @@ agent_owned = set()
 agent_store = root / 'agent-store'
 agent_project = root / 'AgentActionsProject'
 Atspi.init()
-# The first real capture clipped "Actions" to "Actio..." in an 88px button. Measure
-# the complete label independently of the production rectangle and retain both 12px insets.
-button_label_width = int(subprocess.run(
-    ['convert', '-density', '72', '-background', 'none', '-font', 'DejaVu-Sans',
-     '-pointsize', '18', 'label:Actions', '-format', '%w', 'info:'],
-    check=True, capture_output=True, text=True, timeout=5).stdout)
-
-
 def xdo(*args):
     return subprocess.run(['xdotool', *args], check=True, capture_output=True,
                           text=True, timeout=5).stdout.strip()
@@ -116,8 +108,8 @@ def button():
     bounds = item.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
     sidebar_width = 320 if any(child.get_role_name() == 'terminal' for child in items) else \
         frame.get_component_iface().get_extents(Atspi.CoordType.WINDOW).width
-    assert (bounds.x, bounds.y, bounds.width, bounds.height) == (sidebar_width - 112, 8, 100, 36)
-    assert bounds.width >= button_label_width + 24, 'Actions label would be ellipsized'
+    assert (bounds.x, bounds.y, bounds.width, bounds.height) == (sidebar_width - 56, 20, 40, 40)
+    assert item.get_name() in ('Actions', 'Close actions'), 'icon lost its accessible meaning'
     assert frame.get_component_iface().get_accessible_at_point(
         bounds.x + 10, bounds.y + 10, Atspi.CoordType.WINDOW).get_accessible_id() == 'linux.actions'
     assert item.get_state_set().contains(Atspi.StateType.ENABLED)
@@ -293,8 +285,13 @@ try:
         normal = button_pixels('normal')
         xdo('mousemove', '--window', window, str(bounds.x + 20), str(bounds.y + 20))
         hover = eventually(lambda: (value if (value := button_pixels('hover')) != normal else None), 'visible hover state')
+        before_press = log_path.read_text().count('NAVIGATOR_TEXT mounted=')
         xdo('mousedown', '1')
-        pressed = eventually(lambda: (value if (value := button_pixels('pressed')) != hover else None), 'visible pressed state')
+        eventually(lambda: log_path.read_text().count('NAVIGATOR_TEXT mounted=') > before_press,
+                   'production press repaint')
+        # The production icon uses the same surfaceHover fill for hover and press in this
+        # fixed palette. A press must still repaint a visible surface, then cancel correctly.
+        pressed = eventually(lambda: (value if (value := button_pixels('pressed')) != normal else None), 'visible pressed state')
         xdo('mousemove', '--window', window, '10', '150', 'mouseup', '1')
         eventually(lambda: button_pixels('cancelled') == normal, 'cancelled press restores normal button')
         assert listing().get_name() != 'Project actions' and not marker.exists()
@@ -307,7 +304,7 @@ try:
         open_bounds = button()[1]
         assert (open_bounds.x, open_bounds.y, open_bounds.width, open_bounds.height) == \
             (bounds.x, bounds.y, bounds.width, bounds.height), 'Actions mark changed the native hit target'
-        assert_disclosure_mark(Path('out/actions-normal.png'), open_path, bounds)
+        assert_actions_mark(Path('out/actions-normal.png'), open_path, bounds)
         key('Escape')
         eventually(lambda: listing().get_name() == 'Projects', 'pointer menu dismissed before first terminal')
         # Before a terminal exists, sidebarWidth is zero. The shortcut release must still clear

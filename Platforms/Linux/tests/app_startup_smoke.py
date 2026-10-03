@@ -207,7 +207,7 @@ try:
     assert (store / 'threading.db').is_file()
     assert held() == [], 'opening an empty project list spawned a child'
     subprocess.run(['import', '-window', window, 'out/startup-empty-projects.png'], check=True, timeout=5)
-    assert xdo('mousemove', '--window', window, '100', '78', 'click', '1').returncode == 0
+    assert xdo('mousemove', '--window', window, '100', '108', 'click', '1').returncode == 0
     choose_folder(project)
     wait_event('PROJECT_IMPORTED ', 1)
     window = title(process, 'Threading experiment - ' + str(project))

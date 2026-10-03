@@ -103,7 +103,10 @@ with log_path.open('w') as log:
         assert button.get_role_name() == 'push button'
         assert button.get_state_set().contains(Atspi.StateType.ENABLED)
         bounds = button.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert bounds.width == 100 and bounds.height == 36, bounds
+        pane_bounds = listing().get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        assert pane_bounds.y == 82, pane_bounds
+        assert (bounds.x, bounds.y, bounds.width, bounds.height) == (
+            pane_bounds.width - 56, 20, 40, 40), bounds
         add_project = eventually(lambda: next((item for item in descendants()
                                                if item.get_accessible_id() == 'linux.add-project'), None),
                                  'Add project control')
@@ -111,7 +114,8 @@ with log_path.open('w') as log:
         assert add_project.get_name() == 'Add Project'
         assert add_project.get_state_set().contains(Atspi.StateType.ENABLED)
         add_bounds = add_project.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert (add_bounds.x, add_bounds.y, add_bounds.width, add_bounds.height) == (640, 6, 40, 40), add_bounds
+        assert (add_bounds.x, add_bounds.y, add_bounds.width, add_bounds.height) == (
+            pane_bounds.width - 108, 20, 40, 40), add_bounds
         add_action = add_project.get_action_iface()
         assert add_action.get_n_actions() == 1 and add_action.get_action_name(0) == 'press'
         eventually(lambda: (capture / 'normal.bmp').is_file(), 'normal rendered frame')

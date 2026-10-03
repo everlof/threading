@@ -3,6 +3,14 @@
 A native macOS app for organizing coding-agent sessions. Projects live in a sidebar on the
 left; the selected session's terminal fills the pane on the right.
 
+## Linux Preview
+
+The Ubuntu arm64 preview supports local projects, saved agents and persistent terminals.
+Its shared pane header has `+` for Add Project and `⋯` for Actions; Ctrl+Shift+Space also
+opens Actions. The preview still uses a fixed palette and does not include the complete
+macOS UI. See the [Linux preview guide](Platforms/Linux/BUNDLE_README.md) for installation,
+supported commands and keyboard navigation.
+
 ## First Launch
 
 A fresh install opens a short walkthrough instead of the main window — four pages, all
