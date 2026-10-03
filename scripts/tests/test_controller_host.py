@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import platform
 import subprocess
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -46,6 +47,19 @@ class HostTests(unittest.TestCase):
             self.assertEqual(call('memory-get', worker, 'profile')['content'], 'Synthetic memory')
             with self.assertRaisesRegex(ValueError, 'new_destination'):
                 state.snapshot(backup, restored, True)
+
+    def test_legacy_snapshot_disarms_before_migration(self):
+        with tempfile.TemporaryDirectory(prefix='host-') as temp:
+            root = Path(temp)
+            source = root / 'legacy.db'
+            with sqlite3.connect(source) as db:
+                db.execute('PRAGMA user_version=6')
+                db.execute('CREATE TABLE record(sequence INTEGER,kind TEXT,payload TEXT)')
+                db.execute("INSERT INTO record VALUES(1,'workerPolicy',?)", (json.dumps({'enabled': True, 'revision': 1}),))
+            restored = root / 'restored.db'
+            self.assertEqual(state.snapshot(source, restored, True)['schema'], 6)
+            with sqlite3.connect(restored) as db:
+                self.assertEqual(json.loads(db.execute('SELECT payload FROM record').fetchone()[0]), {'enabled': False, 'revision': 2})
 
     def test_install_checks_integrity_and_refuses_implicit_upgrade(self):
         with tempfile.TemporaryDirectory(prefix='host-') as temp:

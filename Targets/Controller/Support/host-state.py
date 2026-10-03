@@ -28,7 +28,7 @@ def snapshot(source, destination, disarm=False):
             if target.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                 raise ValueError('integrity_failed')
             version = target.execute('PRAGMA user_version').fetchone()[0]
-            if version not in (9, 10):
+            if version not in (6, 7, 8, 9, 10):
                 raise ValueError('unsupported_schema')
             if disarm:
                 for sequence, kind, payload in target.execute("SELECT sequence,kind,payload FROM record WHERE kind IN ('workerPolicy','automation','source','trigger','mailPeer')").fetchall():
@@ -39,8 +39,9 @@ def snapshot(source, destination, disarm=False):
                         value['enabled'] = False
                     value['revision'] = value.get('revision', 0) + 1
                     target.execute('UPDATE record SET payload=? WHERE sequence=?', (json.dumps(value), sequence))
-                target.execute('DELETE FROM automation_due')
-                target.execute('DELETE FROM source_due')
+                for table in ('automation_due', 'source_due'):
+                    if target.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                        target.execute(f'DELETE FROM {table}')
             target.commit()
         return {'schema': version, 'integrity': 'ok', 'disarmed': disarm, 'servicesStarted': False}
     except BaseException:
