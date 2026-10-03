@@ -109,6 +109,21 @@ presentation. The built-in MCP tools are the supported agent automation seam: th
 disabled draft creation, host-approved activation, `manage_automation` (whose enable and run are
 host-approved the same way), and session-bound assessment/final reporting.
 
+**A failed run reaches the person; a successful one waits for them.** `TriggerRunAlerts` is the
+one owner of that decision. A run that settles `failed` or `needsAttention` alerts the Mac
+(`AttentionAlertCenter`, with its master switch and per-session mute) and, when Remote Access is
+on, the paired iPhone through the requested-notification route and its opt-in. It does so once
+per run, keyed by run id, however many edges observe the settlement. A completed run alerts
+neither: its receipt is the in-app toast and Activity. The phone half needs a session, because
+every remote notification event is scoped to one, so a run refused before its session started
+reaches the Mac only (`postAppUpdate`). The alert carries the real reason. Where the provider
+refused the turn in a typed field, `TriggerRunDiagnostic` names it instead of "ended without
+reporting a result": Claude's `stream-json` marks a rejected login with
+`"error":"authentication_failed","is_api_error_message":true` on a synthetic assistant line
+(measured against CLI 2.1.288; `AgentTurnFailure`), and the run then says which login is no longer
+signed in, with the one-year token offered only where the runtime accepts one. This was added
+after a scheduled run failed on an expired login on 2026-10-03 and the person found out by looking.
+
 Questions, phone replies and images do not need a Trigger transport. A Trigger launches an
 ordinary session, so existing attention notifications, authenticated remote conversation routing
 and session-owned attachments remain the continuation path. Quick push replies and source

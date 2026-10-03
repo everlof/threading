@@ -4038,6 +4038,10 @@ extension ConversationViewController: AgentConversationRuntimeSurface {
 
     var isHostBacked: Bool { stream.isHostBacked }
 
+    var lastTurnFailure: AgentTurnFailure? {
+        (stream as? TurnFailureReportingConversation)?.lastTurnFailure
+    }
+
     var hasPendingInputForRetirement: Bool {
         pendingInitialPrompt != nil || checkoutMoveOutboxSnapshot()?.isEmpty == false
     }

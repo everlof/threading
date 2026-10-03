@@ -550,6 +550,49 @@ final class AttentionAlertCenter: NSObject {
         return true
     }
 
+    /// Posts an update about this Mac's automations that no session owns yet.
+    ///
+    /// An automation refused before its session started (a dirty checkout, a missing project)
+    /// still has to reach the person; `postRequestedUpdate` cannot carry it, because its route
+    /// and mute are per session. Gated by the master switch only, since there is no session to
+    /// mute, and opened by the system's ordinary activation on click.
+    @discardableResult
+    func postAppUpdate(eventID: String, title: String, body: String) -> Bool {
+        guard isStarted else { return false }
+        guard AppSettings.shared.notifiesOnAttention else {
+            EventLog.shared.record(.session, "Requested update refused", [
+                "event": eventID,
+                "reason": AttentionAlertGate.masterSwitch.rawValue,
+            ])
+            return false
+        }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = SoundResolution.sound(for: .alertRequestedUpdate, sessionID: nil)
+            .notificationSound()
+        let request = UNNotificationRequest(
+            identifier: "requested-\(eventID)",
+            content: content,
+            trigger: nil
+        )
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                    guard granted else { return }
+                    center.add(request)
+                }
+            case .denied:
+                break
+            default:
+                center.add(request)
+            }
+        }
+        return true
+    }
+
     /// Tells the user a curfew tried everything it had and the session is still working.
     ///
     /// Its own entrance rather than an activity edge, because nothing about the session's state

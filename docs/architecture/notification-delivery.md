@@ -210,6 +210,14 @@ restoration refuses to run while that intent is pending. After the authenticated
 confirms the target, the model commits exactly one route and publishes the destination request;
 if the target no longer exists, ordinary continuity restoration is allowed again.
 
+## Automation failures
+
+A settled automation run is not a turn completion and does not use the routine coordinator: it
+goes through the requested-notification path (`agentMessage`) on the phone and
+`postRequestedUpdate` on the Mac, once per run and only for `failed` or `needsAttention`.
+`TriggerRunAlerts` in [`triggers.md`](triggers.md) owns that decision; no new wire kind or field
+was added.
+
 ## Ownership and diagnostics
 
 Mac automatic alerts use `AttentionAlertRuntimeObserver` on the same typed runtime channel.

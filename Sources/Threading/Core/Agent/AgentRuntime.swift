@@ -126,6 +126,10 @@ protocol AgentConversationRuntimeSurface:
     /// Whether this conversation's CLI lives in `threading-ptyd` rather than in this process.
     var isHostBacked: Bool { get }
 
+    /// Why the provider refused the turn this surface most recently sent, where it said so in a
+    /// typed field. Defaulted to nil for transports that report no such class.
+    var lastTurnFailure: AgentTurnFailure? { get }
+
     func resolveRemotePermission(id: String, decision: RemotePermissionDecision) -> Bool
     func resolveManagerPermission(id: String, decision: ControlPermissionDecision) -> Bool
     func terminate(preservingViewport: Bool)
@@ -154,6 +158,8 @@ extension AgentConversationRuntimeSurface {
     var isHostBacked: Bool { false }
 
     var hasPendingInputForRetirement: Bool { false }
+
+    var lastTurnFailure: AgentTurnFailure? { nil }
 
     func detachFromBackgroundHost(by deadline: Date) -> Bool { false }
 
@@ -329,6 +335,12 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         terminalOwnerships[sessionID] = UUID()
         runtimeSnapshots[sessionID] = surface.activityTracker.runtimeSnapshot
         return true
+    }
+
+    /// Why the provider refused this session's most recent turn, where it said so in a typed
+    /// field. Only rendered conversations report one; a terminal session answers nil.
+    func lastTurnFailure(sessionID: SessionID) -> AgentTurnFailure? {
+        conversations[sessionID]?.lastTurnFailure
     }
 
     /// The typed runtime value behind UI's concrete native-conversation adapter lookup.

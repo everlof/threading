@@ -30,7 +30,8 @@ final class ClaudeStreamSession:
     SteerableConversation,
     MessageLifecycleReportingConversation,
     SubagentReportingConversation,
-    SubagentHistoryConversation {
+    SubagentHistoryConversation,
+    TurnFailureReportingConversation {
 
     // MARK: - Properties
 
@@ -106,6 +107,10 @@ final class ClaudeStreamSession:
     private var didRequestComposerCapabilities = false
     private var capabilityInitializationFinished = true
     private var pendingPrompt: String?
+
+    /// Why the provider refused the turn most recently sent, from its typed API-error fields.
+    /// Cleared when the next turn is sent; see `AgentTurnFailure.claudeStreamLine`.
+    private(set) var lastTurnFailure: AgentTurnFailure?
 
     /// Diagnostic fallback for a child that exits before stream-json can explain why.
     private var turnStartedAt: TimeInterval?
@@ -260,6 +265,7 @@ final class ClaudeStreamSession:
         pendingPrompt = text
         pendingMessageID = id
         turnStartedAt = ProcessInfo.processInfo.systemUptime
+        lastTurnFailure = nil
         isTurnInFlight = true
         onInteractionAvailabilityChange?()
         sendPendingTurnIfReady()
@@ -691,6 +697,12 @@ final class ClaudeStreamSession:
         if let route = subagentAdapter.route(parsed.line) {
             for event in route.events { onSubagentEvent?(event) }
             guard route.belongsToParent else { return }
+        }
+
+        // Read after subagent routing: a child refused by the provider is reported to its parent
+        // as a failed task, and the parent's turn goes on.
+        if let failure = AgentTurnFailure.claudeStreamLine(parsed.line) {
+            lastTurnFailure = failure
         }
 
         switch parsed.streamResult {

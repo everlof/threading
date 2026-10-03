@@ -199,14 +199,15 @@ extension SessionCoordinator {
             try? await TriggerRuntime.shared.releaseQueue()
             return
         }
-        let diagnostic: String
-        switch run.state {
-        case .fixing: diagnostic = L10n.string("The fix agent ended without reporting a final result.")
-        case .running: diagnostic = L10n.string("The automation ended without reporting a result.")
-        // The result is kept; what is missing is the ready prompt that proves the turn ended.
-        case .finishing: diagnostic = L10n.string("The agent reported a result but did not finish its turn at a ready prompt.")
-        default: diagnostic = L10n.string("The assessment agent ended without reporting an assessment.")
-        }
+        // The provider's typed refusal names the real cause where it gave one — on 2026-10-03 a
+        // scheduled run settled as "ended without reporting a result" when its login had
+        // simply stopped signing in.
+        let diagnostic = TriggerRunDiagnostic.unreported(
+            state: run.state,
+            failure: environment.agentRuntime.lastTurnFailure(sessionID: sessionID),
+            login: environment.projectStore.session(withID: sessionID)
+                .map(TriggerRunDiagnostic.login(for:))
+        )
         run.state = .needsAttention
         run.settledAt = Date()
         run.boundedDiagnostic = diagnostic
@@ -328,23 +329,12 @@ extension SessionCoordinator {
             detail: summary,
             dwell: ToastDefaults.unattendedDwell
         ))
-        if let sessionID = run.sessionID {
-            _ = AttentionAlertCenter.shared.postRequestedUpdate(
-                eventID: run.id.uuidString,
-                sessionID: sessionID,
-                title: title,
-                body: summary,
-                destination: .session
-            )
-            if environment.settings.remoteAccessEnabled {
-                _ = RemoteNotificationService.shared.notifyRequested(
-                    sessionID: sessionID,
-                    title: title,
-                    body: summary,
-                    recipient: nil,
-                    destination: .session
-                )
-            }
+        // Off-screen delivery is `TriggerRunAlerts`' decision: failures only, once per run,
+        // Mac and paired iPhone. The name is read from the store because a run refused before
+        // its session started has no session title to borrow.
+        Task { @MainActor in
+            let name = (try? await TriggerStore.shared.trigger(id: run.triggerID))?.definition.name
+            TriggerRunAlerts.shared.announce(run, automationName: name)
         }
     }
 }

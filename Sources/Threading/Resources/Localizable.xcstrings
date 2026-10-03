@@ -52132,6 +52132,28 @@
         }
       }
     },
+    "The %@ login “%@” is no longer signed in. Sign in again in Settings ▸ Agents & Accounts." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@-kontot ”%2$@” är inte längre inloggat. Logga in igen under Inställningar ▸ Agenter och konton."
+          }
+        }
+      }
+    },
+    "The %@ login “%@” is no longer signed in. Sign in again, or give it a one-year token in Settings ▸ Agents & Accounts." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@-kontot ”%2$@” är inte längre inloggat. Logga in igen, eller ge det en ettårstoken under Inställningar ▸ Agenter och konton."
+          }
+        }
+      }
+    },
     "The 1Password command line (op) is not installed, so sign-in falls back to revealing the field for you. Install it from 1Password's developer settings." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -70879,6 +70901,17 @@
         }
       }
     },
+    "“%@” failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” misslyckades"
+          }
+        }
+      }
+    },
     "“%@” is not a palette — it draws with whatever the app theme states. Change the app theme above to change what it gives you." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -70952,6 +70985,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "”%@” arbetar i %@"
+          }
+        }
+      }
+    },
+    "“%@” needs attention" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” behöver åtgärdas"
           }
         }
       }
