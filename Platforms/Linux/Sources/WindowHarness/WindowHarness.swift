@@ -1316,7 +1316,10 @@ struct WindowHarness {
             ProcessInfo.processInfo.environment["THREADING_LINUX_CLAUDE_ACCOUNT"])
         var projects = snapshot.projects
         var projectIndexes = Dictionary(uniqueKeysWithValues: projects.enumerated().map { ($0.element.id, $0.offset) })
-        guard let window = tw_open("Threading Linux window experiment", 800, 480) else {
+        let sidebarWidth = 320
+        let initialWidth = launch == nil ? 800 : 1120
+        guard let window = tw_open("Threading Linux window experiment",
+                                   Int32(initialWidth), 480) else {
             throw WindowFailure(String(cString: tw_error()))
         }
         trace("open.end")
@@ -1526,7 +1529,8 @@ struct WindowHarness {
             for terminal in terminals.values { terminal.stop() }
             for terminal in restoredRuntimes.values { terminal.stop() }
         }
-        var width = 800, height = 480, selected = snapshot.selectedProjectIndex, first = 0
+        var width = initialWidth, height = 480,
+            selected = snapshot.selectedProjectIndex, first = 0
         var expandedProjectID: String?
         var inlineSelection: SidebarVisibleRows.Row?
         var savedPicker: SavedPicker?
@@ -1654,19 +1658,28 @@ struct WindowHarness {
             configureOutlineRow(row, item: item, frame: frame)
             return row
         }
-        let sidebarWidth = 320
+        var placeholderActionRequested = false
+        var idlePane = launch.map { _ in
+            WorkspacePlaceholderPane(hasProjects: !projects.isEmpty,
+                                     onAction: { placeholderActionRequested = true })
+        }
         var activePane: WorkspaceTerminalPane?
         var pendingPageReveal: NavigatorOutlineItem?
         var sidebarFocused = true
         var navigatorTitle = "Threading Linux window experiment"
-        var navigatorWidth: Int { activePane == nil ? width : sidebarWidth }
-        var terminalWidth: Int { activePane == nil ? width : width - sidebarWidth }
+        var hasSplitPane: Bool { idlePane != nil || activePane != nil }
+        var navigatorWidth: Int { hasSplitPane ? sidebarWidth : width }
+        var terminalWidth: Int { hasSplitPane ? width - sidebarWidth : width }
+        if idlePane != nil {
+            tw_workspace_mode(window, Int32(sidebarWidth), 1)
+            tw_workspace_placeholder_mode(window, 1)
+        }
         func setNavigatorTitle(_ title: String) {
             navigatorTitle = title
             if sidebarFocused { tw_title(window, title) }
         }
         func focusSidebar(_ focus: Bool) {
-            guard let activePane else { return }
+            guard hasSplitPane else { return }
             // Native sidebar focus cancels terminal gestures, including their queued release.
             // Mirror that cancellation even if a native press moved focus before Swift saw it.
             if focus { dismissedActionGesture = nil }
@@ -1675,7 +1688,8 @@ struct WindowHarness {
             tw_workspace_focus(window, focus ? 1 : 0)
             if !focus { contentWindow.makeFirstResponder(nil) }
             guard changed else { return }
-            activePane.focus(!focus, window: window)
+            activePane?.focus(!focus, window: window)
+            if activePane == nil { idlePane?.focus(!focus) }
             if focus { tw_title(window, navigatorTitle) }
             dirty = true
         }
@@ -1717,7 +1731,7 @@ struct WindowHarness {
             if actions != nil { dismissActions(returnToParent: false) }
             hoveredProjectID = nil
             actions = .init(kind: .addProject, projectID: nil,
-                            returnToSidebar: activePane == nil || sidebarFocused,
+                            returnToSidebar: sidebarFocused,
                             commands: NavigatorActions.addProjectMenuCommands())
             focusSidebar(true)
             dirty = true
@@ -1744,9 +1758,31 @@ struct WindowHarness {
         func routeTerminalInput(_ event: TWEvent) -> Bool {
             if event.kind == 2 { focusSidebar(true) }
             if event.kind == 15 && event.action == 1 { focusSidebar(false) }
-            if event.kind == 37 {
-                if event.action == 1 { focusSidebar(false) }
-                activePane?.handleHeader(event)
+            if event.kind == 39 || event.kind == 40 {
+                guard activePane == nil, let idlePane else { return true }
+                if event.kind == 39 {
+                    if event.action == 1 { focusSidebar(false) }
+                    idlePane.handle(event)
+                } else {
+                    _ = idlePane.pressAction()
+                }
+                if placeholderActionRequested {
+                    placeholderActionRequested = false
+                    if projects.isEmpty { openAddProjectMenu() }
+                    else if projects.indices.contains(selected),
+                            let id = ProjectID(uuidString: projects[selected].id) {
+                        openProjectCreateMenu(for: id, returnToSidebar: false)
+                    }
+                }
+                return true
+            }
+            if event.kind == 37 || event.kind == 38 {
+                if event.kind == 37 {
+                    if event.action == 1 { focusSidebar(false) }
+                    activePane?.handleHeader(event)
+                } else {
+                    _ = activePane?.pressPageTitle()
+                }
                 if let target = pendingPageReveal {
                     pendingPageReveal = nil
                     guard let projectIndex = projectIndexes[target.projectID],
@@ -1780,12 +1816,15 @@ struct WindowHarness {
             rowActionMenuGesture = false
             rowActionMenuEntered = false
             activePane?.focus(false, window: window)
-            if activePane == nil {
+            if !hasSplitPane {
                 width += sidebarWidth
             }
+            idlePane?.focus(false)
+            idlePane = nil
             activePane = WorkspaceTerminalPane(session, pageName: pageName,
                 pageIdentity: pageIdentity, icon: pageIcon,
                 onReveal: { pendingPageReveal = pageTarget })
+            tw_workspace_placeholder_mode(window, 0)
             sidebarFocused = false
             contentWindow.makeFirstResponder(nil)
             tw_terminal_mode(window)
@@ -1827,8 +1866,8 @@ struct WindowHarness {
             return changed
         }
         func updateSurface(_ event: TWEvent) throws {
-            let nextWidth = max(activePane == nil ? 320 : 640,
-                                min(activePane == nil ? 1280 : 1600, Int(event.width)))
+            let nextWidth = max(hasSplitPane ? 640 : 320,
+                                min(hasSplitPane ? 1600 : 1280, Int(event.width)))
             let nextHeight = max(180, min(900, Int(event.height)))
             if nextWidth == width, nextHeight == height {
                 // Exposure invalidates the native drawable, not the unchanged row models.
@@ -1886,6 +1925,9 @@ struct WindowHarness {
                 }
                 try activePane.refresh(window: window, width: terminalWidth, height: height,
                                        originX: sidebarWidth, focused: !sidebarFocused)
+            } else if let idlePane {
+                try idlePane.present(nativeWindow: window, width: terminalWidth,
+                                     height: height, originX: sidebarWidth)
             }
             if let gate = pendingFolderImport, let result = gate.take() {
                 pendingFolderImport = nil
@@ -1893,6 +1935,7 @@ struct WindowHarness {
                 case .success(let imported?):
                     projects = imported.projects
                     projectIndexes = Dictionary(uniqueKeysWithValues: projects.enumerated().map { ($0.element.id, $0.offset) })
+                    if activePane == nil { idlePane?.configure(hasProjects: !projects.isEmpty) }
                     selected = imported.selectedProjectIndex
                     first = 0
                     inlineSelection = nil
@@ -2210,7 +2253,8 @@ struct WindowHarness {
                     ? focusedView : nil)
                 let mountMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - mountStarted) / 1_000_000
                 trace("raster.begin")
-                let bitmap = Bitmap(width: width, height: height, background: Specimen.bodyGround.components)
+                let bitmap = Bitmap(width: navigatorWidth, height: height,
+                                    background: Specimen.bodyGround.components)
                 let context = NSGraphicsContext(bitmap: bitmap, scale: 2)
                 NSGraphicsContext.current = context
                 let renderStarted = DispatchTime.now().uptimeNanoseconds
@@ -2224,8 +2268,10 @@ struct WindowHarness {
                 print("NAVIGATOR_TEXT mounted=\(textRows.count) mountMs=\(mountMilliseconds) renderMs=\(renderMilliseconds)")
                 trace("present.begin")
                 let result = bitmap.pixels.withUnsafeBufferPointer {
-                    activePane == nil ? tw_present(window, $0.baseAddress, Int32(width), Int32(height))
-                        : tw_present_pane(window, $0.baseAddress, Int32(width), Int32(height), 1)
+                    hasSplitPane
+                        ? tw_present_pane(window, $0.baseAddress,
+                                          Int32(navigatorWidth), Int32(height), 1)
+                        : tw_present(window, $0.baseAddress, Int32(width), Int32(height))
                 }
                 trace("present.end")
                 guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
@@ -2546,6 +2592,12 @@ struct WindowHarness {
                 continue
             }
             if event.kind == 27 {
+                if event.action == 6 {
+                    // One native motion leaves the idle pane and enters the navigator.
+                    // Clear its retained hover before delivering that same motion to the row.
+                    idlePane?.cancelHover()
+                    dirty = true
+                }
                 if event.action == 4 {
                     contentWindow.cancelPointerGesture()
                     _ = navigatorRoot.takeActivatedRowSlot()
@@ -2630,7 +2682,7 @@ struct WindowHarness {
                 if actionsActivated {
                     actionsActivated = false
                     if actions != nil { dismissActions() }
-                    else { openActions(for: nil, returnToSidebar: activePane == nil) }
+                    else { openActions(for: nil, returnToSidebar: sidebarFocused) }
                     continue
                 }
                 let wasSidebarFocused = sidebarFocused
@@ -2747,7 +2799,7 @@ struct WindowHarness {
                 case 15:
                     if event.action == 1 { dismissedActionGesture = event.key; dismissActions() }
                     continue
-                case 37:
+                case 37, 38, 39, 40:
                     dismissActions(returnToParent: false)
                     _ = routeTerminalInput(event)
                     continue

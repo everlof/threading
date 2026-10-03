@@ -161,7 +161,7 @@ with log_path.open('w+') as log:
                 assert xdo('windowfocus', window, 'key', 'Left').returncode == 0
                 await_title(process, 'Threading agents - ' + str(project), app_log_path)
                 deadline = time.monotonic() + 5
-                while f'AGENT_PICKER_FRAME 800x480 mounted=2 selected={agents[-1]} total=2 capped=0' not in app_log_path.read_text():
+                while f'AGENT_PICKER_FRAME 1120x480 mounted=2 selected={agents[-1]} total=2 capped=0' not in app_log_path.read_text():
                     assert time.monotonic() < deadline, app_log_path.read_text()
                     time.sleep(.05)
                 with (Path(store) / 'host.lock').open('rb') as lock:

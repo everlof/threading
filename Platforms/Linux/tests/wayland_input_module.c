@@ -65,7 +65,8 @@ static int receive_command(int fd, uint32_t mask, void *data) {
     if (strcmp(command, "origin") == 0) {
         struct weston_view *view;
         wl_list_for_each(view, &module->compositor->view_list, link) {
-            if (view->is_mapped && view->surface->width == 800 &&
+            if (view->is_mapped &&
+                (view->surface->width == 800 || view->surface->width == 1120) &&
                 view->surface->height == 480) {
                 snprintf(detail, sizeof(detail), "ORIGIN %.0f %.0f",
                          view->geometry.pos_offset.x, view->geometry.pos_offset.y);

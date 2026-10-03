@@ -95,9 +95,9 @@ def capture(window, name):
     path = output / name
     subprocess.run(['import', '-window', window, str(path)], check=True, timeout=5)
     assert subprocess.check_output(['identify', '-format', '%wx%h', str(path)],
-                                   text=True, timeout=5) == '800x480'
+                                   text=True, timeout=5) == '1120x480'
     pixels = subprocess.check_output(['convert', str(path), '-depth', '8', 'RGB:-'], timeout=5)
-    assert len(pixels) == 800 * 480 * 3
+    assert len(pixels) == 1120 * 480 * 3
     return pixels
 
 
@@ -105,7 +105,7 @@ def changed_pixels(before, after, x0, y0, x1, y1):
     changed = 0
     for y in range(y0, y1):
         for x in range(x0, x1):
-            offset = (y * 800 + x) * 3
+            offset = (y * 1120 + x) * 3
             if max(abs(before[offset + channel] - after[offset + channel])
                    for channel in range(3)) > 28:
                 changed += 1
@@ -113,7 +113,7 @@ def changed_pixels(before, after, x0, y0, x1, y1):
 
 
 def bright_pixels(image, x0, y0, x1, y1):
-    return sum(min(image[(y * 800 + x) * 3:(y * 800 + x) * 3 + 3]) > 220
+    return sum(min(image[(y * 1120 + x) * 3:(y * 1120 + x) * 3 + 3]) > 220
                for y in range(y0, y1) for x in range(x0, x1))
 
 
@@ -157,7 +157,7 @@ try:
         for index, row in enumerate(rows):
             row_rect = extents(row)
             assert (row_rect.x, row_rect.y, row_rect.width, row_rect.height) == (
-                12, 86 + index * 48, 776, 44)
+                12, 86 + index * 48, 296, 44)
             assert row.get_child_count() == 2
             create = row.get_child_at_index(0)
             assert create.get_role_name() == 'push button'
@@ -236,7 +236,7 @@ try:
         header_button = header_actions(app)
         header_rect = extents(header_button)
         assert (header_rect.x, header_rect.y, header_rect.width, header_rect.height) == (
-            744, 20, 40, 40)
+            264, 20, 40, 40)
         move_pointer(window, header_button)
         xdo('click', '--window', window, '1')
         eventually(lambda: listing(app).get_name() == 'Project actions',

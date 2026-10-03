@@ -138,13 +138,15 @@ try:
     window = projects()
     assert not starts(), 'opening the project must not restart its saved shell'
     assert xdo('windowsize', window, '960', '600').returncode == 0
-    eventually(lambda: 'FRAME 960x600' in Path(log.name).read_text(), 'resized native navigator')
+    eventually(lambda: 'FRAME 320x600' in Path(log.name).read_text()
+               and 'IDLE_PANE_FRAME 640x600' in Path(log.name).read_text(),
+               'resized split workspace')
     key('Right')
     picker()
     key('Return')
     ready(1)
     first = assert_record(1, preferred)
-    assert (first['columns'], first['rows']) == (96, 23), first
+    assert (first['columns'], first['rows']) == (64, 23), first
     subprocess.run(['import', '-window', window, 'out/terminal-restart-recorded-directory.png'],
                    check=True, timeout=5)
 

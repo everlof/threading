@@ -16,6 +16,8 @@ typedef struct TWWindow TWWindow;
 // Kind26 redraws the Actions button; action is 0 normal,1 hover,2 pressed.
 // Kind27 is opt-in navigator pointer delivery. Coordinates are window pixels; action is
 // 0 motion, 1 left down, 2 left drag, 3 left up, 4 leave/cancel, 5 right down.
+// Action6 is one motion crossing from the idle pane: cancel idle hover, then deliver the
+// navigator motion in the same host turn, before a following click can overtake it.
 // A left press begun in the navigator owns drag/up even outside its pane. key is 0 for
 // left or 2 for right; terminal-owned gestures never enter this route.
 // Kind28 activates a mounted project's inline Actions child through AT-SPI. key is its
@@ -29,6 +31,10 @@ typedef struct TWWindow TWWindow;
 // Kind36 toggles the selected project's inline saved-runtime disclosure on Space.
 // Kind37 delivers pointer motion/down/drag/up/cancel to the terminal pane's AppKit header.
 // Coordinates are terminal-pane-local x and window-local y; action matches kind27.
+// Kind38 presses the mounted page title through its production AppKit accessibility action.
+// Kind39 delivers idle right-pane pointer motion/down/drag/up/cancel to the placeholder view.
+// Coordinates are right-pane-local x and window-local y; action matches kind27.
+// Kind40 presses the mounted idle placeholder's action button through AT-SPI or keyboard.
 typedef struct {
     int kind, x, y, width, height;
     char text[1024];
@@ -46,6 +52,11 @@ void tw_workspace_focus(TWWindow *, int sidebarFocused);
 // accessibility geometry use the remaining content rectangle; standalone mode has no inset.
 void tw_workspace_terminal_top_inset(TWWindow *, int pixels);
 int tw_workspace_terminal_top_inset_value(TWWindow *);
+// Explicit idle right-pane state; entering discards retained terminal/header pixels, clears
+// terminal accessibility text and input gestures, and keeps the navigator mounted.
+void tw_workspace_placeholder_mode(TWWindow *, int enabled);
+// Retain the production placeholder's full right-pane bitmap; only valid in placeholder mode.
+int tw_present_placeholder(TWWindow *, const uint8_t *rgba, int width, int height);
 // Explicit runtime activation invalidates the previous terminal image and mouse gesture owner.
 // Repaints the retained sidebar over an empty terminal ground; returns 0 on success.
 int tw_workspace_reset_terminal(TWWindow *);
@@ -95,6 +106,14 @@ int tw_accessibility_add_action_row(TWWindow *, const char *id, const char *name
                                     int enabled, int x, int y, int width, int height);
 void tw_accessibility_end_list(TWWindow *);
 void tw_accessibility_show_terminal(TWWindow *, const char *name);
+// One mounted title button in the workspace header. The identity invalidates queued presses
+// when pages switch; height0 unmounts it. Bounds are window pixels and must fit the header.
+void tw_accessibility_page_title(TWWindow *, const char *identity, const char *name,
+                                 int x, int y, int width, int height);
+// A bounded idle panel with title/detail labels and one optional action button. NULL title
+// unmounts it; NULL actionLabel omits the button. Button bounds are window pixels.
+void tw_accessibility_placeholder(TWWindow *, const char *title, const char *detail,
+                                   const char *actionLabel, int x, int y, int width, int height);
 // SDL window focus is the source of truth; the bridge focuses the mounted selected row or terminal.
 void tw_accessibility_window_focus(TWWindow *, int focused);
 // The accessibility projection uses the rendered cell positions, including wide and combined

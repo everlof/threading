@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 # Test the already-built installed preview under headless Weston without Swift or X11.
+# THREADING_WAYLAND_PACKAGE may point to an immutable snapshot during concurrent builds.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 mode=${1:-render}
 [[ $mode == render || $mode == --actions ]] || { echo 'usage: wayland_smoke.sh [--actions]' >&2; exit 64; }
 mkdir -p out
 evidence=$(mktemp -d "$PWD/out/wayland-smoke.XXXXXXXX")
+package=${THREADING_WAYLAND_PACKAGE:-$PWD/out/threading-linux-preview-ubuntu24.04-arm64.deb}
+[[ -f $package ]] || { echo "missing Wayland package: $package" >&2; exit 1; }
 printf 'Wayland evidence: %s\n' "$evidence"
 docker run --rm -i --platform linux/arm64 \
   -e "THREADING_WAYLAND_SMOKE_MODE=$mode" \
   -e THREADING_WAYLAND_CAIRO_PLUGIN \
   -e SDL_VIDEO_WAYLAND_PREFER_LIBDECOR \
   -e SDL_VIDEO_WAYLAND_ALLOW_LIBDECOR \
-  -v "$PWD/out/threading-linux-preview-ubuntu24.04-arm64.deb:/preview.deb:ro" \
+  -v "$package:/preview.deb:ro" \
   -v "$PWD/tests/wayland_capture.c:/wayland_capture.c:ro" \
   -v "$PWD/tests/wayland_render_smoke.py:/wayland_render_smoke.py:ro" \
   -v "$PWD/tests/wayland_atspi_smoke.py:/wayland_atspi_smoke.py:ro" \

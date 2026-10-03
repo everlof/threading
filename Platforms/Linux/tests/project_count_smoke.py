@@ -11,6 +11,7 @@ gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
 
 binary, host, endpoint, fixture, evidence = sys.argv[1:]
+window_width = 1120
 root = Path(fixture) / 'project-count-fixture'
 root.mkdir()
 output = Path(evidence)
@@ -82,14 +83,14 @@ def capture(window, name):
     subprocess.run(['import', '-window', window, str(path)], check=True, timeout=5)
     dimensions = subprocess.check_output(['identify', '-format', '%wx%h', str(path)],
                                          text=True, timeout=5)
-    assert dimensions == '800x480', dimensions
+    assert dimensions == f'{window_width}x480', dimensions
     rgb = subprocess.check_output(['convert', str(path), '-depth', '8', 'RGB:-'], timeout=5)
-    assert len(rgb) == 800 * 480 * 3
+    assert len(rgb) == window_width * 480 * 3
     return rgb
 
 
 def pixel(rgb, x, y):
-    offset = (y * 800 + x) * 3
+    offset = (y * window_width + x) * 3
     return tuple(rgb[offset:offset + 3])
 
 
@@ -148,7 +149,7 @@ try:
         row_rects = [row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
                      for row in (first, second)]
         for index, rect in enumerate(row_rects):
-            assert (rect.x, rect.y, rect.width, rect.height) == (12, 86 + index * 48, 776, 44)
+            assert (rect.x, rect.y, rect.width, rect.height) == (12, 86 + index * 48, 296, 44)
         window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid',
                                         str(process.pid), '--name', '^Threading experiment - '),
                             'native window', process).splitlines()[0]
@@ -190,7 +191,7 @@ try:
                               'project disclosure opened inline terminal', process)
         child = expanded.get_child_at_index(1)
         child_rect = child.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert (child_rect.x, child_rect.y, child_rect.width, child_rect.height) == (44, 134, 744, 44)
+        assert (child_rect.x, child_rect.y, child_rect.width, child_rect.height) == (44, 134, 264, 44)
         assert child.get_accessible_id() not in (first.get_accessible_id(), second.get_accessible_id())
         assert selected(expanded, 0) and not selected(expanded, 1)
         expanded_pixels = capture(window, 'project-count-alpha-expanded.png')

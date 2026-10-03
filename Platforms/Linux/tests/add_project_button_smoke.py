@@ -85,15 +85,15 @@ def capture(window, name):
     path = output / name
     subprocess.run(['import', '-window', window, str(path)], check=True, timeout=5)
     assert subprocess.check_output(['identify', '-format', '%wx%h', str(path)],
-                                   text=True, timeout=5) == '800x480'
+                                   text=True, timeout=5) == '1120x480'
     image = subprocess.check_output(['convert', str(path), '-depth', '8', 'RGB:-'], timeout=5)
-    assert len(image) == 800 * 480 * 3
+    assert len(image) == 1120 * 480 * 3
     return image
 
 
 def changed_pixels(before, after, x0, y0, x1, y1):
-    return sum(max(abs(before[(y * 800 + x) * 3 + channel] -
-                       after[(y * 800 + x) * 3 + channel]) for channel in range(3)) > 25
+    return sum(max(abs(before[(y * 1120 + x) * 3 + channel] -
+                       after[(y * 1120 + x) * 3 + channel]) for channel in range(3)) > 25
                for y in range(y0, y1) for x in range(x0, x1))
 
 
@@ -121,7 +121,7 @@ try:
         assert button.get_state_set().contains(Atspi.StateType.ENABLED)
         assert button.get_action_iface().get_n_actions() == 1
         bounds = button.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert (bounds.x, bounds.y, bounds.width, bounds.height) == (692, 20, 40, 40)
+        assert (bounds.x, bounds.y, bounds.width, bounds.height) == (212, 20, 40, 40)
         center = (bounds.x + bounds.width // 2, bounds.y + bounds.height // 2)
         assert frame.get_component_iface().get_accessible_at_point(
             *center, Atspi.CoordType.WINDOW).get_accessible_id() == 'linux.add-project'

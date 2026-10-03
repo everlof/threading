@@ -4548,3 +4548,50 @@ AT-SPI and pointer checks. I inspected the installed X11 workspace captures with
 header and the title pressed to reveal its outline row. Wayland's existing checks cover the
 navigator; they do not yet capture the terminal header there. The header's title is not yet
 published as a separate control in the native AT-SPI tree.
+
+## 151. The idle workspace mounts the production session placeholder
+
+An app launch without an active terminal now opens a 320-pixel navigator and an 800-pixel
+right pane. That pane retains the production `SessionPlaceholderView` rather than showing
+an empty terminal texture. With projects it offers **No Session Selected** and **New Session**;
+with an empty store it offers **No Projects Yet** and **Add Project**. The host supplies a
+fixed diagnostic palette, a terminal symbol and the existing project creation/admission
+routes. The placeholder retains its own view tree and bitmap and repaints only on resize or
+interaction. Project rows remain bounded to the visible outline viewport.
+
+The production view needed a narrow Linux `ThemedButton` leaf, two typography roles, and a
+symbol lookup seam on `NSImage`. Linux closure action routing keeps the macOS selector path
+intact. The initial installed capture showed the title clipped against the top edge and the
+symbol above the window. A centered vertical `NSStackView` lacked a weak equation closing
+its last child to the bottom of the stack, leaving its height underdetermined. Adding that
+fitting constraint to the shim corrected the cause; the existing stack and ControlRow
+contracts continue to pass. The title button's focus ring also needed an explicit
+first-responder reset when terminal focus returns to the navigator.
+
+The native bridge now treats the idle right pane separately from the terminal. It publishes
+the actual laid-out action rectangle to an AT-SPI panel with title, detail and button; pointer,
+Tab/Return and AT-SPI presses enter the same host action route. Opening a terminal clears the
+idle texture and nodes before publishing terminal content. The first cross-pane hover test
+found that canceling idle hover consumed the only pointer motion into a project row. Queuing
+a replay then let a following click overtake the hover in an account picker. The bridge now
+emits one crossing event, and the host clears idle hover and delivers the navigator motion
+in the same turn. The active page title is now its own native AT-SPI button, with its bounds
+and reveal action sourced from the mounted header.
+
+Customization gate: this is a host-only diagnostic embedding of a production default view;
+no new extension component is declared. Threading still owns project identity, selection,
+menu admission and PTY lifecycle. Scaling gate: the retained idle tree and bitmap have a
+constant size, and neither pointer motion nor terminal output remounts project rows or
+reads the project graph. The preview still uses fixed colors and a limited symbol catalogue.
+
+Verification on 2026-10-03: the macOS `Threading` Debug build and its boundary scripts passed;
+the Linux stack and ControlRow contracts passed. The full non-root Ubuntu arm64
+`bundle-smoke.sh` run passed from package build through desktop launch, including idle actions,
+provider and account pickers, the 5,100-project outline, saved-terminal restart and directory
+identity. Its evidence is `out/bundle-smoke/run.Ejy5RtDy`, and the installed `.deb` SHA-256 is
+`72c734cfe147ce911a2a38c368356ed55cb440592444aae2fc4e4d96ae94dacb`. Focused installed
+AT-SPI and account-picker runs passed, including one-motion idle-to-sidebar hover followed by
+a first-click choice. The installed Wayland `--actions` run passed on the same source and its
+idle, shell and title-reveal captures were inspected at `out/wayland-smoke.5TD0H9Qu`: the icon,
+labels and button are centered, the terminal header is retained, and title reveal clears its
+focus ring when selection returns to the navigator.
