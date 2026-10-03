@@ -393,15 +393,18 @@ recreated when it cannot be opened — and registers each session lazily as
   old location too, since a host unreachable at launch left the mailbox here — when a mailbox
   was registered there (`hasMailbox`), not merely because the address could exist. Each old
   location is moved on its own: an old host that is down (often why the project moved) does not
-  hold back this Mac's part, and its part is retried after that host's next successful sync —
-  up to five times, and only while the project still runs where that move was taking it; a newer
-  move supersedes it. A move asked for while another for the same session runs is queued behind
-  it. Copied grants keep
+  hold back this Mac's part. That host's unmoved mail is recorded per host and, after its next
+  successful sync, moved to wherever the session lives *then* — a later move neither drops it nor
+  sends it to a stale destination; hosts are matched by id, a retry runs once at a time, and after
+  five failed retries it is given up in the event log. A move asked for while another for the
+  same session runs is queued behind it. Copied grants keep
   their chain token budget. Host → host needs the old host to have the new one as a transport
   peer; otherwise the mail stays and the event log says so. Every step is idempotent.
 - **A session whose mailbox is on its host sends from there.** `send_to_session`'s mailbox
   fallback for such a caller goes through that host's controller (`mail-send … owner-admitted`),
-  so the reply reaches the mailbox the agent reads. Concurrent provisionings of one session (a
+  so the reply reaches the mailbox the agent reads. A Mac target gets a `notify` grant for that
+  exact host address only where it has none; a grant the owner set is never changed, and a
+  revoked sender is answered as refused. Concurrent provisionings of one session (a
   launch racing a move) share one answer instead of the second falling back to this Mac.
 - **Grants and contacts are the owner's** (`MailAccessService`, `SessionMailAccessForm`): the
   Mail section lists live grants and offers grant, revoke and add-contact forms, each an

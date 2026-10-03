@@ -161,6 +161,17 @@ final class RemoteSessionMailboxTests: XCTestCase {
 }
 
 /// Runs `owner-rpc` against a store in-process, or fails like an unreachable host.
+/// Routes owner RPCs to one fake host per SSH alias.
+final class RoutingOwnerRPCFake: RemoteHostCommandRunning, @unchecked Sendable {
+    let hosts: [String: OwnerRPCFake]
+    init(_ hosts: [String: OwnerRPCFake]) { self.hosts = hosts }
+    func run(on destination: RemoteHostDestination, command: String, input: RemoteHostCommandInput,
+             extraOptions: [String], timeout: TimeInterval) throws -> RemoteHostCommandResult {
+        guard let host = hosts[destination.alias] else { return .init(output: "unknown host", termination: .exited(255)) }
+        return try host.run(on: destination, command: command, input: input, extraOptions: extraOptions, timeout: timeout)
+    }
+}
+
 final class OwnerRPCFake: RemoteHostCommandRunning, @unchecked Sendable {
     let store: ControllerStore?
     var offline = false
@@ -444,29 +455,49 @@ final class MailboxHandoverTests: XCTestCase {
         XCTAssertEqual(again.chainTokenBudget, 50_000, "a caller that does not deal in budgets never removes the fuse")
     }
 
-    func testANewerMoveSupersedesAPendingRetryAndAStaleRetryDoesNothing() async throws {
+    /// The session lived on h1, which was down when its project moved to this Mac and then on to
+    /// h2. When h1 answers again, its unread mail goes to h2 — where the session lives now — and
+    /// the retry is cleared; it is neither dropped by the later move nor sent to this Mac.
+    func testAnOldHostsMailFollowsTheSessionToWhereItLivesNowWhenTheHostReturns() async throws {
         let w = try await world()
+        let h1 = try ControllerStore(path: directory.appendingPathComponent("h1.db").path)
+        let h1Host = try await h1.host().id
+        let macHost = try await w.mac.host().id
+        _ = try await h1.setMailPeer(host: macHost, expectedRevision: 0, name: "mac", transport: nil, push: false, pull: false)
+        _ = try await h1.setMailPeer(host: w.remoteHost, expectedRevision: 0, name: "h2", transport: ["/usr/bin/ssh", "h2"], push: true, pull: false)
+        _ = try await w.remote.setMailPeer(host: h1Host, expectedRevision: 0, name: "h1", transport: nil, push: false, pull: false)
         let session = SessionID()
-        _ = try await w.mac.register(session, name: "Deploy")
-        let down = hostEndpoint("down")
+        let onH1 = MailAddress(host: h1Host, kind: .session, id: session.rawValue)
+        _ = try await h1.registerMailbox(onH1, name: "Deploy")
+        let worker = MailAddress(host: h1Host, kind: .worker, id: UUID())
+        _ = try await h1.setMailGrant(recipient: onH1, sender: "*", expectedRevision: 0, mode: .notify, allowsInterrupt: false)
+        let sibling = MailAddress(host: h1Host, kind: .session, id: UUID())
+        _ = try await h1.registerMailbox(sibling, name: "Sibling")
+        let unread = try await h1.sendMail(from: sibling, to: onH1, id: UUID(), text: "unread on h1", replyTo: nil, priority: .normal)
+        _ = worker
+
+        let h1Endpoint = hostEndpoint("h1")
+        var h1Up = false
+        let routing = RoutingOwnerRPCFake(["vps-1": OwnerRPCFake(store: w.remote), "h1": OwnerRPCFake(store: h1)])
+        w.mailboxes.runner = routing
+        w.handover.runner = routing
         w.handover.ensurePeered = { endpoint in
-            if endpoint.name == "down" { throw RemoteControllerRPC.Failure.transport("down") }
+            if endpoint.name == "h1" { guard h1Up else { throw RemoteControllerRPC.Failure.transport("down") }; return h1Host }
             return w.remoteHost
         }
-        _ = await w.handover.move(session, title: "Deploy", from: .host(down), to: .thisMac)
-        XCTAssertNotNil(w.handover.pending[session])
-        // The project then moves on to the reachable host: the old retry is superseded.
+        _ = await w.handover.move(session, title: "Deploy", from: .host(h1Endpoint), to: .thisMac)
         _ = await w.handover.move(session, title: "Deploy", from: .thisMac, to: .host(w.endpoint))
-        XCTAssertNil(w.handover.pending[session], "a newer move replaces the waiting retry")
-        XCTAssertNotNil(w.mailboxes.binding(for: session))
-        // Even a retry recorded earlier is dropped when the project no longer runs where it led.
+        XCTAssertNotNil(w.handover.pending[session]?[h1Endpoint.hostID], "a later move does not drop the old host's mail")
+
+        h1Up = true
         w.handover.currentSide = { _ in .host(w.endpoint) }
-        _ = await w.handover.move(session, title: "Deploy", from: .host(down), to: .thisMac)
-        w.handover.retryPending(reachable: down)
-        XCTAssertNil(w.handover.pending[session], "a stale retry is dropped rather than undoing the later move")
+        for task in w.handover.retryPending(reachable: h1Endpoint) { _ = await task.value }
+        XCTAssertNil(w.handover.pending[session], "moved, so no longer pending")
+        let held = try await h1.outboundBatch(for: w.remoteHost).envelopes.map(\.id)
+        XCTAssertEqual(held, [unread.envelope.id], "queued for h2, where the session lives now")
     }
 
-    func testAnOldPartThatKeepsFailingIsGivenUp() async throws {
+    func testAnOldPartThatKeepsFailingIsGivenUpAfterItsRetries() async throws {
         let w = try await world()
         let session = SessionID()
         let down = hostEndpoint("down")
@@ -475,10 +506,32 @@ final class MailboxHandoverTests: XCTestCase {
             return w.remoteHost
         }
         w.handover.currentSide = { _ in .thisMac }
+        _ = await w.handover.move(session, title: "Deploy", from: .host(down), to: .thisMac)
         for _ in 0..<MailboxHandoverDefaults.retryAttempts {
-            _ = await w.handover.move(session, title: "Deploy", from: .host(down), to: .thisMac)
+            XCTAssertNotNil(w.handover.pending[session]?[down.hostID])
+            for task in w.handover.retryPending(reachable: down) { _ = await task.value }
         }
-        XCTAssertNil(w.handover.pending[session], "bounded: not retried on every sync for ever")
+        XCTAssertNil(w.handover.pending[session], "bounded: given up rather than retried on every sync")
+    }
+
+    func testTheFallbackNeverOverridesAGrantTheOwnerSet() async throws {
+        let w = try await world()
+        let caller = SessionID(), target = SessionID()
+        let provisioned = await w.mailboxes.provision(caller, name: "Caller", endpoint: w.endpoint)
+        let binding = try XCTUnwrap(provisioned)
+        let targetAddress = try await w.mac.register(target, name: "Target")
+        // The owner revoked this caller on the target.
+        try await w.mac.ensureGrant(recipient: targetAddress, sender: binding.address.description, mode: .wake)
+        try await w.mac.ensureGrant(recipient: targetAddress, sender: binding.address.description, mode: nil)
+        let delivery = MacMailDelivery(mailbox: w.mac)
+        delivery.mailboxes = w.mailboxes
+        let answered = expectation(description: "answered")
+        delivery.storeUndeliverable("hello", to: target, from: caller) { ok in
+            XCTAssertFalse(ok, "a revoked sender is refused, not silently re-granted"); answered.fulfill()
+        }
+        await fulfillment(of: [answered], timeout: 10)
+        let grant = try await w.macStore.mailGrants(recipient: targetAddress).items.first { $0.sender == binding.address.description }
+        XCTAssertNil(grant?.mode, "the revocation stands")
     }
 
     func testAMovedGrantKeepsItsChainBudget() async throws {

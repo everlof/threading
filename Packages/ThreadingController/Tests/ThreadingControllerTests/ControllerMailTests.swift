@@ -206,13 +206,13 @@ struct ControllerMailTests {
         }
         let admitted = try await store.sendMail(from: a, to: b, id: UUID(), text: "same project", replyTo: nil, priority: .interrupt, ownerAdmitted: true)
         #expect(admitted.state == .inbox)
-        // Acknowledging carries the chain into the session's next send, as for an execution.
+        // A session continues the conversation by replying to it.
         _ = try await store.acknowledgeMail(mailbox: b, ids: [admitted.envelope.id])
-        let reply = try await store.sendMail(from: b, to: a, id: UUID(), text: "next", replyTo: nil, priority: .normal, ownerAdmitted: true)
+        let reply = try await store.sendMail(from: b, to: a, id: UUID(), text: "next", replyTo: admitted.envelope.id, priority: .normal, ownerAdmitted: true)
         #expect(reply.envelope.chainID == admitted.envelope.chainID && reply.envelope.depth == 1)
     }
 
-    @Test func aSessionThatReadDeepMailCanStillStartAFreshConversation() async throws {
+    @Test func aSessionContinuesAChainOnlyByReplyingAndOtherwiseStartsFresh() async throws {
         let (directory, store) = try fixture.fixture()
         defer { try? FileManager.default.removeItem(at: directory) }
         let host = try await store.host()
@@ -220,29 +220,23 @@ struct ControllerMailTests {
         let b = MailAddress(host: host.id, kind: .session, id: UUID())
         let c = MailAddress(host: host.id, kind: .session, id: UUID())
         for (address, name) in [(a, "A"), (b, "B"), (c, "C")] { _ = try await store.registerMailbox(address, name: name) }
-        // A and B ping-pong to the depth limit, each acknowledging before answering.
-        var from = a, to = b
-        for depth in 0...MailLimits.maximumDepth {
-            let sent = try await store.sendMail(from: from, to: to, id: UUID(), text: "ping \(depth)", replyTo: nil, priority: .normal, ownerAdmitted: true)
-            #expect(sent.envelope.depth == depth)
-            _ = try await store.acknowledgeMail(mailbox: to, ids: [sent.envelope.id])
+        // A reply chain is bounded however deep it goes.
+        var message = try await store.sendMail(from: a, to: b, id: UUID(), text: "ping", replyTo: nil, priority: .normal, ownerAdmitted: true)
+        var from = b, to = a
+        while message.envelope.depth < MailLimits.maximumDepth {
+            _ = try await store.acknowledgeMail(mailbox: from, ids: [message.envelope.id])
+            message = try await store.sendMail(from: from, to: to, id: UUID(), text: "pong", replyTo: message.envelope.id, priority: .normal, ownerAdmitted: true)
             swap(&from, &to)
         }
-        // Within the window the loop stays bounded, however the sessions send: the session that
-        // read the deepest mail is refused, and the other cannot escape by sending twice.
         await #expect(throws: ControllerError.invalidInput("chain_depth")) {
-            try await store.sendMail(from: from, to: to, id: UUID(), text: "too deep", replyTo: nil, priority: .normal, ownerAdmitted: true)
+            try await store.sendMail(from: from, to: to, id: UUID(), text: "too deep", replyTo: message.envelope.id, priority: .normal, ownerAdmitted: true)
         }
-        let other = from == a ? b : a
-        let once = try await store.sendMail(from: other, to: c, id: UUID(), text: "same conversation", replyTo: nil, priority: .normal, ownerAdmitted: true)
-        let twice = try await store.sendMail(from: other, to: c, id: UUID(), text: "and again", replyTo: nil, priority: .normal, ownerAdmitted: true)
-        #expect(once.envelope.depth == MailLimits.maximumDepth && twice.envelope.chainID == once.envelope.chainID)
-        // Past the window, the session that read the deepest mail starts a new conversation:
-        // it is never refused forever.
-        await store.setSessionContextWindow(0.2)
-        try await Task.sleep(for: .milliseconds(400))
+        // Having read the deepest mail, and even after acknowledging it again, the session's
+        // unrelated messages start fresh: nothing it read can refuse what it says next.
+        _ = try await store.acknowledgeMail(mailbox: from, ids: [message.envelope.id])
+        _ = try await store.acknowledgeMail(mailbox: from, ids: [message.envelope.id])
         let fresh = try await store.sendMail(from: from, to: c, id: UUID(), text: "new topic", replyTo: nil, priority: .normal, ownerAdmitted: true)
-        #expect(fresh.envelope.depth == 0 && fresh.envelope.chainID != once.envelope.chainID)
+        #expect(fresh.envelope.depth == 0 && fresh.envelope.chainID != message.envelope.chainID)
     }
 
     @Test func theWakeBudgetIsJudgedOnTheMailThatMayWakeNotOnWhicheverArrivedLast() async throws {

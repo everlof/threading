@@ -199,7 +199,10 @@ final class MacMailDelivery {
                     // a grant naming the caller's host address exactly (siblings created after
                     // the caller launched have none yet), so this Mac does not refuse it.
                     if hosted == nil {
-                        _ = try await mailbox.ensureGrant(recipient: recipient, sender: callerHosted.address.description, mode: .notify)
+                        guard try await mailbox.admitSibling(recipient: recipient, sender: callerHosted.address) else {
+                            // The owner revoked this sender on the target: their decision stands.
+                            throw ControllerError.forbidden
+                        }
                     }
                     _ = try await mailboxes.send(as: callerHosted, to: recipient, text: text)
                     MacMailSync.shared.kick(host: callerHosted.address.host)

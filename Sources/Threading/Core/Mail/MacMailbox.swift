@@ -184,6 +184,22 @@ actor MacMailbox {
     /// exactly the value given, nil meaning none (a grant copied as it was).
     enum BudgetChange: Equatable { case keep, set(Int64?) }
 
+    /// Records the control plane's admission of a project sibling's host-local address on a Mac
+    /// session mailbox — only where no grant for that exact sender exists yet. A grant the owner
+    /// set (any mode) is never changed, and a revocation is answered `false`: the owner's decision
+    /// outranks the same-project default.
+    func admitSibling(recipient: MailAddress, sender: MailAddress) async throws -> Bool {
+        let store = try await openStore()
+        return try await refusing {
+            let prior = try await store.mailGrants(recipient: recipient, limit: MacMailDefaults.grantPage).items
+                .first { $0.sender == sender.description }
+            if let prior { return prior.mode != nil }
+            _ = try await store.setMailGrant(recipient: recipient, sender: sender.description, expectedRevision: 0,
+                                             mode: .notify, allowsInterrupt: false)
+            return true
+        }
+    }
+
     /// Grants `sender` (an address, `<host>/*` or `*`) `mode` on a session mailbox here, unless an
     /// equal grant already stands. Owner-only: no agent tool reaches this.
     @discardableResult

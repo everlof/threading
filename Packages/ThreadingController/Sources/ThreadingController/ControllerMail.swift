@@ -164,11 +164,6 @@ public enum MailLimits {
     public static let openInbox = 1_000
     static let noticeSenders = 3
     static let rateWindow: TimeInterval = 60
-    /// A session mailbox has no execution to bound its chain context, so an acknowledgement
-    /// carries its chain into the session's sends for this long. A loop answers within it, so it
-    /// stays in one bounded chain whether or not it sets reply_to; a message sent later starts a
-    /// new conversation.
-    public static let sessionContextWindow: TimeInterval = 300
 }
 
 /// The fixed text a wake-admitted task starts from. Host-authored; the mail is untrusted data.
@@ -182,13 +177,9 @@ public enum MailWake {
 
 struct MailRate: Codable { var windowStart: Double; var count: Int }
 struct MailChain: Codable { var count: Int }
-struct MailContext: Codable {
-    var chainID: UUID
-    var depth: Int
-    /// When a session mailbox acknowledged it (seconds since 1970). Execution contexts end with
-    /// their execution and carry none.
-    var at: Double? = nil
-}
+/// The chain an execution's acknowledged mail carries into what that execution sends. It ends
+/// with the execution, which is what bounds it.
+struct MailContext: Codable { var chainID: UUID; var depth: Int }
 
 extension ControllerStore {
     // MARK: - Identity
@@ -303,8 +294,7 @@ extension ControllerStore {
             switch request {
             case .mailSend(let recipient, let id, let text, let replyTo, let priority):
                 response.mail = try send(from: address, senderName: try localMailboxName(address), to: recipient, id: id,
-                                         text: text, replyTo: replyTo, priority: priority, questionID: nil, context: nil,
-                                         mailboxContext: true)
+                                         text: text, replyTo: replyTo, priority: priority, questionID: nil, context: nil)
             case .mailInbox(let after): response.address = address; response.inbox = try inbox(address, after: after)
             case .mailAck(let ids): response.mails = try acknowledgeMail(mailbox: address, ids: ids)
             case .mailDirectory: response.address = address; response.directory = try mailDirectory(for: address)
@@ -362,7 +352,7 @@ extension ControllerStore {
             let name = try localMailboxName(sender)
             return try send(from: sender, senderName: name, to: recipient, id: id, text: text,
                             replyTo: replyTo, priority: priority, questionID: nil, context: nil,
-                            mailboxContext: true, ownerAdmitted: ownerAdmitted)
+                            ownerAdmitted: ownerAdmitted)
         }
     }
 
@@ -389,7 +379,7 @@ extension ControllerStore {
 
     func send(from sender: MailAddress, senderName: String, to recipient: MailAddress, id: UUID, text: String,
               replyTo: UUID?, priority: MailPriority, questionID: QuestionID?, context: ExecutionID?,
-              mailboxContext: Bool = false, ownerAdmitted: Bool = false) throws -> MailMessage {
+              ownerAdmitted: Bool = false) throws -> MailMessage {
         let local = try host().id
         guard sender.host == local else { throw ControllerError.forbidden }
         if let prior: MailMessage = try optional("mail", id.uuidString.lowercased()) {
@@ -411,14 +401,11 @@ extension ControllerStore {
             answeringFor = original.envelope.forwardedFrom
         } else if let context, let inherited: MailContext = try optional("mailContext", context.description) {
             chainID = inherited.chainID; depth = inherited.depth + 1
-        } else if mailboxContext, let inherited: MailContext = try optional("mailContext", sender.description),
-                  Date().timeIntervalSince1970 - (inherited.at ?? 0) <= sessionContextWindow {
-            // A session has no execution: what it acknowledged within the window is the
-            // conversation it is in, for every send in that window (so a loop cannot escape its
-            // depth by dropping reply_to or by sending twice). Past the window it starts fresh,
-            // so a session that once read deep mail is never refused forever.
-            chainID = inherited.chainID; depth = inherited.depth + 1
         }
+        // A session mailbox (no execution context) continues a chain only through `reply_to`. It has no
+        // execution to bound an inherited context, and the controller cannot tell a session's new
+        // topic from a loop's next turn: every rule that guessed refused legitimate mail. Sessions
+        // are interactive and watched; what bounds them without `reply_to` is the send-rate fuse.
         guard depth <= MailLimits.maximumDepth else { throw ControllerError.invalidInput("chain_depth") }
         try spendSendRate(sender)
         var envelope = MailEnvelope(id: id, sender: sender, senderName: senderName, recipient: recipient, text: text,
@@ -592,7 +579,6 @@ extension ControllerStore {
     private func acknowledge(_ recipient: MailAddress, ids: [UUID], executionID: ExecutionID?) throws -> [MailMessage] {
         guard (1...100).contains(ids.count) else { throw ControllerError.invalidInput("ids") }
         var context: MailContext? = try executionID.flatMap { try optional("mailContext", $0.description) }
-        let now = Date().timeIntervalSince1970
         let hadContext = context != nil
         var result: [MailMessage] = []
         for id in ids {
@@ -606,20 +592,13 @@ extension ControllerStore {
                 try event("mail.acked", id.uuidString.lowercased())
             }
             if context == nil || message.envelope.depth > context!.depth {
-                context = MailContext(chainID: message.envelope.chainID, depth: message.envelope.depth,
-                                      at: executionID == nil ? now : nil)
+                context = MailContext(chainID: message.envelope.chainID, depth: message.envelope.depth)
             }
             result.append(message)
         }
-        if let context {
-            let key = executionID?.description ?? recipient.description
-            if executionID == nil {
-                // A deeper conversation still inside its window wins; an expired one gives way.
-                let prior: MailContext? = try optional("mailContext", key)
-                if let prior, prior.depth > context.depth, now - (prior.at ?? 0) <= sessionContextWindow { return result }
-                if prior != nil { try update("mailContext", key, value: context) } else { try insert("mailContext", key, value: context) }
-            } else if hadContext { try update("mailContext", key, value: context) }
-            else { try insert("mailContext", key, value: context) }
+        if let executionID, let context {
+            if hadContext { try update("mailContext", executionID.description, value: context) }
+            else { try insert("mailContext", executionID.description, value: context) }
         }
         return result
     }

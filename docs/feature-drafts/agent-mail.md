@@ -90,7 +90,8 @@ only peer; that is a topology, not a protocol.
 7. **A message carries information, never authority.** It cannot grant tools, change a recipe,
    pick a destination, answer a person's question, widen a grant or confer manager scope.
 8. **Loops are bounded mechanically.** Every message carries a chain ID and depth; a reply or a
-   message sent by work a message woke is one deeper; sends past depth 4 are refused; a `wake`
+   message sent by work a message woke is one deeper (a session, which has no execution, continues a
+   chain only by replying); sends past depth 4 are refused; a `wake`
    never targets a mailbox already in the chain unless answering its `ask`. Spend is bounded where
    it happens — at admission — and message counts only as a loop fuse (see [Bounds](#bounds)).
 9. **Everything is visible.** The Mac shows each session's inbox/outbox; a delivered message is

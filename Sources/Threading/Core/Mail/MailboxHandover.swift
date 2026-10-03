@@ -50,9 +50,16 @@ final class MailboxHandover {
     /// A move asked for while this session's previous one is still running; run after it, in
     /// order, so a quick A→B→C ends with the mailbox at C and a forward at each step.
     private var queued: [SessionID: [(title: String, old: Side, new: Side)]] = [:]
-    /// Old locations a move could not reach (the host was down — often why the project moved).
-    /// Retried after that host's next successful sync; bounded by the sessions moved.
-    private(set) var pending: [SessionID: (title: String, old: Side, new: Side, attempts: Int)] = [:]
+    /// An old host that still holds a session's unmoved mail (it was down — often why the
+    /// project moved — or its part failed). Kept per host, whatever later moves happen, and
+    /// retried after that host's next successful sync, towards wherever the session lives then.
+    struct PendingOld {
+        let endpoint: RemoteControllerEndpoint
+        let title: String
+        var attempts: Int
+        var retrying = false
+    }
+    private(set) var pending: [SessionID: [RemoteHostID: PendingOld]] = [:]
 
     func start() {
         observations.observe(ProjectExecutionHostDidChange.self) { [weak self] event in
@@ -82,36 +89,52 @@ final class MailboxHandover {
 
     @discardableResult
     func move(_ sessionID: SessionID, title: String, from old: Side, to new: Side) async -> Outcome {
-        guard old != new else { return Outcome() }
-        // A newer move supersedes a retry still waiting for an old host; the new one re-records
-        // whatever of its own it cannot reach.
-        let retry = pending.removeValue(forKey: sessionID)
+        guard !Self.sameStore(old, new) else { return Outcome() }
         guard !inFlight.contains(sessionID) else {
             queued[sessionID, default: []].append((title, old, new))
             return Outcome()
         }
         inFlight.insert(sessionID)
-        let attempts = retry.map { $0.old == old && $0.new == new ? $0.attempts : 0 } ?? 0
-        var outcome = await moveNow(sessionID, title: title, from: old, to: new, attempts: attempts)
+        var outcome = await moveNow(sessionID, title: title, from: old, to: new)
         while let next = queued[sessionID]?.first {
             queued[sessionID]?.removeFirst()
             if queued[sessionID]?.isEmpty == true { queued[sessionID] = nil }
-            let later = await moveNow(sessionID, title: next.title, from: next.old, to: next.new, attempts: 0)
+            let later = await moveNow(sessionID, title: next.title, from: next.old, to: next.new)
             outcome.moved += later.moved; outcome.grantsCopied += later.grantsCopied; outcome.issues += later.issues
         }
         inFlight.remove(sessionID)
         return outcome
     }
 
-    /// Finishes moves whose old host could not be reached, now that `endpoint` answered.
-    /// Only a move still current is retried: its session's project must still run where the move
-    /// was taking it, or a later move has already decided where the mailbox lives.
-    func retryPending(reachable endpoint: RemoteControllerEndpoint) {
-        for (sessionID, move) in pending {
-            guard case .host(let old) = move.old, old.hostID == endpoint.hostID else { continue }
-            guard currentSide(sessionID) == move.new else { pending[sessionID] = nil; continue }
-            Task { @MainActor in _ = await self.move(sessionID, title: move.title, from: move.old, to: move.new) }
+    /// Moves the mail an old host still holds, now that `endpoint` answered, to wherever each
+    /// session lives *now* — not where the move that failed was going, which a later move may have
+    /// changed. Hosts are matched by id, so editing a host's record does not lose its retry. A
+    /// retry already running is not started twice.
+    @discardableResult
+    func retryPending(reachable endpoint: RemoteControllerEndpoint) -> [Task<Outcome, Never>] {
+        var started: [Task<Outcome, Never>] = []
+        for (sessionID, olds) in pending {
+            guard let entry = olds[endpoint.hostID], !entry.retrying else { continue }
+            guard let current = currentSide(sessionID) else {
+                pending[sessionID]?[endpoint.hostID] = nil
+                EventLog.shared.record(.mcp, "Unmoved mail left on its old host: the session no longer exists", [
+                    "session": sessionID.uuidString, "host": entry.endpoint.name
+                ])
+                continue
+            }
+            if case .host(let now) = current, now.hostID == endpoint.hostID {
+                pending[sessionID]?[endpoint.hostID] = nil // The session lives there again.
+                continue
+            }
+            pending[sessionID]?[endpoint.hostID]?.retrying = true
+            started.append(Task { @MainActor in
+                let outcome = await self.move(sessionID, title: entry.title, from: .host(endpoint), to: current)
+                self.pending[sessionID]?[endpoint.hostID]?.retrying = false
+                if self.pending[sessionID]?.isEmpty == true { self.pending[sessionID] = nil }
+                return outcome
+            })
         }
+        return started
     }
 
     /// Where the session's project runs now. Injected for tests.
@@ -119,20 +142,30 @@ final class MailboxHandover {
         ProjectStore.shared.project(forSessionID: sessionID).map { MailboxHandover.side(for: $0.executionHost) }
     }
 
-    /// Records an old location this move could not finish, up to a bounded number of attempts:
-    /// a reason that does not go away (no transport peer between two hosts) ends in the event log
-    /// instead of a retry on every sync.
-    private func deferOld(_ sessionID: SessionID, title: String, old: Side, new: Side, attempts: Int, reason: String) {
-        guard attempts + 1 < MailboxHandoverDefaults.retryAttempts else {
+    /// Records that an old host still holds this session's mail. Counted per host: the first
+    /// failure and each failed retry add one, and after the first move plus
+    /// `retryAttempts` retries a reason that does not go away (no transport peer between two
+    /// hosts) ends in the event log instead of a retry on every sync.
+    private func deferOld(_ sessionID: SessionID, title: String, endpoint: RemoteControllerEndpoint, reason: String) {
+        var entry = pending[sessionID]?[endpoint.hostID] ?? PendingOld(endpoint: endpoint, title: title, attempts: 0)
+        entry.attempts += 1
+        guard entry.attempts <= MailboxHandoverDefaults.retryAttempts else {
+            pending[sessionID]?[endpoint.hostID] = nil
+            if pending[sessionID]?.isEmpty == true { pending[sessionID] = nil }
             EventLog.shared.record(.mcp, "Mailbox move given up after repeated failures", [
-                "session": sessionID.uuidString, "reason": reason
+                "session": sessionID.uuidString, "host": endpoint.name, "reason": reason
             ])
             return
         }
-        pending[sessionID] = (title, old, new, attempts + 1)
+        pending[sessionID, default: [:]][endpoint.hostID] = entry
     }
 
-    private func moveNow(_ sessionID: SessionID, title: String, from old: Side, to new: Side, attempts: Int) async -> Outcome {
+    private func moved(_ sessionID: SessionID, from endpoint: RemoteControllerEndpoint) {
+        pending[sessionID]?[endpoint.hostID] = nil
+        if pending[sessionID]?.isEmpty == true { pending[sessionID] = nil }
+    }
+
+    private func moveNow(_ sessionID: SessionID, title: String, from old: Side, to new: Side) async -> Outcome {
         var outcome = Outcome()
         do {
             let macHost = try await mailbox.host().id
@@ -161,7 +194,7 @@ final class MailboxHandover {
                     let host = try await ensurePeered(endpoint)
                     olds.append((old, MailAddress(host: host, kind: .session, id: sessionID.rawValue)))
                 } catch {
-                    deferOld(sessionID, title: title, old: old, new: new, attempts: attempts, reason: RemoteControllerRPC.describe(error))
+                    deferOld(sessionID, title: title, endpoint: endpoint, reason: RemoteControllerRPC.describe(error))
                     outcome.issues.append(RemoteControllerRPC.describe(error))
                     EventLog.shared.record(.mcp, "Old host unreachable; its mail moves when it answers again", [
                         "session": sessionID.uuidString,
@@ -178,10 +211,10 @@ final class MailboxHandover {
                     }
                     outcome.moved += try await moveMail(from: oldAddress, to: newAddress, on: side)
                     outcome.grantsCopied += try await copyGrants(from: oldAddress, on: side, to: newAddress, on: new)
-                    if case .host = side { kick(newAddress.host) }
+                    if case .host(let endpoint) = side { kick(newAddress.host); moved(sessionID, from: endpoint) }
                 } catch {
-                    if case .host = side {
-                        deferOld(sessionID, title: title, old: old, new: new, attempts: attempts, reason: RemoteControllerRPC.describe(error))
+                    if case .host(let endpoint) = side {
+                        deferOld(sessionID, title: title, endpoint: endpoint, reason: RemoteControllerRPC.describe(error))
                     }
                     outcome.issues.append(RemoteControllerRPC.describe(error))
                 }
@@ -314,7 +347,7 @@ enum MailboxHandoverDefaults {
     /// Sessions moved per project change. A project is a handful of sessions; this only bounds
     /// a pathological one.
     static let sessionsPerMove = 64
-    /// Times one move's unreachable old part is retried after a successful sync before it is
-    /// given up and left in the event log.
+    /// Times an old host's unmoved part is retried after a successful sync, beyond the move that
+    /// first failed, before it is given up and left in the event log.
     static let retryAttempts = 5
 }

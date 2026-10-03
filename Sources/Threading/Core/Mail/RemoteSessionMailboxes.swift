@@ -108,7 +108,7 @@ final class RemoteSessionMailboxes {
         let task = Task { await self.register(sessionID, name: name, endpoint: endpoint) }
         provisioning[sessionID] = (endpoint, task)
         let binding = await task.value
-        if provisioning[sessionID]?.endpoint == endpoint { provisioning[sessionID] = nil }
+        if provisioning[sessionID]?.task == task { provisioning[sessionID] = nil }
         return binding
     }
 
