@@ -158,7 +158,7 @@ secret. It uses the protected data-protection Keychain where the build can, whic
 of an agent's `security` command. `AgentAccountTokenVault` reads the listed logins on a utility
 queue at startup and whenever the Accounts page opens. A launch, which is built synchronously on the
 main actor, then answers from memory. A launch that beats that read reads its one item inline, as a
-backstop. A hosted test gets a vault backed by memory, so no test reads or writes the developer's
+backstop. Hosted tests and isolated UI scenarios get a vault backed by memory, so no test reads or writes the developer's
 tokens. Remove deletes the item, and Reset Everything erases them all
 (`AppDataResetFlow`), since nothing else would.
 
@@ -166,6 +166,15 @@ tokens. Remove deletes the item, and Reset Everything erases them all
 (`.securityGrant`): it hands every session on the login a year of unattended sign-in and changes
 what the login can do. The sheet shows the mint command with Copy Command, a masked field, and the
 models-only caveat.
+
+Opening the token prompt reads only prepared identity and token values. Accounts preparation
+warms login emails on a utility worker; a cold click uses the generic account wording rather
+than reading a provider file on main. The masked field is an `NSSecureTextField` owner with a
+secure cell and shared themed chrome. AppKit rejects a secure editor delegated to an ordinary
+`NSTextField`, even if its cell is secure; the attached-panel interaction test must enter text
+and dismiss the prompt, not merely inspect the cell type.
+Account binding, confirmation, format validation, Keychain storage and credential delivery remain
+host-owned; theme customization changes only the shared presentation.
 
 The command is routed to the login: `CLAUDE_CONFIG_DIR=<its folder> claude setup-token`, or the
 bare command for the default login. Routing is for correctness, not safety. `setup-token` runs the

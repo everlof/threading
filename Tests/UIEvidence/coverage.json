@@ -1652,6 +1652,27 @@
       }
     },
     {
+      "id": "account-token-prompt",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "One-year token prompt",
+      "description": "The production Use Token action opens its attached themed dialog, accepts secure editor input and cancels without stranding the parent window.",
+      "states": ["Token entry", "Secure editing", "Escape and reopen"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Windows 98"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Shipping attached token prompt"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AccountTokenPromptTests.swift",
+        "test": "ThreadingTests/AccountTokenPromptTests/testTokenPromptOpeningAndEditing"
+      },
+      "capture": {
+        "glob": "account-token-prompt-*.png"
+      }
+    },
+    {
       "id": "account-setup-layouts",
       "kind": "surface",
       "status": "implemented",

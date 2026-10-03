@@ -104,6 +104,13 @@ enum AccountAvatarStore {
         return resolved
     }
 
+    /// A presentation action must not turn a cold cache into a synchronous provider-file read.
+    /// Discovery and Accounts preparation warm this cache on a worker.
+    @MainActor
+    static func preparedEmail(for account: AgentAccount) -> String? {
+        emailCache[account.id] ?? nil
+    }
+
     /// Bounded callers can warm the name cache without introducing file reads on the main actor.
     @MainActor
     static func primeEmails(for accounts: [AgentAccount]) async {

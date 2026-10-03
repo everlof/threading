@@ -6281,14 +6281,11 @@ final class ThemedControlTests: HostedStoreTestCase {
 
     // MARK: - Secure Field
 
-    /// The masking is the *cell*, which is the whole reason `ThemedSecureField` subclasses the
-    /// themed field and swaps only `cellClass`. Swift has one superclass and secure entry lives
-    /// below `NSTextFieldCell`, so the tempting alternative — subclassing `NSSecureTextField`
-    /// and restating the surface, the focus ring and the placeholder — would have been a second
-    /// copy of the theming that could drift. If this assertion ever fails the field still draws
-    /// correctly and silently stops hiding the password.
+    /// The secure editor requires both AppKit's secure owner and its secure cell. Checking only
+    /// the cell let the field draw correctly while throwing an exception on first focus.
     func testASecureFieldMasksThroughAppKitsOwnCell() throws {
         let field = ThemedSecureField()
+        XCTAssertTrue((field as NSTextField) is NSSecureTextField)
         let cell = try XCTUnwrap(
             field.cell as? NSSecureTextFieldCell,
             "the secure field was built with an ordinary editable cell"
@@ -6296,8 +6293,7 @@ final class ThemedControlTests: HostedStoreTestCase {
         XCTAssertTrue(cell.echosBullets, "the cell echoes the typed characters")
     }
 
-    /// Inherited, not restated: the point of the subclass is that the well, the ring and the
-    /// placeholder are the ones every other field draws.
+    /// The shared field chrome keeps the secure well on the ordinary field's design metrics.
     func testASecureFieldDrawsTheSameThemedChromeAsAnOrdinaryField() {
         let field = ThemedSecureField()
         XCTAssertFalse(field.isBezeled)
@@ -6323,8 +6319,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     }
 
     /// The placeholder is a *built* attributed string, so it freezes where the field's own font
-    /// and ink would be re-resolved. `ThemedTextField` rebuilds it on the theme sweep; the
-    /// subclass has to still be observing.
+    /// and ink would be re-resolved. Secure fields must rebuild it on the theme sweep too.
     func testASecureFieldRebuildsItsPlaceholderOnAThemeSweep() {
         let field = ThemedSecureField()
         field.placeholderString = "Test account password"
@@ -6347,9 +6342,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     }
 
     /// The secure field editor is an `NSSecureTextView` inside the same private clip view an
-    /// ordinary field expands into, so the inherited boundary already answers for it. Asserted
-    /// without a window on purpose: everything here is decidable from the hierarchy rule itself,
-    /// and a first responder would have moved this case out of the fast plan.
+    /// ordinary field expands into; only that exact private hierarchy is permitted.
     func testASecureFieldPermitsOnlyItsOwnPrivateEditor() {
         let field = ThemedSecureField()
         let clip = NSClipView()

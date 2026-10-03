@@ -61,6 +61,9 @@ public enum ThemedTextSelection {
         if let field = host as? ThemedTextField {
             return field.textSelectionGround()
         }
+        if let field = host as? ThemedSecureField {
+            return field.textSelectionGround()
+        }
         return host?.resolvedGround() ?? Design.Surface.ground
     }
 

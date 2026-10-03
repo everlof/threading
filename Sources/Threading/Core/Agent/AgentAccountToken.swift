@@ -193,13 +193,12 @@ final class AgentAccountTokenStore: @unchecked Sendable {
 /// Keychain item, once per login per process, rather than launching on the wrong credential.
 final class AgentAccountTokenVault: @unchecked Sendable {
 
-    /// The app's vault. A hosted test process gets one backed by memory instead: the test bundle
-    /// runs inside the app, and a test that builds a Claude launch plan would otherwise read —
-    /// or, through Settings, write — the developer's real sign-in tokens.
+    /// Both hosted tests and isolated UI scenarios use memory. A disposable Cocoa home does not
+    /// isolate Keychain, so the separately launched UI app must use the same redirect too.
     static let shared = AgentAccountTokenVault(
-        store: NSClassFromString("XCTestCase") == nil
-            ? AgentAccountTokenStore()
-            : AgentAccountTokenStore(keychain: InMemoryKeychainItemAccess(), dataProtection: { false })
+        store: PreferenceStore.isRedirected
+            ? AgentAccountTokenStore(keychain: InMemoryKeychainItemAccess(), dataProtection: { false })
+            : AgentAccountTokenStore()
     )
 
     private let store: AgentAccountTokenStore

@@ -35,8 +35,10 @@ final class AccountTokenSectionController: NSObject {
     /// Reads the listed logins' entries off the main actor, then asks the page to restamp. The
     /// rows answer from memory meanwhile, and startup has normally read them already.
     func prepare(_ accounts: [AgentAccount]) {
-        let ids = accounts.filter { $0.provider.longLivedToken != nil }.map(\.id)
+        let eligible = accounts.filter { $0.provider.longLivedToken != nil }
+        let ids = eligible.map(\.id)
         guard !ids.isEmpty else { return }
+        Task { await AccountAvatarStore.primeEmails(for: eligible) }
         vault.prepare(ids) { [weak self] in
             Task { @MainActor in self?.onRowsChange?() }
         }
@@ -142,6 +144,7 @@ final class AccountTokenSectionController: NSObject {
         let account = accounts[sender.tag]
 
         let field = ThemedSecureField()
+        field.setAccessibilityIdentifier("account-token.value")
         field.placeholderString = spec.prefix + "…"
         field.translatesAutoresizingMaskIntoConstraints = false
         field.widthAnchor.constraint(equalToConstant: AccountTokenLayout.fieldWidth).isActive = true
@@ -165,7 +168,7 @@ final class AccountTokenSectionController: NSObject {
             prompt: .storeAccountToken,
             title: AccountTokenStrings.sheetTitle(account.displayName),
             message: AccountTokenStrings.sheetMessage(
-                approvingAs: AccountAvatarStore.cachedEmail(for: account)
+                approvingAs: AccountAvatarStore.preparedEmail(for: account)
                     ?? AccountEmailProbe.cachedEmail(for: account)
             ),
             confirmTitle: AccountTokenStrings.confirmButton,

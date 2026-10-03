@@ -59,10 +59,6 @@ public class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary
         }
     }
 
-    /// The field editor is what actually becomes first responder, so "focused" is asked of the
-    /// editor rather than tracked. Redraws are triggered by the two edges below.
-    private var isEditing: Bool { currentEditor() != nil }
-
     // MARK: - Initialization
 
     /// Overridden so every `NSTextField` initializer — `init()`, `init(frame:)`, `init(string:)`
@@ -282,23 +278,37 @@ public class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary
     /// already authored by every retro material. 98.css treats read-only inputs the same way as
     /// disabled ones, so a non-editable field is not allowed to keep advertising a writable white
     /// well either.
-    private var wellFill: NSColor {
-        isEnabled && isEditable ? Design.Surface.field : Design.Surface.controlResting
-    }
+    private var wellFill: NSColor { ThemedFieldChrome.wellFill(in: self) }
 
-    /// The opaque ground selected text in this field lands on: the well, over whatever is behind
-    /// the field.
-    ///
-    /// Asked only while a field editor is lent to the field, which is exactly when the well is
-    /// drawn — `.onInteraction` included. `resolvedGround()` alone answers for the pane behind the
-    /// field, because the well is painted in `draw(_:)` and never recorded; a selection measured
-    /// there was measured against a colour it is not painted on.
     public func textSelectionGround() -> NSColor {
         wellFill.composited(over: resolvedGround())
     }
 
     private func drawSurface() {
-        if surfacePresentation == .onInteraction, !isEditing {
+        ThemedFieldChrome.drawSurface(in: self, presentation: surfacePresentation, isHovered: isHovered)
+    }
+
+    private func withThemeRasterization(_ draw: () -> Void) {
+        ThemedFieldChrome.withThemeRasterization(in: self, draw)
+    }
+
+}
+
+
+// MARK: - Shared Field Chrome
+
+/// Secure entry requires an NSSecureTextField owner as well as a secure cell. Share the drawing
+/// with ordinary fields without changing the AppKit owner that receives the field editor.
+@MainActor
+private enum ThemedFieldChrome {
+    static func wellFill(in field: NSTextField) -> NSColor {
+        field.isEnabled && field.isEditable ? Design.Surface.field : Design.Surface.controlResting
+    }
+
+    static func drawSurface(in field: NSTextField, presentation: ThemedTextField.SurfacePresentation, isHovered: Bool) {
+        let bounds = field.bounds
+        let isEditing = field.currentEditor() != nil
+        if presentation == .onInteraction, !isEditing {
             guard isHovered else { return }
             // Hover is an invitation rather than an already active text well. Keeping its bevel
             // flat lets it rise without changing visual grammar before the field is selected.
@@ -311,13 +321,13 @@ public class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary
         }
 
         let shape: ThemedSurface.Shape
-        if AppThemePalette.current.material(for: effectiveAppearance).fieldStyle == .outlined {
+        if AppThemePalette.current.material(for: field.effectiveAppearance).fieldStyle == .outlined {
             // A search bar: a capsule outlined in the accent at rest, never bevelled. Focus is
             // still told by the inner ring below, which an unfocused outlined field never has.
             shape = ThemedSurface.draw(
                 bounds,
-                fill: wellFill,
-                border: isEnabled ? Design.Surface.accent : Design.Surface.border,
+                fill: wellFill(in: field),
+                border: field.isEnabled ? Design.Surface.accent : Design.Surface.border,
                 radius: bounds.height / 2,
                 borderWidth: OutlinedField.borderWidth,
                 bevel: .none
@@ -327,7 +337,7 @@ public class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary
             // bevel material reads sunken rather than raised.
             shape = ThemedSurface.draw(
                 bounds,
-                fill: wellFill,
+                fill: wellFill(in: field),
                 border: isEditing ? Design.Surface.accent : Design.Surface.border,
                 bevel: .sunken
             )
@@ -347,8 +357,8 @@ public class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary
     /// Workbench Topaz and Win32's small UI strikes are bitmap faces. Buttons and menu rows
     /// already suppress smoothing for the same material flag; fields must do it as well or the
     /// text changes construction merely because it sits inside an editable well.
-    private func withThemeRasterization(_ draw: () -> Void) {
-        let material = AppThemePalette.current.material(for: effectiveAppearance)
+    static func withThemeRasterization(in field: NSTextField, _ draw: () -> Void) {
+        let material = AppThemePalette.current.material(for: field.effectiveAppearance)
         guard !material.buttonStyle.antialiasesTitle,
               let context = NSGraphicsContext.current else {
             draw()
@@ -368,8 +378,8 @@ public class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary
 // MARK: - Cell
 
 /// What `ThemedTextField` needs of whichever cell it was built with, so the glyph inset is
-/// reachable without naming one concrete cell class. Secure entry is a *cell* behaviour and
-/// `NSSecureTextFieldCell` descends from `NSTextFieldCell` directly, so the themed cells are
+/// reachable without naming one concrete cell class. `NSSecureTextFieldCell` descends from
+/// `NSTextFieldCell` directly, so the themed cells are
 /// siblings rather than a chain — see `ThemedSecureField`.
 @MainActor
 public protocol ThemedFieldCell: AnyObject {
@@ -460,46 +470,147 @@ private final class ThemedTextFieldCell: NSTextFieldCell, ThemedFieldCell {
 
 // MARK: - Secure
 
-/// A masked field drawn from the theme, replacing a bezelled `NSSecureTextField`.
-///
-/// Subclasses `ThemedTextField` and swaps only the *cell*, because that is where secure entry
-/// actually lives: `NSSecureTextField` is an `NSTextField` whose cell is an
-/// `NSSecureTextFieldCell`, and the cell is what vends the secure field editor that suppresses
-/// the glyphs, the pasteboard and the input-method log. Inheriting the themed field therefore
-/// keeps one surface, one focus ring and one placeholder treatment, and puts the masking exactly
-/// where AppKit puts it.
-///
-/// It exists for one screen — entering a test-account password in Settings — and deliberately
-/// offers no reveal control. A field that can be un-masked is a field whose value is on screen
-/// while an agent may be driving the app beside it.
-public final class ThemedSecureField: ThemedTextField {
+/// A masked field with AppKit's secure field owner, editor and cell. Its visible chrome shares
+/// the ordinary field's drawing; AppKit requires the secure editor's delegate to be an
+/// NSSecureTextField, so swapping the cell on an ordinary NSTextField is insufficient.
+public final class ThemedSecureField: NSSecureTextField, ThemedComponent, SystemChromeBoundary, PointerClaiming {
+    public typealias SurfacePresentation = ThemedTextField.SurfacePresentation
+    private var themeRedraw: ThemeRedraw?
+    private let placeholderRefresh = AppEventObservations()
+    private var hoverTrackingArea: NSTrackingArea?
+    public let surfacePresentation: ThemedTextField.SurfacePresentation
+    public private(set) var isHovered = false {
+        didSet { if isHovered != oldValue { needsDisplay = true } }
+    }
 
     public override class var cellClass: AnyClass? {
         get { ThemedSecureFieldCell.self }
         set { super.cellClass = newValue }
     }
 
-    // Both designated initializers restated so `init()` keeps being inherited — the search
-    // field's note on `init(frame:surfacePresentation:)` applies here too.
     public override init(frame frameRect: NSRect) {
+        surfacePresentation = .persistent
         super.init(frame: frameRect)
+        setup()
     }
 
-    public override init(frame frameRect: NSRect, surfacePresentation: SurfacePresentation) {
-        super.init(frame: frameRect, surfacePresentation: surfacePresentation)
+    public init(frame frameRect: NSRect, surfacePresentation: ThemedTextField.SurfacePresentation) {
+        self.surfacePresentation = surfacePresentation
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    public convenience init(surfacePresentation: ThemedTextField.SurfacePresentation) {
+        self.init(frame: .zero, surfacePresentation: surfacePresentation)
+    }
+
+    public convenience init(string: String) {
+        self.init(frame: .zero)
+        stringValue = string
     }
 
     @available(*, unavailable)
-    public required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+    public required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func setup() {
+        isBezeled = false
+        drawsBackground = false
+        cell?.wraps = false
+        cell?.isScrollable = true
+        focusRingType = .none
+        applyFont(.body)
+        textColor = Design.Text.label
+        themeRedraw = ThemeRedraw(self)
+        placeholderRefresh.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.applyPlaceholderColour()
+        }
     }
 
-    /// The secure field editor is a `NSSecureTextView` inside the same private clip view an
-    /// ordinary field expands into. `ThemedTextField.permitsSystemChrome` already answers for
-    /// `NSTextView` subclasses, so nothing is relaxed here — this is only where that is stated.
-    public override func accessibilityRole() -> NSAccessibility.Role? {
-        .textField
+    public func permitsSystemChrome(_ view: NSView) -> Bool {
+        if let clip = view as? NSClipView { return clip.superview === self }
+        if view is NSTextView, let clip = view.superview as? NSClipView {
+            return clip.superview === self
+        }
+        return false
     }
+
+    public override var placeholderString: String? {
+        didSet { applyPlaceholderColour() }
+    }
+
+    private func applyPlaceholderColour() {
+        guard let placeholderString else { return }
+        placeholderAttributedString = NSAttributedString(
+            string: placeholderString,
+            attributes: [.font: font ?? Design.Typography.body(), .foregroundColor: Design.Text.tertiary]
+        )
+    }
+
+    public override var intrinsicContentSize: NSSize {
+        var size = super.intrinsicContentSize
+        size.height = max(size.height, ThemedTextField.Layout.height)
+        return size
+    }
+
+    public override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+            self.hoverTrackingArea = nil
+        }
+        guard surfacePresentation == .onInteraction else { return }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+        if hoverIsStale(isHovered) { isHovered = false }
+    }
+
+    public override func mouseEntered(with event: NSEvent) {
+        if surfacePresentation == .onInteraction { isHovered = true }
+    }
+
+    public override func mouseExited(with event: NSEvent) {
+        if surfacePresentation == .onInteraction { isHovered = false }
+    }
+
+    public var restingPointer: NSCursor? { .arrow }
+    public var caretRect: NSRect { bounds }
+    public var pointerClaims: [PointerClaim] {
+        isEnabled && (isEditable || isSelectable) ? [PointerClaim(caretRect, .iBeam)] : []
+    }
+
+    public override func resetCursorRects() { registerPointerClaims() }
+
+    public override func layout() {
+        super.layout()
+        refreshPointerClaims()
+    }
+
+    public override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        needsDisplay = true
+        return became
+    }
+
+    public override func textDidEndEditing(_ notification: Notification) {
+        super.textDidEndEditing(notification)
+        needsDisplay = true
+    }
+
+    public func textSelectionGround() -> NSColor {
+        ThemedFieldChrome.wellFill(in: self).composited(over: resolvedGround())
+    }
+
+    public override func draw(_ dirtyRect: NSRect) {
+        ThemedFieldChrome.drawSurface(in: self, presentation: surfacePresentation, isHovered: isHovered)
+        ThemedFieldChrome.withThemeRasterization(in: self) { super.draw(dirtyRect) }
+    }
+
+    public override func accessibilityRole() -> NSAccessibility.Role? { .textField }
 }
 
 /// The secure sibling of `ThemedTextFieldCell`, sharing its text rect and nothing else.

@@ -4,6 +4,47 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## One-year token prompt, 2026-10-03
+
+The production Use Token action reproduced an AppKit exception during attached-panel opening:
+the secure editor refused a `ThemedSecureField` delegate because it inherited `NSTextField`,
+rather than `NSSecureTextField`. Merely installing a secure cell was insufficient. The exception
+occurred after the alert had blocked the parent window's mouse events, interrupting ordinary
+presentation and dismissal. The baseline therefore has no successful opening latency to compare;
+its 6.683-second failed XCTest duration includes exception handling and is not a product timing.
+
+The secure component now has AppKit's required owner, with the ordinary field's shared drawing
+and inset calculation. Token-button identity lookup uses prepared values only; Accounts
+preparation resolves provider-file emails off-main. The interaction owns one fixed-size prompt
+and one secure editor, irrespective of roster size. Expected roster size is 1–10 logins; the
+existing Accounts virtualization stress fixture covers 120. Preparation is O(logins); the token
+action constructs only the selected login's fixed form. Keychain reads and writes retain their
+existing worker boundary.
+
+The first fixed Debug fixture repeated opening, secure-editor insertion, Escape and reopening
+three times each under System, Cyberpunk, Windows 98 and the reported TEMU theme. All 12 passes
+succeeded. Opening measured 15.89 ms median / 49.75 ms maximum, with the first framework-cold
+opening at that maximum; the remaining 11 measured 15.46 / 20.40 ms. Secure-editor insertion
+measured 0.87 ms median / 2.50 ms maximum. Fixture construction, theme preparation and test-host
+bootstrap are excluded. These are attached-panel regression observations, not a measured
+Release speedup or proof of every reported system stall. The retained fixture additionally
+covers both System appearances and an opt-in theme JSON via `THREADING_TOKEN_PROMPT_THEME`.
+`AccountTokenJourneyUITests` defines actual keyboard input and recovery through the shipping
+Accounts page; the visual evidence catalogue owns `account-token-prompt`.
+
+The complete macOS evidence command ran 100 tests: 99 passed, while the browser annotation
+fixture timed out waiting for WebKit paint. The token renders were inspected in both System
+appearances, Cyberpunk, Windows 98 and both TEMU appearances, including the filled secure field.
+The final fresh Debug bundle passed all 35 focused token, account-row and secure-component tests,
+including confirmation from the active editor and recovery of the parent window. Theme-boundary
+and main-actor latency checks passed. The app-level keyboard journey
+compiled but could not start because macOS automation mode timed out; it remains unverified.
+The required `full` performance sweep passed Git Review, charts and Tools settings, then was
+stopped after the 2,048-page settings-search fixture spent over ten minutes in its initial
+AppKit constraint layout (`SettingsRowLayoutTests.swift:1247`), before query updates. Its stack
+sample and logs are retained under `.build/token-latency`; the remaining sweep phases and
+live-process captures were not reached. The installed app was not replaced by this check.
+
 ## Chat selection and FSEvents registration, 2026-10-02
 
 The installed Release revision `27202a76e8` recorded a 9,384.9 ms stall at 07:59:21–07:59:30

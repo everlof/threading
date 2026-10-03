@@ -873,6 +873,16 @@ wrapper yet gets one in `UI/Design/` first.
 
 ### Confirmations
 
+**A secure cell requires a secure field owner.** `ThemedSecureField` inherits from
+`NSSecureTextField`; `ThemedTextField` and the secure sibling share `ThemedFieldChrome` for the
+well, focus ring and rasterization, and their cells share the text-rectangle calculation.
+Putting `NSSecureTextFieldCell` in an ordinary `NSTextField` draws masked text but throws when
+AppKit installs its secure editor: that editor requires an `NSSecureTextField` delegate. A
+structural cell assertion missed this defect. `AccountTokenPromptTests` exercises the production
+attached prompt, secure editor insertion, confirmation, cancellation and reopening;
+`AccountTokenJourneyUITests` defines the app-level keyboard check through the shipping Accounts
+page. See the performance record for validation limits on this host.
+
 Agent extension installation offers an explicit second affirmative choice granting persistent
 install/update authority to one authenticated chat. This uses `ConfirmationAlert.choose`, not
 suppression: the scope and future capability changes are disclosed, and each grant is revocable

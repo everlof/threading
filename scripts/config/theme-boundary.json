@@ -197,6 +197,12 @@
       "reason": "The themed boundary preserves AppKit's field editor while replacing its chrome."
     },
     {
+      "path": "Sources/Threading/UI/Design/ThemedTextField.swift",
+      "kind": "inherit",
+      "symbol": "NSSecureTextField",
+      "reason": "AppKit requires its secure editor's delegate to be an NSSecureTextField; shared field chrome stays inside this boundary."
+    },
+    {
       "path": "Sources/Threading/UI/Design/ThemedTextView.swift",
       "kind": "inherit",
       "symbol": "NSTextView",
