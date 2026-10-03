@@ -14,6 +14,12 @@ public enum ControllerAgentRequest: Codable, Sendable {
     case memoryPut(key: String, expectedRevision: Int, content: String)
     case knowledgeGet(spaceID: KnowledgeSpaceID, key: String)
     case knowledgePut(spaceID: KnowledgeSpaceID, key: String, expectedRevision: Int, content: String)
+    case mailSend(to: MailAddress, id: UUID, text: String, replyTo: UUID?, priority: MailPriority)
+    case mailAsk(to: MailAddress, id: QuestionID, text: String, checkpoint: String)
+    case mailInbox(after: Int64)
+    case mailAck(ids: [UUID])
+    case mailDirectory
+    case mailNotice(event: MailNoticeEvent)
 }
 
 public struct ControllerAgentResponse: Codable, Sendable {
@@ -26,6 +32,12 @@ public struct ControllerAgentResponse: Codable, Sendable {
     public var delivery: WorkDelivery?
     public var memory: WorkerMemory?
     public var knowledge: KnowledgeEntry?
+    public var mail: MailMessage?
+    public var mails: [MailMessage]?
+    public var inbox: ControllerPage<MailInboxItem>?
+    public var directory: [MailContact]?
+    public var address: MailAddress?
+    public var notice: String?
 }
 
 extension ControllerStore {
@@ -47,6 +59,8 @@ extension ControllerStore {
                                             text: text, checkpoint: checkpoint)
             case .finish(let payload):
                 response.delivery = try finish(executionID: executionID, destination: launch.spec.destination, payload: payload)
+            case .mailAsk(let recipient, let id, let text, let checkpoint):
+                response.question = try askMail(executionID: executionID, to: recipient, questionID: id, text: text, checkpoint: checkpoint)
             default:
                 let (work, _) = try running(executionID)
                 switch request {
@@ -65,7 +79,17 @@ extension ControllerStore {
                 case .knowledgePut(let space, let key, let revision, let content):
                     try requireKnowledgeAccess(spaceID: space, workerID: work.workerID, writing: true)
                     response.knowledge = try saveKnowledge(spaceID: space, key: key, expectedRevision: revision, content: content, executionID: executionID)
-                case .ask, .finish: throw ControllerError.conflict
+                case .mailSend(let recipient, let id, let text, let replyTo, let priority):
+                    response.mail = try sendMail(executionID: executionID, to: recipient, id: id, text: text, replyTo: replyTo, priority: priority)
+                case .mailInbox(let after):
+                    response.address = try executionAddress(executionID)
+                    response.inbox = try inbox(executionID: executionID, after: after)
+                case .mailAck(let ids): response.mails = try acknowledgeMail(executionID: executionID, ids: ids)
+                case .mailDirectory:
+                    response.address = try executionAddress(executionID)
+                    response.directory = try mailDirectory(executionID: executionID)
+                case .mailNotice(let event): response.notice = try mailNotice(executionID: executionID, event: event)
+                case .ask, .finish, .mailAsk: throw ControllerError.conflict
                 }
             }
             return response

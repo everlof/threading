@@ -460,3 +460,59 @@ admission reject archived workers. Schema v6 adds an index to bound the active-s
 These remain host-owned operations. Consumer UI may present requests, forms, history and
 permissions; consumer authentication determines the caller. Neither a message nor a form
 submission becomes a recipe, shell command, recipient attestation or permission grant.
+
+## Agent mail (schema v7)
+
+Durable, addressed messages between agents, on this host and through peers on others. The
+proposal and its reasoning are [`agent-mail.md`](../feature-drafts/agent-mail.md); this section is
+what the controller implements. `ControllerMail.swift` holds the model and store operations,
+`ControllerMailTransport.swift` the wire protocol, `ControllerMailSync` (runtime) the client half.
+
+- **Identity.** Each store mints a stable `HostID` once (`host`, renamed with `host-set-name`).
+  An address is `<host>/worker/<uuid>` or `<host>/session/<uuid>`; the host part is where the
+  agent's process runs. Session mailboxes are registered (`mail-register`); workers need none.
+- **Sending is storing.** `mail_send` succeeds once the message is in a store: the recipient's
+  inbox on this host, or the outbound queue (`mail_outbound`, one row per message per peer host)
+  for another. Busy, idle and not-running recipients differ only in when they read it. Refusals are
+  authority (no grant, an interrupt the grant does not allow), bounds and unknown addresses.
+- **The sender is authenticated.** An agent's sender is its execution's worker; the owner CLI
+  (`mail-send`) attests a local mailbox; a peer may vouch only for senders on its own host, and
+  only for recipients on this one, so nothing is relayed.
+- **Grants live on the recipient's host** (`mail-grant-set RECIPIENT PATTERN REV mode priority`):
+  exact sender, `<host>/*` or `*`, most specific first, revisioned, a `none` mode revokes. Modes
+  are ordered `notify < wake < ask`. A reply to mail the recipient itself sent needs no grant.
+- **Reading is not acknowledging.** `mail_inbox` reads open mail through the `mail_open` partial
+  index with a host-vouched header line per message; `mail_ack` records the acknowledging
+  execution. An unacknowledged `interrupt` refuses `work_finish` in the finish transaction.
+- **Chains bound loops.** A message continues the chain of what it replies to, or of the mail its
+  execution last acknowledged, so omitting `reply_to` does not escape the depth limit (4). Fuses
+  that need no reading: 50 messages per chain on a host, 20 sends a minute per sender, 1,000 open
+  messages per inbox. Spend limits belong to admission ([usage ledger](../feature-drafts/agent-usage-ledger.md)).
+- **Notices, not bodies.** `threading-controller agent-notice post-tool-use|stop|session-start` is
+  the hook command a recipe installs. It prints one host-authored line naming counts, senders and
+  hosts as hook JSON (`hookSpecificOutput.additionalContext`, or `decision: block` once per
+  message at a stop) and always exits 0. Measured on Codex 0.160.0 and the Claude Code hook
+  contract; a model may ignore a notice, which delays mail but cannot lose it.
+- **Ask.** `mail_ask` sends a question as mail and yields the work in one transaction; the
+  question's recipient is `agent:<address>`. The reply (`reply_to` that message) answers it on the
+  asker's host and requeues the work. A question the recipient's host refuses is answered by the
+  asker's host with the refusal, so the work continues instead of waiting forever.
+- **Wake.** Mail admitted under a `wake` or `ask` grant may start an idle worker: the supervisor
+  admits one `event` task per worker with no open work, keyed by the newest open message, so a
+  restart cannot duplicate it and unread mail cannot loop. The owner still decides through
+  `worker-set-sources … event`.
+- **Transport.** `mail-rpc --peer HOST` is the forced command of a per-peer SSH key: one JSON
+  request (≤ 2 MiB) — `push` a batch (≤ 100 messages / 1 MiB) or `pull` after a cursor that
+  acknowledges what the caller already stored, with the caller's refusals of that page. Every
+  response names the answering host, and the caller refuses a response from any other. A pulled
+  page and the pull cursor commit together. The supervisor runs one sync pass every 15 s beside
+  launch supervision; `mail-sync` runs one pass by hand. Peers are owner-authored (`mail-peer-set`
+  with the transport argv), and only peers with a transport are initiated to.
+
+Validation: `ControllerMailTests` (11 core cases: grants and revocation, busy recipients, notices,
+interrupts and finish, chain depth, ask/reply, wake coalescing, rate fuse, sessions, push/pull
+idempotence and spoofing, refused questions, v6 upgrade) and `scripts/tests/test_controller_mail.py`
+(real ptyd and two stores: a question crossing hosts wakes the recipient, its reply is pulled and
+the asker continues; a busy agent receives the notice through the real hook command and cannot
+finish before acknowledging; unknown peers, forged senders and a transport reaching the wrong host
+are refused).

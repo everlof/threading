@@ -1,6 +1,10 @@
 # Agent mail: durable, cross-host messages between agents
 
-> Status: **draft** (2026-10-03). Nothing here is implemented. Supersedes the worker-only
+> Status: **in progress** (2026-10-03). The controller half — mailboxes, grants, notices, ask,
+> wake and the SSH transport — is implemented and recorded in
+> [`autonomous-controller.md`](../architecture/autonomous-controller.md#agent-mail-schema-v7).
+> The Mac half (session mailboxes, Mac MCP tools, Claude/Codex answering hooks, sync over the
+> remote-host tunnel) is next. Supersedes the worker-only
 > `agent-messaging.md` draft (2026-10-02), whose grant modes, chain bounds and Rindabox notes are
 > folded in below. Extends [`control-plane.md`](../architecture/control-plane.md) (interactive
 > sessions), [`autonomous-controller.md`](../architecture/autonomous-controller.md) (workers) and
@@ -162,15 +166,14 @@ magnitude. So:
   sender (the managers' existing managed-send rate), both per-grant overridable. It needs no
   reading, so it still stops a ping-pong when readings are missing.
 
-## Storage: `Packages/ThreadingMailbox`
+## Storage: inside `ThreadingController`
 
-A new Foundation + SQLite package that builds on Linux, beside `ThreadingController` and for the
-same reason (a Linux process cannot import the app). It owns schema and migrations **on a
-connection it is handed**, so:
+Decided at implementation: no separate package. `ThreadingController` already builds on Linux
+and the Mac app already links it, so the mailbox is part of the controller store (schema v7):
 
-- the controller adds the tables to its own database, keeping "finish" and "no unacknowledged
-  interrupt" in one transaction, as `work_messages` does;
-- the Mac app keeps a mailbox file of its own under the state directory
+- the controller keeps mail in its own database, so "finish" and "no unacknowledged interrupt"
+  share one transaction, as `work_messages` does;
+- the Mac app opens a controller store of its own as its mailbox file, under the state directory
   ([`persistence.md`](../architecture/persistence.md) rules: quarantine, no silent recreate).
 
 Records, in the controller's typed-row shape (`kind`, `id`, `parent`, `key`, `state`, JSON
@@ -271,13 +274,16 @@ What follows for the design:
 One vocabulary on both MCP servers (the Mac's and `agent-mcp`), so an agent's instructions do not
 depend on where it runs:
 
-- `send_message { to, text, id?, reply_to?, priority?, expects_reply? }` → `accepted` with the
-  message ID, or a typed refusal.
-- `inbox { cursor? }` → bounded page of unacknowledged messages, each framed with its vouched
+- `mail_send { to, id, text, reply_to?, priority? }` → the stored message, or a typed refusal.
+- `mail_ask { to, id, text, checkpoint }` → a blocking question (workers; the reply answers it).
+- `mail_inbox { after }` → bounded page of unacknowledged messages, each framed with its vouched
   header (sender address, display name, host, chain depth).
-- `ack { ids[] }`.
-- `directory { cursor? }` → addresses this caller may message, with mode, host reachability,
-  and whether mid-turn delivery is available. On the Mac it generalises `list_sessions`.
+- `mail_ack { ids[] }`.
+- `mail_directory {}` → this caller's address and the addresses it may write to, with mode. On
+  the Mac it generalises `list_sessions`.
+
+Named with a `mail_` prefix (decided at implementation) beside the controller's existing
+`work_`/`memory_`/`knowledge_` families, so the names do not collide with a provider's own.
 
 `send_to_session` stays as a compatibility wrapper: same-host `send_message` plus today's
 immediate live-surface attempt, returning the old outcomes. `watch_session` is unchanged.

@@ -20,7 +20,7 @@ enum ControllerSupervisorCommand {
             let cycle = try await supervisor.tick()
             // Always return one-shot results; a resident idle loop produces no log flood.
             if once || cycle.scheduled > 0 || !cycle.started.isEmpty || !cycle.stopped.isEmpty || !cycle.issues.isEmpty
-                || !cycle.automationIssues.isEmpty {
+                || !cycle.automationIssues.isEmpty || !cycle.woken.isEmpty || cycle.mail != nil {
                 try ControllerMain.output(cycle)
             }
             if once || lifetime.shouldStop { break }

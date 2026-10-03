@@ -81,8 +81,33 @@ struct ControllerMain {
     automation-runs AUTOMATION_UUID [CURSOR]
     owner-rpc  (one bounded JSON request on stdin; trusted SSH/OS owner only)
 
+    host
+    host-set-name NAME
+    mail-address WORKER_UUID
+    mail-peer-set HOST_UUID EXPECTED_REVISION NAME PEER_JSON_FILE   ({"transport":[argv]|null,"push":bool,"pull":bool})
+    mail-peers [CURSOR]
+    mail-grant-set RECIPIENT_ADDRESS SENDER_PATTERN EXPECTED_REVISION none|notify|wake|ask normal|interrupt
+    mail-grants RECIPIENT_ADDRESS [CURSOR]
+    mail-register SESSION_ADDRESS NAME
+    mail-contact-set ADDRESS NAME|-
+    mail-contacts [CURSOR]
+    mailbox ADDRESS [CURSOR]
+    mail-history ADDRESS [CURSOR]
+    mail-get MESSAGE_UUID
+    mail-send FROM_ADDRESS TO_ADDRESS MESSAGE_UUID TEXT_FILE [normal|interrupt]
+    mail-ack ADDRESS MESSAGE_UUID
+    mail-notice ADDRESS post-tool-use|stop|session-start
+    mail-outbound HOST_UUID
+    mail-sync   (one exchange pass with configured peers)
+    mail-rpc --peer HOST_UUID   (a peer's forced SSH command: one bounded JSON request on stdin)
+    Addresses are HOST_UUID/worker/UUID or HOST_UUID/session/UUID. Sender patterns: an address,
+    HOST_UUID/* or *. Grants live on the recipient's host; mail carries information, never authority.
+
     threading-controller agent REQUEST_JSON_FILE
     threading-controller agent-mcp
+    threading-controller agent-notice post-tool-use|stop|session-start
+    The last is a hook command: it prints a host-authored mail notice as hook JSON, or nothing,
+    and always exits 0 so a hook can never break the agent's turn.
     Scoped agent tools use the execution credential/environment supplied by launch.
     Requests: {"context":{}}, {"questions":{"after":0}}, {"checkpoint":{"text":"..."}},
     {"ask":{"id":"QUESTION_UUID","text":"...","checkpoint":"..."}},
@@ -99,6 +124,7 @@ struct ControllerMain {
         do {
             var arguments = Array(CommandLine.arguments.dropFirst())
             if arguments == ["--help"] { print(help); return }
+            if arguments.first == "agent-notice" { await ControllerAgentNotice.run(arguments); return }
             let environment = ProcessInfo.processInfo.environment
             let agentMode = arguments.first == "agent" || arguments.first == "agent-mcp"
             let path: String
@@ -179,6 +205,73 @@ struct ControllerMain {
             let after = try cursor(1); try output(await store.automationRuns(AutomationID(args[0]), after: after))
         case "owner-rpc":
             try count(0); try await ControllerOwnerRPC.run(store: store, database: database)
+        case "host":
+            try count(0); try output(await store.host())
+        case "host-set-name":
+            try count(1); try output(await store.setHostName(args[0]))
+        case "mail-address":
+            try count(1); try output(await store.mailAddress(worker: WorkerID(args[0])))
+        case "mail-peer-set":
+            try count(4)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            let settings = try JSONDecoder().decode(MailPeerSettings.self, from: Data(file(args[3]).utf8))
+            try output(await store.setMailPeer(host: HostID(args[0]), expectedRevision: revision, name: args[2],
+                                               transport: settings.transport, push: settings.push, pull: settings.pull))
+        case "mail-peers":
+            let after = try cursor(0); try output(await store.mailPeers(after: after))
+        case "mail-grant-set":
+            try count(5)
+            guard let revision = Int(args[2]), let priority = MailPriority(rawValue: args[4]) else { throw ControllerError.invalidInput("mail_grant") }
+            let mode: MailMode?
+            if args[3] == "none" { mode = nil } else {
+                guard let value = MailMode(rawValue: args[3]) else { throw ControllerError.invalidInput("mail_mode") }
+                mode = value
+            }
+            try output(await store.setMailGrant(recipient: MailAddress(args[0]), sender: args[1], expectedRevision: revision,
+                                                mode: mode, allowsInterrupt: priority == .interrupt))
+        case "mail-grants":
+            let after = try cursor(1); try output(await store.mailGrants(recipient: MailAddress(args[0]), after: after))
+        case "mail-register":
+            try count(2); try output(await store.registerMailbox(MailAddress(args[0]), name: args[1]))
+        case "mail-contact-set":
+            try count(2); try output(await store.setMailContact(MailAddress(args[0]), name: args[1] == "-" ? nil : args[1]))
+        case "mail-contacts":
+            let after = try cursor(0); try output(await store.mailContacts(after: after))
+        case "mailbox":
+            let after = try cursor(1); try output(await store.inbox(MailAddress(args[0]), after: after))
+        case "mail-history":
+            let after = try cursor(1); try output(await store.mailHistory(MailAddress(args[0]), after: after))
+        case "mail-get":
+            try count(1)
+            guard let id = UUID(uuidString: args[0]) else { throw ControllerError.invalidInput("message_id") }
+            try output(await store.mail(id))
+        case "mail-send":
+            guard args.count == 4 || args.count == 5, let id = UUID(uuidString: args[2]) else { throw ControllerError.invalidInput("arguments") }
+            guard let priority = MailPriority(rawValue: args.count == 5 ? args[4] : "normal") else { throw ControllerError.invalidInput("priority") }
+            try output(await store.sendMail(from: MailAddress(args[0]), to: MailAddress(args[1]), id: id, text: file(args[3]),
+                                            replyTo: nil, priority: priority))
+        case "mail-ack":
+            try count(2)
+            guard let id = UUID(uuidString: args[1]) else { throw ControllerError.invalidInput("message_id") }
+            try output(await store.acknowledgeMail(mailbox: MailAddress(args[0]), ids: [id]))
+        case "mail-notice":
+            try count(2)
+            guard let event = MailNoticeEvent(rawValue: args[1]) else { throw ControllerError.invalidInput("event") }
+            try output(await store.mailNotice(MailAddress(args[0]), event: event))
+        case "mail-outbound":
+            try count(1)
+            try output(await store.outboundBatch(for: HostID(args[0])).envelopes)
+        case "mail-sync":
+            try count(0)
+            try output(await ControllerMailSync.sync(store: store).0)
+        case "mail-rpc":
+            try count(2)
+            guard args[0] == "--peer" else { throw ControllerError.invalidInput("arguments") }
+            let peer = try HostID(args[1])
+            guard let input = try FileHandle.standardInput.read(upToCount: MailTransportLimits.requestBytes + 1),
+                  input.count <= MailTransportLimits.requestBytes else { throw ControllerError.invalidInput("mail_rpc_size") }
+            let request = try JSONDecoder().decode(MailRPCRequest.self, from: input)
+            try output(await store.handleMailRPC(request, peer: peer))
         case "knowledge-grant":
             try count(4)
             guard let revision = Int(args[2]), let access = KnowledgeAccess(rawValue: args[3]) else { throw ControllerError.invalidInput("knowledge_grant") }
@@ -346,6 +439,7 @@ struct ControllerMain {
         return text
     }
     static func csv(_ value: String) -> [String] { value.components(separatedBy: ",") }
+    struct MailPeerSettings: Decodable { let transport: [String]?; let push: Bool; let pull: Bool }
     static func output<T: Encodable>(_ value: T) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]

@@ -14,6 +14,10 @@ public struct SupervisorCycle: Codable, Sendable {
     public var issues: [SupervisorIssue] = []
     /// Schedule admission that could not run this pass. Launch supervision continues regardless.
     public var automationIssues: [String] = []
+    /// Tasks admitted because mail arrived for an idle worker whose grant lets it wake.
+    public var woken: [WorkID] = []
+    /// The most recent completed exchange with mail peers, reported once.
+    public var mail: ControllerMailSync.Report?
 }
 
 /// One serial sweep owner. The database remains the admission authority across processes.
@@ -26,7 +30,12 @@ public actor ControllerSupervisor {
     private var launchCursor: Int64 = 0
     private var policyCursor: Int64 = 0
     private var sweeping = false
-    private enum Budget { static let page = 8; static let starts = 2 }
+    private var mailWakeCursor: Int64 = 0
+    private var mailPeerCursor: Int64 = 0
+    private var mailSyncRunning = false
+    private var mailSyncStarted = Date.distantPast
+    private var finishedMailSync: ControllerMailSync.Report?
+    private enum Budget { static let page = 8; static let starts = 2; static let mailSyncSeconds: TimeInterval = 15 }
 
     public init(store: ControllerStore, database: String, controllerBinary: String) {
         self.store = store; self.database = database; self.binary = controllerBinary
@@ -41,6 +50,13 @@ public actor ControllerSupervisor {
         // database or a broken rule is reported and retried on a later pass.
         do { report.scheduled = try await store.tickAutomations(limit: Budget.page).count }
         catch { report.automationIssues.append(String(describing: error)) }
+        do {
+            let wake = try await store.admitMailWakes(after: mailWakeCursor, limit: Budget.page)
+            mailWakeCursor = wake.next
+            report.woken = wake.admitted.map(\.id)
+        } catch { report.automationIssues.append("mail_wake: \(error)") }
+        startMailSyncIfDue()
+        if let finished = finishedMailSync { report.mail = finished; finishedMailSync = nil }
         let page = try await store.unresolvedLaunches(after: launchCursor, limit: Budget.page)
         launchCursor = page.items.isEmpty ? 0 : page.next
         let active = page.items.filter { $0.state != .prepared }
@@ -91,6 +107,30 @@ public actor ControllerSupervisor {
             try await dispatch(launch.executionID, report: &report)
         }
         return report
+    }
+
+    /// Peer exchanges run SSH with timeouts, so they run beside launch supervision rather than
+    /// inside a tick, one pass at a time.
+    private func startMailSyncIfDue() {
+        guard !mailSyncRunning, Date().timeIntervalSince(mailSyncStarted) >= Budget.mailSyncSeconds else { return }
+        mailSyncRunning = true
+        mailSyncStarted = Date()
+        let store = store, cursor = mailPeerCursor
+        Task {
+            let result: (ControllerMailSync.Report, Int64)
+            do { result = try await ControllerMailSync.sync(store: store, after: cursor) }
+            catch {
+                var report = ControllerMailSync.Report()
+                report.issues.append(ControllerMailSync.describe(error))
+                result = (report, 0)
+            }
+            self.finishMailSync(result.0, next: result.1)
+        }
+    }
+    private func finishMailSync(_ report: ControllerMailSync.Report, next: Int64) {
+        mailSyncRunning = false
+        mailPeerCursor = next
+        if !report.isEmpty { finishedMailSync = report }
     }
 
     private func dispatch(_ id: ExecutionID, report: inout SupervisorCycle) async throws {

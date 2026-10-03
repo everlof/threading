@@ -14,7 +14,12 @@ enum ControllerOwnerRPC {
         "question", "questions", "open-questions", "answer", "delivery", "deliveries", "pending-deliveries",
         "delivery-begin", "delivery-ack", "delivery-uncertain",
         "work-deliveries", "launches", "active-launches", "launch-record", "launch-status", "launch-stop", "retry", "events",
-        "memory-get", "memory-history", "knowledge-get", "knowledge-history"
+        "memory-get", "memory-history", "knowledge-get", "knowledge-history",
+        // Mail administration and mailbox reads. Not mail-rpc (a peer's own forced command) and
+        // not mail-sync (the resident supervisor's job, which runs the peers' transports).
+        "host", "host-set-name", "mail-address", "mail-peer-set", "mail-peers", "mail-grant-set", "mail-grants",
+        "mail-register", "mail-contact-set", "mail-contacts", "mailbox", "mail-history", "mail-get",
+        "mail-send", "mail-ack", "mail-notice", "mail-outbound"
     ]
     static func run(store: ControllerStore, database: String) async throws {
         let maximumBytes = 262_144

@@ -13,3 +13,5 @@ python3 "$repo_root/scripts/tests/test_controller_automations.py" "$controller_s
 swift build --package-path "$repo_root/Targets/PTYHost" --scratch-path "$controller_scratch/ptyd"
 python3 "$repo_root/scripts/tests/test_controller_runtime.py" \
     "$controller_scratch/cli/debug/threading-controller" "$controller_scratch/ptyd/debug/threading-ptyd"
+python3 "$repo_root/scripts/tests/test_controller_mail.py" \
+    "$controller_scratch/cli/debug/threading-controller" "$controller_scratch/ptyd/debug/threading-ptyd"
