@@ -349,7 +349,7 @@ with log_path.open('w+') as log:
             project_title(index)
         _, listed, _ = panes()
         assert listed.get_child_count() <= 10
-        assert listed.get_description() == 'Showing 3 through 12 of 12 items'
+        assert listed.get_description() == 'Showing 6 through 12 of 12 items'
         assert listed.get_selection_iface().get_selected_child(0).get_name().startswith('Workspace12 ')
         assert len([value for value in durable() if value['terminals']]) == 2
         assert state(0)['input'] == payload.encode().hex()

@@ -47,16 +47,15 @@ public enum Design {
             border = LinuxTheme.color("border")
         }
 
-        public static let selection: Ink = {
-            Ink(on: LinuxTheme.color("selection"))
-        }()
+        public static var selection: Ink { Ink(on: Design.Surface.selectionFill) }
     }
 
     public enum Accessibility { public static let focusRingWidth: CGFloat = 2 }
     public enum Opacity { public static let disabledControl: CGFloat = 0.42 }
     public enum Radius {
         public static let border: CGFloat = 1
-        public static let control: CGFloat = 4
+        // AppThemeStyles.threading gives both light and dark variants a 7pt control corner.
+        public static let control: CGFloat = 7
         public static let controlBorder: CGFloat = 1
         public static func control(fitting size: NSSize) -> CGFloat {
             min(control, max(0, min(size.width, size.height) / 2))

@@ -34,6 +34,9 @@ private final class TreeSource: NSOutlineViewDataSource, NSOutlineViewDelegate {
     private(set) var configuredViews = 0
     private(set) var constructedChromeRows = 0
     private(set) var selectionChanges = 0
+    private(set) var heightRequests = 0
+    var usesVariableHeights = false
+    var firstRowHeight: CGFloat?
     private let identifier = NSUserInterfaceItemIdentifier("StressOutlineRow")
     private let chromeIdentifier = NSUserInterfaceItemIdentifier("StressOutlineChrome")
 
@@ -53,6 +56,14 @@ private final class TreeSource: NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
         !((item as! Node).children.isEmpty)
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
+        heightRequests += 1
+        guard usesVariableHeights else { return outlineView.rowHeight }
+        let id = (item as! Node).id
+        if id == 0, let firstRowHeight { return firstRowHeight }
+        return [CGFloat(28), 30, 32][id % 3]
     }
 
     func outlineView(_ outlineView: NSOutlineView,
@@ -157,6 +168,15 @@ private func run() {
     precondition(source.configuredViews == configurationsBeforeReload + outline.visibleRowIndexes.count,
                  "reload did not reconfigure mounted identities")
 
+    outline.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+    let firstChrome = outline.rowView(atRow: 0, makeIfNecessary: false) as! ChromeRowView
+    outline.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+    let secondChrome = outline.rowView(atRow: 1, makeIfNecessary: false) as! ChromeRowView
+    precondition(!firstChrome.isSelected && secondChrome.isSelected,
+                 "visible outline chrome kept an old selection")
+    outline.deselectAll(nil)
+    precondition(!secondChrome.isSelected, "deselect left visible outline chrome selected")
+
     let lastRoot = source.roots[5_099]
     outline.selectRowIndexes(IndexSet(integer: 5_099), byExtendingSelection: false)
     precondition(outline.selectedRow == 5_099, "offscreen selection was lost")
@@ -222,7 +242,7 @@ private func run() {
     assertViewportBound(outline, scroll, context: "wheel viewport")
     precondition(source.constructedViews <= 12, "view creation followed row count")
     precondition(source.constructedChromeRows <= 12, "chrome creation followed row count")
-    precondition(source.selectionChanges == 3, "selection change notification count")
+    precondition(source.selectionChanges == 6, "selection change notification count")
     scroll.documentView = nil
     precondition(outline.mountedViewCount == 0 && outline.subviews.isEmpty,
                  "detached outline retained active viewport cells")
@@ -231,7 +251,78 @@ private func run() {
           + "\(source.configuredViews) visible configurations")
 }
 
+@MainActor
+private func runVariableRows() {
+    let source = TreeSource()
+    source.usesVariableHeights = true
+    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 320, height: 120))
+    let outline = NSOutlineView(frame: .zero)
+    outline.rowHeight = 22
+    outline.intercellSpacing.height = 2
+    outline.dataSource = source
+    outline.delegate = source
+    let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("VariableTree"))
+    outline.addTableColumn(column)
+    outline.outlineTableColumn = column
+    outline.reloadData()
+    precondition(source.heightRequests == 5_100, "heights were not indexed on reload")
+    scroll.documentView = outline
+    precondition(outline.rect(ofRow: 0).height == 28 &&
+                 outline.rect(ofRow: 1).origin.y == 30 &&
+                 outline.rect(ofRow: 1).height == 30 &&
+                 outline.rect(ofRow: 2).origin.y == 62 &&
+                 outline.rect(ofRow: 2).height == 32,
+                 "variable row offsets or heights are wrong")
+    precondition(outline.frame.height == 5_100 / 3 * (28 + 30 + 32 + 6),
+                 "document height lost per-row spacing")
+    precondition(outline.row(at: NSPoint(x: 20, y: 27.99)) == 0 &&
+                 outline.row(at: NSPoint(x: 20, y: 28)) == -1 &&
+                 outline.row(at: NSPoint(x: 20, y: 29.99)) == -1 &&
+                 outline.row(at: NSPoint(x: 20, y: 30)) == 1,
+                 "hit testing did not exclude row gaps")
+    precondition(outline.visibleRowIndexes.first == 0 && outline.mountedViewCount <= 6,
+                 "variable first viewport built too many rows")
+
+    let indexedRequests = source.heightRequests
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: 29))
+    precondition(outline.visibleRowIndexes.first == 1 &&
+                 outline.view(atColumn: 0, row: 0, makeIfNecessary: false) == nil,
+                 "gap-only row was mounted at the viewport edge")
+    outline.selectRowIndexes(IndexSet(integer: 5_099), byExtendingSelection: false)
+    outline.scrollRowToVisible(5_099)
+    let lastRect = outline.rect(ofRow: 5_099)
+    let visible = scroll.contentView.documentVisibleRect
+    precondition(lastRect.minY >= visible.minY && lastRect.maxY <= visible.maxY,
+                 "scroll-to-visible missed variable last row")
+    precondition(outline.row(at: NSPoint(x: 20, y: lastRect.midY)) == 5_099 &&
+                 outline.row(at: NSPoint(x: 20, y: lastRect.maxY)) == -1,
+                 "last-row hit testing lost the trailing gap")
+    precondition(outline.mountedViewCount <= 6 && source.heightRequests == indexedRequests,
+                 "scroll recomputed heights or mounted offscreen cells")
+
+    let expandedRoot = source.roots[2_500]
+    outline.expandItem(expandedRoot)
+    precondition(outline.numberOfRows == 6_124 &&
+                 source.heightRequests == indexedRequests + 6_124,
+                 "expansion did not rebuild the height index once")
+    let childRow = outline.row(forItem: expandedRoot.children[800])
+    outline.scrollRowToVisible(childRow)
+    precondition(outline.row(at: NSPoint(x: 20, y: outline.rect(ofRow: childRow).midY)) == childRow &&
+                 outline.mountedViewCount <= 6,
+                 "expanded child row missed indexed geometry")
+
+    source.firstRowHeight = 40
+    outline.reloadData()
+    precondition(outline.rect(ofRow: 0).height == 40 &&
+                 outline.rect(ofRow: 1).minY == 42,
+                 "reload did not refresh changed row metrics")
+    print("variable outline fixture passed: 5,100 indexed rows, 1,024 expanded children")
+}
+
 @main
 struct Fixture {
-    @MainActor static func main() { run() }
+    @MainActor static func main() {
+        run()
+        runVariableRows()
+    }
 }

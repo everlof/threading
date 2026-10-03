@@ -40,6 +40,9 @@ typedef struct TWWindow TWWindow;
 // menu-local pixels and never enter the terminal. Kind42 is its header Actions button's
 // AT-SPI press. Kind43 is an AT-SPI menu-row press: key is the bounded visible slot and
 // text is the exact page identity, which the host must revalidate before executing.
+// Kind45 reports native window focus (action=1 gained, 0 lost). A focus loss that also
+// cancels an active gesture retains that gesture's event kind; query tw_window_has_focus
+// after every event so the host sees both changes in the same turn.
 typedef struct {
     int kind, x, y, width, height;
     char text[1024];
@@ -48,6 +51,7 @@ typedef struct {
 TWWindow *tw_open(const char *title, int width, int height);
 const char *tw_error(void);
 int tw_next(TWWindow *, TWEvent *);
+int tw_window_has_focus(TWWindow *);
 int tw_present(TWWindow *, const uint8_t *rgba, int width, int height);
 // Persistent workspace: 320-pixel sidebar, terminal up to 1280 pixels, total up to 1600x900.
 // sidebarWidth must be 320 or zero (restore standalone presentation). No child is resized here.

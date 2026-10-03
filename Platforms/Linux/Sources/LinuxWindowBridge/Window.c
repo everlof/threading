@@ -107,6 +107,9 @@ void tw_window_geometry(TWWindow *w, int *x, int *y, int *width, int *height) {
     SDL_GetWindowPosition(w->window, x, y);
     SDL_GetWindowSize(w->window, width, height);
 }
+int tw_window_has_focus(TWWindow *w) {
+    return w && (SDL_GetWindowFlags(w->window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+}
 int tw_present(TWWindow *w, const uint8_t *rgba, int width, int height) {
     if (!w || w->sidebarWidth || !rgba || width < 1 || width > 1280 || height < 1 || height > 900) return -1;
     if (!w->texture || w->width != width || w->height != height) {
@@ -768,7 +771,9 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             if (e.window.event == SDL_WINDOWEVENT_CLOSE) out->kind = 5;
             else if (e.window.event == SDL_WINDOWEVENT_EXPOSED || e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) out->kind = 1;
             else if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED || e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
-                tw_accessibility_window_focus(w, e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED);
+                const int focused = e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED;
+                tw_accessibility_window_focus(w, focused);
+                out->kind = 45; out->action = focused;
                 if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST && w->sessionMenuTexture) {
                     if (w->sessionMenuTracking) SDL_CaptureMouse(SDL_FALSE);
                     w->sessionMenuTracking = w->sessionMenuHovered = 0;

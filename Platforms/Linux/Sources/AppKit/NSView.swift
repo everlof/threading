@@ -165,6 +165,7 @@ open class NSView: NSResponder, NSLayoutItem {
     /// The content root is owned by its window; descendants inherit that owner through parents.
     open var window: NSWindow? { superview?.window ?? contentWindow }
     open func viewWillMove(toWindow newWindow: NSWindow?) {}
+    open func viewDidMoveToSuperview() {}
     open func viewDidMoveToWindow() {}
 
     func notifyWillMove(toWindow newWindow: NSWindow?) {
@@ -224,6 +225,7 @@ open class NSView: NSResponder, NSLayoutItem {
         }
         view.superview = self
         subviews.append(view)
+        view.viewDidMoveToSuperview()
         view.notifyEffectiveAppearanceChanged(from: previousAppearance)
         needsDisplay = true
         setNeedsLayout()
@@ -274,6 +276,7 @@ open class NSView: NSResponder, NSLayoutItem {
         superview.subviews.removeAll { $0 === self }
         superview.setNeedsLayout()
         self.superview = nil
+        viewDidMoveToSuperview()
         if notifyAppearance {
             notifyEffectiveAppearanceChanged(from: previousAppearance)
         }
