@@ -368,8 +368,8 @@ try:
         key('Tab')
         eventually(terminal_focus, 'terminal focus after sidebar-return dismissal')
         xdo('mousemove', '--window', window, '500', '100', 'click', '1')
-        # The fixed10x22px grid begins at window x320. A left click at500,100 is column19,row5.
-        expected_input = b'ivx\x1b[<0;19;5M\x1b[<0;19;5m'
+        # The grid begins below the 82px header. A click at500,100 is column19,row1.
+        expected_input = b'ivx\x1b[<0;19;1M\x1b[<0;19;1m'
         eventually(lambda: child_state()['input'] == expected_input.hex(),
                    'next genuine mouse gesture retains matching press and release')
         key('a')

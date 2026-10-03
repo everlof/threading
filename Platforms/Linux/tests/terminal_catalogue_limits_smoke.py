@@ -114,7 +114,10 @@ def application():
 def listed():
     result = app.get_child_at_index(0).get_child_at_index(0)
     assert result.get_role_name() == 'list'
-    assert result.get_child_count() <= 8, 'offscreen rows mounted in AT-SPI'
+    # The native project outline mounts a ninth partially clipped row; the saved picker
+    # still uses eight complete rows in this window.
+    maximum = 9 if result.get_name() == 'Projects' else 8
+    assert result.get_child_count() <= maximum, 'offscreen rows mounted in AT-SPI'
     return result
 
 

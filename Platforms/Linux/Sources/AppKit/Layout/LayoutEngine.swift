@@ -272,15 +272,19 @@ public enum LayoutEngine {
                 objective[over] = weight
                 objective[under] = weight
             case .lessThanOrEqual:
-                let slack = nextError
-                nextError += 1
-                terms[slack] = -1
-                objective[slack] = weight
-            case .greaterThanOrEqual:
-                let slack = nextError
-                nextError += 1
+                // x ≤ c: x + slack - violation = c. Only exceeding c pays.
+                let slack = nextError, violation = nextError + 1
+                nextError += 2
                 terms[slack] = 1
-                objective[slack] = weight
+                terms[violation] = -1
+                objective[violation] = weight
+            case .greaterThanOrEqual:
+                // x ≥ c: x - slack + violation = c. Only falling below c pays.
+                let slack = nextError, violation = nextError + 1
+                nextError += 2
+                terms[slack] = -1
+                terms[violation] = 1
+                objective[violation] = weight
             }
             rows.append(Simplex.Row(coefficients: terms, relation: relation, constant: constant))
         }

@@ -11,10 +11,12 @@ struct TWWindow {
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *texture;
-    SDL_Texture *sidebarTexture, *terminalTexture;
+    SDL_Texture *sidebarTexture, *terminalTexture, *terminalHeaderTexture;
     int sidebarTextureWidth, sidebarTextureHeight, terminalTextureWidth, terminalTextureHeight;
-    int sidebarWidth, sidebarFocused;
+    int terminalHeaderTextureWidth, terminalHeaderTextureHeight;
+    int sidebarWidth, sidebarFocused, terminalTopInset;
     uint32_t terminalButtons;
+    int terminalHeaderTracking, terminalHeaderHovered;
     SDL_Rect actionsBounds;
     int actionsVisible, actionsEnabled, actionsTracking, actionsState;
     int navigatorPointerRoute, navigatorTracking, navigatorHovered, navigatorSuppressLeftUp;
@@ -60,6 +62,7 @@ void tw_close(TWWindow *w) {
     SDL_DestroyTexture(w->texture);
     SDL_DestroyTexture(w->sidebarTexture);
     SDL_DestroyTexture(w->terminalTexture);
+    SDL_DestroyTexture(w->terminalHeaderTexture);
     SDL_DestroyRenderer(w->renderer);
     SDL_DestroyWindow(w->window);
     free(w);
@@ -124,16 +127,22 @@ int tw_repaint(TWWindow *w) {
             SDL_RenderClear(w->renderer) != 0) return -1;
         // Never stretch cells or labels while a resize is awaiting a freshly sized frame.
         // Crop the retained pixels to the new pane and leave any exposed remainder as ground.
-        SDL_Texture *textures[2] = {w->sidebarTexture, w->terminalTexture};
-        int widths[2] = {w->sidebarTextureWidth, w->terminalTextureWidth};
-        int heights[2] = {w->sidebarTextureHeight, w->terminalTextureHeight};
-        for (int index = 0; index < 2; index++) {
-            const int available = index == 0 ? w->sidebarWidth : width - w->sidebarWidth;
-            const int drawnWidth = widths[index] < available ? widths[index] : available;
-            const int drawnHeight = heights[index] < height ? heights[index] : height;
+        SDL_Texture *textures[3] = {w->sidebarTexture, w->terminalHeaderTexture, w->terminalTexture};
+        int widths[3] = {w->sidebarTextureWidth, w->terminalHeaderTextureWidth,
+                         w->terminalTextureWidth};
+        int heights[3] = {w->sidebarTextureHeight, w->terminalHeaderTextureHeight,
+                          w->terminalTextureHeight};
+        int positionsX[3] = {0, w->sidebarWidth, w->sidebarWidth};
+        int positionsY[3] = {0, 0, w->terminalTopInset};
+        for (int index = 0; index < 3; index++) {
+            const int availableWidth = index == 0 ? w->sidebarWidth : width - w->sidebarWidth;
+            const int availableHeight = index == 1 ? w->terminalTopInset
+                : height - positionsY[index];
+            const int drawnWidth = widths[index] < availableWidth ? widths[index] : availableWidth;
+            const int drawnHeight = heights[index] < availableHeight ? heights[index] : availableHeight;
             if (!textures[index] || drawnWidth <= 0 || drawnHeight <= 0) continue;
             SDL_Rect source = {0, 0, drawnWidth, drawnHeight};
-            SDL_Rect destination = {index == 0 ? 0 : w->sidebarWidth, 0, drawnWidth, drawnHeight};
+            SDL_Rect destination = {positionsX[index], positionsY[index], drawnWidth, drawnHeight};
             if (SDL_RenderCopy(w->renderer, textures[index], &source, &destination) != 0) return -1;
         }
         SDL_RenderPresent(w->renderer);
@@ -157,6 +166,21 @@ int tw_present_pane(TWWindow *w, const uint8_t *rgba, int width, int height, int
         *oldWidth = width; *oldHeight = height;
     }
     if (!*texture || SDL_UpdateTexture(*texture, NULL, rgba, width * 4) != 0) return -1;
+    return tw_repaint(w);
+}
+int tw_present_terminal_header(TWWindow *w, const uint8_t *rgba, int width, int height) {
+    if (!w || !w->sidebarWidth || !rgba || width < 1 || width > 1280 ||
+        height < 1 || height != w->terminalTopInset) return -1;
+    if (!w->terminalHeaderTexture || w->terminalHeaderTextureWidth != width ||
+        w->terminalHeaderTextureHeight != height) {
+        SDL_DestroyTexture(w->terminalHeaderTexture);
+        w->terminalHeaderTexture = SDL_CreateTexture(w->renderer, SDL_PIXELFORMAT_RGBA32,
+                                                     SDL_TEXTUREACCESS_STREAMING, width, height);
+        w->terminalHeaderTextureWidth = width;
+        w->terminalHeaderTextureHeight = height;
+    }
+    if (!w->terminalHeaderTexture || SDL_UpdateTexture(w->terminalHeaderTexture, NULL,
+                                                       rgba, width * 4) != 0) return -1;
     return tw_repaint(w);
 }
 void tw_actions_button(TWWindow *w, const char *label, int enabled,
@@ -216,6 +240,9 @@ int tw_workspace_reset_terminal(TWWindow *w) {
     SDL_DestroyTexture(w->terminalTexture);
     w->terminalTexture = NULL;
     w->terminalTextureWidth = w->terminalTextureHeight = 0;
+    SDL_DestroyTexture(w->terminalHeaderTexture);
+    w->terminalHeaderTexture = NULL;
+    w->terminalHeaderTextureWidth = w->terminalHeaderTextureHeight = 0;
     return tw_repaint(w);
 }
 void tw_workspace_focus(TWWindow *w, int sidebarFocused) {
@@ -224,7 +251,11 @@ void tw_workspace_focus(TWWindow *w, int sidebarFocused) {
     if (w->sidebarFocused == next && w->terminal == !next) return;
     // A gesture belongs to the terminal that received its press. Once navigation takes focus,
     // a later release must not be delivered to a different session selected in that sidebar.
-    if (next) w->terminalButtons = 0;
+    if (next) {
+        w->terminalButtons = 0;
+        if (w->terminalHeaderTracking) SDL_CaptureMouse(SDL_FALSE);
+        w->terminalHeaderTracking = w->terminalHeaderHovered = 0;
+    }
     w->sidebarFocused = next;
     w->terminal = !next;
     w->composing = 0;
@@ -237,6 +268,16 @@ void tw_workspace_focus(TWWindow *w, int sidebarFocused) {
     if (!next) SDL_StartTextInput();
     tw_accessibility_workspace_changed(w);
 }
+void tw_workspace_terminal_top_inset(TWWindow *w, int pixels) {
+    if (!w || !w->sidebarWidth) return;
+    int width, height;
+    SDL_GetWindowSize(w->window, &width, &height);
+    if (pixels < 0 || pixels >= height) return;
+    w->terminalTopInset = pixels;
+}
+int tw_workspace_terminal_top_inset_value(TWWindow *w) {
+    return w && w->sidebarWidth ? w->terminalTopInset : 0;
+}
 void tw_workspace_mode(TWWindow *w, int sidebarWidth, int sidebarFocused) {
     if (!w || (sidebarWidth != 0 && sidebarWidth != 320)) return;
     if (w->sidebarWidth == sidebarWidth) {
@@ -245,6 +286,9 @@ void tw_workspace_mode(TWWindow *w, int sidebarWidth, int sidebarFocused) {
     }
     w->sidebarWidth = sidebarWidth;
     w->terminalButtons = 0;
+    if (w->terminalHeaderTracking) SDL_CaptureMouse(SDL_FALSE);
+    w->terminalHeaderTracking = w->terminalHeaderHovered = 0;
+    w->terminalTopInset = 0;
     if (w->navigatorTracking) {
         SDL_CaptureMouse(SDL_FALSE);
         w->navigatorTracking = 0;
@@ -254,6 +298,7 @@ void tw_workspace_mode(TWWindow *w, int sidebarWidth, int sidebarFocused) {
     SDL_DestroyTexture(w->texture); w->texture = NULL;
     SDL_DestroyTexture(w->sidebarTexture); w->sidebarTexture = NULL;
     SDL_DestroyTexture(w->terminalTexture); w->terminalTexture = NULL;
+    SDL_DestroyTexture(w->terminalHeaderTexture); w->terminalHeaderTexture = NULL;
     SDL_SetWindowMinimumSize(w->window, sidebarWidth ? 640 : 320, 180);
     SDL_SetWindowMaximumSize(w->window, sidebarWidth ? 1600 : 1280, 900);
     if (sidebarWidth) {
@@ -383,7 +428,26 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         // The opt-in shim route owns only the navigator's visible pane. One tracked left press
         // keeps its owner through release, even if the pointer crosses into the terminal. The
         // bridge does constant work per motion and leaves terminal-owned drags untouched.
-        if (w->navigatorPointerRoute && e.type == SDL_MOUSEBUTTONUP &&
+        if (w->terminalHeaderTracking && e.type == SDL_MOUSEBUTTONUP &&
+            e.button.button == SDL_BUTTON_LEFT) {
+            w->terminalHeaderTracking = 0;
+            w->terminalHeaderHovered = e.button.x >= w->sidebarWidth
+                && e.button.y >= 0 && e.button.y < w->terminalTopInset;
+            SDL_CaptureMouse(SDL_FALSE);
+            out->kind = 37; out->action = 3; out->key = 0;
+            out->x = e.button.x - w->sidebarWidth; out->y = e.button.y;
+        } else if (w->terminalHeaderTracking && e.type == SDL_MOUSEMOTION) {
+            out->kind = 37; out->action = 2; out->key = 0;
+            out->x = e.motion.x - w->sidebarWidth; out->y = e.motion.y;
+        } else if (w->terminalHeaderTracking && e.type == SDL_MOUSEBUTTONDOWN) {
+            continue;
+        } else if (w->terminalHeaderHovered && e.type == SDL_MOUSEMOTION &&
+                   (e.motion.x < w->sidebarWidth || e.motion.y < 0 ||
+                    e.motion.y >= w->terminalTopInset)) {
+            w->terminalHeaderHovered = 0;
+            out->kind = 37; out->action = 4; out->key = 0;
+            out->x = e.motion.x - w->sidebarWidth; out->y = e.motion.y;
+        } else if (w->navigatorPointerRoute && e.type == SDL_MOUSEBUTTONUP &&
             e.button.button == SDL_BUTTON_LEFT && w->navigatorTracking) {
             w->navigatorTracking = 0;
             w->navigatorHovered = navigator_contains(w, out, e.button.x, e.button.y);
@@ -494,7 +558,12 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             else if (e.window.event == SDL_WINDOWEVENT_EXPOSED || e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) out->kind = 1;
             else if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED || e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
                 tw_accessibility_window_focus(w, e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED);
-                if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST && w->navigatorPointerRoute &&
+                if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST &&
+                    (w->terminalHeaderTracking || w->terminalHeaderHovered)) {
+                    if (w->terminalHeaderTracking) SDL_CaptureMouse(SDL_FALSE);
+                    w->terminalHeaderTracking = w->terminalHeaderHovered = 0;
+                    out->kind = 37; out->action = 4; out->key = 0;
+                } else if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST && w->navigatorPointerRoute &&
                     (w->navigatorTracking || w->navigatorHovered)) {
                     if (w->navigatorTracking) {
                         SDL_CaptureMouse(SDL_FALSE);
@@ -507,6 +576,10 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                     SDL_CaptureMouse(SDL_FALSE);
                     out->kind = 26; out->action = 0;
                 }
+            } else if (e.window.event == SDL_WINDOWEVENT_LEAVE &&
+                       w->terminalHeaderHovered && !w->terminalHeaderTracking) {
+                w->terminalHeaderHovered = 0;
+                out->kind = 37; out->action = 4; out->key = 0;
             } else if (e.window.event == SDL_WINDOWEVENT_LEAVE && w->navigatorPointerRoute &&
                        w->navigatorHovered && !w->navigatorTracking) {
                 w->navigatorHovered = 0;
@@ -525,13 +598,32 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             if (e.key.keysym.scancode >= 0 && e.key.keysym.scancode < SDL_NUM_SCANCODES)
                 w->suppressedKeyups[e.key.keysym.scancode] = 1;
             out->kind = 24; out->action = sidebar;
+        } else if (w->sidebarWidth && w->terminalTopInset > 0 &&
+                   e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT &&
+                   !w->terminalButtons && e.button.x >= w->sidebarWidth &&
+                   e.button.y >= 0 && e.button.y < w->terminalTopInset) {
+            tw_workspace_focus(w, 0);
+            w->terminalHeaderTracking = w->terminalHeaderHovered = 1;
+            SDL_CaptureMouse(SDL_TRUE);
+            out->kind = 37; out->action = 1; out->key = 0;
+            out->x = e.button.x - w->sidebarWidth; out->y = e.button.y;
+        } else if (w->sidebarWidth && w->terminalTopInset > 0 &&
+                   e.type == SDL_MOUSEMOTION && !w->terminalButtons &&
+                   e.motion.x >= w->sidebarWidth && e.motion.y >= 0 &&
+                   e.motion.y < w->terminalTopInset) {
+            w->terminalHeaderHovered = 1;
+            out->kind = 37; out->action = 0; out->key = 0;
+            out->x = e.motion.x - w->sidebarWidth; out->y = e.motion.y;
         } else if (w->sidebarWidth && (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP)) {
             if (e.button.button == SDL_BUTTON_LEFT) out->key = 0;
             else if (e.button.button == SDL_BUTTON_MIDDLE) out->key = 1;
             else if (e.button.button == SDL_BUTTON_RIGHT) out->key = 2;
             else continue;
             const uint32_t button = SDL_BUTTON(e.button.button);
-            if (e.type == SDL_MOUSEBUTTONDOWN && e.button.x < w->sidebarWidth) {
+            if (e.button.y < w->terminalTopInset && e.button.x >= w->sidebarWidth &&
+                (e.type == SDL_MOUSEBUTTONDOWN || !(w->terminalButtons & button))) {
+                continue;
+            } else if (e.type == SDL_MOUSEBUTTONDOWN && e.button.x < w->sidebarWidth) {
                 // Unsupported sidebar buttons have no navigation action or focus transition.
                 // Changing only native focus here would leave the workspace owner out of sync.
                 if (e.button.button != SDL_BUTTON_LEFT) continue;
@@ -544,7 +636,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 } else w->terminalButtons &= ~button;
                 out->kind = 15;
                 out->x = e.button.x < w->sidebarWidth ? 0 : e.button.x - w->sidebarWidth;
-                out->y = e.button.y;
+                out->y = e.button.y - w->terminalTopInset;
                 out->action = e.type == SDL_MOUSEBUTTONUP ? 3 : 1;
                 out->modifiers = tw_modifiers(SDL_GetModState());
             }
@@ -552,15 +644,16 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             if (!(w->terminalButtons & SDL_BUTTON_LMASK)) continue;
             out->kind = 17;
             out->x = e.motion.x < w->sidebarWidth ? 0 : e.motion.x - w->sidebarWidth;
-            out->y = e.motion.y;
+            out->y = e.motion.y - w->terminalTopInset;
         } else if (w->sidebarWidth && e.type == SDL_MOUSEWHEEL && e.wheel.y != 0) {
             int y = e.wheel.y;
             if (e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) y = y == INT_MIN ? INT_MAX : -y;
             SDL_GetMouseState(&out->x, &out->y);
             if (out->x < w->sidebarWidth) { out->kind = y > 0 ? 3 : 4; out->action = 1; }
-            else {
+            else if (out->y >= w->terminalTopInset) {
                 out->kind = 16; out->key = y > 8 ? 8 : (y < -8 ? -8 : y);
                 out->x -= w->sidebarWidth;
+                out->y -= w->terminalTopInset;
                 out->modifiers = tw_modifiers(SDL_GetModState());
             }
         } else if (w->terminal && (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP)) {

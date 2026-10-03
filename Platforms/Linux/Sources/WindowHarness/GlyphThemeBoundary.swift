@@ -88,15 +88,20 @@ public enum Design {
             precondition(name == "ellipsis" || name == "plus" || name == "terminal",
                          "No Linux diagnostic symbol artwork for \(name)")
             precondition(slot.isFinite && pointSize.isFinite && slot > 0 && pointSize > 0)
-            let side = min(32, max(4, min(slot, pointSize)))
+            // Keep the artwork at its optical point size inside the requested layout slot.
+            // GlyphView's intrinsic width is the image canvas, and a header may require the
+            // full 16pt slot even though the visible terminal mark is only 12pt wide.
+            let canvasSide = min(32, max(4, slot))
+            let side = min(canvasSide, max(4, pointSize))
+            let origin = (canvasSide - side) / 2
             let weightFactor: CGFloat = weight.rawValue >= NSFont.Weight.bold.rawValue ? 1.25
                 : weight.rawValue >= NSFont.Weight.semibold.rawValue ? 1.12 : 1
-            let size = NSSize(width: side, height: side)
+            let size = NSSize(width: canvasSide, height: canvasSide)
             let image = NSImage(size: size, flipped: false) { canvas in
                 NSColor.white.setFill()
                 if name == "terminal" {
                     let screen = NSBezierPath(roundedRect: NSRect(
-                        x: side * 0.1, y: side * 0.16,
+                        x: origin + side * 0.1, y: origin + side * 0.16,
                         width: side * 0.8, height: side * 0.68),
                         xRadius: side * 0.08, yRadius: side * 0.08)
                     screen.lineWidth = max(1, side * 0.11 * weightFactor)
@@ -104,11 +109,11 @@ public enum Design {
                     screen.stroke()
 
                     let prompt = NSBezierPath()
-                    prompt.move(to: NSPoint(x: side * 0.27, y: side * 0.61))
-                    prompt.line(to: NSPoint(x: side * 0.42, y: side * 0.5))
-                    prompt.line(to: NSPoint(x: side * 0.27, y: side * 0.39))
-                    prompt.move(to: NSPoint(x: side * 0.5, y: side * 0.38))
-                    prompt.line(to: NSPoint(x: side * 0.69, y: side * 0.38))
+                    prompt.move(to: NSPoint(x: origin + side * 0.27, y: origin + side * 0.61))
+                    prompt.line(to: NSPoint(x: origin + side * 0.42, y: origin + side * 0.5))
+                    prompt.line(to: NSPoint(x: origin + side * 0.27, y: origin + side * 0.39))
+                    prompt.move(to: NSPoint(x: origin + side * 0.5, y: origin + side * 0.38))
+                    prompt.line(to: NSPoint(x: origin + side * 0.69, y: origin + side * 0.38))
                     prompt.lineWidth = max(1, side * 0.1 * weightFactor)
                     prompt.stroke()
                 } else if name == "plus" {
@@ -121,7 +126,7 @@ public enum Design {
                 } else {
                     let dot = max(1.5, side * 0.19 * weightFactor)
                     for fraction in [CGFloat(0.23), 0.5, 0.77] {
-                        NSBezierPath(ovalIn: NSRect(x: side * fraction - dot / 2,
+                        NSBezierPath(ovalIn: NSRect(x: origin + side * fraction - dot / 2,
                                                     y: canvas.midY - dot / 2,
                                                     width: dot, height: dot)).fill()
                     }

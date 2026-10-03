@@ -97,7 +97,7 @@ with log_path.open('w+') as log:
         title('Threading terminal - ATTACH DETACHED [history cut]')
         geometry = xdo('getwindowgeometry', '--shell', window).stdout
         # The 960px restored terminal pane sits beside a 320px workspace navigator.
-        assert 'WIDTH=1280\n' in geometry and 'HEIGHT=660\n' in geometry, geometry
+        assert 'WIDTH=1280\n' in geometry and 'HEIGHT=742\n' in geometry, geometry
         assert 'TERMINAL_FRAME 960x660' in log_path.read_text()
         assert json.loads((Path(project) / 'attach-child.json').read_text()) == original
         key('p')

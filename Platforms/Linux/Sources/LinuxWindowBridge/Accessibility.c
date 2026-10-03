@@ -399,8 +399,10 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
     if (object == ATK_OBJECT(frame)) {
         *x = 0; *y = 0; *width = windowWidth; *height = windowHeight;
     } else if (object == ATK_OBJECT(terminal)) {
-        *x = tw_workspace_sidebar_width(hostWindow); *y = 0;
-        *width = windowWidth > *x ? windowWidth - *x : 0; *height = windowHeight;
+        *x = tw_workspace_sidebar_width(hostWindow);
+        *y = tw_workspace_terminal_top_inset_value(hostWindow);
+        *width = windowWidth > *x ? windowWidth - *x : 0;
+        *height = windowHeight > *y ? windowHeight - *y : 0;
     } else if (object == ATK_OBJECT(actionsButton) || object == ATK_OBJECT(addProjectButton)) {
         *x = node->bounds.x; *y = node->bounds.y;
         *width = node->bounds.width; *height = node->bounds.height;
@@ -504,10 +506,14 @@ static void terminal_character_extents(AtkText *text, gint offset, gint *x, gint
         }
         if (low < node->runCount && node->runs[low].offset <= offset) {
             TWTextRun run = node->runs[low];
-            resultX = tw_workspace_sidebar_width(hostWindow) + run.column * TW_TERMINAL_CELL_WIDTH;
+            resultX = run.column * TW_TERMINAL_CELL_WIDTH;
             resultY = run.row * TW_TERMINAL_CELL_HEIGHT;
             resultWidth = run.cells * TW_TERMINAL_CELL_WIDTH;
             resultHeight = TW_TERMINAL_CELL_HEIGHT;
+            if (coordinates != ATK_XY_PARENT) {
+                resultX += tw_workspace_sidebar_width(hostWindow);
+                resultY += tw_workspace_terminal_top_inset_value(hostWindow);
+            }
             if (coordinates == ATK_XY_SCREEN) {
                 int originX, originY, windowWidth, windowHeight;
                 tw_window_geometry(hostWindow, &originX, &originY, &windowWidth, &windowHeight);
@@ -530,8 +536,12 @@ static gint terminal_offset_at_point(AtkText *text, gint x, gint y, AtkCoordType
     } else if (coordinates != ATK_XY_WINDOW && coordinates != ATK_XY_PARENT) return -1;
     int terminalX, terminalY, terminalWidth, terminalHeight;
     if (!component_rectangle(ATK_OBJECT(node), ATK_XY_WINDOW,
-                             &terminalX, &terminalY, &terminalWidth, &terminalHeight) ||
-        x < terminalX || x >= terminalX + terminalWidth ||
+                             &terminalX, &terminalY, &terminalWidth, &terminalHeight)) return -1;
+    if (coordinates == ATK_XY_PARENT) {
+        x += terminalX;
+        y += terminalY;
+    }
+    if (x < terminalX || x >= terminalX + terminalWidth ||
         y < terminalY || y >= terminalY + terminalHeight) return -1;
     x -= terminalX; y -= terminalY;
     if (x < 0 || y < 0 || y / TW_TERMINAL_CELL_HEIGHT >= 40) return -1;
