@@ -2,8 +2,8 @@ import AppKit
 
 /// Sidebar row for a standalone terminal.
 final class ProjectTerminalRowView: NSTableCellView {
-    private let iconView = NSImageView()
-    private let titleLabel = MorphingTitleLabel()
+    private let rowVisuals = ThemedTerminalRowContentView()
+    private var titleLabel: MorphingTitleLabel { rowVisuals.titleLabel }
     private let actionButton = ThemedIconButton(
         symbolName: SidebarRowDefaults.actionSymbol,
         accessibility: L10n.string("Terminal actions"),
@@ -55,7 +55,7 @@ final class ProjectTerminalRowView: NSTableCellView {
         isRunning = running
         isBusy = busy
         let title = ProjectTerminalTitle.displayTitle(for: terminal, projectRoot: projectRoot)
-        titleLabel.setStringValue(
+        rowVisuals.setTitle(
             title,
             animated: sameTerminal && titleLabel.stringValue != title
         )
@@ -77,29 +77,10 @@ final class ProjectTerminalRowView: NSTableCellView {
     }
 
     private func setupViews() {
-        iconView.image = NSImage(
+        rowVisuals.setIcon(NSImage(
             systemSymbolName: "terminal",
             accessibilityDescription: L10n.string("Terminal")
-        )
-        iconView.symbolConfiguration = NSImage.SymbolConfiguration(
-            pointSize: SidebarRowDefaults.iconSize,
-            weight: .regular
-        )
-        iconView.imageScaling = .scaleProportionallyDown
-        iconView.translatesAutoresizingMaskIntoConstraints = false
-        iconView.setAccessibilityIdentifier("sidebar.terminal.identity")
-
-        titleLabel.applyFont(.controlRegular)
-        titleLabel.setContentHuggingPriority(
-            SidebarRowDefaults.stretchableHugging,
-            for: .horizontal
-        )
-        titleLabel.setTextColor { [weak self] in
-            guard let self else { return Design.Text.label }
-            if backgroundStyle == .emphasized { return Design.Text.selected }
-            return isRunning ? Design.Text.label : Design.Text.secondary
-        }
-        titleLabel.setAccessibilityIdentifier("sidebar.terminal.title")
+        ))
 
         actionButton.presentsMenu = true
         actionButton.alphaValue = 0
@@ -112,11 +93,10 @@ final class ProjectTerminalRowView: NSTableCellView {
         // sweeping all three — reads this row by the same convention.
         actionButton.setAccessibilityIdentifier("sidebar.terminal.actions")
 
-        addSubview(iconView)
-        addSubview(titleLabel)
+        addSubview(rowVisuals)
         addSubview(actionButton)
 
-        let leading = iconView.leadingAnchor.constraint(
+        let leading = rowVisuals.leadingAnchor.constraint(
             equalTo: leadingAnchor,
             constant: SidebarRowDefaults.leadingInset
         )
@@ -129,15 +109,8 @@ final class ProjectTerminalRowView: NSTableCellView {
 
         NSLayoutConstraint.activate([
             leading,
-            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth),
-            iconView.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth),
-            titleLabel.leadingAnchor.constraint(
-                equalTo: iconView.trailingAnchor,
-                constant: SidebarRowDefaults.horizontalSpacing
-            ),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleLabel.trailingAnchor.constraint(
+            rowVisuals.centerYAnchor.constraint(equalTo: centerYAnchor),
+            rowVisuals.trailingAnchor.constraint(
                 lessThanOrEqualTo: actionButton.leadingAnchor,
                 constant: -SidebarRowDefaults.horizontalSpacing
             ),
@@ -243,10 +216,7 @@ final class ProjectTerminalRowView: NSTableCellView {
     }
 
     private func applyColors() {
-        titleLabel.refreshTextColor()
-        iconView.contentTintColor = backgroundStyle == .emphasized
-            ? Design.Text.selected
-            : (isRunning ? Design.Text.label : Design.Text.secondary)
+        rowVisuals.setInk(selected: backgroundStyle == .emphasized, running: isRunning)
         statusSpinner?.hostGround = backgroundStyle == .emphasized ? .selection : nil
 
         // The `⋯` is a drawn control rather than a tinted image, so it is told which ground it is
