@@ -68,7 +68,7 @@ int tat_attributed_measure_wrapped(const uint8_t *utf8, int length,
 // mode and alignment used by draw(in:). mode matches tat_render's 0...7 convention.
 int tat_attributed_render(uint8_t *rgba, int capacity, int visible_width, int visible_height,
                           int layout_width, int clip_x, int clip_y, int mode, int alignment,
-                          int maximum_lines, const uint8_t *utf8, int length,
+                          int maximum_lines, int antialias, const uint8_t *utf8, int length,
                           const TATStyleSpan *spans, int span_count);
 
 #endif

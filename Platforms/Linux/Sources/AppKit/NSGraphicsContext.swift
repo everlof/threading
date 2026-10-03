@@ -20,6 +20,9 @@ public final class NSGraphicsContext {
         var imageInterpolation: NSImageInterpolation
         var alpha: CGFloat
         var shouldAntialias: Bool
+        var allowsAntialiasing: Bool
+        var shouldSmoothFonts: Bool
+        var allowsFontSmoothing: Bool
         var lineWidth: CGFloat
     }
 
@@ -75,6 +78,9 @@ public final class NSGraphicsContext {
             imageInterpolation: .default,
             alpha: 1,
             shouldAntialias: true,
+            allowsAntialiasing: true,
+            shouldSmoothFonts: true,
+            allowsFontSmoothing: true,
             lineWidth: 1
         )]
     }
@@ -110,6 +116,26 @@ public final class NSGraphicsContext {
     public var shouldAntialias: Bool {
         get { stack[stack.count - 1].shouldAntialias }
         set { stack[stack.count - 1].shouldAntialias = newValue }
+    }
+
+    public var allowsAntialiasing: Bool {
+        get { stack[stack.count - 1].allowsAntialiasing }
+        set { stack[stack.count - 1].allowsAntialiasing = newValue }
+    }
+
+    public var shouldSmoothFonts: Bool {
+        get { stack[stack.count - 1].shouldSmoothFonts }
+        set { stack[stack.count - 1].shouldSmoothFonts = newValue }
+    }
+
+    public var allowsFontSmoothing: Bool {
+        get { stack[stack.count - 1].allowsFontSmoothing }
+        set { stack[stack.count - 1].allowsFontSmoothing = newValue }
+    }
+
+    public var antialiasesShapes: Bool { shouldAntialias && allowsAntialiasing }
+    public var antialiasesText: Bool {
+        antialiasesShapes && shouldSmoothFonts && allowsFontSmoothing
     }
 
     fileprivate var pathLineWidth: CGFloat {
@@ -221,7 +247,7 @@ public final class NSGraphicsContext {
             // particular, a source-in icon tint never scans or allocates a full-window mask.
             let local = polygons.map { $0.map { NSPoint(x: $0.x - CGFloat(left), y: $0.y - CGFloat(top)) } }
             let mask = Rasterizer.mask(polygons: local, evenOdd: evenOdd, width: width,
-                                       height: height, antialias: shouldAntialias)
+                                       height: height, antialias: antialiasesShapes)
             for row in 0..<height {
                 for column in 0..<width where mask[row * width + column] > 0 {
                     composite(x: left + column, y: top + row, color: components,
@@ -232,10 +258,10 @@ public final class NSGraphicsContext {
         }
         if let clip = stack[stack.count - 1].clip {
             Rasterizer.fill(polygons: polygons, evenOdd: evenOdd, color: components,
-                            region: clip, into: bitmap, antialias: shouldAntialias)
+                            region: clip, into: bitmap, antialias: antialiasesShapes)
         } else {
             Rasterizer.fill(polygons: polygons, evenOdd: evenOdd, color: components,
-                            clip: nil, into: bitmap, antialias: shouldAntialias)
+                            clip: nil, into: bitmap, antialias: antialiasesShapes)
         }
     }
 
@@ -458,6 +484,9 @@ public struct CGContextShim {
         owner.alpha = min(1, max(0, value))
     }
     public func setShouldAntialias(_ value: Bool) { owner.shouldAntialias = value }
+    public func setAllowsAntialiasing(_ value: Bool) { owner.allowsAntialiasing = value }
+    public func setShouldSmoothFonts(_ value: Bool) { owner.shouldSmoothFonts = value }
+    public func setAllowsFontSmoothing(_ value: Bool) { owner.allowsFontSmoothing = value }
     public func setStrokeColor(_ color: NSColor) { owner.strokeColor = color }
     public func setFillColor(_ color: NSColor) { owner.fillColor = color }
     public func setLineWidth(_ width: CGFloat) {

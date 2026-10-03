@@ -75,8 +75,9 @@ checks the default 41-point band, title compression, optical margins, unchanged 
 targets, separator and bounded constraints through a wide/narrow/wide resize. Its five
 rendered states and geometry are written to `out/pane-header-{linux,mac}/`. The native
 window now mounts that same header with its retained title and `+`/`⋯` controls, and publishes
-their actual laid-out bounds to native input and AT-SPI. This uses the preview's fixed palette;
-live production themes and complete production navigator/menu assembly remain open.
+their actual laid-out bounds to native input and AT-SPI. The native command menus also mount
+the production `ThemedMenuRowView` through its shared measurement plan. The preview still uses
+one fixed palette; live production themes and complete navigator/menu presentation remain open.
 `tests/text_label/run.sh` checks the Linux-only, Pango-backed `NSTextField` label against
 Unicode shaping, clipping, ellipsis, intrinsic size, baseline behavior and shared neutral-ink
 contrast on eight grounds, then renders that
@@ -128,9 +129,10 @@ It still assembles diagnostic rows rather than a complete production screen. See
 §§124–125. The content owner now also keeps AppKit first-responder state and offers key
 equivalents down the retained view tree. The focused fixture links the unchanged production
 `KeyEquivalentScopeView` and checks that its shortcut runs only while its subtree owns focus,
-including a field editor delegate. Native project and Actions row presses now enter the retained
-tree through `NSView.hitTest` and `mouseDown`; the row returns a bounded slot to the host's
-existing selection and command path. Navigator Up/Down keys now reach the focused shim row.
+including a field editor delegate. Native project-row presses enter the retained tree through
+`NSView.hitTest` and `mouseDown`; the row returns a bounded slot to the host's selection path.
+Production menu rows receive hover and press/release through that tree while the host retains
+command admission. Navigator Up/Down keys now reach the focused shim row.
 Sidebar wheel turns, terminal input and other keyboard commands keep their native routes.
 The production pane header and Add Project/Actions controls are mounted and interactive in
 this preview; broader production chrome remains outside the diagnostic shell. See
@@ -407,8 +409,9 @@ See `FINDINGS.md`.
 ## Current platform gaps
 
 The installed preview runs a native window, project and session navigation, terminal and provider
-journeys, text shaping, and an accessibility tree. It still assembles diagnostic rows and has not
-mounted a complete production screen. Editing and IME, full table and outline behavior, animation,
+journeys, text shaping, and an accessibility tree. Project and picker rows remain diagnostic;
+command menus now use production rows, but a complete production screen is not mounted.
+Editing and IME, full table and outline behavior, animation,
 system services, and the remaining AppKit shims need work. The layout solver still solves a whole
 subtree at a time and can pay a cold cubic cost on structural changes; see FINDINGS sections 8
 and 11. The later sections of FINDINGS record the implemented host and shim slices.
@@ -774,10 +777,11 @@ production `HostCommandPlane`. The same existing host operations serve keyboard,
 AT-SPI invocation; disabled rows keep their reason and refuse execution. Escape restores the
 previous pane and picker. Menu interactions do not become terminal input.
 
-This contextual command surface remains host-owned diagnostic UI, using the existing specimen
-rows and native shaped text. Threading owns project identity, availability, launch, persistence,
-account routing, focus and accessibility. It introduces no Linux extension API and does not yet
-port the production themed menu, command search or shortcut editor. Only visible rows mount,
+This contextual command surface remains host-owned diagnostic UI, mounting the unchanged
+production `ThemedMenuRowView` with the same column and height plan as the Mac presenter.
+Threading owns project identity, availability, launch, persistence, account routing, focus and
+accessibility. It introduces no Linux extension API and does not yet mount the production
+floating menu presenter, command search or shortcut editor. Only visible rows mount,
 and refreshing the nine descriptors performs no file or process work. The installed
 `tests/actions_smoke.py` exercises the real button, command admission and terminal lifecycle.
 
@@ -794,9 +798,10 @@ the nested choice, disabled Manager, and terminal creation.
 
 ### Shared surface painting
 
-The native navigator's selected rows and Actions button use the production `SurfaceDrawing`
+The native navigator's diagnostic selected project rows use the production `SurfaceDrawing`
 leaf, copied unchanged by `vendor.sh`. Mac `ThemedSurface` delegates its flat fill/border path to
 that same source and keeps its existing `Shape` API. Fitted radii, concentric inset/outset and
 welded plate portions therefore have one implementation. Mac theme resolution and hard/soft
 bevels remain in the Mac wrapper; the preview still supplies its diagnostic colors and spacing.
-This shares a drawing component, not the full production controls or theme environment.
+The retained header controls and mounted menu rows are full production components on that
+fixed palette; the project rows remain diagnostic.

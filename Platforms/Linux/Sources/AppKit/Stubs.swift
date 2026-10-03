@@ -37,6 +37,19 @@ open class NSText: NSView {
 
 /// Font selection for the bounded Pango-backed plain and attributed label paths. Editing,
 /// selection, and IME still need separate platform services.
+/// The descriptor preserves the selected family and weight when a design role changes its
+/// point size. The current bounded Pango leaf distinguishes proportional and mono families;
+/// arbitrary installed-family selection remains outside this diagnostic palette.
+public final class NSFontDescriptor {
+    public let familyName: String
+    public let weight: NSFont.Weight
+
+    fileprivate init(familyName: String, weight: NSFont.Weight) {
+        self.familyName = familyName
+        self.weight = weight
+    }
+}
+
 public final class NSFont {
     public struct Weight: RawRepresentable, Hashable, Sendable {
         public let rawValue: CGFloat
@@ -48,15 +61,24 @@ public final class NSFont {
     }
 
     public let pointSize: CGFloat
-    public let familyName: String
+    private let storedFamilyName: String
+    public var familyName: String? { storedFamilyName }
     public let weight: Weight
-    public var fontName: String { familyName }
+    public var fontName: String { storedFamilyName }
+    public var fontDescriptor: NSFontDescriptor {
+        NSFontDescriptor(familyName: storedFamilyName, weight: weight)
+    }
     private let fontBoundsLock = NSLock()
     private var fontBoundsCache: NSRect?
     init(familyName: String, pointSize: CGFloat, weight: Weight = .regular) {
-        self.familyName = familyName
+        storedFamilyName = familyName
         self.pointSize = pointSize
         self.weight = weight
+    }
+    public convenience init?(descriptor: NSFontDescriptor, size: CGFloat) {
+        guard size.isFinite, size > 0, size <= 128 else { return nil }
+        self.init(familyName: descriptor.familyName, pointSize: size,
+                  weight: descriptor.weight)
     }
     public static func systemFont(ofSize size: CGFloat) -> NSFont { NSFont(familyName: "System", pointSize: size) }
     public static func systemFont(ofSize size: CGFloat, weight: Weight) -> NSFont {
@@ -83,7 +105,7 @@ public final class NSFont {
             let role: Int32 = weight.rawValue >= Weight.bold.rawValue ? 3 :
                 weight.rawValue >= Weight.semibold.rawValue ? 2 :
                 weight.rawValue >= Weight.medium.rawValue ? 1 : 0
-            let accepted = tat_font_metrics(familyName.contains("Mono") ? 1 : 0,
+            let accepted = tat_font_metrics(storedFamilyName.contains("Mono") ? 1 : 0,
                                             role, Double(size), &metrics)
             let rect = accepted == 1
                 ? NSRect(x: 0, y: -metrics.descent, width: metrics.approximate_width,

@@ -147,7 +147,7 @@ int tat_attributed_measure_wrapped(const uint8_t *utf8, int length,
 
 int tat_attributed_render(uint8_t *rgba, int capacity, int width, int height,
                           int layout_width, int clip_x, int clip_y, int mode, int alignment,
-                          int maximum_lines, const uint8_t *utf8, int length,
+                          int maximum_lines, int antialias, const uint8_t *utf8, int length,
                           const TATStyleSpan *spans, int count) {
     if (!rgba || !valid(utf8, length, spans, count) || width <= 0 || height <= 0 ||
         width > TAT_ATTR_MAX_WIDTH || height > TAT_ATTR_MAX_HEIGHT ||
@@ -155,7 +155,7 @@ int tat_attributed_render(uint8_t *rgba, int capacity, int width, int height,
         layout_width > TAT_ATTR_MAX_WIDTH || clip_x < 0 || clip_x > TAT_ATTR_MAX_WIDTH ||
         clip_y < 0 || clip_y > TAT_ATTR_MAX_HEIGHT || mode < 0 || mode > 7 ||
         alignment < 0 || alignment > 3 || maximum_lines < 1 ||
-        maximum_lines > TAT_ATTR_MAX_LINES) return 0;
+        maximum_lines > TAT_ATTR_MAX_LINES || (antialias != 0 && antialias != 1)) return 0;
     if (length == 0) { memset(rgba, 0, (size_t)width * height * 4); return 1; }
     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
     if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
@@ -163,7 +163,8 @@ int tat_attributed_render(uint8_t *rgba, int capacity, int width, int height,
     }
     cairo_t *cr = cairo_create(surface);
     cairo_font_options_t *font_options = cairo_font_options_create();
-    cairo_font_options_set_antialias(font_options, CAIRO_ANTIALIAS_GRAY);
+    cairo_font_options_set_antialias(font_options,
+                                   antialias ? CAIRO_ANTIALIAS_GRAY : CAIRO_ANTIALIAS_NONE);
     cairo_set_font_options(cr, font_options);
     cairo_font_options_destroy(font_options);
     PangoLayout *layout = layout_for(cr, utf8, length, spans, count);
@@ -220,6 +221,6 @@ int tat_attributed_measure(const uint8_t *t, int n, const TATStyleSpan *s, int c
 int tat_attributed_measure_wrapped(const uint8_t *t, int n, const TATStyleSpan *s, int c,
                                    int w, int l, int h, TATMetrics *r) { return 0; }
 int tat_attributed_render(uint8_t *p, int cap, int w, int h, int lw, int x, int y,
-                          int mode, int align, int lines, const uint8_t *t, int n,
+                          int mode, int align, int lines, int antialias, const uint8_t *t, int n,
                           const TATStyleSpan *s, int c) { return 0; }
 #endif

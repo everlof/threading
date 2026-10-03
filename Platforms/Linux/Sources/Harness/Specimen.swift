@@ -111,7 +111,9 @@ enum Specimen {
         let headerInk = Ink(on: Specimen.headerGround)
         private let rowLayer = NSView(frame: .zero)
         private let textLayer = NoninteractiveTextLayer(frame: .zero)
+        private let menuLayer = MenuRowLayer(frame: .zero)
         private var mountedRows: [Row] = []
+        private var mountedMenuRows: [NSView] = []
         private var nextRowSlot = 0
         private var mountedLabels: [NSTextField] = []
         private var activatedRowSlot: Int?
@@ -125,12 +127,21 @@ enum Specimen {
             override func hitTest(_ point: NSPoint) -> NSView? { nil }
         }
 
+        private final class MenuRowLayer: NSView {
+            override func hitTest(_ point: NSPoint) -> NSView? {
+                let target = super.hitTest(point)
+                return target === self ? nil : target
+            }
+        }
+
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
             rowLayer.frame = bounds
             textLayer.frame = bounds
+            menuLayer.frame = bounds
             addSubview(rowLayer)
             addSubview(textLayer)
+            addSubview(menuLayer)
         }
 
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -141,7 +152,21 @@ enum Specimen {
             if frame != rect { frame = rect }
             if rowLayer.frame != bounds { rowLayer.frame = bounds }
             if textLayer.frame != bounds { textLayer.frame = bounds }
+            if menuLayer.frame != bounds { menuLayer.frame = bounds }
             nextRowSlot = 0
+        }
+
+        /// Menu rows come from the production design component. The host supplies only the
+        /// bounded visible page and retains command identity in its own presentation model.
+        func mountMenuRows(_ rows: [NSView]) {
+            for row in mountedMenuRows { row.removeFromSuperview() }
+            mountedMenuRows = rows
+            for row in rows { menuLayer.addSubview(row) }
+        }
+
+        func mountedMenuRow(at slot: Int) -> NSView? {
+            guard mountedMenuRows.indices.contains(slot) else { return nil }
+            return mountedMenuRows[slot]
         }
 
         func mountNavigatorRow(frame: NSRect, accent: NSColor, selected: Bool, ink: Ink,

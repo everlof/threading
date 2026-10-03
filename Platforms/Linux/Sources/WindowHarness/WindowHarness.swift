@@ -126,6 +126,15 @@ struct WindowHarness {
                 Int32(row.width * 2), Int32(row.height * 2))
     }
 
+    @MainActor private static func menuRowPixels(_ slot: Int, in root: Specimen.Window,
+                                                   scale: CGFloat)
+        -> (x: Int32, y: Int32, width: Int32, height: Int32)? {
+        guard let view = root.mountedMenuRow(at: slot) else { return nil }
+        let row = view.convert(view.bounds, to: root)
+        return (Int32(row.minX * scale), Int32((root.bounds.height - row.maxY) * scale),
+                Int32(row.width * scale), Int32(row.height * scale))
+    }
+
     private struct NavigatorTextRow {
         let text: String
         let x: Int32
@@ -1279,6 +1288,7 @@ struct WindowHarness {
         var pendingSelection: PendingSelection?
         var pendingFolderImport: FolderImportGate?
         var actions: NavigatorActions.Presentation?
+        var activatedMenuEntry: Int?
         var actionsEnabled = true
         var dismissedActionGesture: Int32?
         var hoveredProjectID: String?
@@ -1546,8 +1556,20 @@ struct WindowHarness {
             }
             let enabled = pendingFolderImport == nil && pendingSelection == nil
             if actionsEnabled != enabled { actionsEnabled = enabled; dirty = true }
+            let visibleRowHeight = actions == nil ? navigatorRowStride : ThemedMenuMetrics.rowHeight
             let count = min(Int(TW_NAVIGATOR_MAX_ROWS),
-                max(1, Int((CGFloat(height / 2) - navigatorHeaderHeight - 2) / navigatorRowStride)))
+                max(1, Int((CGFloat(height / 2) - navigatorHeaderHeight - 2) / visibleRowHeight)))
+            func actionMenuIndex(at x: Int32, y: Int32) -> Int? {
+                guard let menu = actions, y >= navigatorRowsTop else { return nil }
+                let stride = Int32(ThemedMenuMetrics.rowHeight * contentWindow.backingScaleFactor)
+                let slot = Int((y - navigatorRowsTop) / stride)
+                let index = menu.first + slot
+                guard slot >= 0, slot < count, index < menu.commands.count else { return nil }
+                guard let row = menuRowPixels(slot, in: navigatorRoot,
+                                              scale: contentWindow.backingScaleFactor) else { return nil }
+                return x >= row.x && x < row.x + row.width &&
+                       y >= row.y && y < row.y + row.height ? index : nil
+            }
             if var menu = actions {
                 let commands: [HostCommandDescriptor]
                 switch menu.kind {
@@ -1596,15 +1618,38 @@ struct WindowHarness {
                 let selectedInk = Specimen.Ink(on: accent)
                 var textRows: [NavigatorTextRow] = []
                 textRows.reserveCapacity(count * 3 + 2)
+                var menuRows: [NSView] = []
                 let end: Int
                 if let menu = actions {
                     end = min(menu.commands.count, menu.first + count)
+                    let entries: [ThemedMenuEntry] = menu.commands.map { command in
+                        .item(ThemedMenuItem(
+                            title: readableNavigatorText(command.title),
+                            help: command.availability.disabledReason,
+                            representedValue: command.id,
+                            isEnabled: command.availability.isAvailable
+                        ))
+                    }
+                    let plan = ThemedMenuRowPlan(entries: entries)
+                    var top = navigatorHeaderHeight + 2
                     for index in menu.first..<end {
-                        let command = menu.commands[index]
-                        let text = command.title + (command.availability.isAvailable ? "" : " (unavailable)")
-                        addNavigatorRow(text, index: index - menu.first, width: width,
-                            height: height, accent: accent, selected: index == menu.selected,
-                            selectedInk: selectedInk, root: root, textRows: &textRows)
+                        guard let row = plan.row(at: index) else {
+                            throw WindowFailure("host command was not a menu item")
+                        }
+                        let rowHeight = plan.heights[index]
+                        row.frame = NSRect(x: 6, y: root.bounds.height - top - rowHeight,
+                                           width: root.bounds.width - 12, height: rowHeight)
+                        row.isKeyboardHighlighted = index == menu.selected
+                        row.onChoose = { entry, _ in activatedMenuEntry = entry }
+                        row.onHighlight = { entry in
+                            guard var current = actions, current.commands.indices.contains(entry),
+                                  current.selected != entry else { return }
+                            current.selected = entry
+                            actions = current
+                            dirty = true
+                        }
+                        menuRows.append(row)
+                        top += rowHeight
                     }
                 } else if let accountPicker {
                     let provider = accountPicker == .claude ? "Claude" : "Codex"
@@ -1702,6 +1747,7 @@ struct WindowHarness {
                 trace("header bandHeight=\(navigatorHeaderHeight) title=\(titleRect) add=\(addRect) actions=\(actionsRect)")
                 let mountStarted = DispatchTime.now().uptimeNanoseconds
                 try mountNavigatorText(textRows, in: root)
+                root.mountMenuRows(menuRows)
                 let focusedSlot: Int
                 if let menu = actions { focusedSlot = menu.selected - menu.first }
                 else if accountPicker != nil { focusedSlot = accountSelected - accountFirst }
@@ -1745,7 +1791,10 @@ struct WindowHarness {
                     for index in menu.first..<end {
                         let command = menu.commands[index]
                         let label = command.title + (command.availability.disabledReason.map { ". " + $0 } ?? "")
-                        let bounds = navigatorRowPixels(index - menu.first, width: width, height: height)
+                        guard let bounds = menuRowPixels(index - menu.first, in: root,
+                                                         scale: contentWindow.backingScaleFactor) else {
+                            throw WindowFailure("accessible menu command has no mounted row")
+                        }
                         let result = command.id.withCString { identifier in
                             label.withCString { name in
                                 tw_accessibility_add_action_row(window, identifier, name,
@@ -1989,15 +2038,6 @@ struct WindowHarness {
                 continue
             }
             if event.kind == 27 {
-                func actionMenuIndex(at x: Int32, y: Int32) -> Int? {
-                    guard let menu = actions, y >= navigatorRowsTop else { return nil }
-                    let slot = Int((y - navigatorRowsTop) / Int32(navigatorRowStride * 2))
-                    let index = menu.first + slot
-                    guard slot >= 0, slot < count, index < menu.commands.count else { return nil }
-                    let row = navigatorRowPixels(slot, width: navigatorWidth, height: height)
-                    return x >= row.x && x < row.x + row.width &&
-                           y >= row.y && y < row.y + row.height ? index : nil
-                }
                 if event.action == 4 {
                     contentWindow.cancelPointerGesture()
                     _ = navigatorRoot.takeActivatedRowSlot()
@@ -2042,6 +2082,14 @@ struct WindowHarness {
                     y: navigatorRoot.bounds.height - CGFloat(event.y) / contentWindow.backingScaleFactor)
                 _ = contentWindow.dispatchToContent(NSEvent(type: eventType,
                                                               locationInWindow: point))
+                if event.action == 3, let chosen = activatedMenuEntry,
+                   var menu = actions, menu.commands.indices.contains(chosen) {
+                    activatedMenuEntry = nil
+                    menu.selected = chosen
+                    actions = menu
+                    dirty = true
+                    event.kind = 8
+                }
                 if navigatorRoot.takeProjectControlVisualChange() { dirty = true }
                 if addProjectControlVisualChanged {
                     addProjectControlVisualChanged = false
@@ -2151,13 +2199,13 @@ struct WindowHarness {
                 case 12, 11, 24:
                     dismissActions(); continue
                 case 3, 4:
-                    guard let step = navigatorStep(for: event) else { continue }
+                    guard event.action == 1 || sidebarFocused else { continue }
+                    let step = event.kind == 3 ? -1 : 1
                     menu.selected = max(0, min(menu.commands.count - 1, menu.selected + step))
                     actions = menu; dirty = true; continue
                 case 2:
-                    let end = min(menu.commands.count, menu.first + count)
-                    if let mounted = mountedRowPressed(by: event), mounted < end - menu.first {
-                        menu.selected = menu.first + mounted
+                    if let index = actionMenuIndex(at: event.x, y: event.y) {
+                        menu.selected = index
                         actions = menu; dirty = true
                         if event.action == 1 { continue }
                     } else { dismissActions(); continue }
