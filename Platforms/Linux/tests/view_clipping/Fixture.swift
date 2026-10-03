@@ -116,6 +116,7 @@ private struct ViewClippingFixture {
         checkNestedViews(flipped: false, ownClip: true)
         checkNestedViews(flipped: true, ownClip: true)
         checkSubviewOrdering()
-        print("PASS view bounds, descendant, explicit and sibling clipping in both orientations; ordered subviews")
+        checkScrollViewport()
+        print("PASS view bounds, clipping, ordering, and scroll viewport geometry, rendering and wheel routing")
     }
 }
