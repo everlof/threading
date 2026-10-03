@@ -371,8 +371,31 @@ recreated when it cannot be opened — and registers each session lazily as
   `mail-peer-set`, no transport on either side) and synced over `mail-rpc --peer <macHost>` on
   the owner SSH runner every 15 s while its tunnel is up and one second after a send to it —
   four bounded exchanges per direction, a response from any other host id refused. Inbound mail
-  from another host needs a grant on the Mac's store, except a reply to mail the Mac sent; the
-  Mac has no grant-editing surface yet.
+  from another host needs a grant on the Mac's store, except a reply to mail the Mac sent.
+- **Remote-host sessions keep their mailbox on the host** (`RemoteSessionMailboxes`, the draft's
+  "Mailbox location"). When the session's host has a controller set up, the remote launch first
+  registers `<host>/session/<uuid>` there over owner-rpc (`mail-register`, `mail-credential`,
+  and a `<macHost>/*` `notify` grant that stands for this plane's same-project admission), then
+  carries a `threading-mail` stdio server (`<controller> agent-mcp`, with
+  `THREADING_CONTROLLER_DATABASE`/`THREADING_MAILBOX_ADDRESS`/`THREADING_MAILBOX_CREDENTIAL`) in
+  the owner-only `.mcp.json`, the same three variables in the agent's environment, and
+  `<controller> agent-notice …` hook entries in its `.settings.json`. The Mac then drops the
+  `mail_*` tools from that session's catalogue and answers its `/mail-notice` silently. A Mac
+  sibling's send to it is admitted here first and queued for the host; the host session's mail
+  to Mac siblings is admitted by exact-address `notify` grants written on the Mac at launch. A
+  host that cannot be reached within ten seconds, or has no controller, leaves the mailbox on the
+  Mac as before, and the Info panel says which.
+- **Grants and contacts are the owner's** (`MailAccessService`, `SessionMailAccessForm`): the
+  Mail section lists live grants and offers grant, revoke and add-contact forms, each an
+  always-asked `ConfirmationPrompt.changeMailAccess`, written to whichever store holds the
+  mailbox. Modes offered are `notify` and `wake`. No MCP tool reaches them.
+- **Wake** (`MacMailDelivery.considerWake`): mail admitted under a `wake` grant for a dormant
+  native chat posts `MailWakeRequested`; `SessionCoordinator+MailWake` starts it in the background
+  as a scheduled message would, with the controller's `session-start` notice as the opening prompt
+  — never the body. One wake in flight per session. A terminal is never typed into: it waits for
+  its own `SessionStart` hook. The grant's `chainTokenBudget` is checked by the store
+  (`mailWakeCandidate`) against usage it has recorded for the chain; the Mac attributes no
+  transcript usage to chains yet, so a budget does not limit a Mac wake today.
 
 ## Handing an agent a session: the dragged row
 
