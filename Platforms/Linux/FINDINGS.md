@@ -4423,3 +4423,46 @@ Shift+F10 and drag release. The fresh installed Weston Actions capture was inspe
 resized X11 fixture windows onto the display corrected clipped evidence; the final Release
 AT-SPI/workspace runs pass and produce complete 1280×600 and 1280×528 captures, both inspected.
 Theme boundaries, source links, exact separator extraction, runner contracts and diff checks pass.
+
+## 148. The native command list mounts production menu rows
+
+`ThemedMenuItem`, `ThemedMenuMetrics` and `ThemedMenuRowView` are now in separate production
+Design files, linked into both DesignKit and the Linux window. The Mac presenter and Linux host
+use the same `ThemedMenuRowPlan` to calculate column reservations and run heights once. The
+Linux host mounts only the visible page of real menu rows below its retained production pane
+header. Its fixed palette roles stay in a host adapter; the AppKit shim supplies view tracking,
+accessibility, font descriptors and text raster state rather than theme policy.
+
+Command identity, availability, persistence and PTY admission remain host-owned. The native
+AT-SPI list publishes each mounted row's actual laid-out bounds; pointer hit tests and the
+press/drag/release path use those bounds too. At 800×480, seven 28-point rows fit below the
+41-point header, so the ninth command is reached by the existing bounded keyboard scroll.
+The Actions smoke now navigates to an offscreen identity before inspecting it, and the host
+routes menu Up/Down independently of the diagnostic project row's first-responder callback.
+
+The focused Linux Harness menu-leaf tests pass, including overlapping tracking areas and
+whole-pixel indexed Pango text. Native X11 project-action and Actions smokes pass pointer,
+keyboard, AT-SPI, disabled admission and exact terminal ownership. I inspected the installed
+native menu capture: the selected fill, title alignment and disabled rows are visible in the real
+shell. On Mac, the focused menu suite passes 19 tests; System light/dark, Cyberpunk and Swiss
+renders were inspected, and the source extraction plus the Linux Release compile fix left
+those renders byte-identical. The diagnostic Pango renderer still maps requested families to
+DejaVu proportional or mono; arbitrary installed font matching is not established here.
+
+Customization gate: this preview menu remains host-only. Its rows have presentation and local
+interaction behavior, while Threading retains command identity, admission, launch and
+accessibility publication. Scaling gate: the command catalogue is bounded, the column plan is
+computed once per dirty frame, and only viewport rows are constructed; pointer movement does
+not scan persisted projects or sessions. The full floating `ThemedMenuPresenter`, production
+theme engine and complete navigator cells remain outside this preview slice.
+
+The final `./bundle-smoke.sh` rebuilt the Ubuntu arm64 `.deb` from these sources and passed
+the complete non-root installed suite: clean launch, live-child reinstall, workspace,
+Actions/Create/Add menus, provider marks, counts, saved terminal restart and catalogue,
+directory identity and desktop entry. The package SHA-256 is
+`e44f9e60c176454c0cb3179a538d8d2ed6250cc08360d9469a332721f9fd38`.
+`tests/wayland_smoke.sh --actions` passed on that package under headless Weston, including
+native buffer commits, AT-SPI Add/Create/Actions, compositor pointer input, right-click,
+Shift+F10 and drag release. I inspected the installed X11 Actions and Create captures and
+the final Wayland Actions capture. The shell remains a diagnostic preview rather than a full
+production Linux UI.

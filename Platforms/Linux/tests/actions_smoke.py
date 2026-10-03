@@ -133,6 +133,12 @@ def rows():
 
 
 def command(identifier, enabled):
+    if identifier not in rows():
+        current = listing().get_selection_iface().get_selected_child(0).get_accessible_id()
+        distance = commands.index(identifier) - commands.index(current)
+        for _ in range(abs(distance)):
+            key('Down' if distance > 0 else 'Up')
+
     def read():
         row = rows().get(identifier)
         if row is None:

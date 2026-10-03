@@ -11,6 +11,11 @@ public extension NSAttributedString.Key {
     static let paragraphStyle = NSAttributedString.Key("NSParagraphStyle")
 }
 
+public extension NSMutableAttributedString {
+    /// Darwin Foundation supplies the empty convenience initializer used by menu rows.
+    convenience init() { self.init(string: "") }
+}
+
 open class NSParagraphStyle: NSObject {
     open var alignment: NSTextAlignment = .natural
     open var lineBreakMode: NSLineBreakMode = .byWordWrapping
@@ -64,7 +69,7 @@ enum AttributedTextDrawing {
         var span = TATStyleSpan()
         span.start_byte = Int32(start)
         span.end_byte = Int32(end)
-        span.monospace = font.familyName.contains("Mono") ? 1 : 0
+        span.monospace = font.familyName?.contains("Mono") == true ? 1 : 0
         span.weight = weight >= NSFont.Weight.bold.rawValue ? 3 :
             weight >= NSFont.Weight.semibold.rawValue ? 2 :
             weight >= NSFont.Weight.medium.rawValue ? 1 : 0
@@ -219,6 +224,7 @@ enum AttributedTextDrawing {
                                           Int32(width), Int32(height), layoutWidth,
                                           Int32(left - deviceLeft), Int32(top - deviceTop),
                                           mode, alignment, Int32(min(8, max(1, maximumLines))),
+                                          context.antialiasesText ? 1 : 0,
                                           text.baseAddress, Int32(text.count),
                                           styles.baseAddress, Int32(styles.count))
                 }

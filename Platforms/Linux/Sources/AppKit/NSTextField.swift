@@ -180,7 +180,7 @@ open class NSTextField: NSView {
         return result
     }
 
-    private var isMonospace: Int32 { font?.familyName.contains("Mono") == true ? 1 : 0 }
+    private var isMonospace: Int32 { font?.familyName?.contains("Mono") == true ? 1 : 0 }
     private var effectiveLineBreakMode: NSLineBreakMode {
         if usesSingleLineMode && (lineBreakMode == .byWordWrapping || lineBreakMode == .byCharWrapping) {
             return .byClipping

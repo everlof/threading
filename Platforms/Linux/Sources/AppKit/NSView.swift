@@ -520,8 +520,9 @@ open class NSView: NSResponder, NSLayoutItem {
                 && onHitPath && rect.contains(local)
             guard inside != area.isEntered else { continue }
             area.isEntered = inside
-            if inside { area.owner?.mouseEntered(with: event) }
-            else { area.owner?.mouseExited(with: event) }
+            let crossing = event.trackingCrossing(inside ? .mouseEntered : .mouseExited, area: area)
+            if inside { area.owner?.mouseEntered(with: crossing) }
+            else { area.owner?.mouseExited(with: crossing) }
         }
     }
 
@@ -586,6 +587,7 @@ open class NSView: NSResponder, NSLayoutItem {
     private var accessibilityStoredValue: Any?
     private var accessibilityTitleValue: String?
     private var accessibilityHelpValue: String?
+    private weak var accessibilityExplicitParent: AnyObject?
 
     open func setAccessibilityElement(_ isElement: Bool) { accessibilityIsElement = isElement }
     open func isAccessibilityElement() -> Bool { accessibilityIsElement }
@@ -604,6 +606,12 @@ open class NSView: NSResponder, NSLayoutItem {
     open func setAccessibilityHelp(_ help: String?) { accessibilityHelpValue = help }
     open func accessibilityHelp() -> String? { accessibilityHelpValue }
     open func accessibilityPerformShowMenu() -> Bool { false }
+    open func setAccessibilityParent(_ parent: Any?) {
+        accessibilityExplicitParent = parent as AnyObject?
+    }
+    open func accessibilityParent() -> Any? { accessibilityExplicitParent ?? superview }
+    open func accessibilityChildren() -> [Any]? { subviews }
+    open func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? { nil }
 
     open nonisolated func accessibilityHitTest(_ point: NSPoint) -> Any? {
         struct Result: @unchecked Sendable { let value: NSView? }
@@ -641,7 +649,25 @@ public enum NSAccessibility {
         case staticText
         case button
         case group
+        case menu
+        case menuItem
     }
+}
+
+/// A secondary action stays on the row in the accessibility tree. The closure is retained by
+/// the action; production callers capture their row weakly to avoid a menu-cycle.
+@MainActor
+public final class NSAccessibilityCustomAction {
+    public let name: String
+    private let handler: () -> Bool
+
+    public init(name: String, handler: @escaping () -> Bool) {
+        self.name = name
+        self.handler = handler
+    }
+
+    @discardableResult
+    public func perform() -> Bool { handler() }
 }
 
 @MainActor
