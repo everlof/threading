@@ -20,13 +20,14 @@ class ModuleBoundaryTests(unittest.TestCase):
         self.pty_host = self.root / "Packages/ThreadingPTYHostKit/Sources/ThreadingPTYHostKit"
         self.controller = self.root / "Packages/ThreadingController/Sources/ThreadingController"
         self.controller_runtime = self.root / "Targets/Controller/Sources/ControllerRuntime"
+        self.usage = self.root / "Packages/ThreadingUsage/Sources/ThreadingUsage"
         self.domain.mkdir(parents=True)
         self.application.mkdir(parents=True)
         self.pty_host.mkdir(parents=True)
         self.controller.mkdir(parents=True)
         self.controller_runtime.mkdir(parents=True)
-        # Every declared module root must exist in the fixture, as in the repository.
-        (self.root / "Packages/ThreadingUsage/Sources/ThreadingUsage").mkdir(parents=True)
+        self.usage.mkdir(parents=True)
+        (self.usage / "Ledger.swift").write_text("import Foundation\nimport Darwin\n", encoding="utf-8")
         (self.controller / "Store.swift").write_text(
             "import Foundation\nimport CControllerSQLite\n", encoding="utf-8"
         )
