@@ -86,7 +86,7 @@ struct ControllerMain {
     mail-address WORKER_UUID
     mail-peer-set HOST_UUID EXPECTED_REVISION NAME PEER_JSON_FILE   ({"transport":[argv]|null,"push":bool,"pull":bool})
     mail-peers [CURSOR]
-    mail-grant-set RECIPIENT_ADDRESS SENDER_PATTERN EXPECTED_REVISION none|notify|wake|ask normal|interrupt
+    mail-grant-set RECIPIENT_ADDRESS SENDER_PATTERN EXPECTED_REVISION none|notify|wake|ask normal|interrupt [CHAIN_TOKEN_BUDGET]
     mail-grants RECIPIENT_ADDRESS [CURSOR]
     mail-register SESSION_ADDRESS NAME
     mail-credential SESSION_ADDRESS   (the session's private mail-tool credential, for its launch environment)
@@ -114,6 +114,15 @@ struct ControllerMain {
     triggers SOURCE_UUID [CURSOR]
     trigger TRIGGER_UUID
     secret-set NAME TEXT_FILE   (owner-only file a source names; never read back)
+
+    usage-collect EXECUTION_UUID   (write a stopped execution's receipt now)
+    usage-receipt EXECUTION_UUID
+    usage-receipts WORKER_UUID [CURSOR]
+    usage-summary FROM_DAY THROUGH_DAY [CURSOR]   (UTC days, YYYY-MM-DD; daily cells per worker, account, model)
+    worker-budget WORKER_UUID
+    worker-budget-set WORKER_UUID EXPECTED_REVISION TOKENS_PER_DAY|none
+    A recipe names its transcript with "usage": {"runtime":"claude|codex","home":"/abs","account":"name"}.
+    Budget tokens are uncached input + cache writes + output; cached reads are excluded.
     A source is any executable on the probe contract (docs/feature-drafts/portable-trigger-sources.md).
     It runs with this account's authority, unsandboxed; approval pins its content hash.
     Addresses are HOST_UUID/worker/UUID or HOST_UUID/session/UUID. Sender patterns: an address,
@@ -245,15 +254,17 @@ struct ControllerMain {
         case "mail-peers":
             let after = try cursor(0); try output(await store.mailPeers(after: after))
         case "mail-grant-set":
-            try count(5)
+            guard args.count == 5 || args.count == 6 else { throw ControllerError.invalidInput("arguments") }
             guard let revision = Int(args[2]), let priority = MailPriority(rawValue: args[4]) else { throw ControllerError.invalidInput("mail_grant") }
+            let budget: Int64? = args.count == 6 ? Int64(args[5]) : nil
+            if args.count == 6, budget == nil { throw ControllerError.invalidInput("chain_budget") }
             let mode: MailMode?
             if args[3] == "none" { mode = nil } else {
                 guard let value = MailMode(rawValue: args[3]) else { throw ControllerError.invalidInput("mail_mode") }
                 mode = value
             }
             try output(await store.setMailGrant(recipient: MailAddress(args[0]), sender: args[1], expectedRevision: revision,
-                                                mode: mode, allowsInterrupt: priority == .interrupt))
+                                                mode: mode, allowsInterrupt: priority == .interrupt, chainTokenBudget: budget))
         case "mail-grants":
             let after = try cursor(1); try output(await store.mailGrants(recipient: MailAddress(args[0]), after: after))
         case "mail-register":
@@ -331,6 +342,22 @@ struct ControllerMain {
             try count(2)
             try ControllerSourcePoller.storeSecret(args[0], value: file(args[1], maximum: 16_384), database: database)
             try output(["stored": args[0]])
+        case "usage-collect":
+            try count(1); try output(await ControllerUsageCollector.collect(store: store, executionID: ExecutionID(args[0])))
+        case "usage-receipt":
+            try count(1); try output(await store.usageReceipt(ExecutionID(args[0])))
+        case "usage-receipts":
+            let after = try cursor(1); try output(await store.usageReceipts(worker: WorkerID(args[0]), after: after))
+        case "usage-summary":
+            let after = try cursor(2); try output(await store.usageSummary(from: args[0], through: args[1], after: after))
+        case "worker-budget":
+            try count(1); try output(await store.workerBudget(WorkerID(args[0])))
+        case "worker-budget-set":
+            try count(3)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            let tokens: Int64? = args[2] == "none" ? nil : Int64(args[2])
+            if args[2] != "none", tokens == nil { throw ControllerError.invalidInput("budget") }
+            try output(await store.setWorkerBudget(WorkerID(args[0]), expectedRevision: revision, tokensPerDay: tokens))
         case "mail-rpc":
             try count(2)
             guard args[0] == "--peer" else { throw ControllerError.invalidInput("arguments") }

@@ -23,7 +23,9 @@ enum ControllerOwnerRPC {
         // Trigger sources. Approval stays a separate, explicit owner step that names the hash.
         "source-configure", "source-approve", "source-enable", "source-pause", "source-delete", "sources", "source",
         "source-events", "source-poll", "trigger-configure", "trigger-enable", "trigger-pause", "trigger-delete",
-        "triggers", "trigger", "secret-set"
+        "triggers", "trigger", "secret-set",
+        // Usage receipts and budgets: reads for dashboards, budgets as owner policy.
+        "usage-collect", "usage-receipt", "usage-receipts", "usage-summary", "worker-budget", "worker-budget-set"
     ]
     static func run(store: ControllerStore, database: String) async throws {
         let maximumBytes = 262_144

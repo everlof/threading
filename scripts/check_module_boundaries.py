@@ -11,11 +11,18 @@ import sys
 MODULE_BOUNDARIES = {
     "ControllerRuntime": (
         pathlib.Path("Targets/Controller/Sources/ControllerRuntime"),
-        {"Foundation", "ThreadingController", "ThreadingDomain", "ThreadingPTYClient", "ThreadingPTYHostKit"},
+        {"Foundation", "ThreadingController", "ThreadingDomain", "ThreadingPTYClient", "ThreadingPTYHostKit", "ThreadingUsage"},
     ),
     "ThreadingController": (
         pathlib.Path("Packages/ThreadingController/Sources/ThreadingController"),
-        {"Foundation", "CControllerSQLite", "ThreadingDomain"},
+        # ThreadingUsage: one transcript parser for the Mac's Usage page and controller receipts
+        # (docs/feature-drafts/agent-usage-ledger.md); it is Foundation-only like this module.
+        {"Foundation", "CControllerSQLite", "ThreadingDomain", "ThreadingUsage"},
+    ),
+    "ThreadingUsage": (
+        pathlib.Path("Packages/ThreadingUsage/Sources/ThreadingUsage"),
+        # The strict JSONL reader streams with POSIX reads and memmem on every platform.
+        {"Foundation", "Darwin", "Glibc", "Musl"},
     ),
     "ThreadingDomain": (
         pathlib.Path("Packages/ThreadingDomain/Sources/ThreadingDomain"),

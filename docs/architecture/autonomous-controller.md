@@ -560,3 +560,42 @@ backoff/changed) and `scripts/tests/test_controller_sources.py` (a resident supe
 shipped `file_drop.py`, admits one `event` task for a matching file, ignores a redelivery, refuses
 to run an edited probe; a secret reaches a probe by name and its absence fails the poll with the
 cursor kept).
+
+## Usage receipts and budgets (schema v9)
+
+What each agent spent, kept on the host that ran it. The proposal is
+[`agent-usage-ledger.md`](../feature-drafts/agent-usage-ledger.md); `ControllerUsage.swift` owns
+receipts, daily cells and budgets, `ControllerUsageCollector` (runtime) reads transcripts.
+
+- **One parser.** Transcripts are read through `Packages/ThreadingUsage` — the same Claude and
+  Codex adapters, strict reader and pricing catalogue as the Mac's Usage page — so a worker's
+  spend and a Mac session's spend are computed by identical code.
+- **A receipt per execution, owed from the confirmed stop.** A recipe names its transcript with
+  `usage: {runtime, home, account}`. Confirming a launch stopped records it in `usage_pending` in
+  the same transaction; the supervisor writes receipts beside supervision (two at a time), and
+  `usage-collect` writes one by hand. Attribution — worker, task, the mail chain the execution
+  acted on, the trigger whose event admitted it — comes from controller records only.
+- **Finding the transcript.** Claude: `<home>/projects/*/<execution>.jsonl` plus its
+  `subagents/`, exact because the recipe passes the execution id as the session id. Codex names
+  its own session, so the rollout must be the only one in the launch's date folders written since
+  it started whose recorded working directory is the recipe's; anything else is `unavailable`
+  with the reason, never guessed.
+- **Refuse, don't undercount.** An unreadable transcript makes the receipt `partial` or `failed`;
+  a missing one `unavailable`. Cells are per model with five token categories, requests and cost
+  (provider-reported or catalogue-priced; unpriced tokens counted separately), bounded to 16
+  models with an "other models" cell that keeps totals exact.
+- **Reads are O(days × cells).** Each receipt adds to `usage_daily` (day, worker, account, model)
+  in its transaction; `usage-summary FROM THROUGH` pages those cells, `usage-receipts WORKER`
+  pages receipts. Both go through `owner-rpc` for the Mac's Remote page and Rindabox.
+- **Budgets act at admission, in budget tokens** (uncached input + cache writes + output; cached
+  reads excluded because a long conversation rereads its context every turn). A worker's daily
+  budget (`worker-budget-set`) stops the supervisor starting new executions for it; a mail
+  grant's chain budget stops that chain's mail from waking its recipient, while still delivering
+  it. Nothing running is ever stopped by a budget. Chain totals are those of executions on this
+  host. A fraction-of-account-window ceiling needs usage readings this host does not take yet.
+
+Validation: `ControllerUsageTests` (receipt idempotence and daily cells, a stop that owes nothing,
+the daily budget at admission, a chain past its budget delivering without waking) and
+`scripts/tests/test_controller_usage.py` (an agent under ptyd writes a Claude transcript; the
+resident supervisor writes a complete, priced, attributed receipt and then holds a worker past its
+budget).

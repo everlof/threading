@@ -1,9 +1,4 @@
 import Foundation
-#if canImport(Darwin)
-import Darwin
-#else
-import Glibc
-#endif
 
 // A trigger source anyone can write: an executable on a fixed stdin/stdout contract, run with
 // no model and no inherited environment. It reports facts as bounded events with stable ids and
@@ -169,7 +164,11 @@ public enum TriggerProbe {
             request = try JSONSerialization.data(withJSONObject: object) + Data([10])
         } catch { return failed("request") }
         var input: [Int32] = [0, 0], output: [Int32] = [0, 0], errors: [Int32] = [0, 0]
-        guard pipe(&input) == 0, pipe(&output) == 0, pipe(&errors) == 0 else { return failed("pipe") }
+        // Close-on-exec from creation: a probe (or any other child this process starts at the
+        // same moment) must never inherit another poll's pipe ends, or that poll would never see
+        // end-of-file. dup2 onto 0/1/2 clears the flag for the child's own three.
+        spawnLock.lock()
+        guard makePipe(&input), makePipe(&output), makePipe(&errors) else { spawnLock.unlock(); return failed("pipe") }
         #if canImport(Darwin)
         var actions: posix_spawn_file_actions_t?
         var attributes: posix_spawnattr_t?
@@ -197,6 +196,7 @@ public enum TriggerProbe {
         var pid: pid_t = 0
         let spawned = posix_spawn(&pid, invocation.executable, &actions, &attributes, argv, envp)
         for descriptor in [input[0], output[1], errors[1]] { close(descriptor) }
+        spawnLock.unlock()
         guard spawned == 0 else {
             for descriptor in [input[1], output[0], errors[0]] { close(descriptor) }
             return failed("spawn_\(spawned)")
@@ -241,6 +241,16 @@ public enum TriggerProbe {
         default: return failed("exit \(code) " + diagnostics)
         }
     }
+
+    private static func makePipe(_ descriptors: inout [Int32]) -> Bool {
+        guard pipe(&descriptors) == 0 else { return false }
+        for descriptor in descriptors { _ = fcntl(descriptor, F_SETFD, FD_CLOEXEC) }
+        return true
+    }
+    /// Held from creating a poll's pipes until its child's ends are closed in this process, so
+    /// two polls starting together cannot leak descriptors into each other's probe between
+    /// `pipe` and `fcntl` (Linux has no spawn-wide close-on-exec default).
+    private static let spawnLock = NSLock()
 
     private static func drain(_ descriptor: Int32, limit: Int, overflow: (() -> Void)?) -> Data {
         var data = Data()

@@ -1,10 +1,5 @@
 import Foundation
 import ThreadingController
-#if canImport(Darwin)
-import Darwin
-#else
-import Glibc
-#endif
 
 /// Runs one source's probe on this host. The hash is checked before anything runs, so an edited
 /// probe is never executed under an old approval; secrets are resolved by name from owner-only

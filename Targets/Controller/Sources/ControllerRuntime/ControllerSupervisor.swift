@@ -21,6 +21,8 @@ public struct SupervisorCycle: Codable, Sendable {
     /// Source polls finished since the last report: events recorded and issues by source.
     public var sourceEvents = 0
     public var sourceIssues: [String] = []
+    /// Usage receipts written since the last report.
+    public var receipts: [ExecutionID] = []
 }
 
 /// One serial sweep owner. The database remains the admission authority across processes.
@@ -41,6 +43,8 @@ public actor ControllerSupervisor {
     private var pollingSources: Set<SourceID> = []
     private var finishedSourceEvents = 0
     private var finishedSourceIssues: [String] = []
+    private var collecting: Set<ExecutionID> = []
+    private var finishedReceipts: [ExecutionID] = []
     private enum Budget { static let page = 8; static let starts = 2; static let mailSyncSeconds: TimeInterval = 15; static let concurrentPolls = 2 }
 
     public init(store: ControllerStore, database: String, controllerBinary: String) {
@@ -66,6 +70,8 @@ public actor ControllerSupervisor {
         do { try await startDueSourcePolls() } catch { report.sourceIssues.append("due_sources: \(error)") }
         report.sourceEvents = finishedSourceEvents; finishedSourceEvents = 0
         report.sourceIssues += finishedSourceIssues; finishedSourceIssues = []
+        do { try await startUsageCollection() } catch { report.automationIssues.append("usage_pending: \(error)") }
+        report.receipts = finishedReceipts; finishedReceipts = []
         let page = try await store.unresolvedLaunches(after: launchCursor, limit: Budget.page)
         launchCursor = page.items.isEmpty ? 0 : page.next
         let active = page.items.filter { $0.state != .prepared }
@@ -156,6 +162,24 @@ public actor ControllerSupervisor {
             }
         }
     }
+    /// Reading a transcript can take a while for a long run, so receipts are written beside
+    /// supervision, two at a time, from the pending list confirmed stops leave behind.
+    private func startUsageCollection() async throws {
+        for id in try await store.pendingUsage(limit: Budget.page) where !collecting.contains(id) {
+            guard collecting.count < Budget.concurrentPolls else { break }
+            collecting.insert(id)
+            let store = store
+            Task {
+                let written = (try? await ControllerUsageCollector.collect(store: store, executionID: id)) != nil
+                self.finishCollection(id, written: written)
+            }
+        }
+    }
+    private func finishCollection(_ id: ExecutionID, written: Bool) {
+        collecting.remove(id)
+        if written { finishedReceipts.append(id) }
+    }
+
     private func finishSourcePoll(_ id: SourceID, events: Int, issue: String?) {
         pollingSources.remove(id)
         finishedSourceEvents += events
