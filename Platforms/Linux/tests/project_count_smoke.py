@@ -122,6 +122,14 @@ def count_digit_ink(rgb, rect):
                for y in rows for x in range(row_right - 20, row_right - 10))
 
 
+def terminal_content_ink(rgb, rect, leading_start, leading_end):
+    background = pixel(rgb, rect.x + rect.width - 80, rect.y + rect.height // 2)
+    return sum(max(abs(channel - ground) for channel, ground in
+                   zip(pixel(rgb, x, y), background)) > 35
+               for y in range(rect.y + 8, rect.y + rect.height - 8)
+               for x in range(rect.x + leading_start, rect.x + leading_end))
+
+
 process = None
 try:
     # Xvfb keeps the pointer position from the preceding UI fixture. Start this
@@ -185,9 +193,18 @@ try:
         assert (child_rect.x, child_rect.y, child_rect.width, child_rect.height) == (44, 134, 744, 44)
         assert child.get_accessible_id() not in (first.get_accessible_id(), second.get_accessible_id())
         assert selected(expanded, 0) and not selected(expanded, 1)
-        capture(window, 'project-count-alpha-expanded.png')
+        expanded_pixels = capture(window, 'project-count-alpha-expanded.png')
+        assert terminal_content_ink(expanded_pixels, child_rect, 8, 40) >= 16, \
+            'shared terminal identity glyph absent from inline child'
+        assert terminal_content_ink(expanded_pixels, child_rect, 44, 160) >= 16, \
+            'shared terminal title absent from inline child'
         xdo('key', 'Down')
         eventually(lambda: selected(expanded, 1), 'inline terminal keyboard selection', process)
+        selected_terminal = capture(window, 'project-count-alpha-terminal-selected.png')
+        assert terminal_content_ink(selected_terminal, child_rect, 8, 40) >= 16, \
+            'selected terminal identity glyph disappeared'
+        assert terminal_content_ink(selected_terminal, child_rect, 44, 160) >= 16, \
+            'selected terminal title disappeared'
         xdo('key', 'Up')
         eventually(lambda: selected(expanded, 0), 'project keyboard selection', process)
         xdo('key', 'space')

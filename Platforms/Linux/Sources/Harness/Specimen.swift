@@ -223,6 +223,13 @@ enum Specimen {
             mountedRows[nextRowSlot - 1].configureProductionSession(
                 title: title, icon: icon, selected: selected, trailingInset: trailingInset)
         }
+
+        func mountTerminalContent(title: String, icon: NSImage, selected: Bool,
+                                  running: Bool) {
+            guard nextRowSlot > 0 else { return }
+            mountedRows[nextRowSlot - 1].configureProductionTerminal(
+                title: title, icon: icon, selected: selected, running: running)
+        }
         #endif
 
         func finishNavigatorRows() {
@@ -374,6 +381,7 @@ enum Specimen {
         #if THREADING_WINDOW_HARNESS
         private var productionProjectView: ThemedProjectRowView?
         private var productionSessionView: ThemedSessionRowContentView?
+        private var productionTerminalView: ThemedTerminalRowContentView?
         private var productionProjectActionsRevealed = false
         private var projectCreateButton: ThemedIconButton?
         private var projectActionButton: ThemedIconButton?
@@ -421,7 +429,8 @@ enum Specimen {
         override func hitTest(_ point: NSPoint) -> NSView? {
             let target = super.hitTest(point)
             #if THREADING_WINDOW_HARNESS
-            if productionSessionView?.isHidden == false { return self }
+            if productionSessionView?.isHidden == false ||
+               productionTerminalView?.isHidden == false { return self }
             guard let productionProjectView, !productionProjectView.isHidden,
                   let target else { return target }
             if !productionProjectActionsRevealed { return self }
@@ -458,6 +467,7 @@ enum Specimen {
             #if THREADING_WINDOW_HARNESS
             productionProjectView?.isHidden = true
             productionSessionView?.isHidden = true
+            productionTerminalView?.isHidden = true
             #endif
             if let image {
                 let iconFrame = Specimen.navigatorRowGeometry.iconRect(in: bounds, side: imageSide)
@@ -551,6 +561,31 @@ enum Specimen {
             content.setTitle(title)
             content.setIcon(icon)
             content.setSelection(selected)
+            content.isHidden = false
+            iconView?.isHidden = true
+        }
+
+        func configureProductionTerminal(title: String, icon: NSImage, selected: Bool,
+                                         running: Bool) {
+            let content: ThemedTerminalRowContentView
+            if let productionTerminalView {
+                content = productionTerminalView
+            } else {
+                content = ThemedTerminalRowContentView(frame: bounds)
+                content.translatesAutoresizingMaskIntoConstraints = true
+                addSubview(content)
+                productionTerminalView = content
+            }
+            let leading = SidebarRowDefaults.leadingInset
+            let trailing = SidebarRowDefaults.trailingInset +
+                SidebarRowDefaults.trailingSlotSize + SidebarRowDefaults.horizontalSpacing
+            let frame = NSRect(x: leading, y: 0,
+                               width: max(0, bounds.width - leading - trailing),
+                               height: bounds.height)
+            if content.frame != frame { content.frame = frame }
+            content.setTitle(title)
+            content.setIcon(icon)
+            content.setInk(selected: selected, running: running)
             content.isHidden = false
             iconView?.isHidden = true
         }
