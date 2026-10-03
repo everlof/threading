@@ -131,6 +131,15 @@ always uses the paths you saved. **Enable**, **Run now** and **Delete** ask befo
 Connecting does not install a controller or start its supervisor. A remote run is archived only after work completes, result delivery is
 confirmed and its process has stopped; its history remains available.
 
+**Agent usage…** on the Remote page opens what that host's workers spent, read from the host's own
+ledger: choose a worker, then **By day**, **By task**, **By trigger**, **By mail chain** or
+**Receipts** over 7, 30 or 90 UTC days. Each receipt says whether its transcript was read
+completely; partial, failed and unavailable receipts are marked, because their spend is missing or
+short. Receipts are read a few hundred at a time — **Read more receipts** continues. **Edit
+budget…** sets the worker's daily budget in tokens (uncached input, cache writes and output; empty
+for no limit) after a confirmation naming the worker, the host and the new limit. At the budget
+the host starts no new executions for that worker; running ones are never stopped.
+
 ### Manager sessions
 
 A **Manager** is a normal chat with user-granted authority to coordinate other chats in one
@@ -5708,6 +5717,15 @@ down rather than the table scrolling sideways. Coverage remains visible
 when an agent source is partial or unavailable. Provider-reported cost wins; otherwise a versioned
 exact-model catalog may estimate it. Unmatched tokens remain visibly unpriced, and the page says
 that estimates are not an invoice.
+
+Choose **Agents** in the breakdown menu to see who spent it: this Mac's sessions, sessions that
+ran on a remote host (billed to that host, not to a Mac account), and each worker on every host
+you have connected in **Automations ▸ Remote**, named and placed by host. Workers' figures come
+from the host's own ledger and are not added to this Mac's total, so this table's **Share** is of
+its own rows. Hosts are read in the background when the page opens (at most every five minutes,
+or on **Rebuild**). A host that cannot be reached keeps its last figures, marked *last read …
+ago*; a host never read shows dashes, never zero; *older days not read* means the host had more
+history than one read takes and only the newest days are complete.
 
 Limit History chooses one account/window and shows its current usage, scheduled reset, projection
 when enough history exists, recorded resets and restored pace. A window that cycles too often for

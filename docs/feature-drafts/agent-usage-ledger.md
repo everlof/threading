@@ -1,10 +1,12 @@
 # Agent usage ledger: what each agent spent, kept where it ran
 
-> Status: **in progress** (2026-10-03). Slices 1–3 are implemented: `Packages/ThreadingUsage`
+> Status: **in progress** (2026-10-03). Slices 1–4 are implemented on the Mac: `Packages/ThreadingUsage`
 > holds the shared adapters and pricing ([`usage-dashboard.md`](../architecture/usage-dashboard.md)),
-> and the controller writes receipts, daily cells and enforces worker and chain budgets
-> ([`autonomous-controller.md`](../architecture/autonomous-controller.md#usage-receipts-and-budgets-schema-v9)).
-> The dashboards (slice 4) are next. Extends
+> the controller writes receipts, daily cells and enforces worker and chain budgets
+> ([`autonomous-controller.md`](../architecture/autonomous-controller.md#usage-receipts-and-budgets-schema-v9)),
+> and the Usage page's Agents breakdown and the Remote page's worker usage sheet read them
+> ([`usage-dashboard.md`](../architecture/usage-dashboard.md#agents-sessions-and-hosts-workers)).
+> Rindabox's view is not built. Extends
 > [`usage-dashboard.md`](../architecture/usage-dashboard.md) (the Mac's transcript ledger) and
 > [`autonomous-controller.md`](../architecture/autonomous-controller.md) (workers and
 > executions). Read by admission in [`portable-trigger-sources.md`](portable-trigger-sources.md)

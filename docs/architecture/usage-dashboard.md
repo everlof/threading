@@ -378,6 +378,63 @@ What is not covered: subagent transcripts (the mirror holds the root conversatio
 remote conversation whose mirror has never been refreshed on this Mac — its usage appears once its
 session runs or is taken back here.
 
+### Agents: sessions and hosts' workers
+
+The breakdown's fifth kind, **Agents**, answers *who* spent it rather than *what on*. It joins two
+authorities without copying either (the contract in
+[`agent-usage-ledger.md`](../feature-drafts/agent-usage-ledger.md)):
+
+- **Sessions** come from this ledger, folded by where they ran in the same pass as every other
+  slice (`UsageReportSelection.locations`): this Mac, or one remote host whose mirrored
+  transcripts carry its `remote-host:` account. A mirrored session is the host's row.
+- **Workers** come from each connected host's controller — a host record with both saved
+  controller paths — as that host's `usage_daily` cells, read over the same SSH `owner-rpc`
+  the Remote page uses. `RemoteAgentUsageClient` (a Sendable, stateless pager behind a
+  `RemoteAgentUsageTransport` seam, with its own five-command allow-list) reads `usage-summary`
+  in three segments newest first — the last 7, then 23, then 60 UTC days — under one 50-page
+  budget, so a cut loses the oldest days and records from which day the read is complete
+  (`completeFrom`; rows say *older days not read*). `RemoteAgentUsageService` (an actor) reads at
+  most three hosts at once, at most every five minutes unless forced, forgets hosts that are no
+  longer connected, and caches each host's last good snapshot in
+  `agent-usage-hosts.json` beside the report (`RecoverableFileStore`, rebuildable cache,
+  hosted-test redirect). Each finished host posts `RemoteAgentUsageDidChange`, which re-prepares
+  the overview off the main actor.
+
+Attribution rules for the join, each tested in `AgentUsageProjectionTests`:
+
+- **Billed to the host.** Worker spend is never added to this Mac's hero, chart or other
+  breakdowns; the Agents table's Share is of its own rows.
+- **Nothing counted twice.** Session rows come only from transcripts and worker rows only from
+  controller cells; workers' transcripts are never mirrored, so the sets are disjoint. Cells are
+  keyed (day, worker, account, model) and a repeat read across a page boundary replaces rather
+  than adds.
+- **Freshness is data.** A host whose latest read failed, or whose summary is older than 30
+  minutes, keeps its numbers with *last read … ago* in the warning role (`staleSince`); a host
+  never read is one *not read yet* row of dashes (`isUnmeasured`), never a zero.
+- Worker days are UTC, the controller's boundary; session days stay local. A range therefore
+  selects worker cells by UTC day.
+
+The phone's wire omits Agents (`RemoteUsageBridge` maps it to no DTO kind): worker rows depend on
+this Mac's owner connections, which a paired device's authorization does not describe.
+
+**A worker's page.** Automations ▸ Remote ▸ *Agent usage…* presents
+`RemoteWorkerUsageViewController` for the selected host: by day from the cached daily cells
+(exact), and by task, trigger and mail chain from receipts read 10 pages (500) per *Read more*,
+retaining at most 5,000. Receipts page oldest first on the controller, so the sheet says how
+many it has read and whether more exist; each receipt shows its coverage, and partial, failed or
+unavailable ones are counted and drawn in the warning role with their reason spoken.
+`RemoteWorkerUsageProjection` folds both in one pass. The daily budget is shown against today's
+budget tokens; *Edit budget…* asks through `ConfirmationPrompt.changeWorkerBudget` (always asked,
+a security grant: it is spend authority for a machine that runs without this Mac) with the new
+value in the sheet's accessory, then sends `worker-budget-set` with the revision it read; a
+conflict shows the host's current budget rather than retrying. The ledger table is
+`ThemedLedgerTableView`, a virtualized design-system component with the breakdown's anatomy.
+
+Scaling: a host summary is at most 5,000 cells (the expected 10 workers × 90 days several times
+over); folding the stress shape — 100 workers × 90 days × 2 models, 18,000 cells — into every
+range takes well under a second in `testWorkerFoldStaysProportionalToCellsNotHistory`. Nothing
+is proportional to executions; views are the table's viewport.
+
 ### Session receipts
 
 The Session Status Card, Overview ▸ Info and Subagents pane read a second projection of the same
@@ -783,6 +840,12 @@ still alive when the next file opened.
   ordering, the bounded virtual viewport and provider work pool, identity-scoped live updates in
   both shipping hosts, and the Option-click modifier contract.
 - `UsageDashboardPerformanceTests`: default regression sizes and the opt-in stress contracts above.
+- `RemoteAgentUsageClientTests`: newest-first segment paging, the page budget and `completeFrom`,
+  a repeated cursor, the command allow-list, budget wire shape, stale-not-empty across a failed
+  read and a relaunch, bounded host concurrency and forgetting disconnected hosts.
+- `AgentUsageProjectionTests` and `AgentUsageRenderTests`: the Agents join (no double counting,
+  host billing, stale/unread/partial rows, UTC ranges, off the phone wire), the worker
+  projection, and light/dark renders of the breakdown and the worker sheet.
 - `UsageDashboardProjectionTests`: range equality, capped breakdown conservation, nil-versus-zero
   banked-reset inventory, remote encoded-size/page ceilings and three matched 100k/250k/50k
   projection passes.
