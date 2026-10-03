@@ -483,6 +483,23 @@ extension ControllerStore {
     }
     public func mail(_ id: UUID) throws -> MailMessage { try required("mail", id.uuidString.lowercased()) }
 
+    /// The newest open message that may start work for a session mailbox here: admitted under
+    /// a `wake` (or `ask`) grant, or a reply, and within its grant's chain token budget as this
+    /// store has measured it. Nil when nothing open may wake it. Bounded: one page of open mail.
+    public func mailWakeCandidate(_ recipient: MailAddress) throws -> MailMessage? {
+        let rows = try db.rows("""
+            SELECT payload FROM record WHERE kind='mail' AND parent=? AND state IN ('inbox','noticed')
+            AND json_extract(payload,'$.wake')=1 ORDER BY sequence DESC LIMIT 20
+            """, [.text(recipient.description)])
+        for row in rows {
+            let message: MailMessage = try decode(row.text(0))
+            if let budget = try matchingGrant(recipient: recipient, sender: message.envelope.sender)?.chainTokenBudget,
+               try chainUsage(message.envelope.chainID) >= budget { continue }
+            return message
+        }
+        return nil
+    }
+
     /// The newest messages a mailbox here sent, newest first, whatever became of them. One
     /// bounded, index-ordered read per state (`record_scope_state`), merged, so the cost is the
     /// limit times the state count rather than the sender's whole history.

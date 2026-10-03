@@ -19,6 +19,8 @@ final class MailAgentCommandService {
     private let mailbox: MacMailbox
     private let arrived: @MainActor (SessionID, MailPriority) -> Void
     private let queuedForHost: @MainActor (HostID) -> Void
+    private let hostMailbox: @MainActor (SessionID) -> MailAddress?
+    private let sessionForHostAddress: @MainActor (MailAddress) -> SessionID?
 
     init(
         control: WorkspaceControlPlane,
@@ -27,8 +29,16 @@ final class MailAgentCommandService {
         arrived: @escaping @MainActor (SessionID, MailPriority) -> Void = {
             MacMailDelivery.shared.arrived(for: $0, priority: $1)
         },
-        queuedForHost: @escaping @MainActor (HostID) -> Void = { MacMailSync.shared.kick(host: $0) }
+        queuedForHost: @escaping @MainActor (HostID) -> Void = { MacMailSync.shared.kick(host: $0) },
+        hostMailbox: @escaping @MainActor (SessionID) -> MailAddress? = {
+            RemoteSessionMailboxes.shared.binding(for: $0)?.address
+        },
+        sessionForHostAddress: @escaping @MainActor (MailAddress) -> SessionID? = {
+            RemoteSessionMailboxes.shared.session(forAddress: $0)
+        }
     ) {
+        self.hostMailbox = hostMailbox
+        self.sessionForHostAddress = sessionForHostAddress
         self.control = control
         self.projects = projects
         self.mailbox = mailbox
@@ -94,10 +104,25 @@ final class MailAgentCommandService {
                     case .failure(let refusal):
                         return completion(.failure(refusal.toolWords))
                     case .success(let row):
-                        recipient = try await mailbox.register(targetID, name: row.title)
-                        localTarget = targetID
+                        if let hosted = self.hostMailbox(targetID) {
+                            // The sibling's mailbox lives on its host: queue for that host, whose
+                            // `<macHost>/*` grant stands for this plane's admission just made.
+                            recipient = hosted
+                        } else {
+                            recipient = try await mailbox.register(targetID, name: row.title)
+                            localTarget = targetID
+                        }
                     }
                 case .remote(let address):
+                    // An address that is one of this Mac's own sessions on its host is still
+                    // that session: the same scope rule applies, whatever spelling was used.
+                    if let hostedSession = self.sessionForHostAddress(address) {
+                        switch control.admitMail(to: hostedSession, from: .agentSession(sessionID)) {
+                        case .failure(.targetUnknown): return completion(.failure(Self.unknownRecipientWords))
+                        case .failure(let refusal): return completion(.failure(refusal.toolWords))
+                        case .success: break
+                        }
+                    }
                     recipient = address
                 }
                 let message = try await mailbox.send(
@@ -182,7 +207,10 @@ final class MailAgentCommandService {
             do {
                 let own = try await mailbox.register(sessionID, name: name)
                 let contacts = try await mailbox.storeDirectory(for: sessionID, name: name)
-                completion(.success(Self.directoryWords(own: own, siblings: siblings, contacts: contacts)))
+                let hosted = Dictionary(uniqueKeysWithValues: siblings.compactMap { row in
+                    self.hostMailbox(row.id).map { (row.id, $0) }
+                })
+                completion(.success(Self.directoryWords(own: own, siblings: siblings, contacts: contacts, hosted: hosted)))
             } catch let failure as MacMailbox.Failure {
                 completion(.failure(Self.mailWords(for: failure)))
             } catch {
@@ -284,7 +312,8 @@ final class MailAgentCommandService {
     nonisolated static func directoryWords(
         own: MailAddress,
         siblings: [ControlSessionOverview],
-        contacts: [MailContact]
+        contacts: [MailContact],
+        hosted: [SessionID: MailAddress] = [:]
     ) -> String {
         var lines = ["This session's address: \(own)"]
         if siblings.isEmpty && contacts.isEmpty {
@@ -294,7 +323,7 @@ final class MailAgentCommandService {
         if !siblings.isEmpty {
             lines.append("Sessions in this project (notify):")
             for row in siblings {
-                let address = MailAddress(host: own.host, kind: .session, id: row.id.rawValue)
+                let address = hosted[row.id] ?? MailAddress(host: own.host, kind: .session, id: row.id.rawValue)
                 lines.append("• “\(row.title)” — \(address)")
             }
         }

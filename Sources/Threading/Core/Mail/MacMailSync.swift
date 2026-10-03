@@ -26,14 +26,7 @@ actor MacMailSync {
 
     // MARK: - Types
 
-    /// One remote controller this Mac exchanges mail with.
-    struct Endpoint: Equatable, Sendable {
-        let hostID: RemoteHostID
-        let name: String
-        let destination: RemoteHostDestination
-        let executable: String
-        let database: String
-    }
+    typealias Endpoint = RemoteControllerEndpoint
 
     struct Report: Equatable, Sendable {
         var pushed = 0
@@ -41,12 +34,6 @@ actor MacMailSync {
         var issues: [String] = []
         /// Mac sessions that received mail in this pass.
         var recipients: Set<SessionID> = []
-    }
-
-    enum SyncError: Error, Equatable {
-        case transport(String)
-        case invalidResponse
-        case wrongHost
     }
 
     // MARK: - Properties
@@ -124,8 +111,8 @@ actor MacMailSync {
             for _ in 0..<MacMailSyncDefaults.exchangesPerDirection {
                 let batch = try await store.outboundBatch(for: remote)
                 guard !batch.envelopes.isEmpty else { break }
-                let response = try await exchange(
-                    endpoint, MailRPCRequest(push: MailPush(from: local.id, messages: batch.envelopes)),
+                let response = try await rpc(endpoint).mail(
+                    MailRPCRequest(push: MailPush(from: local.id, messages: batch.envelopes)),
                     local: local.id, expecting: remote
                 )
                 try await store.applyPushResults(response.results ?? [], peer: remote)
@@ -134,8 +121,7 @@ actor MacMailSync {
 
             for _ in 0..<MacMailSyncDefaults.exchangesPerDirection {
                 guard let current = try await store.mailPeer(remote) else { break }
-                let response = try await exchange(
-                    endpoint,
+                let response = try await rpc(endpoint).mail(
                     MailRPCRequest(pull: MailPull(after: current.pullCursor, refused: current.pendingRefusals)),
                     local: local.id, expecting: remote
                 )
@@ -169,10 +155,20 @@ actor MacMailSync {
 
     // MARK: - Peering
 
+    /// Peers this Mac and `endpoint`'s controller both ways, once per run, and returns the
+    /// controller's host id. Public to the module so a remote session mailbox can ensure the
+    /// route its mail will travel exists before the session starts.
+    func ensurePeered(_ endpoint: Endpoint) async throws -> HostID {
+        let store = try await mailbox.controllerStore()
+        let local = try await mailbox.host()
+        return try await peer(endpoint, store: store, local: local)
+    }
+
     private func peer(_ endpoint: Endpoint, store: ControllerStore, local: ControllerHost) async throws -> HostID {
         if let known = peered[endpoint.hostID] { return known }
-        let remote: ControllerHost = try await ownerRPC(endpoint, "host", [])
-        guard remote.id != local.id else { throw SyncError.wrongHost }
+        let rpc = rpc(endpoint)
+        let remote: ControllerHost = try await rpc.owner("host")
+        guard remote.id != local.id else { throw RemoteControllerRPC.Failure.wrongHost }
 
         let existing = try await store.mailPeer(remote.id)
         if existing == nil || existing?.name != remote.name {
@@ -182,89 +178,25 @@ actor MacMailSync {
             )
         }
 
-        let theirs: ControllerPage<MailPeer> = try await ownerRPC(endpoint, "mail-peers", [])
+        let theirs: ControllerPage<MailPeer> = try await rpc.owner("mail-peers")
         let mine = theirs.items.first { $0.host == local.id }
         if mine == nil || mine?.name != local.name {
-            let settings = #"{"transport":null,"push":false,"pull":false}"#
-            let _: MailPeer = try await ownerRPC(endpoint, "mail-peer-set", [
+            let _: MailPeer = try await rpc.owner("mail-peer-set", [
                 .init(value: local.id.description),
                 .init(value: String(mine?.revision ?? 0)),
                 .init(value: String(local.name.prefix(64))),
-                .init(text: settings)
+                .init(text: #"{"transport":null,"push":false,"pull":false}"#)
             ])
         }
         peered[endpoint.hostID] = remote.id
         return remote.id
     }
 
-    // MARK: - Transport
-
-    private struct OwnerRequest: Encodable {
-        struct Argument: Encodable {
-            var value: String? = nil
-            var text: String? = nil
-        }
-        let command: String
-        let arguments: [Argument]
+    private func rpc(_ endpoint: Endpoint) -> RemoteControllerRPC {
+        RemoteControllerRPC(endpoint: endpoint, runner: runner, timeout: MacMailSyncDefaults.timeout)
     }
 
-    private func ownerRPC<T: Decodable>(_ endpoint: Endpoint, _ command: String, _ arguments: [OwnerRequest.Argument]) async throws -> T {
-        let input = try JSONEncoder().encode(OwnerRequest(command: command, arguments: arguments))
-        let output = try await run(endpoint, subcommand: "owner-rpc", input: input)
-        return try Self.decodeLastLine(T.self, from: output)
-    }
-
-    private func exchange(_ endpoint: Endpoint, _ request: MailRPCRequest, local: HostID, expecting host: HostID) async throws
-        -> MailRPCResponse {
-        let input = try JSONEncoder().encode(request)
-        guard input.count <= MailTransportLimits.requestBytes else { throw SyncError.transport("request_too_large") }
-        let output = try await run(endpoint, subcommand: "mail-rpc --peer \(local.description)", input: input)
-        let response = try Self.decodeLastLine(MailRPCResponse.self, from: output)
-        guard response.host == host else { throw SyncError.wrongHost }
-        return response
-    }
-
-    /// Blocking SSH, so it runs on a detached task rather than on this actor's executor.
-    private func run(_ endpoint: Endpoint, subcommand: String, input: Data) async throws -> String {
-        let command = Self.quoted(endpoint.executable) + " --database " + Self.quoted(endpoint.database) + " " + subcommand
-        let runner = runner
-        let destination = endpoint.destination
-        let result = try await Task.detached(priority: .utility) {
-            try runner.run(
-                on: destination, command: command, input: .data(input),
-                extraOptions: [], timeout: MacMailSyncDefaults.timeout
-            )
-        }.value
-        guard result.succeeded else { throw SyncError.transport(String(result.output.suffix(256))) }
-        return result.output
-    }
-
-    /// The controller prints one JSON line; anything before it (an SSH banner on the merged
-    /// stream) is ignored rather than failing the decode.
-    static func decodeLastLine<T: Decodable>(_ type: T.Type, from output: String) throws -> T {
-        guard let line = output.split(whereSeparator: \.isNewline).last(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }),
-              let value = try? JSONDecoder().decode(T.self, from: Data(line.utf8)) else {
-            throw SyncError.invalidResponse
-        }
-        return value
-    }
-
-    static func quoted(_ text: String) -> String {
-        "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
-
-    static func describe(_ error: any Error) -> String {
-        switch error {
-        case let error as SyncError:
-            switch error {
-            case .transport(let detail): return "transport: \(detail)"
-            case .invalidResponse: return "invalid_response"
-            case .wrongHost: return "mail_peer_identity"
-            }
-        case let error as ControllerError: return error.description
-        default: return MacMailbox.describe(error)
-        }
-    }
+    static func describe(_ error: any Error) -> String { RemoteControllerRPC.describe(error) }
 }
 
 // MARK: - Live Endpoints
@@ -274,18 +206,11 @@ extension MacMailSync {
     @MainActor
     static func liveEndpoints() -> [Endpoint] {
         RemoteHostStore.shared.hosts.compactMap { host -> Endpoint? in
-            guard let executable = host.controllerExecutable, let database = host.controllerDatabase,
-                  RemoteAutomationEndpoint(hostID: host.id, executable: executable, database: database).isValid,
-                  host.isValid,
+            guard let endpoint = Endpoint(host),
                   RemoteExecutionHosts.shared.tunnelIsRunning(for: host.sshDestination) else { return nil }
-            return Endpoint(hostID: host.id, name: host.displayName, destination: host.sshDestination,
-                            executable: executable, database: database)
+            return endpoint
         }
     }
-}
-
-extension RemoteAutomationEndpoint {
-    var isValid: Bool { (try? validate()) != nil }
 }
 
 // MARK: - Defaults

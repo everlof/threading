@@ -31,7 +31,9 @@ extension MCPServer {
 
         Task { @MainActor in
             // The Tools page's "Other sessions" switch is the off switch for mail too.
-            guard MCPToolCatalog.isEnabled(MCPToolCatalog.workspace) else {
+            // A host-local mailbox is told about by the host's own `agent-notice`.
+            guard MCPToolCatalog.isEnabled(MCPToolCatalog.workspace),
+                  !RemoteSessionMailboxes.shared.keepsMailOnHost(sessionID) else {
                 return respond(MacMailHookOutput.silence)
             }
             // Any mail hook call after a blocked stop is the agent still running its turn.

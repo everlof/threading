@@ -108,6 +108,15 @@ enum MCPRemoteSessionToolScope {
         return reaches(tool)
     }
 
+    /// The mail family, which a host-local mailbox answers on the host instead.
+    static func isMailTool(named name: String) -> Bool {
+        guard let tool = MCPBuiltInTool(rawValue: name) else { return false }
+        switch tool {
+        case .mailSend, .mailInbox, .mailAck, .mailDirectory: return true
+        default: return false
+        }
+    }
+
     @MainActor
     static func isRemote(_ sessionID: SessionID) -> Bool {
         ProjectStore.shared.sessionRunsOnRemoteHost(sessionID)

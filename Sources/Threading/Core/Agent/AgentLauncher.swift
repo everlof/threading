@@ -1045,9 +1045,12 @@ enum AgentLauncher {
         if let settingsPath = integration.settingsPath {
             integrationFlags.append(flag: "--settings", value: settingsPath)
         }
-        if let mcpConfigPath = integration.mcpConfigPath, !integration.allowedTools.isEmpty {
+        if let mcpConfigPath = integration.mcpConfigPath,
+           !integration.allowedTools.isEmpty || !integration.extraAllowedToolNames.isEmpty {
             integrationFlags.append(flag: "--mcp-config", value: mcpConfigPath)
-            integrationFlags.append(flag: "--allowedTools", value: MCPDefaults.allowedToolsArgument(integration.allowedTools))
+            let allowed = ([MCPDefaults.allowedToolsArgument(integration.allowedTools)] + integration.extraAllowedToolNames)
+                .filter { !$0.isEmpty }.joined(separator: ",")
+            integrationFlags.append(flag: "--allowedTools", value: allowed)
         }
         return ClaudeLaunchCommand.terminalPair(
             for: session, executable: AgentDefaults.claudeExecutable,

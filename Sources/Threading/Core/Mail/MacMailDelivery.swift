@@ -66,6 +66,8 @@ final class MacMailDelivery {
     private var liveSessions: Set<SessionID> = []
     /// Sessions with a notice lookup already in flight, so a burst of edges costs one query.
     private var pending: Set<SessionID> = []
+    /// Sessions with a mail wake requested and not yet answered. At most one each.
+    private var waking: Set<SessionID> = []
     private var started = false
 
     // MARK: - Initialization
@@ -114,12 +116,55 @@ final class MacMailDelivery {
 
     /// Mail was just stored for a Mac session. Decides and performs this surface's delivery.
     func arrived(for sessionID: SessionID, priority: MailPriority) {
+        // A host-local mailbox is announced by its host's own hooks.
+        guard !RemoteSessionMailboxes.shared.keepsMailOnHost(sessionID) else { return }
         let facts = liveFacts(for: sessionID)
         switch Self.plan(for: facts, priority: priority) {
         case .steerNotice, .queueNotice, .typeNotice:
             announce(sessionID, event: .postToolUse, steering: priority == .interrupt)
-        case .awaitHooks, .awaitBoundary, .awaitLaunch:
+        case .awaitLaunch:
+            considerWake(sessionID)
+        case .awaitHooks, .awaitBoundary:
             break
+        }
+    }
+
+    // MARK: - Wake
+
+    /// A dormant chat with open mail admitted under a `wake` grant is started in the background
+    /// with the notice as its first prompt. Bounds: one wake in flight per session; only native
+    /// chats (a terminal waits for its own `SessionStart` hook); the grant's chain token budget
+    /// is checked by the store against the usage it has recorded for that chain — on this Mac
+    /// none is attributed to chains yet, so a budget does not limit a Mac wake today.
+    private func considerWake(_ sessionID: SessionID) {
+        guard !waking.contains(sessionID),
+              let session = ProjectStore.shared.session(withID: sessionID), !session.isArchived,
+              Self.canWake(usesNativeUI: session.usesNativeUI, kind: session.kind) else { return }
+        waking.insert(sessionID)
+        let mailbox = mailbox
+        Task { @MainActor in
+            guard await mailbox.wakeCandidate(for: sessionID) != nil,
+                  SessionMessageDelivery.surface(for: sessionID) == .dormant,
+                  let notice = await mailbox.notice(for: sessionID, event: .sessionStart) else {
+                self.waking.remove(sessionID)
+                return
+            }
+            // The notice is spent on the wake; the first live edge must not repeat it.
+            self.liveSessions.insert(sessionID)
+            NotificationCenter.default.post(MailWakeRequested(sessionID: sessionID, notice: notice))
+        }
+    }
+
+    static func canWake(usesNativeUI: Bool, kind: AgentKind) -> Bool {
+        usesNativeUI && kind.supportsNativeUI
+    }
+
+    /// The window's answer. A failed start leaves the mail waiting for the next launch.
+    func wakeFinished(_ sessionID: SessionID, launched: Bool) {
+        waking.remove(sessionID)
+        if !launched {
+            liveSessions.remove(sessionID)
+            EventLog.shared.record(.mcp, "Mail wake did not start the session", ["session": sessionID.uuidString])
         }
     }
 
@@ -135,15 +180,20 @@ final class MacMailDelivery {
         let senderName = Self.title(of: callerID)
         let targetName = Self.title(of: targetID)
         let mailbox = mailbox
+        let hosted = RemoteSessionMailboxes.shared.binding(for: targetID)?.address
         Task { @MainActor in
             do {
-                let recipient = try await mailbox.register(targetID, name: targetName)
+                // A target whose mailbox lives on its host is queued for that host; its
+                // `<macHost>/*` grant stands for the admission the control plane already made.
+                let recipient: MailAddress
+                if let hosted { recipient = hosted } else { recipient = try await mailbox.register(targetID, name: targetName) }
                 _ = try await mailbox.send(
                     from: callerID, senderName: senderName, to: recipient, id: UUID(), text: text,
-                    replyTo: nil, priority: .normal, ownerAdmitted: true
+                    replyTo: nil, priority: .normal, ownerAdmitted: hosted == nil
                 )
                 completion(true)
-                self.arrived(for: targetID, priority: .normal)
+                if let hosted { MacMailSync.shared.kick(host: hosted.host) }
+                else { self.arrived(for: targetID, priority: .normal) }
             } catch {
                 EventLog.shared.record(.mcp, "Undeliverable session message could not be stored as mail", [
                     "target": targetID.uuidString,
@@ -232,4 +282,11 @@ final class MacMailDelivery {
     static func title(of sessionID: SessionID) -> String {
         ProjectStore.shared.session(withID: sessionID)?.displayTitle ?? MacMailDefaults.unnamedSession
     }
+}
+
+/// Mail asks the window to start a dormant chat. The notice is its opening prompt.
+struct MailWakeRequested: AppEvent {
+    static let name = Notification.Name("mailWakeRequested")
+    let sessionID: SessionID
+    let notice: String
 }

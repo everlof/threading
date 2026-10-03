@@ -1,5 +1,6 @@
 import Foundation
 import ThreadingDomain
+import ThreadingController
 
 /// Why a session cannot run on its project's remote host yet. Each is a scope refusal of the first
 /// release, stated rather than attempted: a launch that half-worked on a host would be a session
@@ -108,7 +109,8 @@ struct RemoteAgentLaunch: Sendable {
         context: RemoteHostLaunchContext,
         initialPrompt: String?,
         reportsLifecycle: Bool = AppSettings.shared.reportsClaudeLifecycleEvents,
-        allowedTools: [String]? = nil
+        allowedTools: [String]? = nil,
+        mailbox: RemoteSessionMailboxes.Binding? = nil
     ) throws -> RemoteAgentLaunch.Unencoded {
         guard session.kind.supports(.remoteExecutionHostLaunch) else {
             throw RemoteAgentLaunchError.unsupportedAgent(session.kind)
@@ -127,7 +129,8 @@ struct RemoteAgentLaunch: Sendable {
             for: session,
             context: context,
             reportsLifecycle: reportsLifecycle,
-            allowedTools: allowedTools ?? MCPToolCatalog.remoteProviderLaunchToolNames
+            allowedTools: allowedTools ?? MCPToolCatalog.remoteProviderLaunchToolNames,
+            mailbox: mailbox
         )
         let commands = AgentLauncher.remoteClaudeCommands(
             for: session,
@@ -194,6 +197,8 @@ struct RemoteAgentIntegrationFlags: Equatable, Sendable {
     var settingsPath: String?
     var mcpConfigPath: String?
     var allowedTools: [String] = []
+    /// Fully qualified tool names of servers other than Threading's own (the host mailbox's).
+    var extraAllowedToolNames: [String] = []
 }
 
 extension RemoteAgentLaunch {
@@ -211,44 +216,59 @@ extension RemoteAgentLaunch {
             for session: AgentSession,
             context: RemoteHostLaunchContext,
             reportsLifecycle: Bool,
-            allowedTools: [String]
+            allowedTools: [String],
+            mailbox: RemoteSessionMailboxes.Binding? = nil
         ) -> Integration {
             var integration = Integration()
-            guard let route = context.toolRoute else { return integration }
             let facts = context.facts
+            let route = context.toolRoute
             let token = MCPSessionRegistry.token(for: session.id)
-            // The same two words a local launch exports (`AgentLauncher.hookEnvironmentWords`), so
-            // a person's own hooks find Threading on the host exactly as they do on the Mac. There
-            // is no port: the loopback endpoint is this Mac's, and nothing forwards it.
-            integration.environment = [
-                "\(MCPDefaults.socketEnvironmentKey)=\(route.socketPath)",
-                "\(MCPDefaults.sessionTokenEnvironmentKey)=\(token)"
-            ]
-
             let directory = "\(facts.home)/\(RemoteHostDefaults.remoteSessionFilesDirectory)"
             let stem = session.id.uuidString
             var files: [(variable: String, path: String, object: [String: Any])] = []
+            var servers: [String: Any] = [:]
+
+            if let route {
+                // The same two words a local launch exports (`AgentLauncher.hookEnvironmentWords`),
+                // so a person's own hooks find Threading on the host exactly as they do on the Mac.
+                // There is no port: the loopback endpoint is this Mac's, and nothing forwards it.
+                integration.environment = [
+                    "\(MCPDefaults.socketEnvironmentKey)=\(route.socketPath)",
+                    "\(MCPDefaults.sessionTokenEnvironmentKey)=\(token)"
+                ]
+            }
+
+            // A host-local mailbox (`RemoteSessionMailboxes`): the agent's mail tools and notices
+            // are the controller's on the host, never this Mac's. The credential travels like the
+            // session token — the agent's own environment and an owner-only file, never argv.
+            if let mailbox {
+                integration.environment += MailboxEnvironment.words(for: mailbox)
+            }
 
             // A hook is a `curl` on the host, so a host without one cannot report; the session then
             // falls back to reading its output, as any session without hooks does. Account-derived
             // settings (the status-line override, the speed default) are left out: they describe
             // this Mac's logins, not the host's.
-            if let settings = MCPSessionRegistry.hookSettings(
+            var settings = route == nil ? nil : MCPSessionRegistry.hookSettings(
                 for: session.id,
                 brokersPermissions: false,
                 reportsLifecycle: reportsLifecycle && facts.curlPath != nil,
                 remoteControl: AgentLauncher.remoteControlAtStartup(for: session),
                 fastMode: session.fastMode,
-                // Answered by this Mac through the reverse tunnel, like the lifecycle reports:
-                // the session's mailbox is this Mac's record of it.
-                mailNotices: MailNoticeHook.isWanted(for: session.kind)
-            ) {
+                // Answered by this Mac through the reverse tunnel only while the session's
+                // mailbox is this Mac's; a host-local mailbox answers on the host.
+                mailNotices: mailbox == nil && MailNoticeHook.isWanted(for: session.kind)
+            )
+            if let mailbox {
+                settings = MailNoticeHook.addingHostNoticeHooks(to: settings ?? [:], executable: mailbox.endpoint.executable)
+            }
+            if let settings {
                 let path = "\(directory)/\(stem)\(RemoteAgentLaunchDefaults.settingsFileSuffix)"
                 files.append((RemoteAgentLaunchDefaults.settingsVariable, path, settings))
                 integration.flags.settingsPath = path
             }
 
-            if let bridgePath = route.bridgePath, !allowedTools.isEmpty {
+            if let route, let bridgePath = route.bridgePath, !allowedTools.isEmpty {
                 let invocation = MCPBridgeInvocation(
                     command: bridgePath,
                     arguments: [
@@ -258,13 +278,17 @@ extension RemoteAgentLaunch {
                         "\(route.cacheDirectory)/\(stem).\(MCPDefaults.configFileExtension)"
                     ]
                 )
-                let configuration: [String: Any] = [
-                    "mcpServers": [MCPDefaults.serverName: MCPServerBinding.stdio(invocation).claudeServerObject]
-                ]
-                let path = "\(directory)/\(stem)\(RemoteAgentLaunchDefaults.mcpConfigFileSuffix)"
-                files.append((RemoteAgentLaunchDefaults.mcpConfigVariable, path, configuration))
-                integration.flags.mcpConfigPath = path
+                servers[MCPDefaults.serverName] = MCPServerBinding.stdio(invocation).claudeServerObject
                 integration.flags.allowedTools = allowedTools
+            }
+            if let mailbox {
+                servers[MailboxEnvironment.serverName] = MailboxEnvironment.serverObject(for: mailbox)
+                integration.flags.extraAllowedToolNames = MailboxEnvironment.allowedToolNames
+            }
+            if !servers.isEmpty {
+                let path = "\(directory)/\(stem)\(RemoteAgentLaunchDefaults.mcpConfigFileSuffix)"
+                files.append((RemoteAgentLaunchDefaults.mcpConfigVariable, path, ["mcpServers": servers]))
+                integration.flags.mcpConfigPath = path
             }
 
             guard !files.isEmpty else { return integration }
@@ -272,9 +296,10 @@ extension RemoteAgentLaunch {
             // A file that cannot be written ends the launch with the daemon's status for a
             // directory that cannot be entered, rather than starting an agent whose flags name
             // nothing.
+            let made = [directory] + (route.map { [$0.cacheDirectory] } ?? [])
             var writes = [
                 "umask 077",
-                "mkdir -p \(RemoteAgentLaunch.quoted(directory)) \(RemoteAgentLaunch.quoted(route.cacheDirectory))"
+                "mkdir -p " + made.map(RemoteAgentLaunch.quoted).joined(separator: " ")
             ]
             for file in files {
                 integration.payloads.append(Payload(variable: file.variable, object: JSONObjectBox(value: file.object)))
@@ -286,6 +311,41 @@ extension RemoteAgentLaunch {
             ]
             return integration
         }
+    }
+}
+
+/// The host-local mailbox's launch words: the three variables the controller's `agent-mcp` and
+/// `agent-notice` read, and the stdio server entry that runs `agent-mcp` on the host.
+enum MailboxEnvironment {
+    static let databaseKey = "THREADING_CONTROLLER_DATABASE"
+    static let addressKey = "THREADING_MAILBOX_ADDRESS"
+    static let credentialKey = "THREADING_MAILBOX_CREDENTIAL"
+    /// Its own server name beside `threading`, so Claude lists `mcp__threading-mail__mail_send`
+    /// and the Mac's bridged server offers no second `mail_send`.
+    static let serverName = "threading-mail"
+    static let tools = ["mail_send", "mail_inbox", "mail_ack", "mail_directory"]
+
+    static var allowedToolNames: [String] { tools.map { "mcp__\(serverName)__\($0)" } }
+
+    static func words(for binding: RemoteSessionMailboxes.Binding) -> [String] {
+        [
+            "\(databaseKey)=\(binding.endpoint.database)",
+            "\(addressKey)=\(binding.address)",
+            "\(credentialKey)=\(binding.credential)"
+        ]
+    }
+
+    static func serverObject(for binding: RemoteSessionMailboxes.Binding) -> [String: Any] {
+        [
+            "type": "stdio",
+            "command": binding.endpoint.executable,
+            "args": ["agent-mcp"],
+            "env": [
+                databaseKey: binding.endpoint.database,
+                addressKey: binding.address.description,
+                credentialKey: binding.credential
+            ]
+        ]
     }
 }
 

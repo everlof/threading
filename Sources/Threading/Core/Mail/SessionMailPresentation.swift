@@ -30,12 +30,44 @@ struct SessionMailPresentation: Equatable, Sendable {
 
     let received: [Row]
     let sent: [Row]
+    /// Where the mail is kept, and whether this reading is stale — shown under the rows.
+    private(set) var note: String?
+
+    /// One live grant on the mailbox: who may write, and how.
+    struct Grant: Equatable, Sendable {
+        let sender: String
+        let mode: MailMode
+    }
+
+    /// The owner's grants, live ones only. Bounded by the store's page.
+    private(set) var grants: [Grant] = []
+
+    func granting(_ grants: [MailGrant]) -> SessionMailPresentation {
+        var copy = self
+        copy.grants = grants.compactMap { grant in grant.mode.map { Grant(sender: grant.sender, mode: $0) } }
+        return copy
+    }
+
+    /// The same rows with a note on where they were read from.
+    func located(_ note: String?) -> SessionMailPresentation {
+        var copy = self
+        copy.note = note
+        return copy
+    }
 
     var isEmpty: Bool { received.isEmpty && sent.isEmpty }
 
+    static func words(for mode: MailMode) -> String {
+        switch mode {
+        case .notify: return L10n.string("Can write")
+        case .wake: return L10n.string("Can write and wake")
+        case .ask: return L10n.string("Can ask")
+        }
+    }
+
     /// Row identity only, so a poll with the same rows updates nothing.
     var shape: String {
-        (received + sent).map { "\($0.id.uuidString):\($0.state)" }.joined(separator: ",")
+        (received + sent).map { "\($0.id.uuidString):\($0.state)" }.joined(separator: ",") + "|\(note ?? "")|" + grants.map { "\($0.sender)=\($0.mode.rawValue)" }.joined(separator: ",")
     }
 
     init(received: [Row], sent: [Row]) {
@@ -44,7 +76,8 @@ struct SessionMailPresentation: Equatable, Sendable {
     }
 
     /// `sessionTitle` names a session on this Mac by its id; nil when the record is gone.
-    init(_ snapshot: MacMailbox.Snapshot, sessionTitle: (SessionID) -> String?) {
+    @MainActor
+    init(_ snapshot: MacMailbox.Snapshot, sessionTitle: @MainActor (SessionID) -> String?) {
         func hostName(_ host: HostID) -> String {
             if host == snapshot.localHost { return L10n.string("this Mac") }
             return snapshot.peerNames[host] ?? L10n.format("host %@", String(host.description.prefix(8)))
@@ -64,7 +97,7 @@ struct SessionMailPresentation: Equatable, Sendable {
             let envelope = message.envelope
             let recipient = envelope.recipient
             let party: String
-            if recipient.host == snapshot.localHost, recipient.kind == .session {
+            if recipient.kind == .session {
                 party = sessionTitle(SessionID(recipient.id)).map(WorkspaceControlPlane.safeHeaderTitle)
                     ?? L10n.string("A removed session")
             } else {

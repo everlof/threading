@@ -4003,6 +4003,28 @@
         }
       }
     },
+    "<host>/session/<id> or <host>/worker/<id>" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "<värd>/session/<id> eller <värd>/worker/<id>"
+          }
+        }
+      }
+    },
+    "<host>/session/<id>, <host>/worker/<id> or <host>/*" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "<värd>/session/<id>, <värd>/worker/<id> eller <värd>/*"
+          }
+        }
+      }
+    },
     "A %@ draft is already being written." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6101,6 +6123,17 @@
         }
       }
     },
+    "Add a contact" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till en kontakt"
+          }
+        }
+      }
+    },
     "Add a login" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6207,6 +6240,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lägg till bilagor i chatten"
+          }
+        }
+      }
+    },
+    "Add contact…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till kontakt…"
           }
         }
       }
@@ -6372,6 +6416,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lade till den aktuella revisionen i chatten."
+          }
+        }
+      }
+    },
+    "Address" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adress"
           }
         }
       }
@@ -11337,6 +11392,17 @@
         }
       }
     },
+    "Can ask" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kan fråga"
+          }
+        }
+      }
+    },
     "Can reply" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11377,6 +11443,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kan vi bevisa vilket återanropstillstånd som nådde appen?"
+          }
+        }
+      }
+    },
+    "Can write" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kan skriva"
+          }
+        }
+      }
+    },
+    "Can write and wake" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kan skriva och väcka"
           }
         }
       }
@@ -24471,6 +24559,17 @@
         }
       }
     },
+    "Grant" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ge åtkomst"
+          }
+        }
+      }
+    },
     "Grant Claude access to your Design projects" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24478,6 +24577,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ge Claude åtkomst till dina Design-projekt"
+          }
+        }
+      }
+    },
+    "Grant access…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ge åtkomst…"
           }
         }
       }
@@ -27629,6 +27739,50 @@
         }
       }
     },
+    "Kept on %@, which can’t be reached right now." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förvaras på %@, som inte går att nå just nu."
+          }
+        }
+      }
+    },
+    "Kept on %@, which can’t be reached; as of %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förvaras på %@, som inte går att nå; läst %@."
+          }
+        }
+      }
+    },
+    "Kept on %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förvaras på %@."
+          }
+        }
+      }
+    },
+    "Kept on this Mac: %@ has no controller set up on the Remote automations page." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förvaras på denna Mac: %@ har ingen controller konfigurerad på sidan Fjärrautomationer."
+          }
+        }
+      }
+    },
     "Kept working after %lld interrupts" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29467,6 +29621,17 @@
         }
       }
     },
+    "Mail access was not changed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poståtkomsten ändrades inte"
+          }
+        }
+      }
+    },
     "Mail chain" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29485,6 +29650,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Postkatalog"
+          }
+        }
+      }
+    },
+    "Mail from it to “%@” will be refused from now on. Mail already received stays." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Post från den till ”%@” avvisas från och med nu. Post som redan tagits emot finns kvar."
           }
         }
       }
@@ -31094,6 +31270,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Namn"
+          }
+        }
+      }
+    },
+    "Name an agent’s mail address, or a whole host as <host>/*. “Can write and wake” also lets that agent’s mail start this chat when it is not running, which spends its usage. Agents cannot change this." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange en agents postadress, eller en hel värd som <värd>/*. ”Kan skriva och väcka” låter också agentens post starta chatten när den inte körs, vilket förbrukar dess användning. Agenter kan inte ändra detta."
           }
         }
       }
@@ -43061,6 +43248,17 @@
         }
       }
     },
+    "Revoke this access" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återkalla denna åtkomst"
+          }
+        }
+      }
+    },
     "Revoked" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45645,6 +45843,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skicka · ⌘Return"
+          }
+        }
+      }
+    },
+    "Sender" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avsändare"
           }
         }
       }
@@ -51312,6 +51521,28 @@
         }
       }
     },
+    "That is not a mail address, a host as <host>/*, or *." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det är inte en postadress, en värd som <värd>/*, eller *."
+          }
+        }
+      }
+    },
+    "That is not a mail address." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det är inte en postadress."
+          }
+        }
+      }
+    },
     "That is the most marks one report carries (%lld)." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51759,6 +51990,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den aktiva ytan är inte en terminal."
+          }
+        }
+      }
+    },
+    "The address appears in this chat’s mail directory. Listing it grants nothing: the recipient’s own host still decides whether mail is accepted." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adressen visas i chattens postkatalog. Att den listas ger ingen åtkomst: mottagarens värd avgör fortfarande om posten tas emot."
           }
         }
       }
@@ -63846,6 +64088,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vem kan se trafiken"
+          }
+        }
+      }
+    },
+    "Who can write" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vem kan skriva"
+          }
+        }
+      }
+    },
+    "Who may write to “%@”?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vem får skriva till ”%@”?"
           }
         }
       }

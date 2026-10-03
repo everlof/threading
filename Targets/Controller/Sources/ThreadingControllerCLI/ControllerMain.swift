@@ -94,6 +94,7 @@ struct ControllerMain {
     mail-contacts [CURSOR]
     mailbox ADDRESS [CURSOR]
     mail-history ADDRESS [CURSOR]
+    mail-sent ADDRESS
     mail-get MESSAGE_UUID
     mail-send FROM_ADDRESS TO_ADDRESS MESSAGE_UUID TEXT_FILE [normal|interrupt]
     mail-ack ADDRESS MESSAGE_UUID
@@ -277,6 +278,8 @@ struct ControllerMain {
             let after = try cursor(0); try output(await store.mailContacts(after: after))
         case "mailbox":
             let after = try cursor(1); try output(await store.inbox(MailAddress(args[0]), after: after))
+        case "mail-sent":
+            try count(1); try output(await store.recentSentMail(MailAddress(args[0])))
         case "mail-history":
             let after = try cursor(1); try output(await store.mailHistory(MailAddress(args[0]), after: after))
         case "mail-get":
