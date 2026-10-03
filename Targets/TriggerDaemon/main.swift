@@ -18,63 +18,6 @@ private struct DaemonConfiguration: Decodable {
     let probes: [TriggerProbeDaemonSource]?
 }
 
-private struct SondaFeed: Decodable {
-    let schemaVersion: Int
-    let nextCursor: Int64
-    let events: [SondaEvent]
-}
-
-private struct SondaEvent: Decodable {
-    let cursor: Int64
-    let caseID: String
-    let reviewCycle: Int64
-    let occurredAt: Date
-    let title: String
-    let portalURL: URL?
-    let projectID: String?
-    let reportID: String?
-    let uploadID: String?
-}
-
-private enum AttributeValue: Encodable {
-    case string(String)
-    case integer(Int64)
-
-    private enum CodingKeys: String, CodingKey { case type, string, integer }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case .string(let value):
-            try container.encode("string", forKey: .type)
-            try container.encode(value, forKey: .string)
-        case .integer(let value):
-            try container.encode("integer", forKey: .type)
-            try container.encode(value, forKey: .integer)
-        }
-    }
-}
-
-private struct InboxEvent: Encodable {
-    let sourceInstallationID: UUID
-    let externalID: String
-    let revision: String
-    let kind: String
-    let occurredAt: Date
-    let receivedAt: Date
-    let title: String
-    let attributes: [String: AttributeValue]
-    let deepLink: URL?
-    let resources: [Resource]
-
-    struct Resource: Encodable {
-        let kind: String
-        let identifier: String
-        let displayName: String
-        let byteCount: Int64?
-    }
-}
-
 private enum Locations {
     static let notification = Notification.Name("codes.threading.triggerd.inbox-changed")
 
@@ -151,7 +94,10 @@ private enum StatusWriter {
     }
 }
 
-private actor CursorStore {
+/// Sonda's integer cursors, in the file they have always used. Synchronous so the shared
+/// delivery stage's commit is the durable write itself.
+private final class CursorStore: @unchecked Sendable {
+    private let lock = NSLock()
     private var values: [String: Int64] = [:]
 
     init() {
@@ -163,17 +109,23 @@ private actor CursorStore {
         values = decoded
     }
 
-    func cursor(for sourceID: UUID) -> Int64 { values[sourceID.uuidString] ?? 0 }
+    func cursor(for sourceID: UUID) -> Int64 {
+        lock.lock(); defer { lock.unlock() }
+        return values[sourceID.uuidString] ?? 0
+    }
 
     func commit(_ cursor: Int64, for sourceID: UUID) throws {
+        lock.lock(); defer { lock.unlock() }
         guard let file = Locations.cursorFile else { throw DaemonFailure.noSupportDirectory }
-        values[sourceID.uuidString] = cursor
-        let data = try JSONEncoder().encode(values)
+        var next = values
+        next[sourceID.uuidString] = cursor
+        let data = try JSONEncoder().encode(next)
         try data.write(to: file, options: .atomic)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o600],
             ofItemAtPath: file.path
         )
+        values = next
     }
 }
 
@@ -245,7 +197,8 @@ private enum ConfigurationReader {
 }
 
 private enum InboxWriter {
-    static func write(_ event: InboxEvent, cursor: Int64) throws {
+    /// A Sonda event, named by its feed cursor as it always was.
+    static func write(_ event: TriggerProbeInboxEvent, cursor: Int64) throws {
         try write(event, name: String(format: "%020lld-%@.json", cursor, UUID().uuidString.lowercased()))
     }
 
@@ -338,7 +291,7 @@ private actor SourceBackoff {
 }
 
 private enum SondaSource {
-    static func poll(_ source: SourceConfiguration, after cursor: Int64) async throws -> SondaFeed {
+    static func poll(_ source: SourceConfiguration, after cursor: Int64) async throws -> SondaFeedAdapter.Feed {
         guard source.enabled, source.sourceType == "sonda" else {
             throw DaemonFailure.unsupportedConfiguration
         }
@@ -353,7 +306,7 @@ private enum SondaSource {
         components?.queryItems = [
             URLQueryItem(name: "after", value: String(cursor)),
             URLQueryItem(name: "wait_seconds", value: "25"),
-            URLQueryItem(name: "limit", value: "100"),
+            URLQueryItem(name: "limit", value: String(SondaFeedAdapter.pageLimit)),
         ]
         guard let url = components?.url else { throw DaemonFailure.unsupportedConfiguration }
         var request = URLRequest(url: url, timeoutInterval: 35)
@@ -362,59 +315,7 @@ private enum SondaSource {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw DaemonFailure.invalidResponse }
         guard response.statusCode == 200 else { throw DaemonFailure.server(response.statusCode) }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let container = try decoder.singleValueContainer()
-            let value = try container.decode(String.self)
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = formatter.date(from: value) { return date }
-            formatter.formatOptions = [.withInternetDateTime]
-            guard let date = formatter.date(from: value) else {
-                throw DecodingError.dataCorruptedError(
-                    in: container,
-                    debugDescription: "Expected an RFC 3339 timestamp."
-                )
-            }
-            return date
-        }
-        let feed = try decoder.decode(SondaFeed.self, from: data)
-        var previousCursor = cursor
-        for event in feed.events {
-            guard event.cursor > previousCursor, event.cursor <= feed.nextCursor else {
-                throw DaemonFailure.invalidResponse
-            }
-            previousCursor = event.cursor
-        }
-        guard feed.schemaVersion == 1,
-              feed.nextCursor >= previousCursor,
-              feed.events.count <= 100 else {
-            throw DaemonFailure.invalidResponse
-        }
-        return feed
-    }
-
-    static func inboxEvent(_ event: SondaEvent, sourceID: UUID) -> InboxEvent {
-        var attributes: [String: AttributeValue] = [
-            "status": .string("needs_review"),
-            "cursor": .integer(event.cursor),
-            "review_cycle": .integer(event.reviewCycle),
-        ]
-        if let projectID = event.projectID { attributes["project_id"] = .string(projectID) }
-        if let reportID = event.reportID { attributes["report_id"] = .string(reportID) }
-        if let uploadID = event.uploadID { attributes["upload_id"] = .string(uploadID) }
-        return InboxEvent(
-            sourceInstallationID: sourceID,
-            externalID: event.caseID,
-            revision: String(event.reviewCycle),
-            kind: "case.review-required",
-            occurredAt: event.occurredAt,
-            receivedAt: Date(),
-            title: event.title,
-            attributes: attributes,
-            deepLink: event.portalURL,
-            resources: []
-        )
+        return try SondaFeedAdapter.decode(data, after: cursor)
     }
 }
 
@@ -634,49 +535,48 @@ private enum TriggerDaemon {
                 await withTaskGroup(of: SourcePollResult.self) { group in
                     for source in sources {
                         group.addTask {
+                            let started = Date()
+                            let outcome: TriggerProbePollOutcome
                             do {
-                                let cursor = await cursors.cursor(for: source.id)
-                                let feed = try await SondaSource.poll(source, after: cursor)
-                                for event in feed.events {
-                                    try InboxWriter.write(
-                                        SondaSource.inboxEvent(event, sourceID: source.id),
-                                        cursor: event.cursor
-                                    )
-                                }
-                                try await cursors.commit(feed.nextCursor, for: source.id)
-                                try StatusWriter.write(SourceStatus(
-                                    sourceInstallationID: source.id,
-                                    health: "healthy",
-                                    lastCheckedAt: Date(),
-                                    lastEventAt: feed.events.last?.occurredAt,
-                                    boundedDiagnostic: nil
-                                ))
-                                if !feed.events.isEmpty { AppWake.notify() }
-                                return SourcePollResult(sourceID: source.id, succeeded: true)
-                            } catch {
-                                let health: String
-                                if let failure = error as? DaemonFailure,
-                                   failure.requiresAuthentication {
-                                    health = "authenticationRequired"
-                                } else {
-                                    health = "backingOff"
-                                }
-                                try? StatusWriter.write(SourceStatus(
-                                    sourceInstallationID: source.id,
-                                    health: health,
-                                    lastCheckedAt: Date(),
-                                    lastEventAt: nil,
-                                    boundedDiagnostic: String(
-                                        error.localizedDescription.prefix(1_024)
-                                    )
-                                ))
-                                NSLog(
-                                    "threading-triggerd source %@: %@",
-                                    source.id.uuidString,
-                                    error.localizedDescription
+                                let feed = try await SondaSource.poll(source, after: cursors.cursor(for: source.id))
+                                // The same delivery stage as a probe: every event in the inbox,
+                                // then the cursor. An inbox failure has always meant backing off.
+                                outcome = TriggerProbeSourceRunner.deliver(
+                                    SondaFeedAdapter.report(feed, sourceID: source.id, receivedAt: started),
+                                    inboxFailure: .backingOff,
+                                    write: { event, index in try InboxWriter.write(event, cursor: feed.events[index].cursor) },
+                                    commit: { cursor in
+                                        guard let value = Int64(cursor) else { throw DaemonFailure.invalidResponse }
+                                        try cursors.commit(value, for: source.id)
+                                    }
                                 )
-                                return SourcePollResult(sourceID: source.id, succeeded: false)
+                            } catch {
+                                let authentication = (error as? DaemonFailure)?.requiresAuthentication == true
+                                outcome = TriggerProbePollOutcome(
+                                    health: authentication ? .authenticationRequired : .backingOff,
+                                    writtenEvents: 0, committedCursor: nil, lastEventAt: nil,
+                                    diagnostic: String(error.localizedDescription.prefix(1_024)))
                             }
+                            func receipt(_ health: TriggerProbeHealth, _ diagnostic: String?) -> SourceStatus {
+                                SourceStatus(sourceInstallationID: source.id, health: health.rawValue, lastCheckedAt: Date(),
+                                             lastEventAt: health == .healthy ? outcome.lastEventAt : nil,
+                                             boundedDiagnostic: diagnostic)
+                            }
+                            if outcome.health == .healthy {
+                                do {
+                                    try StatusWriter.write(receipt(.healthy, nil))
+                                    if outcome.writtenEvents > 0 { AppWake.notify() }
+                                    return SourcePollResult(sourceID: source.id, succeeded: true)
+                                } catch {
+                                    // As before: an unwritable receipt is a failed poll that backs off.
+                                    try? StatusWriter.write(receipt(.backingOff, String(error.localizedDescription.prefix(1_024))))
+                                    NSLog("threading-triggerd source %@: %@", source.id.uuidString, error.localizedDescription)
+                                    return SourcePollResult(sourceID: source.id, succeeded: false)
+                                }
+                            }
+                            try? StatusWriter.write(receipt(outcome.health, outcome.diagnostic))
+                            NSLog("threading-triggerd source %@: %@", source.id.uuidString, outcome.diagnostic ?? "")
+                            return SourcePollResult(sourceID: source.id, succeeded: false)
                         }
                     }
                     for await result in group {

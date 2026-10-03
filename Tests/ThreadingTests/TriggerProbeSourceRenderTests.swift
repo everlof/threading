@@ -1,5 +1,6 @@
 import AppKit
 import ThreadingController
+import ThreadingDomain
 import XCTest
 @testable import Threading
 
@@ -120,15 +121,34 @@ final class TriggerProbeSourceRenderTests: XCTestCase {
     }
 
     func testRendersTheProbeApprovalSheet() throws {
-        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
         let source = Self.probe(name: "Support mailbox", approved: false, enabled: false,
                                 secrets: ["IMAP_PASSWORD": "imap-support"])
+        try renderSheet(named: "probe-approval") { TriggerProbePresentation.approvalRequest(source, storedSecrets: []) }
+    }
+
+    /// The editor with a calendar schedule, drawn with the automation editor's schedule controls.
+    func testRendersTheProbeEditorWithACalendarSchedule() throws {
+        var spec = Self.probe(name: "Support mailbox", approved: true, enabled: true).probe!.spec
+        spec = ControllerSourceSpec(name: spec.name, executable: spec.executable, script: spec.script,
+                                    arguments: spec.arguments, environment: spec.environment,
+                                    secrets: ["IMAP_PASSWORD": "imap-support"], intervalSeconds: nil,
+                                    schedule: AutomationSchedule(kind: .weekdays, timeZone: "Europe/Stockholm",
+                                                                 hour: 7, minute: 30, days: [2, 3, 4, 5, 6]))
+        let form = TriggerProbeEditorForm(spec: spec)
+        XCTAssertEqual(form.timing.selectedKind, .weekdays)
+        XCTAssertFalse(form.timing.interval.isEnabled)
+        XCTAssertEqual(try form.spec().schedule?.days, [2, 3, 4, 5, 6])
+        try renderSheet(named: "probe-editor") { TriggerProbePresentation.editorRequest(form, editing: spec.name) }
+    }
+
+    private func renderSheet(named fileName: String, _ make: @escaping @MainActor () -> ConfirmationRequest) throws {
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
         for (appearanceName, name) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
             let appearance = try XCTUnwrap(NSAppearance(named: name))
             var data: Data?
             appearance.performAsCurrentDrawingAppearance {
                 MainActor.assumeIsolated {
-                    let request = TriggerProbePresentation.approvalRequest(source, storedSecrets: [])
+                    let request = make()
                     let content = ConfirmationAlert.makeAlert(request).makeContentView()
                     content.appearance = appearance
                     content.layoutSubtreeIfNeeded()
@@ -143,7 +163,7 @@ final class TriggerProbeSourceRenderTests: XCTestCase {
             }
             let png = try XCTUnwrap(data)
             XCTAssertGreaterThan(png.count, 1_000)
-            try png.write(to: outputDirectory.appendingPathComponent("probe-approval-\(appearanceName).png"))
+            try png.write(to: outputDirectory.appendingPathComponent("\(fileName)-\(appearanceName).png"))
         }
     }
 

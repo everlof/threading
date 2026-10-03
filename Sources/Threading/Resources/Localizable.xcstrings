@@ -11128,17 +11128,6 @@
         }
       }
     },
-    "Calendar: %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Kalender: %@"
-          }
-        }
-      }
-    },
     "Call send_to_session with session_id %@ — the session this side chat was forked from — and report your conclusion: what was found or decided, in a few sentences, not the transcript. Then reply here with one line saying what you sent." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26568,17 +26557,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Intervall (minuter)"
-          }
-        }
-      }
-    },
-    "Interval in minutes (1–1440)" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Intervall i minuter (1–1440)"
           }
         }
       }
@@ -50861,6 +50839,17 @@
         }
       }
     },
+    "That probe source was deleted." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den sondkällan har tagits bort."
+          }
+        }
+      }
+    },
     "That project is no longer available." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58520,6 +58509,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading återupptar den fortfarande i utcheckningen den startade i. Flytta den för att hålla ihop de två."
+          }
+        }
+      }
+    },
+    "Threading stops polling this probe and removes it from this page. Events it already reported and the runs they started stay in Activity. Its files and Keychain secrets are not touched." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading slutar läsa av sonden och tar bort den från sidan. Händelser den redan rapporterat och körningarna de startade finns kvar i Aktivitet. Dess filer och hemligheter i nyckelringen lämnas orörda."
           }
         }
       }

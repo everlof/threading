@@ -15,6 +15,7 @@ enum TriggerProbeSourceCommands {
         case hashChanged
         case unreadable(String)
         case invalid(String)
+        case deleted
 
         var errorDescription: String? {
             switch self {
@@ -30,6 +31,8 @@ enum TriggerProbeSourceCommands {
                 return L10n.format("Threading cannot read “%@”.", path)
             case .invalid(let reason):
                 return L10n.format("The probe source is invalid: %@", reason)
+            case .deleted:
+                return L10n.string("That probe source was deleted.")
             }
         }
     }
@@ -75,6 +78,7 @@ enum TriggerProbeSourceCommands {
         let hash = try await contentHash(of: spec)
         let existing = try await id.asyncFlatMap { try await store.source(id: $0) }
         if let existing, existing.probe == nil { throw Failure.notAProbe }
+        if existing?.isDeleted == true { throw Failure.deleted }
         let source = TriggerSourceInstallation(
             id: id ?? TriggerSourceInstallationID(),
             sourceType: TriggerProbeDefaults.sourceType,
@@ -102,6 +106,7 @@ enum TriggerProbeSourceCommands {
     ) async throws -> TriggerSourceInstallation {
         guard let source = try await store.source(id: id) else { throw TriggerStore.StoreError.missing }
         guard let probe = source.probe else { throw Failure.notAProbe }
+        guard probe.deletedAt == nil else { throw Failure.deleted }
         let current = try await contentHash(of: probe.spec)
         guard current != probe.hash else { return source }
         return try await configure(id: id, expectedRevision: probe.revision, spec: probe.spec, store: store)
@@ -120,6 +125,7 @@ enum TriggerProbeSourceCommands {
     ) async throws -> TriggerSourceInstallation {
         guard var source = try await store.source(id: id) else { throw TriggerStore.StoreError.missing }
         guard var probe = source.probe else { throw Failure.notAProbe }
+        guard probe.deletedAt == nil else { throw Failure.deleted }
         guard probe.revision == expectedRevision else { throw Failure.revisionChanged }
         let current = try await contentHash(of: probe.spec)
         guard probe.hash == reviewedHash, current == reviewedHash else { throw Failure.hashChanged }
@@ -145,12 +151,39 @@ enum TriggerProbeSourceCommands {
     ) async throws -> TriggerSourceInstallation {
         guard var source = try await store.source(id: id) else { throw TriggerStore.StoreError.missing }
         guard var probe = source.probe else { throw Failure.notAProbe }
+        guard probe.deletedAt == nil else { throw Failure.deleted }
         guard probe.revision == expectedRevision else { throw Failure.revisionChanged }
         if enabled, !probe.isApproved { throw Failure.notApproved }
         probe.revision += 1
         source.probe = probe
         source.enabled = enabled
         source.health = enabled ? .checking : .disconnected
+        source.boundedDiagnostic = nil
+        source.updatedAt = now
+        try await store.saveProbeSource(source, expectedRevision: expectedRevision)
+        return source
+    }
+
+    /// Tombstones a probe: it leaves the daemon's configuration (so polling stops on the next
+    /// tick), its approval is cleared, and it disappears from the Sources page and agent lists.
+    /// Its accepted events and run receipts are kept. Host-only: no tool reaches this.
+    @discardableResult
+    static func delete(
+        _ id: TriggerSourceInstallationID,
+        expectedRevision: Int,
+        store: TriggerStore = .shared,
+        now: Date = Date()
+    ) async throws -> TriggerSourceInstallation {
+        guard var source = try await store.source(id: id) else { throw TriggerStore.StoreError.missing }
+        guard var probe = source.probe else { throw Failure.notAProbe }
+        guard probe.deletedAt == nil else { throw Failure.deleted }
+        guard probe.revision == expectedRevision else { throw Failure.revisionChanged }
+        probe.revision += 1
+        probe.approvedHash = nil
+        probe.deletedAt = now
+        source.probe = probe
+        source.enabled = false
+        source.health = .disconnected
         source.boundedDiagnostic = nil
         source.updatedAt = now
         try await store.saveProbeSource(source, expectedRevision: expectedRevision)

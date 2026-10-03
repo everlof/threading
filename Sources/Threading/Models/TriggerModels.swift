@@ -188,8 +188,11 @@ struct TriggerProbeSourceSettings: Codable, Equatable, Sendable {
     var hash: String
     /// The hash a person approved in the host sheet. Configuring clears it.
     var approvedHash: String?
+    /// A tombstone: the source no longer polls and is hidden, while its id, accepted events and
+    /// run receipts stay so history keeps naming it. Never undone; configure a new probe instead.
+    var deletedAt: Date? = nil
 
-    var isApproved: Bool { approvedHash == hash }
+    var isApproved: Bool { deletedAt == nil && approvedHash == hash }
 }
 
 struct TriggerSourceInstallation: Codable, Equatable, Sendable {
@@ -207,6 +210,8 @@ struct TriggerSourceInstallation: Codable, Equatable, Sendable {
     var updatedAt: Date
     /// Present only for `sourceType == "probe"`.
     var probe: TriggerProbeSourceSettings? = nil
+
+    var isDeleted: Bool { probe?.deletedAt != nil }
 }
 
 // MARK: - Matching

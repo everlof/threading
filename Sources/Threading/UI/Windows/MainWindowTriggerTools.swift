@@ -108,7 +108,7 @@ enum TriggerToolActions {
                 }
                 let daemonStatuses = (try? await daemonStatusTask.value) ?? [:]
                 let payload = TriggerSourceListPayload(
-                    sources: sources.map { source in
+                    sources: sources.filter { !$0.isDeleted }.map { source in
                         .init(
                             id: source.id.uuidString,
                             type: source.sourceType,

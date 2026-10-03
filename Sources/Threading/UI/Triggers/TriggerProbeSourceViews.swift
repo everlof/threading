@@ -152,6 +152,19 @@ enum TriggerProbePresentation {
         )
     }
 
+    /// The editor sheet: the form, and the reminder that saving never approves.
+    static func editorRequest(_ form: TriggerProbeEditorForm, editing name: String?) -> ConfirmationRequest {
+        ConfirmationRequest(
+            prompt: .connectTriggerSource,
+            title: name.map { L10n.format("Edit “%@”", $0) } ?? L10n.string("New Probe Source"),
+            message: L10n.string(
+                "Saving leaves the probe paused. You approve its exact files before it runs; any later edit needs approval again."
+            ),
+            confirmTitle: L10n.string("Save"),
+            accessory: form.makeView()
+        )
+    }
+
     private static let relative: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
@@ -173,19 +186,22 @@ final class TriggerProbeEditorForm {
     let arguments = ThemedTextView.scrolling()
     let environment = ThemedTextView.scrolling()
     let secrets = ThemedTextView.scrolling()
-    let interval = ThemedTextField()
+    /// The automation editor's own schedule controls. "Fixed interval" is the spec's
+    /// `intervalSeconds`; the calendar kinds are its `schedule`.
+    let timing: AutomationScheduleFields
     let timeout = ThemedTextField()
     let limit = ThemedTextField()
-    /// A calendar schedule an agent drafted is kept unless the person types an interval.
-    private let schedule: AutomationSchedule?
+    private let anchor: Date?
 
     init(spec: ControllerSourceSpec?) {
-        schedule = spec?.schedule
+        anchor = spec?.schedule?.anchor
+        timing = AutomationScheduleFields(schedule: spec?.schedule ?? AutomationSchedule(
+            kind: .interval, timeZone: TimeZone.current.identifier,
+            intervalMinutes: max(1, (spec?.intervalSeconds ?? 600) / 60)))
+        timing.updateEnabled()
         name.placeholderString = L10n.string("Support mailbox")
         executable.placeholderString = L10n.string("Executable, e.g. /usr/bin/python3")
         script.placeholderString = L10n.string("Script it runs (optional)")
-        interval.placeholderString = spec?.schedule.map { L10n.format("Calendar: %@", $0.summary) }
-            ?? L10n.string("Interval in minutes (1–1440)")
         timeout.placeholderString = L10n.string("Timeout in seconds (default 30)")
         limit.placeholderString = L10n.string("Events per poll (default 50)")
         guard let spec else { return }
@@ -197,7 +213,6 @@ final class TriggerProbeEditorForm {
             .map { "\($0.key)=\($0.value)" }.joined(separator: "\n")
         secrets.textView.string = spec.secrets.sorted { $0.key < $1.key }
             .map { "\($0.key)=\($0.value)" }.joined(separator: "\n")
-        if let seconds = spec.intervalSeconds { interval.stringValue = String(seconds / 60) }
         timeout.stringValue = String(spec.timeoutSeconds)
         limit.stringValue = String(spec.limit)
     }
@@ -214,13 +229,21 @@ final class TriggerProbeEditorForm {
             caption(L10n.string("Arguments after the script, one per line")), arguments,
             caption(L10n.string("Environment, one NAME=value per line; nothing else is inherited")), environment,
             caption(L10n.string("Secrets, one NAME=secret-name per line; values go in Keychain")), secrets,
-            interval, timeout, limit,
+            caption(L10n.string("Repeat")), timing.cadence,
+            caption(L10n.string("Time (HH:mm)")), timing.time,
+            caption(L10n.string("Time zone")), timing.zone,
+            caption(L10n.string("Days")), timing.days,
+            caption(L10n.string("Interval (minutes)")), timing.interval,
+            // Captioned like every other field: a filled field shows no placeholder to name it.
+            caption(L10n.string("Timeout in seconds (default 30)")), timeout,
+            caption(L10n.string("Events per poll (default 50)")), limit,
         ]
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.small
-        for view in [name, executable, script, interval, timeout, limit] as [NSView] + [arguments, environment, secrets] {
+        for view in [name, executable, script, timing.cadence, timing.time, timing.zone, timing.interval, timeout, limit] as [NSView]
+            + [arguments, environment, secrets] {
             view.translatesAutoresizingMaskIntoConstraints = false
             view.widthAnchor.constraint(equalToConstant: Layout.fieldWidth).isActive = true
         }
@@ -234,8 +257,8 @@ final class TriggerProbeEditorForm {
         try Self.spec(
             name: name.stringValue, executable: executable.stringValue, script: script.stringValue,
             arguments: arguments.textView.string, environment: environment.textView.string,
-            secrets: secrets.textView.string, intervalMinutes: interval.stringValue,
-            timeoutSeconds: timeout.stringValue, limit: limit.stringValue, schedule: schedule
+            secrets: secrets.textView.string, timing: try timing.schedule(anchor: anchor),
+            timeoutSeconds: timeout.stringValue, limit: limit.stringValue
         )
     }
 
@@ -243,8 +266,7 @@ final class TriggerProbeEditorForm {
     /// first argument: the file the approval hashes is the file the executable is handed.
     nonisolated static func spec(
         name: String, executable: String, script: String, arguments: String, environment: String,
-        secrets: String, intervalMinutes: String, timeoutSeconds: String, limit: String,
-        schedule: AutomationSchedule?
+        secrets: String, timing: AutomationSchedule, timeoutSeconds: String, limit: String
     ) throws -> ControllerSourceSpec {
         func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
         func lines(_ text: String) -> [String] {
@@ -261,15 +283,10 @@ final class TriggerProbeEditorForm {
             return result
         }
         let scriptPath = trimmed(script)
-        let interval = trimmed(intervalMinutes)
-        let intervalSeconds: Int?
-        if interval.isEmpty, schedule != nil {
-            intervalSeconds = nil
-        } else {
-            guard let minutes = Int(interval.isEmpty ? "10" : interval) else {
-                throw TriggerProbeSourceCommands.Failure.invalid("interval")
-            }
-            intervalSeconds = minutes * 60
+        // A fixed interval is the spec's interval; a calendar rule is its schedule.
+        let intervalSeconds: Int? = timing.kind == .interval ? timing.intervalMinutes * 60 : nil
+        if intervalSeconds == nil {
+            do { try timing.validate() } catch { throw TriggerProbeSourceCommands.Failure.invalid("schedule") }
         }
         let spec = ControllerSourceSpec(
             name: trimmed(name),
@@ -279,7 +296,7 @@ final class TriggerProbeEditorForm {
             environment: try pairs(environment),
             secrets: try pairs(secrets),
             intervalSeconds: intervalSeconds,
-            schedule: intervalSeconds == nil ? schedule : nil,
+            schedule: intervalSeconds == nil ? timing : nil,
             timeoutSeconds: Int(trimmed(timeoutSeconds)) ?? 30,
             limit: Int(trimmed(limit)) ?? 50
         )

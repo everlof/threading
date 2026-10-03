@@ -347,6 +347,8 @@ final class TriggerCenterViewController: NSViewController {
         daemonStatuses: [TriggerSourceInstallationID: TriggerDaemonSourceStatus],
         registrationStatus: TriggerDaemonRegistrationStatus
     ) {
+        // A deleted probe is a tombstone kept for history; it is not a source any more.
+        let sources = sources.filter { !$0.isDeleted }
         list.clear()
         status.stringValue = sources.isEmpty
             ? L10n.string("No sources")
@@ -372,7 +374,7 @@ final class TriggerCenterViewController: NSViewController {
             secondaryActionTitle: nil,
             onSecondaryAction: nil
         ))
-        let probes = sources.filter { $0.sourceType == TriggerProbeDefaults.sourceType }
+        let probes = sources.filter { $0.sourceType == TriggerProbeDefaults.sourceType && !$0.isDeleted }
         let connected = sources.filter { $0.sourceType != TriggerProbeDefaults.sourceType }
         defer { renderProbes(probes, daemonStatuses: daemonStatuses) }
         guard !connected.isEmpty else {
@@ -441,6 +443,7 @@ final class TriggerCenterViewController: NSViewController {
             if row.hasSecrets {
                 extras.append((L10n.string("Secrets…"), { [weak self] in self?.setProbeSecrets(source) }))
             }
+            extras.append((L10n.string("Delete…"), { [weak self] in self?.deleteProbe(source) }))
             list.addRow(TriggerCenterRowView(
                 title: row.title,
                 detail: row.detail,
@@ -456,15 +459,7 @@ final class TriggerCenterViewController: NSViewController {
 
     private func editProbe(_ existing: TriggerSourceInstallation?) {
         let form = TriggerProbeEditorForm(spec: existing?.probe?.spec)
-        let request = ConfirmationRequest(
-            prompt: .connectTriggerSource,
-            title: existing == nil ? L10n.string("New Probe Source") : L10n.format("Edit “%@”", existing?.displayName ?? ""),
-            message: L10n.string(
-                "Saving leaves the probe paused. You approve its exact files before it runs; any later edit needs approval again."
-            ),
-            confirmTitle: L10n.string("Save"),
-            accessory: form.makeView()
-        )
+        let request = TriggerProbePresentation.editorRequest(form, editing: existing?.displayName)
         ConfirmationAlert.ask(request, in: view.window) { [weak self] approved in
             guard approved, let self else { return }
             Task { @MainActor in
@@ -514,6 +509,25 @@ final class TriggerCenterViewController: NSViewController {
                     }
                 }
             } catch { self.presentSourceFailure(error.localizedDescription) }
+        }
+    }
+
+    private func deleteProbe(_ source: TriggerSourceInstallation) {
+        let request = ConfirmationRequest(
+            prompt: .connectTriggerSource,
+            title: L10n.format("Delete “%@”?", source.displayName),
+            message: L10n.string(
+                "Threading stops polling this probe and removes it from this page. Events it already reported and the runs they started stay in Activity. Its files and Keychain secrets are not touched."
+            ),
+            confirmTitle: L10n.string("Delete")
+        )
+        ConfirmationAlert.ask(request, in: view.window) { [weak self] approved in
+            guard approved, let self, let revision = source.probe?.revision else { return }
+            Task { @MainActor in
+                do {
+                    try await TriggerProbeSourceCommands.delete(source.id, expectedRevision: revision, store: self.store)
+                } catch { self.presentSourceFailure(error.localizedDescription) }
+            }
         }
     }
 
@@ -586,7 +600,7 @@ final class TriggerCenterViewController: NSViewController {
         let config = pair.map { AutomationConfiguration(definition: $0.definition, revision: $0.revision) }
         let automationID = pair?.definition.id ?? TriggerID()
         Task { @MainActor in
-        let sources = (try? await store.sources()) ?? []
+        let sources = ((try? await store.sources()) ?? []).filter { !$0.isDeleted }
         let editor = AutomationEditorViewController(configuration: config, sources: sources)
         editor.onSave = { [weak self] config, _ in
             guard let self, let config else { return }

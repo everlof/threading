@@ -123,11 +123,14 @@ reader, a script that watches a folder — without starting a model. A probe rea
 `{"cursor": …, "limit": …}` on stdin and prints one JSON line per event and then one cursor line
 (the contract is in `docs/feature-drafts/portable-trigger-sources.md`). **New Probe…** asks for its
 executable, an optional script (which becomes the first argument), further arguments, environment,
-secret names and an interval. Saving leaves it paused. **Review & Approve…** shows the exact files,
+secret names and when it runs — the same **Repeat** choices as an automation: daily, selected
+weekdays or weekly at a time in a time zone, or a fixed interval. Saving leaves it paused. **Review & Approve…** shows the exact files,
 their SHA-256, the schedule, environment keys and secret names, and says plainly that the probe
 runs unsandboxed with your account's authority; approving enables it. **Secrets…** stores secret
 values in Keychain — they are handed only to the probe's environment and never shown again.
 **Run now** asks for one poll immediately; **Pause** and **Resume** stop and restart its schedule.
+**Delete…** stops it for good and removes it from the page; the events it reported and the runs
+they started stay in **Activity**, and its files and Keychain secrets are left alone.
 Threading checks the hash before every run: if either file changes, the row says **Changed since
 approval** and nothing runs until you approve the new content. Any edit needs approval again. A
 probe's events arrive as `probe.event` with the fields it reported, so an automation's conditions

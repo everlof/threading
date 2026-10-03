@@ -90,6 +90,15 @@ enum TriggerProbeHealth: String, Codable, Sendable {
     case changed
 }
 
+/// One poll's result on the probe contract, whoever produced it: an outcome (the exit-code
+/// meaning), the normalized events in order, and the cursor to commit after them.
+struct TriggerSourceReport: Sendable {
+    let outcome: ProbeOutcome
+    let events: [TriggerProbeInboxEvent]
+    let cursor: String?
+    let diagnostics: String
+}
+
 struct TriggerProbePollOutcome: Equatable, Sendable {
     let health: TriggerProbeHealth
     let writtenEvents: Int
@@ -136,6 +145,9 @@ struct TriggerProbeInboxEvent: Encodable, Equatable, Sendable {
     let receivedAt: Date
     let title: String
     let attributes: [String: Attribute]
+    /// A link a built-in adapter vouches for (Sonda's portal URL). A probe's never has one:
+    /// event content does not become a destination.
+    let deepLink: URL?
     let resources: [String]
     /// Text shown to the agent as untrusted evidence; never an attribute, so never matched.
     let evidence: String?
@@ -168,6 +180,7 @@ enum TriggerProbeSourceRunner {
             receivedAt: receivedAt,
             title: title(of: event),
             attributes: attributes,
+            deepLink: nil,
             resources: [],
             evidence: event.evidence
         )
@@ -249,40 +262,60 @@ enum TriggerProbeSourceRunner {
             limit: source.spec.limit,
             timeout: TimeInterval(source.spec.timeoutSeconds)
         ))
-        let diagnostic = redact(result.diagnostics, secrets: resolved.secretValues)
-        switch result.outcome {
+        let report = TriggerSourceReport(
+            outcome: result.outcome,
+            events: result.events.prefix(source.spec.limit).map {
+                inboxEvent($0, sourceID: source.id, receivedAt: receivedAt)
+            },
+            cursor: result.cursor,
+            diagnostics: redact(result.diagnostics, secrets: resolved.secretValues)
+        )
+        return deliver(report, write: write, commit: commit)
+    }
+
+    /// The stage every source shares, probe or built-in: write each event to the inbox in order,
+    /// and only then commit the cursor. A failure in between commits nothing, so the next poll
+    /// redelivers and the app's idempotent acceptance absorbs the repeat. `inboxFailure` is the
+    /// health an inbox failure reports (Sonda's adapter has always reported it as backing off).
+    static func deliver(
+        _ report: TriggerSourceReport,
+        inboxFailure: TriggerProbeHealth = .failed,
+        write: (TriggerProbeInboxEvent, Int) throws -> Void,
+        commit: (String) throws -> Void
+    ) -> TriggerProbePollOutcome {
+        let diagnostic = report.diagnostics.isEmpty ? nil : bounded(report.diagnostics)
+        switch report.outcome {
         case .healthy:
-            guard let next = result.cursor else {
+            guard let next = report.cursor else {
                 return TriggerProbePollOutcome(health: .failed, writtenEvents: 0, committedCursor: nil,
                                                lastEventAt: nil, diagnostic: "invalid_output: missing_cursor")
             }
             var written = 0
             var lastEventAt: Date?
             do {
-                for (index, event) in result.events.prefix(source.spec.limit).enumerated() {
-                    let envelope = inboxEvent(event, sourceID: source.id, receivedAt: receivedAt)
+                for (index, envelope) in report.events.enumerated() {
                     try write(envelope, index)
                     written += 1
-                    lastEventAt = max(lastEventAt ?? envelope.occurredAt, envelope.occurredAt)
+                    lastEventAt = envelope.occurredAt
                 }
                 try commit(next)
             } catch {
                 return TriggerProbePollOutcome(
-                    health: .failed, writtenEvents: written, committedCursor: nil, lastEventAt: lastEventAt,
-                    diagnostic: bounded("inbox: " + error.localizedDescription)
+                    health: inboxFailure, writtenEvents: written, committedCursor: nil, lastEventAt: lastEventAt,
+                    diagnostic: bounded(error.localizedDescription)
                 )
             }
             return TriggerProbePollOutcome(health: .healthy, writtenEvents: written, committedCursor: next,
-                                           lastEventAt: lastEventAt, diagnostic: diagnostic.isEmpty ? nil : diagnostic)
+                                           lastEventAt: lastEventAt, diagnostic: diagnostic)
         case .backoff:
             return TriggerProbePollOutcome(health: .backingOff, writtenEvents: 0, committedCursor: nil,
-                                           lastEventAt: nil, diagnostic: diagnostic.isEmpty ? nil : diagnostic)
+                                           lastEventAt: nil, diagnostic: diagnostic)
         case .authenticationNeeded:
             return TriggerProbePollOutcome(health: .authenticationRequired, writtenEvents: 0, committedCursor: nil,
-                                           lastEventAt: nil, diagnostic: diagnostic.isEmpty ? nil : diagnostic)
+                                           lastEventAt: nil, diagnostic: diagnostic)
         case .failed:
             return TriggerProbePollOutcome(health: .failed, writtenEvents: 0, committedCursor: nil,
-                                           lastEventAt: nil, diagnostic: diagnostic.isEmpty ? nil : diagnostic)
+                                           lastEventAt: nil, diagnostic: diagnostic)
         }
     }
 
@@ -314,5 +347,101 @@ enum TriggerProbeSourceRunner {
             result.append(character)
         }
         return result
+    }
+}
+
+// MARK: - Sonda, as a built-in source on the same contract
+
+/// Sonda's read-only review-required feed, in-process: the daemon fetches the page over HTTPS
+/// with the Keychain credential, and this adapter turns it into a `TriggerSourceReport` that
+/// goes through the same delivery stage as a probe. Identity, revision, kind, attributes,
+/// title, deep link, inbox order, cursor and health are exactly what the compiled-in adapter
+/// always wrote.
+enum SondaFeedAdapter {
+    struct Feed: Decodable, Sendable {
+        let schemaVersion: Int
+        let nextCursor: Int64
+        let events: [Event]
+    }
+
+    struct Event: Decodable, Sendable {
+        let cursor: Int64
+        let caseID: String
+        let reviewCycle: Int64
+        let occurredAt: Date
+        let title: String
+        let portalURL: URL?
+        let projectID: String?
+        let reportID: String?
+        let uploadID: String?
+    }
+
+    enum Failure: LocalizedError, Equatable {
+        case invalidResponse
+        var errorDescription: String? { "The source returned an invalid response." }
+    }
+
+    static let eventKind = "case.review-required"
+    static let pageLimit = 100
+
+    /// Decodes and validates one page: cursors strictly increasing after the one asked for and
+    /// never past `nextCursor`, at most a page of events, schema 1.
+    static func decode(_ data: Data, after cursor: Int64) throws -> Feed {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: value) { return date }
+            formatter.formatOptions = [.withInternetDateTime]
+            guard let date = formatter.date(from: value) else {
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Expected an RFC 3339 timestamp.")
+            }
+            return date
+        }
+        let feed = try decoder.decode(Feed.self, from: data)
+        var previousCursor = cursor
+        for event in feed.events {
+            guard event.cursor > previousCursor, event.cursor <= feed.nextCursor else { throw Failure.invalidResponse }
+            previousCursor = event.cursor
+        }
+        guard feed.schemaVersion == 1, feed.nextCursor >= previousCursor, feed.events.count <= pageLimit else {
+            throw Failure.invalidResponse
+        }
+        return feed
+    }
+
+    static func inboxEvent(_ event: Event, sourceID: UUID, receivedAt: Date) -> TriggerProbeInboxEvent {
+        var attributes: [String: TriggerProbeInboxEvent.Attribute] = [
+            "status": .string("needs_review"),
+            "cursor": .integer(event.cursor),
+            "review_cycle": .integer(event.reviewCycle),
+        ]
+        if let projectID = event.projectID { attributes["project_id"] = .string(projectID) }
+        if let reportID = event.reportID { attributes["report_id"] = .string(reportID) }
+        if let uploadID = event.uploadID { attributes["upload_id"] = .string(uploadID) }
+        return TriggerProbeInboxEvent(
+            sourceInstallationID: sourceID,
+            externalID: event.caseID,
+            revision: String(event.reviewCycle),
+            kind: eventKind,
+            occurredAt: event.occurredAt,
+            receivedAt: receivedAt,
+            title: event.title,
+            attributes: attributes,
+            deepLink: event.portalURL,
+            resources: [],
+            evidence: nil
+        )
+    }
+
+    static func report(_ feed: Feed, sourceID: UUID, receivedAt: Date) -> TriggerSourceReport {
+        TriggerSourceReport(
+            outcome: .healthy,
+            events: feed.events.map { inboxEvent($0, sourceID: sourceID, receivedAt: receivedAt) },
+            cursor: String(feed.nextCursor),
+            diagnostics: ""
+        )
     }
 }

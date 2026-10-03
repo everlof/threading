@@ -80,7 +80,7 @@ enum TriggerDaemonConfigurationStore {
         }
         let probes = installations.compactMap { source -> TriggerProbeDaemonSource? in
             guard source.sourceType == TriggerProbeDefaults.sourceType, let probe = source.probe,
-                  let approvedHash = probe.approvedHash, probe.isApproved else { return nil }
+                  probe.deletedAt == nil, let approvedHash = probe.approvedHash, probe.isApproved else { return nil }
             return TriggerProbeDaemonSource(id: source.id.rawValue, revision: probe.revision,
                                             spec: TriggerProbeRunSpec(probe.spec),
                                             approvedHash: approvedHash, enabled: source.enabled)

@@ -20,7 +20,14 @@ daemon opens it without activation and repeats the notification.
 
 The first adapter is Sonda's read-only review-required feed. Its stable case ID and review cycle
 become the event identity and revision; its cursor is committed only after every returned event
-has been written to the inbox. The model and store do not know Sonda semantics, and unsupported
+has been written to the inbox. It is a built-in source on the probe contract: the daemon fetches
+the page over HTTPS with the Keychain credential, `SondaFeedAdapter` (in the shared
+`TriggerProbeSources.swift`) validates it and turns it into a `TriggerSourceReport`, and the same
+`TriggerProbeSourceRunner.deliver` stage a probe uses writes the events and then commits the
+cursor. Everything observable is what the compiled-in adapter wrote — event kind
+`case.review-required`, attributes, title, portal deep link, inbox files named by feed cursor, the
+integer `cursors.json`, and health (an HTTP 401/403 or missing credential is authentication
+required; any other failure, including an inbox write, backs off exponentially to five minutes). The model and store do not know Sonda semantics, and unsupported
 `sourceType` values are deliberately left out of daemon configuration until an adapter exists.
 The second source type is `probe`: a person's own program on the portable probe contract, below.
 
@@ -145,6 +152,18 @@ flight and one per source, so a hanging probe cannot delay another past its own 
 Deadlines persist in `probe-schedule.json`; failures back off exponentially from the interval to
 an hour, as the controller's do. Each probe has a private `0700` working directory under
 `Probes/`.
+
+**Deleting** a probe (`TriggerProbeSourceCommands.delete`, host-only, confirmed on the page)
+writes a tombstone: `probe.deletedAt`, approval cleared, paused. It leaves the daemon's
+configuration, so polling stops on the next tick; it disappears from the Sources page, the
+automation editor's source list and `list_trigger_sources`; configure, approve, enable and Run now
+refuse it. The record, its accepted events and their run receipts stay, so Activity keeps naming
+the source. No agent tool deletes a source.
+
+**Timing.** The editor states timing with the automation editor's own schedule controls,
+`AutomationScheduleFields`, which both editors now use. "Fixed interval" becomes the spec's
+`intervalSeconds`; daily, selected weekdays and weekly become its calendar `schedule` (validated,
+with an explicit IANA zone), which the daemon follows with `AutomationSchedule.next(after:)`.
 
 **Events.** A probe event becomes an ordinary `TriggerEvent` of kind `probe.event`: its id and
 revision are the identity, its typed fields become typed attributes (integral numbers as

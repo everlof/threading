@@ -141,8 +141,10 @@ executable, script, the whole SHA-256 the daemon will check before every run, th
 arguments, environment keys (never values), secret names with any not yet stored flagged, the
 timeout and event bound, the revision, and a fixed "Runs unsandboxed" warning. Probe rows show
 approval and daemon health — including "Changed since approval" — and offer Run now only for an
-approved probe. Agents reach probes only through `manage_automation`'s `draftSource`, which writes
-a paused, unapproved draft; there is no tool, extension slot or theme seam that approves one.
+approved probe, and Delete (a confirmed tombstone that keeps history). Agents reach probes only
+through `manage_automation`'s `draftSource`, which writes a paused, unapproved draft; there is no
+tool, extension slot or theme seam that approves or deletes one. The editor's schedule controls
+are the automation editor's (`AutomationScheduleFields`), not a second component.
 
 The two command-line-tool surfaces remain host-only for the same reason as the rows above them,
 one step sharper: both write outside anything Threading owns. One creates and deletes a symlink in

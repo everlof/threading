@@ -21,15 +21,10 @@ final class AutomationEditorViewController: NSViewController {
     private let model = ThemedTextField()
     private let effort = ThemedTextField()
     private let runtime = ThemedTextField()
-    private let cadence = ThemedPopUp()
+    private let scheduleFields: AutomationScheduleFields
     private let source = ThemedPopUp()
     private let eventKind = ThemedTextField()
     private let sources: [TriggerSourceInstallation]
-    private let time = ThemedTextField()
-    private let zone = ThemedTextField()
-    private let interval = ThemedTextField()
-    private let days = NSStackView()
-    private var dayToggles: [ThemedToggle] = []
     private let missed = ThemedPopUp()
     private let archive = ThemedToggle()
     private let save = ThemedButton()
@@ -44,6 +39,12 @@ final class AutomationEditorViewController: NSViewController {
         self.sources = sources
         self.configuration = configuration; self.remoteSpec = remoteSpec; self.remoteMode = remote
         self.projects = projects ?? ProjectStore.shared.projects
+        scheduleFields = AutomationScheduleFields(
+            schedule: configuration?.options.schedule ?? remoteSpec?.schedule,
+            alternative: remote ? L10n.string("Manual or event-driven") : L10n.string("Source event"),
+            selectAlternative: remote
+                ? (remoteSpec != nil && remoteSpec?.schedule == nil)
+                : (configuration?.options.schedule == nil && configuration?.sourceID != nil))
         super.init(nibName: nil, bundle: nil)
     }
     @available(*, unavailable)
@@ -109,15 +110,9 @@ final class AutomationEditorViewController: NSViewController {
         instructions.textView.string = configuration?.instructions ?? remoteSpec?.instruction ?? ""
         instructions.heightAnchor.constraint(equalToConstant: 100).isActive = true
         addRow("Instructions", instructions, to: form)
-        for title in ["Daily", "Selected weekdays", "Weekly", "Fixed interval"] { cadence.addItem(withTitle: L10n.string(title)) }
-        cadence.addItem(withTitle: remoteMode ? L10n.string("Manual or event-driven") : L10n.string("Source event"))
-        let schedule = configuration?.options.schedule ?? remoteSpec?.schedule
-            ?? AutomationSchedule(kind: .daily, timeZone: TimeZone.current.identifier)
-        cadence.selectItem(at: AutomationSchedule.Kind.allCases.firstIndex(of: schedule.kind) ?? 0)
-        if !remoteMode, configuration?.options.schedule == nil, configuration?.sourceID != nil { cadence.selectItem(at: 4) }
-        if remoteMode, remoteSpec != nil, remoteSpec?.schedule == nil { cadence.selectItem(at: 4) }
-        cadence.target = self; cadence.action = #selector(cadenceChanged)
-        addRow("Repeat", cadence, to: form)
+        let fields = scheduleFields
+        fields.onChange = { [weak self] in self?.cadenceChanged() }
+        addRow("Repeat", fields.cadence, to: form)
         if !remoteMode {
             for entry in sources { source.addItem(withTitle: entry.displayName) }
             if let id = configuration?.sourceID {
@@ -128,22 +123,10 @@ final class AutomationEditorViewController: NSViewController {
             addRow("Event source", source, to: form)
             addRow("Event kind", eventKind, to: form)
         }
-        time.stringValue = String(format: "%02d:%02d", schedule.hour, schedule.minute)
-        zone.stringValue = schedule.timeZone
-        interval.stringValue = String(schedule.intervalMinutes)
-        addRow("Time (HH:mm)", time, to: form)
-        addRow("Time zone", zone, to: form)
-        days.orientation = .horizontal; days.spacing = Design.Spacing.small
-        let calendar = Calendar.current
-        for index in 0..<7 {
-            let toggle = ThemedToggle(); toggle.state = schedule.days.contains(index + 1) ? .on : .off
-            toggle.setAccessibilityLabel(calendar.weekdaySymbols[index])
-            let label = NSTextField(labelWithString: calendar.veryShortWeekdaySymbols[index]); label.applyFont(.detail())
-            let day = NSStackView(views: [label, toggle]); day.orientation = .vertical
-            days.addArrangedSubview(day); dayToggles.append(toggle)
-        }
-        addRow("Days", days, to: form)
-        addRow("Interval (minutes)", interval, to: form)
+        addRow("Time (HH:mm)", fields.time, to: form)
+        addRow("Time zone", fields.zone, to: form)
+        addRow("Days", fields.days, to: form)
+        addRow("Interval (minutes)", fields.interval, to: form)
         missed.addItem(withTitle: L10n.string("Skip missed runs"))
         missed.addItem(withTitle: L10n.string("Run once on return"))
         missed.selectItem(at: configuration?.options.missedRunPolicy == .latest || remoteSpec?.missedPolicy == .latest ? 1 : 0)
@@ -179,12 +162,10 @@ final class AutomationEditorViewController: NSViewController {
         if !(control is ThemedToggle) { control.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true }
         form.addArrangedSubview(row)
     }
-    @objc private func cadenceChanged() {
-        let isEvent = cadence.indexOfSelectedItem == 4
+    private func cadenceChanged() {
+        scheduleFields.updateEnabled()
+        let isEvent = scheduleFields.isAlternativeSelected
         source.isEnabled = isEvent; eventKind.isEnabled = isEvent
-        let kind = AutomationSchedule.Kind.allCases[min(3, max(0, cadence.indexOfSelectedItem))]
-        time.isEnabled = !isEvent && kind != .interval; interval.isEnabled = !isEvent && kind == .interval
-        for toggle in dayToggles { toggle.isEnabled = !isEvent && (kind == .weekly || kind == .weekdays) }
     }
     @objc private func cancelPressed() { presentingViewController?.dismiss(self) }
     @objc private func savePressed() {
@@ -201,17 +182,13 @@ final class AutomationEditorViewController: NSViewController {
     /// Reads the form into the value the save operation receives, refusing a choice the form
     /// could only have made by default. Kept apart from presentation so it can be tested.
     func submission() throws -> (AutomationConfiguration?, ControllerAutomationSpec?) {
-        let parts = time.stringValue.split(separator: ":")
-        guard parts.count == 2, let hour = Int(parts[0]), let minute = Int(parts[1]),
-              let minutes = Int(interval.stringValue) else { throw TriggerStore.StoreError.invalidRecord("time or interval") }
-        let schedule = AutomationSchedule(kind: AutomationSchedule.Kind.allCases[min(3, cadence.indexOfSelectedItem)],
-            timeZone: zone.stringValue, hour: hour, minute: minute,
-            days: dayToggles.enumerated().compactMap { $0.element.state == .on ? $0.offset + 1 : nil },
-            intervalMinutes: minutes, anchor: configuration?.options.schedule?.anchor ?? remoteSpec?.schedule?.anchor ?? Date())
-        if cadence.indexOfSelectedItem != 4 { try schedule.validate() }
+        let schedule = try scheduleFields.schedule(
+            anchor: configuration?.options.schedule?.anchor ?? remoteSpec?.schedule?.anchor)
+        let isEvent = scheduleFields.isAlternativeSelected
+        if !isEvent { try schedule.validate() }
         if remoteMode {
             remoteSpec = ControllerAutomationSpec(name: name.stringValue, workerID: workerIDs.indices.contains(workerChoice.indexOfSelectedItem) ? workerIDs[workerChoice.indexOfSelectedItem] : try WorkerID(worker.stringValue),
-                instruction: instructions.textView.string, schedule: cadence.indexOfSelectedItem == 4 ? nil : schedule,
+                instruction: instructions.textView.string, schedule: isEvent ? nil : schedule,
                 missedPolicy: missed.indexOfSelectedItem == 1 ? .latest : .skip, archiveOnSuccess: archive.state == .on)
             return (nil, remoteSpec)
         }
@@ -227,7 +204,7 @@ final class AutomationEditorViewController: NSViewController {
         config.model = model.stringValue.isEmpty ? nil : model.stringValue
         config.reasoningEffort = effort.stringValue.isEmpty ? nil : effort.stringValue
         config.options = .init(schedule: schedule, missedRunPolicy: missed.indexOfSelectedItem == 1 ? .latest : .skip, archiveOnSuccess: archive.state == .on)
-        if cadence.indexOfSelectedItem == 4 {
+        if isEvent {
             guard sources.indices.contains(source.indexOfSelectedItem) else { throw AutomationEditorError.sourceUnavailable }
             config.options.schedule = nil
             config.sourceID = sources[source.indexOfSelectedItem].id

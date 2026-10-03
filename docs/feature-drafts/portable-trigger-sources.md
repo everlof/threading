@@ -8,7 +8,7 @@
 > The Mac half (rollout step 2) is implemented too: `threading-triggerd` runs approved probe
 > sources on the same contract, with hash approval in a host sheet, Keychain secrets, run-now and
 > health on the Sources page — see [`triggers.md`](../architecture/triggers.md#probe-sources).
-> Sonda still runs as its compiled-in adapter rather than behind the probe contract. Extends
+ Sonda now runs as a built-in source on that contract, sharing the probe's delivery stage. Extends
 > [`triggers.md`](../architecture/triggers.md) (the Mac's `listen → match → start` feature) and
 > [`autonomous-controller.md`](../architecture/autonomous-controller.md) (whose workers already
 > accept an `event` admission source that nothing feeds). Companion to

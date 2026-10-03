@@ -330,13 +330,148 @@ final class TriggerProbeSourceTests: XCTestCase {
         let parsed = try TriggerProbeEditorForm.spec(
             name: " Mailbox ", executable: "/usr/bin/python3", script: "/Users/me/probe.py",
             arguments: "--folder\nINBOX\n", environment: "FOLDER=INBOX", secrets: "IMAP_PASSWORD=imap-support",
-            intervalMinutes: "15", timeoutSeconds: "", limit: "", schedule: nil)
+            timing: AutomationSchedule(kind: .interval, timeZone: "UTC", intervalMinutes: 15),
+            timeoutSeconds: "", limit: "")
         XCTAssertEqual(parsed.arguments, ["/Users/me/probe.py", "--folder", "INBOX"])
         XCTAssertEqual(parsed.secrets, ["IMAP_PASSWORD": "imap-support"])
         XCTAssertEqual(parsed.intervalSeconds, 900)
         XCTAssertEqual(parsed.name, "Mailbox")
         XCTAssertThrowsError(try TriggerProbeSourceCommands.validate(ControllerSourceSpec(
             name: "x", executable: "/usr/bin/python3", script: "/a.py", arguments: ["/b.py"])))
+    }
+
+    func testTheEditorStatesACalendarScheduleWithTheAutomationEditorsPieces() throws {
+        let weekly = AutomationSchedule(kind: .weekdays, timeZone: "Europe/Stockholm", hour: 7, minute: 30, days: [2, 3, 4, 5, 6])
+        let parsed = try TriggerProbeEditorForm.spec(
+            name: "Mailbox", executable: "/bin/sh", script: "", arguments: "", environment: "", secrets: "",
+            timing: weekly, timeoutSeconds: "30", limit: "50")
+        XCTAssertNil(parsed.intervalSeconds)
+        XCTAssertEqual(parsed.schedule, weekly)
+
+        let form = MainActor.assumeIsolated { TriggerProbeEditorForm(spec: parsed) }
+        let roundTrip = try MainActor.assumeIsolated { try form.spec() }
+        XCTAssertEqual(roundTrip.schedule?.kind, .weekdays)
+        XCTAssertEqual(roundTrip.schedule?.hour, 7)
+        XCTAssertEqual(roundTrip.schedule?.days, [2, 3, 4, 5, 6])
+        MainActor.assumeIsolated {
+            XCTAssertTrue(form.timing.time.isEnabled)
+            XCTAssertFalse(form.timing.interval.isEnabled)
+        }
+    }
+
+    // MARK: - Delete
+
+    func testDeletingTombstonesAProbeStopsItsPollingAndKeepsItsEvents() async throws {
+        let store = TriggerStore(url: directory.appendingPathComponent("triggers.db"))
+        addTeardownBlock { await store.close() }
+        let path = try script("del.sh", "echo '{\"cursor\":\"x\"}'\n")
+        let configured = try await TriggerProbeSourceCommands.configure(id: nil, expectedRevision: 0, spec: spec(script: path), store: store)
+        let approved = try await TriggerProbeSourceCommands.approve(
+            configured.id, expectedRevision: configured.probe!.revision, reviewedHash: configured.probe!.hash, enable: true, store: store)
+        let event = TriggerEvent(sourceInstallationID: configured.id, externalID: "kept", revision: "1",
+                                 kind: TriggerProbeDefaults.eventKind, occurredAt: Date(), receivedAt: Date(), title: "kept",
+                                 attributes: [:], deepLink: nil, resources: [])
+        let first = try await store.accept(event)
+        XCTAssertTrue(first)
+
+        do {
+            _ = try await TriggerProbeSourceCommands.delete(configured.id, expectedRevision: configured.probe!.revision, store: store)
+            XCTFail("a stale revision deleted the probe")
+        } catch { XCTAssertEqual(error as? TriggerProbeSourceCommands.Failure, .revisionChanged) }
+
+        let deleted = try await TriggerProbeSourceCommands.delete(configured.id, expectedRevision: approved.probe!.revision, store: store)
+        XCTAssertTrue(deleted.isDeleted)
+        XCTAssertFalse(deleted.enabled)
+        XCTAssertNil(try TriggerDaemonConfigurationStore.configuration(for: [deleted]).probes, "polling stops")
+        let again = try await store.accept(event)
+        XCTAssertFalse(again, "the accepted event is still there")
+        let stored = try await store.source(id: configured.id)
+        XCTAssertEqual(stored?.isDeleted, true, "the record is a tombstone, not removed")
+
+        for operation in [
+            { _ = try await TriggerProbeSourceCommands.configure(id: configured.id, expectedRevision: deleted.probe!.revision, spec: self.spec(script: path), store: store) },
+            { _ = try await TriggerProbeSourceCommands.setEnabled(true, id: configured.id, expectedRevision: deleted.probe!.revision, store: store) },
+            { try await TriggerProbeSourceCommands.runNow(configured.id, store: store, request: { _ in }) },
+        ] as [() async throws -> Void] {
+            do { try await operation(); XCTFail("a deleted probe was revived") } catch {}
+        }
+
+        // An agent's draft cannot name it either, and no tool operation deletes.
+        var draft = AutomationToolArguments(operation: "draftSource")
+        draft.id = configured.id.uuidString
+        draft.expectedRevision = String(deleted.probe!.revision)
+        draft.sourceSpec = spec(script: path)
+        do { _ = try await AutomationCommands.execute(draft, store: store); XCTFail("draft revived a deleted probe") } catch {}
+        var remove = AutomationToolArguments(operation: "deleteSource")
+        remove.id = configured.id.uuidString
+        do { _ = try await AutomationCommands.execute(remove, store: store); XCTFail("an agent deleted a source") } catch {}
+    }
+
+    // MARK: - Sonda on the shared contract
+
+    private static let sondaPage = """
+        {"schemaVersion":1,"nextCursor":12,"events":[
+          {"cursor":11,"caseID":"case-1042","reviewCycle":2,"occurredAt":"2026-10-03T09:12:00.250Z","title":"Report upload needs review",
+           "portalURL":"https://demo.example.com/admin/case-1042","projectID":"p1","reportID":null,"uploadID":"u9"},
+          {"cursor":12,"caseID":"case-1043","reviewCycle":1,"occurredAt":"2026-10-03T09:13:00Z","title":"Second"}]}
+        """
+
+    func testSondaKeepsItsIdentityRevisionKindAttributesAndLink() throws {
+        let feed = try SondaFeedAdapter.decode(Data(Self.sondaPage.utf8), after: 10)
+        let id = UUID()
+        let report = SondaFeedAdapter.report(feed, sourceID: id, receivedAt: Date(timeIntervalSince1970: 0))
+        XCTAssertEqual(report.outcome, .healthy)
+        XCTAssertEqual(report.cursor, "12")
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let first = try decoder.decode(TriggerEvent.self, from: encoder.encode(report.events[0]))
+        XCTAssertEqual(first.externalID, "case-1042")
+        XCTAssertEqual(first.revision, "2")
+        XCTAssertEqual(first.kind, "case.review-required")
+        XCTAssertEqual(first.title, "Report upload needs review")
+        XCTAssertEqual(first.deepLink?.absoluteString, "https://demo.example.com/admin/case-1042")
+        XCTAssertEqual(first.attributes, [
+            "status": .string("needs_review"), "cursor": .integer(11), "review_cycle": .integer(2),
+            "project_id": .string("p1"), "upload_id": .string("u9"),
+        ])
+        XCTAssertNil(first.evidence)
+        // The envelope's JSON is the shape the compiled-in adapter wrote: no evidence key, and no
+        // deepLink key when there is no link.
+        let second = String(decoding: try encoder.encode(report.events[1]), as: UTF8.self)
+        XCTAssertFalse(second.contains("evidence"))
+        XCTAssertFalse(second.contains("deepLink"))
+        XCTAssertTrue(second.contains("\"resources\":[]"))
+    }
+
+    func testSondaRefusesAPageWhoseCursorsDoNotAdvance() {
+        let stale = Self.sondaPage.replacingOccurrences(of: "\"cursor\":11", with: "\"cursor\":9")
+        XCTAssertThrowsError(try SondaFeedAdapter.decode(Data(stale.utf8), after: 10)) {
+            XCTAssertEqual($0 as? SondaFeedAdapter.Failure, .invalidResponse)
+        }
+        let past = Self.sondaPage.replacingOccurrences(of: "\"nextCursor\":12", with: "\"nextCursor\":11")
+        XCTAssertThrowsError(try SondaFeedAdapter.decode(Data(past.utf8), after: 10))
+    }
+
+    func testSondaCommitsItsCursorOnlyAfterTheInboxAndBacksOffOnAnInboxFailure() throws {
+        let feed = try SondaFeedAdapter.decode(Data(Self.sondaPage.utf8), after: 10)
+        let report = SondaFeedAdapter.report(feed, sourceID: UUID(), receivedAt: Date())
+        var log: [String] = []
+        let outcome = TriggerProbeSourceRunner.deliver(report, inboxFailure: .backingOff,
+            write: { event, index in log.append("write \(event.externalID) \(feed.events[index].cursor)") },
+            commit: { log.append("commit \($0)") })
+        XCTAssertEqual(log, ["write case-1042 11", "write case-1043 12", "commit 12"])
+        XCTAssertEqual(outcome.health, .healthy)
+        XCTAssertNil(outcome.diagnostic)
+        XCTAssertEqual(outcome.lastEventAt, feed.events.last?.occurredAt)
+
+        var committed = false
+        let failed = TriggerProbeSourceRunner.deliver(report, inboxFailure: .backingOff,
+            write: { _, _ in throw CocoaError(.fileWriteOutOfSpace) }, commit: { _ in committed = true })
+        XCTAssertFalse(committed)
+        XCTAssertEqual(failed.health, .backingOff)
     }
 }
 
