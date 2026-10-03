@@ -469,12 +469,10 @@ final class MailboxHandoverTests: XCTestCase {
         let session = SessionID()
         let onH1 = MailAddress(host: h1Host, kind: .session, id: session.rawValue)
         _ = try await h1.registerMailbox(onH1, name: "Deploy")
-        let worker = MailAddress(host: h1Host, kind: .worker, id: UUID())
         _ = try await h1.setMailGrant(recipient: onH1, sender: "*", expectedRevision: 0, mode: .notify, allowsInterrupt: false)
         let sibling = MailAddress(host: h1Host, kind: .session, id: UUID())
         _ = try await h1.registerMailbox(sibling, name: "Sibling")
         let unread = try await h1.sendMail(from: sibling, to: onH1, id: UUID(), text: "unread on h1", replyTo: nil, priority: .normal)
-        _ = worker
 
         let h1Endpoint = hostEndpoint("h1")
         var h1Up = false

@@ -2612,6 +2612,8 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             refreshInputControl()
             return false
         }
+        // A person's prompt: whatever this session mails next starts a new conversation.
+        if !workspaceFilesValidated { MailHumanTurn.started(sessionID) }
 
         let workspaceFiles = workspaceReferences(in: context)
         if !workspaceFilesValidated, !workspaceFiles.isEmpty {

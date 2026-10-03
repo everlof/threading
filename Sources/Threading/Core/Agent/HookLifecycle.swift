@@ -444,7 +444,10 @@ enum HookLifecycleRelay {
             return
         }
 
-        if report.event == .turnStarted { MailStopContinuationLedger.recordTurnStarted(report.sessionID) }
+        if report.event == .turnStarted {
+            MailStopContinuationLedger.recordTurnStarted(report.sessionID)
+            MailHumanTurn.turnStarted(report.sessionID, prompt: report.prompt)
+        }
 
         // A mail notice that blocked this `Stop` continued the turn; the finish it reports is
         // held until the agent proves it went on (see `MailStopContinuationLedger`).

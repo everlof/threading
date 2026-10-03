@@ -184,6 +184,13 @@ actor MacMailbox {
     /// exactly the value given, nil meaning none (a grant copied as it was).
     enum BudgetChange: Equatable { case keep, set(Int64?) }
 
+    /// A person started a new turn: the session's next mail starts a new conversation.
+    func resetContext(for sessionID: SessionID) async throws {
+        let store = try await openStore()
+        let address = MailAddress(host: try await host().id, kind: .session, id: sessionID.rawValue)
+        try await refusing { try await store.resetMailContext(address) }
+    }
+
     /// Records the control plane's admission of a project sibling's host-local address on a Mac
     /// session mailbox — only where no grant for that exact sender exists yet. A grant the owner
     /// set (any mode) is never changed, and a revocation is answered `false`: the owner's decision
@@ -191,12 +198,18 @@ actor MacMailbox {
     func admitSibling(recipient: MailAddress, sender: MailAddress) async throws -> Bool {
         let store = try await openStore()
         return try await refusing {
-            let prior = try await store.mailGrants(recipient: recipient, limit: MacMailDefaults.grantPage).items
-                .first { $0.sender == sender.description }
-            if let prior { return prior.mode != nil }
-            _ = try await store.setMailGrant(recipient: recipient, sender: sender.description, expectedRevision: 0,
-                                             mode: .notify, allowsInterrupt: false)
-            return true
+            // The grant that would decide this sender — exact, its host, or anyone. Any of them,
+            // granted or revoked, is the owner's word; only with none at all is the default written.
+            if let effective = try await store.effectiveMailGrant(recipient: recipient, sender: sender) {
+                return effective.mode != nil
+            }
+            do {
+                _ = try await store.setMailGrant(recipient: recipient, sender: sender.description, expectedRevision: 0,
+                                                 mode: .notify, allowsInterrupt: false)
+            } catch ControllerError.conflict {
+                // Another fallback wrote it first: read what now stands.
+            }
+            return try await store.effectiveMailGrant(recipient: recipient, sender: sender)?.mode != nil
         }
     }
 

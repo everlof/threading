@@ -46,6 +46,9 @@ enum MCPDefaults {
     static let mailNoticeObservedParameter = "observed"
     static let mailNoticeObservedBlock = "block"
     static let mailNoticeObservedSeen = "seen"
+    /// The host's clock when its hook fired (nanoseconds since 1970, GNU `date +%s%N`): orders a
+    /// report against a block from the same host, whatever the delay on the way here.
+    static let mailNoticeHostTimeParameter = "at"
     /// A notice is a hint on the agent's hot path: an unreachable app or a busy store costs this
     /// much and prints nothing.
     static let mailNoticeTimeout: TimeInterval = 2

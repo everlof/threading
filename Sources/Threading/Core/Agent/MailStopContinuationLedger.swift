@@ -38,6 +38,8 @@ enum MailStopContinuationLedger {
 
     private struct Entry {
         let blockedAt: Date
+        /// The host's clock at the block, when a host-local hook reported it.
+        var blockHostTime: UInt64?
         var sawEvidence = false
         var held: HookLifecycleReport?
         var generation: Int
@@ -61,14 +63,14 @@ enum MailStopContinuationLedger {
     // MARK: - Public Methods
 
     /// Records that the mail hook blocked a `Stop` for this session.
-    static func recordBlock(_ sessionID: SessionID, now: Date = Date()) -> BlockOutcome {
+    static func recordBlock(_ sessionID: SessionID, now: Date = Date(), hostTime: UInt64? = nil) -> BlockOutcome {
         if let finished = lastRelayedFinish[sessionID], now.timeIntervalSince(finished) <= finishWindow {
             lastRelayedFinish[sessionID] = nil
             entries[sessionID] = nil
             return .reopenTurn
         }
         generation += 1
-        entries[sessionID] = Entry(blockedAt: now, generation: generation)
+        entries[sessionID] = Entry(blockedAt: now, blockHostTime: hostTime, generation: generation)
         return .holdNextFinish
     }
 
@@ -79,8 +81,13 @@ enum MailStopContinuationLedger {
     }
 
     /// Any mail-hook call from the session: the agent is still running its turn.
-    static func recordEvidence(_ sessionID: SessionID) {
+    ///
+    /// A host-local hook reports in the background, so its report can arrive after a later
+    /// block. Stamped by the same host's clock as that block, one that fired before it is not
+    /// evidence of anything after it.
+    static func recordEvidence(_ sessionID: SessionID, hostTime: UInt64? = nil) {
         guard var entry = entries[sessionID] else { return }
+        if let blockedAt = entry.blockHostTime, let hostTime, hostTime <= blockedAt { return }
         if entry.held != nil {
             // The turn went on after the stop the lifecycle hook reported; that report is void.
             entries[sessionID] = nil

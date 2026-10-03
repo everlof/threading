@@ -34,7 +34,8 @@ extension MCPServer {
             // nothing but the continuation ledger, and is always answered empty.
             Task { @MainActor in
                 if RemoteSessionMailboxes.shared.keepsMailOnHost(sessionID) {
-                    Self.recordMailHookCall(sessionID, event: event, blocked: observed == MCPDefaults.mailNoticeObservedBlock)
+                    Self.recordMailHookCall(sessionID, event: event, blocked: observed == MCPDefaults.mailNoticeObservedBlock,
+                                            hostTime: Self.mailNoticeHostTime(inQuery: query))
                 }
                 respond(MacMailHookOutput.silence)
             }
@@ -61,19 +62,26 @@ extension MCPServer {
     /// One mail-hook call, answered here or on the host: evidence the turn goes on, and — for a
     /// Stop that was blocked — the block itself.
     @MainActor
-    static func recordMailHookCall(_ sessionID: SessionID, event: MailNoticeEvent, blocked: Bool) {
-        MailStopContinuationLedger.recordEvidence(sessionID)
-        if event == .stop && blocked { recordStopBlock(sessionID) }
+    static func recordMailHookCall(_ sessionID: SessionID, event: MailNoticeEvent, blocked: Bool, hostTime: UInt64? = nil) {
+        MailStopContinuationLedger.recordEvidence(sessionID, hostTime: hostTime)
+        if event == .stop && blocked { recordStopBlock(sessionID, hostTime: hostTime) }
     }
 
     @MainActor
-    static func recordStopBlock(_ sessionID: SessionID) {
-        if MailStopContinuationLedger.recordBlock(sessionID) == .reopenTurn,
+    static func recordStopBlock(_ sessionID: SessionID, hostTime: UInt64? = nil) {
+        if MailStopContinuationLedger.recordBlock(sessionID, hostTime: hostTime) == .reopenTurn,
            let reopened = HookLifecycleReport(sessionID: sessionID, event: .turnStarted, payload: [:]) {
             // The silent Stop hook's finish was already relayed: the turn this block continues
             // has to be open again before anything treats the session as idle.
             HookLifecycleRelay.observe?(reopened)
         }
+    }
+
+    /// The host's own clock for the report, when its `date` can say (GNU `+%s%N`); nil otherwise.
+    static func mailNoticeHostTime(inQuery query: String?) -> UInt64? {
+        guard let query, let value = URLComponents(string: "?\(query)")?.queryItems?
+            .first(where: { $0.name == MCPDefaults.mailNoticeHostTimeParameter })?.value else { return nil }
+        return UInt64(value)
     }
 
     static func mailNoticeObserved(inQuery query: String?) -> String? {

@@ -101,6 +101,7 @@ struct ControllerMain {
     mail-get MESSAGE_UUID
     mail-send FROM_ADDRESS TO_ADDRESS MESSAGE_UUID TEXT_FILE [normal|interrupt [owner-admitted]]
     mail-ack ADDRESS MESSAGE_UUID
+    mail-context-reset SESSION_ADDRESS   (a person started a new turn: the session's next mail starts a new chain)
     mail-notice ADDRESS post-tool-use|stop|session-start
     mail-outbound HOST_UUID
     mail-sync   (one exchange pass with configured peers)
@@ -312,6 +313,8 @@ struct ControllerMain {
             guard args.count < 6 || args[5] == MailOwnerRPCWords.ownerAdmitted else { throw ControllerError.invalidInput("arguments") }
             try output(await store.sendMail(from: MailAddress(args[0]), to: MailAddress(args[1]), id: id, text: file(args[3]),
                                             replyTo: nil, priority: priority, ownerAdmitted: args.count == 6))
+        case "mail-context-reset":
+            try count(1); try await store.resetMailContext(MailAddress(args[0])); try output(["reset": args[0]])
         case "mail-ack":
             try count(2)
             guard let id = UUID(uuidString: args[1]) else { throw ControllerError.invalidInput("message_id") }

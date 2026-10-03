@@ -486,11 +486,15 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   execution. An unacknowledged `interrupt` refuses `work_finish` in the finish transaction.
 - **Chains bound loops.** A message continues the chain of what it replies to, or of the mail its
   execution last acknowledged, so omitting `reply_to` does not escape the depth limit (4). A
-  session mailbox has no execution to bound an inherited context, so a session continues a chain
-  only through `reply_to`; its other messages start fresh, bounded by the send-rate fuse and seen
-  by the person watching the session. Three inherited-context rules were tried and each refused
-  legitimate mail (kept forever; consumed by the next send; a five-minute window, extendable by
-  re-acknowledging): the controller cannot tell a session's new topic from a loop's next turn. A reply to a forwarded
+  session mailbox has no execution, so its acknowledgements carry into its sends until a person
+  starts a new turn: the Mac resets the context (`mail-context-reset`) on a prompt a person wrote
+  — a native chat's composer, or a terminal prompt that is neither the mail notice
+  (`MailNoticeWords.prefix`) nor a cross-session delivery. Stop-hook continuations, typed notices,
+  deliveries and wakes keep agents going unattended, and the shared chain is what bounds them;
+  a person's next prompt always starts fresh. (Tried first and rejected: keeping the context
+  forever, consuming it on the next send, a time window, and reply-only chains — each either
+  refused legitimate mail or let an unattended exchange escape its bound.) Owner admission is the
+  same-project default, never an override: a revocation for the sender stands. A reply to a forwarded
   copy carries `answeringFor` — the address the original reached — which only the same mailbox
   id on another host may claim, so a mailbox that moved still answers what was asked of it; a
   mailbox that moves onto the asker's own host replaces the asker's sent copy rather than

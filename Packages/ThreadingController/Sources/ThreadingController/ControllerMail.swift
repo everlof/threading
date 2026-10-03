@@ -150,6 +150,12 @@ public struct MailMailbox: Codable, Equatable, Sendable {
 
 public enum MailNoticeEvent: String, Codable, Sendable { case postToolUse = "post-tool-use", stop, sessionStart = "session-start" }
 
+/// Every mail notice opens with this, so a host can tell a turn its own notice started from one a
+/// person started.
+public enum MailNoticeWords {
+    public static let prefix = "Threading: "
+}
+
 /// Words of the owner RPC that both its ends must spell the same, defined once here.
 public enum MailOwnerRPCWords {
     /// `mail-send`'s last argument: the owner decided admission itself for a recipient on the
@@ -177,8 +183,10 @@ public enum MailWake {
 
 struct MailRate: Codable { var windowStart: Double; var count: Int }
 struct MailChain: Codable { var count: Int }
-/// The chain an execution's acknowledged mail carries into what that execution sends. It ends
-/// with the execution, which is what bounds it.
+/// The chain acknowledged mail carries into what its reader sends next. An execution's ends with
+/// the execution; a session mailbox's lasts until its owner resets it when a person starts a new
+/// turn (`resetMailContext`) — so agents answering each other unattended stay in one bounded
+/// chain, and a person's next prompt always starts fresh.
 struct MailContext: Codable { var chainID: UUID; var depth: Int }
 
 extension ControllerStore {
@@ -401,11 +409,13 @@ extension ControllerStore {
             answeringFor = original.envelope.forwardedFrom
         } else if let context, let inherited: MailContext = try optional("mailContext", context.description) {
             chainID = inherited.chainID; depth = inherited.depth + 1
+        } else if context == nil, sender.kind == .session,
+                  let inherited: MailContext = try optional("mailContext", sender.description) {
+            // A session continues what it acknowledged since a person last started a turn:
+            // stop-hook continuations and wakes keep agents going unattended, and this is what
+            // keeps such an exchange inside one chain's depth and budget.
+            chainID = inherited.chainID; depth = inherited.depth + 1
         }
-        // A session mailbox (no execution context) continues a chain only through `reply_to`. It has no
-        // execution to bound an inherited context, and the controller cannot tell a session's new
-        // topic from a loop's next turn: every rule that guessed refused legitimate mail. Sessions
-        // are interactive and watched; what bounds them without `reply_to` is the send-rate fuse.
         guard depth <= MailLimits.maximumDepth else { throw ControllerError.invalidInput("chain_depth") }
         try spendSendRate(sender)
         var envelope = MailEnvelope(id: id, sender: sender, senderName: senderName, recipient: recipient, text: text,
@@ -449,6 +459,9 @@ extension ControllerStore {
         let ownerAdmitted = ownerAdmitted || expectedForward
         let isReply = try isReplyToOwnMail(envelope)
         let grant = try matchingGrant(recipient: envelope.recipient, sender: envelope.sender)
+        // Owner admission (the Mac's same-project rule) is the default, never an override: a
+        // revocation the owner wrote for this sender stands.
+        if ownerAdmitted, let grant, grant.mode == nil, !isReply { throw ControllerError.forbidden }
         if !isReply && !(ownerAdmitted && (peer == nil || expectedForward)) {
             guard let grant, let mode = grant.mode else { throw ControllerError.forbidden }
             if envelope.questionID != nil { guard mode.rank >= MailMode.ask.rank else { throw ControllerError.forbidden } }
@@ -526,6 +539,18 @@ extension ControllerStore {
     }
     public func mail(_ id: UUID) throws -> MailMessage { try required("mail", id.uuidString.lowercased()) }
 
+    /// A person started a new turn in this session: what it sends next starts a new conversation.
+    /// Owner-only; idempotent.
+    public func resetMailContext(_ mailbox: MailAddress) throws {
+        try db.run("DELETE FROM record WHERE kind='mailContext' AND id=?", [.text(mailbox.description)])
+    }
+
+    /// The grant that decides `sender`'s mail to `recipient` here: the most specific of an exact
+    /// address, the sender's host and anyone. A nil mode is a revocation.
+    public func effectiveMailGrant(recipient: MailAddress, sender: MailAddress) throws -> MailGrant? {
+        try matchingGrant(recipient: recipient, sender: sender)
+    }
+
     /// The newest open message that may start work for a session mailbox here: admitted under
     /// a `wake` (or `ask`) grant, or a reply, and within its grant's chain token budget as this
     /// store has measured it. Nil when nothing open may wake it. Bounded: one page of open mail.
@@ -596,9 +621,12 @@ extension ControllerStore {
             }
             result.append(message)
         }
-        if let executionID, let context {
-            if hadContext { try update("mailContext", executionID.description, value: context) }
-            else { try insert("mailContext", executionID.description, value: context) }
+        if let context {
+            let key = executionID?.description ?? recipient.description
+            let prior: MailContext? = executionID == nil ? try optional("mailContext", key) : nil
+            if let prior, prior.depth >= context.depth { return result }
+            if hadContext || prior != nil { try update("mailContext", key, value: context) }
+            else { try insert("mailContext", key, value: context) }
         }
         return result
     }
@@ -780,7 +808,7 @@ extension ControllerStore {
         let ending = event == .stop
             ? "Before ending this turn, read them with mail_inbox and acknowledge what you act on with mail_ack."
             : "Read them with mail_inbox when it is sensible to pause, and acknowledge what you act on with mail_ack."
-        return "Threading: \(count) unread mail \(noun) from \(who).\(urgent) \(ending)"
+        return "\(MailNoticeWords.prefix)\(count) unread mail \(noun) from \(who).\(urgent) \(ending)"
     }
     /// A sender names itself; a name ending in a closing quote or bracket must not close the frame.
     static func fenced(_ text: String) -> String {

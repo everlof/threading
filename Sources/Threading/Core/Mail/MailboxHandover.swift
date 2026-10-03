@@ -114,16 +114,18 @@ final class MailboxHandover {
     func retryPending(reachable endpoint: RemoteControllerEndpoint) -> [Task<Outcome, Never>] {
         var started: [Task<Outcome, Never>] = []
         for (sessionID, olds) in pending {
-            guard let entry = olds[endpoint.hostID], !entry.retrying else { continue }
+            // One retry at a time per session: a session with a move already running is retried
+            // after a later sync, rather than queued behind it as a second copy.
+            guard let entry = olds[endpoint.hostID], !entry.retrying, !inFlight.contains(sessionID) else { continue }
             guard let current = currentSide(sessionID) else {
-                pending[sessionID]?[endpoint.hostID] = nil
+                moved(sessionID, from: endpoint)
                 EventLog.shared.record(.mcp, "Unmoved mail left on its old host: the session no longer exists", [
                     "session": sessionID.uuidString, "host": entry.endpoint.name
                 ])
                 continue
             }
             if case .host(let now) = current, now.hostID == endpoint.hostID {
-                pending[sessionID]?[endpoint.hostID] = nil // The session lives there again.
+                moved(sessionID, from: endpoint) // The session lives there again.
                 continue
             }
             pending[sessionID]?[endpoint.hostID]?.retrying = true
@@ -222,6 +224,11 @@ final class MailboxHandover {
             if case .host = new { kick(newAddress.host) }
         } catch {
             outcome.issues.append(RemoteControllerRPC.describe(error))
+            // The whole move failed before the old host's part ran (the new side could not be
+            // made ready): that host's mail is still to move, and this failure counts.
+            if case .host(let endpoint) = old {
+                deferOld(sessionID, title: title, endpoint: endpoint, reason: RemoteControllerRPC.describe(error))
+            }
             EventLog.shared.record(.mcp, "Mailbox not moved with its session", [
                 "session": sessionID.uuidString,
                 "reason": RemoteControllerRPC.describe(error)

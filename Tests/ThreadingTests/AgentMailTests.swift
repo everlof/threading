@@ -492,6 +492,33 @@ final class MailNoticeHookTests: XCTestCase {
         }
     }
 
+    /// A host's background report can arrive after a later block; stamped by the same host's
+    /// clock, a report that fired before the block does not count as the turn going on.
+    func testAHostReportOlderThanTheBlockIsNotEvidence() throws {
+        let session = SessionID()
+        let finish = try XCTUnwrap(HookLifecycleReport(sessionID: session, event: .turnFinished, payload: [:]))
+        var relayed: [HookLifecycleReport] = []
+        var scheduled: [@MainActor () -> Void] = []
+        MailStopContinuationLedger.schedule = { _, work in scheduled.append(work) }
+        defer {
+            MailStopContinuationLedger.schedule = { delay, work in
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { work() } }
+            }
+            MailStopContinuationLedger.reset()
+        }
+        MCPServer.recordMailHookCall(session, event: .stop, blocked: true, hostTime: 2_000)
+        XCTAssertTrue(MailStopContinuationLedger.absorbsFinish(finish) { relayed.append($0) })
+        MCPServer.recordMailHookCall(session, event: .postToolUse, blocked: false, hostTime: 1_000) // late, older
+        scheduled.forEach { $0() }
+        XCTAssertEqual(relayed.count, 1, "the stale report did not void the held finish; it was relayed at the deadline")
+    }
+
+    func testOnlyPromptsAPersonWroteResetTheConversation() {
+        XCTAssertTrue(MailHumanTurn.isAgentOriginated("\(MailNoticeWords.prefix)2 unread mail messages from …"))
+        XCTAssertTrue(MailHumanTurn.isAgentOriginated("[Cross-session message from “A” — Threading session x]\n\nhi"))
+        XCTAssertFalse(MailHumanTurn.isAgentOriginated("Please summarise the release notes"))
+    }
+
     /// The notice typed at the idle edge starts a short new turn, and its Stop is blocked a few
     /// seconds after the previous turn's relayed finish. That block belongs to the new turn: its
     /// finish must be held, not treated as already relayed.

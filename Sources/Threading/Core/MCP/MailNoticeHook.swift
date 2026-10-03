@@ -53,13 +53,13 @@ enum MailNoticeHook {
     /// cannot reach the Mac answers its agent exactly the same.
     static func hostCommand(executable: String, event: MailNoticeEvent) -> String {
         let payload = "threading_hook_payload", answer = "threading_mail_answer"
-        let observed = "threading_mail_observed"
+        let observed = "threading_mail_observed", firedAt = "threading_mail_at"
         let report = MCPDefaults.hookPostCommand(
             payloadVariable: payload,
-            endpointSuffix: observedEndpoint(event: event, observedVariable: observed),
+            endpointSuffix: observedEndpoint(event: event, observedVariable: observed) + "&\(MCPDefaults.mailNoticeHostTimeParameter)=$\(firedAt)",
             timeout: MCPDefaults.mailNoticeTimeout
         )
-        return "\(payload)=$(cat); "
+        return "\(firedAt)=$(date +%s%N 2>/dev/null); \(payload)=$(cat); "
             + "\(answer)=$(printf '%s' \"$\(payload)\" | \(ShellCommand(word: executable).source) agent-notice \(event.rawValue) 2>/dev/null); "
             + "\(observed)=\(MCPDefaults.mailNoticeObservedSeen); "
             + "[ -n \"$\(answer)\" ] && \(observed)=\(MCPDefaults.mailNoticeObservedBlock); "
