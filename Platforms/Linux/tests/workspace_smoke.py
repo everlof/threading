@@ -132,9 +132,11 @@ def panes():
     children = [frame.get_child_at_index(index) for index in range(frame.get_child_count())]
     lists = [item for item in children if item.get_role_name() == 'list']
     terminals = [item for item in children if item.get_role_name() == 'terminal']
-    assert [item.get_role_name() for item in children] == ['list', 'terminal', 'push button', 'push button']
-    assert children[2].get_accessible_id() == 'linux.actions'
-    assert children[3].get_accessible_id() == 'linux.add-project'
+    assert [item.get_role_name() for item in children] == [
+        'list', 'push button', 'terminal', 'push button', 'push button']
+    assert children[1].get_accessible_id() == 'linux.page-title'
+    assert children[3].get_accessible_id() == 'linux.actions'
+    assert children[4].get_accessible_id() == 'linux.add-project'
     assert len(lists) == len(terminals) == 1
     assert 0 < lists[0].get_child_count() <= 12
     assert lists[0].get_state_set().contains(Atspi.StateType.SHOWING)

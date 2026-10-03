@@ -97,9 +97,11 @@ def panes():
     children = [frame.get_child_at_index(i) for i in range(frame.get_child_count())]
     listed = next(item for item in children if item.get_role_name() == 'list')
     terminal = next(item for item in children if item.get_role_name() == 'terminal')
-    assert [item.get_role_name() for item in children] == ['list', 'terminal', 'push button', 'push button']
-    assert children[2].get_accessible_id() == 'linux.actions'
-    assert children[3].get_accessible_id() == 'linux.add-project'
+    assert [item.get_role_name() for item in children] == [
+        'list', 'push button', 'terminal', 'push button', 'push button']
+    assert children[1].get_accessible_id() == 'linux.page-title'
+    assert children[3].get_accessible_id() == 'linux.actions'
+    assert children[4].get_accessible_id() == 'linux.add-project'
     assert terminal.get_component_iface().get_extents(Atspi.CoordType.WINDOW).x == 320
     assert terminal.get_state_set().contains(Atspi.StateType.SHOWING)
     assert_header_controls(frame, children)
@@ -109,7 +111,8 @@ def panes():
 def assert_header_controls(frame, children):
     terminal = next((item for item in children if item.get_role_name() == 'terminal'), None)
     sidebar_width = terminal.get_component_iface().get_extents(Atspi.CoordType.WINDOW).x \
-        if terminal is not None else frame.get_component_iface().get_extents(Atspi.CoordType.WINDOW).width
+        if terminal is not None else children[0].get_component_iface().get_extents(
+            Atspi.CoordType.WINDOW).width
     for identifier, trailing_offset in [('linux.actions', 56), ('linux.add-project', 108)]:
         button = next(item for item in children if item.get_accessible_id() == identifier)
         rect = button.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
@@ -120,9 +123,11 @@ def assert_header_controls(frame, children):
 def idle_labels():
     frame = app.get_child_at_index(0)
     children = [frame.get_child_at_index(i) for i in range(frame.get_child_count())]
-    assert [item.get_role_name() for item in children] == ['list', 'push button', 'push button'], \
+    assert [item.get_role_name() for item in children] == [
+        'list', 'panel', 'push button', 'push button'], \
         'expiry must work before any terminal exists'
-    assert children[2].get_accessible_id() == 'linux.add-project'
+    assert children[1].get_name() == 'Session placeholder'
+    assert children[3].get_accessible_id() == 'linux.add-project'
     assert_header_controls(frame, children)
     listed = children[0]
     assert listed.get_child_count() == 2

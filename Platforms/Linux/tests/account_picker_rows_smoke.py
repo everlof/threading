@@ -98,7 +98,7 @@ try:
         assert selected_id(listed) == 'default'
         for index, row in enumerate(initial):
             rect = bounds(row)
-            assert (rect.x, rect.y, rect.width, rect.height) == (12, 86 + index * 56, 776, 56), \
+            assert (rect.x, rect.y, rect.width, rect.height) == (12, 86 + index * 56, 296, 56), \
                 (index, rect.x, rect.y, rect.width, rect.height)
         capture(window, 'account-picker-first.png')
 
@@ -112,7 +112,7 @@ try:
         assert len(last) == 7
         for index, row in enumerate(last):
             rect = bounds(row)
-            assert (rect.x, rect.y, rect.width, rect.height) == (12, 86 + index * 56, 776, 56), \
+            assert (rect.x, rect.y, rect.width, rect.height) == (12, 86 + index * 56, 296, 56), \
                 (index, rect.x, rect.y, rect.width, rect.height)
         capture(window, 'account-picker-last.png')
 

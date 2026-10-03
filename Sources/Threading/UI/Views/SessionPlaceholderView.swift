@@ -18,6 +18,9 @@ final class SessionPlaceholderView: NSView {
         didSet { actionButton.isHidden = onAction == nil }
     }
 
+    /// The host publishes the actual laid-out target to its native accessibility bridge.
+    var actionAnchor: ThemedButton { actionButton }
+
     // MARK: - Initialization
 
     override init(frame frameRect: NSRect) {
@@ -62,8 +65,12 @@ final class SessionPlaceholderView: NSView {
         detailLabel.alignment = .center
 
         actionButton.isProminent = true
+#if os(Linux)
+        actionButton.action = { [weak self] in self?.actionButtonClicked() }
+#else
         actionButton.target = self
         actionButton.action = #selector(actionButtonClicked)
+#endif
         actionButton.isHidden = true
 
         addSubview(stack)
@@ -101,7 +108,10 @@ final class SessionPlaceholderView: NSView {
 
     // MARK: - Private Methods
 
-    @objc private func actionButtonClicked() {
+#if canImport(ObjectiveC)
+    @objc
+#endif
+    private func actionButtonClicked() {
         onAction?()
     }
 }

@@ -24,7 +24,10 @@ void SDL_RenderPresent(SDL_Renderer *renderer) {
             requested[strcspn(requested, "\r\n")] = 0;
         }
         if ((strcmp(requested, "normal") == 0 || strcmp(requested, "alternate") == 0
-             || strcmp(requested, "open") == 0)
+             || strcmp(requested, "open") == 0 || strcmp(requested, "idle") == 0
+             || strcmp(requested, "terminal") == 0
+             || strcmp(requested, "other-selected") == 0
+             || strcmp(requested, "title-reveal") == 0)
             && strcmp(requested, captured) != 0) {
             int width = 0, height = 0;
             if (SDL_GetRendererOutputSize(renderer, &width, &height) == 0

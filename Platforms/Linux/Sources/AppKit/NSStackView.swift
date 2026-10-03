@@ -235,17 +235,13 @@ open class NSStackView: NSView {
             let bottomLimit = last.bottomAnchor.constraint(
                 lessThanOrEqualTo: bottomAnchor, constant: -edgeInsets.bottom)
             // A top-gravity list keeps its authored rows at their fitting heights and leaves
-            // unused height below. Even a child stack has no intrinsic size of its own, so a
-            // low-priority bottom equality stretches its first row and shifts every label.
+            // unused height below. When the stack is centered without a fixed height, this
+            // weak equality closes its content chain so the solver can find its natural height.
             arrangementConstraints.append(bottomLimit)
-            if visible.contains(where: isFlexibleVerticalSpacer) {
-                // An explicit, otherwise unconstrained spacer is the exception: AppKit's fill
-                // distribution lets it consume the remaining height and move later rows down.
-                let bottomFill = last.bottomAnchor.constraint(
-                    equalTo: bottomAnchor, constant: -edgeInsets.bottom)
-                bottomFill.priority = .defaultLow
-                arrangementConstraints.append(bottomFill)
-            }
+            let bottomFill = last.bottomAnchor.constraint(
+                equalTo: bottomAnchor, constant: -edgeInsets.bottom)
+            bottomFill.priority = .fittingSizeCompression
+            arrangementConstraints.append(bottomFill)
             for view in visible { constrainVerticalCrossAxis(view) }
             if distribution == .fillEqually {
                 for view in visible.dropFirst() {
@@ -256,15 +252,6 @@ open class NSStackView: NSView {
 
         NSLayoutConstraint.activate(arrangementConstraints)
         setNeedsLayout()
-    }
-
-    private func isFlexibleVerticalSpacer(_ view: NSView) -> Bool {
-        guard view.subviews.isEmpty,
-              view.intrinsicContentSize.height == NSView.noIntrinsicMetric else { return false }
-        return !(view.constraints + activeConstraints).contains { constraint in
-            constraint.firstItem === view && constraint.secondItem == nil
-                && constraint.firstAttribute == .height
-        }
     }
 
     private func constrainHorizontalCrossAxis(_ view: NSView, baselineView: NSView) {

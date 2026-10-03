@@ -14,6 +14,7 @@ final class WorkspaceTerminalPane {
     private let headerWindow = NSWindow(backingScaleFactor: 2)
     private let headerRoot = NSView(frame: .zero)
     private let pageTitle = PageTitleView(symbolName: "terminal", inkSource: .backdrop)
+    private let pageIdentity: String
     private var headerNeedsPresentation = true
     private var headerWidth = 0
     private var nextFrame: UInt64 = 0
@@ -28,6 +29,7 @@ final class WorkspaceTerminalPane {
          icon: NSImage? = nil,
          onReveal: @escaping () -> Void) {
         self.session = session
+        self.pageIdentity = pageIdentity
         pageTitle.update(title: pageName, symbolName: "terminal", identity: pageIdentity)
         if let icon { pageTitle.setIcon(icon) }
         pageTitle.onReveal = onReveal
@@ -61,7 +63,9 @@ final class WorkspaceTerminalPane {
         headerNeedsPresentation = true
     }
 
-    private func presentHeader(window: OpaquePointer, width: Int) throws {
+    func pressPageTitle() -> Bool { pageTitle.accessibilityPerformPress() }
+
+    private func presentHeader(window: OpaquePointer, width: Int, originX: Int) throws {
         guard headerNeedsPresentation || headerWidth != width else { return }
         headerNeedsPresentation = false
         headerWidth = width
@@ -76,11 +80,24 @@ final class WorkspaceTerminalPane {
                                        Int32(width), Int32(Self.headerPixelHeight))
         }
         guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
+        let titleBounds = pageTitle.convert(pageTitle.bounds, to: headerRoot)
+        let left = Int((titleBounds.minX * 2).rounded(.down))
+        let top = Int((titleBounds.maxY * 2).rounded(.up))
+        let right = Int((titleBounds.maxX * 2).rounded(.up))
+        let bottom = Int((titleBounds.minY * 2).rounded(.down))
+        pageIdentity.withCString { identity in
+            pageTitle.title.withCString { name in
+                tw_accessibility_page_title(window, identity, name,
+                    Int32(originX + left), Int32(Self.headerPixelHeight - top),
+                    Int32(right - left), Int32(top - bottom))
+            }
+        }
     }
 
     func focus(_ focused: Bool, window: OpaquePointer) {
         headerWindow.isKeyWindow = focused
         if !focused {
+            headerWindow.makeFirstResponder(nil)
             headerWindow.cancelPointerGesture()
             session.setPreedit(nil)
             // Complete each gesture on its original runtime before another pane can own input.
@@ -101,7 +118,7 @@ final class WorkspaceTerminalPane {
                  focused: Bool) throws {
         let contentHeight = max(1, height - Self.headerPixelHeight)
         tw_workspace_terminal_top_inset(window, Int32(Self.headerPixelHeight))
-        try presentHeader(window: window, width: width)
+        try presentHeader(window: window, width: width, originX: originX)
         if size.width != width || size.height != contentHeight {
             size = (width, contentHeight)
             failureNeedsDisplay = failure != nil

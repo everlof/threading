@@ -136,7 +136,7 @@ try:
         screenshot = output / 'project-create-menu.png'
         subprocess.run(['import', '-window', window, str(screenshot)], check=True, timeout=5)
         assert subprocess.check_output(['identify', '-format', '%wx%h', str(screenshot)],
-                                       text=True, timeout=5) == '800x480'
+                                       text=True, timeout=5) == '1120x480'
         xdo('key', 'Escape')
         rows = eventually(lambda: projects(app), 'return to projects', process)
         assert selected(rows[0]) and not selected(rows[1])

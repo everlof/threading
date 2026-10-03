@@ -85,6 +85,15 @@ navigator; the session Actions control stays hidden until that menu exists on Li
 paint, PTY grid size, pointer input, IME caret and AT-SPI text geometry share the resulting
 82-pixel content inset. The right header is retained separately from terminal frames, so PTY
 output does not rerasterize it.
+
+Before a terminal is selected, `--app` now opens the same 320-pixel navigator beside the
+production `SessionPlaceholderView`. It shows **No Session Selected** and a **New Session**
+button, or **No Projects Yet** and **Add Project** for an empty store. The host supplies the
+fixed diagnostic colors, symbol artwork and action admission; the view owns its layout and
+button behavior. The idle pane retains one bitmap and republishes it only on resize or
+interaction. Its button is available through pointer, keyboard and AT-SPI, and the terminal
+node enters the accessibility tree only after a terminal opens.
+
 Visible project slots now mount the same `ThemedProjectRowView` subtree as the Mac
 `ProjectRowView`: icon, shaped title, optional count and trailing `+`/`⋯` controls share one
 production layout. The Linux host retains project identity, selection, menu admission and PTY
@@ -444,7 +453,8 @@ See `FINDINGS.md`.
 
 The installed preview runs a native window, project and session navigation, terminal and provider
 journeys, text shaping, and an accessibility tree. Visible project, agent and terminal rows mount
-shared production content, and command menus use production rows. Account rows remain diagnostic;
+shared production content, the idle pane mounts the production placeholder, and command menus use
+production rows. Account rows remain diagnostic;
 a complete production screen is not mounted.
 Editing and IME, full table and outline behavior, animation,
 system services, and the remaining AppKit shims need work. The layout solver still solves a whole
@@ -642,8 +652,9 @@ WindowHarness --app-agents /path/to/experimental-store /path/to/ptyd.sock /bin/b
 Select a project with Up/Down or a click, then press Enter to open its shell. Click the disclosure
 before a project name, or press Space on its selected row, to show saved agents and terminals
 under that project. Up/Down selects an inline child and Enter opens that exact saved runtime.
-The navigator stays beside the terminal in a 320-pixel leading pane. Ctrl+Shift+P focuses
-navigation without hiding
+The navigator stays beside the idle pane or terminal in a 320-pixel leading pane. The idle
+button opens the selected project's session menu, or the Add Project menu in an empty store.
+Ctrl+Shift+P focuses navigation without hiding
 the terminal; from the focused project list it opens the folder dialog. Tab returns keyboard
 focus to the terminal. Clicking either pane focuses it. Enter revisits
 that project's existing terminal, including its child and

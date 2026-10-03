@@ -100,6 +100,27 @@ with log_path.open('w') as log:
                                 'Actions control')
         finally:
             (evidence / 'atspi-tree.txt').write_text('\n'.join(accessibility_tree(app)) + '\n')
+        placeholder = eventually(lambda: next((item for item in descendants()
+                                               if item.get_role_name() == 'panel'
+                                               and item.get_name() == 'Session placeholder'
+                                               and item.get_child_count() == 3), None),
+                                 'production idle placeholder')
+        title, detail, new_session = [placeholder.get_child_at_index(index) for index in range(3)]
+        assert (title.get_name(), detail.get_name(), new_session.get_name()) == (
+            'No Session Selected', 'Select a session in the sidebar, or start one here.',
+            'New Session')
+        assert new_session.get_role_name() == 'push button'
+        assert new_session.get_accessible_id() == 'linux.placeholder.action'
+        assert new_session.get_action_iface().get_n_actions() == 1
+        placeholder_bounds = placeholder.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        assert (placeholder_bounds.x, placeholder_bounds.y,
+                placeholder_bounds.width, placeholder_bounds.height) == (320, 0, 800, 480), \
+            placeholder_bounds
+        action_bounds = new_session.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        assert (action_bounds.x >= 320 and action_bounds.x + action_bounds.width <= 1120
+                and 240 <= action_bounds.y <= 400
+                and action_bounds.y + action_bounds.height <= 480), \
+            action_bounds
         assert button.get_role_name() == 'push button'
         assert button.get_state_set().contains(Atspi.StateType.ENABLED)
         bounds = button.get_component_iface().get_extents(Atspi.CoordType.WINDOW)

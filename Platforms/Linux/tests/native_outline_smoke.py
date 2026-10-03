@@ -146,7 +146,7 @@ def verify_viewport(app, log_path, expected, total):
     for index in range(listed.get_child_count()):
         row = listed.get_child_at_index(index)
         rect = row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert 0 < rect.height <= 44 and rect.width in (744, 776), \
+        assert 0 < rect.height <= 44 and rect.width in (264, 296), \
             (index, rect.x, rect.y, rect.width, rect.height)
         assert 82 <= rect.y and rect.y + rect.height <= window_height, \
             (index, rect.y, rect.height, window_height)
@@ -155,7 +155,7 @@ def verify_viewport(app, log_path, expected, total):
     return frame, listed
 
 
-def capture(window, name, size=(800, 480)):
+def capture(window, name, size=(1120, 480)):
     path = output / name
     subprocess.run(['import', '-window', window, str(path)], check=True, timeout=8)
     measured = subprocess.check_output(['identify', '-format', '%wx%h', str(path)],

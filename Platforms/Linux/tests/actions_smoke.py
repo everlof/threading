@@ -106,8 +106,7 @@ def button():
     item = next(item for item in items if item.get_accessible_id() == 'linux.actions')
     assert item.get_role_name() == 'push button'
     bounds = item.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-    sidebar_width = 320 if any(child.get_role_name() == 'terminal' for child in items) else \
-        frame.get_component_iface().get_extents(Atspi.CoordType.WINDOW).width
+    sidebar_width = listing().get_component_iface().get_extents(Atspi.CoordType.WINDOW).width
     assert (bounds.x, bounds.y, bounds.width, bounds.height) == (sidebar_width - 56, 20, 40, 40)
     assert item.get_name() in ('Actions', 'Close actions'), 'icon lost its accessible meaning'
     assert frame.get_component_iface().get_accessible_at_point(
@@ -252,6 +251,16 @@ try:
                                     str(child), str(marker)], env=environment, stdout=log, stderr=log)
         window = title('^Threading experiment - empty store$')
         app = eventually(application, 'empty app accessibility')
+        idle = next(item for item in children()[1] if item.get_role_name() == 'panel')
+        assert idle.get_child_at_index(0).get_name() == 'No Projects Yet'
+        idle_add = idle.get_child_at_index(2)
+        assert idle_add.get_name() == 'Add Project'
+        assert idle_add.get_action_iface().do_action(0)
+        eventually(lambda: listing().get_name() == 'Add Project',
+                   'idle Add Project opened menu')
+        key('Escape')
+        eventually(lambda: listing().get_name() == 'Projects',
+                   'idle Add Project menu dismissed')
         press_accessible()
         command('project.add', True)
         for identifier in commands[1:8]:
@@ -313,7 +322,7 @@ try:
         assert_actions_mark(Path('out/actions-normal.png'), open_path, bounds)
         key('Escape')
         eventually(lambda: listing().get_name() == 'Projects', 'pointer menu dismissed before first terminal')
-        # Before a terminal exists, sidebarWidth is zero. The shortcut release must still clear
+        # Before a terminal exists, the idle pane is visible. The shortcut release must still clear
         # activation suppression before an accessibility action opens the first child.
         # Keep both modifiers down during Space release; xdotool's combined key command can
         # release modifiers first and bypass the exact shortcut-keyup branch under test.

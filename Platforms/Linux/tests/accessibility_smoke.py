@@ -125,10 +125,41 @@ with log_path.open('w+') as log:
         def rect(component, coordinates=Atspi.CoordType.WINDOW):
             value = component.get_extents(coordinates)
             return value.x, value.y, value.width, value.height
-        assert rect(frame_component) == (0, 0, 800, 480)
-        assert rect(list_component) == (0, 82, 800, 398)
-        assert rect(first_component) == (12, 86, 776, 44)
-        assert rect(first_component, Atspi.CoordType.PARENT) == (12, 4, 776, 44)
+        def mounted_idle():
+            pane = content(app, 'panel')
+            if pane.get_child_count() != 3:
+                return None
+            return pane if pane.get_child_at_index(0).get_name() == 'No Session Selected' else None
+        idle = eventually(mounted_idle, 'idle right-pane accessibility panel')
+        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == [
+            'list', 'panel', 'push button', 'push button']
+        assert [idle.get_child_at_index(i).get_role_name() for i in range(idle.get_child_count())] == [
+            'label', 'label', 'push button']
+        assert idle.get_child_at_index(0).get_name() == 'No Session Selected'
+        assert idle.get_child_at_index(1).get_name() == 'Select a session in the sidebar, or start one here.'
+        idle_button = idle.get_child_at_index(2)
+        assert idle_button.get_accessible_id() == 'linux.placeholder.action'
+        assert idle_button.get_name() == 'New Session'
+        assert idle_button.get_child_count() == 0
+        idle_action = idle_button.get_action_iface()
+        assert idle_action.get_n_actions() == 1
+        assert idle_action.get_action_name(0) == 'press'
+        assert rect(frame_component) == (0, 0, 1120, 480)
+        assert rect(list_component) == (0, 82, 320, 398)
+        assert rect(idle.get_component_iface()) == (320, 0, 800, 480)
+        button_rect = rect(idle_button.get_component_iface())
+        assert 320 <= button_rect[0] < 1120 and button_rect[2] > 0
+        assert button_rect[0] + button_rect[2] <= 1120
+        assert 0 <= button_rect[1] < 480 and button_rect[3] > 0
+        assert button_rect[1] + button_rect[3] <= 480
+        assert rect(idle_button.get_component_iface(), Atspi.CoordType.PARENT) == (
+            button_rect[0] - 320, button_rect[1], button_rect[2], button_rect[3])
+        assert idle.get_component_iface().get_accessible_at_point(
+            button_rect[0] + button_rect[2] // 2,
+            button_rect[1] + button_rect[3] // 2,
+            Atspi.CoordType.WINDOW).get_accessible_id() == 'linux.placeholder.action'
+        assert rect(first_component) == (12, 86, 296, 44)
+        assert rect(first_component, Atspi.CoordType.PARENT) == (12, 4, 296, 44)
         assert list_component.get_accessible_at_point(
             40, 108, Atspi.CoordType.WINDOW).get_accessible_id() == first.get_accessible_id()
         assert list_component.get_accessible_at_point(40, 131, Atspi.CoordType.WINDOW) is None
@@ -137,9 +168,9 @@ with log_path.open('w+') as log:
         window_geometry = dict(re.findall(r'^(X|Y|WIDTH|HEIGHT)=(-?\d+)$',
                                           geometry.stdout, re.MULTILINE))
         assert rect(frame_component, Atspi.CoordType.SCREEN) == (
-            int(window_geometry['X']), int(window_geometry['Y']), 800, 480)
+            int(window_geometry['X']), int(window_geometry['Y']), 1120, 480)
         assert rect(first_component, Atspi.CoordType.SCREEN) == (
-            int(window_geometry['X']) + 12, int(window_geometry['Y']) + 86, 776, 44)
+            int(window_geometry['X']) + 12, int(window_geometry['Y']) + 86, 296, 44)
         before_pixels = pixels(window_id)
         before_rasters = log_path.read_text().count('stage=raster.begin')
         before_repaints = log_path.read_text().count('stage=repaint.end')
@@ -150,6 +181,39 @@ with log_path.open('w+') as log:
         assert log_path.read_text().count('stage=raster.begin') == before_rasters, \
             'unchanged native exposure rasterized the navigator again'
         assert pixels(window_id) == before_pixels, 'retained repaint changed native pixels'
+        subprocess.run(['xdotool', 'mousemove', '--window', window_id,
+                        str(button_rect[0] + button_rect[2] // 2),
+                        str(button_rect[1] + button_rect[3] // 2)], check=True, timeout=5)
+        eventually(lambda: 'stage=event kind=39 action=0' in log_path.read_text(),
+                   'idle-pane pointer hover')
+        navigator_crossings = log_path.read_text().count('stage=event kind=27 action=6')
+        subprocess.run(['xdotool', 'mousemove', '--window', window_id, '40', '108'],
+                       check=True, timeout=5)
+        eventually(lambda: log_path.read_text().count('stage=event kind=27 action=6')
+                   > navigator_crossings, 'sidebar hover from one cross-pane motion')
+        assert idle_action.do_action(0), 'idle action refused AT-SPI press'
+        eventually(lambda: content(app) if content(app).get_name() == 'New in Project'
+                   else None, 'idle New Session opened project creation choices')
+        assert content(app, 'panel').get_child_at_index(2).get_name() == 'New Session'
+        subprocess.run(['xdotool', 'key', 'Escape'], check=True, timeout=5)
+        eventually(lambda: content(app) if content(app).get_name() == 'Projects'
+                   else None, 'idle action menu dismissed')
+        first = content(app).get_child_at_index(0)
+        first_component = first.get_component_iface()
+        assert first.get_action_iface().do_action(0), 'could not focus navigator before Tab'
+        eventually(lambda: first if first.get_state_set().contains(Atspi.StateType.FOCUSED)
+                   else None, 'navigator focus before idle Tab')
+        subprocess.run(['xdotool', 'key', 'Tab'], check=True, timeout=5)
+        eventually(lambda: idle_button if idle_button.get_state_set().contains(
+            Atspi.StateType.FOCUSED) else None, 'idle action keyboard focus')
+        subprocess.run(['xdotool', 'key', 'Return'], check=True, timeout=5)
+        eventually(lambda: content(app) if content(app).get_name() == 'New in Project'
+                   else None, 'idle keyboard action opened project creation choices')
+        subprocess.run(['xdotool', 'key', 'Escape'], check=True, timeout=5)
+        eventually(lambda: content(app) if content(app).get_name() == 'Projects'
+                   else None, 'idle keyboard action menu dismissed')
+        first = content(app).get_child_at_index(0)
+        first_component = first.get_component_iface()
         assert selection.select_child(1), 'AT-SPI list selection was refused'
         eventually(lambda: window_title().endswith('/Project02'), 'AT-SPI list selected second project')
         eventually(lambda: selection.get_selected_child(0)
@@ -171,15 +235,16 @@ with log_path.open('w+') as log:
         eventually(lambda: window_title().endswith('/Project01'), 'restored first row selection')
         subprocess.run(['import', '-window', window_id,
                         str(Path.cwd() / 'out' / 'accessibility-list.png')], check=True, timeout=5)
-        subprocess.run(['xdotool', 'windowsize', window_id, '801', '481'], check=True, timeout=5)
+        subprocess.run(['xdotool', 'windowsize', window_id, '1121', '481'], check=True, timeout=5)
         eventually(lambda: rect(list_component) if rect(list_component) ==
-                   (0, 82, 801, 399) else None, 'odd-size navigator frame')
-        assert rect(first_component) == (12, 86, 776, 44)
+                   (0, 82, 320, 399) else None, 'odd-size navigator frame')
+        assert rect(idle.get_component_iface()) == (320, 0, 801, 481)
+        assert rect(first_component) == (12, 86, 296, 44)
         subprocess.run(['import', '-window', window_id,
                         str(Path.cwd() / 'out' / 'accessibility-list-odd.png')], check=True, timeout=5)
-        subprocess.run(['xdotool', 'windowsize', window_id, '800', '480'], check=True, timeout=5)
+        subprocess.run(['xdotool', 'windowsize', window_id, '1120', '480'], check=True, timeout=5)
         eventually(lambda: rect(list_component) if rect(list_component) ==
-                   (0, 82, 800, 398) else None, 'restored navigator frame')
+                   (0, 82, 320, 398) else None, 'restored navigator frame')
         assert first.get_state_set().contains(Atspi.StateType.FOCUSABLE)
         eventually(lambda: first if first.get_state_set().contains(Atspi.StateType.FOCUSED)
                    else None, 'selected project keyboard focus')
@@ -221,11 +286,20 @@ with log_path.open('w+') as log:
         assert selection.get_selected_child(0).get_accessible_id() == target.get_accessible_id()
         assert selected.get_action_iface().do_action(1), 'AT-SPI open action was refused'
         terminal = eventually(lambda: content(app, 'terminal'), 'terminal accessible after row action')
+        assert idle_action.get_n_actions() == 0
         eventually(lambda: terminal.get_name().endswith('A11Y TERMINAL READY'),
                    'accessible terminal title')
-        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'terminal', 'push button', 'push button']
-        assert frame.get_child_at_index(2).get_accessible_id() == 'linux.actions'
-        assert frame.get_child_at_index(3).get_accessible_id() == 'linux.add-project'
+        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'push button', 'terminal', 'push button', 'push button']
+        page_title = frame.get_child_at_index(1)
+        assert page_title.get_accessible_id() == 'linux.page-title'
+        assert page_title.get_name() == name
+        assert page_title.get_child_count() == 0
+        title_action = page_title.get_action_iface()
+        assert title_action.get_n_actions() == 1
+        assert title_action.get_action_name(0) == 'press'
+        assert page_title.get_state_set().contains(Atspi.StateType.FOCUSABLE)
+        assert frame.get_child_at_index(3).get_accessible_id() == 'linux.actions'
+        assert frame.get_child_at_index(4).get_accessible_id() == 'linux.add-project'
         assert content(app).get_role_name() == 'list'
         assert listed.get_state_set().contains(Atspi.StateType.SHOWING)
         assert terminal.get_state_set().contains(Atspi.StateType.SHOWING)
@@ -235,6 +309,17 @@ with log_path.open('w+') as log:
         eventually(lambda: rect(frame_component) == (0, 0, 1120, 480)
                    and rect(terminal_component) == (320, 82, 800, 398)
                    and rect(list_component) == (0, 82, 320, 398), 'simultaneous workspace geometry')
+        title_component = page_title.get_component_iface()
+        title_bounds = rect(title_component)
+        assert 320 <= title_bounds[0] < 1120 and title_bounds[2] > 0
+        assert title_bounds[0] + title_bounds[2] <= 1120
+        assert 0 <= title_bounds[1] < 82 and title_bounds[3] > 0
+        assert title_bounds[1] + title_bounds[3] <= 82
+        assert rect(title_component, Atspi.CoordType.PARENT) == title_bounds
+        title_center = (title_bounds[0] + title_bounds[2] // 2,
+                        title_bounds[1] + title_bounds[3] // 2)
+        assert frame_component.get_accessible_at_point(
+            *title_center, Atspi.CoordType.WINDOW).get_accessible_id() == 'linux.page-title'
         selected_bounds = rect(selected.get_component_iface())
         assert selected_bounds[0] == 12 and selected_bounds[2:] == (296, 44), selected_bounds
         assert 82 <= selected_bounds[1] and selected_bounds[1] + 44 <= 480, selected_bounds
@@ -259,6 +344,20 @@ with log_path.open('w+') as log:
         eventually(lambda: terminal.get_state_set().contains(Atspi.StateType.FOCUSED)
                    and not selected.get_state_set().contains(Atspi.StateType.FOCUSED),
                    'Tab restores terminal focus without unmounting sidebar')
+        page_id = selected.get_accessible_id()
+        assert selection.select_child(0), 'could not move navigator away from page'
+        eventually(lambda: content(app).get_selection_iface().get_selected_child(0)
+                   if content(app).get_selection_iface().get_selected_child(0).get_accessible_id() != page_id
+                   else None, 'navigator moved away from mounted page')
+        assert title_action.do_action(0), 'page title refused AT-SPI press'
+        eventually(lambda: content(app).get_selection_iface().get_selected_child(0)
+                   if content(app).get_selection_iface().get_selected_child(0).get_accessible_id() == page_id
+                   else None, 'page title revealed owning navigator row')
+        assert content(app).get_selection_iface().get_selected_child(0).get_state_set().contains(
+            Atspi.StateType.FOCUSED)
+        subprocess.run(['xdotool', 'key', 'Tab'], check=True, timeout=5)
+        eventually(lambda: terminal.get_state_set().contains(Atspi.StateType.FOCUSED),
+                   'Tab restores terminal focus after title reveal')
         assert terminal.get_state_set().contains(Atspi.StateType.FOCUSABLE)
         assert terminal.get_description() == 'Visible terminal screen; read only.'
         terminal_text = terminal.get_text_iface()
@@ -325,9 +424,10 @@ with log_path.open('w+') as log:
                    (320, 82, 960, 518) else None, 'resized terminal component')
         assert rect(frame_component) == (0, 0, 1280, 600)
         assert rect(list_component) == (0, 82, 320, 518)
-        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'terminal', 'push button', 'push button']
-        assert frame.get_child_at_index(2).get_accessible_id() == 'linux.actions'
-        assert frame.get_child_at_index(3).get_accessible_id() == 'linux.add-project'
+        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'push button', 'terminal', 'push button', 'push button']
+        assert frame.get_child_at_index(1).get_accessible_id() == 'linux.page-title'
+        assert frame.get_child_at_index(3).get_accessible_id() == 'linux.actions'
+        assert frame.get_child_at_index(4).get_accessible_id() == 'linux.add-project'
         resized_text = screen_text()
         assert 'UPDATED VISIBLE' in resized_text
         subprocess.run(['import', '-window', window_id,
@@ -363,9 +463,10 @@ with log_path.open('w+') as log:
                    .get_state_set().contains(Atspi.StateType.FOCUSED)
                    and not terminal.get_state_set().contains(Atspi.StateType.FOCUSED),
                    'sidebar focus while terminal remains mounted')
-        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'terminal', 'push button', 'push button']
-        assert frame.get_child_at_index(2).get_accessible_id() == 'linux.actions'
-        assert frame.get_child_at_index(3).get_accessible_id() == 'linux.add-project'
+        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'push button', 'terminal', 'push button', 'push button']
+        assert frame.get_child_at_index(1).get_accessible_id() == 'linux.page-title'
+        assert frame.get_child_at_index(3).get_accessible_id() == 'linux.actions'
+        assert frame.get_child_at_index(4).get_accessible_id() == 'linux.add-project'
         assert content(app, 'terminal').get_state_set().contains(Atspi.StateType.SHOWING)
         assert rect(terminal_component) == (320, 82, 960, 518)
         assert screen_text() == resized_text

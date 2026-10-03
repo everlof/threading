@@ -18,6 +18,11 @@ public enum NSImageRep {
 /// Decoded, bounded artwork. File decoding and resource lookup belong to the platform worker;
 /// this leaf owns the real image sizing/drawing contract used by TemplateImageDrawing.
 public final class NSImage {
+    /// The host supplies platform artwork for SF Symbol names. Keeping lookup here gives
+    /// production views the AppKit initializer without baking a diagnostic glyph catalogue
+    /// into the graphics shim.
+    @MainActor public static var systemSymbolProvider: ((String, String?) -> NSImage?)?
+
     /// Symbol sizing requested by a view. The Linux symbol provider remains app-owned; decoded
     /// artwork keeps its own dimensions, while the configuration travels with the image view.
     public struct SymbolConfiguration: Sendable {
@@ -58,6 +63,16 @@ public final class NSImage {
         guard naturalSize.width.isFinite, naturalSize.height.isFinite,
               naturalSize.width >= 0, naturalSize.height >= 0 else { return nil }
         self.init(validatedRGBA: rgba, width: width, height: height, size: naturalSize)
+    }
+
+    @MainActor public convenience init?(systemSymbolName: String,
+                                        accessibilityDescription: String?) {
+        guard let symbol = Self.systemSymbolProvider?(systemSymbolName,
+                                                      accessibilityDescription) else { return nil }
+        self.init(validatedRGBA: symbol.rgba, width: symbol.width, height: symbol.height,
+                  size: symbol.size)
+        isTemplate = symbol.isTemplate
+        self.accessibilityDescription = accessibilityDescription
     }
 
     /// A small AppKit drawing-handler image, rasterized eagerly at the diagnostic window's 2×

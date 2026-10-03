@@ -50,8 +50,10 @@ static void text_interface_init(AtkTextIface *iface);
 G_DEFINE_TYPE_WITH_CODE(TerminalNode, terminal_node, component_node_get_type(),
                         G_IMPLEMENT_INTERFACE(ATK_TYPE_TEXT, text_interface_init))
 
-static AccessibleNode *app, *frame, *list, *actionsButton, *addProjectButton;
-static int actionsVisible, addProjectVisible;
+static AccessibleNode *app, *frame, *list, *actionsButton, *addProjectButton, *pageTitleButton;
+static AccessibleNode *placeholder, *placeholderTitle, *placeholderDetail, *placeholderAction;
+static int actionsVisible, addProjectVisible, pageTitleVisible, placeholderVisible, placeholderActionVisible;
+static char pageTitleIdentity[128];
 static TerminalNode *terminal;
 static AccessibleNode *activeList;
 static AccessibleNode *focused;
@@ -120,7 +122,7 @@ static AtkStateSet *node_state(AtkObject *object) {
         atk_state_set_add_state(states, ATK_STATE_SENSITIVE);
     }
     if (node == list || node == (AccessibleNode *)terminal || node == actionsButton ||
-        node == addProjectButton ||
+        node == addProjectButton || node == pageTitleButton || node == placeholderAction ||
         node->row >= 0 || node->projectControl) {
         atk_state_set_add_state(states, ATK_STATE_FOCUSABLE);
         if (node == focused) atk_state_set_add_state(states, ATK_STATE_FOCUSED);
@@ -211,8 +213,9 @@ static void set_focused(AccessibleNode *next) {
 static void refresh_focus(void) {
     AccessibleNode *next = NULL;
     if (windowFocused && frame && frame->children->len) {
+        AccessibleNode *rightPane = placeholderVisible ? placeholder : (AccessibleNode *)terminal;
         AccessibleNode *content = tw_workspace_sidebar_width(hostWindow)
-            ? (tw_workspace_sidebar_focused(hostWindow) ? list : (AccessibleNode *)terminal)
+            ? (tw_workspace_sidebar_focused(hostWindow) ? list : rightPane)
             : g_ptr_array_index(frame->children, 0);
         if (content == list) {
             next = list;
@@ -221,17 +224,21 @@ static void refresh_focus(void) {
                 if (row->selected) { next = row; break; }
             }
         } else if (content == (AccessibleNode *)terminal) next = content;
+        else if (content == placeholder && placeholderActionVisible) next = placeholderAction;
     }
     set_focused(next);
 }
 static void show_content(AccessibleNode *content) {
     if (!frame) return;
     const int workspace = tw_workspace_sidebar_width(hostWindow) != 0;
-    const guint baseCount = workspace ? 2 : 1;
+    const int titleVisible = workspace && pageTitleVisible && !placeholderVisible;
+    AccessibleNode *rightPane = placeholderVisible ? placeholder : (AccessibleNode *)terminal;
+    const guint baseCount = workspace ? 2 + titleVisible : 1;
     const guint count = baseCount + actionsVisible + addProjectVisible;
     int same = frame->children->len == count
         && g_ptr_array_index(frame->children, 0) == (workspace ? list : content);
-    if (same && workspace) same = g_ptr_array_index(frame->children, 1) == (AccessibleNode *)terminal;
+    if (same && titleVisible) same = g_ptr_array_index(frame->children, 1) == pageTitleButton;
+    if (same && workspace) same = g_ptr_array_index(frame->children, 1 + titleVisible) == rightPane;
     if (same && actionsVisible) same = g_ptr_array_index(frame->children, baseCount) == actionsButton;
     if (same && addProjectVisible)
         same = g_ptr_array_index(frame->children, baseCount + actionsVisible) == addProjectButton;
@@ -239,7 +246,8 @@ static void show_content(AccessibleNode *content) {
         set_focused(NULL);
         clear_children(frame);
         add_child(frame, workspace ? list : content);
-        if (workspace) add_child(frame, (AccessibleNode *)terminal);
+        if (titleVisible) add_child(frame, pageTitleButton);
+        if (workspace) add_child(frame, rightPane);
         if (actionsVisible) add_child(frame, actionsButton);
         if (addProjectVisible) add_child(frame, addProjectButton);
         generation++;
@@ -251,7 +259,7 @@ static void show_content(AccessibleNode *content) {
 void tw_accessibility_workspace_changed(TWWindow *window) {
     if (!bridgeReady || window != hostWindow) return;
     show_content(tw_workspace_sidebar_width(window) && !tw_workspace_sidebar_focused(window)
-                 ? (AccessibleNode *)terminal : list);
+                 ? (placeholderVisible ? placeholder : (AccessibleNode *)terminal) : list);
 }
 static AtkObject *get_root(void) { return ATK_OBJECT(app); }
 static const gchar *get_toolkit_name(void) { return "Threading Linux bridge"; }
@@ -260,6 +268,10 @@ static const gchar *get_toolkit_version(void) { return "0"; }
 static gint action_count(AtkAction *action) {
     AccessibleNode *node = (AccessibleNode *)action;
     if (node == actionsButton) return actionsVisible && node->enabled ? 1 : 0;
+    if (node == pageTitleButton) return pageTitleVisible && node->enabled &&
+        node_mounted(ATK_OBJECT(node)) ? 1 : 0;
+    if (node == placeholderAction) return placeholderVisible && placeholderActionVisible &&
+        node->enabled && node_mounted(ATK_OBJECT(node)) ? 1 : 0;
     if (node == addProjectButton) return addProjectVisible && node->enabled &&
         node_mounted(ATK_OBJECT(node)) ? 1 : 0;
     if (node->projectControl) return !node->retired && node->enabled &&
@@ -268,13 +280,33 @@ static gint action_count(AtkAction *action) {
 }
 static const gchar *action_name(AtkAction *action, gint index) {
     AccessibleNode *node = (AccessibleNode *)action;
-    if (node == actionsButton || node == addProjectButton || node->projectControl)
+    if (node == actionsButton || node == addProjectButton || node == pageTitleButton ||
+        node == placeholderAction ||
+        node->projectControl)
         return index == 0 && action_count(action) ? "press" : NULL;
     if (node->row < 0) return NULL;
     return index == 0 ? "select" : (index == 1 && node->canOpen && node->enabled ? "open" : NULL);
 }
 static gboolean action_do(AtkAction *action, gint index) {
     AccessibleNode *node = (AccessibleNode *)action;
+    if (node == pageTitleButton) {
+        if (index != 0 || !action_count(action) || eventType == UINT32_MAX) return FALSE;
+        SDL_Event event = {0};
+        event.type = eventType; event.user.code = 7;
+        event.user.data2 = (void *)(uintptr_t)generation;
+        int pushed = SDL_PushEvent(&event);
+        navigation_trace_enqueue(&event, pushed);
+        return pushed == 1;
+    }
+    if (node == placeholderAction) {
+        if (index != 0 || !action_count(action) || eventType == UINT32_MAX) return FALSE;
+        SDL_Event event = {0};
+        event.type = eventType; event.user.code = 8;
+        event.user.data2 = (void *)(uintptr_t)generation;
+        int pushed = SDL_PushEvent(&event);
+        navigation_trace_enqueue(&event, pushed);
+        return pushed == 1;
+    }
     if (node == actionsButton) {
         if (index != 0 || !actionsVisible || !node->enabled || !node_mounted(ATK_OBJECT(node))
             || eventType == UINT32_MAX) return FALSE;
@@ -398,12 +430,16 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
     tw_window_geometry(hostWindow, &originX, &originY, &windowWidth, &windowHeight);
     if (object == ATK_OBJECT(frame)) {
         *x = 0; *y = 0; *width = windowWidth; *height = windowHeight;
+    } else if (object == ATK_OBJECT(placeholder)) {
+        *x = tw_workspace_sidebar_width(hostWindow); *y = 0;
+        *width = windowWidth > *x ? windowWidth - *x : 0; *height = windowHeight;
     } else if (object == ATK_OBJECT(terminal)) {
         *x = tw_workspace_sidebar_width(hostWindow);
         *y = tw_workspace_terminal_top_inset_value(hostWindow);
         *width = windowWidth > *x ? windowWidth - *x : 0;
         *height = windowHeight > *y ? windowHeight - *y : 0;
-    } else if (object == ATK_OBJECT(actionsButton) || object == ATK_OBJECT(addProjectButton)) {
+    } else if (object == ATK_OBJECT(actionsButton) || object == ATK_OBJECT(addProjectButton) ||
+               object == ATK_OBJECT(pageTitleButton) || object == ATK_OBJECT(placeholderAction)) {
         *x = node->bounds.x; *y = node->bounds.y;
         *width = node->bounds.width; *height = node->bounds.height;
     } else if (object == ATK_OBJECT(list)) {
@@ -418,6 +454,9 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
         *width = node->bounds.width; *height = node->bounds.height;
     } else return 0;
     if (coordinates == ATK_XY_SCREEN) { *x += originX; *y += originY; }
+    else if (coordinates == ATK_XY_PARENT && object == ATK_OBJECT(placeholderAction)) {
+        *x -= tw_workspace_sidebar_width(hostWindow);
+    }
     else if (coordinates == ATK_XY_PARENT && node->projectControl) {
         AccessibleNode *row = (AccessibleNode *)atk_object_get_parent(object);
         *x -= row->bounds.x; *y -= row->bounds.y;
@@ -706,8 +745,20 @@ void tw_accessibility_open(TWWindow *window) {
     addProjectButton = new_component(ATK_ROLE_PUSH_BUTTON, "Add Project");
     addProjectButton->id = g_strdup("linux.add-project");
     atk_object_set_accessible_id(ATK_OBJECT(addProjectButton), addProjectButton->id);
+    pageTitleButton = new_component(ATK_ROLE_PUSH_BUTTON, "Page title");
+    pageTitleButton->id = g_strdup("linux.page-title");
+    atk_object_set_accessible_id(ATK_OBJECT(pageTitleButton), pageTitleButton->id);
+    placeholder = new_component(ATK_ROLE_PANEL, "Session placeholder");
+    placeholderTitle = new_node(ATK_ROLE_LABEL, "");
+    placeholderDetail = new_node(ATK_ROLE_LABEL, "");
+    placeholderAction = new_component(ATK_ROLE_PUSH_BUTTON, "New Session");
+    placeholderAction->id = g_strdup("linux.placeholder.action");
+    atk_object_set_accessible_id(ATK_OBJECT(placeholderAction), placeholderAction->id);
     actionsVisible = 0;
     addProjectVisible = 0;
+    pageTitleVisible = 0;
+    placeholderVisible = placeholderActionVisible = 0;
+    pageTitleIdentity[0] = '\0';
     terminal = g_object_new(terminal_node_get_type(), NULL);
     atk_object_set_role(ATK_OBJECT(terminal), ATK_ROLE_TERMINAL);
     atk_object_set_name(ATK_OBJECT(terminal), "Terminal");
@@ -740,7 +791,14 @@ void tw_accessibility_close(void) {
     g_clear_object(&terminal);
     g_clear_object(&actionsButton);
     g_clear_object(&addProjectButton);
-    actionsVisible = addProjectVisible = 0;
+    g_clear_object(&pageTitleButton);
+    g_clear_object(&placeholder);
+    g_clear_object(&placeholderTitle);
+    g_clear_object(&placeholderDetail);
+    g_clear_object(&placeholderAction);
+    actionsVisible = addProjectVisible = pageTitleVisible = 0;
+    placeholderVisible = placeholderActionVisible = 0;
+    pageTitleIdentity[0] = '\0';
     hostWindow = NULL;
     generation++;
 }
@@ -817,6 +875,77 @@ void tw_accessibility_add_project_button(TWWindow *window, int enabled,
     }
     addProjectButton->bounds = (AtkRectangle){x, y, width, height};
     show_content(activeList ? list : (AccessibleNode *)terminal);
+}
+void tw_accessibility_page_title(TWWindow *window, const char *identity, const char *name,
+                                 int x, int y, int width, int height) {
+    if (!bridgeReady || window != hostWindow) return;
+    int originX, originY, windowWidth, windowHeight;
+    tw_window_geometry(window, &originX, &originY, &windowWidth, &windowHeight);
+    const int sidebarWidth = tw_workspace_sidebar_width(window);
+    const int topInset = tw_workspace_terminal_top_inset_value(window);
+    const int visible = sidebarWidth > 0 && identity && name &&
+        strnlen(identity, sizeof(pageTitleIdentity)) < sizeof(pageTitleIdentity) &&
+        strnlen(name, 512) < 512 && g_utf8_validate(name, -1, NULL) &&
+        x >= sidebarWidth && x < windowWidth && width > 0 && width <= windowWidth - x &&
+        y >= 0 && y < topInset && height > 0 && height <= topInset - y;
+    if (pageTitleVisible != visible ||
+        (visible && strcmp(pageTitleIdentity, identity) != 0)) generation++;
+    pageTitleVisible = visible;
+    if (visible) {
+        g_strlcpy(pageTitleIdentity, identity, sizeof(pageTitleIdentity));
+        set_name_if_changed(pageTitleButton, name);
+        pageTitleButton->bounds = (AtkRectangle){x, y, width, height};
+    } else pageTitleIdentity[0] = '\0';
+    show_content(activeList ? list : (AccessibleNode *)terminal);
+}
+void tw_accessibility_placeholder(TWWindow *window, const char *title, const char *detail,
+                                   const char *actionLabel, int x, int y, int width, int height) {
+    if (!bridgeReady || window != hostWindow) return;
+    int originX, originY, windowWidth, windowHeight;
+    tw_window_geometry(window, &originX, &originY, &windowWidth, &windowHeight);
+    const int sidebarWidth = tw_workspace_sidebar_width(window);
+    const int visible = sidebarWidth > 0 && title && detail &&
+        strnlen(title, 512) < 512 && strnlen(detail, 512) < 512 &&
+        g_utf8_validate(title, -1, NULL) && g_utf8_validate(detail, -1, NULL);
+    const int actionVisible = visible && actionLabel &&
+        strnlen(actionLabel, 512) < 512 && g_utf8_validate(actionLabel, -1, NULL) &&
+        x >= sidebarWidth && x < windowWidth && width > 0 && width <= windowWidth - x &&
+        y >= 0 && y < windowHeight && height > 0 && height <= windowHeight - y;
+    if (placeholderVisible != visible || placeholderActionVisible != actionVisible) generation++;
+    placeholderVisible = visible;
+    placeholderActionVisible = actionVisible;
+    if (visible) {
+        if (strcmp(atk_object_get_name(ATK_OBJECT(placeholderTitle)), title) != 0 ||
+            strcmp(atk_object_get_name(ATK_OBJECT(placeholderDetail)), detail) != 0 ||
+            (actionVisible && strcmp(atk_object_get_name(ATK_OBJECT(placeholderAction)), actionLabel) != 0))
+            generation++;
+        set_name_if_changed(placeholderTitle, title);
+        set_name_if_changed(placeholderDetail, detail);
+        if (actionVisible) {
+            set_name_if_changed(placeholderAction, actionLabel);
+            placeholderAction->bounds = (AtkRectangle){x, y, width, height};
+        }
+    }
+    const int detailVisible = visible && detail[0] != '\0';
+    const guint expected = visible ? 1 + detailVisible + actionVisible : 0;
+    int same = placeholder->children->len == expected;
+    if (same && expected) same = g_ptr_array_index(placeholder->children, 0) == placeholderTitle;
+    if (same && detailVisible)
+        same = g_ptr_array_index(placeholder->children, 1) == placeholderDetail;
+    if (same && actionVisible)
+        same = g_ptr_array_index(placeholder->children, expected - 1) == placeholderAction;
+    if (!same) {
+        if (focused == placeholderAction) set_focused(NULL);
+        clear_children(placeholder);
+        if (visible) {
+            add_child(placeholder, placeholderTitle);
+            if (detailVisible) add_child(placeholder, placeholderDetail);
+            if (actionVisible) add_child(placeholder, placeholderAction);
+        }
+        generation++;
+    }
+    show_content(activeList ? list : (placeholderVisible ? placeholder : (AccessibleNode *)terminal));
+    refresh_focus();
 }
 void tw_accessibility_window_focus(TWWindow *window, int hasFocus) {
     (void)window;
