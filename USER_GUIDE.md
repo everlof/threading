@@ -118,6 +118,22 @@ and **Assess, then fix if straightforward**. Local edits use a clean project che
 isolated worktree. Automation permission does not include pushing, deployment or source write-back.
 **Sources** connects the Sonda review-required feed with a scoped API key held in Keychain.
 
+**Probe sources** on the same page run your own programs on a schedule — an IMAP check, a feed
+reader, a script that watches a folder — without starting a model. A probe reads
+`{"cursor": …, "limit": …}` on stdin and prints one JSON line per event and then one cursor line
+(the contract is in `docs/feature-drafts/portable-trigger-sources.md`). **New Probe…** asks for its
+executable, an optional script (which becomes the first argument), further arguments, environment,
+secret names and an interval. Saving leaves it paused. **Review & Approve…** shows the exact files,
+their SHA-256, the schedule, environment keys and secret names, and says plainly that the probe
+runs unsandboxed with your account's authority; approving enables it. **Secrets…** stores secret
+values in Keychain — they are handed only to the probe's environment and never shown again.
+**Run now** asks for one poll immediately; **Pause** and **Resume** stop and restart its schedule.
+Threading checks the hash before every run: if either file changes, the row says **Changed since
+approval** and nothing runs until you approve the new content. Any edit needs approval again. A
+probe's events arrive as `probe.event` with the fields it reported, so an automation's conditions
+match them like any other source. An agent may write a probe and draft its source through
+**manage_automation**'s `draftSource`, but only you can approve or enable it.
+
 Agents can use **manage_automation** to list, inspect, create, edit, enable, pause, run, delete and
 read results when you ask. Enabling or running always shows you the exact settings first and
 waits for your approval. Changes name the current revision so an old editor or agent cannot

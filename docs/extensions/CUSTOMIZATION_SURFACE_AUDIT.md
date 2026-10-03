@@ -92,6 +92,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Attachment preview body | `attachments.preview@1` | exclusive preview-body replacement, offered rather than owned | turn grouping/collapse and chronology, filter, selection, Open in, reveal, delete, pruning, the too-large refusal, editable annotation receipt/revisions and the inspector rail | Implemented |
 | Background sessions (quit choice, launch band, Advanced list) | — | host-only | which children the daemon holds and their identities, the quit answer and what it stops, registration and its removal rule, the stop's attach-then-kill, bounded survey and viewport | Host-only |
 | Trigger center, source connection and activation approval | — | host-only | credential custody, exact immutable revision, project and permission authority, daemon health, queue/run truth and pause/activate actions | Host-only |
+| Probe sources: rows, editor, secrets sheet and probe approval sheet | — | host-only | the approved SHA-256 of exactly what runs unsandboxed, executable/script paths, environment keys, Keychain secret custody, schedule, changed-since-approval health and manual-poll authority | Host-only |
 | Command-line tool installation (Advanced row) | — | host-only | which tools are public, the shim directory and its refresh, what in a user's `~/.local/bin` may be written or removed, the login-shell `PATH` reading, the refusal to edit a shell profile | Host-only |
 | Managed iPhone tooling installation (Advanced row) | — | host-only | explicit network consent, PyPI source and package identity, the app-owned environment, version validation, atomic activation and rollback, stale-version cleanup, and which bundled feature receives the executable path | Host-only |
 | Command-line tools on launched `PATH` (Advanced switch) | — | host-only | the environment composed for every shell and agent, prepend-never-substitute, the absent-`PATH` refusal | Host-only |
@@ -133,6 +134,15 @@ silently started on an expired default — permissions, time limit, after-succes
 revision identity, and the full instructions in the sheet's single scrolling column. Event,
 source and conditions appear only for event rules. Themes style the labels and scroller; no
 extension can reword, reorder or omit a fact.
+
+The probe approval sheet (`TriggerProbePresentation.approvalRequest`) reuses the same view as the
+receipt for a different authority: running a person's own program unsandboxed. It states the
+executable, script, the whole SHA-256 the daemon will check before every run, the schedule,
+arguments, environment keys (never values), secret names with any not yet stored flagged, the
+timeout and event bound, the revision, and a fixed "Runs unsandboxed" warning. Probe rows show
+approval and daemon health — including "Changed since approval" — and offer Run now only for an
+approved probe. Agents reach probes only through `manage_automation`'s `draftSource`, which writes
+a paused, unapproved draft; there is no tool, extension slot or theme seam that approves one.
 
 The two command-line-tool surfaces remain host-only for the same reason as the rows above them,
 one step sharper: both write outside anything Threading owns. One creates and deletes a symlink in
