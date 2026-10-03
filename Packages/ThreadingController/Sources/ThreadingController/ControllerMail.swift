@@ -75,8 +75,8 @@ public struct MailEnvelope: Codable, Equatable, Sendable {
         guard sender != recipient else { throw ControllerError.invalidInput("mail_recipient") }
     }
     /// A retried send is the same request even though its timestamp differs.
-    func sameRequest(as other: MailEnvelope) -> Bool {
-        id == other.id && sender == other.sender && recipient == other.recipient && text == other.text &&
+    func sameRequest(as other: MailEnvelope, ignoringRecipient: Bool = false) -> Bool {
+        id == other.id && sender == other.sender && (ignoringRecipient || recipient == other.recipient) && text == other.text &&
             priority == other.priority && replyTo == other.replyTo && questionID == other.questionID
     }
 }
@@ -150,6 +150,13 @@ public struct MailMailbox: Codable, Equatable, Sendable {
 
 public enum MailNoticeEvent: String, Codable, Sendable { case postToolUse = "post-tool-use", stop, sessionStart = "session-start" }
 
+/// Words of the owner RPC that both its ends must spell the same, defined once here.
+public enum MailOwnerRPCWords {
+    /// `mail-send`'s last argument: the owner decided admission itself for a recipient on the
+    /// receiving host (the Mac's same-project rule). It never reaches another host's grants.
+    public static let ownerAdmitted = "owner-admitted"
+}
+
 public enum MailLimits {
     public static let maximumDepth = 4
     public static let chainMessages = 50
@@ -157,6 +164,11 @@ public enum MailLimits {
     public static let openInbox = 1_000
     static let noticeSenders = 3
     static let rateWindow: TimeInterval = 60
+    /// A session mailbox has no execution to bound its chain context, so an acknowledgement
+    /// carries its chain into the session's sends for this long. A loop answers within it, so it
+    /// stays in one bounded chain whether or not it sets reply_to; a message sent later starts a
+    /// new conversation.
+    public static let sessionContextWindow: TimeInterval = 300
 }
 
 /// The fixed text a wake-admitted task starts from. Host-authored; the mail is untrusted data.
@@ -170,7 +182,13 @@ public enum MailWake {
 
 struct MailRate: Codable { var windowStart: Double; var count: Int }
 struct MailChain: Codable { var count: Int }
-struct MailContext: Codable { var chainID: UUID; var depth: Int }
+struct MailContext: Codable {
+    var chainID: UUID
+    var depth: Int
+    /// When a session mailbox acknowledged it (seconds since 1970). Execution contexts end with
+    /// their execution and carry none.
+    var at: Double? = nil
+}
 
 extension ControllerStore {
     // MARK: - Identity
@@ -393,14 +411,13 @@ extension ControllerStore {
             answeringFor = original.envelope.forwardedFrom
         } else if let context, let inherited: MailContext = try optional("mailContext", context.description) {
             chainID = inherited.chainID; depth = inherited.depth + 1
-        } else if mailboxContext, let inherited: MailContext = try optional("mailContext", sender.description) {
-            // A session has no execution, so its context is the mail it acknowledged since it
-            // last sent, consumed by this send: a ping-pong (acknowledge, send, acknowledge, send)
-            // keeps its chain and is bounded, while a session's next unrelated message starts a
-            // new one instead of inheriting the deepest chain it ever read. Rolled back with the
-            // send if the send fails.
+        } else if mailboxContext, let inherited: MailContext = try optional("mailContext", sender.description),
+                  Date().timeIntervalSince1970 - (inherited.at ?? 0) <= sessionContextWindow {
+            // A session has no execution: what it acknowledged within the window is the
+            // conversation it is in, for every send in that window (so a loop cannot escape its
+            // depth by dropping reply_to or by sending twice). Past the window it starts fresh,
+            // so a session that once read deep mail is never refused forever.
             chainID = inherited.chainID; depth = inherited.depth + 1
-            try db.run("DELETE FROM record WHERE kind='mailContext' AND id=?", [.text(sender.description)])
         }
         guard depth <= MailLimits.maximumDepth else { throw ControllerError.invalidInput("chain_depth") }
         try spendSendRate(sender)
@@ -575,6 +592,7 @@ extension ControllerStore {
     private func acknowledge(_ recipient: MailAddress, ids: [UUID], executionID: ExecutionID?) throws -> [MailMessage] {
         guard (1...100).contains(ids.count) else { throw ControllerError.invalidInput("ids") }
         var context: MailContext? = try executionID.flatMap { try optional("mailContext", $0.description) }
+        let now = Date().timeIntervalSince1970
         let hadContext = context != nil
         var result: [MailMessage] = []
         for id in ids {
@@ -588,15 +606,17 @@ extension ControllerStore {
                 try event("mail.acked", id.uuidString.lowercased())
             }
             if context == nil || message.envelope.depth > context!.depth {
-                context = MailContext(chainID: message.envelope.chainID, depth: message.envelope.depth)
+                context = MailContext(chainID: message.envelope.chainID, depth: message.envelope.depth,
+                                      at: executionID == nil ? now : nil)
             }
             result.append(message)
         }
         if let context {
             let key = executionID?.description ?? recipient.description
             if executionID == nil {
+                // A deeper conversation still inside its window wins; an expired one gives way.
                 let prior: MailContext? = try optional("mailContext", key)
-                if let prior, prior.depth > context.depth { return result }
+                if let prior, prior.depth > context.depth, now - (prior.at ?? 0) <= sessionContextWindow { return result }
                 if prior != nil { try update("mailContext", key, value: context) } else { try insert("mailContext", key, value: context) }
             } else if hadContext { try update("mailContext", key, value: context) }
             else { try insert("mailContext", key, value: context) }

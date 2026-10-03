@@ -228,21 +228,21 @@ struct ControllerMailTests {
             _ = try await store.acknowledgeMail(mailbox: to, ids: [sent.envelope.id])
             swap(&from, &to)
         }
-        // The loop is still bounded...
+        // Within the window the loop stays bounded, however the sessions send: the session that
+        // read the deepest mail is refused, and the other cannot escape by sending twice.
         await #expect(throws: ControllerError.invalidInput("chain_depth")) {
             try await store.sendMail(from: from, to: to, id: UUID(), text: "too deep", replyTo: nil, priority: .normal, ownerAdmitted: true)
         }
-        // ...but that refusal consumed nothing, and once the context is spent by a send, the
-        // session's next unrelated message starts a new conversation at depth 0.
         let other = from == a ? b : a
-        let fresh = try await store.sendMail(from: other, to: c, id: UUID(), text: "new topic", replyTo: nil, priority: .normal, ownerAdmitted: true)
-        let fresher = try await store.sendMail(from: other, to: c, id: UUID(), text: "another", replyTo: nil, priority: .normal, ownerAdmitted: true)
-        #expect(fresher.envelope.depth == 0 && fresher.envelope.chainID != fresh.envelope.chainID)
-        // Many fresh sends never accumulate into one chain's limit.
-        for index in 0..<(MailLimits.sendsPerMinute - 3) {
-            let sent = try await store.sendMail(from: c, to: other, id: UUID(), text: "n\(index)", replyTo: nil, priority: .normal, ownerAdmitted: true)
-            #expect(sent.envelope.depth == 0)
-        }
+        let once = try await store.sendMail(from: other, to: c, id: UUID(), text: "same conversation", replyTo: nil, priority: .normal, ownerAdmitted: true)
+        let twice = try await store.sendMail(from: other, to: c, id: UUID(), text: "and again", replyTo: nil, priority: .normal, ownerAdmitted: true)
+        #expect(once.envelope.depth == MailLimits.maximumDepth && twice.envelope.chainID == once.envelope.chainID)
+        // Past the window, the session that read the deepest mail starts a new conversation:
+        // it is never refused forever.
+        await store.setSessionContextWindow(0.2)
+        try await Task.sleep(for: .milliseconds(400))
+        let fresh = try await store.sendMail(from: from, to: c, id: UUID(), text: "new topic", replyTo: nil, priority: .normal, ownerAdmitted: true)
+        #expect(fresh.envelope.depth == 0 && fresh.envelope.chainID != once.envelope.chainID)
     }
 
     @Test func theWakeBudgetIsJudgedOnTheMailThatMayWakeNotOnWhicheverArrivedLast() async throws {

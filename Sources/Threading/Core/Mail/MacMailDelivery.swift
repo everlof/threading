@@ -194,7 +194,13 @@ final class MacMailDelivery {
                 if let hosted { recipient = hosted } else { recipient = try await mailbox.register(targetID, name: targetName) }
                 if let callerHosted {
                     // A caller whose mailbox lives on its host sends from there, so the reply
-                    // reaches the mailbox it reads (the Mac answers no mail tools for it).
+                    // reaches the mailbox it reads (the Mac answers no mail tools for it). The
+                    // control plane already admitted this pair; a Mac recipient records that as
+                    // a grant naming the caller's host address exactly (siblings created after
+                    // the caller launched have none yet), so this Mac does not refuse it.
+                    if hosted == nil {
+                        _ = try await mailbox.ensureGrant(recipient: recipient, sender: callerHosted.address.description, mode: .notify)
+                    }
                     _ = try await mailboxes.send(as: callerHosted, to: recipient, text: text)
                     MacMailSync.shared.kick(host: callerHosted.address.host)
                 } else {

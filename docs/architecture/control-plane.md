@@ -393,8 +393,10 @@ recreated when it cannot be opened — and registers each session lazily as
   old location too, since a host unreachable at launch left the mailbox here — when a mailbox
   was registered there (`hasMailbox`), not merely because the address could exist. Each old
   location is moved on its own: an old host that is down (often why the project moved) does not
-  hold back this Mac's part, and its part is retried after that host's next successful sync. A
-  move asked for while another for the same session runs is queued behind it. Copied grants keep
+  hold back this Mac's part, and its part is retried after that host's next successful sync —
+  up to five times, and only while the project still runs where that move was taking it; a newer
+  move supersedes it. A move asked for while another for the same session runs is queued behind
+  it. Copied grants keep
   their chain token budget. Host → host needs the old host to have the new one as a transport
   peer; otherwise the mail stays and the event log says so. Every step is idempotent.
 - **A session whose mailbox is on its host sends from there.** `send_to_session`'s mailbox

@@ -1456,9 +1456,11 @@ turns the endpoint silent.
   lifecycle reporting on (`mailNotices`, gated by `MailNoticeHook.isWanted`); native sessions use
   `MacMailDelivery` instead. A remote-host terminal whose mailbox is on its host instead runs
   `<controller> agent-notice <event>` there (`MailNoticeHook.hostCommand`) — the same JSON, with
-  no dependence on this Mac. After answering, that hook reports in the background, through the
-  tunnel, what it answered (`?observed=block|seen`), because this Mac's ledger below must know
-  about a Stop it blocked; the Mac records it and answers silently. One whose host has no
+  no dependence on this Mac. After answering, that hook reports through the tunnel what it
+  answered (`?observed=block|seen`), because this Mac's ledger below must know about a Stop it
+  blocked; the Mac records it and answers silently. A Stop reports before the hook returns, so
+  the agent cannot start its next turn before the Mac has heard of the block (a late report would
+  be taken for the next turn's); the other events report in the background. One whose host has no
   controller keeps the curl entries, answered through the reverse tunnel.
 - **Codex** gets them in the account's shared `hooks.json` through `CodexHookInstaller`,
   token-guarded like every entry there. Adding them changed the file's text once, which costs the

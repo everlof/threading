@@ -97,11 +97,14 @@ final class RemoteSessionMailboxes {
         endpoint: RemoteControllerEndpoint
     ) async -> Binding? {
         if let binding = bindings[sessionID], binding.endpoint == endpoint { return binding }
-        if let running = provisioning[sessionID] {
+        // Wait out whatever is in flight. The same host: its answer is ours. Another host: look
+        // again, because another waiter may already have started provisioning ours.
+        while let running = provisioning[sessionID] {
             let binding = await running.task.value
-            // The same host: its answer is ours. Another host: provision there after it.
             if running.endpoint == endpoint { return binding }
+            if provisioning[sessionID]?.task == running.task { provisioning[sessionID] = nil }
         }
+        if let binding = bindings[sessionID], binding.endpoint == endpoint { return binding }
         let task = Task { await self.register(sessionID, name: name, endpoint: endpoint) }
         provisioning[sessionID] = (endpoint, task)
         let binding = await task.value
@@ -170,7 +173,7 @@ final class RemoteSessionMailboxes {
         return try await rpc.owner("mail-send", [
             .init(value: binding.address.description), .init(value: recipient.description),
             .init(value: UUID().uuidString), .init(text: text),
-            .init(value: MailPriority.normal.rawValue), .init(value: MacMailDefaults.ownerAdmittedArgument)
+            .init(value: MailPriority.normal.rawValue), .init(value: MailOwnerRPCWords.ownerAdmitted)
         ])
     }
 

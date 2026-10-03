@@ -486,10 +486,13 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   execution. An unacknowledged `interrupt` refuses `work_finish` in the finish transaction.
 - **Chains bound loops.** A message continues the chain of what it replies to, or of the mail its
   execution last acknowledged, so omitting `reply_to` does not escape the depth limit (4). A
-  session mailbox has no execution, so its context is the mail it acknowledged *since it last
-  sent*, consumed by that send: a ping-pong keeps its chain and stays bounded, while its next
-  unrelated message starts a new chain. (Keeping the deepest context forever, as first shipped,
-  refused every fresh message from a session after one deep exchange.) A reply to a forwarded
+  session mailbox has no execution, so its context is the deepest mail it acknowledged within
+  the last five minutes (`MailLimits.sessionContextWindow`): every send in that window continues
+  that chain, so a loop cannot escape its depth by dropping `reply_to` or sending twice, and a
+  message sent after the window starts a new chain. (Keeping the deepest context forever, as
+  first shipped, refused every fresh message from a session after one deep exchange; consuming
+  it on the next send, the first fix, let a second send escape the bound and still refused for
+  ever once the inherited depth was the maximum.) A reply to a forwarded
   copy carries `answeringFor` — the address the original reached — which only the same mailbox
   id on another host may claim, so a mailbox that moved still answers what was asked of it; a
   mailbox that moves onto the asker's own host replaces the asker's sent copy rather than

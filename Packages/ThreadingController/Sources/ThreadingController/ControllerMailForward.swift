@@ -164,11 +164,7 @@ extension ControllerStore {
     func adoptSentCopy(_ prior: MailMessage, _ envelope: MailEnvelope, expectedForward: Bool) throws -> Bool {
         guard expectedForward, [.outbound, .forwarded, .bounced].contains(prior.state),
               prior.envelope.sender.host == (try host().id), envelope.forwardedFrom == prior.envelope.recipient,
-              prior.envelope.sameRequest(as: MailEnvelope(id: envelope.id, sender: envelope.sender, senderName: envelope.senderName,
-                                                          recipient: prior.envelope.recipient, text: envelope.text,
-                                                          priority: envelope.priority, replyTo: envelope.replyTo,
-                                                          questionID: envelope.questionID, chainID: envelope.chainID,
-                                                          depth: envelope.depth, sentAt: envelope.sentAt)) else { return false }
+              prior.envelope.sameRequest(as: envelope, ignoringRecipient: true) else { return false }
         let id = envelope.id.uuidString.lowercased()
         try db.run("DELETE FROM mail_outbound WHERE message=?", [.text(id)])
         try db.run("DELETE FROM record WHERE kind='mail' AND id=?", [.text(id)])

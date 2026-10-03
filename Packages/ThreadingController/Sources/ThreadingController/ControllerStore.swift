@@ -4,7 +4,11 @@ import Foundation
 /// application database, email address, or deployment policy here.
 public actor ControllerStore {
     let db: ControllerDatabase
+    /// How long a session mailbox's acknowledgement carries its chain into what the session sends
+    /// next (`MailLimits.sessionContextWindow`). A store property so tests need not wait.
+    var sessionContextWindow: TimeInterval = MailLimits.sessionContextWindow
     public init(path: String) throws { db = try ControllerDatabase(path: path) }
+    func setSessionContextWindow(_ window: TimeInterval) { sessionContextWindow = window }
 
     public func addWorker(id: WorkerID, name: String) throws -> ControllerWorker {
         try Limits.text(name, field: "name", maximum: 256)

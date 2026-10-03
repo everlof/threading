@@ -309,7 +309,7 @@ struct ControllerMain {
             guard let priority = MailPriority(rawValue: args.count >= 5 ? args[4] : "normal") else { throw ControllerError.invalidInput("priority") }
             // `owner-admitted`: the owner decided admission itself (the Mac's same-project rule)
             // for a recipient on this host; it never reaches another host's grants.
-            guard args.count < 6 || args[5] == "owner-admitted" else { throw ControllerError.invalidInput("arguments") }
+            guard args.count < 6 || args[5] == MailOwnerRPCWords.ownerAdmitted else { throw ControllerError.invalidInput("arguments") }
             try output(await store.sendMail(from: MailAddress(args[0]), to: MailAddress(args[1]), id: id, text: file(args[3]),
                                             replyTo: nil, priority: priority, ownerAdmitted: args.count == 6))
         case "mail-ack":

@@ -461,6 +461,37 @@ final class MailNoticeHookTests: XCTestCase {
         MailStopContinuationLedger.reset()
     }
 
+    /// The generated host commands are shell, so they are run by a shell: each prints exactly what
+    /// the host's `agent-notice` answered, with or without a session token to report back with.
+    func testTheHostNoticeCommandsRunInAShellAndPassTheAnswerThrough() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("notice-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fake = directory.appendingPathComponent("threading-controller")
+        try "#!/bin/sh\ncat >/dev/null\n[ \"$2\" = stop ] && printf '%s' '{\"decision\":\"block\"}'\nexit 0\n"
+            .write(to: fake, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fake.path)
+        for event in MailNoticeHook.events {
+            for token in [nil, "token-without-a-listener"] {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/bin/sh")
+                process.arguments = ["-c", MailNoticeHook.hostCommand(executable: fake.path, event: event)]
+                var environment = ["PATH": "/usr/bin:/bin", MCPDefaults.socketEnvironmentKey: directory.appendingPathComponent("absent.sock").path]
+                if let token { environment[MCPDefaults.sessionTokenEnvironmentKey] = token }
+                process.environment = environment
+                let input = Pipe(), output = Pipe(), errors = Pipe()
+                process.standardInput = input; process.standardOutput = output; process.standardError = errors
+                try process.run()
+                input.fileHandleForWriting.write(Data("{}".utf8)); try input.fileHandleForWriting.close()
+                process.waitUntilExit()
+                let printed = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                let complaint = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                XCTAssertEqual(process.terminationStatus, 0, "\(event) \(token ?? "-"): \(complaint)")
+                XCTAssertEqual(printed, event == .stop ? "{\"decision\":\"block\"}" : "", "\(event) \(token ?? "-")")
+            }
+        }
+    }
+
     /// The notice typed at the idle edge starts a short new turn, and its Stop is blocked a few
     /// seconds after the previous turn's relayed finish. That block belongs to the new turn: its
     /// finish must be held, not treated as already relayed.

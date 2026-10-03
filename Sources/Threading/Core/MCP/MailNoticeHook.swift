@@ -44,8 +44,11 @@ enum MailNoticeHook {
     /// The Mac still has to *know* when that hook blocked a Stop: its silent lifecycle Stop hook
     /// reports a finished turn either way, and `MailStopContinuationLedger` keeps the session from
     /// being shown idle while the agent continues. So after answering, the hook also tells this
-    /// Mac what it answered — in the background, through the tunnel like the lifecycle hooks, and
-    /// only while a session token is set. The Mac's reply to that is always empty; a host that
+    /// Mac what it answered — through the tunnel like the lifecycle hooks, and only while a
+    /// session token is set. A Stop reports *before* the hook returns (bounded by the notice
+    /// timeout): the agent cannot continue, and so cannot start its next turn, until the Mac has
+    /// heard of the block, which keeps a late report from being taken for the next turn's. The
+    /// other events report in the background. The Mac's reply to that is always empty; a host that
     /// cannot reach the Mac answers its agent exactly the same.
     static func hostCommand(executable: String, event: MailNoticeEvent) -> String {
         let payload = "threading_hook_payload", answer = "threading_mail_answer"
@@ -59,7 +62,7 @@ enum MailNoticeHook {
             + "\(answer)=$(printf '%s' \"$\(payload)\" | \(ShellCommand(word: executable).source) agent-notice \(event.rawValue) 2>/dev/null); "
             + "\(observed)=\(MCPDefaults.mailNoticeObservedSeen); "
             + "[ -n \"$\(answer)\" ] && \(observed)=\(MCPDefaults.mailNoticeObservedBlock); "
-            + "[ -n \"$\(MCPDefaults.sessionTokenEnvironmentKey)\" ] && { \(payload)='{}'; \(report) >/dev/null 2>&1 & }; "
+            + "[ -n \"$\(MCPDefaults.sessionTokenEnvironmentKey)\" ] && { \(payload)='{}'; \(report) >/dev/null 2>&1\(event == .stop ? ";" : " &") }; "
             + "printf '%s' \"$\(answer)\"; true"
     }
 

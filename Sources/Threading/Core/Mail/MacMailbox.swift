@@ -179,20 +179,30 @@ actor MacMailbox {
 
     // MARK: - Owner configuration
 
+    /// `chainTokenBudget`: `.keep` leaves a stored budget as it is — the default, so a caller that
+    /// does not deal in budgets (re-applying a mode) never removes the spend fuse; `.set` writes
+    /// exactly the value given, nil meaning none (a grant copied as it was).
+    enum BudgetChange: Equatable { case keep, set(Int64?) }
+
     /// Grants `sender` (an address, `<host>/*` or `*`) `mode` on a session mailbox here, unless an
     /// equal grant already stands. Owner-only: no agent tool reaches this.
     @discardableResult
     func ensureGrant(recipient: MailAddress, sender: String, mode: MailMode?, allowsInterrupt: Bool = false,
-                     chainTokenBudget: Int64? = nil) async throws -> MailGrant {
+                     chainTokenBudget: BudgetChange = .keep) async throws -> MailGrant {
         let store = try await openStore()
         return try await refusing {
             let prior = try await store.mailGrants(recipient: recipient, limit: MacMailDefaults.grantPage).items
                 .first { $0.sender == sender }
+            let budget: Int64?
+            switch chainTokenBudget {
+            case .keep: budget = prior?.chainTokenBudget
+            case .set(let value): budget = value
+            }
             if let prior, prior.mode == mode, prior.allowsInterrupt == (mode != nil && allowsInterrupt),
-               prior.chainTokenBudget == chainTokenBudget { return prior }
+               prior.chainTokenBudget == budget { return prior }
             return try await store.setMailGrant(
                 recipient: recipient, sender: sender, expectedRevision: prior?.revision ?? 0,
-                mode: mode, allowsInterrupt: allowsInterrupt, chainTokenBudget: chainTokenBudget
+                mode: mode, allowsInterrupt: allowsInterrupt, chainTokenBudget: mode == nil ? nil : budget
             )
         }
     }
@@ -300,8 +310,6 @@ actor MacMailbox {
 // MARK: - Defaults
 
 enum MacMailDefaults {
-    /// `mail-send`'s last argument when the owner (this Mac's control plane) admitted the pair.
-    static let ownerAdmittedArgument = "owner-admitted"
     static let directoryName = "Mail"
     static let databaseFileName = "mailbox.db"
     static let directoryPermissions = 0o700

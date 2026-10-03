@@ -52,7 +52,7 @@ final class MailboxHandover {
     private var queued: [SessionID: [(title: String, old: Side, new: Side)]] = [:]
     /// Old locations a move could not reach (the host was down — often why the project moved).
     /// Retried after that host's next successful sync; bounded by the sessions moved.
-    private(set) var pending: [SessionID: (title: String, old: Side, new: Side)] = [:]
+    private(set) var pending: [SessionID: (title: String, old: Side, new: Side, attempts: Int)] = [:]
 
     func start() {
         observations.observe(ProjectExecutionHostDidChange.self) { [weak self] event in
@@ -83,16 +83,20 @@ final class MailboxHandover {
     @discardableResult
     func move(_ sessionID: SessionID, title: String, from old: Side, to new: Side) async -> Outcome {
         guard old != new else { return Outcome() }
+        // A newer move supersedes a retry still waiting for an old host; the new one re-records
+        // whatever of its own it cannot reach.
+        let retry = pending.removeValue(forKey: sessionID)
         guard !inFlight.contains(sessionID) else {
             queued[sessionID, default: []].append((title, old, new))
             return Outcome()
         }
         inFlight.insert(sessionID)
-        var outcome = await moveNow(sessionID, title: title, from: old, to: new)
+        let attempts = retry.map { $0.old == old && $0.new == new ? $0.attempts : 0 } ?? 0
+        var outcome = await moveNow(sessionID, title: title, from: old, to: new, attempts: attempts)
         while let next = queued[sessionID]?.first {
             queued[sessionID]?.removeFirst()
             if queued[sessionID]?.isEmpty == true { queued[sessionID] = nil }
-            let later = await moveNow(sessionID, title: next.title, from: next.old, to: next.new)
+            let later = await moveNow(sessionID, title: next.title, from: next.old, to: next.new, attempts: 0)
             outcome.moved += later.moved; outcome.grantsCopied += later.grantsCopied; outcome.issues += later.issues
         }
         inFlight.remove(sessionID)
@@ -100,15 +104,35 @@ final class MailboxHandover {
     }
 
     /// Finishes moves whose old host could not be reached, now that `endpoint` answered.
+    /// Only a move still current is retried: its session's project must still run where the move
+    /// was taking it, or a later move has already decided where the mailbox lives.
     func retryPending(reachable endpoint: RemoteControllerEndpoint) {
         for (sessionID, move) in pending {
             guard case .host(let old) = move.old, old.hostID == endpoint.hostID else { continue }
-            pending[sessionID] = nil
+            guard currentSide(sessionID) == move.new else { pending[sessionID] = nil; continue }
             Task { @MainActor in _ = await self.move(sessionID, title: move.title, from: move.old, to: move.new) }
         }
     }
 
-    private func moveNow(_ sessionID: SessionID, title: String, from old: Side, to new: Side) async -> Outcome {
+    /// Where the session's project runs now. Injected for tests.
+    var currentSide: (SessionID) -> Side? = { sessionID in
+        ProjectStore.shared.project(forSessionID: sessionID).map { MailboxHandover.side(for: $0.executionHost) }
+    }
+
+    /// Records an old location this move could not finish, up to a bounded number of attempts:
+    /// a reason that does not go away (no transport peer between two hosts) ends in the event log
+    /// instead of a retry on every sync.
+    private func deferOld(_ sessionID: SessionID, title: String, old: Side, new: Side, attempts: Int, reason: String) {
+        guard attempts + 1 < MailboxHandoverDefaults.retryAttempts else {
+            EventLog.shared.record(.mcp, "Mailbox move given up after repeated failures", [
+                "session": sessionID.uuidString, "reason": reason
+            ])
+            return
+        }
+        pending[sessionID] = (title, old, new, attempts + 1)
+    }
+
+    private func moveNow(_ sessionID: SessionID, title: String, from old: Side, to new: Side, attempts: Int) async -> Outcome {
         var outcome = Outcome()
         do {
             let macHost = try await mailbox.host().id
@@ -137,7 +161,7 @@ final class MailboxHandover {
                     let host = try await ensurePeered(endpoint)
                     olds.append((old, MailAddress(host: host, kind: .session, id: sessionID.rawValue)))
                 } catch {
-                    pending[sessionID] = (title, old, new)
+                    deferOld(sessionID, title: title, old: old, new: new, attempts: attempts, reason: RemoteControllerRPC.describe(error))
                     outcome.issues.append(RemoteControllerRPC.describe(error))
                     EventLog.shared.record(.mcp, "Old host unreachable; its mail moves when it answers again", [
                         "session": sessionID.uuidString,
@@ -156,7 +180,9 @@ final class MailboxHandover {
                     outcome.grantsCopied += try await copyGrants(from: oldAddress, on: side, to: newAddress, on: new)
                     if case .host = side { kick(newAddress.host) }
                 } catch {
-                    if case .host = side { pending[sessionID] = (title, old, new) }
+                    if case .host = side {
+                        deferOld(sessionID, title: title, old: old, new: new, attempts: attempts, reason: RemoteControllerRPC.describe(error))
+                    }
                     outcome.issues.append(RemoteControllerRPC.describe(error))
                 }
             }
@@ -253,7 +279,7 @@ final class MailboxHandover {
             switch newSide {
             case .thisMac:
                 try await mailbox.ensureGrant(recipient: new, sender: grant.sender, mode: grant.mode,
-                                              allowsInterrupt: grant.allowsInterrupt, chainTokenBudget: grant.chainTokenBudget)
+                                              allowsInterrupt: grant.allowsInterrupt, chainTokenBudget: .set(grant.chainTokenBudget))
             case .host(let endpoint):
                 let rpc = rpc(endpoint)
                 let page: ControllerPage<MailGrant> = try await rpc.owner("mail-grants", [.init(value: new.description)])
@@ -288,4 +314,7 @@ enum MailboxHandoverDefaults {
     /// Sessions moved per project change. A project is a handful of sessions; this only bounds
     /// a pathological one.
     static let sessionsPerMove = 64
+    /// Times one move's unreachable old part is retried after a successful sync before it is
+    /// given up and left in the event log.
+    static let retryAttempts = 5
 }
