@@ -5567,6 +5567,17 @@
         }
       }
     },
+    "Acknowledge mail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bekräfta post"
+          }
+        }
+      }
+    },
     "Actions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27596,6 +27607,17 @@
         }
       }
     },
+    "Leave a durable message in another agent’s mailbox, here or on another host." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lämna ett beständigt meddelande i en annan agents brevlåda, här eller på en annan värd."
+          }
+        }
+      }
+    },
     "Leave the CLI" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28961,6 +28983,17 @@
         }
       }
     },
+    "Mail directory" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Postkatalog"
+          }
+        }
+      }
+    },
     "Main" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29298,6 +29331,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Märkets ritanimation spelades upp igen."
+          }
+        }
+      }
+    },
+    "Mark messages this session acted on." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markera meddelanden som sessionen har hanterat."
           }
         }
       }
@@ -38799,6 +38843,17 @@
         }
       }
     },
+    "Read mail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs post"
+          }
+        }
+      }
+    },
     "Read my GitHub username" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38922,6 +38977,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Läs projektets sessioner — namn, id:n, agenter och vem som arbetar."
+          }
+        }
+      }
+    },
+    "Read this session’s unacknowledged mail." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs sessionens obekräftade post."
           }
         }
       }
@@ -44605,6 +44671,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skicka loggar till Codex underhållare"
+          }
+        }
+      }
+    },
+    "Send mail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka post"
           }
         }
       }
@@ -56941,6 +57018,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här sessionen förblir stängd tills Threading startar normalt."
+          }
+        }
+      }
+    },
+    "This session’s mail address and who it can write to." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sessionens postadress och vilka den kan skriva till."
           }
         }
       }

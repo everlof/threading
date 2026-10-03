@@ -588,6 +588,7 @@ final class SupervisionCommandService {
         case .queued: return "The brief is visible behind its current turn."
         case .typedUnconfirmed: return "The brief was typed, but the terminal did not confirm a turn."
         case .steered: return "The brief joined its current turn."
+        case .storedInMailbox: return "The brief is waiting in its mailbox until it can read it."
         case .refused(let refusal): return "The session launched, but the brief was refused: \(refusal.toolWords)"
         }
     }

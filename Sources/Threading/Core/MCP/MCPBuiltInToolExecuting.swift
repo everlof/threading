@@ -232,6 +232,22 @@ protocol MCPBuiltInToolExecuting: AnyObject {
   func watchSession(
     _ arguments: WatchSessionArguments, for sessionID: SessionID
   ) -> MCPToolResult
+  func mailSend(
+    _ arguments: MailSendArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func mailInbox(
+    _ arguments: MailInboxArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func mailAck(
+    _ arguments: MailAckArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func mailDirectory(
+    for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
   func listAccounts(_ arguments: ListAccountsArguments, for sessionID: SessionID) -> MCPToolResult
   func sessionCost(_ arguments: SessionCostArguments, for sessionID: SessionID) -> MCPToolResult
   func resumeSession(

@@ -89,6 +89,15 @@ final class WorkspaceControlPlane {
         /// Returns the user's own sentence when a grant ceiling currently bars new spend.
         var ceilingRefusal: (SpendCeiling, AgentSession) -> String? = { _, _ in nil }
         var accountMoveCount: (SessionID, SessionID, Date) -> Int = { _, _, _ in 0 }
+        /// Stores a message the target's surface could not take now as agent mail in its
+        /// mailbox, and answers whether it was stored. The default stores nothing, so a plane
+        /// built without a mailbox keeps the old refusals exactly.
+        var storeAsMail: (
+            _ text: String,
+            _ target: SessionID,
+            _ caller: SessionID,
+            _ completion: @escaping @MainActor (Bool) -> Void
+        ) -> Void = { _, _, _, completion in completion(false) }
     }
 
     private let dependencies: Dependencies
@@ -170,6 +179,11 @@ final class WorkspaceControlPlane {
                 guard let supervision = ControlGrantStore.shared.activeManager(of: childID),
                       supervision.managerID == managerID else { return 0 }
                 return ControlGrantStore.shared.moveCount(for: supervision, since: since)
+            },
+            storeAsMail: { text, targetID, callerID, completion in
+                MacMailDelivery.shared.storeUndeliverable(
+                    text, to: targetID, from: callerID, completion: completion
+                )
             }
         )
     )
@@ -340,10 +354,15 @@ final class WorkspaceControlPlane {
                     completion(.queued(behind: self.overview(of: target, caller: callerID)))
                 case .typedUnconfirmed:
                     completion(.typedUnconfirmed(to: self.overview(of: target, caller: callerID)))
-                case .noLiveSurface:
-                    completion(.refused(.targetNotRunning))
-                case .busyTerminal:
-                    completion(.refused(.targetBusy))
+                case .noLiveSurface, .busyTerminal:
+                    // Not a refusal any more: the message waits in the target's mailbox, and
+                    // the target is told it is there at a boundary it can take it. Refused as
+                    // before only when the mailbox itself could not store it.
+                    let refusal: ControlRefusal = outcome == .noLiveSurface ? .targetNotRunning : .targetBusy
+                    self.dependencies.storeAsMail(trimmed, targetID, callerID) { [weak self] stored in
+                        guard let self, stored else { return completion(.refused(refusal)) }
+                        completion(.storedInMailbox(for: self.overview(of: target, caller: callerID)))
+                    }
                 case .notTaken:
                     completion(.refused(.deliveryFailed))
                 }
@@ -361,6 +380,33 @@ final class WorkspaceControlPlane {
                 completion(.refused(.deliveryFailed))
             }
         }
+    }
+
+    // MARK: - Mail
+
+    /// Whether a session may leave mail for another session on this Mac.
+    ///
+    /// Exactly the scope a send has — membership before operation, so a target outside the
+    /// caller's scope answers `.targetUnknown` like one that does not exist. What it does not
+    /// check is what only a delivery needs: the target's surface, its account's limits and its
+    /// curfew. Mail is storing; whether and when the target reads it is its own turn's business.
+    func admitMail(
+        to targetID: SessionID,
+        from actor: ControlActor
+    ) -> Result<ControlSessionOverview, ControlRefusal> {
+        guard case .agentSession(let callerID) = actor,
+              let caller = dependencies.session(callerID),
+              !caller.isArchived,
+              dependencies.projectForSession(callerID) != nil else {
+            return .failure(.callerUnknown)
+        }
+        if let refusal = authorize(actor, operation: .sendMessage, target: targetID) {
+            return .failure(refusal)
+        }
+        guard targetID != callerID else { return .failure(.targetIsCaller) }
+        guard let target = dependencies.session(targetID) else { return .failure(.targetUnknown) }
+        guard !target.isArchived else { return .failure(.targetArchived) }
+        return .success(overview(of: target, caller: callerID))
     }
 
     // MARK: - Watching

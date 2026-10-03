@@ -687,7 +687,8 @@ final class MCPWireTests: XCTestCase {
     XCTAssertEqual(watchArguments.timeoutMinutes, 120)
 
     XCTAssertEqual(
-      MCPTools.workspaceTools, ["list_sessions", "send_to_session", "watch_session"])
+      MCPTools.workspaceTools,
+      ["list_sessions", "send_to_session", "watch_session", "mail_send", "mail_inbox", "mail_ack", "mail_directory"])
     XCTAssertTrue(MCPTools.definitions.contains { $0.name == "list_sessions" })
     let send = try XCTUnwrap(MCPTools.definitions.first { $0.name == "send_to_session" })
     XCTAssertEqual(send.inputSchema.required, ["session_id", "message"])

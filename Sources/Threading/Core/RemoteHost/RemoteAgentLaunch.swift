@@ -238,7 +238,10 @@ extension RemoteAgentLaunch {
                 brokersPermissions: false,
                 reportsLifecycle: reportsLifecycle && facts.curlPath != nil,
                 remoteControl: AgentLauncher.remoteControlAtStartup(for: session),
-                fastMode: session.fastMode
+                fastMode: session.fastMode,
+                // Answered by this Mac through the reverse tunnel, like the lifecycle reports:
+                // the session's mailbox is this Mac's record of it.
+                mailNotices: MailNoticeHook.isWanted(for: session.kind)
             ) {
                 let path = "\(directory)/\(stem)\(RemoteAgentLaunchDefaults.settingsFileSuffix)"
                 files.append((RemoteAgentLaunchDefaults.settingsVariable, path, settings))

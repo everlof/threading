@@ -121,6 +121,13 @@ extension AgentToolCoordinator {
                     not blindly resend: call list_sessions first, and if the session is now \
                     working it likely accepted after all. Resend only if it stays idle.
                     """))
+            case .storedInMailbox(let target):
+                completion(.success("""
+                    “\(target.title)” cannot take a message right now — its terminal is mid-turn \
+                    or still starting, or nothing is running — so the message was stored in its \
+                    mailbox instead. It is told only that mail is waiting, at a point it can act \
+                    on it, and reads the text with mail_inbox. Nothing was typed into it.
+                    """))
             case .refused(let refusal):
                 completion(.failure(Self.words(for: refusal)))
             }

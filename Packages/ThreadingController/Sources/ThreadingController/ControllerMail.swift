@@ -478,6 +478,24 @@ extension ControllerStore {
     }
     public func mail(_ id: UUID) throws -> MailMessage { try required("mail", id.uuidString.lowercased()) }
 
+    /// The newest messages a mailbox here sent, newest first, whatever became of them. One
+    /// bounded, index-ordered read per state (`record_scope_state`), merged, so the cost is the
+    /// limit times the state count rather than the sender's whole history.
+    public func recentSentMail(_ sender: MailAddress, limit: Int = 20) throws -> [MailMessage] {
+        try Limits.page(0, limit)
+        let states: [MailState] = [.outbound, .forwarded, .bounced, .inbox, .noticed, .acked]
+        var rows: [(Int64, MailMessage)] = []
+        for state in states {
+            for row in try db.rows("""
+                SELECT sequence,payload FROM record WHERE kind='mail' AND scope=? AND state=?
+                ORDER BY sequence DESC LIMIT ?
+                """, [.text(sender.description), .text(state.rawValue), .integer(Int64(limit))], pageByteLimit: 1_048_576) {
+                rows.append((row.integers[0], try decode(row.text(1))))
+            }
+        }
+        return rows.sorted { $0.0 > $1.0 }.prefix(limit).map(\.1)
+    }
+
     public func inbox(executionID: ExecutionID, after: Int64) throws -> ControllerPage<MailInboxItem> {
         try inbox(try executionAddress(executionID), after: after)
     }

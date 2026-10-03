@@ -7074,9 +7074,10 @@ enum MCPTools {
         list_sessions prints. The message is delivered as that session's own next turn: \
         an idle chat session receives it immediately, a chat session mid-turn queues it \
         visibly behind the turn in flight (where the user can edit or remove it), and a \
-        terminal session is typed into only while its agent is idle — a busy terminal \
-        refuses rather than typing into whatever its screen is showing. A dormant session \
-        cannot receive messages; resuming it is the user's decision.
+        terminal session is typed into only while its agent is idle. A busy terminal or a \
+        dormant session is never typed into: the message is stored in that session's mailbox \
+        instead, the session is told mail is waiting at a point it can act on it, and it \
+        reads the text with mail_inbox. Resuming a dormant session stays the user's decision.
 
         Every delivered message is prefixed with which session sent it, and it runs on \
         the receiving session's own usage. Send conclusions and briefs, not chatter: the \
@@ -9084,6 +9085,7 @@ enum MCPTools {
         )
       )
     ])
+    declarations.append(contentsOf: mailDeclarations)
     return declarations
   }()
 
