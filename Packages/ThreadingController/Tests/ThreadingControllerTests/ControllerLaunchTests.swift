@@ -81,6 +81,7 @@ struct ControllerLaunchTests {
         await #expect(throws: (any Error).self) { try await store.prepareLaunch(workerID: work.workerID, spec: spec()) }
         #expect(try await store.work(work.id).state == .queued)
         #expect(try await store.launches(workID: work.id).items.isEmpty)
+        try connection.run("DROP INDEX usage_receipt_coverage")
         try connection.run("DROP INDEX record_scope_state")
         try connection.run("DROP INDEX unresolved_launch")
         try connection.run("DROP INDEX unresolved_delivery")
@@ -89,6 +90,6 @@ struct ControllerLaunchTests {
         try connection.run("PRAGMA user_version=1")
         let migrated = try ControllerStore(path: path)
         #expect(try await migrated.work(work.id) == work)
-        #expect(try connection.rows("PRAGMA user_version").first?.integers[0] == 9)
+        #expect(try connection.rows("PRAGMA user_version").first?.integers[0] == 10)
     }
 }

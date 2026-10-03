@@ -50,6 +50,7 @@ actor MacMailSync {
     private var inFlight: Set<RemoteHostID> = []
     private var timer: Task<Void, Never>?
     private var endpointsProvider: (@MainActor () -> [Endpoint])?
+    private var nextHost = 0
 
     // MARK: - Initialization
 
@@ -70,11 +71,20 @@ actor MacMailSync {
                 try? await Task.sleep(nanoseconds: UInt64(MacMailSyncDefaults.interval * 1_000_000_000))
                 guard let self else { return }
                 let current = await MainActor.run { endpoints() }
-                for endpoint in current.prefix(MacMailSyncDefaults.hostsPerPass) {
+                let batch = await self.nextEndpoints(current)
+                for endpoint in batch {
                     _ = await self.sync(endpoint)
                 }
             }
         }
+    }
+
+    func nextEndpoints(_ endpoints: [Endpoint]) -> [Endpoint] {
+        guard !endpoints.isEmpty else { nextHost = 0; return [] }
+        let count = min(endpoints.count, MacMailSyncDefaults.hostsPerPass)
+        let start = nextHost % endpoints.count
+        nextHost = (start + count) % endpoints.count
+        return (0..<count).map { endpoints[(start + $0) % endpoints.count] }
     }
 
     /// An agent here just sent to `host`: sync that host soon rather than at the next tick.

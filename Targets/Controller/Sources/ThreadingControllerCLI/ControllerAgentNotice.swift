@@ -7,15 +7,20 @@ import ThreadingController
 enum ControllerAgentNotice {
     static func run(_ arguments: [String]) async {
         guard arguments.count == 2, let event = MailNoticeEvent(rawValue: arguments[1]) else { return }
-        // Drain the hook's JSON payload so the writer never sees a broken pipe; its content is
-        // not needed. Bounded, and stdin may already be closed.
-        _ = try? FileHandle.standardInput.read(upToCount: 262_144)
+        // Read bounded provider metadata. Session/path binds usage to this execution; no
+        // prompt, transcript body or credential is emitted. Stdin may already be closed.
+        let input = try? FileHandle.standardInput.read(upToCount: 262_144)
         let environment = ProcessInfo.processInfo.environment
         guard let database = environment["THREADING_CONTROLLER_DATABASE"],
               let store = try? ControllerStore(path: database) else { return }
         let response: ControllerAgentResponse?
         if let execution = environment["THREADING_EXECUTION_ID"], let credential = environment["THREADING_EXECUTION_CREDENTIAL"],
            let executionID = try? ExecutionID(execution) {
+            struct Hook: Decodable { let session_id: String; let transcript_path: String? }
+            if let input, let hook = try? JSONDecoder().decode(Hook.self, from: input), let path = hook.transcript_path {
+                try? await store.bindProviderTranscript(executionID, credential: credential,
+                    transcript: ProviderTranscript(sessionID: hook.session_id, path: path))
+            }
             response = try? await store.agentRequest(executionID: executionID, credential: credential, request: .mailNotice(event: event))
         } else if let address = environment["THREADING_MAILBOX_ADDRESS"], let credential = environment["THREADING_MAILBOX_CREDENTIAL"],
                   let mailbox = try? MailAddress(address) {

@@ -623,3 +623,55 @@ the daily budget at admission, a chain past its budget delivering without waking
 `scripts/tests/test_controller_usage.py` (an agent under ptyd writes a Claude transcript; the
 resident supervisor writes a complete, priced, attributed receipt and then holds a worker past its
 budget).
+
+## Host hardening and observability (schema v10)
+
+Controller and ptyd remain separate portable services. Rindabox is a consumer of the owner
+protocol; business prompts, grants and destinations remain application-owned. The owner
+protocol is local Unix-account authority, never a tenant-facing HTTP or unrestricted MCP API.
+Use a distinct OS account/container for clients requiring mutual isolation.
+
+Usage collection requires a confirmed stop. Launches persist start/stop timestamps; receipts
+carry duration and provider session identity without exporting prompts, argv or credentials.
+Daily cells use the recorded stop day, including delayed collection. Codex transcript identity
+comes from the provider's authenticated `agent-notice` hook (`session_id`, `transcript_path`),
+not directory/time inference. Install the hook even for mailbox-free workers. An unbound path,
+identity mismatch, unreadable child directory or capped child set is an explicit coverage gap.
+Claude's execution UUID remains its exact session lookup. Complete receipts are immutable.
+
+A capped worker reserves the remaining daily capacity for one execution until accounting is
+complete. Unknown, partial and pending usage hold new admissions for that UTC day; unresolved
+processes retain their reservation across days. A budgeted recipe with no usage source is held.
+This is a conservative admission policy, not a hard upper bound on a running provider's spend:
+provider turn limits and process deadlines still bound individual runs. `worker-capacity` names
+the reason and stable host authority, leaving an explicit seam for later account/window policy.
+Account coordination across hosts is not claimed. Never infer subscription-window percentage
+from token totals. Credentials stay on their execution host.
+
+The unsettled set is indexed by worker/day; admission reads one row, not historical launches.
+Expected concurrency is 1–8 per worker, 32 per store; retained launches may exceed 100,000.
+Trigger dispatch indexes active rules and supports at most 100 enabled rules per source.
+Paused/deleted history does not consume this limit; enabling excess rules is refused before
+admission. Existing over-limit stores fail the poll without advancing its cursor.
+
+Wake admission rechecks current mail authority. Explicit revocations prevent future work even
+from retained mail. Mac default provisioning preserves revocations; its bounded eight-host sync
+pass rotates through all hosts. Mail transport and probes share `BoundedCommand`: private process
+groups, nonblocking bounded streams, bounded cleanup, and no unbounded wait for descendant EOF.
+
+`scripts/test-controller.sh` runs core, runtime, CLI and real-ptyd suites. It uses the existing
+XCTest harness watchdog on Linux; Swift Testing failures are not retried. The standard Mac CI
+and a separate Ubuntu lane both invoke it. `threading-controller --version` reports protocol,
+schema and capabilities without opening or migrating a database. Before an upgrade, preserve an
+online SQLite backup; older binaries refuse schema 10. Restore into an isolated private directory
+with workers/sources disarmed before testing, never alongside active copies of the same work.
+
+A reusable Ubuntu/glibc distribution path is `scripts/build-controller-host.sh OUTPUT` inside a
+Linux Swift toolchain. It runs all controller/ptyd process checks and emits controller, ptyd,
+SHA-256 manifest, `install-host.py`, and `host-state.py`. Installation verifies architecture,
+content and protocol before writing private per-user files. It does not start services unless
+`--start` is supplied and refuses an implicit replacement of an existing unit. Existing-host
+upgrades remain an explicit stop, online snapshot, verified artifact/unit switch, restart and
+health-check operation. Rindabox's Ansible adapter retains its own destinations and credentials.
+`host-state.py restore` preserves identity and records but disarms workers, schedules, sources,
+triggers and peer transport. It never launches a restored execution or clears uncertainty.

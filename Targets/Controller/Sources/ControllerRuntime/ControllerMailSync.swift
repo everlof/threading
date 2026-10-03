@@ -65,51 +65,14 @@ public enum ControllerMailSync {
     }
 
     static func run(_ argv: [String], input: Data, limit: Int, timeout: TimeInterval) async throws -> Data {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, any Error>) in
-            DispatchQueue.global().async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: argv[0])
-                process.arguments = Array(argv.dropFirst())
-                let stdin = Pipe(), stdout = Pipe()
-                process.standardInput = stdin
-                process.standardOutput = stdout
-                process.standardError = FileHandle.nullDevice
-                do { try process.run() } catch {
-                    continuation.resume(throwing: ControllerRuntimeError.unavailable); return
-                }
-                // Writing on its own queue: a peer that does not read must not wedge this one.
-                DispatchQueue.global().async {
-                    try? stdin.fileHandleForWriting.write(contentsOf: input)
-                    try? stdin.fileHandleForWriting.close()
-                }
-                let deadline = ExpiryFlag()
-                let expired = DispatchWorkItem { deadline.set(); if process.isRunning { process.terminate() } }
-                DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: expired)
-                var data = Data()
-                var overflow = false
-                let reader = stdout.fileHandleForReading
-                while true {
-                    let chunk = reader.availableData
-                    if chunk.isEmpty { break }
-                    data.append(chunk)
-                    if data.count > limit { overflow = true; process.terminate(); break }
-                }
-                process.waitUntilExit()
-                expired.cancel()
-                let timedOut = deadline.isSet && !overflow
-                if overflow { continuation.resume(throwing: ControllerRuntimeError.overflow) }
-                else if timedOut { continuation.resume(throwing: ControllerRuntimeError.timedOut) }
-                else if process.terminationStatus != 0 { continuation.resume(throwing: ControllerRuntimeError.unavailable) }
-                else { continuation.resume(returning: data) }
-            }
-        }
-    }
-
-    private final class ExpiryFlag: @unchecked Sendable {
-        private let lock = NSLock()
-        private var value = false
-        func set() { lock.lock(); value = true; lock.unlock() }
-        var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
+        guard let executable = argv.first else { throw ControllerRuntimeError.unavailable }
+        let result = await BoundedCommand.run(executable: executable, arguments: Array(argv.dropFirst()),
+            environment: ProcessInfo.processInfo.environment, directory: FileManager.default.currentDirectoryPath,
+            input: input, timeout: timeout, outputLimit: limit)
+        if result.failure == "timed_out" { throw ControllerRuntimeError.timedOut }
+        if result.failure == "output_too_large" { throw ControllerRuntimeError.overflow }
+        guard result.failure == nil, result.exitCode == 0 else { throw ControllerRuntimeError.unavailable }
+        return result.output
     }
 
     static func describe(_ error: any Error) -> String {

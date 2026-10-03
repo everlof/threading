@@ -90,6 +90,7 @@ struct ControllerSupervisorTests {
         let work = try await helpers.seed(store)
         let launch = try #require(await store.prepareLaunch(workerID: work.workerID, spec: launches.spec()))
         let connection = try ControllerDatabase(path: directory.appendingPathComponent("controller.db").path)
+        try connection.run("DROP INDEX usage_receipt_coverage")
         try connection.run("DROP INDEX record_scope_state")
         try connection.run("DROP INDEX unresolved_launch")
         try connection.run("DROP INDEX unresolved_delivery")

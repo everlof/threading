@@ -132,6 +132,17 @@ final class RemoteSessionMailboxTests: XCTestCase {
         XCTAssertEqual(grants.map(\.sender), ["\(macHost.id)/*"])
         XCTAssertEqual(grants.first?.mode, .notify)
 
+        // Reprovisioning must preserve an owner's explicit revocation.
+        _ = try await remote.setMailGrant(recipient: binding.address, sender: "\(macHost.id)/*",
+            expectedRevision: 1, mode: nil, allowsInterrupt: false)
+        mailboxes.reset()
+        _ = await mailboxes.provision(session, name: "Deploy", endpoint: endpoint())
+        let revoked = try await remote.mailGrants(recipient: binding.address).items
+        XCTAssertNil(revoked.first?.mode)
+        XCTAssertEqual(revoked.first?.revision, 2)
+        _ = try await remote.setMailGrant(recipient: binding.address, sender: "\(macHost.id)/*",
+            expectedRevision: 2, mode: .notify, allowsInterrupt: false)
+
         // The Info panel reads it over owner-rpc; an unreachable host shows the last read, stale.
         _ = try await mac.send(from: SessionID(), senderName: "Fix the importer", to: binding.address, id: UUID(),
                                text: "hi", replyTo: nil, priority: .normal, ownerAdmitted: false)

@@ -124,6 +124,7 @@ struct ControllerMain {
     usage-receipt EXECUTION_UUID
     usage-receipts WORKER_UUID [CURSOR]
     usage-summary FROM_DAY THROUGH_DAY [CURSOR]   (UTC days, YYYY-MM-DD; daily cells per worker, account, model)
+    worker-capacity WORKER_UUID
     worker-budget WORKER_UUID
     worker-budget-set WORKER_UUID EXPECTED_REVISION TOKENS_PER_DAY|none
     A recipe names its transcript with "usage": {"runtime":"claude|codex","home":"/abs","account":"name"}.
@@ -155,6 +156,10 @@ struct ControllerMain {
     static func main() async {
         do {
             var arguments = Array(CommandLine.arguments.dropFirst())
+            if arguments == ["--version"] {
+                try output(["protocol": "1", "schema": "10", "capabilities": "work,mail,triggers,memory,usage,capacity,transcript-binding"])
+                return
+            }
             if arguments == ["--help"] { print(help); return }
             if arguments.first == "agent-notice" { await ControllerAgentNotice.run(arguments); return }
             let environment = ProcessInfo.processInfo.environment
@@ -377,6 +382,8 @@ struct ControllerMain {
             let after = try cursor(1); try output(await store.usageReceipts(worker: WorkerID(args[0]), after: after))
         case "usage-summary":
             let after = try cursor(2); try output(await store.usageSummary(from: args[0], through: args[1], after: after))
+        case "worker-capacity":
+            try count(1); try output(await store.workerCapacity(WorkerID(args[0])))
         case "worker-budget":
             try count(1); try output(await store.workerBudget(WorkerID(args[0])))
         case "worker-budget-set":

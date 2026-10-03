@@ -54,6 +54,9 @@ public struct ControllerLaunch: Codable, Equatable, Sendable {
     public internal(set) var startSeconds: UInt64?
     public internal(set) var startMicroseconds: UInt64?
     public internal(set) var exitStatus: Int32?
+    public internal(set) var startedAt: String?
+    public internal(set) var stoppedAt: String?
+    public internal(set) var providerTranscript: ProviderTranscript?
 }
 
 /// Status deliberately omits argv, environment and credentials. Recipes may contain secrets
@@ -67,10 +70,13 @@ public struct ControllerLaunchStatus: Codable, Equatable, Sendable {
     public let startSeconds: UInt64?
     public let startMicroseconds: UInt64?
     public let exitStatus: Int32?
+    public let startedAt: String?
+    public let stoppedAt: String?
     public init(_ launch: ControllerLaunch) {
         executionID = launch.executionID; workID = launch.workID; socketPath = launch.spec.socketPath
         state = launch.state; pid = launch.pid; startSeconds = launch.startSeconds
         startMicroseconds = launch.startMicroseconds; exitStatus = launch.exitStatus
+        startedAt = launch.startedAt; stoppedAt = launch.stoppedAt
     }
 }
 
@@ -87,6 +93,7 @@ extension ControllerStore {
                                           state: .prepared, pid: nil, startSeconds: nil, startMicroseconds: nil, exitStatus: nil)
             try insert("launch", launch.executionID.description, parent: claim.work.id.description,
                        state: launch.state.rawValue, scope: workerID.description, value: launch)
+            try db.run("INSERT INTO usage_unsettled(execution,worker) VALUES(?,?)", [.text(launch.executionID.description), .text(workerID.description)])
             // Private bearer routing credential, never included in launch/status/event output.
             let credential = UUID().uuidString + UUID().uuidString
             try insert("executionCredential", launch.executionID.description, value: credential)
@@ -115,7 +122,7 @@ extension ControllerStore {
                 guard policy.enabled, policy.revision == revision else { throw ControllerError.conflict }
             }
             _ = try running(id)
-            value.state = .dispatching
+            value.state = .dispatching; value.startedAt = Self.now()
             try saveLaunch(value)
             return value
         }
@@ -149,7 +156,10 @@ extension ControllerStore {
         try db.transaction {
             var value = try launch(id)
             if value.state == .stopped { return value }
-            value.state = .stopped; value.exitStatus = exitStatus
+            let stoppedAt = Self.now()
+            value.state = .stopped; value.exitStatus = exitStatus; value.stoppedAt = stoppedAt
+            try db.run("UPDATE usage_unsettled SET stopped_day=? WHERE execution=?",
+                       [.text(String(stoppedAt.prefix(10))), .text(id.description)])
             if value.spec.usage != nil {
                 try db.run("INSERT OR IGNORE INTO usage_pending(execution) VALUES(?)", [.text(id.description)])
             }

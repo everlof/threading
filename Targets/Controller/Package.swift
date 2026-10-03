@@ -20,6 +20,7 @@ let package = Package(
             .product(name: "ThreadingDomain", package: "ThreadingDomain"),
             .product(name: "ThreadingUsage", package: "ThreadingUsage")
         ]),
+        .testTarget(name: "ControllerRuntimeTests", dependencies: ["ControllerRuntime"]),
         .executableTarget(name: "ThreadingControllerCLI", dependencies: ["ControllerRuntime",
             .product(name: "ThreadingController", package: "ThreadingController")
         ])

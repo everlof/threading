@@ -77,6 +77,7 @@
 		7C00000C000000000000A004 /* TriggerProbeSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B005 /* TriggerProbeSources.swift */; };
 		7C00000C000000000000A005 /* TriggerProbeSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B005 /* TriggerProbeSources.swift */; };
 		7C00000C000000000000A006 /* TriggerProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B006 /* TriggerProbe.swift */; };
+		7C00000C000000000000A00F /* BoundedCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B00F /* BoundedCommand.swift */; };
 		7C00000C000000000000A007 /* AutomationSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B007 /* AutomationSchedule.swift */; };
 		7C00000C000000000000A002 /* threading-triggerd in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B011 /* threading-triggerd */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		7C00000C000000000000A003 /* codes.threading.triggerd.plist in Embed Launch Agents */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B004 /* codes.threading.triggerd.plist */; };
@@ -403,6 +404,7 @@
 		7C000007000000000000B009 /* threading-simulator-helper.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-simulator-helper.entitlements"; sourceTree = "<group>"; };
 		7C000007000000000000B011 /* threading-simulator-helper */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-simulator-helper"; sourceTree = BUILT_PRODUCTS_DIR; };
 		7C00000C000000000000B006 /* TriggerProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TriggerProbe.swift; path = Packages/ThreadingController/Sources/ThreadingController/TriggerProbe.swift; sourceTree = SOURCE_ROOT; };
+		7C00000C000000000000B00F /* BoundedCommand.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BoundedCommand.swift; path = Packages/ThreadingController/Sources/ThreadingController/BoundedCommand.swift; sourceTree = SOURCE_ROOT; };
 		7C00000C000000000000B007 /* AutomationSchedule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AutomationSchedule.swift; path = Packages/ThreadingDomain/Sources/ThreadingDomain/AutomationSchedule.swift; sourceTree = SOURCE_ROOT; };
 		7C00000C000000000000B005 /* TriggerProbeSources.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TriggerProbeSources.swift; sourceTree = "<group>"; };
 		7C00000C000000000000B001 /* main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
@@ -853,6 +855,7 @@
 				7C00000C000000000000B001 /* main.swift */,
 				7C00000C000000000000B005 /* TriggerProbeSources.swift */,
 				7C00000C000000000000B006 /* TriggerProbe.swift */,
+				7C00000C000000000000B00F /* BoundedCommand.swift */,
 				7C00000C000000000000B007 /* AutomationSchedule.swift */,
 				7C00000C000000000000B002 /* Info.plist */,
 				7C00000C000000000000B003 /* threading-triggerd.entitlements */,
@@ -1774,6 +1777,7 @@
 				7C00000C000000000000A001 /* main.swift in Sources */,
 				7C00000C000000000000A004 /* TriggerProbeSources.swift in Sources */,
 				7C00000C000000000000A006 /* TriggerProbe.swift in Sources */,
+				7C00000C000000000000A00F /* BoundedCommand.swift in Sources */,
 				7C00000C000000000000A007 /* AutomationSchedule.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

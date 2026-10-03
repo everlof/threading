@@ -148,125 +148,30 @@ public enum TriggerProbe {
     /// an oversized report kills the whole group; so does the probe's exit, so nothing it started
     /// outlives the poll.
     public static func run(_ invocation: ProbeInvocation) async -> ProbeRun {
-        await withCheckedContinuation { (continuation: CheckedContinuation<ProbeRun, Never>) in
-            DispatchQueue.global().async { continuation.resume(returning: runBlocking(invocation)) }
-        }
-    }
-
-    static func runBlocking(_ invocation: ProbeInvocation) -> ProbeRun {
         func failed(_ reason: String) -> ProbeRun { ProbeRun(outcome: .failed, events: [], cursor: nil, diagnostics: reason) }
-        // A probe that exits without reading its request must fail the poll, not this process.
-        signal(SIGPIPE, SIG_IGN)
         let request: Data
         do {
             var object: [String: Any] = ["limit": invocation.limit]
             object["cursor"] = invocation.cursor ?? NSNull()
             request = try JSONSerialization.data(withJSONObject: object) + Data([10])
         } catch { return failed("request") }
-        var input: [Int32] = [0, 0], output: [Int32] = [0, 0], errors: [Int32] = [0, 0]
-        // Close-on-exec from creation: a probe (or any other child this process starts at the
-        // same moment) must never inherit another poll's pipe ends, or that poll would never see
-        // end-of-file. dup2 onto 0/1/2 clears the flag for the child's own three.
-        spawnLock.lock()
-        guard makePipe(&input), makePipe(&output), makePipe(&errors) else { spawnLock.unlock(); return failed("pipe") }
-        #if canImport(Darwin)
-        var actions: posix_spawn_file_actions_t?
-        var attributes: posix_spawnattr_t?
-        #else
-        var actions = posix_spawn_file_actions_t()
-        var attributes = posix_spawnattr_t()
-        #endif
-        posix_spawn_file_actions_init(&actions)
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawn_file_actions_destroy(&actions); posix_spawnattr_destroy(&attributes) }
-        posix_spawn_file_actions_adddup2(&actions, input[0], 0)
-        posix_spawn_file_actions_adddup2(&actions, output[1], 1)
-        posix_spawn_file_actions_adddup2(&actions, errors[1], 2)
-        for descriptor in input + output + errors { posix_spawn_file_actions_addclose(&actions, descriptor) }
-        posix_spawn_file_actions_addchdir_np(&actions, invocation.directory)
-        posix_spawnattr_setpgroup(&attributes, 0)
-        #if canImport(Darwin)
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
-        #else
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP))
-        #endif
-        let argv = ([invocation.executable] + invocation.arguments).map { strdup($0) } + [nil]
-        let envp = invocation.environment.sorted { $0.key < $1.key }.map { strdup("\($0.key)=\($0.value)") } + [nil]
-        defer { argv.forEach { free($0) }; envp.forEach { free($0) } }
-        var pid: pid_t = 0
-        let spawned = posix_spawn(&pid, invocation.executable, &actions, &attributes, argv, envp)
-        for descriptor in [input[0], output[1], errors[1]] { close(descriptor) }
-        spawnLock.unlock()
-        guard spawned == 0 else {
-            for descriptor in [input[1], output[0], errors[0]] { close(descriptor) }
-            return failed("spawn_\(spawned)")
-        }
-        let group = DispatchGroup()
-        let killer = ProbeKiller(pid: pid)
-        let requestDescriptor = input[1], errorDescriptor = errors[0], outputDescriptor = output[0]
-        DispatchQueue.global().async(group: group) {
-            // A probe that never reads stdin must not wedge this write: it fails with EPIPE.
-            request.withUnsafeBytes { buffer in _ = write(requestDescriptor, buffer.baseAddress, buffer.count) }
-            close(requestDescriptor)
-        }
-        let stderrBox = ProbeOutputBox()
-        DispatchQueue.global().async(group: group) {
-            stderrBox.set(drain(errorDescriptor, limit: ProbeLimits.stderrBytes, overflow: nil))
-        }
-        var overflow = false
-        let timer = DispatchWorkItem { killer.expire() }
-        DispatchQueue.global().asyncAfter(deadline: .now() + min(invocation.timeout, ProbeLimits.maximumTimeout), execute: timer)
-        let stdout = drain(outputDescriptor, limit: ProbeLimits.stdoutBytes) { overflow = true; killer.kill() }
-        var status: Int32 = 0
-        while waitpid(pid, &status, 0) < 0 && errno == EINTR {}
-        timer.cancel()
-        killer.kill() // Nothing the probe started outlives the poll.
-        group.wait()
-        let stderr = stderrBox.value
-        let diagnostics = String(decoding: stderr.prefix(ProbeLimits.stderrBytes), as: UTF8.self)
-        if killer.expired { return failed("timed_out") }
-        if overflow { return failed("output_too_large") }
-        let exited = (status & 0x7f) == 0
-        let code = (status >> 8) & 0xff
-        guard exited else { return failed("signalled " + diagnostics) }
-        switch code {
+        let result = await BoundedCommand.run(executable: invocation.executable, arguments: invocation.arguments,
+            environment: invocation.environment, directory: invocation.directory, input: request,
+            timeout: min(invocation.timeout, ProbeLimits.maximumTimeout), outputLimit: ProbeLimits.stdoutBytes,
+            errorLimit: ProbeLimits.stderrBytes)
+        if let failure = result.failure { return failed(failure) }
+        let diagnostics = String(decoding: result.errors, as: UTF8.self)
+        switch result.exitCode {
         case 0:
             do {
-                let parsed = try parse(stdout, limit: invocation.limit)
+                let parsed = try parse(result.output, limit: invocation.limit)
                 return ProbeRun(outcome: .healthy, events: parsed.events, cursor: parsed.cursor, diagnostics: diagnostics)
             } catch ProbeFailure.invalidOutput(let reason) { return failed("invalid_output: \(reason)") }
             catch { return failed("invalid_output") }
         case 75: return ProbeRun(outcome: .backoff, events: [], cursor: nil, diagnostics: diagnostics)
         case 77: return ProbeRun(outcome: .authenticationNeeded, events: [], cursor: nil, diagnostics: diagnostics)
-        default: return failed("exit \(code) " + diagnostics)
+        default: return failed("exit \(result.exitCode.map(String.init) ?? "signal") " + diagnostics)
         }
-    }
-
-    private static func makePipe(_ descriptors: inout [Int32]) -> Bool {
-        guard pipe(&descriptors) == 0 else { return false }
-        for descriptor in descriptors { _ = fcntl(descriptor, F_SETFD, FD_CLOEXEC) }
-        return true
-    }
-    /// Held from creating a poll's pipes until its child's ends are closed in this process, so
-    /// two polls starting together cannot leak descriptors into each other's probe between
-    /// `pipe` and `fcntl` (Linux has no spawn-wide close-on-exec default).
-    private static let spawnLock = NSLock()
-
-    private static func drain(_ descriptor: Int32, limit: Int, overflow: (() -> Void)?) -> Data {
-        var data = Data()
-        var buffer = [UInt8](repeating: 0, count: 65_536)
-        var exceeded = false
-        while true {
-            let count = read(descriptor, &buffer, buffer.count)
-            if count < 0 && errno == EINTR { continue }
-            if count <= 0 { break }
-            if !exceeded {
-                data.append(contentsOf: buffer.prefix(count))
-                if data.count > limit { exceeded = true; overflow?() }
-            }
-        }
-        close(descriptor)
-        return data
     }
 
     /// SHA-256 of an executable (and a script it interprets). A changed file pauses the source
@@ -280,29 +185,6 @@ public enum TriggerProbe {
             hasher.update([0])
         }
         return hasher.finalize()
-    }
-}
-
-private final class ProbeOutputBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var data = Data()
-    func set(_ value: Data) { lock.lock(); data = value; lock.unlock() }
-    var value: Data { lock.lock(); defer { lock.unlock() }; return data }
-}
-
-private final class ProbeKiller: @unchecked Sendable {
-    private let lock = NSLock()
-    private let pid: pid_t
-    private var timedOut = false
-    init(pid: pid_t) { self.pid = pid }
-    var expired: Bool { lock.lock(); defer { lock.unlock() }; return timedOut }
-    func expire() { lock.lock(); timedOut = true; lock.unlock(); kill() }
-    func kill() {
-        #if canImport(Darwin)
-        _ = Darwin.kill(-pid, SIGKILL)
-        #else
-        _ = Glibc.kill(-pid, SIGKILL)
-        #endif
     }
 }
 

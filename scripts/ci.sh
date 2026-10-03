@@ -94,6 +94,9 @@ for package in ThreadingExtensionKit ThreadingPluginKit ThreadingRemoteKit Threa
     swift test --package-path "${repository_directory}/Packages/${package}"
 done
 
+say "Testing portable controller and real host processes"
+bash "${script_directory}/test-controller.sh" "${ci_scratch}/controller"
+
 # The plugins are their own packages under a different root, and until now their tests ran in no
 # lane at all: the Xcode plans build one target (ThreadingTests), and the loop above only walks
 # Packages/. Every test defending the device-log pane's behaviour was therefore only ever run by

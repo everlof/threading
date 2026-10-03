@@ -8,16 +8,16 @@ import ThreadingUsage
 public enum ControllerUsageCollector {
     public static func collect(store: ControllerStore, executionID: ExecutionID) async throws -> UsageReceipt {
         let launch = try await store.launch(executionID)
+        guard launch.state == .stopped else { throw ControllerError.conflict }
         guard let usage = launch.spec.usage else {
             return try await store.recordUsageReceipt(executionID, runtime: "unknown", account: "unknown", cells: [],
                                                       coverage: .unavailable, reason: "recipe_names_no_transcript")
         }
         let account = usage.account ?? usage.home
-        let started = launch.startSeconds.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         let found: (records: [UsageLedgerRecord], coverage: UsageCoverage, reason: String?)
         switch usage.runtime {
         case .claude: found = claude(home: usage.home, session: executionID.description, account: account)
-        case .codex: found = codex(home: usage.home, directory: launch.spec.directory, started: started, account: account)
+        case .codex: found = codex(home: usage.home, transcript: launch.providerTranscript, account: account)
         }
         return try await store.recordUsageReceipt(executionID, runtime: usage.runtime.rawValue, account: account,
                                                   cells: cells(found.records), coverage: found.coverage, reason: found.reason)
@@ -35,43 +35,36 @@ public enum ControllerUsageCollector {
             return ([], .unavailable, "transcript_not_found")
         }
         var files = [main]
+        var incomplete = false
         let subagents = main.deletingPathExtension().appendingPathComponent("subagents")
         if let children = try? FileManager.default.contentsOfDirectory(at: subagents, includingPropertiesForKeys: nil) {
             files += children.filter { $0.pathExtension == "jsonl" }.prefix(200)
+            incomplete = children.filter { $0.pathExtension == "jsonl" }.count > 200
+        } else if FileManager.default.fileExists(atPath: subagents.path) {
+            incomplete = true
         }
-        return read(files) { try ClaudeUsageAdapter.records(inTranscriptAt: $0, accountID: account, accountName: account) }
+        let result = read(files) { try ClaudeUsageAdapter.records(inTranscriptAt: $0, accountID: account, accountName: account) }
+        return incomplete ? (result.0, .partial, "subagent_transcripts_incomplete") : result
     }
 
-    /// Codex names its own session, so the rollout is the one in this launch's date folders,
-    /// written since it started, whose recorded working directory is the recipe's. Anything but
-    /// exactly one candidate is reported, not guessed.
-    static func codex(home: String, directory: String, started: Date?, account: String) -> ([UsageLedgerRecord], UsageCoverage, String?) {
-        guard let started else { return ([], .unavailable, "launch_start_unknown") }
-        let calendar = Calendar(identifier: .gregorian)
-        var candidates: [URL] = []
-        var day = calendar.startOfDay(for: started.addingTimeInterval(-86_400))
-        while day <= Date().addingTimeInterval(86_400), candidates.count <= 50 {
-            let parts = calendar.dateComponents([.year, .month, .day], from: day)
-            let folder = URL(fileURLWithPath: home).appendingPathComponent("sessions")
-                .appendingPathComponent(String(format: "%04d/%02d/%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0))
-            for file in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-            where file.pathExtension == "jsonl" {
-                let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-                if modified >= started.addingTimeInterval(-60), rolloutDirectory(file) == directory { candidates.append(file) }
-            }
-            day = calendar.date(byAdding: .day, value: 1, to: day) ?? Date.distantFuture
+    /// A host hook binds the exact path/session while the execution credential is live.
+    /// Check the resolved path again at read time, including symlinks, and verify file identity.
+    static func codex(home: String, transcript: ProviderTranscript?, account: String) -> ([UsageLedgerRecord], UsageCoverage, String?) {
+        guard let transcript else { return ([], .unavailable, "provider_transcript_unbound") }
+        let root = URL(fileURLWithPath: home).resolvingSymlinksInPath().path + "/"
+        let file = URL(fileURLWithPath: transcript.path).resolvingSymlinksInPath()
+        guard file.path.hasPrefix(root), file.pathExtension == "jsonl",
+              let handle = try? FileHandle(forReadingFrom: file) else {
+            return ([], .unavailable, "provider_transcript_unreadable")
         }
-        guard candidates.count == 1 else { return ([], .unavailable, candidates.isEmpty ? "rollout_not_found" : "rollout_ambiguous") }
-        return read(candidates) { try CodexUsageAdapter.records(inRolloutAt: $0, accountID: account, accountName: account) }
-    }
-
-    static func rolloutDirectory(_ file: URL) -> String? {
-        guard let handle = try? FileHandle(forReadingFrom: file), let data = try? handle.read(upToCount: 65_536) else { return nil }
-        try? handle.close()
-        guard let line = data.split(separator: 10).first,
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 65_536), let line = data.split(separator: 10).first,
               let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
-              let payload = object["payload"] as? [String: Any] else { return nil }
-        return payload["cwd"] as? String
+              object["type"] as? String == "session_meta",
+              let payload = object["payload"] as? [String: Any], payload["id"] as? String == transcript.sessionID else {
+            return ([], .failed, "provider_transcript_identity")
+        }
+        return read([file]) { try CodexUsageAdapter.records(inRolloutAt: $0, accountID: account, accountName: account) }
     }
 
     static func read(_ files: [URL], _ adapter: (URL) throws -> [UsageLedgerRecord]) -> ([UsageLedgerRecord], UsageCoverage, String?) {

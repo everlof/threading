@@ -315,8 +315,9 @@ extension ControllerStore {
                         [.text(source.id.description), .text(key)]).isEmpty { return nil }
         let recordID = UUID().uuidString.lowercased()
         var receipts: [TriggerReceipt] = []
-        let triggers = try db.rows("SELECT payload FROM record WHERE kind='trigger' AND parent=? ORDER BY sequence LIMIT 100",
+        let triggers = try db.rows("SELECT payload FROM record WHERE kind='trigger' AND parent=? AND json_extract(payload,'$.enabled')=1 AND json_extract(payload,'$.deleted')=0 ORDER BY sequence LIMIT 101",
                                    [.text(source.id.description)])
+        guard triggers.count <= 100 else { throw ControllerError.invalidInput("active_trigger_limit") }
         for row in triggers {
             let trigger: ControllerTrigger = try decode(row.text(0))
             guard trigger.enabled, !trigger.deleted else { continue }
@@ -385,6 +386,11 @@ extension ControllerStore {
             let prior: ControllerTrigger = try required("trigger", id.description)
             guard prior.revision == expectedRevision, !prior.deleted else { throw ControllerError.conflict }
             if enabled { try requireWorkSource(prior.spec.workerID, source: .event) }
+            if enabled && !prior.enabled {
+                let active = try db.rows("SELECT id FROM record WHERE kind='trigger' AND parent=? AND json_extract(payload,'$.enabled')=1 AND json_extract(payload,'$.deleted')=0 LIMIT 100",
+                                         [.text(prior.spec.sourceID.description)])
+                guard active.count < 100 else { throw ControllerError.invalidInput("active_trigger_limit") }
+            }
             let value = ControllerTrigger(id: id, revision: prior.revision + 1, spec: prior.spec, enabled: enabled, deleted: false)
             try update("trigger", id.description, value: value)
             try event(enabled ? "trigger.enabled" : "trigger.paused", id.description)

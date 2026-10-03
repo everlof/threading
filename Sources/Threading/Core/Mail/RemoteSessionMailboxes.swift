@@ -125,7 +125,7 @@ final class RemoteSessionMailboxes {
             let pattern = "\(macHost)/*"
             let grants: ControllerPage<MailGrant> = try await rpc.owner("mail-grants", [.init(value: address.description)])
             let prior = grants.items.first { $0.sender == pattern }
-            if prior?.mode == nil {
+            if prior == nil {
                 let _: MailGrant = try await rpc.owner("mail-grant-set", [
                     .init(value: address.description), .init(value: pattern),
                     .init(value: String(prior?.revision ?? 0)), .init(value: MailMode.notify.rawValue),
@@ -157,7 +157,7 @@ final class RemoteSessionMailboxes {
         Task {
             for (sibling, title) in siblings {
                 guard let recipient = try? await mailbox.register(sibling, name: title) else { continue }
-                _ = try? await mailbox.ensureGrant(recipient: recipient, sender: address.description, mode: .notify)
+                _ = try? await mailbox.admitSibling(recipient: recipient, sender: address)
             }
         }
     }

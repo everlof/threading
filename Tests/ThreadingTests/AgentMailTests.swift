@@ -627,6 +627,22 @@ final class MacMailSyncTests: XCTestCase {
         private final class Box: @unchecked Sendable { var value: String? }
     }
 
+    func testPeriodicPassRotatesPastEightHosts() async throws {
+        let mac = MacMailbox(databaseURL: directory.appendingPathComponent("mac/mailbox.db"))
+        let store = try await mac.controllerStore()
+        let sync = MacMailSync(mailbox: mac, runner: FakeRemote(store: store))
+        let endpoints = (0..<12).map { index in
+            MacMailSync.Endpoint(hostID: RemoteHostID(), name: "host-\(index)",
+                destination: RemoteHostDestination(alias: "host-\(index)", configFile: nil),
+                executable: "/bin/controller", database: "/state/controller.db")
+        }
+        let first = await sync.nextEndpoints(endpoints)
+        let second = await sync.nextEndpoints(endpoints)
+        XCTAssertEqual(first.count, 8)
+        XCTAssertEqual(second.count, 8)
+        XCTAssertEqual(Set((first + second).map(\.hostID)).count, 12)
+    }
+
     func testPeeringPushAndPullCarryMailBothWaysAndRefuseAWrongHost() async throws {
         let mac = MacMailbox(databaseURL: directory.appendingPathComponent("mac/mailbox.db"))
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("host"), withIntermediateDirectories: true)

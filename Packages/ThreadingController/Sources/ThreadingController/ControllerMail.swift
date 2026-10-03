@@ -561,7 +561,13 @@ extension ControllerStore {
             """, [.text(recipient.description)])
         for row in rows {
             let message: MailMessage = try decode(row.text(0))
-            if let budget = try matchingGrant(recipient: recipient, sender: message.envelope.sender)?.chainTokenBudget,
+            let grant = try matchingGrant(recipient: recipient, sender: message.envelope.sender)
+            // Revocation also withdraws permission to start future work from retained mail.
+            // Replies retain their implicit consent only where no explicit revocation stands.
+            if let grant, grant.mode == nil { continue }
+            let reply = try isReplyToOwnMail(message.envelope)
+            guard grant?.mode == .wake || grant?.mode == .ask || reply else { continue }
+            if let budget = grant?.chainTokenBudget,
                try chainUsage(message.envelope.chainID) >= budget { continue }
             return message
         }

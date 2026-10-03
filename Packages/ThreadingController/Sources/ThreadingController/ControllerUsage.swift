@@ -52,6 +52,9 @@ public struct UsageReceipt: Codable, Equatable, Sendable {
     public let coverage: UsageCoverage
     public let reason: String?
     public let endedAt: String
+    public let startedAt: String?
+    public let durationSeconds: Double?
+    public let providerSessionID: String?
     /// The measure budgets use: everything but cached input reads, which providers bill at a
     /// fraction and which a long conversation rereads every turn.
     public var budgetTokens: Int64 { cells.reduce(0) { $0 + UsageReceipt.budgetTokens($1.tokens) } }
@@ -101,6 +104,7 @@ extension ControllerStore {
                 return existing
             }
             let launch = try launch(executionID)
+            guard launch.state == .stopped, let stoppedAt = launch.stoppedAt else { throw ControllerError.conflict }
             let work = try work(launch.workID)
             let context: MailContext? = try optional("mailContext", executionID.description)
             let trigger = work.key.hasPrefix("trigger:") ? work.key.split(separator: ":").dropFirst().first.map(String.init) : nil
@@ -118,7 +122,9 @@ extension ControllerStore {
             let receipt = UsageReceipt(executionID: executionID, workID: work.id, workerID: work.workerID, source: work.source,
                                        chainID: context?.chainID, triggerID: trigger, runtime: runtime,
                                        account: String(account.prefix(256)), cells: bounded, coverage: coverage,
-                                       reason: reason.map { String($0.prefix(512)) }, endedAt: Self.now())
+                                       reason: reason.map { String($0.prefix(512)) }, endedAt: stoppedAt,
+                                       startedAt: launch.startedAt, durationSeconds: Self.duration(launch.startedAt, stoppedAt),
+                                       providerSessionID: launch.providerTranscript?.sessionID)
             try insert("usageReceipt", executionID.description, parent: work.id.description, state: coverage.rawValue,
                        scope: work.workerID.description, value: receipt)
             let day = String(receipt.endedAt.prefix(10))
@@ -141,6 +147,9 @@ extension ControllerStore {
                 let isNew = (try optional("usageChain", id) as UsageChainTotal?) == nil
                 total.tokens += receipt.budgetTokens; total.executions += 1
                 if isNew { try insert("usageChain", id, value: total) } else { try update("usageChain", id, value: total) }
+            }
+            if coverage == .complete {
+                try db.run("DELETE FROM usage_unsettled WHERE execution=?", [.text(executionID.description)])
             }
             try db.run("DELETE FROM usage_pending WHERE execution=?", [.text(executionID.description)])
             try event("usage.recorded", executionID.description)
@@ -197,8 +206,44 @@ extension ControllerStore {
                                [.text(day), .text(worker.description)])
         return rows.first?.integers[0] ?? 0
     }
-    func workerWithinBudget(_ worker: WorkerID) throws -> Bool {
-        guard let limit = try workerBudget(worker)?.tokensPerDay else { return true }
-        return try workerSpendToday(worker) < limit
+    static func duration(_ start: String?, _ end: String) -> Double? {
+        let formatter = ISO8601DateFormatter()
+        guard let start, let began = formatter.date(from: start), let ended = formatter.date(from: end) else { return nil }
+        return max(0, ended.timeIntervalSince(began))
     }
+    func workerWithinBudget(_ worker: WorkerID) throws -> Bool { try workerCapacity(worker).admitted }
+
+    /// A local authority today. Account/window coordination may later supply another decision
+    /// without moving credentials or admission out of the host's transaction.
+    public func workerCapacity(_ worker: WorkerID) throws -> WorkerCapacity {
+        let _: ControllerWorker = try required("worker", worker.description)
+        let limit = try workerBudget(worker)?.tokensPerDay
+        let spend = try workerSpendToday(worker)
+        let today = String(Self.now().prefix(10))
+        let unsettled = try db.rows("SELECT execution FROM usage_unsettled WHERE worker=? AND (stopped_day IS NULL OR stopped_day=?) LIMIT 1",
+                                    [.text(worker.description), .text(today)])
+        let policy: ControllerWorkerPolicy? = try optional("workerPolicy", worker.description)
+        let reason: WorkerCapacity.Reason
+        if policy?.enabled != true { reason = .paused }
+        else if limit == nil { reason = .ready }
+        else if policy?.spec.usage == nil { reason = .usageNotConfigured }
+        else if !unsettled.isEmpty { reason = .usageUnsettled }
+        else if spend >= (limit ?? 0) { reason = .dailyBudget }
+        else { reason = .ready }
+        return WorkerCapacity(workerID: worker, authority: try host().id, scope: "host", reason: reason,
+                              spentTokens: spend, limitTokens: limit,
+                              unsettledExecution: try unsettled.first.map { try ExecutionID($0.text(0)) })
+    }
+}
+
+public struct WorkerCapacity: Codable, Sendable {
+    public enum Reason: String, Codable, Sendable { case ready, paused, usageNotConfigured, usageUnsettled, dailyBudget }
+    public let workerID: WorkerID
+    public let authority: HostID
+    public let scope: String
+    public let reason: Reason
+    public let spentTokens: Int64
+    public let limitTokens: Int64?
+    public let unsettledExecution: ExecutionID?
+    public var admitted: Bool { reason == .ready }
 }

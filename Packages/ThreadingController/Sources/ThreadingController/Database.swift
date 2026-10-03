@@ -31,7 +31,7 @@ final class ControllerDatabase {
             sqlite3_busy_timeout(handle, 3_000)
             try transaction {
                 let version = try rows("PRAGMA user_version").first?.integers[0]
-                guard let version, (0...9).contains(version) else { throw ControllerError.unsupportedSchema }
+                guard let version, (0...10).contains(version) else { throw ControllerError.unsupportedSchema }
                 if version == 0 {
                     guard try rows("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1").isEmpty else {
                         throw ControllerError.unsupportedSchema
@@ -119,6 +119,31 @@ final class ControllerDatabase {
                         """)
                     try run("CREATE INDEX IF NOT EXISTS usage_daily_worker ON usage_daily(worker,day)")
                     try run("PRAGMA user_version=9")
+                }
+            }
+            if current < 10 {
+                try transaction {
+                    try run("CREATE INDEX IF NOT EXISTS trigger_active_source ON record(parent,sequence) WHERE kind='trigger' AND json_extract(payload,'$.enabled')=1 AND json_extract(payload,'$.deleted')=0")
+                    try run("CREATE INDEX IF NOT EXISTS usage_receipt_coverage ON record(scope,state,sequence) WHERE kind='usageReceipt'")
+                    try run("CREATE TABLE IF NOT EXISTS usage_unsettled (execution TEXT PRIMARY KEY, worker TEXT NOT NULL, stopped_day TEXT)")
+                    try run("CREATE INDEX IF NOT EXISTS usage_unsettled_worker ON usage_unsettled(worker,stopped_day)")
+                    try run("""
+                        INSERT OR IGNORE INTO usage_unsettled(execution,worker)
+                        SELECT l.id,l.scope FROM record l WHERE l.kind='launch'
+                        AND NOT EXISTS (SELECT 1 FROM record r WHERE r.kind='usageReceipt' AND r.id=l.id AND r.state='complete')
+                        """)
+                    try run("CREATE INDEX IF NOT EXISTS event_subject_kind ON event(subject,kind,sequence)")
+                    // Existing stop events are authoritative; never substitute migration time.
+                    try run("""
+                        UPDATE record SET payload=json_set(payload,'$.stoppedAt',
+                            (SELECT at FROM event WHERE kind='launch.stopped' AND subject=record.id ORDER BY sequence DESC LIMIT 1))
+                        WHERE kind='launch' AND state='stopped' AND json_extract(payload,'$.stoppedAt') IS NULL
+                        """)
+                    try run("""
+                        UPDATE usage_unsettled SET stopped_day=(SELECT substr(json_extract(payload,'$.stoppedAt'),1,10)
+                        FROM record WHERE kind='launch' AND id=usage_unsettled.execution)
+                        """)
+                    try run("PRAGMA user_version=10")
                 }
             }
             try run("PRAGMA journal_mode=WAL")

@@ -89,3 +89,16 @@ jobs:
         env:
           THREADING_WASM_SDK_ID: swift-6.3.3-RELEASE_wasm
         run: scripts/verify_navigator_examples_wasi.sh
+
+  controller-linux:
+    runs-on: ubuntu-24.04
+    container:
+      image: swift:6.3.2-noble
+      options: --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - run: apt-get update && apt-get install -y libsqlite3-dev pkg-config python3
+      - run: bash scripts/test-controller.sh /tmp/controller-tests
