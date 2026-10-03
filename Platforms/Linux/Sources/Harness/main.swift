@@ -23,7 +23,7 @@ func render(_ root: NSView, scale: CGFloat = 2, background: NSColor, to path: St
 }
 
 let output = ProcessInfo.processInfo.environment["SPIKE_OUT"] ?? "."
-if !LayoutTests.run() || !BackingAlignmentTests.run() {
+if !LayoutTests.run() || !LayoutRegionTests.run() || !BackingAlignmentTests.run() {
     fflush(nil)
     exit(1)
 }

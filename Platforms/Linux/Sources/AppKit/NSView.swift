@@ -45,6 +45,26 @@ open class NSView: NSResponder, NSLayoutItem {
 
     // MARK: - Geometry
 
+    /// The macOS 26 region vocabulary used by unchanged pane bands. The Linux host places
+    /// decorations outside this retained content tree, so neither safe areas nor margins
+    /// currently consume content. Corner adaptation remains part of the recipe rather than
+    /// importing macOS window-control clearances into a native Linux window.
+    public struct LayoutRegion: Hashable, Sendable {
+        public enum AdaptivityAxis: Hashable, Sendable { case horizontal, vertical }
+        private enum Kind: Hashable, Sendable { case safeArea, margins }
+
+        private let kind: Kind
+        private let cornerAdaptation: AdaptivityAxis?
+
+        public static func safeArea(cornerAdaptation: AdaptivityAxis? = nil) -> LayoutRegion {
+            LayoutRegion(kind: .safeArea, cornerAdaptation: cornerAdaptation)
+        }
+
+        public static func margins(cornerAdaptation: AdaptivityAxis? = nil) -> LayoutRegion {
+            LayoutRegion(kind: .margins, cornerAdaptation: cornerAdaptation)
+        }
+    }
+
     open var frame: NSRect {
         didSet {
             needsDisplay = true
@@ -243,6 +263,7 @@ open class NSView: NSResponder, NSLayoutItem {
 
     var activeConstraints: [NSLayoutConstraint] = []
     public private(set) var layoutGuides: [NSLayoutGuide] = []
+    private var regionGuides: [LayoutRegion: NSLayoutGuide] = [:]
 
     public var constraints: [NSLayoutConstraint] { activeConstraints }
 
@@ -256,6 +277,31 @@ open class NSView: NSResponder, NSLayoutItem {
         layoutGuides.append(guide)
         setNeedsLayout()
     }
+
+    open var safeAreaLayoutGuide: NSLayoutGuide { layoutGuide(for: .safeArea()) }
+
+    /// A region owns one guide and four equations for this view's lifetime. Resizing and
+    /// reparenting reuse them; the solver updates the guide frame on the next layout pass,
+    /// while `rect(for:)` answers current local geometry without forcing layout.
+    public func layoutGuide(for region: LayoutRegion) -> NSLayoutGuide {
+        if let guide = regionGuides[region] { return guide }
+        let guide = NSLayoutGuide()
+        addLayoutGuide(guide)
+        NSLayoutConstraint.activate([
+            guide.leadingAnchor.constraint(equalTo: leadingAnchor),
+            guide.trailingAnchor.constraint(equalTo: trailingAnchor),
+            guide.topAnchor.constraint(equalTo: topAnchor),
+            guide.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+        regionGuides[region] = guide
+        return guide
+    }
+
+    /// Linux content currently has no native decoration or platform-authored margin inside
+    /// it. This deliberately differs from macOS's default 20-point layout margins.
+    public func edgeInsets(for _: LayoutRegion) -> NSEdgeInsets { NSEdgeInsets() }
+
+    public func rect(for _: LayoutRegion) -> NSRect { bounds }
 
     public static let noIntrinsicMetric: CGFloat = -1
     open var intrinsicContentSize: NSSize {

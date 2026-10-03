@@ -330,7 +330,9 @@ with log_path.open('w+') as log:
             'terminal output unnecessarily rasterized or shaped the navigator'
         verify_owner(0)
 
-        xdo('windowsize', window, '1280', '528')
+        # Growing an initially centered SDL window can put its trailing edge off the Xvfb
+        # screen and crop the rendered evidence. Keep the complete resized shell visible.
+        xdo('windowmove', window, '0', '0', 'windowsize', window, '1280', '528')
         eventually(lambda: geometry() == (960, 528), 'resized pane and text geometry')
         eventually(lambda: state(0)['cols'] == 96 and state(0)['rows'] == 24,
                    'actual child PTY resize excludes sidebar')
@@ -413,7 +415,7 @@ with log_path.open('w+') as log:
         # Middle-click is unsupported in the sidebar and must not silently change only the
         # native focus owner. The following byte traverses the real terminal PTY worker.
         before = state(1)['input']
-        xdo('mousemove', '--window', window, '40', '78', 'click', '2')
+        xdo('mousemove', '--window', window, '40', '108', 'click', '2')
         key('x')
         eventually(lambda: state(1)['input'] == before + b'x'.hex(),
                    'unsupported middle-click preserves terminal input ownership')

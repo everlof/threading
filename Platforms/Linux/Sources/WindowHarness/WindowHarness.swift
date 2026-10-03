@@ -106,13 +106,15 @@ struct WindowHarness {
     private static let maximumPersistedRuntimeTitleScalars = 256
     private static let navigatorRowHeight: CGFloat = 22
     private static let navigatorRowStride: CGFloat = 24
+    @MainActor private static var navigatorHeaderHeight: CGFloat { PaneHeaderView.bandHeight }
+    @MainActor private static var navigatorRowsTop: Int32 { Int32((navigatorHeaderHeight + 2) * 2) }
     #if os(Linux)
     static let terminalCellWidth = Int(TW_TERMINAL_CELL_WIDTH)
     static let terminalCellHeight = Int(TW_TERMINAL_CELL_HEIGHT)
     #endif
 
     @MainActor private static func navigatorRowRect(_ index: Int, width: Int, height: Int) -> NSRect {
-        let top = Specimen.Window.titleHeight + 2 + CGFloat(index) * navigatorRowStride
+        let top = navigatorHeaderHeight + 2 + CGFloat(index) * navigatorRowStride
         // The diagnostic root uses integer half-size bounds, even for an odd SDL pixel size.
         return NSRect(x: 6, y: CGFloat(height / 2) - top - navigatorRowHeight,
                       width: CGFloat(width / 2) - 12, height: navigatorRowHeight)
@@ -1162,19 +1164,59 @@ struct WindowHarness {
         let contentWindow = NSWindow(backingScaleFactor: 2)
         let navigatorRoot = Specimen.Window(frame: NSRect(x: 0, y: 0, width: 400, height: 240))
         contentWindow.contentView = navigatorRoot
-        // The Mac sidebar exposes this exact Design control beside its brand. The diagnostic
-        // header has a fixed 20-point slot; host commands own the menu's actual operations.
+        navigatorRoot.headerHeight = navigatorHeaderHeight
+        navigatorRoot.hasMountedHeader = true
+        // Retain the real production pane band and its controls for the window lifetime.
+        // The title yields before either action; the band owns margins, spacing and its rule.
+        let headerTitle = NSTextField(labelWithString: "Projects")
+        headerTitle.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        headerTitle.textColor = navigatorRoot.headerInk.label
+        headerTitle.lineBreakMode = .byTruncatingTail
+        headerTitle.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        headerTitle.setAccessibilityElement(false)
         let addProjectButton = ThemedIconButton(
             symbolName: "plus", accessibility: "Add Project", target: .inline,
             inkSource: .chrome)
-        addProjectButton.translatesAutoresizingMaskIntoConstraints = true
         addProjectButton.toolTip = "Add Project"
         addProjectButton.presentsMenu = true
         var addProjectActivated = false
         var addProjectControlVisualChanged = false
         addProjectButton.onPress = { addProjectActivated = true }
         addProjectButton.surfaceStateDidChange = { addProjectControlVisualChanged = true }
-        navigatorRoot.addSubview(addProjectButton)
+        let actionsButton = ThemedIconButton(
+            symbolName: "ellipsis", accessibility: "Actions", target: .inline,
+            inkSource: .chrome)
+        actionsButton.toolTip = "Actions (Ctrl+Shift+Space)"
+        var actionsActivated = false
+        var actionsControlVisualChanged = false
+        actionsButton.onPress = { actionsActivated = true }
+        actionsButton.surfaceStateDidChange = { actionsControlVisualChanged = true }
+        let header = PaneHeaderView(
+            leading: [headerTitle], trailing: [addProjectButton, actionsButton], margin: .paneEdge)
+        navigatorRoot.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: navigatorRoot.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: navigatorRoot.trailingAnchor),
+            header.topAnchor.constraint(equalTo: navigatorRoot.topAnchor)
+        ])
+        func headerPixels(_ view: NSView) -> (x: Int32, y: Int32, width: Int32, height: Int32) {
+            let rect = view.convert(view.bounds, to: navigatorRoot)
+            let scale = contentWindow.backingScaleFactor
+            return (Int32(rect.minX * scale),
+                    Int32((navigatorRoot.bounds.height - rect.maxY) * scale),
+                    Int32(rect.width * scale), Int32(rect.height * scale))
+        }
+        func publishHeaderGeometry() {
+            contentWindow.layoutIfNeeded()
+            let actionsRect = headerPixels(actionsButton)
+            tw_actions_button(window, actionsButton.isSelected ? "Close actions" : "Actions",
+                              actionsButton.isEnabled ? 1 : 0, actionsRect.x, actionsRect.y,
+                              actionsRect.width, launch == nil ? 0 : actionsRect.height)
+            let addRect = headerPixels(addProjectButton)
+            tw_add_project_button(window, addProjectButton.isEnabled ? 1 : 0,
+                                  addRect.x, addRect.y, addRect.width,
+                                  launch == nil ? 0 : addRect.height)
+        }
         tw_navigator_pointer_route(window, 1)
         defer { contentWindow.contentView = nil }
         var pendingMountedRowSlot: Int?
@@ -1237,10 +1279,8 @@ struct WindowHarness {
         var pendingSelection: PendingSelection?
         var pendingFolderImport: FolderImportGate?
         var actions: NavigatorActions.Presentation?
-        var actionsButtonState: Int32 = 0
         var actionsEnabled = true
         var dismissedActionGesture: Int32?
-        var headerPressArmed = false
         var hoveredProjectID: String?
         var rowActionMenuGesture = false
         var rowActionMenuSource: NSRect = .zero
@@ -1306,7 +1346,6 @@ struct WindowHarness {
                 return
             }
             actions = nil
-            actionsButtonState = 0
             rowActionMenuGesture = false
             rowActionMenuEntered = false
             focusSidebar(presentation.returnToSidebar)
@@ -1369,8 +1408,6 @@ struct WindowHarness {
             // any held control gesture and hover before those same pixels name another pane.
             contentWindow.cancelPointerGesture()
             hoveredProjectID = nil
-            headerPressArmed = false
-            actionsButtonState = 0
             rowActionMenuGesture = false
             rowActionMenuEntered = false
             activePane?.focus(false, window: window)
@@ -1509,15 +1546,8 @@ struct WindowHarness {
             }
             let enabled = pendingFolderImport == nil && pendingSelection == nil
             if actionsEnabled != enabled { actionsEnabled = enabled; dirty = true }
-            if launch != nil {
-                tw_actions_button(window, actions == nil ? "Actions" : "Close actions", enabled ? 1 : 0,
-                                  Int32(navigatorWidth - 112), 8, 100, 36)
-                tw_add_project_button(window,
-                    enabled && accountPicker == nil && savedPicker == nil ? 1 : 0,
-                    Int32(navigatorWidth - 160), 6, 40, 40)
-            }
             let count = min(Int(TW_NAVIGATOR_MAX_ROWS),
-                            max(1, (height / 2 - 32) / Int(navigatorRowStride)))
+                max(1, Int((CGFloat(height / 2) - navigatorHeaderHeight - 2) / navigatorRowStride)))
             if var menu = actions {
                 let commands: [HostCommandDescriptor]
                 switch menu.kind {
@@ -1562,19 +1592,12 @@ struct WindowHarness {
                 let root = navigatorRoot
                 root.prepareNavigatorFrame(NSRect(x: 0, y: 0, width: width / 2, height: height / 2))
                 root.separatesScratchpad = actions?.kind == .addProject
-                root.title = "Threading on Linux"
                 let accent = NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1)
                 let selectedInk = Specimen.Ink(on: accent)
                 var textRows: [NavigatorTextRow] = []
                 textRows.reserveCapacity(count * 3 + 2)
                 let end: Int
                 if let menu = actions {
-                    switch menu.kind {
-                    case .addProject: root.title = "Add Project"
-                    case .projectActions: root.title = "Actions"
-                    case .projectCreate: root.title = "New in Project"
-                    case .chatProviders: root.title = "New Chat"
-                    }
                     end = min(menu.commands.count, menu.first + count)
                     for index in menu.first..<end {
                         let command = menu.commands[index]
@@ -1586,7 +1609,6 @@ struct WindowHarness {
                 } else if let accountPicker {
                     let provider = accountPicker == .claude ? "Claude" : "Codex"
                     let active = accountPicker == .claude ? claudeAccount : codexAccount
-                    root.title = "\(provider) login - Enter: choose; Esc: back"
                     end = min(pickerAccounts.count, accountFirst + count)
                     for index in accountFirst..<end {
                         let handle = pickerAccounts[index]
@@ -1601,9 +1623,6 @@ struct WindowHarness {
                 } else if let savedPicker {
                     let project = projects[savedPicker.projectIndex]
                     let saved = savedPicker.isAgent ? project.recentAgents : project.recentTerminals
-                    root.title = savedPicker.isAgent
-                        ? (width >= 700 ? "Saved agents - Enter: open; Left/Esc: back" : "Saved agents - Enter: open")
-                        : (width >= 700 ? "Saved terminals - Enter: open; Left/Esc: back" : "Saved terminals - Enter: open")
                     end = min(saved.count, savedFirst + count)
                     for index in savedFirst..<end {
                         let runtime = saved[index]
@@ -1628,33 +1647,7 @@ struct WindowHarness {
                         }
                     }
                 } else {
-                    let codexName = codexAccount.isStandard ? "Codex" :
-                        "Codex \(String(codexAccount.name.prefix(12)))"
-                    let claudeName = claudeAccount.isStandard ? "Claude" :
-                        "Claude \(String(claudeAccount.name.prefix(12)))"
-                    var agentActions: [String] = []
-                    if agentExecutable != nil {
-                        agentActions.append("C-S-A/I: \(codexName)/login")
-                    }
-                    if claudeExecutable != nil {
-                        agentActions.append("C-S-L/O: \(claudeName)/login")
-                    }
-                    if launch != nil {
-                        root.title = width >= 700 ? "Projects - Enter: shell; Left: agents; Right: terminals" : "Projects - Enter: shell"
-                    }
-                    if !agentActions.isEmpty {
-                        root.title = width >= 700
-                            ? "Enter: shell; " + agentActions.joined(separator: "; ")
-                            : agentActions.joined(separator: "; ")
-                    }
-                    if !projects.isEmpty, terminals[projects[selected].id]?.canReplace == true {
-                        root.title = agentActions.isEmpty
-                            ? (width >= 700 ? "Enter: view; Ctrl+Shift+N: new; Left/Right: saved" : "Ctrl+Shift+N: new")
-                            : (width >= 700 ? "Enter: view; " + agentActions.joined(separator: "; ")
-                                            : agentActions.joined(separator: "; "))
-                    }
                     if projects.isEmpty, launch != nil {
-                        root.title = "Projects - Ctrl+Shift+P: add folder"
                         end = 1
                         addNavigatorRow("Add project folder…", index: 0, width: width,
                                         height: height, accent: accent, selected: true,
@@ -1686,34 +1679,27 @@ struct WindowHarness {
                         }
                     }
                 }
-                if activePane != nil, actions == nil {
-                    let section = accountPicker.map { $0 == .claude ? "Claude login" : "Codex login" }
-                        ?? savedPicker.map { $0.isAgent ? "Agents" : "Terminals" } ?? "Projects"
-                    root.title = section + (sidebarFocused ? " - Tab: terminal" : " - Ctrl+Shift+P")
-                }
-                let title = root.title
+                headerTitle.stringValue = actions.map { menu in
+                    switch menu.kind {
+                    case .addProject: return "Add Project"
+                    case .projectActions: return "Actions"
+                    case .projectCreate: return "New in Project"
+                    case .chatProviders: return "New Chat"
+                    }
+                } ?? accountPicker.map { $0 == .claude ? "Claude login" : "Codex login" }
+                    ?? savedPicker.map { $0.isAgent ? "Agents" : "Terminals" } ?? "Projects"
                 root.title = ""
-                textRows.append(NavigatorTextRow(text: readableNavigatorText(title), x: 0, y: 0,
-                                                 width: Int32(width - (launch == nil ? 0 : 164)),
-                                                 height: Int32(Specimen.Window.titleHeight * 2),
-                                                 inset: 24, ink: root.headerInk.label))
                 addProjectButton.isHidden = launch == nil
                 addProjectButton.isEnabled = actionsEnabled && accountPicker == nil && savedPicker == nil
-                addProjectButton.frame = NSRect(
-                    x: CGFloat(width - 160) / 2, y: CGFloat(height) / 2 - 23,
-                    width: 20, height: 20)
-                if launch != nil {
-                    let shade: CGFloat = !actionsEnabled ? 0.52 : actionsButtonState == 2 ? 0.25
-                        : actionsButtonState == 1 || actions != nil ? 0.34 : 0.42
-                    let actionGround = NSColor(white: shade, alpha: 1)
-                    let actionInk = Specimen.Ink(on: actionGround)
-                    root.mountNavigatorRow(
-                        frame: NSRect(x: CGFloat(width - 112) / 2, y: CGFloat(height) / 2 - 22, width: 50, height: 18),
-                        accent: actionGround, selected: true, ink: actionInk, showsMark: false,
-                        disclosure: actions == nil ? .down : .up)
-                    textRows.append(NavigatorTextRow(text: actions == nil ? "Actions" : "Close",
-                        x: Int32(width - 112), y: 8, width: 100, height: 36, inset: 12, ink: actionInk.label))
-                }
+                actionsButton.isHidden = launch == nil
+                actionsButton.isEnabled = actionsEnabled
+                actionsButton.isSelected = actions != nil
+                actionsButton.setAccessibilityTitle(actions == nil ? "Actions" : "Close actions")
+                publishHeaderGeometry()
+                let titleRect = headerPixels(headerTitle)
+                let addRect = headerPixels(addProjectButton)
+                let actionsRect = headerPixels(actionsButton)
+                trace("header bandHeight=\(navigatorHeaderHeight) title=\(titleRect) add=\(addRect) actions=\(actionsRect)")
                 let mountStarted = DispatchTime.now().uptimeNanoseconds
                 try mountNavigatorText(textRows, in: root)
                 let focusedSlot: Int
@@ -1731,6 +1717,7 @@ struct WindowHarness {
                 root.render(in: context)
                 _ = root.takeProjectControlVisualChange()
                 addProjectControlVisualChanged = false
+                actionsControlVisualChanged = false
                 let renderMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - renderStarted) / 1_000_000
                 NSGraphicsContext.current = nil
                 trace("raster.end")
@@ -1744,7 +1731,7 @@ struct WindowHarness {
                 guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
                 trace("accessibility-title.begin")
                 if let menu = actions {
-                    let listY = Int32(Specimen.Window.titleHeight * 2)
+                    let listY = Int32(navigatorHeaderHeight * 2)
                     let listTitle: String
                     switch menu.kind {
                     case .addProject: listTitle = "Add Project"
@@ -1789,7 +1776,7 @@ struct WindowHarness {
                 } else if let accountPicker {
                     let provider = accountPicker == .claude ? "Claude" : "Codex"
                     let active = accountPicker == .claude ? claudeAccount : codexAccount
-                    let listY = Int32(Specimen.Window.titleHeight * 2)
+                    let listY = Int32(navigatorHeaderHeight * 2)
                     tw_accessibility_begin_list(window, "\(provider) accounts", Int32(accountFirst),
                                                 Int32(pickerAccounts.count), 1, 0, listY,
                                                 Int32(navigatorWidth), Int32(height) - listY)
@@ -1810,7 +1797,7 @@ struct WindowHarness {
                     let saved = savedPicker.isAgent ? project.recentAgents : project.recentTerminals
                     let total = savedPicker.isAgent ? project.sessions : project.terminalCount
                     let listName = "Saved \(savedPicker.isAgent ? "agents" : "terminals") (\(saved.count) of \(total))"
-                    let listY = Int32(Specimen.Window.titleHeight * 2)
+                    let listY = Int32(navigatorHeaderHeight * 2)
                     listName.withCString {
                         tw_accessibility_begin_list(window, $0, Int32(savedFirst), Int32(saved.count),
                                                     launch == nil ? 0 : 1, 0, listY,
@@ -1837,7 +1824,7 @@ struct WindowHarness {
                     let label = savedPicker.isAgent ? "AGENT_PICKER_FRAME" : "TERMINAL_PICKER_FRAME"
                     print("\(label) \(width)x\(height) mounted=\(end - savedFirst) selected=\(selectedID) total=\(total) capped=\(capped)")
                 } else {
-                    let listY = Int32(Specimen.Window.titleHeight * 2)
+                    let listY = Int32(navigatorHeaderHeight * 2)
                     let hasAddRow = projects.isEmpty && launch != nil
                     tw_accessibility_begin_list(window, "Projects", Int32(first),
                                                 Int32(hasAddRow ? 1 : projects.count),
@@ -1957,13 +1944,9 @@ struct WindowHarness {
                     continue
                 }
             }
-            if event.kind == 26 {
-                if actionsButtonState != event.action { actionsButtonState = event.action; dirty = true }
-                continue
-            }
+            if event.kind == 26 { continue }
             if event.kind == 25, launch != nil {
                 contentWindow.cancelPointerGesture()
-                headerPressArmed = false
                 if actions != nil { dismissActions() }
                 else { openActions(for: nil, returnToSidebar: event.action == 1) }
                 continue
@@ -1974,7 +1957,6 @@ struct WindowHarness {
             }
             if event.kind == 28, launch != nil {
                 contentWindow.cancelPointerGesture()
-                headerPressArmed = false
                 let slot = Int(event.key)
                 let index = first + slot
                 guard actions == nil, accountPicker == nil, savedPicker == nil,
@@ -1987,7 +1969,6 @@ struct WindowHarness {
             }
             if event.kind == 33, launch != nil {
                 contentWindow.cancelPointerGesture()
-                headerPressArmed = false
                 let slot = Int(event.key)
                 let index = first + slot
                 guard actions == nil, accountPicker == nil, savedPicker == nil,
@@ -2000,7 +1981,6 @@ struct WindowHarness {
             }
             if event.kind == 29, launch != nil {
                 contentWindow.cancelPointerGesture()
-                headerPressArmed = false
                 guard actions == nil, accountPicker == nil, savedPicker == nil,
                       projects.indices.contains(selected),
                       let target = ProjectID(uuidString: projects[selected].id)
@@ -2010,35 +1990,33 @@ struct WindowHarness {
             }
             if event.kind == 27 {
                 func actionMenuIndex(at x: Int32, y: Int32) -> Int? {
-                    guard let menu = actions, y >= 56 else { return nil }
-                    let slot = Int((y - 56) / Int32(navigatorRowStride * 2))
+                    guard let menu = actions, y >= navigatorRowsTop else { return nil }
+                    let slot = Int((y - navigatorRowsTop) / Int32(navigatorRowStride * 2))
                     let index = menu.first + slot
                     guard slot >= 0, slot < count, index < menu.commands.count else { return nil }
                     let row = navigatorRowPixels(slot, width: navigatorWidth, height: height)
                     return x >= row.x && x < row.x + row.width &&
                            y >= row.y && y < row.y + row.height ? index : nil
                 }
-                let inHeader = launch != nil && event.x >= Int32(navigatorWidth - 112) &&
-                    event.x < Int32(navigatorWidth - 12) && event.y >= 8 && event.y < 44
                 if event.action == 4 {
                     contentWindow.cancelPointerGesture()
                     _ = navigatorRoot.takeActivatedRowSlot()
                     _ = navigatorRoot.takeActivatedProjectActionID()
                     _ = navigatorRoot.takeActivatedProjectCreateID()
-                    headerPressArmed = false
                     rowActionMenuGesture = false
                     rowActionMenuEntered = false
-                    if actionsButtonState != 0 || hoveredProjectID != nil {
-                        actionsButtonState = 0; hoveredProjectID = nil; dirty = true
+                    if hoveredProjectID != nil {
+                        hoveredProjectID = nil; dirty = true
                     }
+                    dirty = true
                     continue
                 }
                 // Row hover has one fixed-height arithmetic lookup and one geometry check;
                 // a pointer move never scans a stored catalogue or builds hidden controls.
                 var pointerProjectID: String?
                 if actions == nil, accountPicker == nil, savedPicker == nil,
-                   launch != nil, event.y >= 56 {
-                    let slot = Int((event.y - 56) / Int32(navigatorRowStride * 2))
+                   launch != nil, event.y >= navigatorRowsTop {
+                    let slot = Int((event.y - navigatorRowsTop) / Int32(navigatorRowStride * 2))
                     let index = first + slot
                     if slot >= 0, slot < count, projects.indices.contains(index) {
                         let row = navigatorRowPixels(slot, width: navigatorWidth, height: height)
@@ -2069,9 +2047,19 @@ struct WindowHarness {
                     addProjectControlVisualChanged = false
                     dirty = true
                 }
+                if actionsControlVisualChanged {
+                    actionsControlVisualChanged = false
+                    dirty = true
+                }
                 if addProjectActivated {
                     addProjectActivated = false
                     openAddProjectMenu()
+                    continue
+                }
+                if actionsActivated {
+                    actionsActivated = false
+                    if actions != nil { dismissActions() }
+                    else { openActions(for: nil, returnToSidebar: activePane == nil) }
                     continue
                 }
                 let wasSidebarFocused = sidebarFocused
@@ -2123,18 +2111,11 @@ struct WindowHarness {
                     // A held press that entered the menu is completed by its release below.
                 } else if event.action == 1 {
                     if activePane != nil { focusSidebar(true) }
-                    if inHeader {
-                        headerPressArmed = actionsEnabled
-                        if actionsButtonState != (actionsEnabled ? 2 : 0) {
-                            actionsButtonState = actionsEnabled ? 2 : 0; dirty = true
-                        }
-                        continue
-                    }
                     if let activatedCreate, let target = ProjectID(uuidString: activatedCreate),
                        pointerProjectID == activatedCreate {
                         openProjectCreateMenu(for: target, returnToSidebar: wasSidebarFocused)
                         if actions?.projectID == target {
-                            let slot = Int((event.y - 56) / Int32(navigatorRowStride * 2))
+                            let slot = Int((event.y - navigatorRowsTop) / Int32(navigatorRowStride * 2))
                             let row = navigatorRowPixels(slot, width: navigatorWidth, height: height)
                             rowActionMenuSource = NSRect(
                                 x: CGFloat(row.x + row.width - 96), y: CGFloat(row.y + 2),
@@ -2147,7 +2128,7 @@ struct WindowHarness {
                        pointerProjectID == activatedProject {
                         openActions(for: target, returnToSidebar: true)
                         if actions?.projectID == target {
-                            let slot = Int((event.y - 56) / Int32(navigatorRowStride * 2))
+                            let slot = Int((event.y - navigatorRowsTop) / Int32(navigatorRowStride * 2))
                             let row = navigatorRowPixels(slot, width: navigatorWidth, height: height)
                             rowActionMenuSource = NSRect(
                                 x: CGFloat(row.x + row.width - 52), y: CGFloat(row.y + 2),
@@ -2161,22 +2142,7 @@ struct WindowHarness {
                         event.kind = 2
                         event.action = 0
                     } else { continue }
-                } else if event.action == 3 {
-                    let activate = headerPressArmed && inHeader && actionsEnabled
-                    headerPressArmed = false
-                    if actionsButtonState != (inHeader && actionsEnabled ? 1 : 0) {
-                        actionsButtonState = inHeader && actionsEnabled ? 1 : 0; dirty = true
-                    }
-                    if activate {
-                        if actions != nil { dismissActions() }
-                        else { openActions(for: nil, returnToSidebar: activePane == nil) }
-                    }
-                    continue
-                } else {
-                    let state: Int32 = inHeader && actionsEnabled ? (headerPressArmed ? 2 : 1) : 0
-                    if actionsButtonState != state { actionsButtonState = state; dirty = true }
-                    continue
-                }
+                } else { continue }
             }
             if var menu = actions {
                 switch event.kind {

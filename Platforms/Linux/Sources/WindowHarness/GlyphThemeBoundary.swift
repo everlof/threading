@@ -34,6 +34,7 @@ public enum Design {
     public enum Accessibility { public static let focusRingWidth: CGFloat = 2 }
     public enum Opacity { public static let disabledControl: CGFloat = 0.42 }
     public enum Radius {
+        public static let border: CGFloat = 1
         public static let control: CGFloat = 4
         public static let controlBorder: CGFloat = 1
         public static func control(fitting size: NSSize) -> CGFloat {
@@ -44,8 +45,16 @@ public enum Design {
         public static let accent = Specimen.Ink(on: Specimen.headerGround).label
         public static let bevelHighlight = NSColor.white
         public static let bevelShadow = NSColor.black
+        public static let divider = Specimen.Ink(on: Specimen.headerGround).secondary
+        public static let border = divider
+    }
+    public enum Spacing {
+        public static let small: CGFloat = 6
+        public static let inset: CGFloat = 12
     }
     public enum Size {
+        public static let tabHeight: CGFloat = 28
+        public static let footerHeight: CGFloat = 48
         public static let toolbarButtonWidth: CGFloat = 30
         public static let toolbarButtonHeight: CGFloat = 28
         public static let inlineButtonTarget: CGFloat = 20

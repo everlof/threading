@@ -1,34 +1,33 @@
-"""Pixel contract for the native Actions button's decorative disclosure mark."""
+"""Pixel contract for the production Actions icon and its selected menu state."""
 
 from pathlib import Path
 import subprocess
 
 
-def assert_disclosure_mark(closed: Path, opened: Path, button_bounds) -> None:
-    # The title ends before this trailing slot. Inspect only the mark so a changed
-    # button fill, menu contents, or terminal framebuffer cannot satisfy the test.
-    crop = f'14x20+{button_bounds.x + 76}+{button_bounds.y + 8}'
+def assert_actions_mark(closed: Path, opened: Path, button_bounds) -> None:
+    crop = f'{button_bounds.width}x{button_bounds.height}+{button_bounds.x}+{button_bounds.y}'
 
-    def halves(path: Path) -> tuple[int, int]:
+    def pixels(path: Path) -> bytes:
         rgba = subprocess.run(
             ['convert', str(path), '-crop', crop, '+repage', '-depth', '8', 'rgba:-'],
             check=True, capture_output=True, timeout=5,
         ).stdout
-        assert len(rgba) == 14 * 20 * 4, 'Actions mark crop has unexpected dimensions'
-        rows = []
-        for y in range(20):
-            row = 0
-            for x in range(14):
-                offset = (y * 14 + x) * 4
-                red, green, blue = rgba[offset:offset + 3]
-                if min(red, green, blue) >= 170:
-                    row += 1
-            rows.append(row)
-        return sum(rows[:10]), sum(rows[10:])
+        assert len(rgba) == button_bounds.width * button_bounds.height * 4, \
+            'Actions mark crop has unexpected dimensions'
+        return rgba
 
-    closed_top, closed_bottom = halves(closed)
-    open_top, open_bottom = halves(opened)
-    assert closed_top + closed_bottom >= 12, 'closed Actions mark is not visible'
-    assert open_top + open_bottom >= 12, 'open Actions mark is not visible'
-    assert closed_top >= closed_bottom + 4, 'closed Actions mark does not point down'
-    assert open_bottom >= open_top + 4, 'open Actions mark does not point up'
+    normal, selected = pixels(closed), pixels(opened)
+    # Three disconnected dark runs across the centered glyph distinguish ellipsis artwork
+    # from a changed plate or a menu repaint elsewhere in the window.
+    maximum_runs = 0
+    for y in range(button_bounds.height // 2 - 5, button_bounds.height // 2 + 5):
+        previous = False
+        runs = 0
+        for x in range(5, button_bounds.width - 5):
+            offset = (y * button_bounds.width + x) * 4
+            ink = max(normal[offset:offset + 3]) < 120
+            runs += int(ink and not previous)
+            previous = ink
+        maximum_runs = max(maximum_runs, runs)
+    assert maximum_runs == 3, 'Actions ellipsis was not visible as three distinct dots'
+    assert normal != selected, 'open menu did not paint the production control selected state'

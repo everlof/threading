@@ -101,6 +101,12 @@ a focused Linux fixture with Mac-aligned row geometry; the complete Subagents ca
 live pane remain unmounted (`FINDINGS.md` §§143–144). The image shim also honors production
 interpolation hints, source rectangles and copy compositing, with focused Mac/Linux raster
 checks; other image and chrome dependencies remain (`FINDINGS.md` §145).
+The native window now mounts the unchanged production `PaneHeaderView`, title and `+`/`⋯`
+controls. Its production height, optical margins, compression and separator replace the
+diagnostic header's independent geometry; input and AT-SPI receive actual laid-out target
+bounds. A focused Mac/Linux fixture compares the header through resizing. Linux retained
+layout-region guides have zero content insets because native decorations sit outside the
+content tree (`FINDINGS.md` §147).
 The diagnostic host still assembles its own rows and uses a fixed
 window palette; it does not consume the production theme or extension environment.
 

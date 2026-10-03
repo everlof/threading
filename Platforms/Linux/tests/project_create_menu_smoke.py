@@ -118,6 +118,8 @@ try:
         create = rows[1].get_child_at_index(0)
         assert create.get_accessible_id() == 'sidebar.project.create.' + rows[1].get_accessible_id()
         assert create.get_name() == 'New chat or terminal'
+        create_rect = create.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        assert (create_rect.x, create_rect.y, create_rect.width, create_rect.height) == (692, 136, 40, 40)
         assert create.get_action_iface().do_action(0)
         listed = menu(app, 'New in Project', ['linux.project.new-chat',
                       'linux.project.new-manager', 'linux.project.new-shell'], process)
@@ -136,7 +138,10 @@ try:
 
         # Pointer opens the same menu. Chat chooses a configured provider in a nested list;
         # Escape peels one list at a time and leaves project selection unchanged.
-        xdo('mousemove', '--window', window, '712', '126')
+        create_rect = rows[1].get_child_at_index(0).get_component_iface().get_extents(
+            Atspi.CoordType.WINDOW)
+        xdo('mousemove', '--window', window, str(create_rect.x + create_rect.width // 2),
+            str(create_rect.y + create_rect.height // 2))
         xdo('click', '--window', window, '1')
         listed = menu(app, 'New in Project', ['linux.project.new-chat',
                       'linux.project.new-manager', 'linux.project.new-shell'], process)

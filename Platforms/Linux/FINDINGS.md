@@ -4368,3 +4368,58 @@ one-file sweep, not evidence that AppKit itself owes the method. Other genuine m
 platform groups include editable text, tables, accessibility notifications, animation,
 window and image services. The native shell still assembles its own rows and fixed palette;
 this installed pass does not establish a complete production screen or desktop-wide parity.
+
+## 147. The native shell mounts the production pane header
+
+The retained native window now mounts unchanged production `PaneHeaderView`, `OpticalInsets`,
+`PaneFooterView` vocabulary and `ThemedIconButton` controls. `SeparatorView` was extracted from
+`ThemedIndicators.swift` without changing its source, and both DesignKit and Linux link that
+same file. The header replaces the diagnostic title's independent band geometry and manually
+painted labeled Actions plate. The default band is 41 points: the 28-point control row, six
+points above and below, and its one-point separator. The title yields before either 20-point
+control. Native input and AT-SPI receive the controls' actual laid-out frames; at 800 pixels
+wide, Add Project is `(692,20,40,40)` and Actions is `(744,20,40,40)`. In the 320-pixel sidebar
+they move to X212 and X264. The list begins at Y82 and its first row at Y86. Titles now name
+the active section without filling the header with keyboard instructions.
+
+The shim adds cached `NSView.LayoutRegion` recipes and guide/rect/inset queries. Its safe areas
+and margins currently have zero insets: SDL/libdecor decorations sit outside the retained
+content tree. This is an explicit Linux content policy, not macOS's default 20-point margins
+or corner/window-control clearance. The Harness covers six recipes, 100 repeated queries,
+flipped and unflipped resizing, 20 cross-window reparents and detached resizing without
+accumulating guides or constraints. Each recipe retains one guide and four constraints.
+
+`tests/pane_header/run.sh` and `--mac` pass. Their wide/narrow/wide captures have identical
+header and action-control frames; the title has platform font measurement/frame-padding
+variation. The fixture checks compression, optical margins, centerlines, retained constraints,
+separator pixels, selected and disabled states, and accessibility activation. The shipping
+Mac `PaneHeaderTests`, `PaneFooterTests` and `PaneHeaderRenderTests` pass 26 tests. I inspected
+all nine product renders (System, Cyberpunk, Swiss, Bauhaus and Classic Player) and the Linux
+wide/narrow, selected, disabled, project-hover, create-menu and odd-resize captures.
+
+Native X11 Actions, Add Project, project actions/create, counts and provider-mark contracts
+pass. The fixtures now locate controls/rows from their accessibility bounds, and project-import
+checks wait for the actual accessible row/control rather than treating the earlier import log
+as a completed UI publication. The Release AT-SPI lane passes exact navigator/terminal bounds,
+Unicode text and character geometry, odd sizes, 1280×600 resizing, independent focus, and native
+input. A Debug run under competing builds exceeded its 12-second resize wait; the unchanged
+shipping Release fixture passed. This is not a claim that Debug rendering meets latency goals.
+
+Customization gate: the preview header remains host-only. Threading retains project/runtime
+identity, command admission, import and PTY ownership. This slice adds no extension authority
+or replacement API. Scaling gate: one header, one title and two controls are retained per
+window; resizing/pointer events touch that fixed tree and the existing visible row slots.
+The production theme engine, complete navigator cells and floating menu presentation remain
+unmounted; the shell still uses its bounded diagnostic rows and fixed palette.
+
+The final `./bundle-smoke.sh` rebuild passes the complete installed non-root Ubuntu suite,
+including clean-profile import, live-child reinstall, simultaneous panes, command admission,
+project menus, glyphs/counts, saved-terminal restart/catalogues/directories and desktop entry.
+The `.deb` SHA-256 is
+`8d79b00be464208b58ae2bcb5294c0be26327a7bf163894c2e34fe8ad5fcc30e`.
+`tests/wayland_smoke.sh --actions` passes on that package: native toplevel/buffer commits,
+Add/Create/Actions accessibility, compositor-owned header and row pointer input, right-click,
+Shift+F10 and drag release. The fresh installed Weston Actions capture was inspected. Moving
+resized X11 fixture windows onto the display corrected clipped evidence; the final Release
+AT-SPI/workspace runs pass and produce complete 1280×600 and 1280×528 captures, both inspected.
+Theme boundaries, source links, exact separator extraction, runner contracts and diff checks pass.

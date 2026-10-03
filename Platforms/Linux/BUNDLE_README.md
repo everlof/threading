@@ -35,7 +35,9 @@ provider, or to an empty value to disable it.
 The header `+` opens **Add Project** with **Start New Project…**, **Use an Existing Folder…**, and
 **New Scratchpad**. New Project asks for a name and location, Existing Folder adopts a directory,
 and Scratchpad creates or reopens `~/Threading/Scratchpad` without a chooser. Ctrl+Shift+P opens
-the existing-folder chooser directly.
+the existing-folder chooser directly. The pane header uses Threading's shared layout and
+keeps both controls visible when the title is compressed. Its trailing `⋯` opens **Actions**;
+press it again or Escape to return to the previous pane.
 
 Hover a project row to reveal its `+` and `⋯` controls. The row `+` opens **New in Project**
 for that project, with **New Chat…**, **New Manager…**, and **New Terminal**. New Chat asks you
@@ -87,9 +89,9 @@ Saved Claude and Codex sessions show their provider marks beside the title. If a
 unavailable, the row shows the provider name instead. Accessible labels retain the provider,
 account and session identity. Custom account badges and themes are not available in this preview.
 
-The sidebar's **Actions** button opens the supported commands for the selected project: open or
+The sidebar's header `⋯` (**Actions**) opens the supported commands for the selected project: open or
 replace a shell, create Claude/Codex sessions, choose their accounts, browse saved runtimes and
 add a project folder. Ctrl+Shift+Space opens it from either pane. Arrow keys select an action,
-Enter invokes it, and Escape or Close returns to the previous pane. Unavailable commands remain
+Enter invokes it, and Escape or the selected `⋯` returns to the previous pane. Unavailable commands remain
 visible with a reason; opening the picker never launches a child. Availability and the selected
 project are checked again when an action runs.

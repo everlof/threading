@@ -101,6 +101,16 @@ let package = Package(
                       "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift",
                       "NeutralInk.swift", "TextLegibilityPolicy.swift", "SpecimenBoundary.swift",
                       "RowBoundary.swift", "Fixture.swift"]),
+        .executableTarget(name: "PaneHeaderHarness", dependencies: ["AppKit"],
+            path: "tests/pane_header", exclude: ["run.sh"],
+            sources: ["PaneHeader.swift", "PaneFooter.swift", "OpticalInsets.swift",
+                      "SeparatorView.swift", "ThemedControl.swift", "ThemedIconButton.swift",
+                      "PointerClaims.swift", "SurfaceDrawing.swift", "GlyphView.swift",
+                      "TemplateImageDrawing.swift", "AppKitLifetime.swift",
+                      "GlyphThemeBoundary.swift", "IconButtonBoundary.swift",
+                      "NeutralInk.swift", "TextLegibilityPolicy.swift", "SpecimenBoundary.swift",
+                      "Fixture.swift"],
+            swiftSettings: [.define("THREADING_PANE_HEADER_HARNESS")]),
         // Exact production glyph drawing with test-only theme vocabulary. Its Linux bitmap
         // contract exercises the shim's image and backing-pixel behavior, not symbol lookup.
         .executableTarget(name: "GlyphViewHarness", dependencies: ["AppKit"],

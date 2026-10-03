@@ -69,6 +69,14 @@ detachment, keyboard and accessibility activation. Five fresh PNG states remain 
 `out/icon-button.*` for inspection. The native window mounts the production icon control in
 its header and as the visible project-row `+`/`⋯` pair, using a bounded Linux symbol/theme
 source and the retained SDL pointer route.
+`tests/pane_header/run.sh` links the production `PaneHeaderView`, `PaneFooterView`,
+`OpticalInsets` and `SeparatorView`; `--mac` supplies the AppKit reference. The fixture
+checks the default 41-point band, title compression, optical margins, unchanged control
+targets, separator and bounded constraints through a wide/narrow/wide resize. Its five
+rendered states and geometry are written to `out/pane-header-{linux,mac}/`. The native
+window now mounts that same header with its retained title and `+`/`⋯` controls, and publishes
+their actual laid-out bounds to native input and AT-SPI. This uses the preview's fixed palette;
+live production themes and complete production navigator/menu assembly remain open.
 `tests/text_label/run.sh` checks the Linux-only, Pango-backed `NSTextField` label against
 Unicode shaping, clipping, ellipsis, intrinsic size, baseline behavior and shared neutral-ink
 contrast on eight grounds, then renders that
@@ -124,8 +132,9 @@ including a field editor delegate. Native project and Actions row presses now en
 tree through `NSView.hitTest` and `mouseDown`; the row returns a bounded slot to the host's
 existing selection and command path. Navigator Up/Down keys now reach the focused shim row.
 Sidebar wheel turns, terminal input and other keyboard commands keep their native routes.
-The production Add Project control is mounted and interactive in this preview; broader
-production chrome remains outside the diagnostic shell. See `FINDINGS.md` §§126–129, 131, 136–139.
+The production pane header and Add Project/Actions controls are mounted and interactive in
+this preview; broader production chrome remains outside the diagnostic shell. See
+`FINDINGS.md` §§126–129, 131, 136–139, 147.
 
 `tests/wayland_smoke.sh` installs the current `.deb` into Swift-free Ubuntu under headless Weston,
 checks two distinct rendered project frames, and verifies Wayland toplevel/buffer commits. Its

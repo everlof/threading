@@ -121,9 +121,10 @@ try:
         assert button.get_state_set().contains(Atspi.StateType.ENABLED)
         assert button.get_action_iface().get_n_actions() == 1
         bounds = button.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert (bounds.x, bounds.y, bounds.width, bounds.height) == (640, 6, 40, 40)
+        assert (bounds.x, bounds.y, bounds.width, bounds.height) == (692, 20, 40, 40)
+        center = (bounds.x + bounds.width // 2, bounds.y + bounds.height // 2)
         assert frame.get_component_iface().get_accessible_at_point(
-            660, 26, Atspi.CoordType.WINDOW).get_accessible_id() == 'linux.add-project'
+            *center, Atspi.CoordType.WINDOW).get_accessible_id() == 'linux.add-project'
         window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid',
                                         str(process.pid), '--name', '^Threading experiment - '),
                             'native window', process).splitlines()[0]
@@ -131,17 +132,20 @@ try:
                    'initial rendered frame', process)
         normal = capture(window, 'add-project-normal.png')
         before = log_path.read_text().count('NAVIGATOR_TEXT mounted=')
-        xdo('mousemove', '--window', window, '660', '26')
+        xdo('mousemove', '--window', window, *map(str, center))
         eventually(lambda: log_path.read_text().count('NAVIGATOR_TEXT mounted=') > before,
                    'production button hover frame', process)
         hover = capture(window, 'add-project-hover.png')
-        assert changed_pixels(normal, hover, 640, 6, 680, 46) >= 8, \
+        assert changed_pixels(normal, hover, bounds.x, bounds.y,
+                              bounds.x + bounds.width, bounds.y + bounds.height) >= 8, \
             'production plus button did not paint its hover state'
-        assert changed_pixels(normal, hover, 680, 6, 688, 46) == 0, \
+        assert changed_pixels(normal, hover, bounds.x + bounds.width, bounds.y,
+                              bounds.x + bounds.width + 8, bounds.y + bounds.height) == 0, \
             'plus hover leaked outside its slot toward Actions'
 
         def menu():
-            listing = frame.get_child_at_index(0)
+            current_frame = app.get_child_at_index(0)
+            listing = current_frame.get_child_at_index(0)
             assert listing.get_name() == 'Add Project'
             rows = [listing.get_child_at_index(i) for i in range(listing.get_child_count())]
             assert [(row.get_accessible_id(), row.get_name()) for row in rows] == [
@@ -151,7 +155,16 @@ try:
             assert all(row.get_action_iface().get_n_actions() == 2 for row in rows)
             return rows
 
-        xdo('mousemove', '--window', window, '660', '26')
+        def press_add_project():
+            def enabled_button():
+                _, current_button = frame_button(app)
+                if current_button.get_state_set().contains(Atspi.StateType.ENABLED):
+                    return current_button
+                return None
+            current_button = eventually(enabled_button, 'enabled Add Project control', process)
+            assert current_button.get_action_iface().do_action(0)
+
+        xdo('mousemove', '--window', window, *map(str, center))
         xdo('click', '--window', window, '1')
         rows = eventually(menu, 'pointer Add Project menu', process)
         assert chooser_pid(process) is None, 'plus press bypassed its menu'
@@ -177,7 +190,7 @@ try:
                        label + ' button reenabled', process)
 
         # AT-SPI opens the same menu, and its existing-folder row opens the old chooser.
-        assert frame_button(app)[1].get_action_iface().do_action(0)
+        press_add_project()
         rows = eventually(menu, 'AT-SPI Add Project menu', process)
         assert rows[1].get_action_iface().do_action(1)
         dismiss_chooser('AT-SPI existing folder')
@@ -186,14 +199,14 @@ try:
 
         # Save-style chooser supplies the name and place, then the host creates the folder
         # and imports exactly that path. A cancelled save must not create anything.
-        assert frame_button(app)[1].get_action_iface().do_action(0)
+        press_add_project()
         rows = eventually(menu, 'new project menu', process)
         assert rows[0].get_action_iface().do_action(1)
         dismiss_chooser('cancel new project', title='New Project')
         new_project = root / 'CreatedProject'
         assert not new_project.exists()
 
-        assert frame_button(app)[1].get_action_iface().do_action(0)
+        press_add_project()
         rows = eventually(menu, 'create project menu', process)
         assert rows[0].get_action_iface().do_action(1)
         pid = eventually(lambda: chooser_pid(process), 'new project chooser', process)
@@ -210,7 +223,7 @@ try:
 
         # Scratchpad needs no picker. Its identity is stored, pinned above ordinary
         # projects, and remains stable when the command is repeated.
-        assert frame_button(app)[1].get_action_iface().do_action(0)
+        press_add_project()
         rows = eventually(menu, 'scratchpad menu', process)
         assert rows[2].get_action_iface().do_action(1)
         scratchpad = root / 'home' / 'Threading' / 'Scratchpad'
@@ -224,14 +237,28 @@ try:
                        database.execute('SELECT id, data FROM project ORDER BY position')]
         scratch = [item for item in records if item[1].get('isScratchpad')]
         assert len(scratch) == 1 and scratch[0][1]['folderPath'] == str(scratchpad)
-        assert frame.get_child_at_index(0).get_child_at_index(0).get_accessible_id() == scratch[0][0], \
-            'Scratchpad did not pin above projects'
+
+        def pinned_scratchpad_row():
+            # PROJECT_IMPORTED precedes the next accessibility-tree publication. Observe the
+            # real row identity; a log line alone cannot prove that the navigator is ready.
+            current_frame = app.get_child_at_index(0)
+            listing = current_frame.get_child_at_index(0)
+            if listing is None or listing.get_name() != 'Projects':
+                return None
+            row = listing.get_child_at_index(0)
+            if row is None:
+                return None
+            assert row.get_accessible_id() == scratch[0][0], 'Scratchpad did not pin above projects'
+            return row
+
+        eventually(pinned_scratchpad_row, 'accessible Scratchpad pinned above projects', process)
         (scratchpad / 'README.md').write_text('My notes\n')
-        assert frame_button(app)[1].get_action_iface().do_action(0)
+        press_add_project()
         rows = eventually(menu, 'repeat scratchpad menu', process)
         assert rows[2].get_action_iface().do_action(1)
         eventually(lambda: log_path.read_text().count('PROJECT_IMPORTED ' + str(scratchpad)) == 2,
                    'scratchpad reopened', process)
+        eventually(pinned_scratchpad_row, 'same accessible Scratchpad after reopen', process)
         with sqlite3.connect(store / 'threading.db') as database:
             again = [(identifier, json.loads(payload)) for identifier, payload in
                      database.execute('SELECT id, data FROM project ORDER BY position')]
