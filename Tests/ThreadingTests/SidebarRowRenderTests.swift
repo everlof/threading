@@ -837,6 +837,35 @@ final class SidebarRowRenderTests: XCTestCase {
         }
     }
 
+    func testTerminalRowMountsItsSharedNativeContent() throws {
+        let row = ProjectTerminalRowView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.configure(
+            with: ProjectTerminal(currentDirectory: "/tmp/Threading", title: "zsh"),
+            running: true,
+            busy: false,
+            projectRoot: "/tmp/Threading"
+        )
+        Self.layOut(row)
+
+        let content = try XCTUnwrap(
+            row.descendant(identified: "sidebar.terminal.default-content")
+                as? ThemedTerminalRowContentView
+        )
+        let icon = try XCTUnwrap(
+            row.descendant(identified: "sidebar.terminal.identity") as? NSImageView
+        )
+        let title = try XCTUnwrap(
+            row.descendant(identified: "sidebar.terminal.title") as? MorphingTitleLabel
+        )
+        XCTAssertTrue(content.iconView === icon)
+        XCTAssertTrue(content.titleLabel === title)
+        XCTAssertNotNil(icon.image)
+        XCTAssertEqual(title.stringValue, "zsh")
+        XCTAssertGreaterThan(icon.frame.width, 0)
+        XCTAssertGreaterThan(title.frame.width, 0)
+    }
+
     /// A foreground command and the row's action share one trailing slot. The status must stay
     /// visible at rest, yield under the pointer, return when the pointer leaves, and disappear
     /// when the shell regains the foreground.
