@@ -92,8 +92,12 @@ mounts the production `ThemedMenuRowView` with the same row measurement as comma
 the host retains exact account identity and launch admission. The shim has a clipped
 `NSScrollView`/`NSClipView` viewport and view-based `NSTableView`/`NSOutlineView` with bounded
 cell reuse, stable selection and expansion. `tests/outline_view/run.sh` exercises 5,100 roots,
-1,024 expanded children, scrolling, resize and detach. The native navigator still owns its
-visible-row recycling and wheel routing; mounting it on the outline remains open.
+1,024 expanded children, scrolling, resize and detach. The native window's project navigator now
+mounts that outline as its visible-row owner: wheel input moves its clip viewport, and visible
+project, saved-agent and saved-terminal cells reuse the production row content. The host still
+owns exact selection, actions, terminal admission and AT-SPI publication. The installed X11
+`native_outline_smoke.py` checks 5,100 projects, expanded children, scrolling, pointer and
+keyboard selection, resize and middle/tail project restoration.
 `tests/sidebar_visible_rows/run.sh` checks a 5,100-project tree with
 bounded child projection; `--session-row-layout-fixture` and `--terminal-row-layout-fixture`
 check the shared title/icon stacks at their native slot sizes. The installed X11 smoke captures an
@@ -144,17 +148,18 @@ The text-label fixture also checks the shim's bounded `NSWindow.contentView` own
 `NSView.window` lifecycle against callback order measured with macOS AppKit. It covers subtree
 attachment and removal, same-window and cross-window reparenting, moving a content root between
 windows, and assigning the same root twice. `NSWindow` provides content ownership and
-`layoutIfNeeded()` here; SDL still owns the native window. The native preview now attaches one
-root for the SDL window's lifetime and reuses bounded visible row and label slots across frames.
+`layoutIfNeeded()` here; SDL still owns the native window. The native preview attaches one
+root for the SDL window's lifetime. Its project outline reuses visible cells; the remaining
+picker and empty-state paths retain bounded row and label slots across frames.
 It still assembles some diagnostic rows rather than a complete production screen. See `FINDINGS.md`
 §§124–125. The content owner now also keeps AppKit first-responder state and offers key
 equivalents down the retained view tree. The focused fixture links the unchanged production
 `KeyEquivalentScopeView` and checks that its shortcut runs only while its subtree owns focus,
 including a field editor delegate. Native project-row presses enter the retained tree through
-`NSView.hitTest` and `mouseDown`; the row returns a bounded slot to the host's selection path.
+`NSView.hitTest` and `mouseDown`; the outline's stable item resolves through the host's selection path.
 Production menu rows receive hover and press/release through that tree while the host retains
-command admission. Navigator Up/Down keys now reach the focused shim row.
-Sidebar wheel turns, terminal input and other keyboard commands keep their native routes.
+command admission. Navigator Up/Down keys advance selection, while sidebar wheel turns move the
+outline's clip viewport. Terminal input and other keyboard commands keep their native routes.
 The production pane header and Add Project/Actions controls are mounted and interactive in
 this preview; broader production chrome remains outside the diagnostic shell. See
 `FINDINGS.md` §§126–129, 131, 136–139, 147.
@@ -462,7 +467,8 @@ swift run WindowHarness /path/to/existing/experimental/store
 
 The window is a platform-transport experiment, using the existing specimen views for row chrome
 and mounted shim `NSTextField` labels for bounded Unicode navigator text. It is not the shipping sidebar or a selected final Linux
-backend. Up/Down and the wheel move selection; clicking a row selects it; Escape closes. The
+backend. Up/Down move selection, the wheel scrolls the outline viewport, clicking a row selects
+it, and Escape closes. The
 native title names the selected project's full path. Selection is local to the window; it does
 not change the store in this store-only diagnostic mode. Store open/recovery runs on a worker under the same exclusive lock as
 `LinuxHost`, then releases the lock and returns an immutable snapshot. No live reload is claimed.

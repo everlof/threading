@@ -77,4 +77,24 @@ func checkScrollViewport() {
                  "flipped hit test missed scrolled document")
     precondition(viewportPixel(flippedRoot) == [0, 0, 255, 255],
                  "flipped scrolled stripe did not render")
+
+    // The native navigator has unflipped row content inside a flipped outline document.
+    // A scrolled press must hit the row at the painted point, not another recycled row.
+    let navigator = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 240))
+    let navigatorScroll = NSScrollView(frame: NSRect(x: 6, y: 0, width: 388, height: 197))
+    let navigatorDocument = FlippedStripeDocument(
+        frame: NSRect(x: 0, y: 0, width: 388, height: 5_100 * 24))
+    let rows = (0..<20).map { index -> NSView in
+        let row = NSView(frame: NSRect(x: 0, y: CGFloat(index * 24), width: 388, height: 22))
+        navigatorDocument.addSubview(row)
+        return row
+    }
+    navigator.addSubview(navigatorScroll)
+    navigatorScroll.documentView = navigatorDocument
+    navigatorScroll.contentView.scroll(to: NSPoint(x: 0, y: 96))
+    let rowSixCenter = rows[6].convert(NSPoint(x: 120, y: 11), to: navigator)
+    precondition(rowSixCenter == NSPoint(x: 126, y: 138),
+                 "scrolled outline row conversion shifted its painted center")
+    precondition(navigator.hitTest(rowSixCenter) === rows[6],
+                 "scrolled outline hit testing targeted a different row")
 }

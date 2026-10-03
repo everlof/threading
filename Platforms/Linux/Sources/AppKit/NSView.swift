@@ -392,21 +392,37 @@ open class NSView: NSResponder, NSLayoutItem {
 
     open func updateConstraints() {}
 
-    /// Solve this subtree if anything in it is dirty. AppKit runs this from the window's update
-    /// cycle; the spike runs it from the render walk, which is the same contract with a much
-    /// simpler clock.
+    /// Solve dirty constraint islands in this subtree. A frame-placed descendant fixes its own
+    /// rectangle, so its internal constraints can be solved separately from its parent's tree.
+    /// AppKit runs this from the window update cycle; the Linux host also calls it before input
+    /// geometry is read.
     @discardableResult
     open func layoutSubtreeIfNeeded() -> LayoutEngine.Diagnosis? {
+        let boundaries = LayoutEngine.independentDescendants(of: self)
+        var diagnosis = layoutIslandIfNeeded(boundaries: boundaries)
+        for boundary in boundaries {
+            guard let childDiagnosis = boundary.layoutSubtreeIfNeeded() else { continue }
+            if diagnosis == nil || (diagnosis?.solved == true && !childDiagnosis.solved) {
+                diagnosis = childDiagnosis
+            }
+        }
+        return diagnosis
+    }
+
+    private func layoutIslandIfNeeded(boundaries: [NSView]? = nil) -> LayoutEngine.Diagnosis? {
         guard needsLayout else { return nil }
-        let diagnosis = LayoutEngine.layout(self)
-        clearNeedsLayout()
+        let boundaries = boundaries ?? LayoutEngine.independentDescendants(of: self)
+        let diagnosis = LayoutEngine.layoutIsland(self, boundaries: boundaries)
+        let excluded = Set(boundaries.map(ObjectIdentifier.init))
+        clearNeedsLayout(excluding: excluded)
         updateTrackingAreasInSubtree()
         return diagnosis
     }
 
-    private func clearNeedsLayout() {
+    private func clearNeedsLayout(excluding boundaries: Set<ObjectIdentifier>) {
+        if boundaries.contains(ObjectIdentifier(self)) { return }
         needsLayout = false
-        for subview in subviews { subview.clearNeedsLayout() }
+        for subview in subviews { subview.clearNeedsLayout(excluding: boundaries) }
     }
 
     public var leadingAnchor: NSLayoutXAxisAnchor { NSLayoutXAxisAnchor(item: self, attribute: .leading) }
@@ -435,7 +451,7 @@ open class NSView: NSResponder, NSLayoutItem {
     public func render(in context: NSGraphicsContext) {
         guard !isHidden, alphaValue > 0 else { return }
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layoutSubtreeIfNeeded()
+            _ = layoutIslandIfNeeded()
             context.saveGraphicsState()
             defer { context.restoreGraphicsState() }
 

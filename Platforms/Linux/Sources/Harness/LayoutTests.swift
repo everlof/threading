@@ -19,6 +19,8 @@ enum LayoutTests {
         pinnedRowInUnflippedParent()
         pinnedRowInFlippedParent()
         fixedFrameChildKeepsOwnSizeInsideLargerRow()
+        frameDrivenSubtreeLaysOutIndependently()
+        ancestorConstraintKeepsItsDescendantInTheSameSolve()
         measuredBaselinesTrackSolvedHeight()
         centredBox()
         halfWidthByMultiplier()
@@ -102,6 +104,58 @@ enum LayoutTests {
                NSRect(x: 100, y: 10, width: 20, height: 20))
         expect("nested fixed-frame icon", icon.frame,
                NSRect(x: 4, y: 4, width: 12, height: 12))
+    }
+
+    /// Mounting a new frame-positioned row should not add its content constraints to the
+    /// window's program. Its own solve still runs when the parent is clean and its frame changes.
+    private static func frameDrivenSubtreeLaysOutIndependently() {
+        let root = FlippedBox(frame: NSRect(x: 0, y: 0, width: 300, height: 120))
+        let row = FlippedBox(frame: NSRect(x: 20, y: 10, width: 100, height: 40))
+        let icon = Box(frame: .zero)
+        root.addSubview(row)
+        row.addSubview(icon)
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            icon.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -6),
+            icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 12),
+            icon.heightAnchor.constraint(equalToConstant: 12)
+        ])
+
+        let first = root.layoutSubtreeIfNeeded()
+        if first?.itemCount != 2 { failures.append("frame boundary enlarged the window solve") }
+        expect("frame boundary solves its child", icon.frame,
+               NSRect(x: 82, y: 14, width: 12, height: 12))
+
+        row.frame.size.width = 140
+        let second = root.layoutSubtreeIfNeeded()
+        if second?.solved != true { failures.append("clean parent skipped dirty row") }
+        expect("resized frame boundary moves its child", icon.frame,
+               NSRect(x: 122, y: 14, width: 12, height: 12))
+    }
+
+    /// A constraint installed above a frame boundary can reference a deeper view. In that
+    /// case the branch must stay in one program so the relation is not silently discarded.
+    private static func ancestorConstraintKeepsItsDescendantInTheSameSolve() {
+        let root = FlippedBox(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        let row = FlippedBox(frame: NSRect(x: 20, y: 10, width: 100, height: 40))
+        let icon = Box(frame: .zero)
+        root.addSubview(row)
+        row.addSubview(icon)
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 65),
+            icon.topAnchor.constraint(equalTo: row.topAnchor, constant: 8),
+            icon.widthAnchor.constraint(equalToConstant: 12),
+            icon.heightAnchor.constraint(equalToConstant: 12)
+        ])
+
+        let result = root.layoutSubtreeIfNeeded()
+        if result?.itemCount != 3 {
+            failures.append("crossing constraint omitted descendant from window solve")
+        }
+        expect("crossing constraint positions descendant", icon.frame,
+               NSRect(x: 45, y: 8, width: 12, height: 12))
     }
 
     /// A line vertically centred in a stretched label moves by half the height change. A
