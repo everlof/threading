@@ -1454,8 +1454,10 @@ turns the endpoint silent.
 
 - **Claude** gets the entries in its per-session `--settings` only for a terminal launch with
   lifecycle reporting on (`mailNotices`, gated by `MailNoticeHook.isWanted`); native sessions use
-  `MacMailDelivery` instead. Remote-host terminals carry the same entries, answered through the
-  reverse tunnel.
+  `MacMailDelivery` instead. A remote-host terminal whose mailbox is on its host instead runs
+  `<controller> agent-notice <event>` there (`MailNoticeHook.hostCommand`) — the same JSON, with
+  no dependence on this Mac — and this Mac's endpoint answers it silently; one whose host has no
+  controller keeps the curl entries, answered through the reverse tunnel.
 - **Codex** gets them in the account's shared `hooks.json` through `CodexHookInstaller`,
   token-guarded like every entry there. Adding them changed the file's text once, which costs the
   user **one renewal of their Codex hook trust** — the measured cost recorded under "Codex hooks,

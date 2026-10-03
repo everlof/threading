@@ -415,9 +415,10 @@ socket/port fallback with lifecycle reports and answers within the hook's 2-seco
 
 The four `mail_*` tools are ordinary built-ins in the `workspace-control` group, declared in
 `MCPMailTools.swift` and appended to `authoredDeclarations` in one line, so the shared registry
-files change only additively. `MCPRemoteSessionToolScope` admits them for remote-host sessions:
-their mailbox is this Mac's record until the host-local mailbox (draft, "Mailbox location")
-exists.
+files change only additively. `MCPRemoteSessionToolScope` admits them for remote-host sessions
+whose mailbox is this Mac's; a session whose mailbox lives on its host
+(`RemoteSessionMailboxes.keepsMailOnHost`) gets them from the host's `threading-mail` server
+instead, and `MCPToolCatalog.definitions(for:)` removes them here, so each tool has one answer.
 
 ## Scoped ad-hoc endpoints and the AI settings search
 

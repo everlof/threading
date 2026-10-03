@@ -36,6 +36,28 @@ enum MailNoticeHook {
         "\(MCPDefaults.mailNoticePathPrefix)\(token)?\(MCPDefaults.mailNoticeEventParameter)=\(event.rawValue)"
     }
 
+    /// The host-local form for a session whose mailbox lives on its remote host: the hook runs
+    /// the controller's own `agent-notice`, which reads the mailbox address and credential from
+    /// the agent's environment and prints the same hook JSON, or nothing. It needs neither this
+    /// Mac nor the tunnel. Stderr and failure are swallowed exactly as above.
+    static func hostCommand(executable: String, event: MailNoticeEvent) -> String {
+        ShellCommand(word: executable).source + " agent-notice \(event.rawValue) 2>/dev/null || true"
+    }
+
+    /// `settings` with the host-local notice entries appended beside whatever hooks it holds.
+    static func addingHostNoticeHooks(to settings: [String: Any], executable: String) -> [String: Any] {
+        var settings = settings
+        var hooks = settings["hooks"] as? [String: Any] ?? [:]
+        for event in events {
+            let name = hookName(for: event)
+            var entries = hooks[name] as? [[String: Any]] ?? []
+            entries.append(["hooks": [["type": "command", "command": hostCommand(executable: executable, event: event)]]])
+            hooks[name] = entries
+        }
+        settings["hooks"] = hooks
+        return settings
+    }
+
     /// Claude's entry: the token is baked into the per-session `--settings` file.
     static func claudeCommand(token: String, event: MailNoticeEvent) -> String {
         let payload = "threading_hook_payload"

@@ -4518,6 +4518,19 @@ sent lately — who, on which host, and whether it was read, handed to its host,
 never the text. Mail to and from a remote host moves while this Mac is connected to it and its
 controller is set up on the **Remote automations** page.
 
+A session that runs on a remote host keeps its mail **on that host** when the host's controller
+is set up there: it keeps receiving mail and being told about it while your Mac is asleep, and
+the Info panel shows the last reading with its age while the host can't be reached. Without a
+controller its mail stays on this Mac, and the panel says so.
+
+Only you decide who may write. **Grant access…** in the Mail section lets an agent on another
+host — one address, or a whole host as `<host>/*` — leave mail for this chat (**Can write**) or
+also start it when it is not running (**Can write and wake**, which spends its usage); click a
+grant to revoke it. **Add contact…** names an address so the chat sees it in its directory.
+Every change asks first, and agents cannot make them. A chat woken by mail starts in the
+background with a one-line notice — never the message itself; a terminal session is never
+typed into and hears about its mail when it next starts.
+
 Codex users approve Threading's hooks once more after this update: the mail notice adds entries
 to `hooks.json`, and Codex asks again for any changed hook file.
 

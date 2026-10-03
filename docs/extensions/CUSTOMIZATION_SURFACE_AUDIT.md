@@ -627,7 +627,11 @@ The session Info panel's **Mail** section is host-only presentation over the ses
 Its entity is one session's mail address. Threading owns addressing, admission, storage,
 acknowledgement, cross-host sync and every notice; the section shows party, host and state from a
 bounded read and never message text. It is built from `SessionInfoRowView` and `PanelListView`,
-reuses the panel's on-screen-only poll, and introduces no extension slot, data or authority.
+reuses the panel's on-screen-only poll, and introduces no extension slot, data or authority. Its
+grant, revoke and contact forms (`SessionMailAccessForm`) are host-only authorization UI: each is
+an always-asked `ConfirmationAlert` (`changeMailAccess`) whose accessory is `ThemedTextField` and
+`ThemedPopUp`; Threading owns validation, the store written and revocation, and no extension can
+read, replace or pre-fill them.
 
 Before adding a component:
 

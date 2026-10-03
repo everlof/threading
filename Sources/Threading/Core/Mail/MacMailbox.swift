@@ -177,6 +177,51 @@ actor MacMailbox {
         }
     }
 
+    // MARK: - Owner configuration
+
+    /// Grants `sender` (an address, `<host>/*` or `*`) `mode` on a session mailbox here, unless an
+    /// equal grant already stands. Owner-only: no agent tool reaches this.
+    @discardableResult
+    func ensureGrant(recipient: MailAddress, sender: String, mode: MailMode?, allowsInterrupt: Bool = false) async throws -> MailGrant {
+        let store = try await openStore()
+        return try await refusing {
+            let prior = try await store.mailGrants(recipient: recipient, limit: MacMailDefaults.grantPage).items
+                .first { $0.sender == sender }
+            if let prior, prior.mode == mode, prior.allowsInterrupt == (mode != nil && allowsInterrupt) { return prior }
+            return try await store.setMailGrant(
+                recipient: recipient, sender: sender, expectedRevision: prior?.revision ?? 0,
+                mode: mode, allowsInterrupt: allowsInterrupt
+            )
+        }
+    }
+
+    /// The grants on a session's mailbox, live ones first. Bounded to one page.
+    func grants(for sessionID: SessionID, name: String) async throws -> [MailGrant] {
+        let store = try await openStore()
+        let address = try await register(sessionID, name: name)
+        return try await refusing {
+            try await store.mailGrants(recipient: address, limit: MacMailDefaults.grantPage).items
+                .sorted { ($0.mode != nil ? 0 : 1) < ($1.mode != nil ? 0 : 1) }
+        }
+    }
+
+    /// Names (or, with nil, removes) an address in this Mac's directory.
+    func setContact(_ address: MailAddress, name: String?) async throws {
+        let store = try await openStore()
+        try await refusing { _ = try await store.setMailContact(address, name: name) }
+    }
+
+    func contacts() async throws -> [MailContact] {
+        let store = try await openStore()
+        return try await refusing { try await store.mailContacts(limit: MacMailDefaults.grantPage).items }
+    }
+
+    /// The newest open message a wake grant lets start this session, within its chain budget.
+    func wakeCandidate(for sessionID: SessionID) async -> MailMessage? {
+        guard let store = try? await openStore(), let address = try? await address(for: sessionID) else { return nil }
+        return try? await store.mailWakeCandidate(address)
+    }
+
     /// The store itself, for the sync engine. Owner operations only.
     func controllerStore() async throws -> ControllerStore {
         try await openStore()
@@ -263,6 +308,9 @@ enum MacMailDefaults {
     /// answer the question; it is not a listing.
     static let unannouncedProbe = 20
     static let peerPage = 50
+    static let grantPage = 50
+    /// Project siblings granted `notify` from a host-local session mailbox.
+    static let siblingGrantLimit = 32
     /// One inbox page for an agent: the controller's own default.
     static let inboxPage = 20
     /// Rows the session's Mail section shows in each list.

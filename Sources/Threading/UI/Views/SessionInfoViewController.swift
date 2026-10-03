@@ -276,6 +276,13 @@ final class SessionInfoViewController: NSViewController {
         }
     }
 
+    /// The grant and contact forms for this session's mailbox.
+    private lazy var mailAccess = SessionMailAccessForm(
+        sessionID: sessionID,
+        window: { [weak self] in self?.view.window },
+        changed: { [weak self] in self?.refreshMail() }
+    )
+
     /// Deterministic render seam for the Mail section. Production reads `MacMailbox` off-main on
     /// each poll.
     var mailSource: (() -> SessionMailPresentation?)?
@@ -316,12 +323,28 @@ final class SessionInfoViewController: NSViewController {
             return
         }
         let sessionID = sessionID
+        let title: @MainActor (SessionID) -> String? = { ProjectStore.shared.session(withID: $0)?.displayTitle }
+        let location = RemoteSessionMailboxes.shared.location(for: sessionID)
         Task { @MainActor [weak self] in
-            let snapshot = try? await MacMailbox.shared.snapshot(for: sessionID, limit: MacMailDefaults.snapshotRows)
-            let presentation = snapshot.map {
-                SessionMailPresentation($0) { ProjectStore.shared.session(withID: $0)?.displayTitle }
+            let presentation: SessionMailPresentation?
+            switch location {
+            case .host:
+                // Kept on the session's host; read over owner SSH, stale with its age when away.
+                presentation = await RemoteSessionMailboxes.shared.read(sessionID, sessionTitle: title)
+            case .thisMac, .thisMacForHost:
+                let snapshot = try? await MacMailbox.shared.snapshot(for: sessionID, limit: MacMailDefaults.snapshotRows)
+                var local = snapshot.map { SessionMailPresentation($0, sessionTitle: title) }
+                if case .thisMacForHost(let host) = location {
+                    local = (local ?? SessionMailPresentation(received: [], sent: [])).located(L10n.format(
+                        "Kept on this Mac: %@ has no controller set up on the Remote automations page.", host
+                    ))
+                }
+                presentation = local
             }
-            self?.applyMail(presentation)
+            let grants = (try? await MailAccessService.shared.grants(
+                for: sessionID, name: title(sessionID) ?? ""
+            )) ?? []
+            self?.applyMail((presentation ?? SessionMailPresentation(received: [], sent: [])).granting(grants))
         }
     }
 
@@ -558,6 +581,23 @@ final class SessionInfoViewController: NSViewController {
     /// A fixed form over a bounded read: at most `snapshotRows` received and sent rows.
     private func addMail(_ presentation: SessionMailPresentation?) {
         list.addSection(L10n.string("Mail"))
+        defer {
+            if let presentation, !presentation.grants.isEmpty {
+                addUsageSubheading(L10n.string("Who can write"))
+                presentation.grants.forEach(addMailGrantRow)
+            }
+            addMailActionRow(
+                title: L10n.string("Grant access…"),
+                symbol: SessionInfoSymbols.mailGrant,
+                action: { [weak self] in self?.mailAccess.presentGrant() }
+            )
+            addMailActionRow(
+                title: L10n.string("Add contact…"),
+                symbol: SessionInfoSymbols.mailContact,
+                action: { [weak self] in self?.mailAccess.presentContact() }
+            )
+            if let note = presentation?.note { _ = list.addFootnote(note) }
+        }
         guard let presentation, !presentation.isEmpty else {
             list.addNote(L10n.string("No mail."))
             return
@@ -570,6 +610,35 @@ final class SessionInfoViewController: NSViewController {
             addUsageSubheading(L10n.string("Sent"))
             presentation.sent.forEach(addMailRow)
         }
+    }
+
+    private func addMailGrantRow(_ grant: SessionMailPresentation.Grant) {
+        let mode = SessionMailPresentation.words(for: grant.mode)
+        let view = SessionInfoRowView(
+            symbolName: SessionInfoSymbols.mailGrant,
+            symbolColor: Design.Text.secondary,
+            primary: grant.sender,
+            secondary: "",
+            valueSegments: [mode],
+            face: .receipt,
+            accessibilityLabel: [grant.sender, mode].joined(separator: " · "),
+            action: { [weak self] in self?.mailAccess.presentRevoke(sender: grant.sender) }
+        )
+        view.toolTip = L10n.string("Revoke this access")
+        list.addRow(view)
+    }
+
+    private func addMailActionRow(title: String, symbol: String, action: @escaping () -> Void) {
+        list.addRow(SessionInfoRowView(
+            symbolName: symbol,
+            symbolColor: Design.Text.secondary,
+            primary: title,
+            secondary: "",
+            valueSegments: [],
+            face: .receipt,
+            accessibilityLabel: title,
+            action: action
+        ))
     }
 
     private func addMailRow(_ row: SessionMailPresentation.Row) {
@@ -1025,4 +1094,6 @@ enum SessionInfoSymbols {
     /// Mail waiting for the session, and mail it sent.
     static let mailReceived = "envelope"
     static let mailSent = "paperplane"
+    static let mailGrant = "person.badge.key"
+    static let mailContact = "person.crop.circle.badge.plus"
 }

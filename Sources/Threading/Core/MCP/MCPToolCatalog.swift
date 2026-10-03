@@ -849,7 +849,13 @@ enum MCPToolCatalog {
   static func definitions(for sessionID: SessionID) -> [MCPToolDefinition] {
     let definitions = definitions(forOperations: ControlGrantStore.shared.effectiveOperations(for: sessionID))
     guard MCPRemoteSessionToolScope.isRemote(sessionID) else { return definitions }
-    return definitions.filter { MCPRemoteSessionToolScope.reaches(toolNamed: $0.name) }
+    // A session whose mailbox lives on its host gets the mail tools from that host's own
+    // `agent-mcp`; offering them here too would give two answers per tool.
+    let mailOnHost = RemoteSessionMailboxes.shared.keepsMailOnHost(sessionID)
+    return definitions.filter {
+      MCPRemoteSessionToolScope.reaches(toolNamed: $0.name)
+        && !(mailOnHost && MCPRemoteSessionToolScope.isMailTool(named: $0.name))
+    }
   }
 
   /// Pure authority projection used by admission tests and by the session lookup above.

@@ -612,7 +612,13 @@ final class SessionMailRenderTests: XCTestCase {
             .init(id: UUID(), direction: .sent, party: "Session", host: "build-box",
                   state: SessionMailPresentation.words(for: .bounced), isUrgent: false, isProblem: true)
         ]
-    )
+    ).granting([SessionMailRenderTests.wakeGrant]).located("Kept on vps-1, which can’t be reached; as of 3 min. ago.")
+
+    static let wakeGrant: MailGrant = {
+        let host = HostID()
+        let json = #"{"recipient":"\#(host)/session/\#(UUID().uuidString)","sender":"\#(host)/*","mode":"wake","allowsInterrupt":false,"revision":1}"#
+        return try! JSONDecoder().decode(MailGrant.self, from: Data(json.utf8))
+    }()
 
     private func panel(_ presentation: SessionMailPresentation?) -> (SessionInfoViewController, ThemedSurfaceView) {
         let controller = SessionInfoViewController(sessionID: SessionID(), folderPath: NSHomeDirectory())
@@ -635,16 +641,19 @@ final class SessionMailRenderTests: XCTestCase {
         view.subviews.flatMap { ($0 as? SessionInfoRowView).map { [$0] } ?? [] + rows(in: $0) }
     }
 
+    private func labels(_ rows: [SessionInfoRowView]) -> [String] { rows.map { $0.accessibilityLabel() ?? "" } }
+
     func testTheSectionListsReceivedAndSentRowsWithoutBodies() {
         let (controller, _) = panel(Self.fixture)
         let rows = Self.rows(in: controller.view)
-        XCTAssertEqual(rows.count, 4)
-        let labels = rows.map { $0.accessibilityLabel() ?? "" }
+        XCTAssertEqual(rows.count, 4 + 1 + 2, "four messages, one grant, grant and contact actions")
+        XCTAssertTrue(labels(rows).contains { $0.contains(SessionMailPresentation.words(for: .wake)) })
+        let labels = labels(rows)
         XCTAssertTrue(labels.contains { $0.contains("Deploy bot") && $0.contains("vps-1") && $0.contains("Urgent") })
         XCTAssertTrue(labels.contains { $0.contains(SessionMailPresentation.words(for: .bounced)) })
 
         let (empty, _) = panel(nil)
-        XCTAssertTrue(Self.rows(in: empty.view).isEmpty)
+        XCTAssertEqual(Self.rows(in: empty.view).count, 2, "only the grant and contact actions")
     }
 
     func testRendersTheMailSectionToImages() throws {
