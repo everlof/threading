@@ -507,6 +507,19 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         }
         *out = (TWEvent){0};
         SDL_GetWindowSize(w->window, &out->width, &out->height);
+        // The preview host owns its appearance switch. Consume both halves here so a live
+        // terminal never receives the shortcut as PTY input or a stray printable t.
+        if (w->sidebarWidth && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
+            e.key.keysym.sym == SDLK_t && (e.key.keysym.mod & KMOD_CTRL) &&
+            (e.key.keysym.mod & KMOD_SHIFT)) {
+            if (e.type == SDL_KEYDOWN && !e.key.repeat) {
+                out->kind = 44;
+                w->suppressActivation = SDLK_t;
+                return 1;
+            }
+            if (e.type == SDL_KEYUP) w->suppressActivation = 0;
+            continue;
+        }
         // Navigation-owned key releases remain navigation-owned even when their press opened
         // a terminal or moved focus. Never send the other pane a lone Enter/arrow/Tab release.
         if ((w->sidebarWidth || w->actionsVisible) && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&

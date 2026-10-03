@@ -6,8 +6,18 @@ import Foundation
 /// `./vendor.sh --verify` proves the shared painters have not been adapted for Linux.
 @MainActor
 enum Specimen {
+    #if THREADING_WINDOW_HARNESS
+    static var bodyGround: NSColor { LinuxTheme.color("surface") }
+    static var headerGround: NSColor { LinuxTheme.color("panel") }
+
+    private static func resolvedGround(_ role: String) -> NSColor {
+        let (red, green, blue, alpha) = LinuxTheme.components(role)
+        return NSColor(red: red, green: green, blue: blue, alpha: alpha)
+    }
+    #else
     static let bodyGround = NSColor(white: 0.87, alpha: 1)
     static let headerGround = NSColor(white: 0.78, alpha: 1)
+    #endif
     static let navigatorRowGeometry = NavigatorRowGeometry(
         leadingInset: 4, iconSlotWidth: 16, contentGap: 6)
 
@@ -83,6 +93,8 @@ enum Specimen {
     struct Ink {
         let label: NSColor
         let secondary: NSColor
+        let tertiary: NSColor
+        let quaternary: NSColor
 
         init(on ground: NSColor) {
             guard let resolved = NeutralInk.resolve(
@@ -98,6 +110,8 @@ enum Specimen {
             let base: CGFloat = resolved.base == .white ? 1 : 0
             label = NSColor(white: base, alpha: resolved.label.alpha)
             secondary = NSColor(white: base, alpha: resolved.secondary.alpha)
+            tertiary = NSColor(white: base, alpha: resolved.tertiary.alpha)
+            quaternary = NSColor(white: base, alpha: resolved.quaternary.alpha)
         }
     }
 
@@ -107,8 +121,13 @@ enum Specimen {
         var hasMountedHeader = false
         var title = "Threading on Linux"
         var separatesScratchpad = false
+        #if THREADING_WINDOW_HARNESS
+        private(set) var bodyInk = Ink(on: Specimen.resolvedGround("surface"))
+        private(set) var headerInk = Ink(on: Specimen.resolvedGround("panel"))
+        #else
         let bodyInk = Ink(on: Specimen.bodyGround)
         let headerInk = Ink(on: Specimen.headerGround)
+        #endif
         private let rowLayer = NSView(frame: .zero)
         private let textLayer = NoninteractiveTextLayer(frame: .zero)
         private let menuLayer = MenuRowLayer(frame: .zero)
@@ -145,6 +164,17 @@ enum Specimen {
         }
 
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        #if THREADING_WINDOW_HARNESS
+        /// The SDL host keeps this tree mounted across mode changes. Re-resolve the neutral
+        /// ink outside drawing and let the appearance hook invalidate every descendant.
+        func setThemeAppearance() {
+            bodyInk = Ink(on: Specimen.resolvedGround("surface"))
+            headerInk = Ink(on: Specimen.resolvedGround("panel"))
+            appearance = LinuxTheme.appearance
+            needsDisplay = true
+        }
+        #endif
 
         /// The native host retains this root for the SDL window's lifetime. View slots are
         /// bounded by the viewport and reused through selection and resize.

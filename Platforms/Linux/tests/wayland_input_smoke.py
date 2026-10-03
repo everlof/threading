@@ -128,6 +128,16 @@ def has_placeholder_icon(path, button_bounds):
     return ink > 50
 
 
+def bmp_pixel(path, x, y):
+    bitmap = path.read_bytes()
+    assert bitmap[:2] == b'BM', 'invalid Wayland capture'
+    offset = struct.unpack_from('<I', bitmap, 10)[0]
+    width, height = struct.unpack_from('<ii', bitmap, 18)
+    assert 0 <= x < width and 0 <= y < height
+    start = offset + (height - 1 - y) * width * 4 + x * 4
+    return bitmap[start:start + 3]
+
+
 input_socket = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 input_socket.bind(str(evidence / 'input-client'))
 input_socket.settimeout(3)
@@ -199,6 +209,39 @@ with log_path.open('w') as log:
             'production placeholder icon is missing from the centered stack'
         assert not any(item.get_role_name() == 'terminal' for item in descendants(app)), \
             'idle workspace unexpectedly mounted a terminal'
+        navigator_frames = log_path.read_text().count('NAVIGATOR_TEXT mounted=')
+        inject('key 29 down')  # KEY_LEFTCTRL
+        inject('key 42 down')  # KEY_LEFTSHIFT
+        inject('key 20 down')  # KEY_T
+        inject('key 20 up')
+        inject('key 42 up')
+        inject('key 29 up')
+        eventually(lambda: 'THEME_APPEARANCE dark' in log_path.read_text(),
+                   'physical Wayland dark appearance')
+        eventually(lambda: log_path.read_text().count('NAVIGATOR_TEXT mounted=') > navigator_frames,
+                   'dark Wayland navigator frame')
+        (capture / 'trigger').write_text('dark-idle\n')
+        move_window_point(1100, 400)
+        dark_idle = capture / 'dark-idle.bmp'
+        eventually(dark_idle.is_file, 'dark idle Wayland frame')
+        for x, y in [(300, 300), (1100, 400)]:
+            assert bmp_pixel(idle_image, x, y) != bmp_pixel(dark_idle, x, y), \
+                f'Wayland appearance left pane pixel unchanged at {(x, y)}'
+        navigator_frames = log_path.read_text().count('NAVIGATOR_TEXT mounted=')
+        inject('key 29 down')
+        inject('key 42 down')
+        inject('key 20 down')
+        inject('key 20 up')
+        inject('key 42 up')
+        inject('key 29 up')
+        eventually(lambda: 'THEME_APPEARANCE light' in log_path.read_text(),
+                   'physical Wayland light appearance')
+        eventually(lambda: log_path.read_text().count('NAVIGATOR_TEXT mounted=') > navigator_frames,
+                   'restored light Wayland navigator frame')
+        (capture / 'trigger').write_text('light-idle\n')
+        move_window_point(1100, 405)
+        eventually(lambda: (capture / 'light-idle.bmp').is_file(),
+                   'restored light idle Wayland frame')
         click(placeholder_action)
         eventually(lambda: menu_name() == 'New in Project',
                    'physical Wayland New Session opened project creation menu')

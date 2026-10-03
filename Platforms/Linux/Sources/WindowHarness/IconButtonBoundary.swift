@@ -1,7 +1,7 @@
 import AppKit
 
 // Only the neighboring theme and menu contracts needed to mount unchanged ThemedControl and
-// ThemedIconButton. WindowHarness has fixed diagnostic grounds and no macOS theme bus.
+// ThemedIconButton. WindowHarness consumes a checked production theme snapshot.
 @MainActor public protocol ThemedComponent: AnyObject {}
 
 @MainActor public enum SurfaceBevel { case automatic, sunken, none }
@@ -41,17 +41,15 @@ public struct ProfileDidChange {}
 public struct AccessibilityDisplayOptionsDidChange {}
 @MainActor public final class AppEventObservations {
     public func observe<Event>(_ event: Event.Type, _ handler: @escaping (Event) -> Void) {
-        // These event types do not fire in the fixed-palette diagnostic shell.
+        // WindowHarness explicitly invalidates its bounded retained views on theme changes.
     }
 }
 
 @MainActor public enum InkSource: Equatable {
     case backdrop, chrome, selection
-    // The terminal header's 24/255 ground is drawn by WorkspaceTerminalPane. The page title
-    // resolves its ink against that same value; the sidebar controls use the lighter band.
-    static let backdropGround = NSColor(white: CGFloat(24) / 255, alpha: 1)
+    static var backdropGround: NSColor { LinuxTheme.color("terminal.background") }
     private static let backdropInk = Design.Ink(on: backdropGround)
-    private static let chromeInk = Design.Ink(on: Specimen.headerGround)
+    private static let chromeInk = Design.Ink(on: LinuxTheme.color("surface"))
     private static let selectionInk = Design.Ink.selection
     public var ink: Design.Ink {
         switch self {
@@ -62,9 +60,8 @@ public struct AccessibilityDisplayOptionsDidChange {}
     }
 }
 
-/// The diagnostic host's fixed-ground counterpart of production BackdropThemedControl. The
-/// actual icon button and its ThemedControl base are linked unchanged; this seam only provides
-/// the two stable grounds that the host can draw beneath them.
+/// The Linux host's counterpart of production BackdropThemedControl. The actual icon button
+/// and its ThemedControl base are linked unchanged; this seam provides the host's theme roles.
 @MainActor
 public class BackdropThemedControl: ThemedControl {
     public let inkSource: InkSource

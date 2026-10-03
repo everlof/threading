@@ -85,9 +85,14 @@ runtime without sending those keys to the shell. From the focused project list, 
 opens the folder chooser. Escape backs out of a picker or returns focus to the terminal.
 Alt+F4 closes the window while running children remain with the daemon.
 
+Ctrl+Shift+T switches the current window between Threading's light and dark appearances. The
+sidebar, idle pane, terminal header, menus and visible terminal colors update together; the
+choice resets to light when the preview restarts. A theme settings control is not yet available.
+
 Saved Claude and Codex sessions show their provider marks beside the title. If artwork is
 unavailable, the row shows the provider name instead. Accessible labels retain the provider,
-account and session identity. Custom account badges and themes are not available in this preview.
+account and session identity. Custom account badges and imported themes are not available in
+this preview.
 
 The sidebar's header `⋯` (**Actions**) opens the supported commands for the selected project: open or
 replace a shell, create Claude/Codex sessions, choose their accounts, browse saved runtimes and

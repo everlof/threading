@@ -79,8 +79,32 @@ final class WorkspaceTerminalPane {
         headerWindow.contentView = headerRoot
         headerWindow.isKeyWindow = true
         menuWindow.contentView = menuRoot
+        setThemeAppearance()
         session.setPreedit(nil)
         session.invalidateFrame()
+    }
+
+    func setThemeAppearance() {
+        let appearance = LinuxTheme.appearance
+        headerRoot.appearance = appearance
+        menuRoot.appearance = appearance
+        let ansiRoles = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+                         "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue",
+                         "brightMagenta", "brightCyan", "brightWhite"]
+        session.setThemeColors(
+            foregroundRGB: Self.rgb("terminal.foreground"),
+            backgroundRGB: Self.rgb("terminal.background"),
+            ansiRGB: ansiRoles.map { Self.rgb("terminal.\($0)") })
+        headerNeedsPresentation = true
+        menuNeedsPresentation = menuOpen
+    }
+
+    private static func rgb(_ role: String) -> UInt32 {
+        let (red, green, blue, _) = LinuxTheme.components(role)
+        func channel(_ value: CGFloat) -> UInt32 {
+            UInt32((max(0, min(1, value)) * 255).rounded())
+        }
+        return channel(red) << 16 | channel(green) << 8 | channel(blue)
     }
 
     func handleHeader(_ input: TWEvent) {
@@ -246,7 +270,7 @@ final class WorkspaceTerminalPane {
                                   height: PaneHeaderView.bandHeight)
         pageTitle.maxWidth = max(0, headerRoot.bounds.width - 2 * PaneHeaderView.contentInset)
         let bitmap = Bitmap(width: width, height: Self.headerPixelHeight,
-                            background: InkSource.backdropGround.components)
+                            background: LinuxTheme.components("terminal.background"))
         headerRoot.render(in: NSGraphicsContext(bitmap: bitmap, scale: 2))
         let result = bitmap.pixels.withUnsafeBufferPointer {
             tw_present_terminal_header(window, $0.baseAddress,

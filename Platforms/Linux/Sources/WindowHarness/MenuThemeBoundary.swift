@@ -1,7 +1,7 @@
 import AppKit
 
-// The installed Linux preview has one fixed diagnostic palette. These are app-owned role values
-// for the unchanged production menu row; no theme decisions belong in the AppKit shim.
+// The installed Linux preview consumes a checked production palette. These app-owned role values
+// support the unchanged production menu row; no theme decisions belong in the AppKit shim.
 @MainActor
 public enum AppTheme {
     public enum Material {
@@ -40,9 +40,9 @@ extension Design.Radius {
 }
 
 extension Design.Surface {
-    static let elevated = Specimen.bodyGround
-    static let controlResting = Specimen.bodyGround
-    static let controlHover = NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 0.23)
+    static var elevated: NSColor { LinuxTheme.color("elevated") }
+    static var controlResting: NSColor { LinuxTheme.color("controlResting") }
+    static var controlHover: NSColor { LinuxTheme.color("controlHover") }
 }
 
 extension Design.Symbol {
@@ -56,16 +56,16 @@ extension Design.Symbol {
 
 extension Design {
     @MainActor enum Text {
-        static let label = Specimen.Ink(on: Specimen.bodyGround).label
-        static let selected = Specimen.Ink(on: NSColor(red: 0.16, green: 0.42,
-                                                       blue: 0.78, alpha: 1)).label
-        static let secondary = Specimen.Ink(on: Specimen.bodyGround).secondary
-        static let tertiary = secondary.withAlphaComponent(0.7)
+        private static let chromeInk = Design.Ink(on: LinuxTheme.color("ground"))
+        static var label: NSColor { LinuxTheme.color("label") }
+        static var selected: NSColor { Design.Ink.selection.label }
+        static var secondary: NSColor { chromeInk.secondary }
+        static var tertiary: NSColor { chromeInk.tertiary }
     }
 
-    enum Status {
-        static let warning = NSColor(red: 0.48, green: 0.27, blue: 0.02, alpha: 1)
-        static let negative = NSColor(red: 0.62, green: 0.12, blue: 0.12, alpha: 1)
+    @MainActor enum Status {
+        static var warning: NSColor { LinuxTheme.color("statusWarning") }
+        static var negative: NSColor { LinuxTheme.color("statusNegative") }
     }
 
     enum Typography {
@@ -89,7 +89,7 @@ struct SelectionSurface {
     let ink: Design.Ink
 
     static func stated(over ground: NSColor) -> SelectionSurface {
-        let fill = NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1)
-        return SelectionSurface(fill: fill, ink: Design.Ink(on: fill))
+        let fill = LinuxTheme.color("selection")
+        return SelectionSurface(fill: fill, ink: .selection)
     }
 }

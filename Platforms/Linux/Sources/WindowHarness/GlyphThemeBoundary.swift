@@ -1,10 +1,8 @@
 import AppKit
 
-/// The Linux diagnostic shell has fixed grounds, not the macOS theme engine. Its retained icon
-/// buttons still use the exact production Design control; these are the measured host roles it
-/// reads. Geometry matches the production default theme, while ink is resolved from Specimen's
-/// header and body grounds. This file belongs only to WindowHarness; the generic Harness keeps
-/// its separate symbol trap.
+/// The Linux shell maps the roles read by retained production controls to a checked export of
+/// the Threading theme. Geometry remains the production default. This host adapter belongs only
+/// to WindowHarness; the generic Harness keeps its separate symbol trap.
 @MainActor
 public protocol ThemeDerivedContent: AnyObject {
     func rederiveThemedContent()
@@ -12,27 +10,46 @@ public protocol ThemeDerivedContent: AnyObject {
 
 @MainActor
 public enum Design {
-    public struct Ink {
+    @MainActor public struct Ink {
         public let label: NSColor
         public let secondary: NSColor
+        public let tertiary: NSColor
         public let quaternary: NSColor
         public let surface: NSColor
         public let surfaceHover: NSColor
         public let border: NSColor
 
         public init(on ground: NSColor) {
-            let neutral = Specimen.Ink(on: ground)
-            label = neutral.label
-            secondary = neutral.secondary
-            quaternary = neutral.secondary.withAlphaComponent(0.46)
-            surface = ground.blended(withFraction: 0.11, of: .black)!
-            surfaceHover = ground.blended(withFraction: 0.22, of: .black)!
-            border = ground.blended(withFraction: 0.42, of: .black)!
+            let light = LinuxTheme.neutralInk(on: ground, dark: false)
+            let dark = LinuxTheme.neutralInk(on: ground, dark: true)
+            let lightLabel = light.label
+            let darkLabel = dark.label
+            let lightSecondary = light.secondary
+            let darkSecondary = dark.secondary
+            let lightTertiary = light.tertiary
+            let darkTertiary = dark.tertiary
+            let lightQuaternary = light.quaternary
+            let darkQuaternary = dark.quaternary
+            label = NSColor(name: NSColor.Name("threading.linux.ink.label")) { appearance in
+                appearance.name == .darkAqua ? darkLabel : lightLabel
+            }
+            secondary = NSColor(name: NSColor.Name("threading.linux.ink.secondary")) { appearance in
+                appearance.name == .darkAqua ? darkSecondary : lightSecondary
+            }
+            tertiary = NSColor(name: NSColor.Name("threading.linux.ink.tertiary")) { appearance in
+                appearance.name == .darkAqua ? darkTertiary : lightTertiary
+            }
+            quaternary = NSColor(name: NSColor.Name("threading.linux.ink.quaternary")) { appearance in
+                appearance.name == .darkAqua ? darkQuaternary : lightQuaternary
+            }
+            surface = LinuxTheme.color("controlResting")
+            surfaceHover = LinuxTheme.color("controlHover")
+            border = LinuxTheme.color("border")
         }
 
-        public static var selection: Ink {
-            Ink(on: NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1))
-        }
+        public static let selection: Ink = {
+            Ink(on: LinuxTheme.color("selection"))
+        }()
     }
 
     public enum Accessibility { public static let focusRingWidth: CGFloat = 2 }
@@ -46,11 +63,11 @@ public enum Design {
         }
     }
     @MainActor public enum Surface {
-        public static let accent = Specimen.Ink(on: Specimen.headerGround).label
-        public static let bevelHighlight = NSColor.white
-        public static let bevelShadow = NSColor.black
-        public static let divider = Specimen.Ink(on: Specimen.headerGround).secondary
-        public static let border = divider
+        public static var accent: NSColor { LinuxTheme.color("accent") }
+        public static var bevelHighlight: NSColor { LinuxTheme.color("bevelHighlight") }
+        public static var bevelShadow: NSColor { LinuxTheme.color("bevelShadow") }
+        public static var divider: NSColor { LinuxTheme.color("divider") }
+        public static var border: NSColor { LinuxTheme.color("border") }
     }
     public enum Spacing {
         public static let small: CGFloat = 6
