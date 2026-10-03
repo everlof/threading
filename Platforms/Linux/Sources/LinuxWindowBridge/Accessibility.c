@@ -10,7 +10,8 @@
 #include <string.h>
 
 enum { MAX_VISIBLE_ROWS = 32, MAX_ROW_NAME = 512, MAX_ROW_ID = 64,
-       MAX_TERMINAL_TEXT = 64 * 1024, MAX_TERMINAL_RUNS = 128 * 40 + 40 };
+       MAX_TERMINAL_TEXT = 64 * 1024, MAX_TERMINAL_RUNS = 128 * 40 + 40,
+       MAX_SESSION_MENU_ROWS = 8 };
 enum { PROJECT_CONTROL_NONE, PROJECT_CONTROL_CREATE, PROJECT_CONTROL_ACTIONS };
 
 typedef struct {
@@ -51,9 +52,12 @@ G_DEFINE_TYPE_WITH_CODE(TerminalNode, terminal_node, component_node_get_type(),
                         G_IMPLEMENT_INTERFACE(ATK_TYPE_TEXT, text_interface_init))
 
 static AccessibleNode *app, *frame, *list, *actionsButton, *addProjectButton, *pageTitleButton;
+static AccessibleNode *pageActionsButton, *sessionMenuList;
 static AccessibleNode *placeholder, *placeholderTitle, *placeholderDetail, *placeholderAction;
 static int actionsVisible, addProjectVisible, pageTitleVisible, placeholderVisible, placeholderActionVisible;
+static int pageActionsVisible, sessionMenuVisible;
 static char pageTitleIdentity[128];
+static char pageActionsIdentity[128], sessionMenuIdentity[128];
 static TerminalNode *terminal;
 static AccessibleNode *activeList;
 static AccessibleNode *focused;
@@ -85,6 +89,16 @@ static struct {
         AtkRectangle bounds, createBounds, actionsBounds;
     } rows[MAX_VISIBLE_ROWS];
 } pending;
+static struct {
+    char identity[128];
+    int visible, count;
+    AtkRectangle bounds;
+    struct {
+        char id[MAX_ROW_ID], name[MAX_ROW_NAME];
+        int selected, enabled;
+        AtkRectangle bounds;
+    } rows[MAX_SESSION_MENU_ROWS];
+} sessionMenuPending;
 
 static gint node_child_count(AtkObject *object) {
     return (gint)((AccessibleNode *)object)->children->len;
@@ -121,8 +135,9 @@ static AtkStateSet *node_state(AtkObject *object) {
         atk_state_set_add_state(states, ATK_STATE_ENABLED);
         atk_state_set_add_state(states, ATK_STATE_SENSITIVE);
     }
-    if (node == list || node == (AccessibleNode *)terminal || node == actionsButton ||
-        node == addProjectButton || node == pageTitleButton || node == placeholderAction ||
+    if (node == list || node == sessionMenuList || node == (AccessibleNode *)terminal ||
+        node == actionsButton || node == addProjectButton || node == pageTitleButton ||
+        node == pageActionsButton || node == placeholderAction ||
         node->row >= 0 || node->projectControl) {
         atk_state_set_add_state(states, ATK_STATE_FOCUSABLE);
         if (node == focused) atk_state_set_add_state(states, ATK_STATE_FOCUSED);
@@ -213,6 +228,15 @@ static void set_focused(AccessibleNode *next) {
 static void refresh_focus(void) {
     AccessibleNode *next = NULL;
     if (windowFocused && frame && frame->children->len) {
+        if (sessionMenuVisible && sessionMenuList && sessionMenuList->children->len) {
+            next = g_ptr_array_index(sessionMenuList->children, 0);
+            for (guint i = 0; i < sessionMenuList->children->len; i++) {
+                AccessibleNode *row = g_ptr_array_index(sessionMenuList->children, i);
+                if (row->selected) { next = row; break; }
+            }
+            set_focused(next);
+            return;
+        }
         AccessibleNode *rightPane = placeholderVisible ? placeholder : (AccessibleNode *)terminal;
         AccessibleNode *content = tw_workspace_sidebar_width(hostWindow)
             ? (tw_workspace_sidebar_focused(hostWindow) ? list : rightPane)
@@ -234,7 +258,8 @@ static void show_content(AccessibleNode *content) {
     const int titleVisible = workspace && pageTitleVisible && !placeholderVisible;
     AccessibleNode *rightPane = placeholderVisible ? placeholder : (AccessibleNode *)terminal;
     const guint baseCount = workspace ? 2 + titleVisible : 1;
-    const guint count = baseCount + actionsVisible + addProjectVisible;
+    const guint count = baseCount + actionsVisible + addProjectVisible
+        + pageActionsVisible + sessionMenuVisible;
     int same = frame->children->len == count
         && g_ptr_array_index(frame->children, 0) == (workspace ? list : content);
     if (same && titleVisible) same = g_ptr_array_index(frame->children, 1) == pageTitleButton;
@@ -242,6 +267,11 @@ static void show_content(AccessibleNode *content) {
     if (same && actionsVisible) same = g_ptr_array_index(frame->children, baseCount) == actionsButton;
     if (same && addProjectVisible)
         same = g_ptr_array_index(frame->children, baseCount + actionsVisible) == addProjectButton;
+    if (same && pageActionsVisible)
+        same = g_ptr_array_index(frame->children, baseCount + actionsVisible + addProjectVisible)
+            == pageActionsButton;
+    if (same && sessionMenuVisible)
+        same = g_ptr_array_index(frame->children, count - 1) == sessionMenuList;
     if (!same) {
         set_focused(NULL);
         clear_children(frame);
@@ -250,6 +280,8 @@ static void show_content(AccessibleNode *content) {
         if (workspace) add_child(frame, rightPane);
         if (actionsVisible) add_child(frame, actionsButton);
         if (addProjectVisible) add_child(frame, addProjectButton);
+        if (pageActionsVisible) add_child(frame, pageActionsButton);
+        if (sessionMenuVisible) add_child(frame, sessionMenuList);
         generation++;
     }
     activeList = workspace || content == list ? list : NULL;
@@ -268,6 +300,9 @@ static const gchar *get_toolkit_version(void) { return "0"; }
 static gint action_count(AtkAction *action) {
     AccessibleNode *node = (AccessibleNode *)action;
     if (node == actionsButton) return actionsVisible && node->enabled ? 1 : 0;
+    if (node == pageActionsButton) return pageActionsVisible && node->enabled &&
+        strcmp(pageActionsIdentity, pageTitleIdentity) == 0 &&
+        node_mounted(ATK_OBJECT(node)) ? 1 : 0;
     if (node == pageTitleButton) return pageTitleVisible && node->enabled &&
         node_mounted(ATK_OBJECT(node)) ? 1 : 0;
     if (node == placeholderAction) return placeholderVisible && placeholderActionVisible &&
@@ -276,19 +311,37 @@ static gint action_count(AtkAction *action) {
         node_mounted(ATK_OBJECT(node)) ? 1 : 0;
     if (node->projectControl) return !node->retired && node->enabled &&
         node_mounted(ATK_OBJECT(node)) ? 1 : 0;
+    if (node->row >= 0 && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(sessionMenuList))
+        return sessionMenuVisible && !node->retired && node->enabled &&
+            node_mounted(ATK_OBJECT(node)) ? 1 : 0;
     return node->row < 0 ? 0 : (node->canOpen && node->enabled ? 2 : 1);
 }
 static const gchar *action_name(AtkAction *action, gint index) {
     AccessibleNode *node = (AccessibleNode *)action;
     if (node == actionsButton || node == addProjectButton || node == pageTitleButton ||
+        node == pageActionsButton ||
         node == placeholderAction ||
         node->projectControl)
+        return index == 0 && action_count(action) ? "press" : NULL;
+    if (node->row >= 0 && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(sessionMenuList))
         return index == 0 && action_count(action) ? "press" : NULL;
     if (node->row < 0) return NULL;
     return index == 0 ? "select" : (index == 1 && node->canOpen && node->enabled ? "open" : NULL);
 }
 static gboolean action_do(AtkAction *action, gint index) {
     AccessibleNode *node = (AccessibleNode *)action;
+    if (node == pageActionsButton ||
+        (node->row >= 0 && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(sessionMenuList))) {
+        if (index != 0 || !action_count(action) || eventType == UINT32_MAX) return FALSE;
+        SDL_Event event = {0};
+        event.type = eventType;
+        event.user.code = node == pageActionsButton ? 9 : 10;
+        event.user.data1 = (void *)(intptr_t)(node == pageActionsButton ? 0 : node->row);
+        event.user.data2 = (void *)(uintptr_t)generation;
+        int pushed = SDL_PushEvent(&event);
+        navigation_trace_enqueue(&event, pushed);
+        return pushed == 1;
+    }
     if (node == pageTitleButton) {
         if (index != 0 || !action_count(action) || eventType == UINT32_MAX) return FALSE;
         SDL_Event event = {0};
@@ -439,17 +492,20 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
         *width = windowWidth > *x ? windowWidth - *x : 0;
         *height = windowHeight > *y ? windowHeight - *y : 0;
     } else if (object == ATK_OBJECT(actionsButton) || object == ATK_OBJECT(addProjectButton) ||
-               object == ATK_OBJECT(pageTitleButton) || object == ATK_OBJECT(placeholderAction)) {
+               object == ATK_OBJECT(pageTitleButton) || object == ATK_OBJECT(pageActionsButton) ||
+               object == ATK_OBJECT(placeholderAction)) {
         *x = node->bounds.x; *y = node->bounds.y;
         *width = node->bounds.width; *height = node->bounds.height;
-    } else if (object == ATK_OBJECT(list)) {
+    } else if (object == ATK_OBJECT(list) || object == ATK_OBJECT(sessionMenuList)) {
         *x = node->bounds.x; *y = node->bounds.y;
         *width = node->bounds.width; *height = node->bounds.height;
     } else if (node->projectControl && node->actionRow >= 0 &&
                atk_object_get_parent(object) != NULL) {
         *x = node->bounds.x; *y = node->bounds.y;
         *width = node->bounds.width; *height = node->bounds.height;
-    } else if (node->row >= 0 && atk_object_get_parent(object) == ATK_OBJECT(list)) {
+    } else if (node->row >= 0 &&
+               (atk_object_get_parent(object) == ATK_OBJECT(list) ||
+                atk_object_get_parent(object) == ATK_OBJECT(sessionMenuList))) {
         *x = node->bounds.x; *y = node->bounds.y;
         *width = node->bounds.width; *height = node->bounds.height;
     } else return 0;
@@ -462,7 +518,8 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
         *x -= row->bounds.x; *y -= row->bounds.y;
     }
     else if (coordinates == ATK_XY_PARENT && node->row >= 0) {
-        *x -= list->bounds.x; *y -= list->bounds.y;
+        AccessibleNode *parent = (AccessibleNode *)atk_object_get_parent(object);
+        *x -= parent->bounds.x; *y -= parent->bounds.y;
     }
     else if (coordinates != ATK_XY_WINDOW && coordinates != ATK_XY_PARENT) return 0;
     return 1;
@@ -495,6 +552,9 @@ static AtkObject *component_child_at(AtkComponent *component, gint x, gint y,
                                  &parentX, &parentY, &parentWidth, &parentHeight)) return NULL;
         x += parentX; y += parentY;
     } else if (coordinates != ATK_XY_WINDOW) return NULL;
+    if (node == frame && sessionMenuVisible &&
+        atk_component_contains(ATK_COMPONENT(sessionMenuList), x, y, ATK_XY_WINDOW))
+        return ATK_OBJECT(g_object_ref(sessionMenuList));
     for (guint i = 0; i < node->children->len; i++) {
         AtkObject *child = g_ptr_array_index(node->children, i);
         if (ATK_IS_COMPONENT(child) && atk_component_contains(ATK_COMPONENT(child), x, y, ATK_XY_WINDOW))
@@ -748,6 +808,12 @@ void tw_accessibility_open(TWWindow *window) {
     pageTitleButton = new_component(ATK_ROLE_PUSH_BUTTON, "Page title");
     pageTitleButton->id = g_strdup("linux.page-title");
     atk_object_set_accessible_id(ATK_OBJECT(pageTitleButton), pageTitleButton->id);
+    pageActionsButton = new_component(ATK_ROLE_PUSH_BUTTON, "Session actions");
+    pageActionsButton->id = g_strdup("linux.page-actions");
+    atk_object_set_accessible_id(ATK_OBJECT(pageActionsButton), pageActionsButton->id);
+    sessionMenuList = new_component(ATK_ROLE_LIST, "Session actions");
+    sessionMenuList->id = g_strdup("linux.session-actions");
+    atk_object_set_accessible_id(ATK_OBJECT(sessionMenuList), sessionMenuList->id);
     placeholder = new_component(ATK_ROLE_PANEL, "Session placeholder");
     placeholderTitle = new_node(ATK_ROLE_LABEL, "");
     placeholderDetail = new_node(ATK_ROLE_LABEL, "");
@@ -756,9 +822,10 @@ void tw_accessibility_open(TWWindow *window) {
     atk_object_set_accessible_id(ATK_OBJECT(placeholderAction), placeholderAction->id);
     actionsVisible = 0;
     addProjectVisible = 0;
-    pageTitleVisible = 0;
+    pageTitleVisible = pageActionsVisible = sessionMenuVisible = 0;
     placeholderVisible = placeholderActionVisible = 0;
     pageTitleIdentity[0] = '\0';
+    pageActionsIdentity[0] = sessionMenuIdentity[0] = '\0';
     terminal = g_object_new(terminal_node_get_type(), NULL);
     atk_object_set_role(ATK_OBJECT(terminal), ATK_ROLE_TERMINAL);
     atk_object_set_name(ATK_OBJECT(terminal), "Terminal");
@@ -783,6 +850,7 @@ void tw_accessibility_close(void) {
     if (bridgeReady) atk_bridge_adaptor_cleanup();
     bridgeReady = 0; activeList = NULL; eventType = UINT32_MAX; windowFocused = 0;
     clear_children(list);
+    clear_children(sessionMenuList);
     clear_children(frame);
     clear_children(app);
     g_clear_object(&app);
@@ -792,13 +860,16 @@ void tw_accessibility_close(void) {
     g_clear_object(&actionsButton);
     g_clear_object(&addProjectButton);
     g_clear_object(&pageTitleButton);
+    g_clear_object(&pageActionsButton);
+    g_clear_object(&sessionMenuList);
     g_clear_object(&placeholder);
     g_clear_object(&placeholderTitle);
     g_clear_object(&placeholderDetail);
     g_clear_object(&placeholderAction);
-    actionsVisible = addProjectVisible = pageTitleVisible = 0;
+    actionsVisible = addProjectVisible = pageTitleVisible = pageActionsVisible = sessionMenuVisible = 0;
     placeholderVisible = placeholderActionVisible = 0;
     pageTitleIdentity[0] = '\0';
+    pageActionsIdentity[0] = sessionMenuIdentity[0] = '\0';
     hostWindow = NULL;
     generation++;
 }
@@ -888,6 +959,12 @@ void tw_accessibility_page_title(TWWindow *window, const char *identity, const c
         strnlen(name, 512) < 512 && g_utf8_validate(name, -1, NULL) &&
         x >= sidebarWidth && x < windowWidth && width > 0 && width <= windowWidth - x &&
         y >= 0 && y < topInset && height > 0 && height <= topInset - y;
+    if (!visible || strcmp(pageTitleIdentity, identity) != 0) {
+        if (pageActionsVisible || sessionMenuVisible) generation++;
+        pageActionsVisible = sessionMenuVisible = 0;
+        pageActionsIdentity[0] = sessionMenuIdentity[0] = '\0';
+        clear_children(sessionMenuList);
+    }
     if (pageTitleVisible != visible ||
         (visible && strcmp(pageTitleIdentity, identity) != 0)) generation++;
     pageTitleVisible = visible;
@@ -897,6 +974,125 @@ void tw_accessibility_page_title(TWWindow *window, const char *identity, const c
         pageTitleButton->bounds = (AtkRectangle){x, y, width, height};
     } else pageTitleIdentity[0] = '\0';
     show_content(activeList ? list : (AccessibleNode *)terminal);
+}
+void tw_accessibility_page_actions(TWWindow *window, const char *identity, const char *label,
+                                   int x, int y, int width, int height) {
+    if (!bridgeReady || window != hostWindow) return;
+    int originX, originY, windowWidth, windowHeight;
+    tw_window_geometry(window, &originX, &originY, &windowWidth, &windowHeight);
+    const int sidebarWidth = tw_workspace_sidebar_width(window);
+    const int topInset = tw_workspace_terminal_top_inset_value(window);
+    const int visible = pageTitleVisible && identity && label &&
+        strcmp(identity, pageTitleIdentity) == 0 &&
+        strnlen(label, 512) < 512 && g_utf8_validate(label, -1, NULL) &&
+        x >= sidebarWidth && x < windowWidth && width > 0 && width <= windowWidth - x &&
+        y >= 0 && y < topInset && height > 0 && height <= topInset - y;
+    if (pageActionsVisible != visible ||
+        (visible && strcmp(pageActionsIdentity, identity) != 0)) generation++;
+    pageActionsVisible = visible;
+    if (visible) {
+        g_strlcpy(pageActionsIdentity, identity, sizeof(pageActionsIdentity));
+        set_name_if_changed(pageActionsButton, label);
+        pageActionsButton->bounds = (AtkRectangle){x, y, width, height};
+    } else pageActionsIdentity[0] = '\0';
+    show_content(activeList ? list : (AccessibleNode *)terminal);
+}
+void tw_accessibility_session_menu_begin(TWWindow *window, const char *identity,
+                                         int x, int y, int width, int height) {
+    sessionMenuPending.count = 0;
+    sessionMenuPending.visible = 0;
+    sessionMenuPending.identity[0] = '\0';
+    if (!bridgeReady || window != hostWindow || !identity || !pageTitleVisible ||
+        strcmp(identity, pageTitleIdentity) != 0 ||
+        strnlen(identity, sizeof(sessionMenuPending.identity)) >= sizeof(sessionMenuPending.identity)) return;
+    int originX, originY, windowWidth, windowHeight;
+    tw_window_geometry(window, &originX, &originY, &windowWidth, &windowHeight);
+    const int sidebarWidth = tw_workspace_sidebar_width(window);
+    if (x < sidebarWidth || x >= windowWidth || width < 1 || width > windowWidth - x ||
+        y < 0 || y >= windowHeight || height < 1 || height > windowHeight - y) return;
+    sessionMenuPending.visible = 1;
+    g_strlcpy(sessionMenuPending.identity, identity, sizeof(sessionMenuPending.identity));
+    sessionMenuPending.bounds = (AtkRectangle){x, y, width, height};
+}
+int tw_accessibility_session_menu_add_row(TWWindow *window, const char *id, const char *name,
+                                          int selected, int enabled,
+                                          int x, int y, int width, int height) {
+    if (!bridgeReady) return 0;
+    if (window != hostWindow || !sessionMenuPending.visible || !id || !name ||
+        sessionMenuPending.count >= MAX_SESSION_MENU_ROWS ||
+        strnlen(id, MAX_ROW_ID) >= MAX_ROW_ID ||
+        strnlen(name, MAX_ROW_NAME) >= MAX_ROW_NAME || !g_utf8_validate(name, -1, NULL)) return -1;
+    AtkRectangle menu = sessionMenuPending.bounds;
+    if (x < menu.x || y < menu.y || x >= menu.x + menu.width || y >= menu.y + menu.height ||
+        width < 1 || height < 1 || width > menu.x + menu.width - x ||
+        height > menu.y + menu.height - y) return -1;
+    const int index = sessionMenuPending.count++;
+    g_strlcpy(sessionMenuPending.rows[index].id, id, MAX_ROW_ID);
+    g_strlcpy(sessionMenuPending.rows[index].name, name, MAX_ROW_NAME);
+    sessionMenuPending.rows[index].selected = selected != 0;
+    sessionMenuPending.rows[index].enabled = enabled != 0;
+    sessionMenuPending.rows[index].bounds = (AtkRectangle){x, y, width, height};
+    return 0;
+}
+void tw_accessibility_session_menu_end(TWWindow *window) {
+    if (!bridgeReady || window != hostWindow) return;
+    const int visible = sessionMenuPending.visible && sessionMenuPending.count > 0;
+    int same = visible && sessionMenuVisible &&
+        strcmp(sessionMenuIdentity, sessionMenuPending.identity) == 0 &&
+        sessionMenuList->children->len == (guint)sessionMenuPending.count;
+    for (int i = 0; same && i < sessionMenuPending.count; i++) {
+        AccessibleNode *row = g_ptr_array_index(sessionMenuList->children, (guint)i);
+        same = row->id && strcmp(row->id, sessionMenuPending.rows[i].id) == 0;
+    }
+    if (!visible || !same) {
+        if (sessionMenuVisible || visible) generation++;
+        clear_children(sessionMenuList);
+    }
+    sessionMenuVisible = visible;
+    if (visible) {
+        g_strlcpy(sessionMenuIdentity, sessionMenuPending.identity, sizeof(sessionMenuIdentity));
+        sessionMenuList->bounds = sessionMenuPending.bounds;
+        if (!same) {
+            for (int i = 0; i < sessionMenuPending.count; i++) {
+                AccessibleNode *row = new_component(ATK_ROLE_LIST_ITEM, sessionMenuPending.rows[i].name);
+                row->id = g_strdup(sessionMenuPending.rows[i].id);
+                atk_object_set_accessible_id(ATK_OBJECT(row), row->id);
+                row->row = i;
+                row->selected = sessionMenuPending.rows[i].selected;
+                row->enabled = sessionMenuPending.rows[i].enabled;
+                row->bounds = sessionMenuPending.rows[i].bounds;
+                add_child(sessionMenuList, row);
+                g_object_unref(row);
+            }
+        } else {
+            for (int i = 0; i < sessionMenuPending.count; i++) {
+                AccessibleNode *row = g_ptr_array_index(sessionMenuList->children, (guint)i);
+                set_name_if_changed(row, sessionMenuPending.rows[i].name);
+                if (row->enabled != sessionMenuPending.rows[i].enabled) {
+                    row->enabled = sessionMenuPending.rows[i].enabled;
+                    generation++;
+                    atk_object_notify_state_change(ATK_OBJECT(row), ATK_STATE_ENABLED, row->enabled);
+                    atk_object_notify_state_change(ATK_OBJECT(row), ATK_STATE_SENSITIVE, row->enabled);
+                }
+                if (row->selected != sessionMenuPending.rows[i].selected) {
+                    row->selected = sessionMenuPending.rows[i].selected;
+                    atk_object_notify_state_change(ATK_OBJECT(row), ATK_STATE_SELECTED, row->selected);
+                }
+                row->bounds = sessionMenuPending.rows[i].bounds;
+            }
+        }
+    } else sessionMenuIdentity[0] = '\0';
+    show_content(activeList ? list : (AccessibleNode *)terminal);
+    refresh_focus();
+}
+int tw_accessibility_session_menu_row_identity(int row, char *identity, int capacity) {
+    if (!bridgeReady || !sessionMenuVisible || !identity || capacity < (int)sizeof(sessionMenuIdentity) ||
+        strcmp(sessionMenuIdentity, pageTitleIdentity) != 0 ||
+        row < 0 || (guint)row >= sessionMenuList->children->len) return 0;
+    AccessibleNode *item = g_ptr_array_index(sessionMenuList->children, (guint)row);
+    if (item->retired || !item->enabled || !node_mounted(ATK_OBJECT(item))) return 0;
+    strcpy(identity, sessionMenuIdentity);
+    return 1;
 }
 void tw_accessibility_placeholder(TWWindow *window, const char *title, const char *detail,
                                    const char *actionLabel, int x, int y, int width, int height) {

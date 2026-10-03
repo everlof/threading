@@ -35,6 +35,11 @@ typedef struct TWWindow TWWindow;
 // Kind39 delivers idle right-pane pointer motion/down/drag/up/cancel to the placeholder view.
 // Coordinates are right-pane-local x and window-local y; action matches kind27.
 // Kind40 presses the mounted idle placeholder's action button through AT-SPI or keyboard.
+// Kind41 owns an open right-pane session menu: actions 0 motion, 1 down, 2 drag, 3 up,
+// 4 outside press/dismiss, 6 Escape, 7 Up, 8 Down, 9 Enter. Pointer coordinates are
+// menu-local pixels and never enter the terminal. Kind42 is its header Actions button's
+// AT-SPI press. Kind43 is an AT-SPI menu-row press: key is the bounded visible slot and
+// text is the exact page identity, which the host must revalidate before executing.
 typedef struct {
     int kind, x, y, width, height;
     char text[1024];
@@ -64,6 +69,10 @@ int tw_workspace_reset_terminal(TWWindow *);
 int tw_present_pane(TWWindow *, const uint8_t *rgba, int width, int height, int sidebar);
 // The production pane header is a separate retained texture above the terminal grid.
 int tw_present_terminal_header(TWWindow *, const uint8_t *rgba, int width, int height);
+// A retained, bounded right-pane overlay is composed after the terminal and header. Its
+// origin is right-pane-local; hiding also unmounts its accessibility menu.
+int tw_present_session_menu(TWWindow *, const uint8_t *rgba, int width, int height, int x, int y);
+void tw_hide_session_menu(TWWindow *);
 // App-only header button. Height0 hides; disabled buttons remain visible but cannot activate.
 void tw_actions_button(TWWindow *, const char *label, int enabled,
                        int x, int y, int width, int height);
@@ -110,6 +119,14 @@ void tw_accessibility_show_terminal(TWWindow *, const char *name);
 // when pages switch; height0 unmounts it. Bounds are window pixels and must fit the header.
 void tw_accessibility_page_title(TWWindow *, const char *identity, const char *name,
                                  int x, int y, int width, int height);
+void tw_accessibility_page_actions(TWWindow *, const char *identity, const char *label,
+                                   int x, int y, int width, int height);
+void tw_accessibility_session_menu_begin(TWWindow *, const char *identity,
+                                         int x, int y, int width, int height);
+int tw_accessibility_session_menu_add_row(TWWindow *, const char *id, const char *name,
+                                          int selected, int enabled,
+                                          int x, int y, int width, int height);
+void tw_accessibility_session_menu_end(TWWindow *);
 // A bounded idle panel with title/detail labels and one optional action button. NULL title
 // unmounts it; NULL actionLabel omits the button. Button bounds are window pixels.
 void tw_accessibility_placeholder(TWWindow *, const char *title, const char *detail,

@@ -13,6 +13,24 @@ public final class NSTableColumn {
 @MainActor
 open class NSTableCellView: NSView {}
 
+/// AppKit's row chrome sits behind a cell, and owns selection/hover drawing independently of
+/// the cell's content. Subclasses can override either drawing hook without recreating cells.
+@MainActor
+open class NSTableRowView: NSView {
+    open var isSelected = false { didSet { needsDisplay = true } }
+    open var isEmphasized = true { didSet { needsDisplay = true } }
+
+    open override var isFlipped: Bool { true }
+
+    open func drawBackground(in dirtyRect: NSRect) {}
+    open func drawSelection(in dirtyRect: NSRect) {}
+
+    open override func draw(_ dirtyRect: NSRect) {
+        drawBackground(in: dirtyRect)
+        if isSelected { drawSelection(in: dirtyRect) }
+    }
+}
+
 @MainActor
 public protocol NSTableViewDataSource: AnyObject {
     func numberOfRows(in tableView: NSTableView) -> Int
@@ -21,11 +39,13 @@ public protocol NSTableViewDataSource: AnyObject {
 @MainActor
 public protocol NSTableViewDelegate: AnyObject {
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView?
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView?
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool
     func tableViewSelectionDidChange(_ notification: Notification)
 }
 
 public extension NSTableViewDelegate {
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { nil }
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { true }
     func tableViewSelectionDidChange(_ notification: Notification) {}
 }
@@ -41,6 +61,7 @@ public extension Notification.Name {
 open class NSTableView: NSView, NSClipViewDocumentObserver {
     private struct MountedRow {
         let identity: AnyHashable
+        let rowView: NSTableRowView
         let view: NSView
     }
 
@@ -66,6 +87,9 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
     private var mounted: [Int: MountedRow] = [:]
     private var reusable: [NSUserInterfaceItemIdentifier: [NSView]] = [:]
     private var reusableCount = 0
+    private var reusableChrome: [NSUserInterfaceItemIdentifier: [NSTableRowView]] = [:]
+    private var reusableChromeCount = 0
+    private var reusableRows: [NSTableRowView] = []
     private var selectedIdentities: Set<AnyHashable> = []
     private var rowForIdentity: [AnyHashable: Int] = [:]
     private var changingDocumentGeometry = false
@@ -83,6 +107,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
     open var visibleRowIndexes: IndexSet { IndexSet(integersIn: visibleRowRange()) }
     open var mountedViewCount: Int { mounted.count }
     open var reusableViewCount: Int { reusableCount }
+    open var reusableRowViewCount: Int { reusableRows.count + reusableChromeCount }
 
     open override var frame: NSRect {
         didSet {
@@ -109,8 +134,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         guard !columns.isEmpty else { return }
         for row in rows {
             guard let cell = mounted.removeValue(forKey: row) else { continue }
-            cell.view.removeFromSuperview()
-            recycle(cell.view)
+            recycle(cell)
         }
         reconcileVisibleRows()
     }
@@ -121,8 +145,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         // Reload must reconfigure even when an item's identity and row stay fixed. Recycle only
         // the current viewport; the value projection may contain thousands of other rows.
         for cell in mounted.values {
-            cell.view.removeFromSuperview()
-            recycle(cell.view)
+            recycle(cell)
         }
         mounted.removeAll()
         numberOfRows = count
@@ -178,10 +201,17 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
 
     open func makeView(withIdentifier identifier: NSUserInterfaceItemIdentifier,
                        owner: Any?) -> NSView? {
-        guard var stack = reusable[identifier], let view = stack.popLast() else { return nil }
-        reusable[identifier] = stack.isEmpty ? nil : stack
-        reusableCount -= 1
-        return view
+        if var stack = reusable[identifier], let view = stack.popLast() {
+            reusable[identifier] = stack.isEmpty ? nil : stack
+            reusableCount -= 1
+            return view
+        }
+        guard var stack = reusableChrome[identifier], let row = stack.popLast() else {
+            return nil
+        }
+        reusableChrome[identifier] = stack.isEmpty ? nil : stack
+        reusableChromeCount -= 1
+        return row
     }
 
     /// Offscreen requests do not eagerly create a cell. The viewport will ask its delegate when
@@ -191,6 +221,12 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
               column < max(tableColumns.count, 1) else { return nil }
         if makeIfNecessary { reconcileVisibleRows() }
         return mounted[row]?.view
+    }
+
+    open func rowView(atRow row: Int, makeIfNecessary: Bool) -> NSTableRowView? {
+        guard row >= 0, row < numberOfRows else { return nil }
+        if makeIfNecessary { reconcileVisibleRows() }
+        return mounted[row]?.rowView
     }
 
     open override func mouseDown(with event: NSEvent) {
@@ -205,11 +241,18 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         (delegate as? NSTableViewDelegate)?.tableView(self, viewFor: tableColumns.first, row: row)
     }
 
+    open func rowViewForRow(_ row: Int) -> NSTableRowView? {
+        (delegate as? NSTableViewDelegate)?.tableView(self, rowViewForRow: row)
+    }
+
     open func shouldSelectRow(_ row: Int) -> Bool {
         (delegate as? NSTableViewDelegate)?.tableView(self, shouldSelectRow: row) ?? true
     }
 
     open func selectionDidChange() {
+        for cell in mounted.values {
+            cell.rowView.isSelected = selectedIdentities.contains(cell.identity)
+        }
         (delegate as? NSTableViewDelegate)?.tableViewSelectionDidChange(
             Notification(name: .NSTableViewSelectionDidChange, object: self))
     }
@@ -253,24 +296,64 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         for row in Array(mounted.keys) {
             guard let cell = mounted[row], !visibleSet.contains(row)
                 || cell.identity != rowIdentity(at: row) else { continue }
-            cell.view.removeFromSuperview()
-            recycle(cell.view)
+            recycle(cell)
             mounted[row] = nil
         }
         trimReusableViews(to: max(8, visible.count + 2))
+        trimReusableRows(to: visible.count + 2)
 
         for row in visible where mounted[row] == nil {
             guard let view = viewForRow(row) else { continue }
-            view.frame = rect(ofRow: row)
-            addSubview(view)
-            mounted[row] = MountedRow(identity: rowIdentity(at: row), view: view)
+            let rowView = rowViewForRow(row) ?? reusableRows.popLast()
+                ?? NSTableRowView(frame: .zero)
+            let rect = rect(ofRow: row)
+            rowView.frame = rect
+            rowView.isSelected = selectedIdentities.contains(rowIdentity(at: row))
+            view.frame = NSRect(origin: .zero, size: rect.size)
+            rowView.addSubview(view)
+            addSubview(rowView)
+            mounted[row] = MountedRow(identity: rowIdentity(at: row), rowView: rowView, view: view)
         }
         for row in visible {
             guard let cell = mounted[row] else { continue }
             let rect = rect(ofRow: row)
-            if cell.view.frame != rect { cell.view.frame = rect }
+            if cell.rowView.frame != rect { cell.rowView.frame = rect }
+            let contentRect = NSRect(origin: .zero, size: rect.size)
+            if cell.view.frame != contentRect { cell.view.frame = contentRect }
         }
         trimReusableViews(to: max(8, visible.count + 2))
+        trimReusableRows(to: visible.count + 2)
+    }
+
+    private func recycle(_ cell: MountedRow) {
+        cell.rowView.removeFromSuperview()
+        cell.view.removeFromSuperview()
+        recycle(cell.view)
+        // A delegate-owned row may be reused through makeView(withIdentifier:owner:), just as
+        // its cell is. The default shell has no identifier and uses its own small reuse pool.
+        if type(of: cell.rowView) == NSTableRowView.self,
+           cell.rowView.identifier == nil {
+            reusableRows.append(cell.rowView)
+        } else if let identifier = cell.rowView.identifier {
+            reusableChrome[identifier, default: []].append(cell.rowView)
+            reusableChromeCount += 1
+        }
+    }
+
+    private func trimReusableRows(to limit: Int) {
+        if reusableRows.count > limit {
+            reusableRows.removeFirst(reusableRows.count - limit)
+        }
+        guard reusableRowViewCount > limit else { return }
+        for identifier in Array(reusableChrome.keys) {
+            while reusableRowViewCount > limit,
+                  var stack = reusableChrome[identifier], !stack.isEmpty {
+                stack.removeLast()
+                reusableChromeCount -= 1
+                reusableChrome[identifier] = stack.isEmpty ? nil : stack
+            }
+            if reusableRowViewCount <= limit { break }
+        }
     }
 
     private func recycle(_ view: NSView) {

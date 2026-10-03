@@ -4,6 +4,27 @@ import Foundation
 import LinuxWindowBridge
 @testable import TerminalRuntime
 
+enum SessionMenuCommand: String, CaseIterable {
+    case copySessionID
+    case copyProjectPath
+
+    var title: String {
+        switch self {
+        case .copySessionID: "Copy Session ID"
+        case .copyProjectPath: "Copy Project Path"
+        }
+    }
+}
+
+@MainActor
+private final class SessionMenuSurface: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        ThemedSurface.draw(bounds.insetBy(dx: 0.5, dy: 0.5),
+            fill: Design.Surface.elevated, border: Design.Text.tertiary,
+            radius: Design.Radius.panel, borderWidth: 1)
+    }
+}
+
 /// The visible terminal's presentation state. Runtime ownership stays in the app's bounded
 /// catalogue; switching panes neither closes nor duplicates a daemon-backed session.
 @MainActor
@@ -14,7 +35,17 @@ final class WorkspaceTerminalPane {
     private let headerWindow = NSWindow(backingScaleFactor: 2)
     private let headerRoot = NSView(frame: .zero)
     private let pageTitle = PageTitleView(symbolName: "terminal", inkSource: .backdrop)
-    private let pageIdentity: String
+    let pageIdentity: String
+    private let menuWindow = NSWindow(backingScaleFactor: 2)
+    private let menuRoot = SessionMenuSurface(frame: .zero)
+    private var menuRows: [ThemedMenuRowView] = []
+    private var menuOrigin = (x: 0, y: 0)
+    private var menuSize = (width: 0, height: 0)
+    private var menuSelected = 0
+    private var menuOpen = false
+    private var menuNeedsPresentation = false
+    private(set) var menuToggleRequested = false
+    private(set) var chosenMenuCommand: SessionMenuCommand?
     private var headerNeedsPresentation = true
     private var headerWidth = 0
     private var nextFrame: UInt64 = 0
@@ -24,17 +55,20 @@ final class WorkspaceTerminalPane {
     private var heldButtons: [Int: (x: Int, y: Int, modifiers: PTYEmulator.Modifiers)] = [:]
     private(set) var title = "Threading terminal - starting"
     var needsPolling: Bool { failure == nil }
+    var hasSessionActions: Bool { !pageTitle.actionsAnchor.isHidden }
+    var hasOpenMenu: Bool { menuOpen }
 
     init(_ session: GraphicalTerminal, pageName: String, pageIdentity: String,
          icon: NSImage? = nil,
+         showsSessionActions: Bool = false,
          onReveal: @escaping () -> Void) {
         self.session = session
         self.pageIdentity = pageIdentity
         pageTitle.update(title: pageName, symbolName: "terminal", identity: pageIdentity)
         if let icon { pageTitle.setIcon(icon) }
         pageTitle.onReveal = onReveal
-        // Linux has no session-actions menu yet. The title still reveals its navigator row.
-        pageTitle.actionsAnchor.isHidden = true
+        pageTitle.actionsAnchor.isHidden = !showsSessionActions
+        pageTitle.onActions = { [weak self] _ in self?.menuToggleRequested = true }
         let header = PaneHeaderView(leading: [pageTitle], margin: .paneEdge)
         headerRoot.addSubview(header)
         NSLayoutConstraint.activate([
@@ -44,6 +78,7 @@ final class WorkspaceTerminalPane {
         ])
         headerWindow.contentView = headerRoot
         headerWindow.isKeyWindow = true
+        menuWindow.contentView = menuRoot
         session.setPreedit(nil)
         session.invalidateFrame()
     }
@@ -65,6 +100,144 @@ final class WorkspaceTerminalPane {
 
     func pressPageTitle() -> Bool { pageTitle.accessibilityPerformPress() }
 
+    func pressSessionActions() -> Bool {
+        guard hasSessionActions else { return false }
+        return pageTitle.actionsAnchor.accessibilityPerformPress()
+    }
+
+    func takeMenuToggleRequest() -> Bool {
+        defer { menuToggleRequested = false }
+        return menuToggleRequested
+    }
+
+    func takeMenuCommand() -> SessionMenuCommand? {
+        defer { chosenMenuCommand = nil }
+        return chosenMenuCommand
+    }
+
+    func toggleMenu(window: OpaquePointer, paneWidth: Int) {
+        if menuOpen { dismissMenu(window: window); return }
+        guard hasSessionActions, paneWidth >= 280 else { return }
+        let commands = SessionMenuCommand.allCases
+        let entries = commands.map {
+            ThemedMenuEntry.item(ThemedMenuItem(title: $0.title, representedValue: $0.rawValue))
+        }
+        let plan = ThemedMenuRowPlan(entries: entries)
+        let menuWidth = min(CGFloat(228), CGFloat(paneWidth) / 2 - 8)
+        let padding: CGFloat = 6
+        let menuHeight = plan.heights.reduce(0, +) + padding * 2
+        menuSize = (Int(menuWidth * 2), Int(menuHeight * 2))
+        menuRoot.frame = NSRect(x: 0, y: 0, width: menuWidth, height: menuHeight)
+        for row in menuRows { row.removeFromSuperview() }
+        menuRows.removeAll(keepingCapacity: true)
+        var top = padding
+        for index in commands.indices {
+            guard let row = plan.row(at: index) else { continue }
+            let rowHeight = plan.heights[index]
+            row.frame = NSRect(x: padding, y: menuHeight - top - rowHeight,
+                               width: menuWidth - padding * 2, height: rowHeight)
+            row.onChoose = { [weak self] selected, _ in
+                self?.chosenMenuCommand = commands[selected]
+            }
+            row.onHighlight = { [weak self] selected in self?.highlightMenuRow(selected) }
+            menuRoot.addSubview(row)
+            menuRows.append(row)
+            top += rowHeight
+        }
+        menuSelected = 0
+        highlightMenuRow(0)
+        headerWindow.layoutIfNeeded()
+        let anchor = pageTitle.actionsAnchor.convert(pageTitle.actionsAnchor.bounds, to: headerRoot)
+        let x = Int((anchor.minX * 2).rounded())
+        menuOrigin = (max(0, min(paneWidth - menuSize.width, x)), Self.headerPixelHeight)
+        pageTitle.actionsAnchor.isSelected = true
+        headerNeedsPresentation = true
+        menuOpen = true
+        menuNeedsPresentation = true
+    }
+
+    func dismissMenu(window: OpaquePointer) {
+        guard menuOpen else { return }
+        menuOpen = false
+        menuNeedsPresentation = false
+        pageTitle.actionsAnchor.isSelected = false
+        headerNeedsPresentation = true
+        menuWindow.cancelPointerGesture()
+        tw_hide_session_menu(window)
+    }
+
+    private func highlightMenuRow(_ index: Int) {
+        guard menuRows.indices.contains(index) else { return }
+        menuSelected = index
+        for (slot, row) in menuRows.enumerated() {
+            row.isKeyboardHighlighted = slot == index
+        }
+        menuNeedsPresentation = true
+    }
+
+    func handleMenu(_ input: TWEvent, window: OpaquePointer) {
+        guard menuOpen else { return }
+        switch input.action {
+        case 4, 6:
+            dismissMenu(window: window)
+        case 7:
+            highlightMenuRow(max(0, menuSelected - 1))
+        case 8:
+            highlightMenuRow(min(menuRows.count - 1, menuSelected + 1))
+        case 9:
+            chosenMenuCommand = SessionMenuCommand.allCases[menuSelected]
+        default:
+            let eventType: NSEvent.EventType
+            switch input.action {
+            case 1: eventType = .leftMouseDown
+            case 2: eventType = .leftMouseDragged
+            case 3: eventType = .leftMouseUp
+            default: eventType = .mouseMoved
+            }
+            let point = NSPoint(x: CGFloat(input.x) / 2,
+                                y: menuRoot.bounds.height - CGFloat(input.y) / 2)
+            _ = menuWindow.dispatchToContent(NSEvent(type: eventType, locationInWindow: point))
+            menuNeedsPresentation = true
+        }
+    }
+
+    func chooseMenuRow(_ slot: Int, identity: String) {
+        guard menuOpen, identity == pageIdentity,
+              SessionMenuCommand.allCases.indices.contains(slot) else { return }
+        chosenMenuCommand = SessionMenuCommand.allCases[slot]
+    }
+
+    private func presentMenu(window: OpaquePointer, originX: Int) throws {
+        guard menuOpen, menuNeedsPresentation else { return }
+        menuNeedsPresentation = false
+        let bitmap = Bitmap(width: menuSize.width, height: menuSize.height)
+        menuRoot.render(in: NSGraphicsContext(bitmap: bitmap, scale: 2))
+        let result = bitmap.pixels.withUnsafeBufferPointer {
+            tw_present_session_menu(window, $0.baseAddress,
+                                    Int32(menuSize.width), Int32(menuSize.height),
+                                    Int32(menuOrigin.x), Int32(menuOrigin.y))
+        }
+        guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
+        pageIdentity.withCString { identity in
+            tw_accessibility_session_menu_begin(window, identity,
+                Int32(originX + menuOrigin.x), Int32(menuOrigin.y),
+                Int32(menuSize.width), Int32(menuSize.height))
+        }
+        for (slot, row) in menuRows.enumerated() {
+            let bounds = row.convert(row.bounds, to: menuRoot)
+            let x = originX + menuOrigin.x + Int((bounds.minX * 2).rounded())
+            let y = menuOrigin.y + Int(((menuRoot.bounds.height - bounds.maxY) * 2).rounded())
+            _ = SessionMenuCommand.allCases[slot].rawValue.withCString { identifier in
+                row.item.title.withCString { name in
+                    tw_accessibility_session_menu_add_row(window, identifier, name,
+                        slot == menuSelected ? 1 : 0, 1, Int32(x), Int32(y),
+                        Int32((bounds.width * 2).rounded()), Int32((bounds.height * 2).rounded()))
+                }
+            }
+        }
+        tw_accessibility_session_menu_end(window)
+    }
+
     private func presentHeader(window: OpaquePointer, width: Int, originX: Int) throws {
         guard headerNeedsPresentation || headerWidth != width else { return }
         headerNeedsPresentation = false
@@ -83,7 +256,10 @@ final class WorkspaceTerminalPane {
         let titleBounds = pageTitle.convert(pageTitle.bounds, to: headerRoot)
         let left = Int((titleBounds.minX * 2).rounded(.down))
         let top = Int((titleBounds.maxY * 2).rounded(.up))
-        let right = Int((titleBounds.maxX * 2).rounded(.up))
+        let actionsBounds = pageTitle.actionsAnchor.convert(pageTitle.actionsAnchor.bounds,
+                                                              to: headerRoot)
+        let right = Int(((hasSessionActions ? min(titleBounds.maxX, actionsBounds.minX)
+                           : titleBounds.maxX) * 2).rounded(.up))
         let bottom = Int((titleBounds.minY * 2).rounded(.down))
         pageIdentity.withCString { identity in
             pageTitle.title.withCString { name in
@@ -92,11 +268,24 @@ final class WorkspaceTerminalPane {
                     Int32(right - left), Int32(top - bottom))
             }
         }
+        if hasSessionActions {
+            let actionX = Int((actionsBounds.minX * 2).rounded(.down))
+            let actionTop = Int((actionsBounds.maxY * 2).rounded(.up))
+            pageIdentity.withCString { identity in
+                tw_accessibility_page_actions(window, identity, "Session context menu",
+                    Int32(originX + actionX), Int32(Self.headerPixelHeight - actionTop),
+                    Int32((actionsBounds.width * 2).rounded()),
+                    Int32((actionsBounds.height * 2).rounded()))
+            }
+        } else {
+            tw_accessibility_page_actions(window, nil, nil, 0, 0, 0, 0)
+        }
     }
 
     func focus(_ focused: Bool, window: OpaquePointer) {
         headerWindow.isKeyWindow = focused
         if !focused {
+            dismissMenu(window: window)
             headerWindow.makeFirstResponder(nil)
             headerWindow.cancelPointerGesture()
             session.setPreedit(nil)
@@ -116,9 +305,11 @@ final class WorkspaceTerminalPane {
     /// No wait or nested event loop: the workspace services both panes on one UI turn.
     func refresh(window: OpaquePointer, width: Int, height: Int, originX: Int,
                  focused: Bool) throws {
+        if menuOpen && headerWidth != width { dismissMenu(window: window) }
         let contentHeight = max(1, height - Self.headerPixelHeight)
         tw_workspace_terminal_top_inset(window, Int32(Self.headerPixelHeight))
         try presentHeader(window: window, width: width, originX: originX)
+        try presentMenu(window: window, originX: originX)
         if size.width != width || size.height != contentHeight {
             size = (width, contentHeight)
             failureNeedsDisplay = failure != nil

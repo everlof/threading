@@ -1664,6 +1664,7 @@ struct WindowHarness {
                                      onAction: { placeholderActionRequested = true })
         }
         var activePane: WorkspaceTerminalPane?
+        var activePageTarget: NavigatorOutlineItem?
         var pendingPageReveal: NavigatorOutlineItem?
         var sidebarFocused = true
         var navigatorTitle = "Threading Linux window experiment"
@@ -1755,7 +1756,60 @@ struct WindowHarness {
             focusSidebar(true)
             dirty = true
         }
+        func invokeSessionMenuCommand(_ command: SessionMenuCommand) {
+            guard let pane = activePane, let target = activePageTarget,
+                  target.kind == .agent, pane.pageIdentity == target.id,
+                  let projectIndex = projectIndexes[target.projectID],
+                  projects.indices.contains(projectIndex),
+                  projects[projectIndex].id == target.projectID,
+                  projects[projectIndex].recentAgents.contains(where: { $0.id == target.id })
+            else {
+                print("SESSION_ACTION_REFUSED stale page identity"); fflush(nil)
+                return
+            }
+            let value: String
+            switch command {
+            case .copySessionID: value = target.id
+            case .copyProjectPath: value = projects[projectIndex].path
+            }
+            let bytes = Data(value.utf8)
+            guard !bytes.isEmpty, bytes.count <= 1_048_576 else {
+                print("SESSION_ACTION_REFUSED clipboard payload exceeds bound"); fflush(nil)
+                return
+            }
+            let result = bytes.withUnsafeBytes {
+                tw_clipboard_write($0.bindMemory(to: UInt8.self).baseAddress, Int32(bytes.count))
+            }
+            if result == 0 {
+                print("SESSION_ACTION_COPIED \(command.rawValue) \(target.id)")
+            } else {
+                print("SESSION_ACTION_REFUSED clipboard unavailable")
+            }
+            fflush(nil)
+        }
         func routeTerminalInput(_ event: TWEvent) -> Bool {
+            if event.kind == 41 || event.kind == 42 || event.kind == 43 {
+                guard let pane = activePane else { return true }
+                switch event.kind {
+                case 41: pane.handleMenu(event, window: window)
+                case 42:
+                    _ = pane.pressSessionActions()
+                default:
+                    var identityEvent = event
+                    let identity = String(validatingCString: tw_event_text(&identityEvent)) ?? ""
+                    pane.chooseMenuRow(Int(event.key), identity: identity)
+                }
+                if pane.takeMenuToggleRequest() {
+                    focusSidebar(false)
+                    pane.toggleMenu(window: window, paneWidth: terminalWidth)
+                }
+                if let command = pane.takeMenuCommand() {
+                    invokeSessionMenuCommand(command)
+                    pane.dismissMenu(window: window)
+                }
+                dirty = true
+                return true
+            }
             if event.kind == 2 { focusSidebar(true) }
             if event.kind == 15 && event.action == 1 { focusSidebar(false) }
             if event.kind == 39 || event.kind == 40 {
@@ -1782,6 +1836,11 @@ struct WindowHarness {
                     activePane?.handleHeader(event)
                 } else {
                     _ = activePane?.pressPageTitle()
+                }
+                if let pane = activePane, pane.takeMenuToggleRequest() {
+                    focusSidebar(false)
+                    pane.toggleMenu(window: window, paneWidth: terminalWidth)
+                    dirty = true
                 }
                 if let target = pendingPageReveal {
                     pendingPageReveal = nil
@@ -1823,7 +1882,9 @@ struct WindowHarness {
             idlePane = nil
             activePane = WorkspaceTerminalPane(session, pageName: pageName,
                 pageIdentity: pageIdentity, icon: pageIcon,
+                showsSessionActions: pageTarget.kind == .agent && pageTarget.childIndex >= 0,
                 onReveal: { pendingPageReveal = pageTarget })
+            activePageTarget = pageTarget
             tw_workspace_placeholder_mode(window, 0)
             sidebarFocused = false
             contentWindow.makeFirstResponder(nil)

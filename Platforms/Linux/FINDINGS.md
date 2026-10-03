@@ -4595,3 +4595,57 @@ a first-click choice. The installed Wayland `--actions` run passed on the same s
 idle, shell and title-reveal captures were inspected at `out/wayland-smoke.5TD0H9Qu`: the icon,
 labels and button are centered, the terminal header is retained, and title reveal clears its
 focus ring when selection returns to the navigator.
+
+## 152. Visible table cells now have a reusable AppKit row shell
+
+`NSTableView` and `NSOutlineView` now place each mounted cell inside a retained
+`NSTableRowView`. Table and outline delegates can supply row chrome separately from cell
+content, and `rowView(atRow:makeIfNecessary:)` answers only for mounted viewport rows.
+Selection follows the stable row identity through reorder and scroll. Cell and row pools are
+bounded independently by the visible viewport; no row view is built for a collapsed or
+offscreen project. The 5,100-project/1,024-child outline fixture checks row-local cell
+geometry, selection drawing hooks and bounded row-view construction.
+
+The native navigator keeps its diagnostic row fill for now. Mounting the exact production
+`SidebarHoverRowView` also needs the live theme roles and activity-beam stack, so this change
+adds its AppKit row contract without inventing a second host-drawn version of that control.
+The row shell is a platform shim; project identity, disclosure, selection admission and process
+ownership stay with the host.
+
+The first full installed run found a coordinate regression that the initial outline fixture
+missed. A dirty-frame refresh put a cell's old document-space rectangle back into its new
+row-local shell, so the host could not intersect its bounds with the visible navigator.
+`Specimen.Row.configure` now retains a zero-origin frame while mounted in `NSTableRowView`;
+the focused fixtures check that post-mount refresh as well as converted viewport geometry.
+Verification on 2026-10-03: `shim-smoke.sh`, the focused outline fixture, and the full
+installed Ubuntu bundle suite passed, including the 5,100-project/1,024-child native outline.
+
+## 153. Saved-agent pages expose the production Actions control and menu rows
+
+The right-pane `PageTitleView` now shows its existing Actions icon for a mounted saved agent.
+It opens a bounded retained overlay containing two unchanged `ThemedMenuRowView` items:
+**Copy Session ID** and **Copy Project Path**. The Linux host rechecks the active page,
+owning project and saved-agent identity before writing either value to the native clipboard.
+The menu is deliberately scoped to commands whose Linux behavior is implemented; a fresh
+shell or saved terminal does not display an agent action it cannot perform.
+
+The SDL bridge composites the menu after the terminal and header without rerasterizing it on
+PTY output. While open it owns pointer and keyboard input, including Escape and arrow/Enter
+navigation, before those events reach the terminal. The AT-SPI bridge publishes the actual
+Actions bounds and mounted rows, and its queued row press carries the exact page identity for
+host revalidation. Dismissing the menu removes its retained pixels and accessible nodes.
+Customization gate: this is a host-owned Linux command surface around production default
+components; it does not declare a new extension component or transfer admission, clipboard or
+PTY ownership to a view. Scaling gate: the menu has two retained rows and one bounded bitmap,
+and it performs no project scan or database read on pointer motion or PTY output.
+
+Verification on 2026-10-03: the focused Release Linux build and installed Ubuntu/X11 smoke
+passed. The smoke exercised AT-SPI Actions/row presses, pointer opening, keyboard selection,
+exact clipboard values and Escape dismissal against a live synthetic agent; its PTY input log
+remained unchanged across every menu gesture. I inspected the installed screenshot: the menu
+is anchored below the header control, both rows are readable and its rounded corners composite
+cleanly over the active terminal. The full non-root Ubuntu arm64 `bundle-smoke.sh` suite passed,
+including this smoke, workspace restoration, account/project actions, and the large outline;
+its evidence is `out/bundle-smoke/run.WGP2EZlo`. The installed Wayland `--actions` suite passed
+rendering, AT-SPI and native seat input on the rebuilt package, with evidence at
+`out/wayland-smoke.gMgfdUFV`. The saved-agent menu itself has not yet been driven under Wayland.
