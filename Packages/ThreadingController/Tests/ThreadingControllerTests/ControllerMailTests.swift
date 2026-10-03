@@ -172,6 +172,46 @@ struct ControllerMailTests {
         #expect(try await store.inbox(other).items.isEmpty)
     }
 
+    @Test func aSessionMailboxUsesItsOwnCredentialAndOnlyMailTools() async throws {
+        let (directory, store) = try fixture.fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let host = try await store.host()
+        let session = MailAddress(host: host.id, kind: .session, id: UUID())
+        _ = try await store.registerMailbox(session, name: "Remote session")
+        let credential = try await store.mailboxCredential(session)
+        let worker = try await fixture.seed(store, key: "w")
+        let workerAddress = try await store.mailAddress(worker: worker.workerID)
+        _ = try await store.setMailGrant(recipient: workerAddress, sender: session.description, expectedRevision: 0, mode: .notify, allowsInterrupt: false)
+        await #expect(throws: ControllerError.forbidden) {
+            try await store.mailboxRequest(address: session, credential: "wrong", request: .mailDirectory)
+        }
+        await #expect(throws: ControllerError.forbidden) {
+            try await store.mailboxRequest(address: session, credential: credential, request: .context)
+        }
+        let sent = try await store.mailboxRequest(address: session, credential: credential,
+            request: .mailSend(to: workerAddress, id: UUID(), text: "From a session", replyTo: nil, priority: .normal))
+        #expect(sent.mail?.envelope.senderName == "Remote session")
+        #expect(try await store.mailboxRequest(address: session, credential: credential, request: .mailDirectory).directory?.map(\.address) == [workerAddress])
+    }
+
+    @Test func ownerAdmissionReplacesAGrantOnlyOnThisHost() async throws {
+        let (directory, store) = try fixture.fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let host = try await store.host()
+        let a = MailAddress(host: host.id, kind: .session, id: UUID())
+        let b = MailAddress(host: host.id, kind: .session, id: UUID())
+        _ = try await store.registerMailbox(a, name: "A"); _ = try await store.registerMailbox(b, name: "B")
+        await #expect(throws: ControllerError.forbidden) {
+            try await store.sendMail(from: a, to: b, id: UUID(), text: "no grant", replyTo: nil, priority: .normal)
+        }
+        let admitted = try await store.sendMail(from: a, to: b, id: UUID(), text: "same project", replyTo: nil, priority: .interrupt, ownerAdmitted: true)
+        #expect(admitted.state == .inbox)
+        // Acknowledging carries the chain into the session's next send, as for an execution.
+        _ = try await store.acknowledgeMail(mailbox: b, ids: [admitted.envelope.id])
+        let reply = try await store.sendMail(from: b, to: a, id: UUID(), text: "next", replyTo: nil, priority: .normal, ownerAdmitted: true)
+        #expect(reply.envelope.chainID == admitted.envelope.chainID && reply.envelope.depth == 1)
+    }
+
     // MARK: - Between hosts
 
     func twoHosts() async throws -> (URL, URL, ControllerStore, ControllerStore, HostID, HostID) {

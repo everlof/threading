@@ -212,6 +212,33 @@ class MailTests(unittest.TestCase):
         self.assertEqual(stop["decision"], "block")
         self.wait(lambda: self.vps.call("launch-status", launch["executionID"])["presence"] == "stopped")
 
+    def test_a_session_on_this_host_gets_only_mail_tools_from_agent_mcp(self):
+        _, worker_address, _ = self.worker(self.vps, "Builder", "build:1")
+        session = "%s/session/%s" % (self.vps.id, uuid.uuid4())
+        self.vps.call("mail-register", session, "Remote Claude session")
+        credential = self.vps.call("mail-credential", session)
+        self.vps.call("mail-grant-set", worker_address, session, "0", "notify", "normal")
+        env = {"PATH": "/usr/bin:/bin", "THREADING_CONTROLLER_DATABASE": str(self.vps.db),
+               "THREADING_MAILBOX_ADDRESS": session, "THREADING_MAILBOX_CREDENTIAL": credential}
+        lines = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "mail_send", "arguments": {"to": worker_address, "id": str(uuid.uuid4()), "text": "Session hello"}}},
+            {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "work_context", "arguments": {}}},
+        ]
+        result = subprocess.run([CONTROLLER, "agent-mcp"], input="".join(json.dumps(l) + "\n" for l in lines),
+                                capture_output=True, text=True, timeout=15, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        replies = {r["id"]: r for r in map(json.loads, result.stdout.splitlines())}
+        self.assertEqual({t["name"] for t in replies[2]["result"]["tools"]}, {"mail_send", "mail_inbox", "mail_ack", "mail_directory"})
+        self.assertFalse(replies[3]["result"]["isError"])
+        self.assertTrue(replies[4]["result"]["isError"])
+        self.assertEqual([i["message"]["envelope"]["text"] for i in self.vps.call("mailbox", worker_address)["items"]], ["Session hello"])
+        # The notice hook works for a session too, and says nothing when there is nothing new.
+        notice = subprocess.run([CONTROLLER, "agent-notice", "session-start"], input="{}", capture_output=True, text=True, timeout=15, env=env)
+        self.assertEqual((notice.returncode, notice.stdout), (0, ""))
+
     def test_the_receiving_end_refuses_unknown_peers_and_spoofed_senders(self):
         stranger = str(uuid.uuid4())
         request = json.dumps({"pull": {"after": 0}})

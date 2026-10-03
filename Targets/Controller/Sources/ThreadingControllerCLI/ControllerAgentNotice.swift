@@ -12,12 +12,16 @@ enum ControllerAgentNotice {
         _ = try? FileHandle.standardInput.read(upToCount: 262_144)
         let environment = ProcessInfo.processInfo.environment
         guard let database = environment["THREADING_CONTROLLER_DATABASE"],
-              let execution = environment["THREADING_EXECUTION_ID"],
-              let credential = environment["THREADING_EXECUTION_CREDENTIAL"],
-              let executionID = try? ExecutionID(execution),
-              let store = try? ControllerStore(path: database),
-              let response = try? await store.agentRequest(executionID: executionID, credential: credential, request: .mailNotice(event: event)),
-              let notice = response.notice else { return }
+              let store = try? ControllerStore(path: database) else { return }
+        let response: ControllerAgentResponse?
+        if let execution = environment["THREADING_EXECUTION_ID"], let credential = environment["THREADING_EXECUTION_CREDENTIAL"],
+           let executionID = try? ExecutionID(execution) {
+            response = try? await store.agentRequest(executionID: executionID, credential: credential, request: .mailNotice(event: event))
+        } else if let address = environment["THREADING_MAILBOX_ADDRESS"], let credential = environment["THREADING_MAILBOX_CREDENTIAL"],
+                  let mailbox = try? MailAddress(address) {
+            response = try? await store.mailboxRequest(address: mailbox, credential: credential, request: .mailNotice(event: event))
+        } else { response = nil }
+        guard let notice = response?.notice else { return }
         try? ControllerMain.output(hookOutput(event: event, notice: notice))
     }
 

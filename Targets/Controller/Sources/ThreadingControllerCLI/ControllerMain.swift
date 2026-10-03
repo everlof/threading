@@ -89,6 +89,7 @@ struct ControllerMain {
     mail-grant-set RECIPIENT_ADDRESS SENDER_PATTERN EXPECTED_REVISION none|notify|wake|ask normal|interrupt
     mail-grants RECIPIENT_ADDRESS [CURSOR]
     mail-register SESSION_ADDRESS NAME
+    mail-credential SESSION_ADDRESS   (the session's private mail-tool credential, for its launch environment)
     mail-contact-set ADDRESS NAME|-
     mail-contacts [CURSOR]
     mailbox ADDRESS [CURSOR]
@@ -106,6 +107,8 @@ struct ControllerMain {
     threading-controller agent REQUEST_JSON_FILE
     threading-controller agent-mcp
     threading-controller agent-notice post-tool-use|stop|session-start
+    A session (not an execution) uses THREADING_MAILBOX_ADDRESS and THREADING_MAILBOX_CREDENTIAL
+    instead, and agent-mcp then serves only the mail tools.
     The last is a hook command: it prints a host-authored mail notice as hook JSON, or nothing,
     and always exits 0 so a hook can never break the agent's turn.
     Scoped agent tools use the execution credential/environment supplied by launch.
@@ -154,6 +157,13 @@ struct ControllerMain {
             umask(0o077)
             let store = try ControllerStore(path: path)
             if agentMode {
+                if command == "agent-mcp", environment["THREADING_EXECUTION_ID"] == nil,
+                   let address = environment["THREADING_MAILBOX_ADDRESS"],
+                   let credential = environment["THREADING_MAILBOX_CREDENTIAL"] {
+                    // A session's own mail tools, on the host that runs it.
+                    try await ControllerMCPServer.run(store: store, caller: .mailbox(MailAddress(address), credential: credential))
+                    return
+                }
                 guard let execution = environment["THREADING_EXECUTION_ID"],
                       let credential = environment["THREADING_EXECUTION_CREDENTIAL"] else { throw ControllerError.forbidden }
                 if command == "agent-mcp" {
@@ -233,6 +243,8 @@ struct ControllerMain {
             let after = try cursor(1); try output(await store.mailGrants(recipient: MailAddress(args[0]), after: after))
         case "mail-register":
             try count(2); try output(await store.registerMailbox(MailAddress(args[0]), name: args[1]))
+        case "mail-credential":
+            try count(1); try output(await store.mailboxCredential(MailAddress(args[0])))
         case "mail-contact-set":
             try count(2); try output(await store.setMailContact(MailAddress(args[0]), name: args[1] == "-" ? nil : args[1]))
         case "mail-contacts":

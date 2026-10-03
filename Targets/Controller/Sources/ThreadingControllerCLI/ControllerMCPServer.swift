@@ -49,8 +49,33 @@ enum ControllerMCPServer {
         .init(name: "mail_directory", description: "List the mailboxes you may write to: their addresses, names and what their owners allow from you. Also returns your own address.", fields: [:])
     ]
 
+    /// Who the server answers for: an execution (all work tools) or a session mailbox (mail only).
+    enum Caller: Sendable {
+        case execution(ExecutionID, credential: String)
+        case mailbox(MailAddress, credential: String)
+        func perform(_ store: ControllerStore, _ request: ControllerAgentRequest) async throws -> ControllerAgentResponse {
+            switch self {
+            case .execution(let id, let credential): return try await store.agentRequest(executionID: id, credential: credential, request: request)
+            case .mailbox(let address, let credential): return try await store.mailboxRequest(address: address, credential: credential, request: request)
+            }
+        }
+        var tools: [Tool] {
+            switch self {
+            case .execution: return ControllerMCPServer.tools
+            case .mailbox: return ControllerMCPServer.tools.filter { ["mail_send", "mail_inbox", "mail_ack", "mail_directory"].contains($0.name) }
+            }
+        }
+    }
+
     static func run(store: ControllerStore, executionID: ExecutionID, credential: String) async throws {
-        _ = try await store.agentRequest(executionID: executionID, credential: credential, request: .context)
+        try await run(store: store, caller: .execution(executionID, credential: credential))
+    }
+    static func run(store: ControllerStore, caller: Caller) async throws {
+        switch caller {
+        case .execution: _ = try await caller.perform(store, .context)
+        case .mailbox: _ = try await caller.perform(store, .mailDirectory)
+        }
+        let tools = caller.tools
         var initialized = false
         var ready = false
         var pending = Data()
@@ -91,8 +116,8 @@ enum ControllerMCPServer {
                 case "tools/list": try reply(id, result: .object(["tools": .array(tools.map(\.schema))]))
                 case "tools/call":
                     do {
-                        let request = try request(message["params"])
-                        let response = try await store.agentRequest(executionID: executionID, credential: credential, request: request)
+                        let request = try request(message["params"], tools: tools)
+                        let response = try await caller.perform(store, request)
                         let text = String(decoding: try JSONEncoder().encode(response), as: UTF8.self)
                         try reply(id, result: toolResult(text, failed: false))
                     } catch {
@@ -119,7 +144,7 @@ enum ControllerMCPServer {
         }
     }
 
-    static func request(_ params: MCPValue?) throws -> ControllerAgentRequest {
+    static func request(_ params: MCPValue?, tools: [Tool] = tools) throws -> ControllerAgentRequest {
         guard case .object(let params) = params, case .string(let name) = params["name"],
               let tool = tools.first(where: { $0.name == name }) else { throw ControllerError.invalidInput("tool") }
         let arguments: [String: MCPValue]

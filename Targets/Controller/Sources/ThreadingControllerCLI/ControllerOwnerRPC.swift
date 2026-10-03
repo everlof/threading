@@ -18,7 +18,7 @@ enum ControllerOwnerRPC {
         // Mail administration and mailbox reads. Not mail-rpc (a peer's own forced command) and
         // not mail-sync (the resident supervisor's job, which runs the peers' transports).
         "host", "host-set-name", "mail-address", "mail-peer-set", "mail-peers", "mail-grant-set", "mail-grants",
-        "mail-register", "mail-contact-set", "mail-contacts", "mailbox", "mail-history", "mail-get",
+        "mail-register", "mail-credential", "mail-contact-set", "mail-contacts", "mailbox", "mail-history", "mail-get",
         "mail-send", "mail-ack", "mail-notice", "mail-outbound"
     ]
     static func run(store: ControllerStore, database: String) async throws {

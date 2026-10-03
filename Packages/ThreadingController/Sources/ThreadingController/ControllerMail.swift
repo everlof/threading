@@ -248,8 +248,38 @@ extension ControllerStore {
             let value = MailMailbox(address: address, name: name)
             if (try optional("mailbox", address.description) as MailMailbox?) == nil {
                 try insert("mailbox", address.description, value: value)
+                // A private routing credential for a session's own mail tools, like an
+                // execution credential. Never part of any listing or event.
+                try insert("mailboxCredential", address.description, value: UUID().uuidString + UUID().uuidString)
             } else { try update("mailbox", address.description, value: value) }
             return value
+        }
+    }
+    /// Owner read: handed to the session's launch environment, never to a listing.
+    public func mailboxCredential(_ address: MailAddress) throws -> String {
+        try required("mailboxCredential", address.description)
+    }
+
+    /// The mail subset of agent tools for a session mailbox, authenticated by its credential.
+    /// A session has no work item, so questions, finishing and work context are not available.
+    public func mailboxRequest(address: MailAddress, credential: String,
+                               request: ControllerAgentRequest) throws -> ControllerAgentResponse {
+        try db.transaction {
+            let expected: String = try required("mailboxCredential", address.description)
+            guard credential == expected else { throw ControllerError.forbidden }
+            var response = ControllerAgentResponse()
+            switch request {
+            case .mailSend(let recipient, let id, let text, let replyTo, let priority):
+                response.mail = try send(from: address, senderName: try localMailboxName(address), to: recipient, id: id,
+                                         text: text, replyTo: replyTo, priority: priority, questionID: nil, context: nil,
+                                         mailboxContext: true)
+            case .mailInbox(let after): response.address = address; response.inbox = try inbox(address, after: after)
+            case .mailAck(let ids): response.mails = try acknowledgeMail(mailbox: address, ids: ids)
+            case .mailDirectory: response.address = address; response.directory = try mailDirectory(for: address)
+            case .mailNotice(let event): response.notice = try mailNotice(address, event: event)
+            default: throw ControllerError.forbidden
+            }
+            return response
         }
     }
 
@@ -291,12 +321,16 @@ extension ControllerStore {
     }
 
     /// Owner-attested send from a mailbox on this host — how the Mac sends for its sessions.
+    /// `ownerAdmitted` is the owner deciding admission itself for a recipient on this host (the
+    /// Mac's same-project rule, enforced by its control plane) instead of a stored grant. It
+    /// never reaches another host: a remote recipient's own grants still decide there.
     public func sendMail(from sender: MailAddress, to recipient: MailAddress, id: UUID, text: String,
-                         replyTo: UUID?, priority: MailPriority) throws -> MailMessage {
+                         replyTo: UUID?, priority: MailPriority, ownerAdmitted: Bool = false) throws -> MailMessage {
         try db.transaction {
             let name = try localMailboxName(sender)
             return try send(from: sender, senderName: name, to: recipient, id: id, text: text,
-                            replyTo: replyTo, priority: priority, questionID: nil, context: nil)
+                            replyTo: replyTo, priority: priority, questionID: nil, context: nil,
+                            mailboxContext: true, ownerAdmitted: ownerAdmitted)
         }
     }
 
@@ -322,7 +356,8 @@ extension ControllerStore {
     }
 
     func send(from sender: MailAddress, senderName: String, to recipient: MailAddress, id: UUID, text: String,
-              replyTo: UUID?, priority: MailPriority, questionID: QuestionID?, context: ExecutionID?) throws -> MailMessage {
+              replyTo: UUID?, priority: MailPriority, questionID: QuestionID?, context: ExecutionID?,
+              mailboxContext: Bool = false, ownerAdmitted: Bool = false) throws -> MailMessage {
         let local = try host().id
         guard sender.host == local else { throw ControllerError.forbidden }
         if let prior: MailMessage = try optional("mail", id.uuidString.lowercased()) {
@@ -342,6 +377,9 @@ extension ControllerStore {
             chainID = original.envelope.chainID; depth = original.envelope.depth + 1
         } else if let context, let inherited: MailContext = try optional("mailContext", context.description) {
             chainID = inherited.chainID; depth = inherited.depth + 1
+        } else if mailboxContext, let inherited: MailContext = try optional("mailContext", sender.description) {
+            // A session has no execution; its chain context is its mailbox's last acknowledgement.
+            chainID = inherited.chainID; depth = inherited.depth + 1
         }
         guard depth <= MailLimits.maximumDepth else { throw ControllerError.invalidInput("chain_depth") }
         try spendSendRate(sender)
@@ -349,7 +387,7 @@ extension ControllerStore {
                                     priority: priority, replyTo: replyTo, questionID: questionID, chainID: chainID,
                                     depth: depth, sentAt: Self.now())
         try envelope.validate()
-        if recipient.host == local { return try accept(envelope) }
+        if recipient.host == local { return try accept(envelope, ownerAdmitted: ownerAdmitted) }
         guard try mailPeer(recipient.host) != nil else { throw ControllerError.invalidInput("unknown_host") }
         try countChain(chainID)
         let message = MailMessage(envelope: envelope, state: .outbound, acceptedAt: nil)
@@ -364,7 +402,7 @@ extension ControllerStore {
 
     /// Accepts a message for a mailbox on this host: from a local sender, or pushed or pulled
     /// from `peer`, which may only vouch for senders on itself.
-    func accept(_ envelope: MailEnvelope, peer: HostID? = nil) throws -> MailMessage {
+    func accept(_ envelope: MailEnvelope, peer: HostID? = nil, ownerAdmitted: Bool = false) throws -> MailMessage {
         try envelope.validate()
         let local = try host().id
         if let peer { guard envelope.sender.host == peer else { throw ControllerError.forbidden } }
@@ -378,11 +416,13 @@ extension ControllerStore {
         try requireLocalMailbox(envelope.recipient)
         let isReply = try isReplyToOwnMail(envelope)
         let grant = try matchingGrant(recipient: envelope.recipient, sender: envelope.sender)
-        if !isReply {
+        if !isReply && !(ownerAdmitted && peer == nil) {
             guard let grant, let mode = grant.mode else { throw ControllerError.forbidden }
             if envelope.questionID != nil { guard mode.rank >= MailMode.ask.rank else { throw ControllerError.forbidden } }
         }
-        if envelope.priority == .interrupt { guard grant?.allowsInterrupt == true else { throw ControllerError.forbidden } }
+        if envelope.priority == .interrupt, !(ownerAdmitted && peer == nil) {
+            guard grant?.allowsInterrupt == true else { throw ControllerError.forbidden }
+        }
         let open = try db.rows("SELECT COUNT(*) FROM (SELECT 1 FROM record WHERE kind='mail' AND parent=? AND state IN ('inbox','noticed') LIMIT ?)",
                                [.text(envelope.recipient.description), .integer(Int64(MailLimits.openInbox))])
         guard (open.first?.integers[0] ?? 0) < Int64(MailLimits.openInbox) else { throw ControllerError.invalidInput("inbox_full") }
@@ -473,9 +513,14 @@ extension ControllerStore {
             }
             result.append(message)
         }
-        if let executionID, let context {
-            if hadContext { try update("mailContext", executionID.description, value: context) }
-            else { try insert("mailContext", executionID.description, value: context) }
+        if let context {
+            let key = executionID?.description ?? recipient.description
+            if executionID == nil {
+                let prior: MailContext? = try optional("mailContext", key)
+                if let prior, prior.depth > context.depth { return result }
+                if prior != nil { try update("mailContext", key, value: context) } else { try insert("mailContext", key, value: context) }
+            } else if hadContext { try update("mailContext", key, value: context) }
+            else { try insert("mailContext", key, value: context) }
         }
         return result
     }
