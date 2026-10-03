@@ -62,6 +62,10 @@ public struct MailEnvelope: Codable, Equatable, Sendable {
     /// Set on the one copy a forward makes: the address it was first accepted for. A message
     /// carrying it is never forwarded again (`ControllerMailForward.swift`).
     public var forwardedFrom: MailAddress? = nil
+    /// Set on a reply to a forwarded copy: the address the original was sent to, which the
+    /// replying mailbox had before it moved. Only the same mailbox id on another host may claim
+    /// it, so a moved mailbox can answer what was asked of it and no one else's questions.
+    public var answeringFor: MailAddress? = nil
 
     func validate() throws {
         try Limits.text(text, field: "mail_text")
@@ -381,21 +385,29 @@ extension ControllerStore {
         // execution acted on, so a loop cannot escape its depth by omitting reply_to.
         var chainID = UUID()
         var depth = 0
+        var answeringFor: MailAddress?
         if let replyTo {
             let original: MailMessage = try required("mail", replyTo.uuidString.lowercased())
             guard original.envelope.recipient == sender, original.envelope.sender == recipient else { throw ControllerError.forbidden }
             chainID = original.envelope.chainID; depth = original.envelope.depth + 1
+            answeringFor = original.envelope.forwardedFrom
         } else if let context, let inherited: MailContext = try optional("mailContext", context.description) {
             chainID = inherited.chainID; depth = inherited.depth + 1
         } else if mailboxContext, let inherited: MailContext = try optional("mailContext", sender.description) {
-            // A session has no execution; its chain context is its mailbox's last acknowledgement.
+            // A session has no execution, so its context is the mail it acknowledged since it
+            // last sent, consumed by this send: a ping-pong (acknowledge, send, acknowledge, send)
+            // keeps its chain and is bounded, while a session's next unrelated message starts a
+            // new one instead of inheriting the deepest chain it ever read. Rolled back with the
+            // send if the send fails.
             chainID = inherited.chainID; depth = inherited.depth + 1
+            try db.run("DELETE FROM record WHERE kind='mailContext' AND id=?", [.text(sender.description)])
         }
         guard depth <= MailLimits.maximumDepth else { throw ControllerError.invalidInput("chain_depth") }
         try spendSendRate(sender)
-        let envelope = MailEnvelope(id: id, sender: sender, senderName: senderName, recipient: recipient, text: text,
+        var envelope = MailEnvelope(id: id, sender: sender, senderName: senderName, recipient: recipient, text: text,
                                     priority: priority, replyTo: replyTo, questionID: questionID, chainID: chainID,
                                     depth: depth, sentAt: Self.now())
+        envelope.answeringFor = answeringFor
         try envelope.validate()
         if recipient.host == local { return try accept(envelope, ownerAdmitted: ownerAdmitted) }
         guard try mailPeer(recipient.host) != nil else { throw ControllerError.invalidInput("unknown_host") }
@@ -421,7 +433,8 @@ extension ControllerStore {
         if let peer { guard envelope.sender.host == peer || expectedForward else { throw ControllerError.forbidden } }
         guard envelope.recipient.host == local else { throw ControllerError.forbidden }
         if let prior: MailMessage = try optional("mail", envelope.id.uuidString.lowercased()),
-           !(try retireReturningMove(prior, envelope, from: peer)) {
+           !(try retireReturningMove(prior, envelope, from: peer)),
+           !(try adoptSentCopy(prior, envelope, expectedForward: expectedForward)) {
             guard prior.envelope.sameRequest(as: envelope), prior.envelope.sentAt == envelope.sentAt || peer == nil else {
                 throw ControllerError.conflict
             }
@@ -456,7 +469,10 @@ extension ControllerStore {
            let original: MailMessage = try optional("mail", replyTo.uuidString.lowercased()),
            let question = original.envelope.questionID {
             // A question that was cancelled or already answered leaves the reply as ordinary mail.
-            do { _ = try resolveQuestion(question, answeredBy: "agent:\(envelope.sender)", text: envelope.text, authorized: false) }
+            // The question names the address it was asked of; a mailbox that has since moved
+            // answers as that address (isReplyToOwnMail proved the reply may speak for it).
+            let askedOf = original.envelope.forwardedFrom ?? original.envelope.recipient
+            do { _ = try resolveQuestion(question, answeredBy: "agent:\(askedOf)", text: envelope.text, authorized: false) }
             catch ControllerError.conflict {}
         }
         return message
@@ -466,8 +482,16 @@ extension ControllerStore {
     /// conversation. Depth still bounds it.
     private func isReplyToOwnMail(_ envelope: MailEnvelope) throws -> Bool {
         guard let replyTo = envelope.replyTo,
-              let original: MailMessage = try optional("mail", replyTo.uuidString.lowercased()) else { return false }
-        return original.envelope.sender == envelope.recipient && original.envelope.recipient == envelope.sender
+              let original: MailMessage = try optional("mail", replyTo.uuidString.lowercased()),
+              original.envelope.sender == envelope.recipient else { return false }
+        return try repliedAs(envelope, original: original) == original.envelope.recipient
+    }
+    /// The address a reply speaks for: its sender, or — for a mailbox that moved after the
+    /// original reached it — the address it had then, claimable only by the same mailbox id.
+    private func repliedAs(_ envelope: MailEnvelope, original: MailMessage) throws -> MailAddress {
+        guard let old = envelope.answeringFor, old != envelope.sender, old == original.envelope.recipient,
+              old.kind == envelope.sender.kind, old.id == envelope.sender.id else { return envelope.sender }
+        return old
     }
 
     func matchingGrant(recipient: MailAddress, sender: MailAddress) throws -> MailGrant? {
@@ -661,21 +685,17 @@ extension ControllerStore {
                 if let work = try db.transaction({ () throws -> WorkItem? in
                     guard try db.rows("SELECT id FROM record WHERE kind='work' AND parent=? AND state IN ('queued','running','waiting') LIMIT 1",
                                       [.text(worker.description)]).isEmpty else { return nil }
-                    guard let newest = try db.rows("""
-                        SELECT MAX(sequence) FROM record WHERE kind='mail' AND parent=? AND state IN ('inbox','noticed')
-                        """, [.text(address.description)]).first?.integers[0] else { return nil }
-                    let key = "inbox:\(address):\(newest)"
-                    // Spend is limited where it is spent: a chain past its grant's budget still
-                    // delivers mail, but starts no more work.
-                    if let row = try db.rows("SELECT payload FROM record WHERE kind='mail' AND parent=? AND sequence=? LIMIT 1",
-                                             [.text(address.description), .integer(newest)]).first {
-                        let message: MailMessage = try decode(row.text(0))
-                        if let budget = try matchingGrant(recipient: address, sender: message.envelope.sender)?.chainTokenBudget,
-                           try chainUsage(message.envelope.chainID) >= budget {
-                            try event("mail.wake_over_budget", address.description)
-                            return nil
-                        }
+                    // Spend is limited where it is spent: the work is keyed by the newest open
+                    // message that may wake this worker *and* whose chain is within its grant's
+                    // budget. Mail over budget, or admitted under notify only, is still
+                    // delivered; it just starts nothing.
+                    guard let candidate = try mailWakeCandidate(address) else {
+                        try event("mail.wake_over_budget", address.description)
+                        return nil
                     }
+                    guard let newest = try db.rows("SELECT sequence FROM record WHERE kind='mail' AND id=? LIMIT 1",
+                                                   [.text(candidate.envelope.id.uuidString.lowercased())]).first?.integers[0] else { return nil }
+                    let key = "inbox:\(address):\(newest)"
                     if try db.rows("SELECT id FROM record WHERE kind='work' AND parent=? AND key=? LIMIT 1",
                                    [.text(worker.description), .text(key)]).first != nil { return nil }
                     return try enqueue(workerID: worker, key: key, instruction: MailWake.instruction, source: .event)

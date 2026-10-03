@@ -23,6 +23,7 @@ extension MailEnvelope {
                                 priority: priority, replyTo: replyTo, questionID: questionID, chainID: chainID,
                                 depth: depth, sentAt: sentAt)
         copy.forwardedFrom = recipient
+        copy.answeringFor = answeringFor
         return copy
     }
 }
@@ -154,6 +155,24 @@ extension ControllerStore {
         try db.run("DELETE FROM mail_outbound WHERE message=?", [.text(id)])
         try db.run("DELETE FROM record WHERE kind='mail' AND id=?", [.text(id)])
         try event("mail.returned", id)
+        return true
+    }
+
+    /// A mailbox moved onto the sender's own host: the forwarded copy arriving here carries the
+    /// id of the copy this host already holds as sent. One store keeps one record per message,
+    /// so the sent copy gives way and the message is accepted as the recipient's inbox copy.
+    func adoptSentCopy(_ prior: MailMessage, _ envelope: MailEnvelope, expectedForward: Bool) throws -> Bool {
+        guard expectedForward, [.outbound, .forwarded, .bounced].contains(prior.state),
+              prior.envelope.sender.host == (try host().id), envelope.forwardedFrom == prior.envelope.recipient,
+              prior.envelope.sameRequest(as: MailEnvelope(id: envelope.id, sender: envelope.sender, senderName: envelope.senderName,
+                                                          recipient: prior.envelope.recipient, text: envelope.text,
+                                                          priority: envelope.priority, replyTo: envelope.replyTo,
+                                                          questionID: envelope.questionID, chainID: envelope.chainID,
+                                                          depth: envelope.depth, sentAt: envelope.sentAt)) else { return false }
+        let id = envelope.id.uuidString.lowercased()
+        try db.run("DELETE FROM mail_outbound WHERE message=?", [.text(id)])
+        try db.run("DELETE FROM record WHERE kind='mail' AND id=?", [.text(id)])
+        try event("mail.came_home", id)
         return true
     }
 

@@ -78,8 +78,11 @@ extension ControllerStore {
     private func acceptPushed(_ envelope: MailEnvelope, peer: HostID) -> MailPushResult {
         do {
             return try db.transaction {
+                // The same prior-copy rules as `accept`: a returning move or a mailbox that moved onto
+                // the sender's host replaces the copy held here; anything else is a duplicate.
                 if let prior: MailMessage = try optional("mail", envelope.id.uuidString.lowercased()),
-                   !(try retireReturningMove(prior, envelope, from: peer)) {
+                   !(try retireReturningMove(prior, envelope, from: peer)),
+                   !(try adoptSentCopy(prior, envelope, expectedForward: try expectsForward(envelope, from: peer))) {
                     guard prior.envelope.sameRequest(as: envelope) else { throw ControllerError.conflict }
                     return MailPushResult(id: envelope.id, outcome: .duplicate, reason: nil)
                 }

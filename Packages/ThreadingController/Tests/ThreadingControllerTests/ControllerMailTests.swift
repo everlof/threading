@@ -212,6 +212,67 @@ struct ControllerMailTests {
         #expect(reply.envelope.chainID == admitted.envelope.chainID && reply.envelope.depth == 1)
     }
 
+    @Test func aSessionThatReadDeepMailCanStillStartAFreshConversation() async throws {
+        let (directory, store) = try fixture.fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let host = try await store.host()
+        let a = MailAddress(host: host.id, kind: .session, id: UUID())
+        let b = MailAddress(host: host.id, kind: .session, id: UUID())
+        let c = MailAddress(host: host.id, kind: .session, id: UUID())
+        for (address, name) in [(a, "A"), (b, "B"), (c, "C")] { _ = try await store.registerMailbox(address, name: name) }
+        // A and B ping-pong to the depth limit, each acknowledging before answering.
+        var from = a, to = b
+        for depth in 0...MailLimits.maximumDepth {
+            let sent = try await store.sendMail(from: from, to: to, id: UUID(), text: "ping \(depth)", replyTo: nil, priority: .normal, ownerAdmitted: true)
+            #expect(sent.envelope.depth == depth)
+            _ = try await store.acknowledgeMail(mailbox: to, ids: [sent.envelope.id])
+            swap(&from, &to)
+        }
+        // The loop is still bounded...
+        await #expect(throws: ControllerError.invalidInput("chain_depth")) {
+            try await store.sendMail(from: from, to: to, id: UUID(), text: "too deep", replyTo: nil, priority: .normal, ownerAdmitted: true)
+        }
+        // ...but that refusal consumed nothing, and once the context is spent by a send, the
+        // session's next unrelated message starts a new conversation at depth 0.
+        let other = from == a ? b : a
+        let fresh = try await store.sendMail(from: other, to: c, id: UUID(), text: "new topic", replyTo: nil, priority: .normal, ownerAdmitted: true)
+        let fresher = try await store.sendMail(from: other, to: c, id: UUID(), text: "another", replyTo: nil, priority: .normal, ownerAdmitted: true)
+        #expect(fresher.envelope.depth == 0 && fresher.envelope.chainID != fresh.envelope.chainID)
+        // Many fresh sends never accumulate into one chain's limit.
+        for index in 0..<(MailLimits.sendsPerMinute - 3) {
+            let sent = try await store.sendMail(from: c, to: other, id: UUID(), text: "n\(index)", replyTo: nil, priority: .normal, ownerAdmitted: true)
+            #expect(sent.envelope.depth == 0)
+        }
+    }
+
+    @Test func theWakeBudgetIsJudgedOnTheMailThatMayWakeNotOnWhicheverArrivedLast() async throws {
+        let (directory, store) = try fixture.fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let host = try await store.host()
+        let idle = WorkerID()
+        _ = try await store.addWorker(id: idle, name: "Reviewer")
+        _ = try await store.setWorkerSources(idle, expectedRevision: 0, sources: [.request, .event])
+        let idleAddress = try await store.mailAddress(worker: idle)
+        let lead = MailAddress(host: host.id, kind: .session, id: UUID())
+        let chatter = MailAddress(host: host.id, kind: .session, id: UUID())
+        _ = try await store.registerMailbox(lead, name: "Lead"); _ = try await store.registerMailbox(chatter, name: "Chatter")
+        _ = try await store.setMailGrant(recipient: idleAddress, sender: lead.description, expectedRevision: 0, mode: .wake,
+                                         allowsInterrupt: false, chainTokenBudget: 500)
+        _ = try await store.setMailGrant(recipient: idleAddress, sender: chatter.description, expectedRevision: 0, mode: .notify, allowsInterrupt: false)
+        // The lead's conversation has already spent past its budget.
+        let spent = try await store.sendMail(from: lead, to: idleAddress, id: UUID(), text: "Again", replyTo: nil, priority: .normal)
+        try await store.insert("usageChain", spent.envelope.chainID.uuidString.lowercased(), value: UsageChainTotal(tokens: 1_000, executions: 2))
+        // Newer notify-only mail, from a sender with no budget, must not wake it in its place.
+        _ = try await store.sendMail(from: chatter, to: idleAddress, id: UUID(), text: "fyi", replyTo: nil, priority: .normal)
+        #expect(try await store.admitMailWakes(after: 0).admitted.isEmpty)
+        // And a newer over-budget message must not hide an older in-budget one that may wake.
+        _ = try await store.setMailGrant(recipient: idleAddress, sender: chatter.description, expectedRevision: 1, mode: .wake, allowsInterrupt: false)
+        _ = try await store.sendMail(from: chatter, to: idleAddress, id: UUID(), text: "please look", replyTo: nil, priority: .normal)
+        let newest = try await store.sendMail(from: lead, to: idleAddress, id: UUID(), text: "Again!", replyTo: nil, priority: .normal)
+        try await store.insert("usageChain", newest.envelope.chainID.uuidString.lowercased(), value: UsageChainTotal(tokens: 900, executions: 1))
+        #expect(try await store.admitMailWakes(after: 0).admitted.count == 1)
+    }
+
     // MARK: - Between hosts
 
     func twoHosts() async throws -> (URL, URL, ControllerStore, ControllerStore, HostID, HostID) {
@@ -386,5 +447,42 @@ struct ControllerMailTests {
         #expect(try await reopened.work(work.id).id == work.id)
         let address = try await reopened.mailAddress(worker: work.workerID)
         #expect(try await reopened.inbox(address).items.isEmpty)
+    }
+
+    @Test func aMovedMailboxAnswersTheQuestionAskedOfItsOldAddress() async throws {
+        let (d1, d2, mac, vps, macID, vpsID) = try await twoHosts()
+        defer { try? FileManager.default.removeItem(at: d1); try? FileManager.default.removeItem(at: d2) }
+        // A worker on the VPS asks a Mac session a question.
+        let work = try await fixture.seed(vps, key: "asker")
+        let claim = try #require(await vps.claim(workerID: work.workerID))
+        let session = UUID()
+        let oldAddress = MailAddress(host: macID, kind: .session, id: session)
+        let newAddress = MailAddress(host: vpsID, kind: .session, id: session)
+        _ = try await mac.registerMailbox(oldAddress, name: "Release notes")
+        _ = try await mac.setMailGrant(recipient: oldAddress, sender: "\(vpsID)/*", expectedRevision: 0, mode: .ask, allowsInterrupt: false)
+        let question = try await vps.askMail(executionID: claim.execution.id, to: oldAddress, questionID: QuestionID(), text: "Ship it?", checkpoint: "Asked")
+        let held = try await vps.handleMailRPC(MailRPCRequest(pull: MailPull(after: 0, refused: nil)), peer: macID)
+        try await mac.acceptPulled(held.messages ?? [], from: vpsID, next: held.next ?? 0)
+        // The session's project moves to the VPS before it answers.
+        _ = try await vps.registerMailbox(newAddress, name: "Release notes")
+        _ = try await vps.setMailForward(from: oldAddress, to: newAddress, expectedRevision: 0)
+        #expect(try await mac.moveMail(from: oldAddress, to: newAddress) == 1)
+        let batch = try await mac.outboundBatch(for: vpsID)
+        let pushed = try await vps.handleMailRPC(MailRPCRequest(push: MailPush(from: macID, messages: batch.envelopes)), peer: macID)
+        try await mac.applyPushResults(pushed.results ?? [], peer: vpsID)
+        #expect(pushed.results?.map(\.outcome) == [.accepted])
+        let moved = try #require(try await vps.inbox(newAddress).items.first)
+        #expect(moved.message.envelope.questionID == question.id)
+        // Its reply, from the new address, answers the question and resumes the asker.
+        let asker = try await vps.mailAddress(worker: work.workerID)
+        _ = try await vps.sendMail(from: newAddress, to: asker, id: UUID(), text: "Yes", replyTo: moved.message.envelope.id, priority: .normal)
+        #expect(try await vps.question(question.id).answer == "Yes")
+        #expect(try await vps.work(work.id).state == .queued)
+        // No other mailbox may claim to answer for that address.
+        let impostor = MailAddress(host: vpsID, kind: .session, id: UUID())
+        _ = try await vps.registerMailbox(impostor, name: "Impostor")
+        await #expect(throws: ControllerError.forbidden) {
+            try await vps.sendMail(from: impostor, to: asker, id: UUID(), text: "No", replyTo: moved.message.envelope.id, priority: .normal)
+        }
     }
 }
