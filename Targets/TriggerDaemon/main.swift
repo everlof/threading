@@ -14,6 +14,8 @@ private struct DaemonConfiguration: Decodable {
     let schemaVersion: Int
     let sources: [SourceConfiguration]
     let nextScheduleUnixTime: Double?
+    /// Approved probe sources. Absent from configurations written before probes existed.
+    let probes: [TriggerProbeDaemonSource]?
 }
 
 private struct SondaFeed: Decodable {
@@ -95,6 +97,24 @@ private enum Locations {
 
     static var statusDirectory: URL? {
         directory?.appendingPathComponent("Source Status", isDirectory: true)
+    }
+
+    /// Per-probe private working directories, `0700`.
+    static var probeDirectory: URL? {
+        directory?.appendingPathComponent("Probes", isDirectory: true)
+    }
+
+    static var probeCursorFile: URL? {
+        directory?.appendingPathComponent("probe-cursors.json", isDirectory: false)
+    }
+
+    static var probeScheduleFile: URL? {
+        directory?.appendingPathComponent("probe-schedule.json", isDirectory: false)
+    }
+
+    /// One empty file per requested manual poll, named by source id. The app writes them.
+    static var pollRequests: URL? {
+        directory?.appendingPathComponent("Poll Requests", isDirectory: true)
     }
 }
 
@@ -226,16 +246,24 @@ private enum ConfigurationReader {
 
 private enum InboxWriter {
     static func write(_ event: InboxEvent, cursor: Int64) throws {
+        try write(event, name: String(format: "%020lld-%@.json", cursor, UUID().uuidString.lowercased()))
+    }
+
+    /// A probe event: named by the poll's time and the event's position in it, so a drain reads
+    /// a poll's events in the order the probe reported them.
+    static func write(_ event: TriggerProbeInboxEvent, index: Int, at date: Date) throws {
+        let milliseconds = Int64(date.timeIntervalSince1970 * 1_000)
+        try write(event, name: String(format: "%020lld-%04d-%@.json", milliseconds, index, UUID().uuidString.lowercased()))
+    }
+
+    private static func write<Event: Encodable>(_ event: Event, name: String) throws {
         guard let inbox = Locations.inbox else { throw DaemonFailure.noSupportDirectory }
         try FileManager.default.createDirectory(
             at: inbox,
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
-        let file = inbox.appendingPathComponent(
-            String(format: "%020lld-%@.json", cursor, UUID().uuidString.lowercased()),
-            isDirectory: false
-        )
+        let file = inbox.appendingPathComponent(name, isDirectory: false)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
@@ -390,6 +418,183 @@ private enum SondaSource {
     }
 }
 
+// MARK: - Probe sources
+
+/// Probe secrets by name from Keychain, under the same access group as source credentials.
+private struct KeychainProbeSecrets: TriggerProbeSecretResolving {
+    private static var accessGroup: String? {
+        #if DEBUG
+        nil
+        #else
+        "SMQ3E8Y57T.codes.threading.triggers"
+        #endif
+    }
+
+    func value(forSecret name: String) throws -> String {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: TriggerProbeDefaults.secretService,
+            kSecAttrAccount as String: name,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        if let accessGroup = Self.accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data,
+              let value = String(data: data, encoding: .utf8), !value.isEmpty else {
+            throw TriggerProbeSecretFailure.unavailable(name)
+        }
+        return value
+    }
+}
+
+/// Opaque probe cursors by source id, committed only after a poll's events are in the inbox.
+/// Synchronous, so the runner's commit step is the durable write itself rather than a value
+/// handed to someone who might not write it.
+private final class ProbeCursorStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: String] = [:]
+
+    init() {
+        guard let file = Locations.probeCursorFile, let data = try? Data(contentsOf: file),
+              let decoded = try? JSONDecoder().decode([String: String].self, from: data) else { return }
+        values = decoded
+    }
+
+    func cursor(for id: UUID) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return values[id.uuidString]
+    }
+
+    func commit(_ cursor: String, for id: UUID) throws {
+        lock.lock(); defer { lock.unlock() }
+        guard let file = Locations.probeCursorFile else { throw DaemonFailure.noSupportDirectory }
+        var next = values
+        next[id.uuidString] = cursor
+        try JSONEncoder().encode(next).write(to: file, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        values = next
+    }
+}
+
+/// When each probe is next due, its consecutive failures, and which polls are in flight. The
+/// deadlines persist so a daemon restart does not poll every source at once.
+private actor ProbeSchedule {
+    private struct Entry: Codable { var due: Date; var failures: Int }
+    private var entries: [String: Entry] = [:]
+    private var inFlight: Set<UUID> = []
+
+    init() {
+        guard let file = Locations.probeScheduleFile, let data = try? Data(contentsOf: file),
+              let decoded = try? JSONDecoder().decode([String: Entry].self, from: data) else { return }
+        entries = decoded
+    }
+
+    /// Requested manual polls first, then the oldest scheduled deadlines; never a source already
+    /// polling, and never more than the concurrency bound in flight.
+    func claim(_ probes: [TriggerProbeDaemonSource], manual: Set<UUID>, now: Date) -> [(TriggerProbeDaemonSource, Bool)] {
+        let capacity = TriggerProbeDefaults.concurrentPolls - inFlight.count
+        guard capacity > 0 else { return [] }
+        let candidates = probes.filter { !inFlight.contains($0.id) }
+        let requested = candidates.filter { manual.contains($0.id) }.map { ($0, true) }
+        let scheduled = candidates
+            .filter { $0.enabled && !manual.contains($0.id) && (entries[$0.id.uuidString]?.due ?? .distantPast) <= now }
+            .sorted { (entries[$0.id.uuidString]?.due ?? .distantPast) < (entries[$1.id.uuidString]?.due ?? .distantPast) }
+            .prefix(TriggerProbeDefaults.duePerTick)
+            .map { ($0, false) }
+        let claimed = Array((requested + scheduled).prefix(capacity))
+        for (probe, _) in claimed { inFlight.insert(probe.id) }
+        return claimed
+    }
+
+    func finish(_ probe: TriggerProbeDaemonSource, health: TriggerProbeHealth, at now: Date) {
+        inFlight.remove(probe.id)
+        let failures = health == .healthy ? 0 : (entries[probe.id.uuidString]?.failures ?? 0) + 1
+        entries[probe.id.uuidString] = Entry(
+            due: TriggerProbeSourceRunner.nextPoll(probe.spec, after: now, failures: failures),
+            failures: failures
+        )
+        guard let file = Locations.probeScheduleFile,
+              let data = try? JSONEncoder().encode(entries) else { return }
+        try? data.write(to: file, options: .atomic)
+    }
+}
+
+private enum ProbeLoop {
+    static let tick: Duration = .seconds(5)
+
+    static func run() async {
+        let cursors = ProbeCursorStore()
+        let schedule = ProbeSchedule()
+        let secrets = KeychainProbeSecrets()
+        while !Task.isCancelled {
+            let probes = ((try? ConfigurationReader.read())?.probes ?? [])
+            let manual = takePollRequests()
+            for (probe, isManual) in await schedule.claim(probes, manual: manual, now: Date()) {
+                Task.detached(priority: .utility) {
+                    let health = await poll(probe, manual: isManual, cursors: cursors, secrets: secrets)
+                    await schedule.finish(probe, health: health, at: Date())
+                }
+            }
+            try? await Task.sleep(for: tick)
+        }
+    }
+
+    /// Manual requests are consumed whether or not their source is still configured, so a
+    /// request for a deleted or unapproved probe cannot wait to run under a later approval.
+    private static func takePollRequests() -> Set<UUID> {
+        guard let directory = Locations.pollRequests,
+              let files = try? FileManager.default.contentsOfDirectory(
+                  at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return [] }
+        var ids: Set<UUID> = []
+        for file in files.prefix(256) {
+            try? FileManager.default.removeItem(at: file)
+            if let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent) { ids.insert(id) }
+        }
+        return ids
+    }
+
+    private static func poll(
+        _ probe: TriggerProbeDaemonSource, manual: Bool,
+        cursors: ProbeCursorStore, secrets: KeychainProbeSecrets
+    ) async -> TriggerProbeHealth {
+        let started = Date()
+        let outcome: TriggerProbePollOutcome
+        do {
+            guard let root = Locations.probeDirectory else { throw DaemonFailure.noSupportDirectory }
+            let directory = root.appendingPathComponent(probe.id.uuidString.lowercased(), isDirectory: true)
+            for url in [root, directory] {
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true,
+                                                        attributes: [.posixPermissions: 0o700])
+            }
+            let observed = try? TriggerProbe.contentHash(of: probe.spec.hashedPaths)
+            outcome = await TriggerProbeSourceRunner.poll(
+                probe, cursor: cursors.cursor(for: probe.id), directory: directory.path, secrets: secrets,
+                observedHash: observed, receivedAt: started,
+                write: { event, index in try InboxWriter.write(event, index: index, at: started) },
+                commit: { try cursors.commit($0, for: probe.id) }
+            )
+        } catch {
+            outcome = TriggerProbePollOutcome(health: .failed, writtenEvents: 0, committedCursor: nil,
+                                              lastEventAt: nil, diagnostic: error.localizedDescription)
+        }
+        try? StatusWriter.write(SourceStatus(
+            sourceInstallationID: probe.id,
+            health: outcome.health.rawValue,
+            lastCheckedAt: Date(),
+            lastEventAt: outcome.lastEventAt,
+            boundedDiagnostic: outcome.diagnostic
+        ))
+        if outcome.writtenEvents > 0 { AppWake.notify() }
+        if outcome.health != .healthy {
+            NSLog("threading-triggerd probe %@%@: %@", probe.id.uuidString, manual ? " (manual)" : "",
+                  outcome.health.rawValue)
+        }
+        return outcome.health
+    }
+}
+
 @main
 private enum TriggerDaemon {
     static func main() async {
@@ -402,6 +607,9 @@ private enum TriggerDaemon {
         let cursors = CursorStore()
         let sourceBackoff = SourceBackoff()
         var failureDelay: UInt64 = 2
+        // Probes poll on their own loop, so a Sonda long-poll never delays one and a hanging
+        // probe never delays Sonda.
+        Task.detached(priority: .utility) { await ProbeLoop.run() }
 
         while !Task.isCancelled {
             do {

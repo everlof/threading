@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingController
 
 // MARK: - Identity
 
@@ -153,6 +154,9 @@ struct TriggerEvent: Codable, Equatable, Sendable {
     let attributes: [String: TriggerAttributeValue]
     let deepLink: URL?
     let resources: [TriggerResourceReference]
+    /// Bounded text a probe reported for the agent to read. Never an attribute, so no
+    /// condition can match on it; the prompt carries it inside the untrusted-evidence block.
+    var evidence: String? = nil
 
     var storageKey: String {
         [sourceInstallationID.uuidString, externalID, revision]
@@ -170,6 +174,22 @@ enum TriggerSourceHealth: String, Codable, Sendable {
     case backingOff
     case authenticationRequired
     case failed
+    /// A probe's executable or script no longer hashes to its approval, so it did not run.
+    case changed
+}
+
+/// A probe source's owner-authored configuration: the controller's own spec (so a probe means
+/// the same on the Mac and on a VPS), its revision, and the content hash a person approved.
+struct TriggerProbeSourceSettings: Codable, Equatable, Sendable {
+    var spec: ControllerSourceSpec
+    /// Increments on every configure and approval, for compare-and-swap edits.
+    var revision: Int
+    /// SHA-256 of the executable and script when this revision was configured.
+    var hash: String
+    /// The hash a person approved in the host sheet. Configuring clears it.
+    var approvedHash: String?
+
+    var isApproved: Bool { approvedHash == hash }
 }
 
 struct TriggerSourceInstallation: Codable, Equatable, Sendable {
@@ -185,6 +205,8 @@ struct TriggerSourceInstallation: Codable, Equatable, Sendable {
     var boundedDiagnostic: String?
     var createdAt: Date
     var updatedAt: Date
+    /// Present only for `sourceType == "probe"`.
+    var probe: TriggerProbeSourceSettings? = nil
 }
 
 // MARK: - Matching

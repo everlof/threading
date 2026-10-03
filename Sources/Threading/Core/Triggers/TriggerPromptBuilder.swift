@@ -10,6 +10,7 @@ enum TriggerPromptBuilder {
         let attributes: [String: TriggerAttributeValue]
         let deepLink: URL?
         let resources: [TriggerResourceReference]
+        let evidence: String?
     }
 
     static func assessment(
@@ -24,7 +25,8 @@ enum TriggerPromptBuilder {
             title: dispatch.event.title,
             attributes: dispatch.event.attributes,
             deepLink: dispatch.event.deepLink,
-            resources: dispatch.revision.allowSourceResources ? dispatch.event.resources : []
+            resources: dispatch.revision.allowSourceResources ? dispatch.event.resources : [],
+            evidence: dispatch.event.evidence
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]

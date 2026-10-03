@@ -8785,6 +8785,9 @@ enum MCPTools {
           Remote schedules run on that VPS's supervisor even while this Mac is offline. An existing
           worker owns execution permissions; configuring a schedule never enables or changes its recipe.
           On a lost response inspect state; run uses a stable requestKey for safe retries.
+          draftSource writes or edits a probe source on this Mac (id and integer expectedRevision for an edit,
+          omitted/0 for a new one). It is always left paused and unapproved: a probe runs unsandboxed with the
+          user's authority, so only the user approves its exact files on the Sources page. No operation approves it.
           """,
         inputSchema: AutomationToolSchema.input
       ),

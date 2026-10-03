@@ -74,6 +74,10 @@
 		7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C011 /* ThreadingSimulatorKit */; };
 		7C000006000000000000A001 /* codes.threading.ptyd.plist in Embed Launch Agents */ = {isa = PBXBuildFile; fileRef = 7C000006000000000000B001 /* codes.threading.ptyd.plist */; };
 		7C00000C000000000000A001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B001 /* main.swift */; };
+		7C00000C000000000000A004 /* TriggerProbeSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B005 /* TriggerProbeSources.swift */; };
+		7C00000C000000000000A005 /* TriggerProbeSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B005 /* TriggerProbeSources.swift */; };
+		7C00000C000000000000A006 /* TriggerProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B006 /* TriggerProbe.swift */; };
+		7C00000C000000000000A007 /* AutomationSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B007 /* AutomationSchedule.swift */; };
 		7C00000C000000000000A002 /* threading-triggerd in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B011 /* threading-triggerd */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		7C00000C000000000000A003 /* codes.threading.triggerd.plist in Embed Launch Agents */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B004 /* codes.threading.triggerd.plist */; };
 		89DB8D32FAE049571D22D568 /* threading-extension-helper-network in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 543E83291094AE2E9DCA09FB /* threading-extension-helper-network */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -393,6 +397,9 @@
 		7C000007000000000000B008 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		7C000007000000000000B009 /* threading-simulator-helper.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-simulator-helper.entitlements"; sourceTree = "<group>"; };
 		7C000007000000000000B011 /* threading-simulator-helper */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-simulator-helper"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7C00000C000000000000B006 /* TriggerProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TriggerProbe.swift; path = Packages/ThreadingController/Sources/ThreadingController/TriggerProbe.swift; sourceTree = SOURCE_ROOT; };
+		7C00000C000000000000B007 /* AutomationSchedule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AutomationSchedule.swift; path = Packages/ThreadingDomain/Sources/ThreadingDomain/AutomationSchedule.swift; sourceTree = SOURCE_ROOT; };
+		7C00000C000000000000B005 /* TriggerProbeSources.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TriggerProbeSources.swift; sourceTree = "<group>"; };
 		7C00000C000000000000B001 /* main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		7C00000C000000000000B002 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		7C00000C000000000000B003 /* threading-triggerd.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-triggerd.entitlements"; sourceTree = "<group>"; };
@@ -834,6 +841,9 @@
 			isa = PBXGroup;
 			children = (
 				7C00000C000000000000B001 /* main.swift */,
+				7C00000C000000000000B005 /* TriggerProbeSources.swift */,
+				7C00000C000000000000B006 /* TriggerProbe.swift */,
+				7C00000C000000000000B007 /* AutomationSchedule.swift */,
 				7C00000C000000000000B002 /* Info.plist */,
 				7C00000C000000000000B003 /* threading-triggerd.entitlements */,
 				7C00000C000000000000B004 /* codes.threading.triggerd.plist */,
@@ -1730,6 +1740,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				7C00000C000000000000A001 /* main.swift in Sources */,
+				7C00000C000000000000A004 /* TriggerProbeSources.swift in Sources */,
+				7C00000C000000000000A006 /* TriggerProbe.swift in Sources */,
+				7C00000C000000000000A007 /* AutomationSchedule.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1844,6 +1857,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				953EC13AE9B26A038EF6BA1C /* ExtensionRunnerRequest.swift in Sources */,
+				7C00000C000000000000A005 /* TriggerProbeSources.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2262,6 +2276,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.triggerd";
 				PRODUCT_NAME = "threading-triggerd";
 				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) THREADING_TRIGGER_DAEMON";
 				SKIP_INSTALL = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 5.0;
@@ -2285,6 +2300,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.triggerd";
 				PRODUCT_NAME = "threading-triggerd";
 				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) THREADING_TRIGGER_DAEMON";
 				SKIP_INSTALL = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 5.0;

@@ -4460,6 +4460,17 @@
         }
       }
     },
+    "A person has to approve this probe on the Sources page before it can run." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En person måste godkänna den här sonden på sidan Källor innan den kan köras."
+          }
+        }
+      }
+    },
     "A phone away from home cannot reach this Mac while it sleeps." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4566,6 +4577,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En tidigare Threading avslutades inte, och %1$lld av agentprocesserna den startade håller fortfarande låset på dina projekt: %2$@. Att avsluta dem låter den här Threading starta. Allt de höll på med går förlorat."
+          }
+        }
+      }
+    },
+    "A probe checks something on a schedule and reports events without starting a model. It runs unsandboxed, as you, so each one needs your approval." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En sond kontrollerar något enligt ett schema och rapporterar händelser utan att starta en modell. Den körs utan sandlåda, som du, så var och en behöver ditt godkännande."
           }
         }
       }
@@ -8233,6 +8255,17 @@
         }
       }
     },
+    "Approve and Enable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkänn och aktivera"
+          }
+        }
+      }
+    },
     "Approve one retry of a recent auto-review denial" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8240,6 +8273,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Godkänn ett nytt försök efter ett nekat automatiskt granskningsanrop"
+          }
+        }
+      }
+    },
+    "Approve the probe “%@”?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkänna sonden ”%@”?"
           }
         }
       }
@@ -8433,6 +8477,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ytan motsvarar storleken. Välj en cirkel för att öppna grenen; välj en fil för att granska den."
+          }
+        }
+      }
+    },
+    "Arguments" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Argument"
+          }
+        }
+      }
+    },
+    "Arguments after the script, one per line" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Argument efter skriptet, ett per rad"
           }
         }
       }
@@ -8813,6 +8879,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Högst %d"
+          }
+        }
+      }
+    },
+    "At most %lld events per poll" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Högst %lld händelser per avläsning"
           }
         }
       }
@@ -11051,6 +11128,17 @@
         }
       }
     },
+    "Calendar: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kalender: %@"
+          }
+        }
+      }
+    },
     "Call send_to_session with session_id %@ — the session this side chat was forked from — and report your conclusion: what was found or decided, in a few sentences, not the transcript. Then reply here with one line saying what you sent." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11535,6 +11623,17 @@
         }
       }
     },
+    "Changed since approval" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändrad sedan godkännandet"
+          }
+        }
+      }
+    },
     "Changed since it was added" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11806,6 +11905,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kontrollera att Tailscale körs på denna Mac och försök sedan igen."
+          }
+        }
+      }
+    },
+    "Checked before every run; a change pauses the probe until you approve it again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrolleras före varje körning; en ändring pausar sonden tills du godkänner den igen."
           }
         }
       }
@@ -20587,6 +20697,28 @@
         }
       }
     },
+    "Environment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Miljö"
+          }
+        }
+      }
+    },
+    "Environment, one NAME=value per line; nothing else is inherited" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Miljö, en NAMN=värde per rad; inget annat ärvs"
+          }
+        }
+      }
+    },
     "Error" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20664,6 +20796,17 @@
         }
       }
     },
+    "Events per poll (default 50)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Händelser per avläsning (standard 50)"
+          }
+        }
+      }
+    },
     "Events shown as Silent make no sound anywhere unless given one here — the group and one-click choices never turn them on." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20697,6 +20840,28 @@
         }
       }
     },
+    "Every %lld h" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Var %lld:e timme"
+          }
+        }
+      }
+    },
+    "Every %lld min" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Var %lld:e minut"
+          }
+        }
+      }
+    },
     "Every %lld minutes" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20704,6 +20869,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Var %lld minut"
+          }
+        }
+      }
+    },
+    "Every %lld s" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Var %lld:e sekund"
           }
         }
       }
@@ -20972,6 +21148,17 @@
         }
       }
     },
+    "Executable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Program"
+          }
+        }
+      }
+    },
     "Executable used for new sessions: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20985,6 +21172,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Körbar fil för nya sessioner: %@"
+          }
+        }
+      }
+    },
+    "Executable, e.g. /usr/bin/python3" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Program, t.ex. /usr/bin/python3"
           }
         }
       }
@@ -26374,6 +26572,17 @@
         }
       }
     },
+    "Interval in minutes (1–1440)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Intervall i minuter (1–1440)"
+          }
+        }
+      }
+    },
     "Invalid" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28093,6 +28302,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "LimitEscapeStripView"
+          }
+        }
+      }
+    },
+    "Limits" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gränser"
           }
         }
       }
@@ -30790,6 +31010,17 @@
         }
       }
     },
+    "Needs approval" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Behöver godkännande"
+          }
+        }
+      }
+    },
     "Needs attention" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30979,6 +31210,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ny manager…"
+          }
+        }
+      }
+    },
+    "New Probe Source" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ny sondkälla"
+          }
+        }
+      }
+    },
+    "New Probe…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ny sond…"
           }
         }
       }
@@ -32328,6 +32581,17 @@
         }
       }
     },
+    "No schedule" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget schema"
+          }
+        }
+      }
+    },
     "No sessions match this navigator." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33050,6 +33314,17 @@
         }
       }
     },
+    "Not set yet: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte angivna än: %@"
+          }
+        }
+      }
+    },
     "Not signed in" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33105,6 +33380,17 @@
         }
       }
     },
+    "Nothing else is inherited." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget annat ärvs."
+          }
+        }
+      }
+    },
     "Nothing ends this session; it runs until you stop it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33145,6 +33431,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inget här än. Använd Spara som baslinje i webbläsarens alternativ för att spara en bild av en sida du bestämt är rätt."
+          }
+        }
+      }
+    },
+    "Nothing inherited, nothing added" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget ärvs, inget läggs till"
           }
         }
       }
@@ -36619,6 +36916,17 @@
         }
       }
     },
+    "Poll requested" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avläsning begärd"
+          }
+        }
+      }
+    },
     "Popover" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37319,6 +37627,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bilder från privata flikar är först bara dina, eftersom ursprung inte är tillstånd att lämna ut inloggade bildpunkter."
+          }
+        }
+      }
+    },
+    "Probe sources" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sondkällor"
           }
         }
       }
@@ -38784,6 +39103,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Läs varje publikt, versionerat UI-komponentkontrakt."
+          }
+        }
+      }
+    },
+    "Read from Keychain at each poll, only into the probe's environment." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läses från nyckelringen vid varje avläsning, enbart in i sondens miljö."
           }
         }
       }
@@ -41982,6 +42312,17 @@
         }
       }
     },
+    "Review & Approve…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Granska och godkänn…"
+          }
+        }
+      }
+    },
     "Review before publishing" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42511,6 +42852,17 @@
         }
       }
     },
+    "Run now" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör nu"
+          }
+        }
+      }
+    },
     "Run once in Terminal, so keyvault seals its Touch ID key for this iPhone:" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42781,6 +43133,17 @@
         }
       }
     },
+    "Runs unsandboxed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körs utan sandlåda"
+          }
+        }
+      }
+    },
     "Runs while Threading is closed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42821,6 +43184,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "SDK %@"
+          }
+        }
+      }
+    },
+    "SHA-256" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SHA-256"
           }
         }
       }
@@ -43140,6 +43514,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sparande är fortfarande pausat; försök återställa igen."
+          }
+        }
+      }
+    },
+    "Saving leaves the probe paused. You approve its exact files before it runs; any later edit needs approval again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När du sparar förblir sonden pausad. Du godkänner dess exakta filer innan den körs; varje senare ändring behöver godkännas igen."
           }
         }
       }
@@ -43562,6 +43947,17 @@
         }
       }
     },
+    "Script" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skript"
+          }
+        }
+      }
+    },
     "Script %lld has an invalid SF Symbol name." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43657,6 +44053,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skript %lld upprepar ID:t ”%@”."
+          }
+        }
+      }
+    },
+    "Script it runs (optional)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skript som körs (valfritt)"
           }
         }
       }
@@ -44053,6 +44460,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Andra valet"
+          }
+        }
+      }
+    },
+    "Secrets" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hemligheter"
+          }
+        }
+      }
+    },
+    "Secrets for “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hemligheter för ”%@”"
+          }
+        }
+      }
+    },
+    "Secrets, one NAME=secret-name per line; values go in Keychain" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hemligheter, en NAMN=hemlighetsnamn per rad; värdena sparas i nyckelringen"
+          }
+        }
+      }
+    },
+    "Secrets…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hemligheter…"
           }
         }
       }
@@ -49116,6 +49567,17 @@
         }
       }
     },
+    "Stops after %lld seconds" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppas efter %lld sekunder"
+          }
+        }
+      }
+    },
     "Stops at its limit" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49442,6 +49904,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "SupervisionRowView"
+          }
+        }
+      }
+    },
+    "Support mailbox" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supportbrevlåda"
           }
         }
       }
@@ -50472,6 +50945,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den inställningssidan är inte längre tillgänglig."
+          }
+        }
+      }
+    },
+    "That source is not a probe source." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den källan är ingen sondkälla."
           }
         }
       }
@@ -53467,6 +53951,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Utkorgen för privata rapporter är full."
+          }
+        }
+      }
+    },
+    "The probe source changed. Inspect it again before retrying." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sondkällan har ändrats. Granska den igen innan du försöker på nytt."
+          }
+        }
+      }
+    },
+    "The probe source is invalid: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sondkällan är ogiltig: %@"
+          }
+        }
+      }
+    },
+    "The probe's files changed after they were reviewed. Review them again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sondens filer ändrades efter granskningen. Granska dem igen."
           }
         }
       }
@@ -56769,6 +57286,17 @@
         }
       }
     },
+    "This probe is not sandboxed. It runs as you, with your account's authority: it can read, change and send anything you can. Approve it only if you trust these exact files. Its events start agents only through automations you activate separately, and their content is shown to agents as untrusted evidence." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här sonden körs utan sandlåda. Den körs som du, med ditt kontos behörighet: den kan läsa, ändra och skicka allt som du kan. Godkänn den bara om du litar på exakt de här filerna. Dess händelser startar agenter bara genom automationer som du aktiverar separat, och deras innehåll visas för agenter som obetrodda uppgifter."
+          }
+        }
+      }
+    },
     "This project already has a baseline named “%@”." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -57194,6 +57722,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading kan inte läsa %@ just nu, så det spenderar inte det här kontot på egen hand."
+          }
+        }
+      }
+    },
+    "Threading cannot read “%@”." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kan inte läsa ”%@”."
           }
         }
       }
@@ -58205,6 +58744,17 @@
         }
       }
     },
+    "Threading will run this program on its schedule, without asking again, until you pause it or its files change." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kör programmet enligt dess schema, utan att fråga igen, tills du pausar det eller dess filer ändras."
+          }
+        }
+      }
+    },
     "Threading will start an agent with these settings once, now." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58476,6 +59026,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tidszon: %@"
+          }
+        }
+      }
+    },
+    "Timeout in seconds (default 30)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tidsgräns i sekunder (standard 30)"
           }
         }
       }
@@ -61011,6 +61572,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Validera patch"
+          }
+        }
+      }
+    },
+    "Values are stored in your Keychain and handed only to this probe's environment when it runs. Leave a field blank to keep its current value." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdena sparas i din nyckelring och lämnas bara till den här sondens miljö när den körs. Lämna ett fält tomt för att behålla dess nuvarande värde."
           }
         }
       }
@@ -63595,6 +64167,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dina egna enheter är parkopplade med den här Mac-datorn, inte med chatten. Ta bort parkopplingen i Inställningar."
+          }
+        }
+      }
+    },
+    "Your own programs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dina egna program"
           }
         }
       }

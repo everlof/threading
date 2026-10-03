@@ -48,7 +48,7 @@ public struct ControllerSourceSpec: Codable, Equatable, Sendable {
         limit = try c.decodeIfPresent(Int.self, forKey: .limit) ?? 50
     }
 
-    func validate() throws {
+    public func validate() throws {
         try Limits.text(name, field: "source_name", maximum: 128)
         for path in [executable] + (script.map { [$0] } ?? []) {
             try Limits.text(path, field: "source_path", maximum: 4096)
@@ -67,7 +67,8 @@ public struct ControllerSourceSpec: Codable, Equatable, Sendable {
             throw ControllerError.invalidInput("source_bounds")
         }
     }
-    var hashedPaths: [String] { [executable] + (script.map { [$0] } ?? []) }
+    /// The files whose content the approval names: the executable and the script it interprets.
+    public var hashedPaths: [String] { [executable] + (script.map { [$0] } ?? []) }
 }
 
 public enum SecretName {

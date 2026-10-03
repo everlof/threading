@@ -12,6 +12,18 @@ struct AutomationToolArguments: Codable, Sendable {
     var cursor: Int64?
     /// `addProject` only: the absolute path of an existing folder.
     var folder: String?
+    /// `draftSource` only: a probe source's complete spec. Drafting never approves or enables.
+    var sourceSpec: ControllerSourceSpec?
+}
+
+/// What `draftSource` returns: the paused draft, and that only a person can approve it.
+struct ProbeSourceDraftSnapshot: Encodable, Sendable {
+    let id: String
+    let revision: Int
+    let sha256: String
+    let approved: Bool
+    let enabled: Bool
+    let next: String
 }
 
 struct AutomationSnapshot: Codable, Sendable {
@@ -67,6 +79,9 @@ enum AutomationCommands {
         encoder.outputFormatting = [.sortedKeys]
         func json<T: Encodable>(_ value: T) throws -> String {
             String(decoding: try encoder.encode(value), as: UTF8.self)
+        }
+        if args.operation == "draftSource" {
+            return try json(try await draftSource(args, store: store))
         }
         let id = args.id.flatMap(TriggerID.init(uuidString:))
         let expected = args.expectedRevision.flatMap(TriggerRevisionID.init(uuidString:))
@@ -128,6 +143,30 @@ enum AutomationCommands {
             return try json(try await store.runPage(triggerID: id, before: args.cursor))
         default: throw TriggerStore.StoreError.invalidRecord("unknown automation operation")
         }
+    }
+
+    /// An agent may write a probe and draft the source that runs it. The draft is paused with no
+    /// approval; enabling it is a host-sheet decision on the Sources page, which no tool reaches.
+    static func draftSource(_ args: AutomationToolArguments, store: TriggerStore) async throws -> ProbeSourceDraftSnapshot {
+        guard let spec = args.sourceSpec else { throw TriggerStore.StoreError.invalidRecord("sourceSpec required") }
+        let id: TriggerSourceInstallationID?
+        if let raw = args.id {
+            guard let parsed = TriggerSourceInstallationID(uuidString: raw) else {
+                throw TriggerStore.StoreError.invalidRecord("id is not a source UUID")
+            }
+            id = parsed
+        } else {
+            id = nil
+        }
+        guard let expected = Int(args.expectedRevision ?? "0"), expected >= 0 else {
+            throw TriggerStore.StoreError.invalidRecord("expectedRevision is the probe's integer revision; 0 for a new source")
+        }
+        let source = try await TriggerProbeSourceCommands.configure(id: id, expectedRevision: expected, spec: spec, store: store)
+        return ProbeSourceDraftSnapshot(
+            id: source.id.uuidString, revision: source.probe?.revision ?? 0, sha256: source.probe?.hash ?? "",
+            approved: false, enabled: false,
+            next: "Ask the user to review and approve this probe on Automations ▸ Sources. It runs unsandboxed with their account's authority, so only they can enable it."
+        )
     }
 
     static func remote(_ args: AutomationToolArguments, destination: RemoteHostDestination,
