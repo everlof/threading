@@ -80,12 +80,12 @@ public enum Design {
         public static func slot(inControlOfHeight height: CGFloat) -> CGFloat { height - 10 }
         public static func role(forSlot slot: CGFloat) -> Role { slot >= 14 ? .toolbar : .control }
 
-        /// Two explicit diagnostic symbols used by project-row actions. An unfamiliar name is
-        /// a missing platform service and fails visibly; it is never substituted with a plus.
+        /// Explicit diagnostic symbols for project actions and the saved-terminal identity.
+        /// An unfamiliar name is a missing platform service and fails visibly.
         /// Images rasterize once per visible control at 2×, capped to a 32-point canvas.
         public static func image(_ name: String, slot: CGFloat, pointSize: CGFloat,
                                  weight: NSFont.Weight) -> NSImage? {
-            precondition(name == "ellipsis" || name == "plus",
+            precondition(name == "ellipsis" || name == "plus" || name == "terminal",
                          "No Linux diagnostic symbol artwork for \(name)")
             precondition(slot.isFinite && pointSize.isFinite && slot > 0 && pointSize > 0)
             let side = min(32, max(4, min(slot, pointSize)))
@@ -94,7 +94,24 @@ public enum Design {
             let size = NSSize(width: side, height: side)
             let image = NSImage(size: size, flipped: false) { canvas in
                 NSColor.white.setFill()
-                if name == "plus" {
+                if name == "terminal" {
+                    let screen = NSBezierPath(roundedRect: NSRect(
+                        x: side * 0.1, y: side * 0.16,
+                        width: side * 0.8, height: side * 0.68),
+                        xRadius: side * 0.08, yRadius: side * 0.08)
+                    screen.lineWidth = max(1, side * 0.11 * weightFactor)
+                    NSColor.white.setStroke()
+                    screen.stroke()
+
+                    let prompt = NSBezierPath()
+                    prompt.move(to: NSPoint(x: side * 0.27, y: side * 0.61))
+                    prompt.line(to: NSPoint(x: side * 0.42, y: side * 0.5))
+                    prompt.line(to: NSPoint(x: side * 0.27, y: side * 0.39))
+                    prompt.move(to: NSPoint(x: side * 0.5, y: side * 0.38))
+                    prompt.line(to: NSPoint(x: side * 0.69, y: side * 0.38))
+                    prompt.lineWidth = max(1, side * 0.1 * weightFactor)
+                    prompt.stroke()
+                } else if name == "plus" {
                     let stroke = max(1.5, side * 0.15 * weightFactor)
                     let span = side * 0.72
                     NSRect(x: canvas.midX - span / 2, y: canvas.midY - stroke / 2,

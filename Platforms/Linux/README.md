@@ -84,14 +84,17 @@ production layout. The Linux host retains project identity, selection, menu admi
 ownership. The shim clips nested views to their bounds and preserves subview ordering so the
 count sits behind hover controls. A project with saved runtimes now exposes an inline disclosure
 in the same bounded list. Its visible agent rows mount the production
-`ThemedSessionRowContentView` used by Mac session cells; project selection, runtime activation,
-attention, retained state and AT-SPI identities stay host-owned. The saved-runtime pickers
-remain available, while account and terminal rows still use diagnostic content. The shim also
+`ThemedSessionRowContentView` used by Mac session cells. Visible saved terminals now mount the
+same `ThemedTerminalRowContentView` icon/title subtree as the Mac terminal cell, with a bounded
+Linux terminal symbol. Project selection, runtime activation, attention, retained state and
+AT-SPI identities stay host-owned. The saved-runtime pickers remain available; account rows
+still use diagnostic content. The shim also
 has a clipped `NSScrollView`/`NSClipView` viewport with wheel and bounds-origin handling, but the
 native navigator still owns visible-row recycling and wheel routing rather than mounting the
 production outline. `tests/sidebar_visible_rows/run.sh` checks a 5,100-project tree with
-bounded child projection; `--session-row-layout-fixture` checks the shared title/icon stack at
-its native slot size. The installed X11 smoke captures an expanded project and verifies
+bounded child projection; `--session-row-layout-fixture` and `--terminal-row-layout-fixture`
+check the shared title/icon stacks at their native slot sizes. The installed X11 smoke captures an
+expanded project and verifies
 pointer, keyboard, AT-SPI and inline saved-terminal activation.
 `tests/text_label/run.sh` checks the Linux-only, Pango-backed `NSTextField` label against
 Unicode shaping, clipping, ellipsis, intrinsic size, baseline behavior and shared neutral-ink
@@ -425,8 +428,9 @@ See `FINDINGS.md`.
 ## Current platform gaps
 
 The installed preview runs a native window, project and session navigation, terminal and provider
-journeys, text shaping, and an accessibility tree. Project and picker rows remain diagnostic;
-command menus now use production rows, but a complete production screen is not mounted.
+journeys, text shaping, and an accessibility tree. Visible project, agent and terminal rows mount
+shared production content, and command menus use production rows. Account rows remain diagnostic;
+a complete production screen is not mounted.
 Editing and IME, full table and outline behavior, animation,
 system services, and the remaining AppKit shims need work. The layout solver still solves a whole
 subtree at a time and can pay a cold cubic cost on structural changes; see FINDINGS sections 8
@@ -733,9 +737,10 @@ account routing, and Claude create/reattach/resume journeys. `THREADING_LINUX_NA
 Saved Claude and Codex rows show the production provider artwork beside the session title.
 The PNGs are byte-identical to the Mac asset catalogue (`./vendor-marks.sh --verify`), and the
 production `TemplateImageDrawing.swift` compiles unchanged against the shim. Selected marks use
-selection ink; an unavailable asset falls back to the provider's textual name. Provider, account
+selection ink; an unavailable asset falls back to a neutral mark. Provider, account
 and stable session identity remain in the accessible label even when a long title is truncated.
-The title and provider/short-ID/account detail occupy separate lines. A reserved status region
+The production title occupies one line; provider, short ID and account remain in the accessible
+name. A reserved status region
 shows durable wake/snooze attention or `Retained` for a cached runtime; it does not claim agent
 activity. Visible snooze deadlines refresh even before a terminal is opened. The native wait
 keeps accessibility responsive while waiting for the next deadline.

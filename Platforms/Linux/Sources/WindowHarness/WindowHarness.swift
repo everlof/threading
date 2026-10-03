@@ -100,6 +100,14 @@ func render(_ root: NSView, scale: CGFloat = 2, background: NSColor, to path: St
 
 @main
 struct WindowHarness {
+    @MainActor private static let terminalMark: NSImage = {
+        guard let image = Design.Symbol.image("terminal", slot: SidebarRowDefaults.iconSlotWidth,
+                                              pointSize: SidebarRowDefaults.iconSize,
+                                              weight: .regular)
+        else { preconditionFailure("terminal identity glyph is unavailable") }
+        return image
+    }()
+
     private static let maximumOpenRuntimes = 8
     private static let maximumSelectableAgentsPerProject = 512
     private static let maximumSelectableTerminalsPerProject = 512
@@ -239,6 +247,21 @@ struct WindowHarness {
         }
     }
 
+    /// A visible saved shell uses the Mac terminal row's icon and title composition. The
+    /// host retains exact runtime identity, selection, activation and accessibility labels.
+    @MainActor private static func addSavedTerminalRow(
+        _ runtime: ProjectSnapshot.SavedRuntime, running: Bool, index: Int,
+        width: Int, height: Int, accent: NSColor, selected: Bool,
+        selectedInk: Specimen.Ink, root: Specimen.Window, indent: CGFloat = 0
+    ) {
+        let frame = navigatorRowRect(index, width: width, height: height, indent: indent)
+        let ink = selected ? selectedInk : root.bodyInk
+        root.mountNavigatorRow(frame: frame, accent: accent, selected: selected,
+                               ink: ink, showsMark: false)
+        root.mountTerminalContent(title: readableNavigatorText(runtime.title), icon: terminalMark,
+                                  selected: selected, running: running)
+    }
+
     /// Mount only the shaped text in the current viewport. Selection and commands still belong
     /// to the native host, while the AppKit shim now owns the same label leaf as other UI views.
     @MainActor private static func mountNavigatorText(_ rows: [NavigatorTextRow],
@@ -362,6 +385,10 @@ struct WindowHarness {
         }
         if mode == "--session-row-layout-fixture" {
             SessionRowLayoutFixture.run()
+            return
+        }
+        if mode == "--terminal-row-layout-fixture" {
+            TerminalRowLayoutFixture.run()
             return
         }
         if mode == "--attach" {
@@ -1707,10 +1734,10 @@ struct WindowHarness {
                     end = min(saved.count, savedFirst + count)
                     for index in savedFirst..<end {
                         let runtime = saved[index]
-                        let mark = ProviderMarks.image(for: runtime.kind, selected: index == savedSelected)
                         let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
                         let retained = retainedRuntime(for: owner(of: key, projectID: project.id)) != nil
                         if savedPicker.isAgent {
+                            let mark = ProviderMarks.image(for: runtime.kind, selected: index == savedSelected)
                             if runtime.attention(at: presentationDate) == .snoozed,
                                let expiry = runtime.snoozedUntil {
                                 nextVisibleAttentionExpiry = min(nextVisibleAttentionExpiry ?? expiry, expiry)
@@ -1721,10 +1748,9 @@ struct WindowHarness {
                                 selected: index == savedSelected, selectedInk: selectedInk, root: root,
                                 textRows: &textRows, image: mark)
                         } else {
-                            let text = "\(runtime.identityTitle) [\(String(runtime.id.prefix(8)))]\(retained ? " *" : "")"
-                            addNavigatorRow(text, index: index - savedFirst, width: width,
-                                height: height, accent: accent, selected: index == savedSelected,
-                                selectedInk: selectedInk, root: root, textRows: &textRows, image: mark)
+                            addSavedTerminalRow(runtime, running: retained, index: index - savedFirst,
+                                width: width, height: height, accent: accent,
+                                selected: index == savedSelected, selectedInk: selectedInk, root: root)
                         }
                     }
                 } else {
@@ -1784,11 +1810,10 @@ struct WindowHarness {
                                 let runtime = project.recentTerminals[childIndex]
                                 let retained = retainedRuntime(for: owner(of: .terminal(runtime.id),
                                     projectID: project.id)) != nil
-                                let mark = ProviderMarks.image(for: runtime.kind, selected: isSelected)
-                                let text = "\(runtime.identityTitle) [\(String(runtime.id.prefix(8)))]\(retained ? " *" : "")"
-                                addNavigatorRow(text, index: slot, width: width, height: height,
-                                    accent: accent, selected: isSelected, selectedInk: selectedInk,
-                                    root: root, textRows: &textRows, image: mark, indent: 16)
+                                addSavedTerminalRow(runtime, running: retained, index: slot,
+                                    width: width, height: height, accent: accent,
+                                    selected: isSelected, selectedInk: selectedInk,
+                                    root: root, indent: 16)
                             }
                         }
                     }
