@@ -115,4 +115,26 @@ struct ControllerHardeningTests {
         }
     }
 
+    @Test func freshExecutionsDiscoverOnlyTheirStableAgentsMemory() async throws {
+        let (directory, store) = try fixture.fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let first = try await fixture.seed(store)
+        let second = try await fixture.seed(store, worker: WorkerID(), key: "other")
+        for index in 0..<25 {
+            _ = try await store.putMemory(workerID: first.workerID, key: "note-\(index)", expectedRevision: 0, content: "Synthetic preference")
+        }
+        let identity = try await store.agentIdentity(first.workerID)
+        let reopened = try ControllerStore(path: directory.appendingPathComponent("controller.db").path)
+        #expect(try await reopened.agentIdentity(first.workerID) == identity)
+        let launch = try #require(await reopened.prepareLaunch(workerID: first.workerID, spec: usage.spec()))
+        _ = try await reopened.beginLaunch(launch.executionID)
+        let credential = try await reopened.launchCredential(launch.executionID)
+        let context = try await reopened.agentRequest(executionID: launch.executionID, credential: credential, request: .context)
+        #expect(context.agent == identity && context.memoryKeys?.items.count == 20)
+        let next = try await reopened.agentRequest(executionID: launch.executionID, credential: credential,
+            request: .memoryList(after: context.memoryKeys?.next ?? 0))
+        #expect(next.memoryKeys?.items.count == 5)
+        #expect(try await reopened.memoryKeys(workerID: second.workerID).items.isEmpty)
+    }
+
 }

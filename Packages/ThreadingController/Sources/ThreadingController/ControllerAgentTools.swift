@@ -10,6 +10,7 @@ public enum ControllerAgentRequest: Codable, Sendable {
     case checkpoint(text: String)
     case ask(id: QuestionID, text: String, checkpoint: String)
     case finish(payload: String)
+    case memoryList(after: Int64)
     case memoryGet(key: String)
     case memoryPut(key: String, expectedRevision: Int, content: String)
     case knowledgeGet(spaceID: KnowledgeSpaceID, key: String)
@@ -30,6 +31,8 @@ public struct ControllerAgentResponse: Codable, Sendable {
     public var questions: ControllerPage<WorkQuestion>?
     public var question: WorkQuestion?
     public var delivery: WorkDelivery?
+    public var agent: AgentIdentity?
+    public var memoryKeys: ControllerPage<WorkerMemoryKey>?
     public var memory: WorkerMemory?
     public var knowledge: KnowledgeEntry?
     public var mail: MailMessage?
@@ -64,7 +67,11 @@ extension ControllerStore {
             default:
                 let (work, _) = try running(executionID)
                 switch request {
-                case .context: response.work = work
+                case .context:
+                    response.work = work
+                    response.agent = try agentIdentity(work.workerID)
+                    response.memoryKeys = try memoryKeys(workerID: work.workerID)
+                case .memoryList(let after): response.memoryKeys = try memoryKeys(workerID: work.workerID, after: after)
                 case .messages(let after): response.messages = try messages(workID: work.id, after: after)
                 case .messageConsumed(let id): response.message = try consumeMessage(executionID: executionID, id: id)
                 case .history(let after): response.history = try activities(workID: work.id, after: after)

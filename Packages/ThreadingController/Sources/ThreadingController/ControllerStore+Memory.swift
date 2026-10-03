@@ -1,6 +1,29 @@
 import Foundation
 
+public struct AgentIdentity: Codable, Equatable, Sendable {
+    public let authorityID: HostID
+    public let agentID: WorkerID
+}
+
+public struct WorkerMemoryKey: Codable, Equatable, Sendable {
+    public let key: String
+    public let revision: Int
+}
+
 extension ControllerStore {
+    public func agentIdentity(_ worker: WorkerID) throws -> AgentIdentity {
+        let _: ControllerWorker = try required("worker", worker.description)
+        return AgentIdentity(authorityID: try host().id, agentID: worker)
+    }
+    /// Read keys before loading content: bounded startup context regardless of memory size.
+    public func memoryKeys(workerID: WorkerID, after: Int64 = 0, limit: Int = 20) throws -> ControllerPage<WorkerMemoryKey> {
+        try Limits.page(after, limit)
+        let rows = try db.rows("SELECT sequence,key,json_extract(payload,'$.revision') FROM record WHERE kind='memory' AND parent=? AND sequence>? ORDER BY sequence LIMIT ?",
+                               [.text(workerID.description), .integer(after), .integer(Int64(limit))])
+        return ControllerPage(items: try rows.map { WorkerMemoryKey(key: try $0.text(1), revision: Int($0.integers[2])) },
+                              next: rows.last?.integers[0] ?? after)
+    }
+
     /// Memory belongs to a stable worker, not the last provider session that happened to run it.
     public func memory(workerID: WorkerID, key: String) throws -> WorkerMemory? {
         try Limits.text(key, field: "key", maximum: 256)

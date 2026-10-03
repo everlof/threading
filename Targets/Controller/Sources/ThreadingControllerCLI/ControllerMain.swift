@@ -48,6 +48,7 @@ struct ControllerMain {
     delivery-ack DELIVERY_UUID ATTEMPT_UUID RECEIPT_FILE
     delivery-uncertain DELIVERY_UUID ATTEMPT_UUID
     delivery-confirm-absent DELIVERY_UUID ATTEMPT_UUID
+    memory-list WORKER_UUID [CURSOR]
     memory-get WORKER_UUID KEY
     memory-put WORKER_UUID KEY EXPECTED_REVISION TEXT_FILE
     memory-history WORKER_UUID KEY [CURSOR]
@@ -506,6 +507,8 @@ struct ControllerMain {
             try count(2); try output(await store.markDeliveryUncertain(DeliveryID(args[0]), attemptID: DeliveryAttemptID(args[1])))
         case "delivery-confirm-absent":
             try count(2); try output(await store.confirmDeliveryAbsent(DeliveryID(args[0]), attemptID: DeliveryAttemptID(args[1])))
+        case "memory-list":
+            let after = try cursor(1); try output(await store.memoryKeys(workerID: WorkerID(args[0]), after: after))
         case "memory-get":
             try count(2); try output(await store.memory(workerID: WorkerID(args[0]), key: args[1]))
         case "memory-put":

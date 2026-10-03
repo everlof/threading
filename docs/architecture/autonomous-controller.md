@@ -120,7 +120,7 @@ The launched child receives the controller executable, database path, execution 
 credential in environment variables. `threading-controller agent REQUEST_JSON_FILE` exposes a
 single typed operation; `agent-mcp` exposes the same operations over newline-delimited stdio MCP:
 `work_context`, `work_questions`, `work_messages`, `work_history`, `work_message_consumed`,
-`work_checkpoint`, `work_ask`, `work_finish`, `memory_get`, `memory_put`, `knowledge_get`,
+`work_checkpoint`, `work_ask`, `work_finish`, `memory_list`, `memory_get`, `memory_put`, `knowledge_get`,
 `knowledge_put`. These adapters have no claim, answer, retry, stop, delivery acknowledgement, arbitrary
 SQL or destination-selection tool. Question recipients and output destination come from the
 immutable owner recipe. Memory derives its worker from the execution's work.
@@ -601,9 +601,9 @@ receipts, daily cells and budgets, `ControllerUsageCollector` (runtime) reads tr
   acted on, the trigger whose event admitted it — comes from controller records only.
 - **Finding the transcript.** Claude: `<home>/projects/*/<execution>.jsonl` plus its
   `subagents/`, exact because the recipe passes the execution id as the session id. Codex names
-  its own session, so the rollout must be the only one in the launch's date folders written since
-  it started whose recorded working directory is the recipe's; anything else is `unavailable`
-  with the reason, never guessed.
+  its own session: the authenticated session-start hook binds its exact session ID and path.
+  Collection verifies the path lies under the configured account home and the transcript metadata
+  has that same ID. Missing or conflicting identity is `unavailable`, never guessed.
 - **Refuse, don't undercount.** An unreadable transcript makes the receipt `partial` or `failed`;
   a missing one `unavailable`. Cells are per model with five token categories, requests and cost
   (provider-reported or catalogue-priced; unpriced tokens counted separately), bounded to 16
@@ -675,3 +675,19 @@ upgrades remain an explicit stop, online snapshot, verified artifact/unit switch
 health-check operation. Rindabox's Ansible adapter retains its own destinations and credentials.
 `host-state.py restore` preserves identity and records but disarms workers, schedules, sources,
 triggers and peer transport. It never launches a restored execution or clears uncertainty.
+
+## Discoverable hosted memory
+
+A hosted agent is identified by `(authorityID, agentID)`: the persisted controller host and
+existing worker UUID. An execution or provider-session change does not mint another agent.
+`work_context` includes this identity and the first 20 memory keys/revisions; `memory_list`
+pages further keys through the worker/sequence index without loading note bodies. Agents read
+relevant notes with `memory_get` and update them with compare-and-swap `memory_put`. All agent
+routes derive the worker from the authenticated execution; none accepts another worker ID.
+The owner protocol provides memory-list/get/put/history for trusted administration.
+
+Notes and revision history live in controller SQLite and travel with its backup; provider
+transcripts and credentials do not. A regression reopens the store, starts a new execution and
+checks recall, pagination and isolation from a second worker. This is the hosted memory core;
+attaching persistent identities to native chats, promotion/profile UI and authenticated remote
+chat attachment remain separate consumer work.
