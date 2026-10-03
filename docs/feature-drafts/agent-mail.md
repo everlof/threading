@@ -353,5 +353,16 @@ is unaffected.
 
 ## Open questions
 
-- Whether a controller recipe can pre-trust its own Codex hooks file non-interactively, without
-  the bypass flag that trusts every hook in the home.
+None remain from the design. Answered 2026-10-03, measured on Codex 0.160.0:
+
+- **A controller recipe can trust exactly its own Codex hooks, non-interactively.** Codex keeps
+  hook trust per hook in that home's `config.toml`:
+  `[hooks.state."<hooks.json path>:<event>:<group>:<index>"] trusted_hash = "sha256:…"`. The
+  app-server's `hooks/list` reports each hook's `key`, `currentHash` and `trustStatus`, and
+  `config/batchWrite` (`keyPath` `hooks.state."<key>".trusted_hash`) records trust for that one
+  hook. With only that entry written, a real `codex exec` ran the hook without
+  `--dangerously-bypass-hook-trust`; editing the hook's text turned it to `modified` and it no
+  longer ran. So a deployment that owns a worker's `CODEX_HOME` trusts its notice hooks at recipe
+  reconciliation, by hash, and every other hook in that home stays gated. This is the owner's
+  decision for a home the deployment owns; the Mac does **not** do it for a person's own Codex
+  login, where the trust decision stays the user's (session-activity.md).
