@@ -34,6 +34,9 @@ public final class NSLayoutConstraint {
         public static let defaultLow = Priority(250)
         public static let fittingSizeCompression = Priority(50)
         public static func < (lhs: Priority, rhs: Priority) -> Bool { lhs.rawValue < rhs.rawValue }
+        public static func - (lhs: Priority, rhs: Float) -> Priority {
+            Priority(lhs.rawValue - rhs)
+        }
     }
 
     public weak var firstItem: AnyObject?

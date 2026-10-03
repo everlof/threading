@@ -137,7 +137,7 @@ with log_path.open('w+') as log:
         title(process, 'Threading terminal - CREATED AGENT READY', log_path)
         marker = project / 'created-agent.json'
         report = json.loads(marker.read_text())
-        assert report['cwd'] == str(project) and report['grid'] == [80, 21], report
+        assert report['cwd'] == str(project) and report['grid'] == [80, 18], report
         assert report['term'] == 'xterm-256color' and report['color'] == 'truecolor', report
         argv = report['argv']
         assert '--no-alt-screen' in argv and '--ask-for-approval' in argv and '--sandbox' in argv, argv

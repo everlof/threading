@@ -4512,3 +4512,39 @@ dark row-kind renders were inspected and remained byte-identical. Linux `ViewCli
 `bundle-smoke.sh` installed Ubuntu suite and `tests/wayland_smoke.sh --actions` passed. I inspected
 the installed X11 normal/hover/count captures and Wayland's rendered project row: full names,
 count-to-controls crossfade and button hover plates are visible in the real shell.
+
+## 150. The content pane mounts the production page title
+
+The Linux workspace now retains a `PaneHeaderView` and the exact production `PageTitleView`
+above its terminal. A small Pango-backed `MorphingTitleLabel` supplies the one-line text API
+while the Apple-only glyph animation is unavailable. The page title carries the selected saved
+runtime's name and provider mark, or the project's name for a fresh shell. Pressing it reveals
+the owning outline row. The Actions control is hidden until a Linux session menu exists; the
+shared production view no longer exposes that hidden child to accessibility. The header is a
+separate retained texture, so a terminal frame upload does not reshape or repaint its title.
+
+This header exposed two real shim gaps. Soft inequality constraints had the wrong slack sign
+and no weighted violation variable, so an optional intrinsic width could make an otherwise
+feasible tree fail. The Linux diagnostic symbol also made its bitmap canvas the optical glyph
+size rather than the requested layout slot; its required 16-point header slot then conflicted
+with a 12-point intrinsic width. Both are corrected at their shim sources. The title fixture
+links the production file on Mac and Linux and passes wide, narrow, hover, reveal, Actions,
+provider-icon and hidden-Actions states. Existing Linux layout, clipping, outline and pane
+header fixtures pass. Their generated renders were inspected.
+
+The right pane reserves the header's 41 points at 2× scale as an 82-pixel inset. SDL texture
+composition, terminal pointer and wheel coordinates, PTY frame/grid height, IME caret geometry
+and AT-SPI component/text coordinates now use that inset. The title and its reveal action are
+host-owned in this preview; runtime identity, selection persistence, command admission and
+PTY ownership remain host-owned. The same customization-surface decision applies to the
+preview header. The title costs one bounded bitmap on resize or interaction, while terminal
+output continues to reuse the header texture and the mounted navigator rows.
+
+Verification on 2026-10-03: the full installed Ubuntu `bundle-smoke.sh` suite passed, as did
+the focused installed AT-SPI geometry and saved-terminal picker checks. The latter restored a
+960×660 terminal viewport inside a 1280×742 outer window, retained its child and history, and
+returned to the picker. The installed `tests/wayland_smoke.sh --actions` run passed its render,
+AT-SPI and pointer checks. I inspected the installed X11 workspace captures with the visible
+header and the title pressed to reveal its outline row. Wayland's existing checks cover the
+navigator; they do not yet capture the terminal header there. The header's title is not yet
+published as a separate control in the native AT-SPI tree.

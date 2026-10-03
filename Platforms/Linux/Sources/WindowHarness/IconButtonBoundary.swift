@@ -1,7 +1,7 @@
 import AppKit
 
 // Only the neighboring theme and menu contracts needed to mount unchanged ThemedControl and
-// ThemedIconButton. WindowHarness has one fixed diagnostic palette and no macOS theme bus.
+// ThemedIconButton. WindowHarness has fixed diagnostic grounds and no macOS theme bus.
 @MainActor public protocol ThemedComponent: AnyObject {}
 
 @MainActor public enum SurfaceBevel { case automatic, sunken, none }
@@ -47,7 +47,10 @@ public struct AccessibilityDisplayOptionsDidChange {}
 
 @MainActor public enum InkSource: Equatable {
     case backdrop, chrome, selection
-    private static let backdropInk = Design.Ink(on: Specimen.bodyGround)
+    // The terminal header's 24/255 ground is drawn by WorkspaceTerminalPane. The page title
+    // resolves its ink against that same value; the sidebar controls use the lighter band.
+    static let backdropGround = NSColor(white: CGFloat(24) / 255, alpha: 1)
+    private static let backdropInk = Design.Ink(on: backdropGround)
     private static let chromeInk = Design.Ink(on: Specimen.headerGround)
     private static let selectionInk = Design.Ink.selection
     public var ink: Design.Ink {

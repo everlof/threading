@@ -115,6 +115,15 @@ let package = Package(
                       "NeutralInk.swift", "TextLegibilityPolicy.swift", "SpecimenBoundary.swift",
                       "Fixture.swift"],
             swiftSettings: [.define("THREADING_PANE_HEADER_HARNESS")]),
+        // Compile the unchanged page-title component with the retained icon-control leaves.
+        // LabelMorph is Apple-only; the fixture provides a bounded Pango label adapter.
+        .executableTarget(name: "PageTitleHarness", dependencies: ["AppKit"],
+            path: "tests/page_title", exclude: ["run.sh"],
+            sources: ["PageTitleView.swift", "MorphingTitleLabel.swift", "PageTitleBoundary.swift", "Fixture.swift",
+                      "ThemedControl.swift", "ThemedIconButton.swift", "PointerClaims.swift",
+                      "SurfaceDrawing.swift", "GlyphView.swift", "TemplateImageDrawing.swift",
+                      "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift",
+                      "NeutralInk.swift", "TextLegibilityPolicy.swift", "SpecimenBoundary.swift"]),
         // Exact production glyph drawing with test-only theme vocabulary. Its Linux bitmap
         // contract exercises the shim's image and backing-pixel behavior, not symbol lookup.
         .executableTarget(name: "GlyphViewHarness", dependencies: ["AppKit"],

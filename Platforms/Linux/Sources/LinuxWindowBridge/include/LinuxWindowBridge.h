@@ -27,6 +27,8 @@ typedef struct TWWindow TWWindow;
 // Kind33 opens the mounted project's inline `+` choices through AT-SPI. key is its
 // visible row slot and text is the exact project ID, revalidated by the Swift host.
 // Kind36 toggles the selected project's inline saved-runtime disclosure on Space.
+// Kind37 delivers pointer motion/down/drag/up/cancel to the terminal pane's AppKit header.
+// Coordinates are terminal-pane-local x and window-local y; action matches kind27.
 typedef struct {
     int kind, x, y, width, height;
     char text[1024];
@@ -40,11 +42,17 @@ int tw_present(TWWindow *, const uint8_t *rgba, int width, int height);
 // sidebarWidth must be 320 or zero (restore standalone presentation). No child is resized here.
 void tw_workspace_mode(TWWindow *, int sidebarWidth, int sidebarFocused);
 void tw_workspace_focus(TWWindow *, int sidebarFocused);
+// Reserve the top of the workspace's right pane for its AppKit header. Terminal input and
+// accessibility geometry use the remaining content rectangle; standalone mode has no inset.
+void tw_workspace_terminal_top_inset(TWWindow *, int pixels);
+int tw_workspace_terminal_top_inset_value(TWWindow *);
 // Explicit runtime activation invalidates the previous terminal image and mouse gesture owner.
 // Repaints the retained sidebar over an empty terminal ground; returns 0 on success.
 int tw_workspace_reset_terminal(TWWindow *);
 // Replace one bounded pane texture, then compose both. The pixels use pane-local coordinates.
 int tw_present_pane(TWWindow *, const uint8_t *rgba, int width, int height, int sidebar);
+// The production pane header is a separate retained texture above the terminal grid.
+int tw_present_terminal_header(TWWindow *, const uint8_t *rgba, int width, int height);
 // App-only header button. Height0 hides; disabled buttons remain visible but cannot activate.
 void tw_actions_button(TWWindow *, const char *label, int enabled,
                        int x, int y, int width, int height);

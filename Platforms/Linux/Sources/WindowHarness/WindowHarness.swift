@@ -1656,6 +1656,7 @@ struct WindowHarness {
         }
         let sidebarWidth = 320
         var activePane: WorkspaceTerminalPane?
+        var pendingPageReveal: NavigatorOutlineItem?
         var sidebarFocused = true
         var navigatorTitle = "Threading Linux window experiment"
         var navigatorWidth: Int { activePane == nil ? width : sidebarWidth }
@@ -1743,11 +1744,35 @@ struct WindowHarness {
         func routeTerminalInput(_ event: TWEvent) -> Bool {
             if event.kind == 2 { focusSidebar(true) }
             if event.kind == 15 && event.action == 1 { focusSidebar(false) }
+            if event.kind == 37 {
+                if event.action == 1 { focusSidebar(false) }
+                activePane?.handleHeader(event)
+                if let target = pendingPageReveal {
+                    pendingPageReveal = nil
+                    guard let projectIndex = projectIndexes[target.projectID],
+                          projects.indices.contains(projectIndex) else { return true }
+                    selected = projectIndex
+                    if target.kind != .project {
+                        expandedProjectID = target.projectID
+                    }
+                    inlineSelection = target.resolvedRow(in: projects, indexes: projectIndexes)
+                        ?? .project(projectIndex: projectIndex, id: target.projectID)
+                    savedPicker = nil
+                    accountPicker = nil
+                    actions = nil
+                    outlineScrollSelection = true
+                    focusSidebar(true)
+                    dirty = true
+                }
+                return true
+            }
             guard [6, 7, 14, 15, 16, 17, 18, 19].contains(event.kind) else { return false }
             activePane?.handle(event, window: window)
             return true
         }
-        func activate(_ session: GraphicalTerminal) throws {
+        func activate(_ session: GraphicalTerminal, pageName: String,
+                      pageIdentity: String, pageIcon: NSImage? = nil,
+                      pageTarget: NavigatorOutlineItem) throws {
             // Standalone coordinates become a 320px sidebar when the terminal appears. Clear
             // any held control gesture and hover before those same pixels name another pane.
             contentWindow.cancelPointerGesture()
@@ -1758,12 +1783,16 @@ struct WindowHarness {
             if activePane == nil {
                 width += sidebarWidth
             }
-            activePane = WorkspaceTerminalPane(session)
+            activePane = WorkspaceTerminalPane(session, pageName: pageName,
+                pageIdentity: pageIdentity, icon: pageIcon,
+                onReveal: { pendingPageReveal = pageTarget })
             sidebarFocused = false
             contentWindow.makeFirstResponder(nil)
             tw_terminal_mode(window)
             tw_project_navigation(window, 1)
             tw_workspace_mode(window, Int32(sidebarWidth), 0)
+            tw_workspace_terminal_top_inset(window,
+                Int32(WorkspaceTerminalPane.headerPixelHeight))
             guard tw_workspace_reset_terminal(window) == 0 else {
                 throw WindowFailure(String(cString: tw_error()))
             }
@@ -1824,7 +1853,11 @@ struct WindowHarness {
             savedPicker = .agents(selected)
             savedSelected = row
             session.attachAgent(store: launch[0], socket: launch[1], sessionID: id)
-            try activate(session)
+            let runtime = projects[selected].recentAgents[row]
+            try activate(session, pageName: readableNavigatorText(runtime.title),
+                pageIdentity: id, pageIcon: ProviderMarks.image(for: runtime.kind, selected: false),
+                pageTarget: NavigatorOutlineItem(kind: .agent,
+                    projectID: projects[selected].id, id: id, projectIndex: selected, childIndex: row))
         } else if let id = snapshot.restoreTerminalID, let launch,
                   projects.indices.contains(selected),
                   let row = projects[selected].recentTerminals.firstIndex(where: { $0.id == id }) {
@@ -1835,13 +1868,17 @@ struct WindowHarness {
             savedSelected = row
             session.attach(store: launch[0], socket: launch[1], terminalID: id,
                            projectID: projects[selected].id)
-            try activate(session)
+            let runtime = projects[selected].recentTerminals[row]
+            try activate(session, pageName: readableNavigatorText(runtime.title),
+                pageIdentity: id,
+                pageTarget: NavigatorOutlineItem(kind: .terminal,
+                    projectID: projects[selected].id, id: id, projectIndex: selected, childIndex: row))
         }
         while true {
             if let activePane {
                 if let adopted = activePane.session.takeInitialViewport() {
                     width = adopted.0 + sidebarWidth
-                    height = adopted.1
+                    height = min(900, adopted.1 + WorkspaceTerminalPane.headerPixelHeight)
                     guard tw_resize(window, Int32(width), Int32(height)) == 0 else {
                         throw WindowFailure(String(cString: tw_error()))
                     }
@@ -2710,6 +2747,10 @@ struct WindowHarness {
                 case 15:
                     if event.action == 1 { dismissedActionGesture = event.key; dismissActions() }
                     continue
+                case 37:
+                    dismissActions(returnToParent: false)
+                    _ = routeTerminalInput(event)
+                    continue
                 default: continue
                 }
                 guard let command = NavigatorActions.Command(rawValue: menu.commands[menu.selected].id) else { continue }
@@ -2888,17 +2929,25 @@ struct WindowHarness {
                             if mayResume {
                                 session.openAgent(store: launch[0], socket: launch[1], sessionID: runtime.id,
                                     shell: launch[2], codex: agentExecutable, claude: claudeExecutable,
-                                    width: terminalWidth, height: height)
+                                    width: terminalWidth,
+                                    height: max(1, height - WorkspaceTerminalPane.headerPixelHeight))
                             } else {
                                 session.attachAgent(store: launch[0], socket: launch[1], sessionID: runtime.id)
                             }
                         } else {
                             session.openTerminal(store: launch[0], socket: launch[1], terminalID: runtime.id,
                                 projectID: project.id, executable: launch[2],
-                                arguments: Array(launch.dropFirst(3)), width: terminalWidth, height: height)
+                                arguments: Array(launch.dropFirst(3)), width: terminalWidth,
+                                height: max(1, height - WorkspaceTerminalPane.headerPixelHeight))
                         }
                     }
-                    try activate(session)
+                    try activate(session, pageName: readableNavigatorText(runtime.title),
+                        pageIdentity: runtime.id,
+                        pageIcon: picker.isAgent
+                            ? ProviderMarks.image(for: runtime.kind, selected: false) : nil,
+                        pageTarget: NavigatorOutlineItem(kind: picker.isAgent ? .agent : .terminal,
+                            projectID: project.id, id: runtime.id,
+                            projectIndex: picker.projectIndex, childIndex: destination.index))
                     dirty = true
                     break
                 }
@@ -2928,7 +2977,8 @@ struct WindowHarness {
                     session.start(store: launch[0], socket: launch[1], directory: project.path,
                                   executable: launch[2], arguments: Array(launch.dropFirst(3)))
                 }
-                try activate(session)
+                try activate(session, pageName: project.name, pageIdentity: project.id,
+                    pageTarget: NavigatorOutlineItem(projectID: project.id, projectIndex: selected))
                 dirty = true
             case 9:
                 guard accountPicker == nil, savedPicker == nil, let launch, !projects.isEmpty else { break }
@@ -2958,7 +3008,8 @@ struct WindowHarness {
                 terminals[project.id] = session
                 session.start(store: launch[0], socket: launch[1], directory: project.path,
                               executable: launch[2], arguments: Array(launch.dropFirst(3)))
-                try activate(session)
+                try activate(session, pageName: project.name, pageIdentity: project.id,
+                    pageTarget: NavigatorOutlineItem(projectID: project.id, projectIndex: selected))
                 dirty = true
             case 23:
                 guard accountPicker == nil, savedPicker == nil, let launch else { break }
@@ -2987,8 +3038,13 @@ struct WindowHarness {
                 session.startAgent(store: launch[0], socket: launch[1], directory: projects[selected].path,
                                    shell: launch[2], kind: kind, executable: executable,
                                    accountHandle: accountHandle, id: id,
-                                   width: terminalWidth, height: height)
-                try activate(session)
+                                   width: terminalWidth,
+                                   height: max(1, height - WorkspaceTerminalPane.headerPixelHeight))
+                try activate(session, pageName: kind.displayName, pageIdentity: savedID,
+                    pageIcon: ProviderMarks.image(for: kind, selected: false),
+                    pageTarget: NavigatorOutlineItem(kind: .agent,
+                        projectID: projects[selected].id, id: savedID,
+                        projectIndex: selected, childIndex: -1))
                 dirty = true
             case 3, 4:
                 if event.action == 1, accountPicker == nil, savedPicker == nil,

@@ -144,7 +144,7 @@ try:
     key('Return')
     ready(1)
     first = assert_record(1, preferred)
-    assert (first['columns'], first['rows']) == (96, 27), first
+    assert (first['columns'], first['rows']) == (96, 23), first
     subprocess.run(['import', '-window', window, 'out/terminal-restart-recorded-directory.png'],
                    check=True, timeout=5)
 

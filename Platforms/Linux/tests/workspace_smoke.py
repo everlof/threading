@@ -208,23 +208,26 @@ def geometry():
     tx, ty, tw, th = rect(terminal)
     lx, ly, lw, lh = rect(listed)
     assert (fx, fy) == (0, 0)
-    assert (tx, ty, tw, th) == (320, 0, fw - 320, fh)
-    assert lx == 0 and lw == 320 and ly >= 0 and ly + lh <= fh
-    assert listed.get_child_count() <= min(12, int(lh // 48))
+    assert (tx, ty, tw, th) == (320, 82, fw - 320, fh - 82), (tx, ty, tw, th, fw, fh)
+    assert lx == 0 and lw == 320 and ly >= 0 and ly + lh <= fh, (lx, ly, lw, lh, fw, fh)
+    # The native outline also mounts the final row when only part of it enters the clip.
+    assert listed.get_child_count() <= min(12, (lh + 47) // 48), (listed.get_child_count(), lh)
     component = frame.get_component_iface()
     assert component.get_accessible_at_point(tx + 5, ty + 5,
                                              Atspi.CoordType.WINDOW).get_role_name() == 'terminal'
+    header_hit = component.get_accessible_at_point(tx + 5, 5, Atspi.CoordType.WINDOW)
+    assert header_hit is None, header_hit.get_role_name()
     text = terminal.get_text_iface()
     screen = Atspi.Text.get_text(text, 0, -1)
     assert screen.startswith('VISIBLE 界 e\u0301'), screen
     wide = screen.index('界')
     bounds = text.get_character_extents(wide, Atspi.CoordType.WINDOW)
-    assert (bounds.x, bounds.y, bounds.width, bounds.height) == (400, 0, 20, 22)
-    assert text.get_offset_at_point(415, 11, Atspi.CoordType.WINDOW) == wide
+    assert (bounds.x, bounds.y, bounds.width, bounds.height) == (400, 82, 20, 22), bounds
+    assert text.get_offset_at_point(415, 93, Atspi.CoordType.WINDOW) == wide, wide
     assert text.get_offset_at_point(95, 11, Atspi.CoordType.WINDOW) == -1
     parent = text.get_character_extents(wide, Atspi.CoordType.PARENT)
-    # The terminal's accessible parent is the frame, so PARENT retains the pane offset.
-    assert (parent.x, parent.y, parent.width, parent.height) == (400, 0, 20, 22)
+    assert (parent.x, parent.y, parent.width, parent.height) == (80, 0, 20, 22), parent
+    assert text.get_offset_at_point(95, 11, Atspi.CoordType.PARENT) == wide, wide
     return tw, th
 
 
@@ -333,8 +336,8 @@ with log_path.open('w+') as log:
         # Growing an initially centered SDL window can put its trailing edge off the Xvfb
         # screen and crop the rendered evidence. Keep the complete resized shell visible.
         xdo('windowmove', window, '0', '0', 'windowsize', window, '1280', '528')
-        eventually(lambda: geometry() == (960, 528), 'resized pane and text geometry')
-        eventually(lambda: state(0)['cols'] == 96 and state(0)['rows'] == 24,
+        eventually(lambda: geometry() == (960, 446), 'resized pane and text geometry')
+        eventually(lambda: state(0)['cols'] == 96 and state(0)['rows'] == 20,
                    'actual child PTY resize excludes sidebar')
         key('ctrl+shift+p')
         project_title(0)
@@ -343,8 +346,8 @@ with log_path.open('w+') as log:
             key('Down')
             project_title(index)
         _, listed, _ = panes()
-        assert listed.get_child_count() <= 9
-        assert listed.get_description() == 'Showing 4 through 12 of 12 items'
+        assert listed.get_child_count() <= 10
+        assert listed.get_description() == 'Showing 3 through 12 of 12 items'
         assert listed.get_selection_iface().get_selected_child(0).get_name().startswith('Workspace12 ')
         assert len([value for value in durable() if value['terminals']]) == 2
         assert state(0)['input'] == payload.encode().hex()
@@ -359,9 +362,9 @@ with log_path.open('w+') as log:
         screenshot('resized-terminal')
         key('ctrl+shift+p')
         project_title(11)
-        xdo('mousemove', '--window', window, '325', '5', 'mousedown', '1')
+        xdo('mousemove', '--window', window, '325', '87', 'mousedown', '1')
         time.sleep(.05)
-        xdo('mousemove', '--window', window, '395', '5')
+        xdo('mousemove', '--window', window, '395', '87')
         time.sleep(.05)
         xdo('mouseup', '1')
         terminal_title(0)
@@ -387,7 +390,7 @@ with log_path.open('w+') as log:
         press = b'\x1b[<0;3;2M'.hex()
         release = b'\x1b[<0;3;2m'.hex()
         try:
-            xdo('mousemove', '--window', window, '345', '33', 'mousedown', '1')
+            xdo('mousemove', '--window', window, '345', '115', 'mousedown', '1')
             eventually(lambda: state(0)['input'] == input_a + press, 'mouse press delivered to A')
             key('ctrl+shift+p')
             project_title(11)
@@ -400,7 +403,7 @@ with log_path.open('w+') as log:
             terminal_title(1, mouse=True)
             focus(True)
             verify_owner(1)
-            xdo('mousemove', '--window', window, '365', '55')
+            xdo('mousemove', '--window', window, '365', '137')
         finally:
             # Always release the fixture's X button, including assertion failure paths.
             xdo('mouseup', '1')
@@ -488,6 +491,23 @@ with log_path.open('w+') as log:
         verify_owner(1)
         assert state(1)['input'] == old_input + b'v'.hex()
         screenshot('storage-pending-input')
+        # The production page title reveals its owning project after the outline has scrolled
+        # elsewhere, without sending the header press to the still-running PTY.
+        key('ctrl+shift+p')
+        project_title(0)
+        for index in range(1, 12):
+            key('Down')
+            project_title(index)
+        before_reveal = state(0)['input']
+        xdo('mousemove', '--window', window, '380', '20', 'click', '1')
+        project_title(0)
+        focus(False)
+        _, listed, _ = panes()
+        assert listed.get_selection_iface().get_selected_child(0).get_name().startswith('Workspace01 ')
+        assert state(0)['input'] == before_reveal
+        screenshot('page-title-reveal')
+        key('Escape')
+        terminal_title(0, mouse=True)
         key('alt+F4')
         assert process.wait(timeout=5) == 0, tail()
         print('PASS simultaneous workspace panes, bounded navigator, exact child reuse, '

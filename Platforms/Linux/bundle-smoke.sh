@@ -4,6 +4,8 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ./vendor-core.sh --verify
 mkdir -p out/bundle-smoke
+evidence=$(mktemp -d "$PWD/out/bundle-smoke/run.XXXXXXXX")
+printf 'bundle-smoke evidence: %s\n' "$evidence"
 # A linked worktree's .git pointer may lead outside the Docker mount.
 source_revision=${THREADING_LINUX_SOURCE_REVISION:-}
 source_dirty=${THREADING_LINUX_SOURCE_DIRTY:-}
@@ -79,4 +81,4 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/bundle_runtime_smoke.sh:/runner.sh:ro" \
   -v "$PWD/tests/desktop_entry_smoke.sh:/desktop-test.sh:ro" \
   -v "$PWD/tests/provider_path_smoke.sh:/provider-path-test.sh:ro" \
-  -v "$PWD/out/bundle-smoke:/evidence" ubuntu:24.04 bash /runner.sh
+  -v "$evidence:/evidence" ubuntu:24.04 bash /runner.sh

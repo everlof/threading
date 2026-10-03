@@ -93,11 +93,11 @@ with log_path.open('w+') as log:
                                stdout=log, stderr=log)
     try:
         app = eventually(application, 'AT-SPI application registration')
-        listed = eventually(lambda: content(app) if content(app).get_child_count() == 8 else None,
+        listed = eventually(lambda: content(app) if content(app).get_child_count() == 9 else None,
                             'bounded project list')
         assert listed.get_role_name() == 'list'
-        assert listed.get_description() == 'Showing 1 through 8 of 15 items'
-        assert listed.get_child_count() == 8
+        assert listed.get_description() == 'Showing 1 through 9 of 15 items'
+        assert listed.get_child_count() == 9
         first = listed.get_child_at_index(0)
         assert first.get_role_name() == 'list item'
         assert re.fullmatch(r'[0-9A-Fa-f-]{36}', first.get_accessible_id())
@@ -189,13 +189,13 @@ with log_path.open('w+') as log:
             eventually(lambda: window_title().endswith('/' + project_name),
                        f'keyboard selected {project_name}')
         listed = eventually(lambda: content(app)
-                            if content(app).get_description() == 'Showing 4 through 11 of 15 items'
+                            if content(app).get_description() == 'Showing 3 through 11 of 15 items'
                             else None, 'scrolled accessible viewport')
-        assert listed.get_child_count() == 8
-        assert listed.get_child_at_index(7).get_state_set().contains(Atspi.StateType.SELECTED)
-        assert listed.get_child_at_index(7).get_state_set().contains(Atspi.StateType.FOCUSED)
+        assert listed.get_child_count() == 9
+        assert listed.get_child_at_index(8).get_state_set().contains(Atspi.StateType.SELECTED)
+        assert listed.get_child_at_index(8).get_state_set().contains(Atspi.StateType.FOCUSED)
         assert selection.get_n_selected_children() == 1
-        assert selection.is_child_selected(7)
+        assert selection.is_child_selected(8)
         target_index = next(index for index in range(listed.get_child_count())
                             if '界' in listed.get_child_at_index(index).get_name())
         target = listed.get_child_at_index(target_index)
@@ -233,9 +233,11 @@ with log_path.open('w+') as log:
         terminal_component = terminal.get_component_iface()
         assert terminal_component is not None
         eventually(lambda: rect(frame_component) == (0, 0, 1120, 480)
-                   and rect(terminal_component) == (320, 0, 800, 480)
+                   and rect(terminal_component) == (320, 82, 800, 398)
                    and rect(list_component) == (0, 82, 320, 398), 'simultaneous workspace geometry')
-        assert rect(selected.get_component_iface()) == (12, 86 + target_index * 48, 296, 44)
+        selected_bounds = rect(selected.get_component_iface())
+        assert selected_bounds[0] == 12 and selected_bounds[2:] == (296, 44), selected_bounds
+        assert 82 <= selected_bounds[1] and selected_bounds[1] + 44 <= 480, selected_bounds
         assert frame_component.get_accessible_at_point(
             360, 108, Atspi.CoordType.WINDOW).get_role_name() == 'terminal'
         assert frame_component.get_accessible_at_point(
@@ -251,7 +253,7 @@ with log_path.open('w+') as log:
         eventually(lambda: selected.get_state_set().contains(Atspi.StateType.FOCUSED)
                    and not terminal.get_state_set().contains(Atspi.StateType.FOCUSED),
                    'AT-SPI action transfers focus to mounted sidebar')
-        assert rect(terminal_component) == (320, 0, 800, 480)
+        assert rect(terminal_component) == (320, 82, 800, 398)
         assert selected.get_action_iface().get_n_actions() == 2
         subprocess.run(['xdotool', 'key', 'Tab'], check=True, timeout=5)
         eventually(lambda: terminal.get_state_set().contains(Atspi.StateType.FOCUSED)
@@ -276,23 +278,25 @@ with log_path.open('w+') as log:
             return value.x, value.y, value.width, value.height
         wide = initial.index('界')
         character_row = initial[:wide].count('\n')
-        assert character_rect(wide) == (400, character_row * 22, 20, 22)
-        assert character_rect(wide, Atspi.CoordType.PARENT) == (400, character_row * 22, 20, 22)
-        assert terminal_text.get_offset_at_point(415, character_row * 22 + 11,
+        assert character_rect(wide) == (400, 82 + character_row * 22, 20, 22)
+        assert character_rect(wide, Atspi.CoordType.PARENT) == (80, character_row * 22, 20, 22)
+        assert terminal_text.get_offset_at_point(95, character_row * 22 + 11,
+                                                 Atspi.CoordType.PARENT) == wide
+        assert terminal_text.get_offset_at_point(415, 82 + character_row * 22 + 11,
                                                  Atspi.CoordType.WINDOW) == wide
         assert terminal_text.get_offset_at_point(95, character_row * 22 + 11,
                                                  Atspi.CoordType.WINDOW) == -1
         accented = initial.index('e\u0301', wide)
-        assert character_rect(accented) == (430, character_row * 22, 10, 22)
+        assert character_rect(accented) == (430, 82 + character_row * 22, 10, 22)
         assert character_rect(accented + 1) == character_rect(accented)
-        assert terminal_text.get_offset_at_point(435, character_row * 22 + 11,
+        assert terminal_text.get_offset_at_point(435, 82 + character_row * 22 + 11,
                                                  Atspi.CoordType.WINDOW) == accented
         newline = initial.index('\n', accented)
-        assert character_rect(newline) == (440, character_row * 22, 0, 22)
+        assert character_rect(newline) == (440, 82 + character_row * 22, 0, 22)
         # AT-SPI may normalize ATK's unavailable horizontal corners on the wire.
         invalid = character_rect(len(initial))
         assert invalid[0] < 0 and invalid[1] == -1 and invalid[3] == -1, invalid
-        assert terminal_text.get_offset_at_point(1119, character_row * 22 + 11,
+        assert terminal_text.get_offset_at_point(1119, 82 + character_row * 22 + 11,
                                                  Atspi.CoordType.WINDOW) == -1
         geometry = subprocess.run(['xdotool', 'getwindowgeometry', '--shell', window_id],
                                   capture_output=True, text=True, check=True, timeout=5)
@@ -300,7 +304,7 @@ with log_path.open('w+') as log:
                                           geometry.stdout, re.MULTILINE))
         assert character_rect(wide, Atspi.CoordType.SCREEN) == (
             int(window_geometry['X']) + 400,
-            int(window_geometry['Y']) + character_row * 22, 20, 22)
+            int(window_geometry['Y']) + 82 + character_row * 22, 20, 22)
         assert not terminal_text.set_caret_offset(0), 'read-only terminal accepted remote caret movement'
         subprocess.run(['xdotool', 'key', 'x'], check=True, timeout=5)
         updated = eventually(lambda: screen_text()
@@ -308,17 +312,17 @@ with log_path.open('w+') as log:
                              'live accessible terminal update')
         assert 'VISIBLE 界 e\u0301' not in updated, updated
         assert terminal_text.get_character_count() == len(updated)
-        assert character_rect(updated.index('UPDATED')) == (320, 0, 10, 22)
+        assert character_rect(updated.index('UPDATED')) == (320, 82, 10, 22)
         invalid = character_rect(len(updated))
         assert invalid[0] < 0 and invalid[1] == -1 and invalid[3] == -1, invalid
         # Keep the resized window wholly on the Xvfb screen; ImageMagick otherwise captures
         # only the visible right edge after SDL's initially centered window grows.
         subprocess.run(['xdotool', 'windowmove', window_id, '0', '0',
                         'windowsize', window_id, '1280', '600'], check=True, timeout=5)
-        eventually(lambda: re.search(r'TERMINAL_FRAME 960x600', log_path.read_text()),
+        eventually(lambda: re.search(r'TERMINAL_FRAME 960x518', log_path.read_text()),
                    'resized terminal frame')
         eventually(lambda: rect(terminal_component) if rect(terminal_component) ==
-                   (320, 0, 960, 600) else None, 'resized terminal component')
+                   (320, 82, 960, 518) else None, 'resized terminal component')
         assert rect(frame_component) == (0, 0, 1280, 600)
         assert rect(list_component) == (0, 82, 320, 518)
         assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'terminal', 'push button', 'push button']
@@ -363,11 +367,12 @@ with log_path.open('w+') as log:
         assert frame.get_child_at_index(2).get_accessible_id() == 'linux.actions'
         assert frame.get_child_at_index(3).get_accessible_id() == 'linux.add-project'
         assert content(app, 'terminal').get_state_set().contains(Atspi.StateType.SHOWING)
-        assert rect(terminal_component) == (320, 0, 960, 600)
+        assert rect(terminal_component) == (320, 82, 960, 518)
         assert screen_text() == resized_text
         assert terminal_text.get_offset_at_point(5, 5, Atspi.CoordType.WINDOW) == -1
-        assert character_rect(0) == (320, 0, 10, 22)
-        assert terminal_text.get_offset_at_point(325, 5, Atspi.CoordType.WINDOW) == 0
+        assert character_rect(0) == (320, 82, 10, 22)
+        assert terminal_text.get_offset_at_point(325, 5, Atspi.CoordType.WINDOW) == -1
+        assert terminal_text.get_offset_at_point(325, 87, Atspi.CoordType.WINDOW) == 0
         subprocess.run(['xdotool', 'windowfocus', window_id,
                         'key', 'alt+F4'], check=True, timeout=5)
         assert process.wait(timeout=5) == 0

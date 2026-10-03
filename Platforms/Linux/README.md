@@ -78,6 +78,13 @@ window now mounts that same header with its retained title and `+`/`⋯` control
 their actual laid-out bounds to native input and AT-SPI. The native command menus also mount
 the production `ThemedMenuRowView` through its shared measurement plan. The preview still uses
 one fixed palette; live production themes and complete navigator/menu presentation remain open.
+`tests/page_title/run.sh` links the production `PageTitleView` with a Linux Pango label adapter
+for its Apple-only title animation. The native workspace mounts that title in a separate
+41-point right-pane header. Its press reveals the active project or saved runtime in the
+navigator; the session Actions control stays hidden until that menu exists on Linux. Terminal
+paint, PTY grid size, pointer input, IME caret and AT-SPI text geometry share the resulting
+82-pixel content inset. The right header is retained separately from terminal frames, so PTY
+output does not rerasterize it.
 Visible project slots now mount the same `ThemedProjectRowView` subtree as the Mac
 `ProjectRowView`: icon, shaped title, optional count and trailing `+`/`⋯` controls share one
 production layout. The Linux host retains project identity, selection, menu admission and PTY
