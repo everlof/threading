@@ -314,6 +314,10 @@ struct ControllerMailTests {
         let accepted = try await mac.handleMailRPC(MailRPCRequest(push: MailPush(from: vpsID, messages: back.filter { $0.id == fromWorker.envelope.id })), peer: vpsID)
         #expect(accepted.results?.first?.outcome == .accepted)
         #expect(try await mac.inbox(old).items.map(\.message.envelope.text).contains("from a worker"))
+        // The message that moved away comes home under its own id, replacing the copy left here.
+        let home = try await mac.handleMailRPC(MailRPCRequest(push: MailPush(from: vpsID, messages: back.filter { $0.id == open.envelope.id })), peer: vpsID)
+        #expect(home.results?.first?.outcome == .accepted)
+        #expect(try await mac.mail(open.envelope.id).state == .inbox)
 
         // Never relayed onward: a forwarded copy for an address that is itself forwarded is refused.
         _ = try await mac.setMailForward(from: old, to: new, expectedRevision: try await mac.mailForwardRevision(old))

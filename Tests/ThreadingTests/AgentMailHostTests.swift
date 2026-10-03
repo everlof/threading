@@ -197,6 +197,14 @@ final class OwnerRPCFake: RemoteHostCommandRunning, @unchecked Sendable {
         case "mailbox": return try encode(try await store.inbox(MailAddress(args[0])))
         case "mail-sent": return try encode(try await store.recentSentMail(MailAddress(args[0])))
         case "mail-contact-set": return try encode(try await store.setMailContact(MailAddress(args[0]), name: args[1]))
+        case "mail-forward": return try encode(try await store.mailForward(MailAddress(args[0])))
+        case "mail-forward-revision": return try encode(try await store.mailForwardRevision(MailAddress(args[0])))
+        case "mail-forward-set":
+            return try encode(try await store.setMailForward(from: MailAddress(args[0]), to: MailAddress(args[1]), expectedRevision: Int(args[2])!))
+        case "mail-forward-clear":
+            try await store.clearMailForward(MailAddress(args[0]), expectedRevision: Int(args[1])!)
+            return try encode(try await store.mailForwardRevision(MailAddress(args[0])))
+        case "mail-move": return try encode(try await store.moveMail(from: MailAddress(args[0]), to: MailAddress(args[1])))
         default: throw ControllerError.forbidden
         }
     }
@@ -291,5 +299,100 @@ final class MailAccessTests: XCTestCase {
         XCTAssertEqual(fields.mode.item(at: 0)?.title, SessionMailPresentation.words(for: .notify))
         XCTAssertEqual(fields.mode.item(at: 1)?.title, SessionMailPresentation.words(for: .wake))
         XCTAssertNil(fields.mode.item(at: 2))
+    }
+}
+
+// MARK: - Moving a session's mailbox
+
+@MainActor
+final class MailboxHandoverTests: XCTestCase {
+
+    private var directory: URL!
+
+    override func setUpWithError() throws {
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MailboxHandoverTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("host"), withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testMovingToAHostAndBackCarriesUnreadMailAndGrants() async throws {
+        let remote = try ControllerStore(path: directory.appendingPathComponent("host/controller.db").path)
+        let remoteHost = try await remote.host()
+        let mac = MacMailbox(databaseURL: directory.appendingPathComponent("mac/mailbox.db"))
+        let macHost = try await mac.host()
+        let macStore = try await mac.controllerStore()
+        _ = try await remote.setMailPeer(host: macHost.id, expectedRevision: 0, name: "mac", transport: nil, push: false, pull: false)
+        _ = try await macStore.setMailPeer(host: remoteHost.id, expectedRevision: 0, name: "vps-1", transport: nil, push: false, pull: false)
+
+        let fake = OwnerRPCFake(store: remote)
+        let mailboxes = RemoteSessionMailboxes()
+        mailboxes.runner = fake
+        mailboxes.mailbox = mac
+        mailboxes.ensurePeered = { _ in remoteHost.id }
+        let handover = MailboxHandover()
+        handover.mailbox = mac
+        handover.mailboxes = mailboxes
+        handover.ensurePeered = { _ in remoteHost.id }
+        handover.kick = { _ in }
+        let endpoint = RemoteControllerEndpoint(
+            hostID: RemoteHostID(), name: "vps-1", destination: RemoteHostDestination(alias: "vps-1", configFile: nil),
+            executable: "/opt/threading/threading-controller", database: "/var/lib/threading/controller.db"
+        )
+
+        let session = SessionID()
+        let onMac = try await mac.register(session, name: "Deploy")
+        let worker = MailAddress(host: remoteHost.id, kind: .worker, id: UUID())
+        try await mac.ensureGrant(recipient: onMac, sender: worker.description, mode: .wake)
+        let unread = UUID()
+        _ = try await mac.send(from: SessionID(), senderName: "Review", to: onMac, id: unread, text: "unread",
+                               replyTo: nil, priority: .normal, ownerAdmitted: true)
+
+        // This Mac -> the host.
+        let there = await handover.move(session, title: "Deploy", from: .thisMac, to: .host(endpoint))
+        XCTAssertEqual(there.issues, [])
+        XCTAssertEqual(there.moved, 1)
+        XCTAssertEqual(there.grantsCopied, 1)
+        let onHost = MailAddress(host: remoteHost.id, kind: .session, id: session.rawValue)
+        XCTAssertEqual(mailboxes.binding(for: session)?.address, onHost)
+        let pushed = try await macStore.outboundBatch(for: remoteHost.id).envelopes
+        _ = try await remote.handleMailRPC(MailRPCRequest(push: MailPush(from: macHost.id, messages: pushed)), peer: macHost.id)
+        let hostInbox = try await remote.inbox(onHost).items.map(\.message.envelope.id)
+        XCTAssertEqual(hostInbox, [unread], "same id, now on the host")
+        let hostGrants = try await remote.mailGrants(recipient: onHost).items.map(\.sender)
+        XCTAssertTrue(hostGrants.contains(worker.description), "the grant followed the session")
+
+        // The host -> this Mac: forwarded back, accepted because the Mac wrote the forward.
+        let back = await handover.move(session, title: "Deploy", from: .host(endpoint), to: .thisMac)
+        XCTAssertEqual(back.issues, [])
+        XCTAssertEqual(back.moved, 1)
+        XCTAssertNil(mailboxes.binding(for: session))
+        let held = try await remote.outboundBatch(for: macHost.id)
+        try await macStore.acceptPulled(held.envelopes, from: remoteHost.id, next: held.next)
+        let macInbox = try await mac.inbox(for: session, name: "Deploy", after: 0, limit: 5).items.map(\.message.envelope.id)
+        XCTAssertEqual(macInbox, [unread])
+    }
+
+    func testAnUnreachableNewHostMovesNothing() async {
+        let handover = MailboxHandover()
+        let mailboxes = RemoteSessionMailboxes()
+        let fake = OwnerRPCFake(store: nil)
+        fake.offline = true
+        mailboxes.runner = fake
+        mailboxes.ensurePeered = { _ in throw RemoteControllerRPC.Failure.transport("down") }
+        mailboxes.mailbox = MacMailbox(databaseURL: directory.appendingPathComponent("mac/mailbox.db"))
+        handover.mailbox = mailboxes.mailbox
+        handover.mailboxes = mailboxes
+        handover.kick = { _ in }
+        let endpoint = RemoteControllerEndpoint(
+            hostID: RemoteHostID(), name: "vps-1", destination: RemoteHostDestination(alias: "vps-1", configFile: nil),
+            executable: "/opt/threading/threading-controller", database: "/var/lib/threading/controller.db"
+        )
+        let outcome = await handover.move(SessionID(), title: "Deploy", from: .thisMac, to: .host(endpoint))
+        XCTAssertEqual(outcome.moved, 0)
+        XCTAssertFalse(outcome.issues.isEmpty)
     }
 }

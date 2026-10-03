@@ -385,6 +385,14 @@ recreated when it cannot be opened — and registers each session lazily as
   to Mac siblings is admitted by exact-address `notify` grants written on the Mac at launch. A
   host that cannot be reached within ten seconds, or has no controller, leaves the mailbox on the
   Mac as before, and the Info panel says which.
+- **Moving a project moves its mailboxes** (`MailboxHandover`, on `ProjectExecutionHostDidChange`
+  from `ProjectStore.setExecutionHost`). For each session: the new mailbox is made ready (provisioned
+  on the new host, or registered here), the store that will hold it gets the forward as consent,
+  the old store gets the forward and `mail-move`s the unacknowledged mail (ids kept), and the old
+  mailbox's live grants are written on the new one. This Mac's address is always checked as an
+  old location too, since a host unreachable at launch left the mailbox here. Host → host needs
+  the old host to have the new one as a transport peer; otherwise the mail stays and the event
+  log says so. Every step is idempotent.
 - **Grants and contacts are the owner's** (`MailAccessService`, `SessionMailAccessForm`): the
   Mail section lists live grants and offers grant, revoke and add-contact forms, each an
   always-asked `ConfirmationPrompt.changeMailAccess`, written to whichever store holds the

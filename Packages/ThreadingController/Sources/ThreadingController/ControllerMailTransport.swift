@@ -78,7 +78,8 @@ extension ControllerStore {
     private func acceptPushed(_ envelope: MailEnvelope, peer: HostID) -> MailPushResult {
         do {
             return try db.transaction {
-                if let prior: MailMessage = try optional("mail", envelope.id.uuidString.lowercased()) {
+                if let prior: MailMessage = try optional("mail", envelope.id.uuidString.lowercased()),
+                   !(try retireReturningMove(prior, envelope, from: peer)) {
                     guard prior.envelope.sameRequest(as: envelope) else { throw ControllerError.conflict }
                     return MailPushResult(id: envelope.id, outcome: .duplicate, reason: nil)
                 }

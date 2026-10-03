@@ -120,6 +120,7 @@ struct SessionMailPresentation: Equatable, Sendable {
         case .outbound: return L10n.string("Waiting for host")
         case .forwarded: return L10n.string("Handed to host")
         case .bounced: return L10n.string("Refused by host")
+        case .moved: return L10n.string("Moved with the session")
         }
     }
 }

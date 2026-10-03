@@ -195,4 +195,10 @@ final class RemoteSessionMailboxes {
     }
 
     func install(_ binding: Binding, for sessionID: SessionID) { bindings[sessionID] = binding }
+
+    /// The session's mailbox is this Mac's again.
+    func forget(_ sessionID: SessionID) {
+        bindings[sessionID] = nil
+        lastRead[sessionID] = nil
+    }
 }

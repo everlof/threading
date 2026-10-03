@@ -420,7 +420,8 @@ extension ControllerStore {
         let expectedForward = try expectsForward(envelope, from: peer)
         if let peer { guard envelope.sender.host == peer || expectedForward else { throw ControllerError.forbidden } }
         guard envelope.recipient.host == local else { throw ControllerError.forbidden }
-        if let prior: MailMessage = try optional("mail", envelope.id.uuidString.lowercased()) {
+        if let prior: MailMessage = try optional("mail", envelope.id.uuidString.lowercased()),
+           !(try retireReturningMove(prior, envelope, from: peer)) {
             guard prior.envelope.sameRequest(as: envelope), prior.envelope.sentAt == envelope.sentAt || peer == nil else {
                 throw ControllerError.conflict
             }

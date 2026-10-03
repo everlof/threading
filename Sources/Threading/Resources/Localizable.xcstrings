@@ -31114,6 +31114,17 @@
         }
       }
     },
+    "Moved with the session" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flyttad med sessionen"
+          }
+        }
+      }
+    },
     "Moved “%@” to %@" : {
       "extractionState" : "manual",
       "localizations" : {

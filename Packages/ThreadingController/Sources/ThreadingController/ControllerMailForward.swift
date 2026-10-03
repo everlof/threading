@@ -145,6 +145,18 @@ extension ControllerStore {
         return message
     }
 
+    /// A mailbox moved away and back: the copy it left here as `moved` gives way to the one
+    /// coming home, under the same id. Only for the address this store's owner forwards from.
+    func retireReturningMove(_ prior: MailMessage, _ envelope: MailEnvelope, from peer: HostID?) throws -> Bool {
+        guard prior.state == .moved, envelope.forwardedFrom == prior.envelope.recipient,
+              try expectsForward(envelope, from: peer) else { return false }
+        let id = envelope.id.uuidString.lowercased()
+        try db.run("DELETE FROM mail_outbound WHERE message=?", [.text(id)])
+        try db.run("DELETE FROM record WHERE kind='mail' AND id=?", [.text(id)])
+        try event("mail.returned", id)
+        return true
+    }
+
     private func requireMailbox(_ address: MailAddress) throws {
         switch address.kind {
         case .session: let _: MailMailbox = try required("mailbox", address.description)

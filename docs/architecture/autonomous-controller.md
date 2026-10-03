@@ -509,11 +509,21 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   launch supervision; `mail-sync` runs one pass by hand. Peers are owner-authored (`mail-peer-set`
   with the transport argv), and only peers with a transport are initiated to.
 
+- **Moving a mailbox** (`ControllerMailForward.swift`). A forward is owner-written and
+  revisioned, keyed by the old address (`mail-forward-set OLD NEW REV`, `mail-forward-clear`).
+  On the old store it forwards mail still arriving for the old address once — after the old
+  address's own admission — re-addressed in place or queued to the new host as `moved`. On the
+  new store the same record is the owner's consent: a copy carrying `forwardedFrom` from that
+  host is admitted without a sender-host match or grant. A copy that was forwarded once is never
+  forwarded again. `mail-move OLD NEW` moves unacknowledged mail in one transaction with ids
+  kept, so the receiver's idempotence makes a retry harmless; a mailbox moved away and back
+  replaces the `moved` copy it left under the same id.
+
 Validation: `ControllerMailTests` (11 core cases: grants and revocation, busy recipients, notices,
 interrupts and finish, chain depth, ask/reply, wake coalescing, rate fuse, sessions, push/pull
 idempotence and spoofing, refused questions, v6 upgrade) and `scripts/tests/test_controller_mail.py`
 (real ptyd and two stores: a question crossing hosts wakes the recipient, its reply is pulled and
-the asker continues; a busy agent receives the notice through the real hook command and cannot
+the asker continues; a moved session keeps its unread mail and late mail is forwarded once; a busy agent receives the notice through the real hook command and cannot
 finish before acknowledging; unknown peers, forged senders and a transport reaching the wrong host
 are refused).
 

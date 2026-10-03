@@ -7,10 +7,12 @@
 > storing undeliverable messages as mail, Claude/Codex answering hooks, native-chat and boundary
 > notices, sync with remote hosts' controllers over owner SSH, remote-host sessions keeping their
 > mailbox on the host (`RemoteSessionMailboxes`), owner grants and contacts in the session Info
-> panel, and `wake` for dormant Mac chats — is implemented (2026-10-03) and recorded in
-> [`control-plane.md`](../architecture/control-plane.md#agent-mail-on-the-mac). Not yet: `ask`
-> for Mac sessions, chain budgets measured against Mac transcript usage, and forwarding a
-> session's mail when its project moves to another host. Supersedes the worker-only
+> panel, `wake` for dormant Mac chats, and moving a session's mailbox when its project changes
+> host (forward + `mail-move`, `MailboxHandover`) — is implemented (2026-10-03) and recorded in
+> [`control-plane.md`](../architecture/control-plane.md#agent-mail-on-the-mac) and
+> [`autonomous-controller.md`](../architecture/autonomous-controller.md#agent-mail-schema-v7).
+> Not planned: `ask` for Mac sessions (workers only). Not yet: chain budgets measured against Mac
+> transcript usage. Supersedes the worker-only
 > `agent-messaging.md` draft (2026-10-02), whose grant modes, chain bounds and Rindabox notes are
 > folded in below. Extends [`control-plane.md`](../architecture/control-plane.md) (interactive
 > sessions), [`autonomous-controller.md`](../architecture/autonomous-controller.md) (workers) and
