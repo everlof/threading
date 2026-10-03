@@ -82,7 +82,17 @@ Visible project slots now mount the same `ThemedProjectRowView` subtree as the M
 `ProjectRowView`: icon, shaped title, optional count and trailing `+`/`⋯` controls share one
 production layout. The Linux host retains project identity, selection, menu admission and PTY
 ownership. The shim clips nested views to their bounds and preserves subview ordering so the
-count sits behind hover controls. Account and saved-runtime rows remain diagnostic.
+count sits behind hover controls. A project with saved runtimes now exposes an inline disclosure
+in the same bounded list. Its visible agent rows mount the production
+`ThemedSessionRowContentView` used by Mac session cells; project selection, runtime activation,
+attention, retained state and AT-SPI identities stay host-owned. The saved-runtime pickers
+remain available, while account and terminal rows still use diagnostic content. The shim also
+has a clipped `NSScrollView`/`NSClipView` viewport with wheel and bounds-origin handling, but the
+native navigator still owns visible-row recycling and wheel routing rather than mounting the
+production outline. `tests/sidebar_visible_rows/run.sh` checks a 5,100-project tree with
+bounded child projection; `--session-row-layout-fixture` checks the shared title/icon stack at
+its native slot size. The installed X11 smoke captures an expanded project and verifies
+pointer, keyboard, AT-SPI and inline saved-terminal activation.
 `tests/text_label/run.sh` checks the Linux-only, Pango-backed `NSTextField` label against
 Unicode shaping, clipping, ellipsis, intrinsic size, baseline behavior and shared neutral-ink
 contrast on eight grounds, then renders that
@@ -609,8 +619,11 @@ WindowHarness --app-claude /path/to/experimental-store /path/to/ptyd.sock /bin/b
 WindowHarness --app-agents /path/to/experimental-store /path/to/ptyd.sock /bin/bash /absolute/path/to/codex /absolute/path/to/claude
 ```
 
-Select a project with Up/Down or a click, then press Enter to open its shell. The navigator stays
-beside the terminal in a 320-pixel leading pane. Ctrl+Shift+P focuses navigation without hiding
+Select a project with Up/Down or a click, then press Enter to open its shell. Click the disclosure
+before a project name, or press Space on its selected row, to show saved agents and terminals
+under that project. Up/Down selects an inline child and Enter opens that exact saved runtime.
+The navigator stays beside the terminal in a 320-pixel leading pane. Ctrl+Shift+P focuses
+navigation without hiding
 the terminal; from the focused project list it opens the folder dialog. Tab returns keyboard
 focus to the terminal. Clicking either pane focuses it. Enter revisits
 that project's existing terminal, including its child and
@@ -622,7 +635,8 @@ first; Enter attaches the selected agent through its own persisted identity. Bot
 their selection when returning from a terminal with Ctrl+Shift+P. Alt+F4 closes the window.
 
 Project rows reserve a trailing numeric slot for a nonzero collapsed agent-plus-terminal count;
-zero counts leave the slot empty. The AT-SPI row name keeps both complete totals. The source and
+expansion subtracts the visible children from that count, and zero leaves the slot empty. The
+AT-SPI row name keeps both complete totals. The source and
 installed smoke suites check this with a real native window; see `FINDINGS.md` §133.
 
 Escape moves out of an account/saved picker, then returns from Projects to the visible terminal;

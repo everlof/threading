@@ -113,15 +113,17 @@ struct WindowHarness {
     static let terminalCellHeight = Int(TW_TERMINAL_CELL_HEIGHT)
     #endif
 
-    @MainActor private static func navigatorRowRect(_ index: Int, width: Int, height: Int) -> NSRect {
+    @MainActor private static func navigatorRowRect(_ index: Int, width: Int, height: Int,
+                                                    indent: CGFloat = 0) -> NSRect {
         let top = navigatorHeaderHeight + 2 + CGFloat(index) * navigatorRowStride
         // The diagnostic root uses integer half-size bounds, even for an odd SDL pixel size.
-        return NSRect(x: 6, y: CGFloat(height / 2) - top - navigatorRowHeight,
-                      width: CGFloat(width / 2) - 12, height: navigatorRowHeight)
+        return NSRect(x: 6 + indent, y: CGFloat(height / 2) - top - navigatorRowHeight,
+                      width: CGFloat(width / 2) - 12 - indent, height: navigatorRowHeight)
     }
-    @MainActor private static func navigatorRowPixels(_ index: Int, width: Int, height: Int)
+    @MainActor private static func navigatorRowPixels(_ index: Int, width: Int, height: Int,
+                                                      indent: CGFloat = 0)
         -> (x: Int32, y: Int32, width: Int32, height: Int32) {
-        let row = navigatorRowRect(index, width: width, height: height)
+        let row = navigatorRowRect(index, width: width, height: height, indent: indent)
         return (Int32(row.minX * 2), Int32((CGFloat(height / 2) - row.maxY) * 2),
                 Int32(row.width * 2), Int32(row.height * 2))
     }
@@ -162,11 +164,11 @@ struct WindowHarness {
         accent: NSColor, selected: Bool, selectedInk: Specimen.Ink, root: Specimen.Window,
         textRows: inout [NavigatorTextRow], image: NSImage? = nil,
         projectPresentation: NavigatorProjectRowPresentation? = nil,
-        imageSide: CGFloat = 13, trailingCount: Int = 0,
+        imageSide: CGFloat = 13, trailingCount: Int = 0, indent: CGFloat = 0,
         projectActionID: String? = nil, revealsProjectAction: Bool = false,
         projectActionEnabled: Bool = true
     ) {
-        let frame = navigatorRowRect(index, width: width, height: height)
+        let frame = navigatorRowRect(index, width: width, height: height, indent: indent)
         let ink = selected ? selectedInk : root.bodyInk
         root.mountNavigatorRow(frame: frame, accent: accent, selected: selected,
                                ink: ink, image: image,
@@ -175,11 +177,9 @@ struct WindowHarness {
                                projectActionID: projectActionID,
                                revealsProjectAction: revealsProjectAction,
                                projectActionEnabled: projectActionEnabled)
-        let pixels = navigatorRowPixels(index, width: width, height: height)
+        let pixels = navigatorRowPixels(index, width: width, height: height, indent: indent)
         let role = projectPresentation?.titleRole
-        // Mac's collapsed ProjectRowView puts hidden-session digits in the trailing slot;
-        // the Linux project list keeps its sessions behind pickers, so they remain collapsed.
-        // Bound the count slot to the mounted row and leave a gap before it for the title.
+        // Bound the optional count slot to the mounted row and leave a gap for the title.
         let countText = trailingCount > 0 && !revealsProjectAction ? String(trailingCount) : ""
         let trailingInset: CGFloat = 6
         let minimumTitleWidth: CGFloat = 32
@@ -208,18 +208,19 @@ struct WindowHarness {
         }
     }
 
-    /// A row keeps its host identity even when one visual field is ellipsized. Only mounted
-    /// rows produce these three bounded runs; title changes cannot push account/status offscreen.
+    /// The production session content draws the title and provider mark in a bounded row slot.
+    /// The host keeps identity, retained/attention status and its complete accessible label.
     @MainActor private static func addSavedAgentRow(
         _ runtime: ProjectSnapshot.SavedRuntime, retained: Bool, at date: Date,
         index: Int, width: Int, height: Int, accent: NSColor, selected: Bool,
-        selectedInk: Specimen.Ink, root: Specimen.Window, textRows: inout [NavigatorTextRow], image: NSImage?
+        selectedInk: Specimen.Ink, root: Specimen.Window, textRows: inout [NavigatorTextRow], image: NSImage?,
+        indent: CGFloat = 0
     ) {
-        let frame = navigatorRowRect(index, width: width, height: height)
+        let frame = navigatorRowRect(index, width: width, height: height, indent: indent)
         let ink = selected ? selectedInk : root.bodyInk
         root.mountNavigatorRow(frame: frame, accent: accent,
-                               selected: selected, ink: ink, image: image)
-        let pixels = navigatorRowPixels(index, width: width, height: height)
+                               selected: selected, ink: ink, showsMark: image == nil)
+        let pixels = navigatorRowPixels(index, width: width, height: height, indent: indent)
         let status = runtime.attentionTitle(at: date) ?? (retained ? "Retained" : nil)
         let regions = SavedAgentRowLayout(
             row: CGRect(x: Int(pixels.x), y: Int(pixels.y),
@@ -227,19 +228,15 @@ struct WindowHarness {
             showsStatus: status != nil,
             titleLeadingInset: Specimen.navigatorRowGeometry.titleLeadingOffset * 2
         )
-        func append(_ text: String, in rect: CGRect, detail: Bool) {
-            guard rect.width > 0, rect.height > 0, !text.isEmpty else { return }
-            textRows.append(NavigatorTextRow(text: readableNavigatorText(text),
-                x: Int32(rect.minX), y: Int32(rect.minY), width: Int32(rect.width),
-                height: Int32(rect.height), inset: 0, ink: detail ? ink.secondary : ink.label,
-                trailingInset: 0, isDetail: detail))
+        let contentTrailingInset = CGFloat(pixels.x + pixels.width - Int32(regions.title.maxX)) / 2
+        root.mountSessionContent(title: readableNavigatorText(runtime.title), icon: image,
+                                 selected: selected, trailingInset: contentTrailingInset)
+        if let status, regions.status.width > 0 {
+            textRows.append(NavigatorTextRow(text: readableNavigatorText(status),
+                x: Int32(regions.status.minX), y: Int32(regions.status.minY),
+                width: Int32(regions.status.width), height: Int32(regions.status.height),
+                inset: 0, ink: ink.secondary, trailingInset: 0, isDetail: true))
         }
-        append(runtime.title, in: regions.title, detail: false)
-        let identity = runtime.kind?.displayName ?? "Agent"
-        append(identity + " · " + String(runtime.id.prefix(8))
-               + (runtime.account.map { " · " + $0 } ?? ""),
-               in: regions.identityDetail, detail: true)
-        if let status { append(status, in: regions.status, detail: true) }
     }
 
     /// Mount only the shaped text in the current viewport. Selection and commands still belong
@@ -361,6 +358,10 @@ struct WindowHarness {
         let mode = CommandLine.arguments.dropFirst().first
         if mode == "--project-row-layout-fixture" {
             ProjectRowLayoutFixture.run()
+            return
+        }
+        if mode == "--session-row-layout-fixture" {
+            SessionRowLayoutFixture.run()
             return
         }
         if mode == "--attach" {
@@ -1292,6 +1293,8 @@ struct WindowHarness {
             for terminal in restoredRuntimes.values { terminal.stop() }
         }
         var width = 800, height = 480, selected = snapshot.selectedProjectIndex, first = 0
+        var expandedProjectID: String?
+        var inlineSelection: SidebarVisibleRows.Row?
         var savedPicker: SavedPicker?
         var savedSelected = 0, savedFirst = 0
         var accountPicker: AgentKind?
@@ -1459,6 +1462,9 @@ struct WindowHarness {
                projects[picker.projectIndex].recentTerminals.indices.contains(savedSelected) {
                 selection = (projects[picker.projectIndex].id,
                              projects[picker.projectIndex].recentTerminals[savedSelected].id)
+            } else if case .some(.terminal(_, _, let id)) = inlineSelection,
+                      let expandedProjectID {
+                selection = (expandedProjectID, id)
             } else { selection = nil }
             let changed = reconcileCreatedTerminals(projects: &projects, projectIndexes: projectIndexes,
                                                     runtimes: terminals, preserving: selection)
@@ -1532,6 +1538,8 @@ struct WindowHarness {
                     projectIndexes = Dictionary(uniqueKeysWithValues: projects.enumerated().map { ($0.element.id, $0.offset) })
                     selected = imported.selectedProjectIndex
                     first = 0
+                    inlineSelection = nil
+                    expandedProjectID = nil
                     dirty = true
                     print("PROJECT_IMPORTED \(projects[selected].path)"); fflush(nil)
                 case .success(nil):
@@ -1552,6 +1560,9 @@ struct WindowHarness {
                    projects[picker.projectIndex].recentAgents.indices.contains(savedSelected) {
                     selection = (projects[picker.projectIndex].id,
                                  projects[picker.projectIndex].recentAgents[savedSelected].id)
+                } else if case .some(.agent(_, _, let id)) = inlineSelection,
+                          let expandedProjectID {
+                    selection = (expandedProjectID, id)
                 } else { selection = nil }
                 if reconcilePendingAgents(projects: &projects, projectIndexes: projectIndexes,
                                           runtimes: &restoredRuntimes,
@@ -1610,9 +1621,23 @@ struct WindowHarness {
                 if savedSelected >= savedFirst + count { savedFirst = savedSelected - count + 1 }
             } else {
                 selected = max(0, min(projects.count - 1, selected))
-                if selected < first { first = selected }
-                if selected >= first + count { first = selected - count + 1 }
+                if let expandedID = expandedProjectID, projectIndexes[expandedID] == nil {
+                    expandedProjectID = nil
+                }
+                let expanded = expandedProjectID.flatMap { projectIndexes[$0] }
+                let projection = SidebarVisibleRows(projects: projects,
+                    expandedProjectIndex: expanded, first: first, count: count)
+                let selectedIndex = inlineSelection.flatMap { projection.index(of: $0) }
+                    ?? projection.index(of: selected) ?? 0
+                if selectedIndex < first { first = selectedIndex }
+                if selectedIndex >= first + count { first = selectedIndex - count + 1 }
+                if let row = projection.row(at: selectedIndex) { inlineSelection = row }
             }
+            let sidebarRows = SidebarVisibleRows(projects: projects,
+                expandedProjectIndex: expandedProjectID.flatMap { projectIndexes[$0] },
+                first: first, count: count)
+            let selectedInlineIndex = inlineSelection.flatMap { sidebarRows.index(of: $0) }
+                ?? sidebarRows.index(of: selected) ?? 0
             let presentationDate = Date()
             if let expiry = nextVisibleAttentionExpiry, presentationDate >= expiry {
                 dirty = true
@@ -1709,26 +1734,62 @@ struct WindowHarness {
                                         height: height, accent: accent, selected: true,
                                         selectedInk: selectedInk, root: root, textRows: &textRows)
                     } else {
-                        end = min(projects.count, first + count)
+                        end = min(sidebarRows.totalCount, first + count)
                         for index in first..<end {
-                            let project = projects[index]
-                            let display = String(project.name.unicodeScalars.prefix(80))
-                            let presentation = NavigatorProjectRowPresentation.project(name: display)
-                            let hiddenCount = project.sessions.addingReportingOverflow(project.terminalCount)
-                            // The native visual subtree is shared with the Mac project cell.
-                            // Only visible rows request artwork; host identity and commands stay
-                            // on the bounded navigator slots.
-                            let identity = GeneratedProjectIcon.image(for: project.name)
-                            root.mountNavigatorRow(
-                                frame: navigatorRowRect(index - first, width: width, height: height),
-                                accent: accent, selected: index == selected, ink: selectedInk,
-                                showsMark: false)
-                            root.mountProjectContent(
-                                presentation: presentation, icon: identity,
-                                count: hiddenCount.overflow ? Int.max : hiddenCount.partialValue,
-                                projectID: launch == nil ? nil : project.id,
-                                revealed: hoveredProjectID == project.id,
-                                enabled: actionsEnabled)
+                            guard let row = sidebarRows.row(at: index) else { continue }
+                            let slot = index - first
+                            let isSelected = index == selectedInlineIndex
+                            switch row {
+                            case .project(let projectIndex, _):
+                                let project = projects[projectIndex]
+                                let hasChildren = !project.recentAgents.isEmpty || !project.recentTerminals.isEmpty
+                                let disclosure = hasChildren && launch != nil
+                                    ? (expandedProjectID == project.id ? "▾ " : "▸ ") : ""
+                                let display = disclosure + String(project.name.unicodeScalars.prefix(80))
+                                let presentation = NavigatorProjectRowPresentation.project(name: display)
+                                let hiddenCount = project.sessions.addingReportingOverflow(project.terminalCount)
+                                let totalRuntimes = hiddenCount.overflow ? Int.max : hiddenCount.partialValue
+                                let visibleChildren = project.recentAgents.count + project.recentTerminals.count
+                                let collapsedCount = expandedProjectID == project.id
+                                    ? max(0, totalRuntimes - visibleChildren) : totalRuntimes
+                                // Only visible rows request artwork; identity and commands stay
+                                // on the bounded navigator slots.
+                                let identity = GeneratedProjectIcon.image(for: project.name)
+                                root.mountNavigatorRow(
+                                    frame: navigatorRowRect(slot, width: width, height: height),
+                                    accent: accent, selected: isSelected, ink: selectedInk,
+                                    showsMark: false)
+                                root.mountProjectContent(
+                                    presentation: presentation, icon: identity,
+                                    count: collapsedCount,
+                                    projectID: launch == nil ? nil : project.id,
+                                    revealed: hoveredProjectID == project.id,
+                                    enabled: actionsEnabled)
+                            case .agent(let projectIndex, let childIndex, _):
+                                let project = projects[projectIndex]
+                                let runtime = project.recentAgents[childIndex]
+                                let mark = ProviderMarks.image(for: runtime.kind, selected: isSelected)
+                                let retained = retainedRuntime(for: owner(of: .agent(runtime.id),
+                                    projectID: project.id)) != nil
+                                if runtime.attention(at: presentationDate) == .snoozed,
+                                   let expiry = runtime.snoozedUntil {
+                                    nextVisibleAttentionExpiry = min(nextVisibleAttentionExpiry ?? expiry, expiry)
+                                }
+                                addSavedAgentRow(runtime, retained: retained, at: presentationDate,
+                                    index: slot, width: width, height: height, accent: accent,
+                                    selected: isSelected, selectedInk: selectedInk, root: root,
+                                    textRows: &textRows, image: mark, indent: 16)
+                            case .terminal(let projectIndex, let childIndex, _):
+                                let project = projects[projectIndex]
+                                let runtime = project.recentTerminals[childIndex]
+                                let retained = retainedRuntime(for: owner(of: .terminal(runtime.id),
+                                    projectID: project.id)) != nil
+                                let mark = ProviderMarks.image(for: runtime.kind, selected: isSelected)
+                                let text = "\(runtime.identityTitle) [\(String(runtime.id.prefix(8)))]\(retained ? " *" : "")"
+                                addNavigatorRow(text, index: slot, width: width, height: height,
+                                    accent: accent, selected: isSelected, selectedInk: selectedInk,
+                                    root: root, textRows: &textRows, image: mark, indent: 16)
+                            }
                         }
                     }
                 }
@@ -1760,7 +1821,7 @@ struct WindowHarness {
                 if let menu = actions { focusedSlot = menu.selected - menu.first }
                 else if accountPicker != nil { focusedSlot = accountSelected - accountFirst }
                 else if savedPicker != nil { focusedSlot = savedSelected - savedFirst }
-                else { focusedSlot = selected - first }
+                else { focusedSlot = selectedInlineIndex - first }
                 contentWindow.makeFirstResponder(sidebarFocused ? root.mountedRow(at: focusedSlot) : nil)
                 let mountMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - mountStarted) / 1_000_000
                 trace("raster.begin")
@@ -1884,7 +1945,7 @@ struct WindowHarness {
                     let listY = Int32(navigatorHeaderHeight * 2)
                     let hasAddRow = projects.isEmpty && launch != nil
                     tw_accessibility_begin_list(window, "Projects", Int32(first),
-                                                Int32(hasAddRow ? 1 : projects.count),
+                                                Int32(hasAddRow ? 1 : sidebarRows.totalCount),
                                                 launch == nil ? 0 : 1, 0, listY,
                                                 Int32(navigatorWidth), Int32(height) - listY)
                     if hasAddRow {
@@ -1893,40 +1954,66 @@ struct WindowHarness {
                                                  width: width, height: height)
                     } else {
                         for index in first..<end {
-                            let project = projects[index]
-                            let opened = terminals[project.id]
-                            let retained = opened != nil || restoredProjectIDs.contains(project.id)
-                            let label = "\(boundedAccessibilityLabel(project.name)) [\(project.sessions) agents, \(project.terminalCount) terminals]\(retained ? " retained" : "")"
-                            if launch == nil {
-                                try publishAccessibleRow(window, id: project.id, label: label,
-                                                         selected: index == selected,
-                                                         visibleIndex: index - first,
-                                                         width: width, height: height)
-                            } else {
-                                let bounds = navigatorRowPixels(index - first, width: width, height: height)
-                                guard let create = projectControlPixels(index - first, create: true),
-                                      let action = projectControlPixels(index - first, create: false)
-                                else { throw WindowFailure("mounted project controls have no layout") }
-                                let result = project.id.withCString { identifier in
-                                    label.withCString { name in
-                                        tw_accessibility_add_project_row(window, identifier, name,
-                                            index == selected ? 1 : 0,
-                                            bounds.x, bounds.y, bounds.width, bounds.height,
-                                            create.x, create.y, create.width, create.height,
-                                            action.x, action.y, action.width, action.height,
-                                            actionsEnabled ? 1 : 0)
+                            guard let row = sidebarRows.row(at: index) else { continue }
+                            let slot = index - first
+                            let isSelected = index == selectedInlineIndex
+                            switch row {
+                            case .project(let projectIndex, _):
+                                let project = projects[projectIndex]
+                                let retained = terminals[project.id] != nil || restoredProjectIDs.contains(project.id)
+                                let label = "\(boundedAccessibilityLabel(project.name)) [\(project.sessions) agents, \(project.terminalCount) terminals]\(retained ? " retained" : "")"
+                                if launch == nil {
+                                    try publishAccessibleRow(window, id: project.id, label: label,
+                                        selected: isSelected, visibleIndex: slot, width: width, height: height)
+                                } else {
+                                    let bounds = navigatorRowPixels(slot, width: width, height: height)
+                                    guard let create = projectControlPixels(slot, create: true),
+                                          let action = projectControlPixels(slot, create: false)
+                                    else { throw WindowFailure("mounted project controls have no layout") }
+                                    let result = project.id.withCString { identifier in
+                                        label.withCString { name in
+                                            tw_accessibility_add_project_row(window, identifier, name,
+                                                isSelected ? 1 : 0,
+                                                bounds.x, bounds.y, bounds.width, bounds.height,
+                                                create.x, create.y, create.width, create.height,
+                                                action.x, action.y, action.width, action.height,
+                                                actionsEnabled ? 1 : 0)
+                                        }
+                                    }
+                                    guard result == 0 else {
+                                        throw WindowFailure("native project action row exceeds its bound")
                                     }
                                 }
-                                guard result == 0 else {
-                                    throw WindowFailure("native project action row exceeds its bound")
-                                }
+                            case .agent(let projectIndex, let childIndex, _):
+                                let project = projects[projectIndex]
+                                let runtime = project.recentAgents[childIndex]
+                                let retained = retainedRuntime(for: owner(of: .agent(runtime.id),
+                                    projectID: project.id)) != nil
+                                let provider = runtime.kind.map { "[\($0.displayName)] " } ?? ""
+                                let account = runtime.account.map { " [\($0)]" } ?? ""
+                                let title = boundedAccessibilityLabel(runtime.title,
+                                    maximumBytes: 400 - provider.utf8.count - account.utf8.count)
+                                let label = "\(provider)\(title)\(account) [\(String(runtime.id.prefix(8)))]\(retained ? " retained" : "")"
+                                    + (runtime.attentionTitle(at: presentationDate).map { " " + $0 } ?? "")
+                                try publishAccessibleRow(window, id: runtime.id, label: label,
+                                    selected: isSelected, visibleIndex: slot, width: width, height: height,
+                                    indent: 16)
+                            case .terminal(let projectIndex, let childIndex, _):
+                                let project = projects[projectIndex]
+                                let runtime = project.recentTerminals[childIndex]
+                                let retained = retainedRuntime(for: owner(of: .terminal(runtime.id),
+                                    projectID: project.id)) != nil
+                                let label = "\(runtime.identityTitle) [\(String(runtime.id.prefix(8)))]\(retained ? " retained" : "")"
+                                try publishAccessibleRow(window, id: runtime.id, label: label,
+                                    selected: isSelected, visibleIndex: slot, width: width, height: height,
+                                    indent: 16)
                             }
                         }
                     }
                     tw_accessibility_end_list(window)
                     let title = projects.isEmpty ? "Threading experiment - empty store" : "Threading experiment - \(projects[selected].path)"
                     setNavigatorTitle(title)
-                    print("FRAME \(width)x\(height) mounted=\(end - first) selected=\(projects.isEmpty ? "none" : projects[selected].id)")
+                    print("FRAME \(width)x\(height) mounted=\(end - first) selected=\(projects.isEmpty ? "none" : projects[selected].id) total=\(sidebarRows.totalCount)")
                 }
                 trace("accessibility-title.end")
                 traceFirstFrame = false
@@ -1935,6 +2022,7 @@ struct WindowHarness {
             }
             var event = TWEvent()
             var selectionWasCommitted = false
+            var pointerActivatedRow = false
             if let pending = pendingSelection {
                 if let result = pending.gate.take() {
                     pendingSelection = nil
@@ -2032,10 +2120,12 @@ struct WindowHarness {
                 let slot = Int(event.key)
                 let index = first + slot
                 guard actions == nil, accountPicker == nil, savedPicker == nil,
-                      slot >= 0, slot < count, projects.indices.contains(index),
+                      slot >= 0, slot < count,
+                      case .some(.project(let projectIndex, let projectID)) = sidebarRows.row(at: index),
                       let id = String(validatingCString: tw_event_text(&event)),
-                      projects[index].id == id, let target = ProjectID(uuidString: id)
+                      projectID == id, let target = ProjectID(uuidString: id)
                 else { continue }
+                selected = projectIndex
                 openProjectCreateMenu(for: target, returnToSidebar: sidebarFocused)
                 continue
             }
@@ -2069,11 +2159,12 @@ struct WindowHarness {
                    launch != nil, event.y >= navigatorRowsTop {
                     let slot = Int((event.y - navigatorRowsTop) / Int32(navigatorRowStride * 2))
                     let index = first + slot
-                    if slot >= 0, slot < count, projects.indices.contains(index) {
+                    if slot >= 0, slot < count,
+                       case .some(.project(_, let id)) = sidebarRows.row(at: index) {
                         let row = navigatorRowPixels(slot, width: navigatorWidth, height: height)
                         if event.x >= row.x, event.x < row.x + row.width,
                            event.y >= row.y, event.y < row.y + row.height {
-                            pointerProjectID = projects[index].id
+                            pointerProjectID = id
                         }
                     }
                 }
@@ -2200,6 +2291,7 @@ struct WindowHarness {
                     }
                     if let activatedRow {
                         pendingMountedRowSlot = activatedRow
+                        pointerActivatedRow = true
                         event.kind = 2
                         event.action = 0
                     } else { continue }
@@ -2250,6 +2342,7 @@ struct WindowHarness {
                         // Opening a row menu leaves selection in place. Taking a project
                         // command then makes that exact project the existing operation target.
                         selected = targetIndex
+                        inlineSelection = .project(projectIndex: targetIndex, id: projects[targetIndex].id)
                         dirty = true
                     }
                     dismissActions(returnToParent: false)
@@ -2304,9 +2397,10 @@ struct WindowHarness {
                 } else if let savedPicker {
                     let project = projects[savedPicker.projectIndex]
                     listCount = savedPicker.isAgent ? project.recentAgents.count : project.recentTerminals.count
-                } else { listCount = projects.isEmpty && launch != nil ? 1 : projects.count }
+                } else { listCount = projects.isEmpty && launch != nil ? 1 : sidebarRows.totalCount }
                 let visibleCount = max(0, min(listCount - listFirst, count))
-                if let mounted = mountedRowPressed(by: event), mounted < visibleCount {
+                let pressedSlot = event.action == 1 ? Int(event.key) : mountedRowPressed(by: event)
+                if let mounted = pressedSlot, mounted >= 0, mounted < visibleCount {
                     if projects.isEmpty, let launch, accountPicker == nil, savedPicker == nil {
                         if event.action != 1 {
                             pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1])
@@ -2315,8 +2409,25 @@ struct WindowHarness {
                     }
                     let candidate = listFirst + mounted
                     if accountPicker != nil { accountSelected = candidate }
-                    else if savedPicker == nil { selected = candidate }
-                    else { savedSelected = candidate }
+                    else if savedPicker != nil { savedSelected = candidate }
+                    else if let row = sidebarRows.row(at: candidate) {
+                        inlineSelection = row
+                        switch row {
+                        case .project(let projectIndex, let projectID):
+                            selected = projectIndex
+                            let project = projects[projectIndex]
+                            let hasChildren = !project.recentAgents.isEmpty || !project.recentTerminals.isEmpty
+                            // The disclosure is the first glyph in the shared project's title.
+                            let disclosureX = Int32((6 + SidebarRowDefaults.leadingInset
+                                + SidebarRowDefaults.iconSlotWidth + SidebarRowDefaults.horizontalSpacing) * 2)
+                            if pointerActivatedRow, hasChildren,
+                               event.x >= disclosureX, event.x < disclosureX + 20 {
+                                expandedProjectID = expandedProjectID == projectID ? nil : projectID
+                            }
+                        case .agent(let projectIndex, _, _), .terminal(let projectIndex, _, _):
+                            selected = projectIndex
+                        }
+                    }
                     trace("selection index=\(candidate)")
                     dirty = true
                 }
@@ -2336,20 +2447,30 @@ struct WindowHarness {
                     dirty = true
                     break
                 }
-                if let savedPicker {
-                    let project = projects[savedPicker.projectIndex]
-                    let saved = savedPicker.isAgent ? project.recentAgents : project.recentTerminals
-                    guard !saved.isEmpty else { break }
-                    let runtime = saved[savedSelected]
-                    let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
+                let inlineRuntime: (picker: SavedPicker, index: Int)?
+                switch sidebarRows.row(at: selectedInlineIndex) {
+                case .some(.agent(let projectIndex, let childIndex, _)):
+                    inlineRuntime = (.agents(projectIndex), childIndex)
+                case .some(.terminal(let projectIndex, let childIndex, _)):
+                    inlineRuntime = (.terminals(projectIndex), childIndex)
+                default:
+                    inlineRuntime = nil
+                }
+                if let destination = savedPicker.map({ (picker: $0, index: savedSelected) }) ?? inlineRuntime {
+                    let picker = destination.picker
+                    let project = projects[picker.projectIndex]
+                    let saved = picker.isAgent ? project.recentAgents : project.recentTerminals
+                    guard saved.indices.contains(destination.index) else { break }
+                    let runtime = saved[destination.index]
+                    let key: SavedRuntimeKey = picker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
                     let session: GraphicalTerminal
-                    let mayResume = savedPicker.isAgent && (agentExecutable != nil || claudeExecutable != nil)
-                    let mayStartAgain = mayResume || !savedPicker.isAgent
+                    let mayResume = picker.isAgent && (agentExecutable != nil || claudeExecutable != nil)
+                    let mayStartAgain = mayResume || !picker.isAgent
                     let runtimeOwner = owner(of: key, projectID: project.id)
                     let existing = retainedRuntime(for: runtimeOwner)
                     let reuses = existing.map {
                         !(mayStartAgain && $0.canReplace)
-                            && !(!savedPicker.isAgent && $0.canReopenSavedTerminal)
+                            && !(!picker.isAgent && $0.canReopenSavedTerminal)
                     } ?? false
                     guard reuses || existing != nil
                             || terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
@@ -2357,9 +2478,9 @@ struct WindowHarness {
                         break
                     }
                     if !selectionWasCommitted {
-                        pendingSelection = recordSelection(savedPicker.isAgent ? runtime.id : nil,
-                                                           terminalID: savedPicker.isAgent ? nil : runtime.id,
-                                                           terminalProjectID: savedPicker.isAgent ? nil : project.id,
+                        pendingSelection = recordSelection(picker.isAgent ? runtime.id : nil,
+                                                           terminalID: picker.isAgent ? nil : runtime.id,
+                                                           terminalProjectID: picker.isAgent ? nil : project.id,
                                                            store: launch[0], after: event)
                         break
                     }
@@ -2369,7 +2490,7 @@ struct WindowHarness {
                         session = GraphicalTerminal()
                         retain(session, for: runtimeOwner)
                         restoredProjectIDs.insert(project.id)
-                        if savedPicker.isAgent {
+                        if picker.isAgent {
                             if mayResume {
                                 session.openAgent(store: launch[0], socket: launch[1], sessionID: runtime.id,
                                     shell: launch[2], codex: agentExecutable, claude: claudeExecutable,
@@ -2487,9 +2608,26 @@ struct WindowHarness {
                     let next = max(0, min(savedCount - 1, savedSelected + step))
                     if next != savedSelected { savedSelected = next; dirty = true }
                 } else {
-                    let next = max(0, min(projects.count - 1, selected + step))
-                    if next != selected { selected = next; dirty = true }
+                    let next = max(0, min(sidebarRows.totalCount - 1, selectedInlineIndex + step))
+                    if next != selectedInlineIndex, let row = sidebarRows.row(at: next) {
+                        inlineSelection = row
+                        switch row {
+                        case .project(let projectIndex, _),
+                             .agent(let projectIndex, _, _),
+                             .terminal(let projectIndex, _, _):
+                            selected = projectIndex
+                        }
+                        dirty = true
+                    }
                 }
+            case 36:
+                guard accountPicker == nil, savedPicker == nil, launch != nil,
+                      case .some(.project(let projectIndex, let projectID)) = sidebarRows.row(at: selectedInlineIndex)
+                else { break }
+                let project = projects[projectIndex]
+                guard !project.recentAgents.isEmpty || !project.recentTerminals.isEmpty else { break }
+                expandedProjectID = expandedProjectID == projectID ? nil : projectID
+                dirty = true
             case 10:
                 guard accountPicker == nil, savedPicker == nil, launch != nil,
                       !projects.isEmpty else { break }
@@ -2559,8 +2697,9 @@ struct WindowHarness {
 
     @MainActor private static func publishAccessibleRow(_ window: OpaquePointer, id: String,
                                                          label: String, selected: Bool,
-                                                         visibleIndex: Int, width: Int, height: Int) throws {
-        let bounds = navigatorRowPixels(visibleIndex, width: width, height: height)
+                                                         visibleIndex: Int, width: Int, height: Int,
+                                                         indent: CGFloat = 0) throws {
+        let bounds = navigatorRowPixels(visibleIndex, width: width, height: height, indent: indent)
         let result = id.withCString { identifier in
             label.withCString { name in
                 tw_accessibility_add_row(window, identifier, name, selected ? 1 : 0,

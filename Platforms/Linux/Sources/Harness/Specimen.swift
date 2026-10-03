@@ -214,6 +214,15 @@ enum Specimen {
                 presentation: presentation, icon: icon, count: count,
                 projectID: projectID, revealed: revealed, enabled: enabled)
         }
+
+        /// Mount the same default session content that the Mac sidebar places inside its
+        /// extension container. The host retains row identity and the adjacent status text.
+        func mountSessionContent(title: String, icon: NSImage?, selected: Bool,
+                                 trailingInset: CGFloat) {
+            guard nextRowSlot > 0 else { return }
+            mountedRows[nextRowSlot - 1].configureProductionSession(
+                title: title, icon: icon, selected: selected, trailingInset: trailingInset)
+        }
         #endif
 
         func finishNavigatorRows() {
@@ -364,6 +373,7 @@ enum Specimen {
         private var iconView: GlyphView?
         #if THREADING_WINDOW_HARNESS
         private var productionProjectView: ThemedProjectRowView?
+        private var productionSessionView: ThemedSessionRowContentView?
         private var productionProjectActionsRevealed = false
         private var projectCreateButton: ThemedIconButton?
         private var projectActionButton: ThemedIconButton?
@@ -411,6 +421,7 @@ enum Specimen {
         override func hitTest(_ point: NSPoint) -> NSView? {
             let target = super.hitTest(point)
             #if THREADING_WINDOW_HARNESS
+            if productionSessionView?.isHidden == false { return self }
             guard let productionProjectView, !productionProjectView.isHidden,
                   let target else { return target }
             if !productionProjectActionsRevealed { return self }
@@ -446,6 +457,7 @@ enum Specimen {
             self.disclosure = disclosure
             #if THREADING_WINDOW_HARNESS
             productionProjectView?.isHidden = true
+            productionSessionView?.isHidden = true
             #endif
             if let image {
                 let iconFrame = Specimen.navigatorRowGeometry.iconRect(in: bounds, side: imageSide)
@@ -521,6 +533,28 @@ enum Specimen {
         }
 
         #if THREADING_WINDOW_HARNESS
+        func configureProductionSession(title: String, icon: NSImage?, selected: Bool,
+                                        trailingInset: CGFloat) {
+            let content: ThemedSessionRowContentView
+            if let productionSessionView {
+                content = productionSessionView
+            } else {
+                content = ThemedSessionRowContentView(frame: bounds)
+                content.translatesAutoresizingMaskIntoConstraints = true
+                addSubview(content)
+                productionSessionView = content
+            }
+            let leading = SidebarRowDefaults.leadingInset
+            let width = max(0, bounds.width - leading - trailingInset)
+            let frame = NSRect(x: leading, y: 0, width: width, height: bounds.height)
+            if content.frame != frame { content.frame = frame }
+            content.setTitle(title)
+            content.setIcon(icon)
+            content.setSelection(selected)
+            content.isHidden = false
+            iconView?.isHidden = true
+        }
+
         func productionProjectControl(create: Bool) -> NSView? {
             guard let productionProjectView, !productionProjectView.isHidden else { return nil }
             return create ? productionProjectView.createButton : productionProjectView.actionButton

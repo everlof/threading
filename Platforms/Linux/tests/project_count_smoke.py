@@ -1,4 +1,4 @@
-"""A collapsed project count occupies the Mac row's trailing slot in the native shell."""
+"""Project count, disclosure, and inline terminal selection in the native shell."""
 import os
 from pathlib import Path
 import signal
@@ -59,6 +59,13 @@ def project_list(app):
     matches = [frame.get_child_at_index(index) for index in range(frame.get_child_count())
                if frame.get_child_at_index(index).get_role_name() == 'list']
     return matches[0] if len(matches) == 1 and matches[0].get_child_count() == 2 else None
+
+
+def expanded_project_list(app):
+    frame = app.get_child_at_index(0)
+    matches = [frame.get_child_at_index(index) for index in range(frame.get_child_count())
+               if frame.get_child_at_index(index).get_role_name() == 'list']
+    return matches[0] if len(matches) == 1 and matches[0].get_child_count() == 3 else None
 
 
 def selected(listed, index):
@@ -164,13 +171,37 @@ try:
         assert trailing_ink(after_key, row_rects[0]) >= 8, 'count disappeared when selection moved'
         assert trailing_ink(after_key, row_rects[1]) == 0, 'selected empty project painted a count'
 
-        xdo('mousemove', '--window', window, str(rect.x + 58), str(rect.y + rect.height // 2))
+        xdo('mousemove', '--window', window, str(rect.x + 100), str(rect.y + rect.height // 2))
         xdo('click', '--window', window, '1')
         eventually(lambda: selected(listed, 0) and not selected(listed, 1),
                    'row click selected the counted project', process)
         assert first.get_name().startswith('AlphaCount [0 agents, 1 terminals]')
+        xdo('mousemove', '--window', window, str(rect.x + 58), str(rect.y + rect.height // 2))
+        xdo('click', '--window', window, '1')
+        expanded = eventually(lambda: expanded_project_list(app),
+                              'project disclosure opened inline terminal', process)
+        child = expanded.get_child_at_index(1)
+        child_rect = child.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        assert (child_rect.x, child_rect.y, child_rect.width, child_rect.height) == (44, 134, 744, 44)
+        assert child.get_accessible_id() not in (first.get_accessible_id(), second.get_accessible_id())
+        assert selected(expanded, 0) and not selected(expanded, 1)
+        capture(window, 'project-count-alpha-expanded.png')
+        xdo('key', 'Down')
+        eventually(lambda: selected(expanded, 1), 'inline terminal keyboard selection', process)
+        xdo('key', 'Up')
+        eventually(lambda: selected(expanded, 0), 'project keyboard selection', process)
+        xdo('key', 'space')
+        eventually(lambda: project_list(app), 'space collapsed inline terminal', process)
+        xdo('key', 'space')
+        expanded = eventually(lambda: expanded_project_list(app),
+                              'space reopened inline terminal', process)
+        xdo('key', 'Down')
+        eventually(lambda: selected(expanded, 1), 'terminal selected for activation', process)
+        xdo('key', 'Return')
+        eventually(lambda: 'TERMINAL_FRAME ' in log_path.read_text(),
+                   'inline terminal activated through retained runtime route', process)
         print('PASS trailing count/action hover crossfade, zero-count omission, AT-SPI totals, '
-              'keyboard and click selection')
+              'keyboard and click selection, inline child expansion and activation')
 finally:
     if process is not None and process.poll() is None:
         process.send_signal(signal.SIGTERM)
