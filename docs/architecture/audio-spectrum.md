@@ -122,3 +122,13 @@ clock, a separately launched app with its own usage description, and a test host
 Threading's normal Developer ID did not resolve it. The test build was restored afterward.
 The cause is still unresolved; do not treat live capture as verified until the HAL test
 delivers the expected 1 kHz spectrum. Missing delivery remains unavailable in the public API.
+
+The installed app's Motion preview also stalled in `AudioDeviceStart` on this Mac. A
+fresh, Developer ID-signed diagnostic confirmed that the aggregate contains the correct
+tap UUID, one input stream, and a 48 kHz nominal rate before IOProc registration. A stereo
+tap still stalled; setting the tap's unchanged description returned `MACH_RCV_TIMED_OUT`
+after 30 seconds. A separate ScreenCaptureKit check did not complete shareable-content
+enumeration before its 45-second process deadline, even though TCC reported Threading's
+Screen Recording grant as allowed. This narrows the failure to capture startup rather
+than FFT or theme rendering, but does not establish its cause. No capture-backend fallback,
+system-service restart, or privacy-grant change was made during these checks.

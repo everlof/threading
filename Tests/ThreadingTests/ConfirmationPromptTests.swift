@@ -37,6 +37,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "switchRunningSessionSurface",
             "conversationRepairOutcome",
             "closeMarkdownDocument",
+            "replaceChangedMarkdownDocument",
             "quitWithRunningAgents",
             "quitWithBackgroundSessions",
             "removeExtension",

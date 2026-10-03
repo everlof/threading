@@ -82,6 +82,8 @@ final class ProjectStore {
     // MARK: - Properties
 
     private(set) var projects: [Project] = []
+    /// Invalidates a maintenance snapshot when child identities or project membership change.
+    private(set) var structureRevision: UInt64 = 0
 
     /// False for the rest of a launch after a corrupt or unsupported state file was found.
     /// Consumers must not interpret the resulting empty project list as authoritative.
@@ -1266,24 +1268,61 @@ final class ProjectStore {
 
     @discardableResult
     func setProjectHidden(_ hidden: Bool, projectID: ProjectID) -> ProjectMutationResult {
+        setProjectHidden(hidden, projectID: projectID, publishesChange: true)
+    }
+
+    @discardableResult
+    func setProjectHidden(
+        _ hidden: Bool, projectID: ProjectID, publishesChange: Bool
+    ) -> ProjectMutationResult {
         guard let index = index(ofProject: projectID) else { return .targetNotFound }
         guard projects[index].isHidden != hidden else { return .unchanged }
         projects[index].isHidden = hidden
+        // Showing a project explicitly gives it a fresh inactivity window.
+        if !hidden { projects[index].lastInteractionAt = Date() }
         guard saveProjectRecord(at: index) else {
-            notifyChanged(sidebarImpact: .structure)
+            if publishesChange { publishProjectVisibilityChanges() }
             return .persistenceRefused
         }
-        notifyChanged(sidebarImpact: .structure)
+        if publishesChange { publishProjectVisibilityChanges() }
         return .applied
     }
 
+    /// A maintenance pass persists each changed row, then invalidates navigation once.
+    func publishProjectVisibilityChanges() {
+        notifyChanged(sidebarImpact: .structure)
+    }
+
     /// Called only at human input boundaries, never from provider output or draft restoration.
-    /// The indexed lookup is O(1); after the first write subsequent keystrokes do no persistence.
+    /// The indexed lookup is O(1); writing coalesces activity and unhides only once.
     func noteUserWriting(in sessionID: SessionID) {
+        guard let location = locate(sessionID: sessionID) else { return }
+        noteProjectInteraction(projectID: projects[location.projectIndex].id)
         guard AppSettings.shared.unhidesProjectsOnWriting,
-              let location = locate(sessionID: sessionID),
               projects[location.projectIndex].isHidden else { return }
         setProjectHidden(false, projectID: projects[location.projectIndex].id)
+    }
+
+    func noteUserWriting(inTerminal terminalID: TerminalID) {
+        noteTerminalWork(terminalID: terminalID)
+    }
+
+    func noteTerminalWork(terminalID: TerminalID) {
+        guard let location = locate(terminalID: terminalID) else { return }
+        noteProjectInteraction(projectID: projects[location.projectIndex].id)
+    }
+
+    /// Keystrokes resolve one indexed project and coalesce its timestamp at minute granularity.
+    /// Work boundaries use their exact session timestamp as well as this project-level fence.
+    func noteProjectInteraction(projectID: ProjectID, at date: Date = Date()) {
+        guard stateWritePolicy.allowsWrites,
+              let index = index(ofProject: projectID) else { return }
+        if let previous = projects[index].lastInteractionAt,
+           date.timeIntervalSince(previous) < ProjectAutoHideDefaults.interactionCoalescingInterval {
+            return
+        }
+        projects[index].lastInteractionAt = date
+        scheduleProjectSave(projectID)
     }
 
     /// The same for a whole checkout.
@@ -1984,6 +2023,7 @@ final class ProjectStore {
             projects[location.projectIndex].sessions[location.sessionIndex].lastTurnAt = date
         }
         projects[location.projectIndex].sessions[location.sessionIndex].lastWorkAt = date
+        noteProjectInteraction(projectID: projects[location.projectIndex].id, at: date)
         scheduleSessionSave(sessionID)
         NotificationCenter.default.post(SessionWorkDidChange(sessionID: sessionID, kind: kind))
     }
@@ -2067,6 +2107,7 @@ final class ProjectStore {
     }
 
     private func rebuildLookupIndexes() {
+        structureRevision &+= 1
         projectIndicesByID.removeAll(keepingCapacity: true)
         sessionLocationsByID.removeAll(keepingCapacity: true)
         terminalLocationsByID.removeAll(keepingCapacity: true)
@@ -2337,6 +2378,7 @@ final class ProjectStore {
             restorePersistedSnapshot()
             return false
         }
+        structureRevision &+= 1
         recordPersistedSnapshot()
         return true
     }

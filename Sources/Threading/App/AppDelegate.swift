@@ -140,6 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private let macNotificationActivityMonitor = MacNotificationActivityMonitor()
     private var activeTurnSleepInhibitor: ActiveTurnSleepInhibitor?
     private var sessionProcessRetention: SessionProcessRetentionCoordinator?
+    private var projectAutoHide: ProjectAutoHideCoordinator?
     private var onboardingWindowController: OnboardingWindowController?
     /// True while first-launch onboarding is deferring the main window. Gates session restore
     /// and routes Dock-click reopens to the onboarding window instead of the hidden main one.
@@ -732,6 +733,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             )
             retention.start()
             sessionProcessRetention = retention
+
+            let autoHide = ProjectAutoHideCoordinator(
+                store: projectStore,
+                settings: settings,
+                currentProjectID: { [weak self] in self?.mainWindowController?.currentProjectID },
+                sessionIsProtected: { sessionID in
+                    let snapshot = runtime.runtimeSnapshot(sessionID: sessionID)
+                    let activity = runtime.activity(sessionID: sessionID)
+                    return snapshot.hasWorkAtRisk || snapshot.process == .starting
+                        || snapshot.blocker != .none || activity == .needsAttention
+                        || activity == .limitReached
+                },
+                terminalIsBusy: { ProjectTerminalRuntime.shared.isBusy(terminalID: $0) }
+            )
+            projectAutoHide = autoHide
         }
 
         // One activity signal replaces a device-by-device settings matrix. The phone already
@@ -998,9 +1014,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // process never began.
         guard ownsSingleInstanceLock else { return .terminateNow }
 
-        // Document review happens before heartbeat, agents or stores begin shutting down.
-        guard markdownWindows.permitsQuit() else { return .terminateCancel }
+        // Document review happens before heartbeat, agents or stores begin shutting down. Its
+        // questions are sheets, so termination waits for their answers. Replying later lets a
+        // logout or restart that asked to quit carry on afterwards; cancelling and re-requesting
+        // the quit, as this first did, stopped the logout and left the person to start it again.
+        guard !markdownWindows.isReviewingQuit else { return .terminateCancel }
+        if markdownWindows.needsQuitReview {
+            markdownWindows.reviewForQuit { [weak self] confirmed in
+                let reply = confirmed ? self?.terminationReplyAfterDocumentReview() : .terminateCancel
+                NSApp.reply(toApplicationShouldTerminate: reply == .terminateNow)
+            }
+            return .terminateLater
+        }
+        return terminationReplyAfterDocumentReview()
+    }
 
+    /// The rest of the termination decision, once no document can lose work.
+    private func terminationReplyAfterDocumentReview() -> NSApplication.TerminateReply {
         // Stopped on every path out of the owning process, including the startup fixture's:
         // a beat written while the app is tearing down says the main thread is turning for a
         // launch that is nearly gone.
@@ -1071,6 +1101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
         }
         activeTurnSleepInhibitor?.stop()
+        projectAutoHide?.stop()
         activeTurnSleepInhibitor = nil
         // Host-backed sessions are handed to `threading-ptyd` rather than ended: their children
         // belong to the daemon and outlive this process, and the screen and mode seeds only this
@@ -1288,6 +1319,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             previousLaunch: EventLog.shared.previousLaunchOutcome,
             escalation: UncleanExitEscalation(decision: launchDecision)
         )
+        // Restoration establishes the visible project and live pending-work protections first.
+        projectAutoHide?.start()
         LaunchLedger.shared.record(.selectedSessionRestored, detail: [
             StartupCheckpointDefaults.restorationField: plan == .restoresEverything
                 ? StartupCheckpointDefaults.restorationRestored
@@ -2188,11 +2221,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     /// Re-reads every bound item. Called on the change event, so a shortcut edited in Settings
     /// works immediately rather than after a relaunch.
+    ///
+    /// While a Markdown document is key it owns the platform's document keys, and the menu bar
+    /// says so: the File items show ⌘N, ⌘O, ⌘W, ⌘S and ⇧⌘S (unless the person bound them to
+    /// something else), and the main window's commands on those chords show none until the
+    /// document stops being key. Before this the editor took the keys silently while View still
+    /// printed ⌘S beside Toggle Sidebar.
     func applyShortcutBindings() {
+        applyShortcutBindings(documentIsKey: markdownWindows.active != nil)
+    }
+
+    /// The same, for a stated key window, so a test can read the menu bar both ways.
+    func applyShortcutBindings(documentIsKey: Bool) {
+        let document = documentIsKey ? MarkdownEditorDefaults.documentShortcuts : [:]
+        let claimed = Set(document.values)
+        showsDocumentShortcuts = !document.isEmpty
         for (id, item) in commandItems {
             guard let command = CommandRegistry.shared.command(id: id) else { continue }
-            apply(ShortcutOverrideStore.shared.shortcut(for: command), to: item)
+            let bound = ShortcutOverrideStore.shared.shortcut(for: command)
+            if let chord = document[id] {
+                apply(bound ?? chord, to: item)
+            } else {
+                apply(bound.flatMap { claimed.contains($0) ? nil : $0 }, to: item)
+            }
         }
+    }
+
+    /// Whether the menu currently shows a Markdown document's keys.
+    private(set) var showsDocumentShortcuts = false
+
+    private func refreshDocumentShortcuts() {
+        guard (markdownWindows.active != nil) != showsDocumentShortcuts else { return }
+        applyShortcutBindings()
     }
 
     /// Internal so the hosted app tests can verify the real AppKit menu tree. Production calls
@@ -2225,6 +2285,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // exist — otherwise a shortcut changed in Settings would not work until the next launch.
         menuEvents.observe(KeyboardShortcutsDidChange.self) { [weak self] _ in
             self?.applyShortcutBindings()
+        }
+        for change in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            menuEvents.observe(change) { [weak self] in self?.refreshDocumentShortcuts() }
         }
         menuEvents.observe(CommandRegistryDidChange.self) { [weak self] _ in
             self?.rebuildExtensionMenus()
@@ -2495,9 +2558,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let menu = NSMenu(title: L10n.string("File"))
         for id in [
             AppCommands.ID.newMarkdown, AppCommands.ID.openMarkdown,
-            AppCommands.ID.saveMarkdown, AppCommands.ID.saveMarkdownAs
+            AppCommands.ID.closeMarkdown, AppCommands.ID.saveMarkdown, AppCommands.ID.saveMarkdownAs
         ] {
-            if id == AppCommands.ID.saveMarkdown { menu.addItem(.separator()) }
+            if id == AppCommands.ID.closeMarkdown { menu.addItem(.separator()) }
             let entry = commandItem(id, action: #selector(performHostMenuCommand(_:)))
             entry.target = self
             menu.addItem(entry)
@@ -3220,9 +3283,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
 
         switch command.id {
-        case AppCommands.ID.saveMarkdown, AppCommands.ID.saveMarkdownAs:
-            guard markdownWindows.active != nil else {
+        case AppCommands.ID.saveMarkdown, AppCommands.ID.saveMarkdownAs, AppCommands.ID.closeMarkdown:
+            guard let document = markdownWindows.active else {
                 return .unavailable(L10n.string("Select a Markdown document first."))
+            }
+            guard document.acceptsDocumentCommands else {
+                return .unavailable(L10n.string("Answer the open question first."))
             }
         case AppCommands.ID.closeTab:
             guard mainWindowController?.canCloseActiveTab == true else {
@@ -3418,8 +3484,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         switch id {
         case AppCommands.ID.newMarkdown: markdownWindows.newDocument()
         case AppCommands.ID.openMarkdown: markdownWindows.openDocument()
-        case AppCommands.ID.saveMarkdown: markdownWindows.active?.save()
-        case AppCommands.ID.saveMarkdownAs: markdownWindows.active?.save(asCopy: true)
+        case AppCommands.ID.saveMarkdown, AppCommands.ID.saveMarkdownAs, AppCommands.ID.closeMarkdown:
+            markdownWindows.active?.perform(documentCommand: id)
         case AppCommands.ID.commandPalette: showCommandPalette()
         case AppCommands.ID.newSession: mainWindowController?.newSession()
         case AppCommands.ID.newManager: mainWindowController?.newManager()

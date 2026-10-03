@@ -19,7 +19,7 @@ actor MarkdownEditorFileStore {
             switch self {
             case .tooLarge: L10n.string("The Markdown editor supports files up to 1 MB.")
             case .invalidUTF8: L10n.string("This file is not valid UTF-8 text.")
-            case .changedOnDisk: L10n.string("This file changed on disk. Save a copy to keep both versions.")
+            case .changedOnDisk: L10n.string("This file changed on disk after it was opened.")
             case .notRegularFile: L10n.string("Choose a regular Markdown text file.")
             }
         }

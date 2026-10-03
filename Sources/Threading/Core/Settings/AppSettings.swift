@@ -569,6 +569,16 @@ final class AppSettings {
         set { AppSettingDefinitions.unhidesProjectsOnWriting.write(newValue, to: defaults) }
     }
 
+    var autoHidesInactiveProjects: Bool {
+        get { AppSettingDefinitions.autoHidesInactiveProjects.read(from: defaults) ?? false }
+        set { AppSettingDefinitions.autoHidesInactiveProjects.write(newValue, to: defaults) }
+    }
+
+    var projectAutoHideDays: Int {
+        get { AppSettingDefinitions.projectAutoHideDays.read(from: defaults) ?? ProjectAutoHideDefaults.days }
+        set { AppSettingDefinitions.projectAutoHideDays.write(newValue, to: defaults) }
+    }
+
     var silencesAllSounds: Bool {
         get { AppSettingDefinitions.silencesAllSounds.read(from: defaults) ?? false }
         set {

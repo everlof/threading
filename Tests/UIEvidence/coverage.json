@@ -604,13 +604,17 @@
       "status": "implemented",
       "priority": "important",
       "title": "Sidebar settings",
-      "description": "The Sidebar settings page — order, layout, names and icons — at both supported review widths.",
+      "description": "Sidebar settings at regular and constrained widths, plus auto-hide enabled and disabled in the product shell.",
       "states": [
-        "Settings overview"
+        "Settings overview",
+        "Auto-hide disabled",
+        "Auto-hide enabled"
       ],
       "matrix": {
         "themes": [
-          "System"
+          "System",
+          "Swiss Minimalist",
+          "Cyberpunk"
         ],
         "appearances": [
           "Light",
@@ -623,10 +627,13 @@
       },
       "source": {
         "path": "Tests/ThreadingTests/GeneralSettingsRenderTests.swift",
-        "test": "ThreadingTests/GeneralSettingsRenderTests/testRendersSidebarSettingsToImages"
+        "tests": [
+          "ThreadingTests/GeneralSettingsRenderTests/testRendersSidebarSettingsToImages",
+          "ThreadingTests/ProjectAutoHideSettingsTests/testRendersAutoHideSettingsInTheShippingShell"
+        ]
       },
       "capture": {
-        "glob": "sidebar-[0-9]*.png"
+        "glob": "sidebar-*.png"
       }
     },
     {
@@ -2158,6 +2165,7 @@
       "description": "The shipping document window with editable source beside the native conversation Markdown renderer.",
       "states": [
         "Editable source and native preview",
+        "File changed on disk under unsaved edits",
         "System light",
         "System dark",
         "Cyberpunk",

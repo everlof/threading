@@ -100,6 +100,10 @@ struct Project: Codable, Identifiable {
   /// Hidden from native project navigation on Mac and iPhone until Show Hidden Projects is enabled.
   var isHidden: Bool = false
 
+  /// Human writing and observed work, never process restoration or sidebar metadata refreshes.
+  /// Older projects also resolve activity from their chats and terminal creation dates.
+  var lastInteractionAt: Date?
+
   /// Sounds this checkout overrides, in the same stored shape `AgentSession` carries — and for
   /// the same reason it is a raw map rather than a typed one. Its chats and terminals follow
   /// unless they answered for themselves. See `SoundResolution`.
@@ -182,7 +186,7 @@ struct Project: Codable, Identifiable {
 
   private enum CodingKeys: String, CodingKey {
     case id, name, folderPath, sessions, terminals, isExpanded, createdAt, icon, themeID, themeName
-    case isHidden
+    case isHidden, lastInteractionAt
     case notificationsMuted, soundOverrides, limitRecoveryPolicy, isScratchpad
     case curfewRule, isAdoptedForCheckoutMove
     case executionHost, lastKnownRepositoryIdentity
@@ -221,6 +225,7 @@ struct Project: Codable, Identifiable {
       themeID = .migratedFromName(legacyName)
     }
     isHidden = try container.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
+    lastInteractionAt = try container.decodeIfPresent(Date.self, forKey: .lastInteractionAt)
     notificationsMuted = try container.decodeIfPresent(
       Bool.self,
       forKey: .notificationsMuted
@@ -279,6 +284,7 @@ struct Project: Codable, Identifiable {
     try container.encodeIfPresent(icon, forKey: .icon)
     try container.encodeIfPresent(themeID, forKey: .themeID)
     if isHidden { try container.encode(true, forKey: .isHidden) }
+    try container.encodeIfPresent(lastInteractionAt, forKey: .lastInteractionAt)
     try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
     try container.encodeIfPresent(soundOverrides, forKey: .soundOverrides)
     try container.encodeIfPresent(limitRecoveryPolicy, forKey: .limitRecoveryPolicy)

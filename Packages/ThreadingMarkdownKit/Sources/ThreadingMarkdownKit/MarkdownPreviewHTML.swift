@@ -8,7 +8,7 @@ public enum MarkdownPreviewHTML {
                               excerptMessage: String) -> String {
         let light = themes?.light ?? .system(dark: false)
         let dark = themes?.dark ?? .system(dark: true)
-        let style = markdownStyle(light)
+        let style = semanticStyle()
         let body = document.blocks.flatMap { source in
             Markdown.parse(source, style: style).map { blockHTML($0, source: source) }
         }.joined(separator: "\n")
@@ -21,8 +21,8 @@ public enum MarkdownPreviewHTML {
         :root { \(variables(light)) }
         @media (prefers-color-scheme: dark) { :root { \(variables(dark)) } }
         * { box-sizing: border-box; }
-        html { background: var(--ground); color: var(--ink); }
-        body { margin: 0; padding: 32px clamp(20px, 5vw, 52px); background-image: var(--pattern); background-size: var(--pattern-size); }
+        html { min-height: 100%; color: var(--ink); background-color: var(--ground); background-image: var(--pattern); background-size: var(--pattern-size); }
+        body { margin: 0; padding: 32px clamp(20px, 5vw, 52px); }
         article { max-width: 840px; margin: auto; font-family: var(--font), -apple-system, sans-serif; font-size: var(--size); line-height: 1.65; overflow-wrap: anywhere; }
         article > :first-child { margin-top: 0; }
         h1,h2,h3,h4,h5,h6 { line-height: 1.25; margin: 1.4em 0 .55em; font-weight: 650; }
@@ -31,7 +31,7 @@ public enum MarkdownPreviewHTML {
         ul,ol { padding-left: 1.7em; } li { padding-left: .2em; }
         blockquote { color: var(--secondary); border-left: 3px solid var(--accent); padding: .2em 1em; }
         a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
-        code,pre { font-family: var(--code-font), monospace; font-size: var(--code-size); }
+        code,pre { font-family: var(--code-font), ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--code-size); }
         code { background: var(--panel); border-radius: 3px; padding: .13em .3em; }
         pre { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; overflow: auto; white-space: pre; overflow-wrap: normal; }
         pre code { padding: 0; background: none; font-size: inherit; }
@@ -43,19 +43,23 @@ public enum MarkdownPreviewHTML {
         """
     }
 
-    private static func markdownStyle(_ theme: MarkdownPreviewTheme) -> MarkdownStyle {
-        MarkdownStyle(font: NSFont(name: theme.fontName, size: 16) ?? .systemFont(ofSize: 16),
-                      textColor: .labelColor, secondaryColor: .secondaryLabelColor,
-                      codeFont: NSFont(name: theme.codeFontName, size: 13) ?? .monospacedSystemFont(ofSize: 13, weight: .regular),
-                      codeColor: .labelColor, codeBackground: .textBackgroundColor, linkColor: .linkColor)
+    /// The parser marks emphasis with font traits, so it is read through faces that always have
+    /// bold and italic. The theme's family can lack either — Windows 98's has neither — and
+    /// detecting through it erased emphasis that CSS draws fine. CSS owns the visible family.
+    private static func semanticStyle() -> MarkdownStyle {
+        let size: CGFloat = 16
+        return MarkdownStyle(font: .systemFont(ofSize: size), textColor: .labelColor,
+                             secondaryColor: .secondaryLabelColor,
+                             codeFont: .monospacedSystemFont(ofSize: size, weight: .regular),
+                             codeColor: .labelColor, codeBackground: .textBackgroundColor, linkColor: .linkColor)
     }
 
     private static func blockHTML(_ block: MarkdownBlock, source: String) -> String {
         switch block {
         case .paragraph(let text): return "<p>\(inlineHTML(text))</p>"
         case .heading(let text):
-            let level = min(6, max(1, source.prefix { $0 == "#" }.count))
-            return "<h\(level)>\(inlineHTML(text))</h\(level)>"
+            let level = Markdown.headingLevel(ofSource: source) ?? 1
+            return "<h\(level)>\(inlineHTML(text, inHeading: true))</h\(level)>"
         case .bullets(let items): return list(items, tag: "ul")
         case .ordered(let items): return list(items, tag: "ol")
         case .code(let text): return "<pre><code>\(escaped(text))</code></pre>"
@@ -76,14 +80,15 @@ public enum MarkdownPreviewHTML {
         "<\(tag)>" + items.map { "<li>\(inlineHTML($0))</li>" }.joined() + "</\(tag)>"
     }
 
-    private static func inlineHTML(_ text: NSAttributedString) -> String {
+    /// A heading's own face is bold, so inside one only italic is emphasis the source asked for.
+    private static func inlineHTML(_ text: NSAttributedString, inHeading: Bool = false) -> String {
         var html = ""
         text.enumerateAttributes(in: NSRange(location: 0, length: text.length)) { attributes, range, _ in
             var run = escaped(text.attributedSubstring(from: range).string)
             if attributes[.backgroundColor] != nil { run = "<code>\(run)</code>" }
             if let font = attributes[.font] as? NSFont {
                 let traits = font.fontDescriptor.symbolicTraits
-                if traits.contains(.bold) { run = "<strong>\(run)</strong>" }
+                if traits.contains(.bold), !inHeading { run = "<strong>\(run)</strong>" }
                 if traits.contains(.italic) { run = "<em>\(run)</em>" }
             }
             if let url = attributes[.link] as? URL, MarkdownExternalURLPolicy.externalWebURL(url) != nil {
@@ -102,13 +107,18 @@ public enum MarkdownPreviewHTML {
         if let marks = theme.pattern, marks.spacing.isFinite, marks.width.isFinite {
             let spacing = min(64, max(8, marks.spacing)), width = min(6, max(0.5, marks.width))
             let ink = color(marks.color)
+            patternSize = "\(spacing)px \(spacing)px"
             if marks.kind == "dots" {
                 pattern = "radial-gradient(circle, \(ink) \(width / 2)px, transparent \(width / 2)px)"
-            } else if marks.kind == "grid" || marks.kind == "diagonal_grid" || marks.kind == "perspective_grid" {
-                let angle = marks.kind == "diagonal_grid" ? 45 : 0
-                pattern = "linear-gradient(\(angle)deg, \(ink) \(width)px, transparent \(width)px),linear-gradient(\(angle + 90)deg, \(ink) \(width)px, transparent \(width)px)"
+            } else if marks.kind == "grid" || marks.kind == "perspective_grid" {
+                pattern = "linear-gradient(0deg, \(ink) \(width)px, transparent \(width)px),linear-gradient(90deg, \(ink) \(width)px, transparent \(width)px)"
+            } else if marks.kind == "diagonal_grid" {
+                // A rotated gradient inside a square tile draws a notch per corner, not a line;
+                // repeating stripes run continuously across tiles.
+                let stripe = "\(ink) 0 \(width)px, transparent \(width)px \(spacing)px"
+                pattern = "repeating-linear-gradient(45deg, \(stripe)),repeating-linear-gradient(-45deg, \(stripe))"
+                patternSize = "auto"
             }
-            patternSize = "\(spacing)px \(spacing)px"
         }
         return """
         --ground:\(color(theme.background));--ink:\(color(theme.text));--secondary:\(color(theme.secondary));

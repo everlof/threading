@@ -56,6 +56,11 @@ reshuffling it is a line move.
   follows the same order. The durable record is in
   [`accounts.md`](../architecture/accounts.md#project-default-accounts). It shares its "the list is
   the consent" rule with usage-aware accounts §B1, whose app-wide order is still to come.
+- [Persistent agents and memory](persistent-agents-and-memory.md) — researched implementation
+  plan: named agent identities shared by chats and autonomous workers, explicit revisioned memory,
+  protected export/recovery and bounded retrieval. Includes Rindabox's concrete acceptance cases,
+  UUID-preserving adoption and a consumer-managed remote chat path that retains application grants.
+
 ### Next — researched and ready, waiting for a slot
 
 - [Agent mail](agent-mail.md) — durable, cross-host messages between agents: a mailbox per host,

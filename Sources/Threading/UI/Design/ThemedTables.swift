@@ -1451,6 +1451,8 @@ public final class ThemedDocumentTableView: NSView, ThemedComponent {
     private let scrollView = ThemedScrollView()
     private let canvas: ThemedDocumentTableCanvas
     private var themeRedraw: ThemeRedraw?
+    /// The width the grid was last offered: the one it was built for until it has a frame.
+    private var offeredWidth: CGFloat
 
     public init(
         headers: [NSAttributedString],
@@ -1466,6 +1468,7 @@ public final class ThemedDocumentTableView: NSView, ThemedComponent {
             availableWidth: availableWidth,
             minimumColumnWidth: minimumColumnWidth
         )
+        offeredWidth = availableWidth
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         themeRedraw = ThemeRedraw(self)
@@ -1480,6 +1483,7 @@ public final class ThemedDocumentTableView: NSView, ThemedComponent {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.drawsBackground = false
         scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
         scrollView.hasVerticalScroller = false
         scrollView.horizontalScrollElasticity = .allowed
         scrollView.verticalScrollHandoff = .always
@@ -1503,13 +1507,22 @@ public final class ThemedDocumentTableView: NSView, ThemedComponent {
         let widthChanged = abs(newSize.width - frame.width) > 0.5
         super.setFrameSize(newSize)
         guard widthChanged, newSize.width > 0 else { return }
-        if canvas.updateAvailableWidth(newSize.width) {
+        let overflowed = overflowsHorizontally
+        offeredWidth = newSize.width
+        if canvas.updateAvailableWidth(newSize.width) || overflowsHorizontally != overflowed {
             invalidateIntrinsicContentSize()
         }
     }
 
+    /// Known from the grid and the width it was offered, before any layout: the minimum column
+    /// width is what makes a table wider than its pane, and only then is a scroller shown.
+    private var overflowsHorizontally: Bool { canvas.frame.width > offeredWidth + 0.5 }
+
     public override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: scrollView.heightToFitContent(canvas.frame.height))
+        NSSize(
+            width: NSView.noIntrinsicMetric,
+            height: scrollView.heightToFitContent(canvas.frame.height, overflowsHorizontally: overflowsHorizontally)
+        )
     }
 }
 

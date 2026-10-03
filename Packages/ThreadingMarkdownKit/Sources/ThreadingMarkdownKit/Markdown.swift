@@ -77,8 +77,14 @@ public enum Markdown {
     /// keep these small source values as their presentation model and style a block only when
     /// AppKit asks for its row.
     nonisolated public static func sourceBlocks(_ text: String) -> [String] {
+        sourceBlockLines(text).map(\.source)
+    }
+
+    /// The same blocks with the zero-based source line each one starts on, so an editor can
+    /// tell which bounded page holds the line being typed without re-deriving block boundaries.
+    nonisolated public static func sourceBlockLines(_ text: String) -> [(source: String, line: Int)] {
         let lines = text.components(separatedBy: "\n")
-        var blocks: [String] = []
+        var blocks: [(source: String, line: Int)] = []
         var index = 0
 
         while index < lines.count {
@@ -92,14 +98,21 @@ public enum Markdown {
             // recovery path anyway: this parser consumes provider text, and a future reader bug
             // must render one line plainly rather than terminate the app.
             guard end > index else {
-                blocks.append(lines[index])
+                blocks.append((lines[index], index))
                 index += 1
                 continue
             }
-            blocks.append(lines[index..<end].joined(separator: "\n"))
+            blocks.append((lines[index..<end].joined(separator: "\n"), index))
             index = end
         }
         return blocks
+    }
+
+    /// The level of a heading block's source line, or nil when the block is not a heading.
+    nonisolated public static func headingLevel(ofSource source: String) -> Int? {
+        // A heading marker is at most six hashes and a space; never copy a long block to ask.
+        let markerLength = 8
+        return headingLevel(String(source.drop { $0 == " " || $0 == "\t" }.prefix(markerLength)))
     }
 
     private static func firstMatch(

@@ -8,18 +8,44 @@ reads resolve symlinks on the worker so aliases converge on the same document.
 The vertical `ThemedSplitView` places plain, undoable `ThemedTextView` source on the left and
 native `MarkdownView` on the right. Preview uses exactly the conversation renderer and its
 CommonMark subset: headings, paragraphs, fenced code, simple lists, quotes, emphasis, links and
-pipe tables. It does not add a WebKit Markdown engine. The secondary window keeps native macOS
+pipe tables. It does not add a WebKit Markdown engine.
+
+The parser and block views are shared; the *setting* is not. `MarkdownPresentation.document`
+gives the editor what a chat answer deliberately flattens — distinct H1–H4 sizes
+(`Design.Typography.documentHeading`), `Spacing.large` above a heading and `Spacing.medium`
+between blocks — while `.conversation` keeps the transcript's single heading step. Rendered
+prose is centred at `Design.Size.readableWidth`; both panes start their first line
+`Spacing.large` below the band. The source stays one monospaced face: `MarkdownSourceHighlighter`
+only recolours structural marks (heading hashes, list/quote markers, fences, rules, table pipes,
+emphasis and code delimiters, link brackets and targets) to tertiary ink, never font or
+metrics, so caret geometry and the code font's recorded role are untouched and the dynamic
+inks follow a live theme switch. Underscores are not tinted: they are more often `snake_case`
+than emphasis. The header carries a quiet word count (runs holding a letter or digit, so
+Markdown's own marks are not words) and a tertiary Save.
+
+**The preview follows the page being edited.** A README longer than one bounded page used to
+return the preview to page one on every keystroke. The worker maps the caret's source line to
+the page holding it (`Markdown.sourceBlockLines`), the reader's scroll position survives an
+edit on the same page, and a theme rebuild keeps the page on screen. Loading a document puts
+the caret at its start, because assigning `NSTextView.string` leaves it after the last
+character. New windows cascade from the key editor instead of stacking exactly over it. The secondary window keeps native macOS
 caption hardware, following detached-browser and gallery policy; all content, controls, text
 selection, divider and scrolling belong to the current theme and respond to live changes.
 The split view owns its direct pane frames; Auto Layout only owns each pane's contents.
 `ThemedTextScrollView.fillsViewport` sizes the empty source after clip-view tiling, making the
 complete source pane clickable. Finite code and table blocks reserve scrollbar chrome through
-`ThemedScrollView.heightToFitContent`, so classic themes cannot hide the final line or row.
+`ThemedScrollView.heightToFitContent`, so classic themes cannot hide the final line or row —
+and only while the block is wider than the pane, so a block that fits draws no empty trough.
 
 Document keys are scoped to the key editor window before the application menu handles them:
-⌘N new, ⌘O open, ⌘S save, ⇧⌘S Save As and ⌘W close. The application command register exposes
-the same host operations without competing default global chords. The main window retains its
-existing ⌘N/⌘O/⌘S/⇧⌘S meanings. The source header also exposes Save.
+⌘N new, ⌘O open, ⌘W close, ⌘S save and ⇧⌘S Save As. One table,
+`MarkdownEditorDefaults.documentShortcuts`, drives both the window's dispatch and what the menu
+bar shows. While an editor is key, `applyShortcutBindings` prints those chords on the File items
+(a person's own binding for one of them wins) and takes them off the main window's commands —
+New Session, Open In, Close Tab, Toggle Sidebar, Silence Sounds — which get them back when the
+editor stops being key. Before that the editor took the keys silently while View still printed
+⌘S beside Toggle Sidebar. Save, Save As and Close are unavailable while a sheet or close
+question is up, so a menu key cannot start a second sheet. The source header also exposes Save.
 
 ## File authority and lifetime
 
@@ -27,16 +53,32 @@ existing ⌘N/⌘O/⌘S/⇧⌘S meanings. The source header also exposes Save.
 coordinated atomic writes away from the main actor. Reads are capped at 1 MiB plus one sentinel
 byte; invalid UTF-8 and non-regular files are refused. Source is never silently truncated.
 Saves compare the current disk bytes with the exact opened/last-saved bytes before replacing
-the file. An external edit refuses the save and offers Save As in the refusal copy; the editor
-keeps the unsaved text. Save As uses the system panel's explicit overwrite decision, and saving
-to the same path retains the baseline check. Edits made while a write is pending remain dirty
-after the submitted snapshot is saved.
+the file. A file that changed since is never replaced by an ordinary save: the non-suppressible
+`.replaceChangedMarkdownDocument` choice offers Replace (`replaceOnDisk`) or Save As…, and
+Cancel keeps the unsaved text. Save As uses the system panel's explicit overwrite decision, and
+saving to the same path retains the baseline check. Edits made while a write is pending remain
+dirty after the submitted snapshot is saved.
+
+**The file is shared with agents.** `MarkdownDocumentWatcher` watches the open path with two
+non-recursive vnode sources — the file (in-place writes) and its folder (an atomic save's new
+inode, a rename, a delete) — and costs one `stat` per coalesced event; a recursive FSEvents
+stream would have watched the whole home directory for a note kept there. Only a moved `stat`
+signature reaches the main actor, where the bytes are read off-main and compared with the
+baseline, so the editor's own saves change nothing. An unedited document follows the file as one
+undoable edit of only the span that differs, keeping caret and scroll. Unsaved edits are never
+replaced: a `PaneNoticeView` above the source offers Reload, itself undoable. A file moved or
+deleted keeps the document open and dirty, and Save writes it back. A file that can no longer
+be read here (over 1 MiB, invalid UTF-8) says so and leaves saving to the replace choice.
 
 Close and quit review dirty documents using the non-suppressible `.closeMarkdownDocument`
-choice. Cancel and failed/cancelled saves preserve the open editor. Quit reviews precede every
-agent/store shutdown operation and recheck document revisions so another edit during a later
-window's question cannot be discarded by stale consent. Drafts are in memory, with explicit
-saves to user-selected files; window and draft restoration are not part of this surface.
+choice. Cancel and failed/cancelled saves preserve the open editor. A close or quit pressed
+while a save is in flight waits for it and then asks only if something is still unsaved;
+refusing made ⌘Q during a save do nothing. Quit review precedes every agent/store shutdown
+operation and answers with `.terminateLater`: the sheets run, then
+`reply(toApplicationShouldTerminate:)` carries the rest of the termination decision. The first
+version cancelled the quit and called `terminate` again, which also cancelled a logout or
+restart that had asked to quit. Drafts are in memory, with explicit saves to user-selected
+files; window and draft restoration are not part of this surface.
 
 ## Scaling contract
 
@@ -48,7 +90,11 @@ from replacing a newer preview. Mounting, theme rebuild and layout materialize o
 renderer page (48 source blocks / 96 source lines, with its existing nested list/table budgets).
 A block above 32 KiB pauses the preview before any attributed document or block views are
 constructed. All source remains readable, editable and saveable. Layout and scrolling perform
-no file work or whole-source scans.
+no file work or whole-source scans. The word count and caret line are computed by the same
+worker. Source tinting re-colours only the paragraphs an edit touched, reading the storage's
+own `mutableString` (bridging `textStorage.string` copied the whole document on every
+keystroke). A loaded document tints its first 64 KiB synchronously and the rest in 64 KiB
+slices, one per main-actor turn; an edit made before the slices finish moves the remainder.
 
 `MarkdownEditorTests.testStressPreviewKeepsOnlyOneBoundedNativePage` reports preparation/mount,
 layout and live-preview-view count through the shipping controller. Behavior tests cover undo,
@@ -85,6 +131,14 @@ inks through `MarkdownStyle`; conversation heading fonts still resolve in the co
 surface. Quick Look presents those exact parsed blocks and runs as semantic HTML. Headings,
 quotes, lists, tables and fenced code become readable document structure. Raw HTML is escaped,
 there are no scripts or external images, and a content-security policy forbids resource loads.
+
+Emphasis is read from the parser's font traits through system faces that always have bold
+and italic; the theme's family is CSS's to draw. Detecting through the theme's own family
+erased emphasis wherever it lacks those faces — Windows 98's has neither. The backdrop pattern
+is painted on the root element so it covers the whole canvas, a diagonal grid is drawn with
+repeating stripes (a rotated gradient in a square tile draws corner notches, not lines), and
+code falls back through `ui-monospace` rather than WebKit's Courier when Quick Look cannot load
+the theme's code family.
 
 The preview worker reads at most 1 MiB plus one sentinel byte, closes the handle before display,
 and refuses non-regular files and invalid UTF-8. It selects at most 256 blocks, 128 KiB of source

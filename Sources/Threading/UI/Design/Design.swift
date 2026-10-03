@@ -773,6 +773,27 @@ public enum Design {
             )
         }
 
+        /// How far each standalone-document heading level stands above the body, H1 first.
+        /// Deeper levels share the last step.
+        public static let documentHeadingSteps: [CGFloat] = [11, 7, 3, 1]
+
+        /// A standalone document keeps the hierarchy an answer deliberately flattens: a title
+        /// and its sections must read as different levels, where a chat heading is one quiet
+        /// step above the prose around it. The theme's heading style still owns weight and slant.
+        public static func documentHeading(
+            level: Int,
+            from base: NSFont,
+            surface: FontSurface = .chrome
+        ) -> NSFont {
+            let steps = documentHeadingSteps
+            let step = steps[min(max(level, 1), steps.count) - 1]
+            return heading(
+                pointSize: base.pointSize + scaled(step),
+                defaultWeight: level <= 2 ? .bold : .semibold,
+                surface: surface
+            )
+        }
+
         /// The height `NSString.draw(in:)` actually lays a single line out at, so a rect built
         /// from it **centres** the words instead of top-aligning them in slack.
         ///

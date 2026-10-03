@@ -203,6 +203,8 @@ final class AppSettingDefinitionTests: XCTestCase {
             .previewsSidebarChats: .init(key: "previewsSidebarChats", valueType: .boolean),
             .showsHiddenProjects: .init(key: "showsHiddenProjects", valueType: .boolean),
             .unhidesProjectsOnWriting: .init(key: "unhidesProjectsOnWriting", valueType: .boolean),
+            .autoHidesInactiveProjects: .init(key: "autoHidesInactiveProjects", valueType: .boolean),
+            .projectAutoHideDays: .init(key: "projectAutoHideDays", valueType: .integer),
             .nativeSidebarGroupByFact: .init(
                 key: "nativeSidebarGroupByFact",
                 valueType: .string
@@ -541,9 +543,9 @@ final class AppSettingDefinitionTests: XCTestCase {
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
 #if DEBUG || THREADING_INTERNAL
-        XCTAssertEqual(authoredRows.count, 98)
+        XCTAssertEqual(authoredRows.count, 100)
 #else
-        XCTAssertEqual(authoredRows.count, 97)
+        XCTAssertEqual(authoredRows.count, 99)
 #endif
         XCTAssertEqual(
             // Markdown associations are OS-owned actions, not persisted AppSettings.
@@ -582,6 +584,7 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Sort sessions by", "Sort direction", "Show five chats per project",
             "Group sessions by branch", "Follow the checkout's branch", "Compact tree",
             "Unhide projects when writing in their chats",
+            "Auto-hide inactive projects", "Days without activity",
             "Name sessions after the agent's own title", "Discover project icons",
             "Discover account avatars"
         ])

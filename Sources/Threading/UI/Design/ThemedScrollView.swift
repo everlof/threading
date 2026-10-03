@@ -2831,20 +2831,80 @@ public class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBounda
         return nil
     }
 
-    /// A table with a header makes AppKit insert a second clip view beside `contentView`.
-    /// It is framework-owned and cannot be replaced through the public API, but its stock
-    /// background is still ours to neutralise.
     /// A finite document block reserves the space consumed by non-overlay scrollbars.
     /// Its content height alone would hide the last line in themes with classic scrollers.
-    public func heightToFitContent(_ height: CGFloat) -> CGFloat {
-        Self.frameSize(
+    ///
+    /// An autohiding horizontal scroller is shown only while the document is wider than the
+    /// strip, so its track is reserved only then. Reserving it always drew an empty trough
+    /// under every short code block and table in Windows 98 and the other classic themes.
+    /// A host that knows both widths before layout says whether the document overflows.
+    public func heightToFitContent(_ height: CGFloat, overflowsHorizontally: Bool? = nil) -> CGFloat {
+        let reservesTrack = hasHorizontalScroller
+            && (!autohidesScrollers || (overflowsHorizontally ?? documentOverflowsHorizontally))
+        return Self.frameSize(
             forContentSize: NSSize(width: 0, height: height),
-            horizontalScrollerClass: hasHorizontalScroller ? ThemedScroller.self : nil,
+            horizontalScrollerClass: reservesTrack ? ThemedScroller.self : nil,
             verticalScrollerClass: hasVerticalScroller ? ThemedScroller.self : nil,
             borderType: borderType, controlSize: .regular, scrollerStyle: scrollerStyle
         ).height + contentInsets.top + contentInsets.bottom
     }
 
+    /// Whether the document is wider than the strip — the only time a horizontal scroller has
+    /// anything to do. A strip not yet laid out is assumed to overflow: guessing wrong costs a
+    /// track's height for one pass, where the other guess could hide a block's last line.
+    public var documentOverflowsHorizontally: Bool {
+        guard let documentView else { return false }
+        let visible = contentView.bounds.width
+        return visible <= 0 || documentView.frame.width > visible + Self.fittedHeightTolerance
+    }
+
+    /// The document height of a finite strip that scrolls only sideways, such as a code block.
+    /// Set, the strip's intrinsic height is `heightToFitContent` of it and its scroller
+    /// autohides; once laid out, a strip whose answer changed re-measures the table row it
+    /// sits in, because an automatically sized row keeps the height it was first solved at.
+    public var fittedDocumentHeight: CGFloat? {
+        didSet {
+            guard fittedDocumentHeight != oldValue else { return }
+            if fittedDocumentHeight != nil { autohidesScrollers = true }
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    private static let fittedHeightTolerance: CGFloat = 0.5
+    private var reportedFittedHeight: CGFloat?
+
+    public override var intrinsicContentSize: NSSize {
+        guard let fittedDocumentHeight else { return super.intrinsicContentSize }
+        let height = heightToFitContent(fittedDocumentHeight)
+        reportedFittedHeight = height
+        return NSSize(width: NSView.noIntrinsicMetric, height: height)
+    }
+
+    private func refitDocumentHeight() {
+        guard let fittedDocumentHeight, let reported = reportedFittedHeight,
+              abs(heightToFitContent(fittedDocumentHeight) - reported) > Self.fittedHeightTolerance else { return }
+        invalidateIntrinsicContentSize()
+        // Outside the layout pass that discovered it: a row re-measured mid-layout re-enters it.
+        Task { @MainActor [weak self] in self?.remeasureEnclosingRow() }
+    }
+
+    private func remeasureEnclosingRow() {
+        var ancestor = superview
+        while let view = ancestor {
+            view.invalidateIntrinsicContentSize()
+            view.needsLayout = true
+            if let table = view as? NSTableView {
+                let row = table.row(for: self)
+                if row >= 0 { table.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row)) }
+                return
+            }
+            ancestor = view.superview
+        }
+    }
+
+    /// A table with a header makes AppKit insert a second clip view beside `contentView`.
+    /// It is framework-owned and cannot be replaced through the public API, but its stock
+    /// background is still ours to neutralise.
     public override func tile() {
         super.tile()
         if AppThemePalette.current.material(
@@ -2881,6 +2941,7 @@ public class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBounda
         for case let clip as NSClipView in subviews where clip !== contentView {
             clip.drawsBackground = false
         }
+        refitDocumentHeight()
     }
 
     public func permitsSystemChrome(_ view: NSView) -> Bool {

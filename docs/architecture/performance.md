@@ -117,6 +117,32 @@ progress, partial newline handling, replacement and current-boundary publication
 following separately waits for a turn boundary after live-execution evidence, so delayed lifecycle
 observation cannot authorize killing a worktree-creation process.
 
+## Inactive project maintenance
+
+Auto-hide's expected catalog is 50 projects and 2,000 chats; the opt-in fixture carries 25,000
+projects and 100,000 chats. Settings remains a fixed form using existing themed controls. Human
+input resolves one indexed project in O(1) and coalesces its durable activity update at minute
+granularity. Stream, layout, pointer and scroll callbacks never trigger a catalog scan.
+
+Maintenance runs at launch after workspace restoration, on policy changes and hourly while
+enabled. It examines value records in cooperative slices of at most 256 and yields between
+changed project-row commits. One structural sidebar publication ends the pass; hidden chats are
+filtered before native rows are projected. Activity and structural revision fences prevent a
+stale snapshot from hiding fresh work. The stress lane measures catalog traversal and main-actor
+heartbeat gaps separately from fixture construction, SQLite setup and rendered navigation; it
+does not claim to measure bulk database commit or outline layout latency.
+
+The three Debug traversal repetitions measured 174.978 ms median and 320.782 ms maximum. The
+concurrent main-actor heartbeat advanced 1,546 times with a 13.160 ms maximum gap. Fixture
+construction and SQLite setup are outside those timings (the complete test took 18.094 s).
+These are the new maintenance path's measurements, not a before/after speedup or Release launch
+claim.
+
+```bash
+TEST_RUNNER_THREADING_AUTO_HIDE_STRESS=1 scripts/test.sh fast \
+  -only-testing:ThreadingTests/ProjectAutoHideTests/testStressTraversalYieldsToMainActor
+```
+
 ## The layers answer different questions
 
 No one profiler should try to answer everything:
@@ -5694,3 +5720,13 @@ Theme publication coalesces rare changes and writes at most 16 KiB of presentati
 the preview neither starts the app nor reads sessions. Package tests exercise invalid UTF-8,
 oversized files, long blocks and the 256-block stress limit. See
 [`markdown-editor.md`](markdown-editor.md) for document and OS authority.
+
+**Source tinting (2026-10-03).** Matched hosted Debug runs on a 1,017,000-byte fixture, three
+loads and 90 keystrokes each: without tinting, assigning the source took 3.5 ms (median) and a
+keystroke 2.0 ms (median, 13 ms max). A whole-document tint on load took 142 ms, and each
+keystroke rose to 7.1 ms because bridging `textStorage.string` copied the document every edit.
+The shipped highlighter reads `mutableString`, re-tints only the edited paragraphs, and tints a
+load's first 64 KiB synchronously with the rest in 64 KiB main-actor slices.
+`MarkdownEditorTests.testLargeSourceTintsInBoundedSlices` measured a 131 KB load at 15.5 ms;
+the 560 KB preview stress fixture's end-to-end time stayed within its previous range
+(131–157 ms), with 110 live preview views.

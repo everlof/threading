@@ -192,6 +192,7 @@ final class ProjectTerminalViewController: NSViewController {
         }
 
         guard session.refreshForegroundProcess() else { return }
+        ProjectStore.shared.noteTerminalWork(terminalID: terminalID)
         // Retiring a title the last program left behind is a store edit; picking up a new
         // foreground command is not, since the derived name is computed rather than stored.
         // Only the second case still needs the row told.
@@ -208,6 +209,11 @@ final class ProjectTerminalViewController: NSViewController {
 }
 
 extension ProjectTerminalViewController: TerminalSessionDelegate {
+    func terminalSession(_ session: TerminalSession, didReceiveUserInput input: TerminalUserInput) {
+        guard !input.bytes.isEmpty else { return }
+        ProjectStore.shared.noteUserWriting(inTerminal: terminalID)
+    }
+
     func terminalSessionDidStart(_ session: TerminalSession) {
         startDirectoryTracking()
         // The agent surfaces begin capturing at launch so the ring follows a live terminal

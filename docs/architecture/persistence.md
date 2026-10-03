@@ -259,6 +259,29 @@ unregistered key, and `bool(forKey:)` answers `false`, which for every seeded se
 are registered by the readers themselves now; registration is idempotent, and an invariant that
 depends on instantiation order is not an invariant.
 
+### Inactive project visibility
+
+Sidebar auto-hide is opt-in through typed `autoHidesInactiveProjects` and `projectAutoHideDays`
+descriptors (off and 30 days by default; integer range 1–365). It writes the ordinary durable
+`Project.isHidden` flag, so native Mac and iPhone navigation share the result while chats and
+processes remain intact. Turning the policy off does not rewrite existing hidden choices.
+
+`Project.lastInteractionAt` is optional and backward compatible. Human chat/terminal input,
+foreground terminal-command boundaries and new-chat drafts advance it through indexed,
+minute-coalesced project-row writes. Observed work
+boundaries also advance this fence while retaining exact session work timestamps. Explicit Show
+Project commits a fresh fence with the visibility change. Process restoration, titles, checkout
+metadata and appearance changes do not count. Legacy project recency includes creation time,
+chat creation and `lastUsedAt`, and standalone-terminal creation.
+
+`ProjectAutoHideCoordinator` runs only with normal background services, once at launch and on
+policy changes, then hourly while enabled. It excludes the scratchpad, open project, chats with
+work at risk or attention/usage blockers, and busy terminals. Catalog traversal yields after
+256 records and between durable mutations, then publishes one structural navigation update for
+the pass. After yielding it rechecks policy, navigation, the project activity fence, child
+counts and the store’s structural revision. A changed structure ends the stale pass. Store write
+refusal stops the pass; existing rollback and recovery rules remain in force.
+
 ### Typed application-setting descriptors
 
 Persisted app preferences have two representations with different jobs. `AppSettingIdentity` is

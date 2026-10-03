@@ -1,5 +1,38 @@
 import AppKit
 
+/// How a rendered document is set. The parser and block views are shared; only rhythm and the
+/// heading hierarchy differ.
+enum MarkdownPresentation {
+    /// An answer in a transcript: one quiet heading step and the conversation's tight rhythm.
+    case conversation
+    /// A standalone document read on its own: distinct heading levels and air above sections.
+    case document
+
+    @MainActor var blockSpacing: CGFloat {
+        switch self {
+        case .conversation: MarkdownDefaults.blockSpacing
+        case .document: Design.Spacing.medium
+        }
+    }
+
+    /// What a heading stands clear of the block before it, beyond the ordinary rhythm.
+    @MainActor var headingLeading: CGFloat? {
+        switch self {
+        case .conversation: nil
+        case .document: Design.Spacing.large
+        }
+    }
+
+    @MainActor func style(_ style: MarkdownStyle, headingLevel level: Int) -> MarkdownStyle {
+        guard self == .document else { return style }
+        var leveled = style
+        leveled.headingFont = Design.Typography.documentHeading(
+            level: level, from: style.font, surface: .conversation
+        )
+        return leveled
+    }
+}
+
 /// Lays out a rendered markdown document as a vertical stack of block views.
 ///
 /// One view per block on the active bounded page rather than a single attributed string, because
@@ -18,7 +51,12 @@ final class MarkdownView: NSStackView {
     /// styled and turned into AppKit views at a time; keeping a giant answer as one virtual table
     /// row must not recreate an unbounded view/constraint tree inside that row.
     private let blockPages: [[String]]
+    private let presentation: MarkdownPresentation
     private let restyle = AppEventObservations()
+    private weak var pagedContent: MarkdownPagedContentView?
+
+    /// The page on screen, which a theme rebuild keeps rather than returning to the first.
+    var currentPage: Int { pagedContent?.pageIndex ?? 0 }
 
     convenience init(markdown: String, style: @autoclosure @escaping () -> MarkdownStyle = .assistant) {
         self.init(preparedPages: Self.preparePages(markdown), style: style())
@@ -26,17 +64,23 @@ final class MarkdownView: NSStackView {
 
     /// The editor prepares source boundaries on its bounded worker; only the active page is
     /// styled and mounted here, through the same renderer used by native conversations.
-    init(preparedPages: [[String]], style: @autoclosure @escaping () -> MarkdownStyle = .assistant) {
+    init(
+        preparedPages: [[String]],
+        initialPage: Int = 0,
+        presentation: MarkdownPresentation = .conversation,
+        style: @autoclosure @escaping () -> MarkdownStyle = .assistant
+    ) {
         self.style = style
         blockPages = preparedPages
+        self.presentation = presentation
         super.init(frame: .zero)
 
         orientation = .vertical
         alignment = .leading
-        spacing = MarkdownDefaults.blockSpacing
+        spacing = presentation.blockSpacing
         translatesAutoresizingMaskIntoConstraints = false
 
-        build()
+        build(page: initialPage)
 
         // **Markdown does not follow the sweep, and cannot.** Its paragraphs are built
         // `NSAttributedString`s and its bullets and code blocks take a font from a `MarkdownStyle`
@@ -54,12 +98,14 @@ final class MarkdownView: NSStackView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    private func build() {
+    private func build(page initialPage: Int) {
         let style = self.style()
         let pages = blockPages
+        let presentation = self.presentation
 
         let document = MarkdownPagedContentView(
             pageCount: pages.count,
+            initialPage: initialPage,
             pageDescription: { page in
                 return L10n.format(
                     "Page %lld of %lld",
@@ -71,22 +117,30 @@ final class MarkdownView: NSStackView {
                 let pageStack = NSStackView()
                 pageStack.orientation = .vertical
                 pageStack.alignment = .leading
-                pageStack.spacing = MarkdownDefaults.blockSpacing
+                pageStack.spacing = presentation.blockSpacing
                 pageStack.translatesAutoresizingMaskIntoConstraints = false
 
+                var previous: NSView?
                 for source in pages[page] {
-                    for block in Markdown.parse(source, style: style) {
-                        let view = Self.blockView(for: block, style: style)
+                    let level = presentation == .document ? Markdown.headingLevel(ofSource: source) : nil
+                    let blockStyle = level.map { presentation.style(style, headingLevel: $0) } ?? style
+                    for block in Markdown.parse(source, style: blockStyle) {
+                        let view = Self.blockView(for: block, style: blockStyle)
+                        if level != nil, let previous, let leading = presentation.headingLeading {
+                            pageStack.setCustomSpacing(leading, after: previous)
+                        }
                         pageStack.addArrangedSubview(view)
                         NSLayoutConstraint.activate([
                             view.leadingAnchor.constraint(equalTo: pageStack.leadingAnchor),
                             view.trailingAnchor.constraint(equalTo: pageStack.trailingAnchor)
                         ])
+                        previous = view
                     }
                 }
                 return pageStack
             }
         )
+        pagedContent = document
         addArrangedSubview(document)
         NSLayoutConstraint.activate([
             document.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -100,6 +154,21 @@ final class MarkdownView: NSStackView {
     /// strings or AppKit objects for content outside the active page.
     nonisolated static func preparePages(_ markdown: String) -> [[String]] {
         sourcePages(Markdown.sourceBlocks(markdown))
+    }
+
+    /// The same plan plus the page holding source `line`, so an editor's preview follows the
+    /// text being typed instead of returning to the first page whenever the source changes.
+    nonisolated static func preparePages(_ markdown: String, showingLine line: Int) -> (pages: [[String]], page: Int) {
+        let blocks = Markdown.sourceBlockLines(markdown)
+        let pages = sourcePages(blocks.map(\.source))
+        var page = 0
+        var firstBlock = 0
+        for (index, sources) in pages.enumerated() {
+            guard firstBlock < blocks.count, blocks[firstBlock].line <= line else { break }
+            page = index
+            firstBlock += sources.count
+        }
+        return (pages, page)
     }
 
     nonisolated private static func sourcePages(_ sources: [String]) -> [[String]] {
@@ -261,11 +330,12 @@ final class MarkdownView: NSStackView {
     }
 
     private func rebuild() {
+        let page = currentPage
         for view in arrangedSubviews {
             removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        build()
+        build(page: page)
     }
 
     // MARK: - Block Views
@@ -381,6 +451,9 @@ final class MarkdownView: NSStackView {
         document.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(field)
         scroll.documentView = document
+        scroll.fittedDocumentHeight = field.intrinsicContentSize.height
+        scroll.setContentHuggingPriority(.required, for: .vertical)
+        scroll.setContentCompressionResistancePriority(.required, for: .vertical)
         container.addSubview(scroll)
 
         let pad = MarkdownDefaults.codePadding
@@ -389,7 +462,6 @@ final class MarkdownView: NSStackView {
             scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -pad),
             scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: pad),
             scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -pad),
-            scroll.heightAnchor.constraint(equalToConstant: scroll.heightToFitContent(field.intrinsicContentSize.height)),
 
             field.topAnchor.constraint(equalTo: document.topAnchor),
             field.bottomAnchor.constraint(equalTo: document.bottomAnchor),
@@ -440,14 +512,16 @@ private final class MarkdownPagedContentView: NSStackView {
     private let pageCount: Int
     private let pageDescription: (Int) -> String
     private let makePage: (Int) -> NSView
-    private var pageIndex = 0
+    private(set) var pageIndex: Int
 
     init(
         pageCount: Int,
+        initialPage: Int = 0,
         pageDescription: @escaping (Int) -> String,
         makePage: @escaping (Int) -> NSView
     ) {
         self.pageCount = max(pageCount, 1)
+        pageIndex = min(max(initialPage, 0), self.pageCount - 1)
         self.pageDescription = pageDescription
         self.makePage = makePage
         super.init(frame: .zero)

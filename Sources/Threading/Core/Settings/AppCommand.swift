@@ -192,6 +192,7 @@ enum AppCommands {
         static let openMarkdown = "markdown.open"
         static let saveMarkdown = "markdown.save"
         static let saveMarkdownAs = "markdown.saveAs"
+        static let closeMarkdown = "markdown.close"
 
         static let toggleSidebar = "view.sidebar"
         static let groupByBranch = "view.groupByBranch"
@@ -258,6 +259,8 @@ enum AppCommands {
                    defaultShortcut: nil, isEditable: true, iconName: "doc.badge.plus"),
         AppCommand(id: ID.openMarkdown, group: .system, title: "Open Markdown Document…",
                    defaultShortcut: nil, isEditable: true, iconName: "doc.text"),
+        AppCommand(id: ID.closeMarkdown, group: .system, title: "Close Markdown Document",
+                   defaultShortcut: nil, isEditable: true),
         AppCommand(id: ID.saveMarkdown, group: .system, title: "Save Markdown Document",
                    defaultShortcut: nil, isEditable: true),
         AppCommand(id: ID.saveMarkdownAs, group: .system, title: "Save Markdown Document As…",

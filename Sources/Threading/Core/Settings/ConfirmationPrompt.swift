@@ -51,6 +51,9 @@ enum ConfirmationPrompt: String, CaseIterable {
     /// session and the answer changes what that session is.
     case conversationRepairOutcome
     case closeMarkdownDocument
+    /// Saving over a Markdown file something else changed since it was read. Each conflict is a
+    /// different pair of versions, so no answer could be remembered for the next one.
+    case replaceChangedMarkdownDocument
 
     // MARK: Recoverable elsewhere
 
@@ -360,7 +363,7 @@ enum ConfirmationPrompt: String, CaseIterable {
         // about my conversations" is the setting this deliberately cannot have.
         case .conversationRepairOutcome:
             return .alwaysAsks(.newQuestionEachTime)
-        case .closeMarkdownDocument:
+        case .closeMarkdownDocument, .replaceChangedMarkdownDocument:
             return .alwaysAsks(.newQuestionEachTime)
         }
     }

@@ -99,6 +99,113 @@ final class MarkdownEditorTests: XCTestCase {
         XCTAssertFalse(descendants(controller.previewScroll).contains { $0 is MarkdownView })
     }
 
+    /// A README longer than one bounded page must not snap the preview back to its first page
+    /// on every keystroke, and a theme change must not either.
+    func testPreviewFollowsTheEditedPageAndKeepsItAcrossThemeChanges() async throws {
+        let controller = MarkdownEditorWindowController()
+        let source = (1...200).map { "Paragraph \($0)" }.joined(separator: "\n\n")
+        controller.editor.setSource(source)
+        await controller.editor.waitForPreview()
+        XCTAssertEqual(controller.editor.renderedPreview?.currentPage, 0)
+        let text = controller.editor.sourceScroll.textView
+        text.setSelectedRange(NSRange(location: (source as NSString).length, length: 0))
+        text.insertText(" edited", replacementRange: text.selectedRange())
+        await controller.editor.waitForPreview()
+        let lastPage = MarkdownView.preparePages(controller.editor.source).count - 1
+        XCTAssertGreaterThan(lastPage, 0)
+        XCTAssertEqual(controller.editor.renderedPreview?.currentPage, lastPage)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeID.system))
+        await Task.yield()
+        XCTAssertEqual(controller.editor.renderedPreview?.currentPage, lastPage)
+    }
+
+    /// The standalone document sets heading levels apart; a chat answer keeps its single step.
+    func testDocumentPreviewSetsHeadingLevelsApart() async throws {
+        let controller = MarkdownEditorViewController()
+        let source = "# Title\n\n## Section\n\n### Detail\n\nBody"
+        controller.setSource(source)
+        await controller.waitForPreview()
+        let document = fontSizes(in: controller.previewScroll)
+        let title = try XCTUnwrap(document["Title"]), section = try XCTUnwrap(document["Section"])
+        let detail = try XCTUnwrap(document["Detail"]), body = try XCTUnwrap(document["Body"])
+        XCTAssertGreaterThan(title, section)
+        XCTAssertGreaterThan(section, detail)
+        XCTAssertGreaterThan(detail, body)
+        let conversation = fontSizes(in: MarkdownView(markdown: source))
+        XCTAssertEqual(conversation["Title"], conversation["Detail"])
+    }
+
+    func testWordCountIgnoresMarkdownMarksAndEmptyDocumentsInvite() async throws {
+        let controller = MarkdownEditorViewController()
+        controller.setSource("# Title\n\n- one *two*\n\n| a | b |\n| --- | --- |\n\n```\nlet x = 1\n```\n")
+        await controller.waitForPreview()
+        XCTAssertEqual(controller.wordCount.stringValue, L10n.format("%lld words", Int64(8)))
+        controller.setSource("  \n")
+        await controller.waitForPreview()
+        XCTAssertNil(controller.renderedPreview)
+        XCTAssertTrue(descendants(controller.previewScroll).contains {
+            ($0 as? NSTextField)?.stringValue == L10n.string("Start writing to see the preview.")
+        })
+    }
+
+    func testSourceMarksRecedeWithoutTouchingTextOrUndo() throws {
+        let highlighter = MarkdownSourceHighlighter()
+        XCTAssertEqual(highlighter.marks(in: "## Title"), [NSRange(location: 0, length: 2)])
+        XCTAssertEqual(highlighter.marks(in: "- **bold** and `code`"), [
+            NSRange(location: 0, length: 1), NSRange(location: 2, length: 2), NSRange(location: 8, length: 2),
+            NSRange(location: 15, length: 1), NSRange(location: 20, length: 1)
+        ])
+        XCTAssertEqual(highlighter.marks(in: "```swift"), [NSRange(location: 0, length: 8)])
+        XCTAssertEqual(highlighter.marks(in: "| --- | :-: |"), [NSRange(location: 0, length: 13)])
+        XCTAssertEqual(highlighter.marks(in: "See [docs](https://x.y) now"), [
+            NSRange(location: 4, length: 1), NSRange(location: 9, length: 14)
+        ])
+        XCTAssertEqual(highlighter.marks(in: "snake_case #tag"), [])
+
+        let controller = MarkdownEditorWindowController()
+        controller.editor.setSource("# Title\n\nBody")
+        let text = controller.editor.sourceScroll.textView
+        let storage = try XCTUnwrap(text.textStorage)
+        func ink(_ location: Int) -> NSColor? {
+            storage.attribute(.foregroundColor, at: location, effectiveRange: nil) as? NSColor
+        }
+        XCTAssertNotEqual(ink(0), ink(2), "A heading's hashes recede from its words")
+        text.setSelectedRange(NSRange(location: 9, length: 0))
+        text.insertText("## ", replacementRange: text.selectedRange())
+        XCTAssertEqual(ink(9), ink(0))
+        XCTAssertEqual(ink(12), ink(2))
+        AppThemeRefresh.repaint(try XCTUnwrap(controller.window?.contentView))
+        XCTAssertEqual(ink(9), ink(0), "A theme repaint keeps the tint")
+        text.undoManager?.undo()
+        XCTAssertEqual(controller.editor.source, "# Title\n\nBody")
+        XCTAssertEqual(ink(9), ink(2))
+    }
+
+    /// A large document tints its opening synchronously and the rest in bounded slices, and an
+    /// edit made before the slices finish moves the remainder with it.
+    func testLargeSourceTintsInBoundedSlices() async throws {
+        let controller = MarkdownEditorWindowController()
+        let line = "- item with **bold** text\n"
+        let source = String(repeating: line, count: 2 * MarkdownSourceHighlighter.chunkLength / line.utf16.count)
+        let started = ContinuousClock.now
+        controller.editor.setSource(source)
+        let loaded = started.duration(to: .now)
+        let highlighter = controller.editor.highlighter
+        let storage = try XCTUnwrap(controller.editor.sourceScroll.textView.textStorage)
+        let pending = try XCTUnwrap(highlighter.untintedLocation)
+        XCTAssertGreaterThanOrEqual(pending, MarkdownSourceHighlighter.chunkLength)
+        let text = controller.editor.sourceScroll.textView
+        text.setSelectedRange(NSRange(location: 0, length: 0))
+        text.insertText("# ", replacementRange: text.selectedRange())
+        XCTAssertEqual(highlighter.untintedLocation, pending + 2)
+        await highlighter.waitUntilTinted()
+        XCTAssertNil(highlighter.untintedLocation)
+        let mark = storage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        let lastBullet = storage.length - line.utf16.count
+        XCTAssertEqual(storage.attribute(.foregroundColor, at: lastBullet, effectiveRange: nil) as? NSColor, mark)
+        print("MARKDOWN_TINT bytes=\(source.utf8.count) load=\(loaded)")
+    }
+
     func testMarkdownRoutingAndOptInBundleDeclaration() throws {
         XCTAssertTrue(MarkdownFileAssociation.accepts(URL(fileURLWithPath: "/tmp/NOTE.MD")))
         XCTAssertTrue(MarkdownFileAssociation.accepts(URL(fileURLWithPath: "/tmp/note.mc")))
@@ -131,6 +238,15 @@ final class MarkdownEditorTests: XCTestCase {
 
     private func descendants(_ view: NSView) -> [NSView] {
         [view] + view.subviews.flatMap(descendants)
+    }
+
+    private func fontSizes(in view: NSView) -> [String: CGFloat] {
+        var sizes: [String: CGFloat] = [:]
+        for case let field as NSTextField in descendants(view) where field.attributedStringValue.length > 0 {
+            let font = field.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+            sizes[field.stringValue] = font?.pointSize
+        }
+        return sizes
     }
 }
 
@@ -200,6 +316,27 @@ final class MarkdownEditorRenderTests: XCTestCase {
             let bitmap = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
             window.appearance?.performAsCurrentDrawingAppearance { root.cacheDisplay(in: root.bounds, to: bitmap) }
             try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: directory.appendingPathComponent("markdown-editor-\(name).png"))
+
+            // The standing notice a file changed on disk under unsaved edits puts in the source pane.
+            controller.editor.showNotice(PaneNoticeView(
+                tone: .attention,
+                message: L10n.format("“%@” changed on disk. Reload it, or keep editing — saving will ask before replacing it.", "README.md"),
+                actions: [PaneNoticeAction(title: L10n.string("Reload")) {}],
+                onDismiss: {}
+            ))
+            window.appearance?.performAsCurrentDrawingAppearance {
+                AppThemeRefresh.repaint(root)
+                root.layoutSubtreeIfNeeded()
+            }
+            let notice = try XCTUnwrap(controller.editor.notice)
+            let pane = try XCTUnwrap(controller.editor.sourceScroll.superview)
+            let noticeFrame = notice.convert(notice.bounds, to: pane)
+            XCTAssertGreaterThan(noticeFrame.height, 0)
+            XCTAssertEqual(controller.editor.sourceScroll.frame.maxY, noticeFrame.minY, accuracy: 1,
+                           "The notice is pushed into layout above the source, not drawn over it")
+            let noticed = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+            window.appearance?.performAsCurrentDrawingAppearance { root.cacheDisplay(in: root.bounds, to: noticed) }
+            try XCTUnwrap(noticed.representation(using: .png, properties: [:])).write(to: directory.appendingPathComponent("markdown-editor-notice-\(name).png"))
         }
     }
 
@@ -231,5 +368,242 @@ final class MarkdownSettingsRenderTests: HostedStoreTestCase {
             content.cacheDisplay(in: content.bounds, to: bitmap)
             try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: output.appendingPathComponent("markdown-settings-\(name).png"))
         }
+    }
+}
+
+/// The file under an open document is shared with agents, git and other editors. These drive
+/// the real watcher against real writes in a scratch folder.
+@MainActor
+final class MarkdownDocumentDiskTests: XCTestCase {
+    private var directory: URL!
+
+    override func setUpWithError() throws {
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testAnUneditedDocumentFollowsOutsideWritesAndUndoBringsTheLastOneBack() async throws {
+        let (controller, url) = try await openDocument("# Plan\n\nFirst draft.\n")
+        separateUndoSteps(controller)
+        // An agent's save: a new inode under the same name.
+        try Data("# Plan\n\nSecond draft.\n".utf8).write(to: url, options: .atomic)
+        let followed = await eventually { controller.editor.source == "# Plan\n\nSecond draft.\n" }
+        XCTAssertTrue(followed)
+        XCTAssertFalse(controller.isDirty)
+        // An in-place append after the inode changed is still seen.
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("More.\n".utf8))
+        try handle.close()
+        let appended = await eventually { controller.editor.source.hasSuffix("More.\n") }
+        XCTAssertTrue(appended)
+        controller.editor.sourceScroll.textView.undoManager?.undo()
+        XCTAssertEqual(controller.editor.source, "# Plan\n\nSecond draft.\n")
+        XCTAssertTrue(controller.isDirty, "Undoing a reload is an edit against the file")
+    }
+
+    func testEditsAreKeptWhenTheFileChangesAndReloadIsUndoable() async throws {
+        let (controller, url) = try await openDocument("Original\n")
+        let undo = separateUndoSteps(controller)
+        let text = controller.editor.sourceScroll.textView
+        text.setSelectedRange(NSRange(location: 8, length: 0))
+        undo.beginUndoGrouping()
+        text.insertText(" mine", replacementRange: text.selectedRange())
+        undo.endUndoGrouping()
+        try Data("Theirs\n".utf8).write(to: url, options: .atomic)
+        let noticed = await eventually { controller.editor.notice != nil }
+        XCTAssertTrue(noticed)
+        XCTAssertEqual(controller.editor.source, "Original mine\n")
+        XCTAssertTrue(controller.isDirty)
+        let reload = try XCTUnwrap(controller.editor.notice?.actionControls.first)
+        XCTAssertEqual(reload.title, L10n.string("Reload"))
+        reload.performClick()
+        let reloaded = await eventually { controller.editor.source == "Theirs\n" }
+        XCTAssertTrue(reloaded)
+        XCTAssertFalse(controller.isDirty)
+        XCTAssertNil(controller.editor.notice)
+        text.undoManager?.undo()
+        XCTAssertEqual(controller.editor.source, "Original mine\n")
+    }
+
+    func testOwnSavesAreNotMistakenForOutsideChanges() async throws {
+        let (controller, _) = try await openDocument("A\n")
+        let text = controller.editor.sourceScroll.textView
+        text.setSelectedRange(NSRange(location: 1, length: 0))
+        text.insertText(" B", replacementRange: text.selectedRange())
+        let saved = await withCheckedContinuation { done in controller.save { done.resume(returning: $0) } }
+        XCTAssertTrue(saved)
+        try await Task.sleep(for: .milliseconds(600))
+        await controller.waitForDiskCheck()
+        XCTAssertNil(controller.editor.notice)
+        XCTAssertFalse(controller.isDirty)
+        XCTAssertEqual(controller.editor.source, "A B\n")
+    }
+
+    func testADeletedFileKeepsTheDocumentAndSaveWritesItBack() async throws {
+        let (controller, url) = try await openDocument("Keep me\n")
+        try FileManager.default.removeItem(at: url)
+        let missing = await eventually { controller.fileIsMissing }
+        XCTAssertTrue(missing)
+        XCTAssertTrue(controller.isDirty, "Closing now would lose the only copy")
+        XCTAssertNotNil(controller.editor.notice)
+        let saved = await withCheckedContinuation { done in controller.save { done.resume(returning: $0) } }
+        XCTAssertTrue(saved)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "Keep me\n")
+        XCTAssertFalse(controller.isDirty)
+        XCTAssertNil(controller.editor.notice)
+    }
+
+    func testReplaceWritesOverAChangedFileOnlyWhenAsked() async throws {
+        let (controller, url) = try await openDocument("Base\n")
+        let text = controller.editor.sourceScroll.textView
+        text.setSelectedRange(NSRange(location: 4, length: 0))
+        text.insertText(" edit", replacementRange: text.selectedRange())
+        try Data("Other\n".utf8).write(to: url, options: .atomic)
+        do {
+            _ = try await MarkdownEditorFileStore.shared.save(controller.editor.source, to: url, baseline: Data("Base\n".utf8))
+            XCTFail("An ordinary save replaced a file that changed underneath it")
+        } catch MarkdownEditorFileStore.Failure.changedOnDisk {}
+        let replaced = await withCheckedContinuation { done in controller.replaceOnDisk { done.resume(returning: $0) } }
+        XCTAssertTrue(replaced)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "Base edit\n")
+        XCTAssertFalse(controller.isDirty)
+    }
+
+    /// A quit or close pressed while a save is in flight waits for it: refusing made ⌘Q during
+    /// a save do nothing at all.
+    func testReviewDuringASaveWaitsForItInsteadOfRefusing() async throws {
+        let (controller, _) = try await openDocument("A\n")
+        let text = controller.editor.sourceScroll.textView
+        text.setSelectedRange(NSRange(location: 1, length: 0))
+        text.insertText("B", replacementRange: text.selectedRange())
+        controller.save()
+        XCTAssertTrue(controller.needsQuitReview)
+        let mayClose = await withCheckedContinuation { done in
+            controller.reviewUnsavedChanges { done.resume(returning: $0) }
+        }
+        XCTAssertTrue(mayClose)
+        XCTAssertFalse(controller.isDirty)
+    }
+
+    private func openDocument(_ text: String) async throws -> (MarkdownEditorWindowController, URL) {
+        let url = directory.appendingPathComponent("note.md")
+        try Data(text.utf8).write(to: url)
+        let contents = try await MarkdownEditorFileStore.shared.read(url)
+        let controller = MarkdownEditorWindowController(url: url, contents: contents)
+        // The watcher arms on its own queue; a write before it has looked would be its baseline.
+        try await Task.sleep(for: .milliseconds(200))
+        return (controller, contents.url)
+    }
+
+    /// A hosted test never ends a run-loop event, so every edit would share one undo group.
+    /// Each step here is grouped explicitly instead, the way separate events group them.
+    @discardableResult
+    private func separateUndoSteps(_ controller: MarkdownEditorWindowController) -> UndoManager {
+        let undo = controller.editor.sourceScroll.textView.undoManager!
+        undo.groupsByEvent = false
+        return undo
+    }
+
+    private func eventually(timeout: Duration = .seconds(5), _ condition: () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return condition()
+    }
+}
+
+/// While a document is key the menu bar shows its keys, and the main window's commands on the
+/// same chords show none; both come back when the document stops being key.
+@MainActor
+final class MarkdownDocumentShortcutTests: XCTestCase {
+    func testTheMenuBarShowsTheKeyDocumentsShortcutsAndNoCompetingOnes() throws {
+        let previousMainMenu = NSApp.mainMenu
+        let previousWindowsMenu = NSApp.windowsMenu
+        let previousHelpMenu = NSApp.helpMenu
+        defer {
+            NSApp.mainMenu = previousMainMenu
+            NSApp.windowsMenu = previousWindowsMenu
+            NSApp.helpMenu = previousHelpMenu
+        }
+        let delegate = AppDelegate()
+        delegate.setupMenuBar()
+        let menu = try XCTUnwrap(NSApp.mainMenu)
+        let chords = Set(MarkdownEditorDefaults.documentShortcuts.values)
+
+        delegate.applyShortcutBindings(documentIsKey: true)
+        for (id, chord) in MarkdownEditorDefaults.documentShortcuts {
+            let item = try XCTUnwrap(item(id, in: menu))
+            let bound = ShortcutOverrideStore.shared.shortcut(forID: id) ?? chord
+            XCTAssertEqual(item.keyEquivalent, bound.key, id)
+            XCTAssertEqual(item.keyEquivalentModifierMask, bound.modifiers, id)
+        }
+        for item in allItems(in: menu) where !MarkdownEditorDefaults.documentShortcuts.keys.contains(item.representedObject as? String ?? "") {
+            let shown = KeyboardShortcut(key: item.keyEquivalent, modifiers: item.keyEquivalentModifierMask)
+            XCTAssertFalse(chords.contains(shown), "\(item.title) still shows a document key")
+        }
+
+        delegate.applyShortcutBindings(documentIsKey: false)
+        let sidebar = try XCTUnwrap(item(AppCommands.ID.toggleSidebar, in: menu))
+        let sidebarChord = ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.toggleSidebar)
+        XCTAssertEqual(sidebar.keyEquivalent, sidebarChord?.key ?? "")
+        let save = try XCTUnwrap(item(AppCommands.ID.saveMarkdown, in: menu))
+        XCTAssertEqual(save.keyEquivalent, ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.saveMarkdown)?.key ?? "")
+    }
+
+    private func allItems(in menu: NSMenu) -> [NSMenuItem] {
+        menu.items.flatMap { [$0] + ($0.submenu.map(allItems) ?? []) }
+    }
+
+    private func item(_ id: String, in menu: NSMenu) -> NSMenuItem? {
+        allItems(in: menu).first { $0.representedObject as? String == id }
+    }
+}
+
+/// Classic themes draw a real scroller track. A code block or table reserves room for one only
+/// while its content is wider than the block; an always-reserved track was an empty trough.
+@MainActor
+final class MarkdownStripScrollerTests: XCTestCase {
+    func testClassicScrollersTakeRoomOnlyWhileABlockOverflows() throws {
+        defer { AppThemePalette.set(.system) }
+        AppThemePalette.set(AppThemeStyles.win98)
+
+        let short = try codeBlock("let x = 1")
+        XCTAssertEqual(short.strip, short.text, accuracy: 1, "A block that fits keeps no empty track")
+        let wide = try codeBlock(String(repeating: "wide ", count: 120))
+        XCTAssertGreaterThan(wide.strip, wide.text + 4, "A block that overflows keeps its last line clear of the track")
+
+        func table(offered width: CGFloat) -> CGFloat {
+            let cell = NSAttributedString(string: "cell")
+            return ThemedDocumentTableView(
+                headers: [cell, cell, cell], rows: [[cell, cell, cell]],
+                alignments: [.left, .left, .left], availableWidth: width, minimumColumnWidth: 120
+            ).intrinsicContentSize.height
+        }
+        XCTAssertGreaterThan(table(offered: 300), table(offered: 400) + 4, "Only the overflowing table reserves a track")
+    }
+
+    private func codeBlock(_ code: String) throws -> (strip: CGFloat, text: CGFloat) {
+        let view = MarkdownView(markdown: "```\n\(code)\n```")
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        host.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            view.topAnchor.constraint(equalTo: host.topAnchor)
+        ])
+        for _ in 0..<3 { host.layoutSubtreeIfNeeded() }
+        let strip = try XCTUnwrap(descendants(view).compactMap { $0 as? ThemedScrollView }.first { $0.fittedDocumentHeight != nil })
+        return (strip.frame.height, try XCTUnwrap(strip.fittedDocumentHeight))
+    }
+
+    private func descendants(_ view: NSView) -> [NSView] {
+        [view] + view.subviews.flatMap(descendants)
     }
 }

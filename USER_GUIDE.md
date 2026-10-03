@@ -3492,17 +3492,27 @@ Images, files and copying while ThreadingMobile is in the background are not sup
 
 **File ▸ New Markdown Document** opens a separate themed window with editable source on the left
 and a live native preview on the right. Drag the vertical divider to resize either side. The
-preview uses the same Markdown rendering as native chats. **File ▸ Open Markdown Document…**
+preview uses the same Markdown rendering as native chats, set as a document: headings step down
+in size by level and long lines keep a readable width. In the source, Markdown's own marks —
+`#`, list bullets, `>`, fences, table pipes, `**` and backticks — are drawn in a quieter ink so
+your words read first. The header shows a word count. A long document's preview is split into
+pages; it follows the page you are typing on. **File ▸ Open Markdown Document…**
 opens `.md`, `.markdown` or `.mc` files, and reopening a file raises its existing window.
 
 Inside the editor, **⌘N** creates a document, **⌘O** opens one, **⌘S** saves, **⌘⇧S** saves as a
-new file, and **⌘W** closes. The main window keeps its existing shortcuts. The source header
-also has a Save button; Undo and Redo work through the Edit menu. Closing or quitting with
-unsaved edits offers Save, Don't Save and Cancel. Drafts stay in memory until saved.
+new file, and **⌘W** closes. The File menu shows these while an editor is in front; the main
+window keeps its own shortcuts. The source header also has a Save button; Undo and Redo work
+through the Edit menu. Closing or quitting with unsaved edits offers Save, Don't Save and
+Cancel, and a quit that is part of logging out or restarting continues once you have answered.
+Drafts stay in memory until saved.
 
-Files must be UTF-8 text and at most 1 MB. If the file changed on disk since you opened or saved
-it, saving refuses to overwrite it; use Save As to preserve both versions. A Markdown block
-larger than 32 KB pauses the preview while keeping the complete source editable and saveable.
+Files must be UTF-8 text and at most 1 MB. The editor notices when something else changes the
+file — an agent, git, another editor. A document you haven't edited updates to match (**⌘Z**
+brings back what was there). If you have unsaved edits, a notice above the source offers
+**Reload**; otherwise your text stays, and saving asks whether to **Replace** the file or **Save
+As…** a new one. If the file is moved or deleted, the document stays open and saving writes it
+back. A Markdown block larger than 32 KB pauses the preview while keeping the complete source
+editable and saveable.
 
 **Settings ▸ Markdown** lets you explicitly make Threading the default application for `.md`
 files or, separately, `.mc` files treated as Markdown. Both are opt-in; macOS may ask for
@@ -5377,8 +5387,8 @@ What the project list shows and how it orders it.
 - **Layout** — **Show five chats per project**, **Group sessions by branch** (see
   [Grouping sessions by branch](#grouping-sessions-by-branch)), **Follow the checkout's branch**
   (an idle session's recorded branch tracks its checkout, however the switch was made; off, it
-  keeps the branch it last ran on), **Compact tree**, and **Unhide projects when writing in their
-  chats**
+  keeps the branch it last ran on), **Compact tree**, **Unhide projects when writing in their
+  chats**, and **Auto-hide inactive projects** with a configurable day count
 - **Names & Icons** — **Name sessions after the agent's own title** (see [Names](#names)),
   **Discover project icons** (see [Project icons](#project-icons)) and **Discover account
   avatars** (see [Icons and names](#icons-and-names))
@@ -6172,6 +6182,15 @@ prompts for that chat. New extensions are still installed disabled; updates pres
 | Close Tab (the focused drawer/panel tab, else the page on screen; never stops the agent) | Cmd+W |
 | Close Session (stops the agent) | unbound by default — assign one in Settings ▸ Keyboard |
 
+### Markdown Editor (while an editor window is in front)
+| Action | Shortcut |
+|--------|----------|
+| New Markdown Document | Cmd+N |
+| Open Markdown Document | Cmd+O |
+| Close Markdown Document | Cmd+W |
+| Save Markdown Document | Cmd+S |
+| Save Markdown Document As | Cmd+Shift+S |
+
 ### Editing
 | Action | Shortcut |
 |--------|----------|
@@ -6317,6 +6336,14 @@ On Mac, opening a hidden project's project, chat or terminal search result turns
 Projects** and reveals the destination in the sidebar. The project stays marked hidden.
 In **Settings → Sidebar → Layout**, enable **Unhide projects when writing in their chats** to
 restore a hidden project when you type in one of its chats (off by default).
+Enable **Auto-hide inactive projects** in the same section to hide projects after a chosen number
+of days without activity (30 by default, adjustable from 1 to 365). It is off by default, and the
+day count can be set before enabling it. Chat work, terminal commands, typing in chats or
+terminals, and drafting a new chat count as activity. The open project,
+scratchpad, projects with active work or chats waiting for attention, and busy terminals stay
+visible. Threading checks at launch, when the setting changes, and hourly while enabled. Hidden
+projects keep their chats and processes and share their hidden state with iPhone. **Show Project**
+starts a fresh inactivity window. Turning auto-hide off leaves already hidden projects hidden.
 
 The sidebar footer keeps **Settings** on the left and the icon-only **Automations**, mute and
 hidden-project controls on the right.

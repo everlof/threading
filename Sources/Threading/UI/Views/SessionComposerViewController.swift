@@ -827,6 +827,7 @@ final class SessionComposerViewController: NSViewController {
         // otherwise the end of it.
         promptView.onChange = { [weak self] text in
             guard let self, let projectID = self.projectID else { return }
+            if !text.isEmpty { ProjectStore.shared.noteProjectInteraction(projectID: projectID) }
             // While an edit borrows the box, the text in it belongs to the scheduled record,
             // not to the project's draft — writing it through would overwrite the half-typed
             // brief the edit will hand back when it ends.

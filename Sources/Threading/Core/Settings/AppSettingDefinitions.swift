@@ -48,6 +48,8 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case soundEventChoices
     case showsHiddenProjects
     case unhidesProjectsOnWriting
+    case autoHidesInactiveProjects
+    case projectAutoHideDays
     case silencesAllSounds
     case disabledAttachmentDetectionAgentKinds
     case includesAttachmentsOutsideProject
@@ -796,7 +798,7 @@ enum AppSettingDefinitions {
         identity: .usesAgentTitleInSidebar,
         persistenceKey: "usesTerminalTitleInSidebar",
         absence: .registered(true),
-        presentations: [row("sidebar", 7, "Names & Icons", "Name sessions after the agent's own title",
+        presentations: [row("sidebar", 9, "Names & Icons", "Name sessions after the agent's own title",
                             ["naming", "rename"])]
     )
     static let groupsSessionsByBranch = AppSettingDescriptor<Bool>(
@@ -875,14 +877,14 @@ enum AppSettingDefinitions {
         identity: .discoversProjectIcons,
         persistenceKey: "discoversProjectIcons",
         absence: .registered(true),
-        presentations: [row("sidebar", 8, "Names & Icons", "Discover project icons",
+        presentations: [row("sidebar", 10, "Names & Icons", "Discover project icons",
                             ["project icons", "favicon"])]
     )
     static let discoversAccountAvatars = AppSettingDescriptor<Bool>(
         identity: .discoversAccountAvatars,
         persistenceKey: "discoversAccountAvatars",
         absence: .registered(true),
-        presentations: [row("sidebar", 9, "Names & Icons", "Discover account avatars",
+        presentations: [row("sidebar", 11, "Names & Icons", "Discover account avatars",
                             ["account avatars", "Gravatar"])]
     )
     static let harmonizesTerminalBackgrounds = AppSettingDescriptor<Bool>(
@@ -982,6 +984,19 @@ enum AppSettingDefinitions {
         absence: .falseValue,
         presentations: [row("sidebar", 6, "Layout", "Unhide projects when writing in their chats",
                             ["hidden projects", "show hidden", "auto unhide"])]
+    )
+    static let autoHidesInactiveProjects = AppSettingDescriptor<Bool>(
+        identity: .autoHidesInactiveProjects, persistenceKey: "autoHidesInactiveProjects",
+        absence: .falseValue,
+        presentations: [row("sidebar", 7, "Layout", "Auto-hide inactive projects",
+                            ["hide projects", "inactivity", "automatic", "days"])]
+    )
+    static let projectAutoHideDays = AppSettingDescriptor<Int>(
+        identity: .projectAutoHideDays, persistenceKey: "projectAutoHideDays",
+        absence: .registered(ProjectAutoHideDefaults.days),
+        validation: .refusingRange(ProjectAutoHideDefaults.dayRange),
+        presentations: [row("sidebar", 8, "Layout", "Days without activity",
+                            ["auto-hide", "inactivity", "days", "hidden projects"])]
     )
 
     static let silencesAllSounds = AppSettingDescriptor<Bool>(
@@ -1572,7 +1587,9 @@ enum AppSettingDefinitions {
         .init(copiesTerminalSelection), .init(notifiesOnAttention),
         .init(disabledAttentionAlerts), .init(legacyPlaysAttentionAlertSound),
         .init(attentionAlertSound), .init(terminalBellSound), .init(soundEventChoices),
-        .init(showsHiddenProjects), .init(unhidesProjectsOnWriting), .init(silencesAllSounds), .init(disabledAttachmentDetectionAgentKinds),
+        .init(showsHiddenProjects), .init(unhidesProjectsOnWriting),
+        .init(autoHidesInactiveProjects), .init(projectAutoHideDays),
+        .init(silencesAllSounds), .init(disabledAttachmentDetectionAgentKinds),
         .init(includesAttachmentsOutsideProject), .init(capturesPageBeforeAgentActions),
         .init(sessionCheckoutAuthorityPolicy),
         .init(disabledToolGroupIDs), .init(usesContainedExtensionLauncher),

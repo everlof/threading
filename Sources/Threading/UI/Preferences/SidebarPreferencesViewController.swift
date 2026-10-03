@@ -16,6 +16,8 @@ final class SidebarPreferencesViewController: NSViewController {
     private let branchFollowToggle = ThemedToggle()
     private let compactTreeToggle = ThemedToggle()
     private let unhideProjectsToggle = ThemedToggle()
+    private let autoHideProjectsToggle = ThemedToggle()
+    private let autoHideDaysField = ThemedTextField()
     private let terminalTitleToggle = ThemedToggle()
     private let projectIconToggle = ThemedToggle()
     private let accountAvatarToggle = ThemedToggle()
@@ -49,9 +51,25 @@ final class SidebarPreferencesViewController: NSViewController {
                   isOn: AppSettings.shared.unhidesProjectsOnWriting,
                   action: #selector(unhideProjectsChanged))
         unhideProjectsToggle.setAccessibilityIdentifier("settings.sidebar.unhide-projects-on-writing")
+        configure(autoHideProjectsToggle,
+                  isOn: AppSettings.shared.autoHidesInactiveProjects,
+                  action: #selector(autoHideProjectsChanged))
+        autoHideProjectsToggle.setAccessibilityIdentifier("settings.sidebar.auto-hide-projects")
+        autoHideDaysField.applyFont(.body)
+        autoHideDaysField.target = self
+        autoHideDaysField.action = #selector(autoHideDaysChanged)
+        autoHideDaysField.delegate = self
+        autoHideDaysField.setAccessibilityIdentifier("settings.sidebar.auto-hide-days")
+        SettingsUI.preferControlWidth(autoHideDaysField)
+        refreshAutoHideControls()
         appEvents.observe(AppSettingsDidChange.self) { [weak self] change in
-            guard change.affects(AppSettingIdentity.unhidesProjectsOnWriting.rawValue) else { return }
-            self?.unhideProjectsToggle.state = AppSettings.shared.unhidesProjectsOnWriting ? .on : .off
+            if change.affects(AppSettingIdentity.unhidesProjectsOnWriting.rawValue) {
+                self?.unhideProjectsToggle.state = AppSettings.shared.unhidesProjectsOnWriting ? .on : .off
+            }
+            if change.affects(AppSettingIdentity.autoHidesInactiveProjects.rawValue,
+                              AppSettingIdentity.projectAutoHideDays.rawValue) {
+                self?.refreshAutoHideControls()
+            }
         }
         configure(terminalTitleToggle,
                   isOn: AppSettings.shared.usesAgentTitleInSidebar,
@@ -165,6 +183,23 @@ final class SidebarPreferencesViewController: NSViewController {
                 title: "Unhide projects when writing in their chats",
                 subtitle: "Typing in a hidden project's chat shows the project again.",
                 control: unhideProjectsToggle
+            ),
+            SettingsUI.row(
+                title: "Auto-hide inactive projects",
+                subtitle: "Keep old projects out of the sidebar. Chats are kept.",
+                help: SettingsUI.help(
+                    "Auto-hide inactive projects",
+                    "Activity includes chat work, terminal commands, and typing in chats or terminals. The open "
+                        + "project, scratchpad, and projects with running work or chats waiting "
+                        + "for attention stay visible. Find hidden projects with Show Hidden "
+                        + "Projects. Showing a project starts a fresh inactivity window."
+                ),
+                control: autoHideProjectsToggle
+            ),
+            SettingsUI.row(
+                title: "Days without activity",
+                subtitle: "Choose 1 to 365 days.",
+                control: autoHideDaysField
             )
         ])
 
@@ -214,6 +249,27 @@ final class SidebarPreferencesViewController: NSViewController {
     }
 
     // MARK: - Actions
+
+    private func refreshAutoHideControls() {
+        let settings = AppSettings.shared
+        autoHideProjectsToggle.state = settings.autoHidesInactiveProjects ? .on : .off
+        autoHideDaysField.stringValue = String(settings.projectAutoHideDays)
+    }
+
+    @objc private func autoHideProjectsChanged(_ sender: ThemedToggle) {
+        let enabled = sender.state == .on
+        // Commit the threshold before enabling maintenance, including an unfinished field edit.
+        autoHideDaysChanged(autoHideDaysField)
+        AppSettings.shared.autoHidesInactiveProjects = enabled
+    }
+
+    @objc private func autoHideDaysChanged(_ sender: ThemedTextField) {
+        if let days = Int(sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)),
+           ProjectAutoHideDefaults.dayRange.contains(days) {
+            AppSettings.shared.projectAutoHideDays = days
+        }
+        refreshAutoHideControls()
+    }
 
     @objc private func sessionOrderChanged(_ sender: ThemedPopUp) {
         guard let order = sender.selectedItem?.representedValue as? SidebarSessionOrder else {
@@ -276,5 +332,12 @@ final class SidebarPreferencesViewController: NSViewController {
         // rows re-prime lookups as they reconfigure.
         AccountAvatarStore.retryAll()
         NotificationCenter.default.post(ProjectsDidChange())
+    }
+}
+
+extension SidebarPreferencesViewController: NSTextFieldDelegate {
+    func controlTextDidEndEditing(_ notification: Notification) {
+        guard let field = notification.object as? ThemedTextField, field === autoHideDaysField else { return }
+        autoHideDaysChanged(field)
     }
 }

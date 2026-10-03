@@ -3018,6 +3018,17 @@
         }
       }
     },
+    "%lld words" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld ord"
+          }
+        }
+      }
+    },
     "%lld working" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3515,6 +3526,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 verktygsanrop"
+          }
+        }
+      }
+    },
+    "1 word" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 ord"
           }
         }
       }
@@ -5743,6 +5765,17 @@
         }
       }
     },
+    "Activity includes chat work, terminal commands, and typing in chats or terminals. The open project, scratchpad, and projects with running work or chats waiting for attention stay visible. Find hidden projects with Show Hidden Projects. Showing a project starts a fresh inactivity window." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivitet omfattar arbete i chattar, terminalkommandon och att skriva i chattar eller terminaler. Det öppna projektet, kladdblocket och projekt med pågående arbete eller chattar som behöver uppmärksamhet förblir synliga. Hitta dolda projekt med Visa dolda projekt. När du visar ett projekt börjar en ny inaktivitetsperiod."
+          }
+        }
+      }
+    },
     "Adapter: Sonda review-required events" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7869,6 +7902,17 @@
         }
       }
     },
+    "Another app changed this file after you opened it. Replace it with your version, or save yours as a new file." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En annan app ändrade filen efter att du öppnade den. Ersätt den med din version, eller spara din som en ny fil."
+          }
+        }
+      }
+    },
     "Another host already connects to %@." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7942,6 +7986,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Besvara väljaren och fortsätt vid återställning"
+          }
+        }
+      }
+    },
+    "Answer the open question first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Svara på den öppna frågan först."
           }
         }
       }
@@ -9156,6 +9211,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Automatiskt (godkänn åt mig)"
+          }
+        }
+      }
+    },
+    "Auto-hide inactive projects" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dölj inaktiva projekt automatiskt"
           }
         }
       }
@@ -12069,6 +12135,17 @@
         }
       }
     },
+    "Choose 1 to 365 days." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj 1 till 365 dagar."
+          }
+        }
+      }
+    },
     "Choose Enroll iPhone, then on the iPhone open Threading › Settings › Security › Face ID Approvals and type the code shown here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13492,6 +13569,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stäng historik"
+          }
+        }
+      }
+    },
+    "Close Markdown Document" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stäng Markdown-dokument"
           }
         }
       }
@@ -18134,6 +18222,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dagar"
+          }
+        }
+      }
+    },
+    "Days without activity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dagar utan aktivitet"
           }
         }
       }
@@ -27053,6 +27152,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Håll det under %@"
+          }
+        }
+      }
+    },
+    "Keep old projects out of the sidebar. Chats are kept." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Håll gamla projekt borta från sidofältet. Chattarna sparas."
           }
         }
       }
@@ -40892,6 +41002,17 @@
         }
       }
     },
+    "Replace" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ersätt"
+          }
+        }
+      }
+    },
     "Replace…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43124,6 +43245,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spara anteckning"
+          }
+        }
+      }
+    },
+    "Save As…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara som…"
           }
         }
       }
@@ -48693,6 +48825,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Börja använda Threading"
+          }
+        }
+      }
+    },
+    "Start writing to see the preview." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Börja skriva för att se förhandsvisningen."
           }
         }
       }
@@ -56752,13 +56895,13 @@
         }
       }
     },
-    "This file changed on disk. Save a copy to keep both versions." : {
+    "This file changed on disk after it was opened." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Filen har ändrats på disk. Spara en kopia för att behålla båda versionerna."
+            "value" : "Filen har ändrats på disk sedan den öppnades."
           }
         }
       }
@@ -69064,6 +69207,39 @@
         }
       }
     },
+    "“%@” changed on disk" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” har ändrats på disk"
+          }
+        }
+      }
+    },
+    "“%@” changed on disk and can no longer be opened here. Saving will ask before replacing it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” har ändrats på disk och kan inte längre öppnas här. När du sparar får du frågan innan den ersätts."
+          }
+        }
+      }
+    },
+    "“%@” changed on disk. Reload it, or keep editing — saving will ask before replacing it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” har ändrats på disk. Ladda om den, eller fortsätt redigera – när du sparar får du frågan innan den ersätts."
+          }
+        }
+      }
+    },
     "“%@” could not be repaired" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -69181,6 +69357,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“%@” har kopierats till Threading och är inaktiverad tills du aktiverar den."
+          }
+        }
+      }
+    },
+    "“%@” was moved or deleted. Save to write your text back to it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” har flyttats eller raderats. Spara för att skriva tillbaka din text."
           }
         }
       }
