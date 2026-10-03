@@ -590,3 +590,109 @@ final class MacMailSyncTests: XCTestCase {
         XCTAssertEqual(stillQueued, 1, "nothing is settled on a wrong host's word")
     }
 }
+
+// MARK: - The Info panel's Mail section
+
+/// Draws the session Info panel's Mail section from a fixture presentation, light and dark under
+/// System and one stock theme, and asserts what the picture is reviewed for: the rows exist, name
+/// party, host and state, and never carry a message's text.
+@MainActor
+final class SessionMailRenderTests: XCTestCase {
+
+    private static let fixture = SessionMailPresentation(
+        received: [
+            .init(id: UUID(), direction: .received, party: "Deploy bot", host: "vps-1",
+                  state: SessionMailPresentation.words(for: .inbox), isUrgent: true, isProblem: false),
+            .init(id: UUID(), direction: .received, party: "Review pass", host: "this Mac",
+                  state: SessionMailPresentation.words(for: .noticed), isUrgent: false, isProblem: false)
+        ],
+        sent: [
+            .init(id: UUID(), direction: .sent, party: "Worker", host: "vps-1",
+                  state: SessionMailPresentation.words(for: .forwarded), isUrgent: false, isProblem: false),
+            .init(id: UUID(), direction: .sent, party: "Session", host: "build-box",
+                  state: SessionMailPresentation.words(for: .bounced), isUrgent: false, isProblem: true)
+        ]
+    )
+
+    private func panel(_ presentation: SessionMailPresentation?) -> (SessionInfoViewController, ThemedSurfaceView) {
+        let controller = SessionInfoViewController(sessionID: SessionID(), folderPath: NSHomeDirectory())
+        controller.readSource = { completion in completion(.empty) }
+        controller.usageSource = { nil }
+        controller.mailSource = { presentation }
+        let host = ThemedSurfaceView()
+        host.frame = NSRect(x: 0, y: 0, width: 420, height: 520)
+        host.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+        let view = controller.view
+        view.frame = host.bounds
+        view.autoresizingMask = [.width, .height]
+        host.addSubview(view)
+        controller.apply(.empty, isRunning: false)
+        host.layoutSubtreeIfNeeded()
+        return (controller, host)
+    }
+
+    private static func rows(in view: NSView) -> [SessionInfoRowView] {
+        view.subviews.flatMap { ($0 as? SessionInfoRowView).map { [$0] } ?? [] + rows(in: $0) }
+    }
+
+    func testTheSectionListsReceivedAndSentRowsWithoutBodies() {
+        let (controller, _) = panel(Self.fixture)
+        let rows = Self.rows(in: controller.view)
+        XCTAssertEqual(rows.count, 4)
+        let labels = rows.map { $0.accessibilityLabel() ?? "" }
+        XCTAssertTrue(labels.contains { $0.contains("Deploy bot") && $0.contains("vps-1") && $0.contains("Urgent") })
+        XCTAssertTrue(labels.contains { $0.contains(SessionMailPresentation.words(for: .bounced)) })
+
+        let (empty, _) = panel(nil)
+        XCTAssertTrue(Self.rows(in: empty.view).isEmpty)
+    }
+
+    func testRendersTheMailSectionToImages() throws {
+        let directory: URL = {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"], !override.isEmpty {
+                return URL(fileURLWithPath: override)
+            }
+            return URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("ThreadingRenders", isDirectory: true)
+        }()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { AppThemePalette.set(.system) }
+        for (themeName, theme) in [("system", AppTheme.system), ("swiss", AppThemeStyles.swissMinimalist)] {
+            AppThemePalette.set(theme)
+            for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+                var data: Data?
+                NSAppearance(named: appearance)?.performAsCurrentDrawingAppearance {
+                    MainActor.assumeIsolated {
+                        let (_, host) = panel(Self.fixture)
+                        host.appearance = NSAppearance(named: appearance)
+                        AppThemeRefresh.repaint(host)
+                        host.layoutSubtreeIfNeeded()
+                        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        data = rep.representation(using: .png, properties: [:])
+                    }
+                }
+                let png = try XCTUnwrap(data, "the \(themeName) \(name) render produced no image")
+                XCTAssertGreaterThan(png.count, 1_000)
+                try png.write(to: directory.appendingPathComponent("session-mail-\(themeName)-\(name).png"))
+            }
+        }
+    }
+
+    func testPresentationNamesLocalSessionsAndHostsAndCarriesNoText() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SessionMail-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mailbox = MacMailbox(databaseURL: directory.appendingPathComponent("mailbox.db"))
+        let sender = SessionID(), recipient = SessionID()
+        let to = try await mailbox.register(recipient, name: "Review pass")
+        _ = try await mailbox.send(from: sender, senderName: "Fix the importer", to: to, id: UUID(),
+                                   text: "secret body", replyTo: nil, priority: .interrupt, ownerAdmitted: true)
+        let received = SessionMailPresentation(try await mailbox.snapshot(for: recipient, limit: 5)) { _ in nil }
+        XCTAssertEqual(received.received.map(\.party), ["Fix the importer"])
+        XCTAssertEqual(received.received.first?.isUrgent, true)
+        let sent = SessionMailPresentation(try await mailbox.snapshot(for: sender, limit: 5)) {
+            $0 == recipient ? "Review pass" : nil
+        }
+        XCTAssertEqual(sent.sent.map(\.party), ["Review pass"])
+        XCTAssertFalse("\(received)\(sent)".contains("secret body"))
+    }
+}
