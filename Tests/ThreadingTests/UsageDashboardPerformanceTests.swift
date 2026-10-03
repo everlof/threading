@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import Threading
+import ThreadingUsage
 
 /// Deterministic scale regressions for the Usage dashboard's complete data path.
 ///

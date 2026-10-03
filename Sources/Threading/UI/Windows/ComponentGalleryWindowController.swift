@@ -2,6 +2,7 @@ import AppKit
 import ImageIO
 import ThreadingExtensionKit
 import ThinkingOrbs
+import ThreadingUsage
 
 /// A live catalogue of the application's design-system components.
 ///

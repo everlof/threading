@@ -8,17 +8,17 @@ import Foundation
 /// creation can have its own rate, and reasoning is a subset of output rather than another pile
 /// of tokens to add to it. Collapsing these at ingestion would make both cost and cache-savings
 /// impossible to recover honestly later.
-struct UsageTokenCounts: Codable, Equatable, Sendable {
-    var uncachedInput: Int64 = 0
-    var cachedInput: Int64 = 0
-    var cacheWrite: Int64 = 0
+public struct UsageTokenCounts: Codable, Equatable, Sendable {
+    public var uncachedInput: Int64 = 0
+    public var cachedInput: Int64 = 0
+    public var cacheWrite: Int64 = 0
     /// The one-hour portion of `cacheWrite`; the remainder uses the ordinary five-minute rate.
     /// Kept as a subset so presentation and transport can retain one aggregate cache-write total.
-    var cacheWrite1h: Int64 = 0
-    var output: Int64 = 0
-    var reasoning: Int64 = 0
+    public var cacheWrite1h: Int64 = 0
+    public var output: Int64 = 0
+    public var reasoning: Int64 = 0
 
-    init(
+    public init(
         uncachedInput: Int64 = 0,
         cachedInput: Int64 = 0,
         cacheWrite: Int64 = 0,
@@ -36,7 +36,7 @@ struct UsageTokenCounts: Codable, Equatable, Sendable {
 
     /// Some providers report input inclusive of the cached portion. This initializer names that
     /// fact at the adapter boundary so shared code never has to remember which provider does.
-    init(
+    public init(
         inputIncludingCached: Int64,
         cachedInput: Int64,
         cacheWrite: Int64 = 0,
@@ -55,12 +55,12 @@ struct UsageTokenCounts: Codable, Equatable, Sendable {
     }
 
     /// Everything processed by the model. Reasoning is already included in output.
-    var processed: Int64 { uncachedInput + cachedInput + cacheWrite + output }
+    public var processed: Int64 { uncachedInput + cachedInput + cacheWrite + output }
 
     /// The historical Usage page's definition, retained for window-spend summaries.
-    var legacyBilled: Int64 { uncachedInput + cacheWrite + output }
+    public var legacyBilled: Int64 { uncachedInput + cacheWrite + output }
 
-    static func + (lhs: Self, rhs: Self) -> Self {
+    public static func + (lhs: Self, rhs: Self) -> Self {
         Self(
             uncachedInput: lhs.uncachedInput + rhs.uncachedInput,
             cachedInput: lhs.cachedInput + rhs.cachedInput,
@@ -71,14 +71,14 @@ struct UsageTokenCounts: Codable, Equatable, Sendable {
         )
     }
 
-    static func += (lhs: inout Self, rhs: Self) {
+    public static func += (lhs: inout Self, rhs: Self) {
         lhs = lhs + rhs
     }
 
     /// Streaming providers may repeat one response identity while its counters are still growing.
     /// Component-wise maxima retain the completed counters without assuming every field changes
     /// in lockstep or allowing a later copied partial to reduce an already observed total.
-    func mergingMaximums(with other: Self) -> Self {
+    public func mergingMaximums(with other: Self) -> Self {
         Self(
             uncachedInput: max(uncachedInput, other.uncachedInput),
             cachedInput: max(cachedInput, other.cachedInput),
@@ -98,7 +98,7 @@ struct UsageTokenCounts: Codable, Equatable, Sendable {
         case reasoning
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
             uncachedInput: try values.decodeIfPresent(Int64.self, forKey: .uncachedInput) ?? 0,
@@ -110,7 +110,7 @@ struct UsageTokenCounts: Codable, Equatable, Sendable {
         )
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(uncachedInput, forKey: .uncachedInput)
         try values.encode(cachedInput, forKey: .cachedInput)
@@ -124,7 +124,7 @@ struct UsageTokenCounts: Codable, Equatable, Sendable {
 // MARK: - Ledger Provenance
 
 /// How the monetary value beside a record was obtained.
-enum UsageCostSource: String, Codable, Sendable {
+public enum UsageCostSource: String, Codable, Sendable {
     /// The runtime or billing route stated the amount for this response.
     case providerReported
     /// Threading applied one exact, versioned model rate from an official provider source.
@@ -138,29 +138,41 @@ enum UsageCostSource: String, Codable, Sendable {
 /// `parentSessionID` below is optional because older Codex child rollouts identify themselves as
 /// delegated work without always naming their parent. Keeping the role even then is what lets the
 /// machine-wide ledger remain exact without inventing a parent association.
-enum UsageSessionKind: String, Codable, Equatable, Hashable, Sendable {
+public enum UsageSessionKind: String, Codable, Equatable, Hashable, Sendable {
     case root
     case subagent
 }
 
 /// One runtime may route to a different company for inference. OpenCode using OpenRouter is the
 /// motivating case: the runtime owns the session and transcript while OpenRouter owns the bill.
-struct UsageOrigin: Codable, Equatable, Hashable, Sendable {
-    let runtimeID: String
-    let runtimeName: String
-    let billingProviderID: String
-    let billingProviderName: String
+public struct UsageOrigin: Codable, Equatable, Hashable, Sendable {
+    public let runtimeID: String
+    public let runtimeName: String
+    public let billingProviderID: String
+    public let billingProviderName: String
 
-    var seriesID: String { "\(runtimeID)|\(billingProviderID)" }
+    public init(
+        runtimeID: String,
+        runtimeName: String,
+        billingProviderID: String,
+        billingProviderName: String
+    ) {
+        self.runtimeID = runtimeID
+        self.runtimeName = runtimeName
+        self.billingProviderID = billingProviderID
+        self.billingProviderName = billingProviderName
+    }
 
-    var seriesName: String {
+    public var seriesID: String { "\(runtimeID)|\(billingProviderID)" }
+
+    public var seriesName: String {
         if isDirectRuntimeRoute || runtimeID == billingProviderID { return runtimeName }
-        if runtimeID == AgentKind.openCode.rawValue { return billingProviderName }
+        if runtimeID == UsageRuntime.openCode.rawValue { return billingProviderName }
         return "\(runtimeName) · \(billingProviderName)"
     }
 
     private var isDirectRuntimeRoute: Bool {
-        switch AgentKind(rawValue: runtimeID) {
+        switch UsageRuntime(rawValue: runtimeID) {
         case .claude: return billingProviderID == "anthropic"
         case .codex: return billingProviderID == "openai"
         case .grok: return billingProviderID == "xai"
@@ -170,7 +182,7 @@ struct UsageOrigin: Codable, Equatable, Hashable, Sendable {
         }
     }
 
-    static func direct(_ runtime: AgentKind) -> Self {
+    public static func direct(_ runtime: UsageRuntime) -> Self {
         let billing: (String, String)
         switch runtime {
         case .claude: billing = ("anthropic", "Claude")
@@ -187,7 +199,7 @@ struct UsageOrigin: Codable, Equatable, Hashable, Sendable {
         )
     }
 
-    static func openCode(providerID: String) -> Self {
+    public static func openCode(providerID: String) -> Self {
         let normalized = providerID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let id = normalized.isEmpty ? "opencode" : normalized
         let name: String
@@ -200,8 +212,8 @@ struct UsageOrigin: Codable, Equatable, Hashable, Sendable {
         default: name = providerID.isEmpty ? "OpenCode" : providerID
         }
         return Self(
-            runtimeID: AgentKind.openCode.rawValue,
-            runtimeName: AgentKind.openCode.displayName,
+            runtimeID: UsageRuntime.openCode.rawValue,
+            runtimeName: UsageRuntime.openCode.displayName,
             billingProviderID: id,
             billingProviderName: name
         )
@@ -213,27 +225,27 @@ struct UsageOrigin: Codable, Equatable, Hashable, Sendable {
 /// Cached file records retain `identity`; global deduplication is deliberately performed after
 /// all cache hits and misses have been joined. That is what makes an incremental scan as exact as
 /// a cold scan when Claude copied a response into a resume, compaction, or fork.
-struct UsageLedgerRecord: Codable, Equatable, Sendable {
-    let identity: String
-    let sessionID: String
-    let at: Date?
-    let origin: UsageOrigin
-    let accountID: String
-    let accountName: String
-    let model: String
-    let workingDirectory: String
-    let tokens: UsageTokenCounts
-    let reportedCostUSD: Double?
+public struct UsageLedgerRecord: Codable, Equatable, Sendable {
+    public let identity: String
+    public let sessionID: String
+    public let at: Date?
+    public let origin: UsageOrigin
+    public let accountID: String
+    public let accountName: String
+    public let model: String
+    public let workingDirectory: String
+    public let tokens: UsageTokenCounts
+    public let reportedCostUSD: Double?
     /// Optional for decoding ledger rows written before transcript provenance was retained.
-    let sessionKind: UsageSessionKind?
+    public let sessionKind: UsageSessionKind?
     /// Provider transcript identity of the parent when the durable source states it.
-    let parentSessionID: String?
+    public let parentSessionID: String?
 
-    var costUSD: Double?
-    var costSource: UsageCostSource
-    var cacheSavingsUSD: Double
+    public var costUSD: Double?
+    public var costSource: UsageCostSource
+    public var cacheSavingsUSD: Double
 
-    init(
+    public init(
         identity: String,
         sessionID: String,
         at: Date?,
@@ -268,7 +280,7 @@ struct UsageLedgerRecord: Codable, Equatable, Sendable {
     }
 
     /// Preserve last-wins provenance while making repeated streaming counters monotonic.
-    func mergingUsageMaximums(with later: Self) -> Self {
+    public func mergingUsageMaximums(with later: Self) -> Self {
         precondition(identity == later.identity)
         let reported = [reportedCostUSD, later.reportedCostUSD]
             .compactMap { $0 }
@@ -294,7 +306,7 @@ struct UsageLedgerRecord: Codable, Equatable, Sendable {
 
 // MARK: - Coverage
 
-enum UsageCoverageState: String, Codable, Sendable {
+public enum UsageCoverageState: String, Codable, Sendable {
     case complete
     case partial
     case unavailable
@@ -304,29 +316,45 @@ enum UsageCoverageState: String, Codable, Sendable {
 /// The report never hides a runtime merely because no authoritative token source exists. A
 /// partial or unavailable source is itself useful information and prevents a plausible-looking
 /// total from being mistaken for whole-machine spend.
-struct UsageSourceCoverage: Codable, Equatable, Sendable {
-    let runtimeID: String
-    let runtimeName: String
-    var state: UsageCoverageState
-    var sourceCount: Int
-    var recordCount: Int
-    var detail: String?
+public struct UsageSourceCoverage: Codable, Equatable, Sendable {
+    public let runtimeID: String
+    public let runtimeName: String
+    public var state: UsageCoverageState
+    public var sourceCount: Int
+    public var recordCount: Int
+    public var detail: String?
+
+    public init(
+        runtimeID: String,
+        runtimeName: String,
+        state: UsageCoverageState,
+        sourceCount: Int,
+        recordCount: Int,
+        detail: String? = nil
+    ) {
+        self.runtimeID = runtimeID
+        self.runtimeName = runtimeName
+        self.state = state
+        self.sourceCount = sourceCount
+        self.recordCount = recordCount
+        self.detail = detail
+    }
 }
 
 // MARK: - Pricing
 
 /// One official list-price row, in US dollars per million tokens.
-struct UsageModelRate: Equatable, Sendable {
-    let providerID: String
-    let model: String
-    let input: Double
-    let cachedInput: Double?
-    let cacheWrite: Double?
-    let cacheWrite1h: Double?
-    let output: Double
-    let longContextThreshold: Int64?
+public struct UsageModelRate: Equatable, Sendable {
+    public let providerID: String
+    public let model: String
+    public let input: Double
+    public let cachedInput: Double?
+    public let cacheWrite: Double?
+    public let cacheWrite1h: Double?
+    public let output: Double
+    public let longContextThreshold: Int64?
 
-    init(
+    public init(
         providerID: String,
         model: String,
         input: Double,
@@ -352,9 +380,9 @@ struct UsageModelRate: Equatable, Sendable {
 /// This is intentionally not a copied community rate dump. Exact identifiers are maintained
 /// from official provider pricing and ambiguous aliases remain unpriced. The version appears in
 /// the Usage page so an estimate never masquerades as an invoice.
-enum UsagePricingCatalog {
-    static let version = "2026-08-28"
-    static let sourceDescription = "Official provider list prices checked 28 Aug 2026"
+public enum UsagePricingCatalog {
+    public static let version = "2026-08-28"
+    public static let sourceDescription = "Official provider list prices checked 28 Aug 2026"
 
     /// Standard, global-processing rows from the providers' official API pricing pages. The
     /// exact-match rule below also accepts their dated snapshots without accepting feature names.
@@ -417,7 +445,7 @@ enum UsagePricingCatalog {
         )
     }
 
-    static func price(_ record: UsageLedgerRecord) -> UsageLedgerRecord {
+    public static func price(_ record: UsageLedgerRecord) -> UsageLedgerRecord {
         var priced = record
 
         if let reported = record.reportedCostUSD, reported.isFinite, reported >= 0 {
@@ -491,7 +519,7 @@ enum UsagePricingCatalog {
         return false
     }
 
-    static func rate(providerID: String, model: String) -> UsageModelRate? {
+    public static func rate(providerID: String, model: String) -> UsageModelRate? {
         let provider = providerID.lowercased()
         let normalizedModel = model.lowercased()
 
@@ -527,19 +555,19 @@ enum UsagePricingCatalog {
 
 // MARK: - Date Keys
 
-enum UsageLedgerDate {
+public enum UsageLedgerDate {
     private static let fractional = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
     private static let plain = Date.ISO8601FormatStyle(includingFractionalSeconds: false)
 
-    static func parse(_ value: String) -> Date? {
+    public static func parse(_ value: String) -> Date? {
         (try? fractional.parse(value)) ?? (try? plain.parse(value))
     }
 
-    static func dayStart(_ date: Date, calendar: Calendar) -> Date {
+    public static func dayStart(_ date: Date, calendar: Calendar) -> Date {
         calendar.startOfDay(for: date)
     }
 
-    static func quarterHour(_ date: Date) -> Date {
+    public static func quarterHour(_ date: Date) -> Date {
         let seconds = date.timeIntervalSince1970
         return Date(timeIntervalSince1970: floor(seconds / 900) * 900)
     }

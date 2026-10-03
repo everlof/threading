@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import Threading
+import ThreadingUsage
 
 /// A remote session's usage: read from its transcript mirror, billed to the host's own login rather
 /// than an account on this Mac, and never counted twice.

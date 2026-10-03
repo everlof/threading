@@ -1,5 +1,6 @@
 import XCTest
 @testable import Threading
+import ThreadingUsage
 
 final class TranscriptReplayTests: XCTestCase {
 

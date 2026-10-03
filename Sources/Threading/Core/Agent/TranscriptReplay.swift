@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingUsage
 
 /// The measured local conversation formats Threading can normalize.
 ///

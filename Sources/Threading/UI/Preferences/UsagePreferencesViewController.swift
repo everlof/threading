@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingUsage
 
 /// Hosts the retained Usage page and coordinates its three independent data feeds: live account
 /// capacity, provider-limit history, and transcript accounting. Neither filesystem scanning nor

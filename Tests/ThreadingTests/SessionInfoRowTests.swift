@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import Threading
+import ThreadingUsage
 
 /// The info row's contracts: secrets hidden until deliberately revealed, readings written in
 /// place, parentage drawn as indent, and a pointer action that VoiceOver can take without a
