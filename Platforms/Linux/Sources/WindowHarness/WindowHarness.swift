@@ -1285,6 +1285,7 @@ struct WindowHarness {
             let direction = event.kind == 3 ? -1 : 1
             if event.action == 1 { return direction } // Sidebar wheel, not a key event.
             guard sidebarFocused else { return nil }
+            if accountPicker != nil { return direction }
             _ = contentWindow.dispatchToContent(NavigatorKeyEvent(
                 keyCode: event.kind == 3 ? 126 : 125))
             return navigatorRoot.takeNavigationStep()
@@ -1326,6 +1327,7 @@ struct WindowHarness {
         var savedSelected = 0, savedFirst = 0
         var accountPicker: AgentKind?
         var accountSelected = 0, accountFirst = 0
+        var activatedAccountHandle: AccountHandle?
         var pendingSelection: PendingSelection?
         var pendingFolderImport: FolderImportGate?
         var actions: NavigatorActions.Presentation?
@@ -1605,7 +1607,8 @@ struct WindowHarness {
             }
             let enabled = pendingFolderImport == nil && pendingSelection == nil
             if actionsEnabled != enabled { actionsEnabled = enabled; dirty = true }
-            let visibleRowHeight = actions == nil ? navigatorRowStride : ThemedMenuMetrics.rowHeight
+            let visibleRowHeight = actions == nil && accountPicker == nil
+                ? navigatorRowStride : ThemedMenuMetrics.rowHeight
             let count = min(Int(TW_NAVIGATOR_MAX_ROWS),
                 max(1, Int((CGFloat(height / 2) - navigatorHeaderHeight - 2) / visibleRowHeight)))
             func actionMenuIndex(at x: Int32, y: Int32) -> Int? {
@@ -1718,15 +1721,35 @@ struct WindowHarness {
                     let provider = accountPicker == .claude ? "Claude" : "Codex"
                     let active = accountPicker == .claude ? claudeAccount : codexAccount
                     end = min(pickerAccounts.count, accountFirst + count)
-                    for index in accountFirst..<end {
-                        let handle = pickerAccounts[index]
+                    // Discovery admits at most 32 handles. Measure the common check column
+                    // once, then materialize only the visible page as native menu rows.
+                    let entries: [ThemedMenuEntry] = pickerAccounts.map { handle in
                         let name = handle.isStandard ? "Default \(provider)" :
-                            "\(provider) [\(String(handle.name.prefix(48)))]"
-                        let text = name + (handle == active ? " *" : "")
-                        addNavigatorRow(text, index: index - accountFirst, width: width,
-                                        height: height, accent: accent,
-                                        selected: index == accountSelected,
-                                        selectedInk: selectedInk, root: root, textRows: &textRows)
+                            "\(provider) [\(readableNavigatorText(handle.name))]"
+                        return .item(ThemedMenuItem(title: name, representedValue: handle,
+                                                    isSelected: handle == active))
+                    }
+                    let plan = ThemedMenuRowPlan(entries: entries)
+                    var top = navigatorHeaderHeight + 2
+                    for index in accountFirst..<end {
+                        guard let row = plan.row(at: index) else {
+                            throw WindowFailure("account choice was not a menu item")
+                        }
+                        let rowHeight = plan.heights[index]
+                        row.frame = NSRect(x: 6, y: root.bounds.height - top - rowHeight,
+                                           width: root.bounds.width - 12, height: rowHeight)
+                        row.isKeyboardHighlighted = index == accountSelected
+                        row.onChoose = { _, item in
+                            activatedAccountHandle = item.representedValue as? AccountHandle
+                        }
+                        row.onHighlight = { entry in
+                            guard pickerAccounts.indices.contains(entry), accountSelected != entry
+                            else { return }
+                            accountSelected = entry
+                            dirty = true
+                        }
+                        menuRows.append(row)
+                        top += rowHeight
                     }
                 } else if let savedPicker {
                     let project = projects[savedPicker.projectIndex]
@@ -1847,7 +1870,8 @@ struct WindowHarness {
                 else if accountPicker != nil { focusedSlot = accountSelected - accountFirst }
                 else if savedPicker != nil { focusedSlot = savedSelected - savedFirst }
                 else { focusedSlot = selectedInlineIndex - first }
-                contentWindow.makeFirstResponder(sidebarFocused ? root.mountedRow(at: focusedSlot) : nil)
+                contentWindow.makeFirstResponder(sidebarFocused && accountPicker == nil
+                    ? root.mountedRow(at: focusedSlot) : nil)
                 let mountMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - mountStarted) / 1_000_000
                 trace("raster.begin")
                 let bitmap = Bitmap(width: width, height: height, background: Specimen.bodyGround.components)
@@ -1927,10 +1951,19 @@ struct WindowHarness {
                         let handle = pickerAccounts[index]
                         let name = handle.isStandard ? "Default \(provider)" : "\(provider) \(handle.name)"
                         let label = name + (handle == active ? " active" : "")
-                        try publishAccessibleRow(window, id: handle.name, label: label,
-                                                 selected: index == accountSelected,
-                                                 visibleIndex: index - accountFirst,
-                                                 width: width, height: height)
+                        guard let bounds = menuRowPixels(index - accountFirst, in: root,
+                                                         scale: contentWindow.backingScaleFactor)
+                        else { throw WindowFailure("accessible account has no mounted row") }
+                        let result = handle.name.withCString { identifier in
+                            label.withCString { text in
+                                tw_accessibility_add_row(window, identifier, text,
+                                    index == accountSelected ? 1 : 0,
+                                    bounds.x, bounds.y, bounds.width, bounds.height)
+                            }
+                        }
+                        guard result == 0 else {
+                            throw WindowFailure("native account row exceeds its bound")
+                        }
                     }
                     tw_accessibility_end_list(window)
                     setNavigatorTitle("Threading \(provider) accounts - \(projects[selected].path)")
@@ -2169,6 +2202,7 @@ struct WindowHarness {
                     _ = navigatorRoot.takeActivatedRowSlot()
                     _ = navigatorRoot.takeActivatedProjectActionID()
                     _ = navigatorRoot.takeActivatedProjectCreateID()
+                    activatedAccountHandle = nil
                     rowActionMenuGesture = false
                     rowActionMenuEntered = false
                     if hoveredProjectID != nil {
@@ -2216,6 +2250,14 @@ struct WindowHarness {
                     actions = menu
                     dirty = true
                     event.kind = 8
+                }
+                if event.action == 3, let handle = activatedAccountHandle {
+                    activatedAccountHandle = nil
+                    if accountPicker != nil, let index = pickerAccounts.firstIndex(of: handle) {
+                        accountSelected = index
+                        dirty = true
+                        event.kind = 8
+                    }
                 }
                 if navigatorRoot.takeProjectControlVisualChange() { dirty = true }
                 if addProjectControlVisualChanged {

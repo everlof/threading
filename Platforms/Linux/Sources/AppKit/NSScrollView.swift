@@ -1,5 +1,12 @@
 import Foundation
 
+/// Document views with viewport-owned children use this hook to recycle those children after
+/// scrolling or resizing. It is internal to the shim; callers use the ordinary scroll APIs.
+@MainActor
+protocol NSClipViewDocumentObserver: AnyObject {
+    func clipViewViewportDidChange(_ clipView: NSClipView)
+}
+
 /// The clipping viewport for a document view. Scrolling changes the bounds origin, so the
 /// document keeps stable geometry and callers can retain only the views intersecting `bounds`.
 @MainActor
@@ -12,10 +19,13 @@ open class NSClipView: NSView {
         get { storedDocumentView }
         set {
             guard storedDocumentView !== newValue else { return }
-            storedDocumentView?.removeFromSuperview()
+            let previous = storedDocumentView
+            previous?.removeFromSuperview()
             storedDocumentView = newValue
             if let newValue { addSubview(newValue) }
+            (previous as? NSClipViewDocumentObserver)?.clipViewViewportDidChange(self)
             scroll(to: bounds.origin)
+            (newValue as? NSClipViewDocumentObserver)?.clipViewViewportDidChange(self)
         }
     }
 
@@ -33,6 +43,7 @@ open class NSClipView: NSView {
         didSet {
             guard frame.size != oldValue.size else { return }
             scroll(to: bounds.origin)
+            (documentView as? NSClipViewDocumentObserver)?.clipViewViewportDidChange(self)
         }
     }
 
@@ -55,6 +66,7 @@ open class NSClipView: NSView {
         let constrained = constrainBoundsRect(proposed)
         guard constrained.origin != bounds.origin else { return }
         setBoundsOrigin(constrained.origin)
+        (documentView as? NSClipViewDocumentObserver)?.clipViewViewportDidChange(self)
     }
 }
 

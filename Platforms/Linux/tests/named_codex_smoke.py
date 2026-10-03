@@ -125,7 +125,15 @@ def create(process, window, log):
         time.sleep(.05)
     subprocess.run(['import', '-window', window, 'out/codex-account-picker.png'],
                    check=True, timeout=5)
-    key(window, 'Return')
+    # The production menu row commits on a pointer release; choosing this login must
+    # still carry its exact handle through the host-owned launch route.
+    xdo('mousemove', '--window', window, '120', '170', 'click', '1')
+    title(process, 'Threading experiment - ' + str(project), log)
+    key(window, 'ctrl+shift+i')
+    title(process, 'Threading Codex accounts - ' + str(project), log)
+    subprocess.run(['import', '-window', window, 'out/codex-account-picker-active.png'],
+                   check=True, timeout=5)
+    key(window, 'Escape')
     title(process, 'Threading experiment - ' + str(project), log)
     key(window, 'ctrl+shift+a')
     title(process, 'Threading terminal - NAMED CREATED', log)

@@ -132,6 +132,8 @@ dbus-run-session -- python3 /add_project_button_smoke.py "$bin/WindowHarness" "$
   "$bin/threading-ptyd" "$fixture" /evidence/restart-out/add-project-button
 dbus-run-session -- python3 /provider_marks_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
+dbus-run-session -- python3 /account_picker_rows_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$fixture/pty.sock" /evidence/restart-out/account-picker
 dbus-run-session -- python3 /project_count_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$fixture/pty.sock" "$fixture" /evidence/restart-out/project-count
 python3 /terminal_restart_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \

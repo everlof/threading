@@ -87,11 +87,14 @@ in the same bounded list. Its visible agent rows mount the production
 `ThemedSessionRowContentView` used by Mac session cells. Visible saved terminals now mount the
 same `ThemedTerminalRowContentView` icon/title subtree as the Mac terminal cell, with a bounded
 Linux terminal symbol. Project selection, runtime activation, attention, retained state and
-AT-SPI identities stay host-owned. The saved-runtime pickers remain available; account rows
-still use diagnostic content. The shim also
-has a clipped `NSScrollView`/`NSClipView` viewport with wheel and bounds-origin handling, but the
-native navigator still owns visible-row recycling and wheel routing rather than mounting the
-production outline. `tests/sidebar_visible_rows/run.sh` checks a 5,100-project tree with
+AT-SPI identities stay host-owned. The saved-runtime pickers remain available; the account picker
+mounts the production `ThemedMenuRowView` with the same row measurement as command menus while
+the host retains exact account identity and launch admission. The shim has a clipped
+`NSScrollView`/`NSClipView` viewport and view-based `NSTableView`/`NSOutlineView` with bounded
+cell reuse, stable selection and expansion. `tests/outline_view/run.sh` exercises 5,100 roots,
+1,024 expanded children, scrolling, resize and detach. The native navigator still owns its
+visible-row recycling and wheel routing; mounting it on the outline remains open.
+`tests/sidebar_visible_rows/run.sh` checks a 5,100-project tree with
 bounded child projection; `--session-row-layout-fixture` and `--terminal-row-layout-fixture`
 check the shared title/icon stacks at their native slot sizes. The installed X11 smoke captures an
 expanded project and verifies
