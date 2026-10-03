@@ -11,7 +11,7 @@
 
 enum { MAX_VISIBLE_ROWS = 32, MAX_ROW_NAME = 512, MAX_ROW_ID = 64,
        MAX_TERMINAL_TEXT = 64 * 1024, MAX_TERMINAL_RUNS = 128 * 40 + 40,
-       MAX_SESSION_MENU_ROWS = 8 };
+       MAX_SESSION_MENU_ROWS = 8, MAX_COMPOSER_TEXT = 64 * 1024 };
 enum { PROJECT_CONTROL_NONE, PROJECT_CONTROL_CREATE, PROJECT_CONTROL_ACTIONS };
 
 typedef struct {
@@ -51,10 +51,22 @@ static void text_interface_init(AtkTextIface *iface);
 G_DEFINE_TYPE_WITH_CODE(TerminalNode, terminal_node, component_node_get_type(),
                         G_IMPLEMENT_INTERFACE(ATK_TYPE_TEXT, text_interface_init))
 
+typedef struct {
+    ComponentNode parent;
+    char *text;
+    int length, characters, selectionStart, selectionEnd;
+} ComposerEditorNode;
+typedef struct { ComponentNodeClass parent; } ComposerEditorNodeClass;
+static void composer_text_interface_init(AtkTextIface *iface);
+G_DEFINE_TYPE_WITH_CODE(ComposerEditorNode, composer_editor_node, component_node_get_type(),
+                        G_IMPLEMENT_INTERFACE(ATK_TYPE_TEXT, composer_text_interface_init))
+
 static AccessibleNode *app, *frame, *list, *actionsButton, *addProjectButton, *pageTitleButton;
 static AccessibleNode *pageActionsButton, *sessionMenuList;
 static AccessibleNode *placeholder, *placeholderTitle, *placeholderDetail, *placeholderAction;
 static int actionsVisible, addProjectVisible, pageTitleVisible, placeholderVisible, placeholderActionVisible;
+static ComposerEditorNode *composerEditor;
+static int composerEditorVisible, composerEditorFocused;
 static int pageActionsVisible, sessionMenuVisible;
 static char pageTitleIdentity[128];
 static char pageActionsIdentity[128], sessionMenuIdentity[128];
@@ -136,11 +148,16 @@ static AtkStateSet *node_state(AtkObject *object) {
         atk_state_set_add_state(states, ATK_STATE_SENSITIVE);
     }
     if (node == list || node == sessionMenuList || node == (AccessibleNode *)terminal ||
+        node == (AccessibleNode *)composerEditor ||
         node == actionsButton || node == addProjectButton || node == pageTitleButton ||
         node == pageActionsButton || node == placeholderAction ||
         node->row >= 0 || node->projectControl) {
         atk_state_set_add_state(states, ATK_STATE_FOCUSABLE);
         if (node == focused) atk_state_set_add_state(states, ATK_STATE_FOCUSED);
+    }
+    if (node == (AccessibleNode *)composerEditor && composerEditorVisible && node_mounted(object)) {
+        atk_state_set_add_state(states, ATK_STATE_EDITABLE);
+        atk_state_set_add_state(states, ATK_STATE_MULTI_LINE);
     }
     if (node_mounted(object)) {
         atk_state_set_add_state(states, ATK_STATE_VISIBLE);
@@ -248,6 +265,8 @@ static void refresh_focus(void) {
                 if (row->selected) { next = row; break; }
             }
         } else if (content == (AccessibleNode *)terminal) next = content;
+        else if (content == placeholder && composerEditorVisible && composerEditorFocused)
+            next = (AccessibleNode *)composerEditor;
         else if (content == placeholder && placeholderActionVisible) next = placeholderAction;
     }
     set_focused(next);
@@ -493,7 +512,7 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
         *height = windowHeight > *y ? windowHeight - *y : 0;
     } else if (object == ATK_OBJECT(actionsButton) || object == ATK_OBJECT(addProjectButton) ||
                object == ATK_OBJECT(pageTitleButton) || object == ATK_OBJECT(pageActionsButton) ||
-               object == ATK_OBJECT(placeholderAction)) {
+               object == ATK_OBJECT(placeholderAction) || object == ATK_OBJECT(composerEditor)) {
         *x = node->bounds.x; *y = node->bounds.y;
         *width = node->bounds.width; *height = node->bounds.height;
     } else if (object == ATK_OBJECT(list) || object == ATK_OBJECT(sessionMenuList)) {
@@ -510,7 +529,8 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
         *width = node->bounds.width; *height = node->bounds.height;
     } else return 0;
     if (coordinates == ATK_XY_SCREEN) { *x += originX; *y += originY; }
-    else if (coordinates == ATK_XY_PARENT && object == ATK_OBJECT(placeholderAction)) {
+    else if (coordinates == ATK_XY_PARENT &&
+             (object == ATK_OBJECT(placeholderAction) || object == ATK_OBJECT(composerEditor))) {
         *x -= tw_workspace_sidebar_width(hostWindow);
     }
     else if (coordinates == ATK_XY_PARENT && node->projectControl) {
@@ -727,6 +747,140 @@ static void terminal_node_init(TerminalNode *node) {
     node->text = g_strdup("");
     node->caret = -1;
 }
+static gchar *composer_get_text(AtkText *text, gint start, gint end) {
+    ComposerEditorNode *node = (ComposerEditorNode *)text;
+    if (start < 0 || start > node->characters || end < -1) return g_strdup("");
+    if (end == -1 || end > node->characters) end = node->characters;
+    if (end < start) return g_strdup("");
+    const char *first = g_utf8_offset_to_pointer(node->text, start);
+    const char *last = g_utf8_offset_to_pointer(first, end - start);
+    return g_strndup(first, (gsize)(last - first));
+}
+static gunichar composer_character(AtkText *text, gint offset) {
+    ComposerEditorNode *node = (ComposerEditorNode *)text;
+    if (offset < 0 || offset >= node->characters) return 0;
+    return g_utf8_get_char(g_utf8_offset_to_pointer(node->text, offset));
+}
+static gint composer_character_count(AtkText *text) {
+    return ((ComposerEditorNode *)text)->characters;
+}
+static gint composer_caret(AtkText *text) {
+    return ((ComposerEditorNode *)text)->selectionEnd;
+}
+static gint composer_selections(AtkText *text) {
+    ComposerEditorNode *node = (ComposerEditorNode *)text;
+    return node->selectionStart < node->selectionEnd ? 1 : 0;
+}
+static gchar *composer_selection(AtkText *text, gint index, gint *start, gint *end) {
+    ComposerEditorNode *node = (ComposerEditorNode *)text;
+    if (start) *start = -1;
+    if (end) *end = -1;
+    if (index != 0 || node->selectionStart == node->selectionEnd) return NULL;
+    if (start) *start = node->selectionStart;
+    if (end) *end = node->selectionEnd;
+    return composer_get_text(text, node->selectionStart, node->selectionEnd);
+}
+static gchar *composer_string_at(AtkText *text, gint offset, AtkTextGranularity granularity,
+                                 gint *start, gint *end) {
+    ComposerEditorNode *node = (ComposerEditorNode *)text;
+    *start = *end = -1;
+    if (offset < 0 || offset >= node->characters) return NULL;
+    const char *begin = node->text;
+    const char *limit = begin + node->length;
+    const char *here = g_utf8_offset_to_pointer(begin, offset);
+    const char *left = here, *right = g_utf8_next_char(here);
+    int first = offset, last = offset + 1;
+    if (granularity == ATK_TEXT_GRANULARITY_WORD) {
+        if (!word_character(g_utf8_get_char(left)) && left > begin) {
+            left = g_utf8_prev_char(left); first--;
+        }
+        gboolean inWord = word_character(g_utf8_get_char(left));
+        right = left;
+        last = first;
+        while (left > begin) {
+            const char *previous = g_utf8_prev_char(left);
+            if (word_character(g_utf8_get_char(previous)) != inWord) break;
+            left = previous; first--;
+        }
+        while (right < limit && word_character(g_utf8_get_char(right)) == inWord) {
+            right = g_utf8_next_char(right); last++;
+        }
+    } else if (granularity == ATK_TEXT_GRANULARITY_LINE ||
+               granularity == ATK_TEXT_GRANULARITY_PARAGRAPH) {
+        while (left > begin) {
+            const char *previous = g_utf8_prev_char(left);
+            if (g_utf8_get_char(previous) == '\n') break;
+            left = previous; first--;
+        }
+        right = here; last = offset;
+        while (right < limit && g_utf8_get_char(right) != '\n') {
+            right = g_utf8_next_char(right); last++;
+        }
+        if (right < limit) { right++; last++; }
+    } else if (granularity != ATK_TEXT_GRANULARITY_CHAR) return NULL;
+    *start = first; *end = last;
+    return g_strndup(left, (gsize)(right - left));
+}
+static void composer_text_interface_init(AtkTextIface *iface) {
+    iface->get_text = composer_get_text;
+    iface->get_character_at_offset = composer_character;
+    iface->get_character_count = composer_character_count;
+    iface->get_caret_offset = composer_caret;
+    iface->get_n_selections = composer_selections;
+    iface->get_selection = composer_selection;
+    iface->get_string_at_offset = composer_string_at;
+}
+static void composer_editor_node_finalize(GObject *object) {
+    g_free(((ComposerEditorNode *)object)->text);
+    G_OBJECT_CLASS(composer_editor_node_parent_class)->finalize(object);
+}
+static void composer_editor_node_class_init(ComposerEditorNodeClass *klass) {
+    G_OBJECT_CLASS(klass)->finalize = composer_editor_node_finalize;
+}
+static void composer_editor_node_init(ComposerEditorNode *node) {
+    node->text = g_strdup("");
+}
+static void set_composer_text(const char *value, int length, int characters,
+                              int selectionStart, int selectionEnd) {
+    ComposerEditorNode *node = composerEditor;
+    const int changed = node->length != length || memcmp(node->text, value, (size_t)length) != 0;
+    if (changed) {
+        char *oldText = node->text;
+        const char *oldFirst = oldText, *newFirst = value;
+        const char *oldLast = oldText + node->length, *newLast = value + length;
+        int firstCharacter = 0;
+        while (oldFirst < oldLast && newFirst < newLast &&
+               g_utf8_get_char(oldFirst) == g_utf8_get_char(newFirst)) {
+            oldFirst = g_utf8_next_char(oldFirst);
+            newFirst = g_utf8_next_char(newFirst);
+            firstCharacter++;
+        }
+        while (oldLast > oldFirst && newLast > newFirst) {
+            const char *oldPrevious = g_utf8_prev_char(oldLast);
+            const char *newPrevious = g_utf8_prev_char(newLast);
+            if (g_utf8_get_char(oldPrevious) != g_utf8_get_char(newPrevious)) break;
+            oldLast = oldPrevious; newLast = newPrevious;
+        }
+        const int removed = (int)g_utf8_strlen(oldFirst, oldLast - oldFirst);
+        const int inserted = (int)g_utf8_strlen(newFirst, newLast - newFirst);
+        char *removedText = removed ? g_strndup(oldFirst, (gsize)(oldLast - oldFirst)) : NULL;
+        char *insertedText = inserted ? g_strndup(newFirst, (gsize)(newLast - newFirst)) : NULL;
+        node->text = g_strndup(value, (gsize)length);
+        node->length = length;
+        node->characters = characters;
+        if (removed) g_signal_emit_by_name(node, "text-remove::system", firstCharacter, removed, removedText);
+        if (inserted) g_signal_emit_by_name(node, "text-insert::system", firstCharacter, inserted, insertedText);
+        g_free(removedText);
+        g_free(insertedText);
+        g_free(oldText);
+    }
+    const int selectionChanged = node->selectionStart != selectionStart || node->selectionEnd != selectionEnd;
+    const int caretChanged = node->selectionEnd != selectionEnd;
+    node->selectionStart = selectionStart;
+    node->selectionEnd = selectionEnd;
+    if (selectionChanged) g_signal_emit_by_name(node, "text-selection-changed");
+    if (caretChanged) g_signal_emit_by_name(node, "text-caret-moved", selectionEnd);
+}
 static void set_terminal_text(const char *value, int length, int caret,
                               const TWTextRun *runs, int runCount) {
     if (!terminal) return;
@@ -820,10 +974,17 @@ void tw_accessibility_open(TWWindow *window) {
     placeholderAction = new_component(ATK_ROLE_PUSH_BUTTON, "New Session");
     placeholderAction->id = g_strdup("linux.placeholder.action");
     atk_object_set_accessible_id(ATK_OBJECT(placeholderAction), placeholderAction->id);
+    composerEditor = g_object_new(composer_editor_node_get_type(), NULL);
+    atk_object_set_role(ATK_OBJECT(composerEditor), ATK_ROLE_TEXT);
+    atk_object_set_name(ATK_OBJECT(composerEditor), "New session brief");
+    atk_object_set_description(ATK_OBJECT(composerEditor), "Multiline brief for the new session.");
+    ((AccessibleNode *)composerEditor)->id = g_strdup("linux.composer.editor");
+    atk_object_set_accessible_id(ATK_OBJECT(composerEditor),
+                                 ((AccessibleNode *)composerEditor)->id);
     actionsVisible = 0;
     addProjectVisible = 0;
     pageTitleVisible = pageActionsVisible = sessionMenuVisible = 0;
-    placeholderVisible = placeholderActionVisible = 0;
+    placeholderVisible = placeholderActionVisible = composerEditorVisible = composerEditorFocused = 0;
     pageTitleIdentity[0] = '\0';
     pageActionsIdentity[0] = sessionMenuIdentity[0] = '\0';
     terminal = g_object_new(terminal_node_get_type(), NULL);
@@ -866,8 +1027,9 @@ void tw_accessibility_close(void) {
     g_clear_object(&placeholderTitle);
     g_clear_object(&placeholderDetail);
     g_clear_object(&placeholderAction);
+    g_clear_object(&composerEditor);
     actionsVisible = addProjectVisible = pageTitleVisible = pageActionsVisible = sessionMenuVisible = 0;
-    placeholderVisible = placeholderActionVisible = 0;
+    placeholderVisible = placeholderActionVisible = composerEditorVisible = composerEditorFocused = 0;
     pageTitleIdentity[0] = '\0';
     pageActionsIdentity[0] = sessionMenuIdentity[0] = '\0';
     hostWindow = NULL;
@@ -1094,6 +1256,31 @@ int tw_accessibility_session_menu_row_identity(int row, char *identity, int capa
     strcpy(identity, sessionMenuIdentity);
     return 1;
 }
+static void rebuild_placeholder_children(void) {
+    const int detailVisible = placeholderVisible &&
+        atk_object_get_name(ATK_OBJECT(placeholderDetail))[0] != '\0';
+    const int editorVisible = placeholderVisible && composerEditorVisible;
+    const guint expected = placeholderVisible
+        ? 1 + detailVisible + editorVisible + placeholderActionVisible : 0;
+    int same = placeholder->children->len == expected;
+    if (same && expected) same = g_ptr_array_index(placeholder->children, 0) == placeholderTitle;
+    if (same && detailVisible)
+        same = g_ptr_array_index(placeholder->children, 1) == placeholderDetail;
+    if (same && editorVisible)
+        same = g_ptr_array_index(placeholder->children, 1 + detailVisible) == composerEditor;
+    if (same && placeholderActionVisible)
+        same = g_ptr_array_index(placeholder->children, expected - 1) == placeholderAction;
+    if (same) return;
+    if (focused == placeholderAction || focused == (AccessibleNode *)composerEditor) set_focused(NULL);
+    clear_children(placeholder);
+    if (placeholderVisible) {
+        add_child(placeholder, placeholderTitle);
+        if (detailVisible) add_child(placeholder, placeholderDetail);
+        if (editorVisible) add_child(placeholder, (AccessibleNode *)composerEditor);
+        if (placeholderActionVisible) add_child(placeholder, placeholderAction);
+    }
+    generation++;
+}
 void tw_accessibility_placeholder(TWWindow *window, const char *title, const char *detail,
                                    const char *actionLabel, int x, int y, int width, int height) {
     if (!bridgeReady || window != hostWindow) return;
@@ -1110,6 +1297,11 @@ void tw_accessibility_placeholder(TWWindow *window, const char *title, const cha
     if (placeholderVisible != visible || placeholderActionVisible != actionVisible) generation++;
     placeholderVisible = visible;
     placeholderActionVisible = actionVisible;
+    if (!visible && composerEditorVisible) {
+        composerEditorVisible = composerEditorFocused = 0;
+        atk_object_notify_state_change(ATK_OBJECT(composerEditor), ATK_STATE_EDITABLE, FALSE);
+        set_composer_text("", 0, 0, 0, 0);
+    }
     if (visible) {
         if (strcmp(atk_object_get_name(ATK_OBJECT(placeholderTitle)), title) != 0 ||
             strcmp(atk_object_get_name(ATK_OBJECT(placeholderDetail)), detail) != 0 ||
@@ -1122,25 +1314,39 @@ void tw_accessibility_placeholder(TWWindow *window, const char *title, const cha
             placeholderAction->bounds = (AtkRectangle){x, y, width, height};
         }
     }
-    const int detailVisible = visible && detail[0] != '\0';
-    const guint expected = visible ? 1 + detailVisible + actionVisible : 0;
-    int same = placeholder->children->len == expected;
-    if (same && expected) same = g_ptr_array_index(placeholder->children, 0) == placeholderTitle;
-    if (same && detailVisible)
-        same = g_ptr_array_index(placeholder->children, 1) == placeholderDetail;
-    if (same && actionVisible)
-        same = g_ptr_array_index(placeholder->children, expected - 1) == placeholderAction;
-    if (!same) {
-        if (focused == placeholderAction) set_focused(NULL);
-        clear_children(placeholder);
-        if (visible) {
-            add_child(placeholder, placeholderTitle);
-            if (detailVisible) add_child(placeholder, placeholderDetail);
-            if (actionVisible) add_child(placeholder, placeholderAction);
-        }
-        generation++;
-    }
+    rebuild_placeholder_children();
     show_content(activeList ? list : (placeholderVisible ? placeholder : (AccessibleNode *)terminal));
+    refresh_focus();
+}
+void tw_accessibility_composer_editor(TWWindow *window, const char *utf8, int length,
+                                      int selectionStart, int selectionEnd, int hasFocus,
+                                      int x, int y, int width, int height) {
+    if (!bridgeReady || window != hostWindow || !placeholderVisible) return;
+    if (!utf8) {
+        if (!composerEditorVisible) return;
+        composerEditorVisible = composerEditorFocused = 0;
+        atk_object_notify_state_change(ATK_OBJECT(composerEditor), ATK_STATE_EDITABLE, FALSE);
+        set_composer_text("", 0, 0, 0, 0);
+        rebuild_placeholder_children();
+        refresh_focus();
+        return;
+    }
+    int originX, originY, windowWidth, windowHeight;
+    tw_window_geometry(window, &originX, &originY, &windowWidth, &windowHeight);
+    const int sidebarWidth = tw_workspace_sidebar_width(window);
+    if (length < 0 || length > MAX_COMPOSER_TEXT ||
+        memchr(utf8, 0, (size_t)length) || !g_utf8_validate(utf8, length, NULL) ||
+        x < sidebarWidth || x >= windowWidth || width <= 0 || width > windowWidth - x ||
+        y < 0 || y >= windowHeight || height <= 0 || height > windowHeight - y) return;
+    const int characters = (int)g_utf8_strlen(utf8, length);
+    if (selectionStart < 0 || selectionStart > selectionEnd || selectionEnd > characters) return;
+    const int wasVisible = composerEditorVisible;
+    composerEditorVisible = 1;
+    composerEditorFocused = hasFocus != 0;
+    ((AccessibleNode *)composerEditor)->bounds = (AtkRectangle){x, y, width, height};
+    set_composer_text(utf8, length, characters, selectionStart, selectionEnd);
+    rebuild_placeholder_children();
+    if (!wasVisible) atk_object_notify_state_change(ATK_OBJECT(composerEditor), ATK_STATE_EDITABLE, TRUE);
     refresh_focus();
 }
 void tw_accessibility_window_focus(TWWindow *window, int hasFocus) {

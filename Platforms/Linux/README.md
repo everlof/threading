@@ -473,7 +473,17 @@ journeys, text shaping, and an accessibility tree. Visible project, agent and te
 shared production content, the idle pane mounts the production placeholder, and command menus use
 production rows. Account rows remain diagnostic;
 a complete production screen is not mounted.
-Editing and IME, full table and outline behavior, animation,
+The right-pane New Session path now mounts the unchanged production `ThemedTextView` in a
+scrolling composer. The Linux TextKit shim shapes and edits Unicode text, wraps and scrolls,
+tracks selection and undo, and accepts SDL committed text and IME preedit without sending it
+to the PTY. The host passes a nonempty opening brief through the existing exact-project agent
+launch. `tests/text_editor/run.sh` exercises the editor itself;
+`THREADING_LINUX_COMPOSER_ONLY=1 ./window-smoke.sh` exercises the native X11 window,
+AT-SPI text, screenshot, and agent launch.
+The installed `bundle-smoke.sh` repeats that journey from the packaged binary. AT-SPI publishes
+up to 64 KiB of composer text; programmatic AT-SPI editing is not implemented. Full Mac composer
+behavior, including attachments and durable drafts, remains open. Other editing surfaces,
+full table and outline behavior, animation,
 system services, and the remaining AppKit shims need work. The layout solver still solves a whole
 subtree at a time and can pay a cold cubic cost on structural changes; see FINDINGS sections 8
 and 11. The later sections of FINDINGS record the implemented host and shim slices.

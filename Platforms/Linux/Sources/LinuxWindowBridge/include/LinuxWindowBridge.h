@@ -43,6 +43,15 @@ typedef struct TWWindow TWWindow;
 // Kind45 reports native window focus (action=1 gained, 0 lost). A focus loss that also
 // cancels an active gesture retains that gesture's event kind; query tw_window_has_focus
 // after every event so the host sees both changes in the same turn.
+// Editor input is opt-in only while the split workspace shows its right-pane placeholder.
+// Kind46 is committed SDL_TEXTINPUT (action=1 following a preedit, otherwise 0).
+// Kind47 is uncommitted SDL_TEXTEDITING(_EXT); cursor/selection are Unicode characters.
+// Kind48 is an editor key: action=1 press, 2 repeat, 3 release; modifiers use the same
+// bits as kind7. key is TW_KEY_* for functional keys or lowercase ASCII for a modified
+// letter/digit. Ordinary printable characters arrive only in kind46; non-IME CR/LF/Tab/
+// Backspace/Delete text events are dropped because kind48 already carries those keys.
+// All three kinds
+// are editor-owned and must never be sent to the terminal PTY or sidebar navigation.
 typedef struct {
     int kind, x, y, width, height;
     char text[1024];
@@ -57,6 +66,12 @@ int tw_present(TWWindow *, const uint8_t *rgba, int width, int height);
 // sidebarWidth must be 320 or zero (restore standalone presentation). No child is resized here.
 void tw_workspace_mode(TWWindow *, int sidebarWidth, int sidebarFocused);
 void tw_workspace_focus(TWWindow *, int sidebarFocused);
+// Opt in to SDL text input for an editable right-pane view. Enabling requires split
+// placeholder mode and moves focus from the sidebar; disabling leaves pane focus intact.
+// A sidebar focus or pane-mode change clears this editor focus. Returns 0 on success,
+// -1 when the requested editor is unavailable. No editor input is active by default.
+int tw_workspace_editor_focus(TWWindow *, int focused);
+int tw_workspace_editor_focused(TWWindow *);
 // Reserve the top of the workspace's right pane for its AppKit header. Terminal input and
 // accessibility geometry use the remaining content rectangle; standalone mode has no inset.
 void tw_workspace_terminal_top_inset(TWWindow *, int pixels);
@@ -135,6 +150,16 @@ void tw_accessibility_session_menu_end(TWWindow *);
 // unmounts it; NULL actionLabel omits the button. Button bounds are window pixels.
 void tw_accessibility_placeholder(TWWindow *, const char *title, const char *detail,
                                    const char *actionLabel, int x, int y, int width, int height);
+// Publish the mounted composer's editable text to AT-SPI. NULL utf8 unmounts the editor;
+// otherwise length is 0...65536 bytes of valid UTF-8, with no embedded NUL. Selection
+// bounds are ordered Unicode scalar offsets (not UTF-16 indices); the end is the caret.
+// Bounds are window pixels inside the right pane. Invalid updates leave the previous
+// projection intact. Text changes emit only the changed span, not the whole draft.
+// The native keyboard route performs editing; this projection does not implement AT-SPI
+// programmatic EditableText mutations.
+void tw_accessibility_composer_editor(TWWindow *, const char *utf8, int length,
+                                      int selectionStart, int selectionEnd, int focused,
+                                      int x, int y, int width, int height);
 // SDL window focus is the source of truth; the bridge focuses the mounted selected row or terminal.
 void tw_accessibility_window_focus(TWWindow *, int focused);
 // The accessibility projection uses the rendered cell positions, including wide and combined
@@ -144,7 +169,8 @@ typedef struct { int offset, characters, column, row, cells; } TWTextRun;
 // Content is capped at 64 KiB and at the 128x40 visible-cell grid.
 void tw_accessibility_terminal_text(TWWindow *, const char *utf8, int length, int caret,
                                     const TWTextRun *runs, int runCount);
-// Candidate windows follow the current terminal cursor. Coordinates are window pixels.
+// Candidate windows follow the current terminal or focused editor caret. Coordinates are
+// window pixels; calls without an active text-input owner are ignored.
 void tw_text_input_rect(TWWindow *, int x, int y, int width, int height);
 int tw_next_timeout(TWWindow *, TWEvent *, int milliseconds);
 const char *tw_event_text(const TWEvent *);

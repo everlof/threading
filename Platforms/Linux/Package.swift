@@ -86,6 +86,9 @@ let package = Package(
         .executableTarget(name: "SearchMatchHarness", dependencies: ["AppKit"],
             path: "tests/search_match", exclude: ["run.sh"],
             sources: ["SearchMatchLabel.swift", "ShimDependencies.swift", "Fixture.swift"]),
+        .executableTarget(name: "TextEditorHarness", dependencies: ["AppKit"],
+            path: "tests/text_editor", exclude: ["run.sh"],
+            sources: ["ThemedTextView.swift", "ThemeBoundary.swift", "Fixture.swift"]),
         // The exact control files plus the same fixed-palette boundary linked into WindowHarness.
         // The fixture's Specimen facts are the native shell's measured fixed grounds.
         .executableTarget(name: "IconButtonHarness", dependencies: ["AppKit"],

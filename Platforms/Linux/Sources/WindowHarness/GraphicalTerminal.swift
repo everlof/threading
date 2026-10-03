@@ -216,7 +216,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     }
     func startAgent(store: String, socket: String, directory: String, shell: String,
                     kind: AgentKind, executable: String, accountHandle: AccountHandle, id: SessionID,
-                    width: Int, height: Int) {
+                    width: Int, height: Int, prompt: String? = nil) {
         lock.lock(); agentCreationPending = true; lock.unlock()
         worker.async { [self] in
             defer { lock.lock(); agentCreationPending = false; lock.unlock() }
@@ -226,7 +226,7 @@ final class GraphicalTerminal: @unchecked Sendable {
                 let accountPath = try Self.accountPath(for: kind, handle: accountHandle)
                 let plan = try Self.createAgent(store: store, directory: directory,
                                                 shell: shell, kind: kind, executable: executable,
-                                                accountHandle: accountHandle,
+                                                accountHandle: accountHandle, prompt: prompt,
                                                 accountPath: accountPath, id: id) { receipt in
                     lock.lock(); agentCreation = receipt; lock.unlock()
                 }
@@ -711,7 +711,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     }
     private static func createAgent(store: String, directory: String, shell: String,
                                     kind: AgentKind, executable: String, accountHandle: AccountHandle,
-                                    accountPath: String, id: SessionID,
+                                    prompt: String?, accountPath: String, id: SessionID,
                                     admitted: (AgentCreation) -> Void) throws -> AgentLaunchPlan {
         guard shell.hasPrefix("/"), executable.hasPrefix("/") else {
             throw WindowFailure("shell and agent executable must be absolute paths")
@@ -748,10 +748,10 @@ final class GraphicalTerminal: @unchecked Sendable {
         case .codex:
             (agentCommand, resumeState) = CodexLaunchCommand.terminal(executable: executable,
                 model: nil, permissionMode: session.permissionMode,
-                resumeState: session.resumeState, prompt: nil)
+                resumeState: session.resumeState, prompt: prompt)
         case .claude:
             let pair = ClaudeLaunchCommand.terminalPair(for: session, executable: executable,
-                permissionMode: session.permissionMode, prompt: nil)
+                permissionMode: session.permissionMode, prompt: prompt)
             agentCommand = pair.fresh
             resumeState = .resumable(pair.transcriptID)
         case .grok, .openCode, .cursor:

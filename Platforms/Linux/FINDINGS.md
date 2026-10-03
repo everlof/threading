@@ -4649,3 +4649,36 @@ including this smoke, workspace restoration, account/project actions, and the la
 its evidence is `out/bundle-smoke/run.WGP2EZlo`. The installed Wayland `--actions` suite passed
 rendering, AT-SPI and native seat input on the rebuilt package, with evidence at
 `out/wayland-smoke.gMgfdUFV`. The saved-agent menu itself has not yet been driven under Wayland.
+
+## 154. A project can begin a session with a real editable brief
+
+The right-pane New Session → New Chat → provider path now mounts the unchanged production
+`ThemedTextView` inside a scrolling editor. The Linux AppKit shim supplies the TextKit storage,
+layout, selection, undo and IME composition methods that component expects. SDL sends committed
+text, preedit and functional keys to that editor only while it has focus; the terminal keeps its
+separate input kinds. The host passes the finished brief to the existing exact-project agent
+launch and persists one session. Selecting a different project closes the old composer so its
+brief cannot launch in the wrong directory.
+
+The native AT-SPI panel publishes a text node with a stable identity, bounded value, caret,
+selection, focus and layout bounds. It accepts keyboard editing through the window; AT-SPI
+programmatic text mutation is still open. The host publishes at most 64 KiB of editor text to
+the accessibility bridge. The pane rerenders after an editor change without rerasterizing the
+unchanged sidebar; the earlier full-pane redraw cost was about 350 ms per key under arm64 Docker
+emulation. Text layout caches lines and paints the visible viewport; large first pastes and
+complex-script caret geometry need separate performance and visual checks.
+
+Customization gate: this is Linux preview wiring around a production Design editor, not a new
+public extension component. The host retains project identity, provider and account choice,
+prompt admission, process launch and persistence. The themed editor owns presentation and
+selection colors. The focused editor fixture and native composer smoke cover the shim and the
+real X11 shell; the installed package repeats the journey.
+
+Verification on 2026-10-03: the editor fixture, focused native composer smoke and full
+non-root Ubuntu arm64 `bundle-smoke.sh` suite passed. The installed suite's composer screenshot
+and selected-text screenshot in `out/bundle-smoke/run.hpCyruL8/restart-out/composer/` were
+inspected at 1120×480: the action is fully visible, both brief lines and emoji render, and
+selected text remains readable. After the final forward-delete, clipboard-cut and Escape fixes,
+the Release `.deb` was rebuilt and its installed composer journey passed again in a Swift-free
+Ubuntu container; the final screenshot is `out/composer-installed-final/composer.png`. The
+theme-boundary and main-actor-latency checks are clean. Wayland composer input remains unverified.
