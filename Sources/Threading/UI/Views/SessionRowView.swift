@@ -90,7 +90,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     var onCustomizationAction: ((ComponentCustomizationAction) -> Void)?
     private var sessionID: SessionID?
 
-    private let iconView = NSImageView()
+    private let rowVisuals = ThemedSessionRowContentView()
+    private var iconView: NSImageView { rowVisuals.iconView }
 
     /// The account's chip, overlaid on the mark's bottom-trailing corner. Deliberately not
     /// an arranged subview: the stack would give it a slot of its own, when the whole point
@@ -98,9 +99,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// Exists only after a row actually has an alternate-account chip to show. A standard
     /// session has no badge at all; constructing an image view and four constraints for every
     /// ordinary row made absent content part of viewport mounting and scrolling.
-    private var accountChipView: NSImageView?
+    private var accountChipView: NSImageView? { rowVisuals.accountChipView }
 
-    private let titleLabel = MorphingTitleLabel()
+    private var titleLabel: MorphingTitleLabel { rowVisuals.titleLabel }
     /// Durable visibility state in words: the row remains findable while snoozed, and an early
     /// wake remains obvious until the session is visited.
     private var attentionOverlayLabel: NSTextField?
@@ -116,14 +117,14 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// not become part of mounting and scrolling. See `RowConductSummary`.
     private var conductIndicator: NSImageView?
     private var executionHostIndicator: NSImageView?
-    private let nativeIdentityContent = NSView()
+    private var nativeIdentityContent: NSView { rowVisuals.nativeIdentityContent }
     private lazy var afterTitleSlot = NSStackView()
     private lazy var identityContentContainer = ComponentContentContainer(
         defaultContent: nativeIdentityContent
     )
-    private lazy var nativeStack = NSStackView(views: [nativeIdentityContent, titleLabel])
+    private var nativeStack: NSStackView { rowVisuals }
     private lazy var contentContainer = ComponentContentContainer(defaultContent: nativeStack)
-    private lazy var rowContentStack = NSStackView(views: [nativeStack])
+    private lazy var rowContentStack = NSStackView(views: [rowVisuals])
 
     /// The two gutters the column's width moves — see `SidebarDensity`. Held so a narrower
     /// column is a constant assignment on the rows already on screen.
@@ -298,19 +299,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     // MARK: - Setup
 
     private func setupViews() {
-        iconView.imageScaling = .scaleProportionallyDown
-        // The slot is wider than the symbol so a 12pt emoji fits unclipped; the symbol
-        // keeps its own point size rather than growing to fill.
-        iconView.symbolConfiguration = NSImage.SymbolConfiguration(
-            pointSize: SidebarRowDefaults.iconSize,
-            weight: .regular
-        )
-        iconView.translatesAutoresizingMaskIntoConstraints = false
-        iconView.setAccessibilityIdentifier("sidebar.session.identity")
-
-        titleLabel.applyFont(.controlRegular)
-        titleLabel.setAccessibilityIdentifier("sidebar.session.title")
-
         // The ink is stated once, as a rule: the row's dormancy and selection both move
         // under it, and a theme switch replaces the colours it resolves to. See
         // `applyTextColors`.
@@ -319,14 +307,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             if backgroundStyle == .emphasized { return Design.Text.selected }
             return isDormant ? Design.Text.secondary : Design.Text.label
         }
-
-        // The lowest hugging in the stack, unambiguously: the title absorbs all slack, which
-        // is what pins the status/actions slot to the row's trailing edge. Left at the
-        // default, the stack has no single view to stretch and the slot trails the text.
-        titleLabel.setContentHuggingPriority(
-            SidebarRowDefaults.stretchableHugging,
-            for: .horizontal
-        )
 
         setupTrailingSlot()
         setupCustomizableContent()
@@ -378,36 +358,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// Builds the one visual subtree extensions may customize. The activity/actions slot is a
     /// sibling outside the container, so replacing or invalidating content cannot disturb it.
     private func setupCustomizableContent() {
-        nativeIdentityContent.translatesAutoresizingMaskIntoConstraints = false
-        nativeIdentityContent.addSubview(iconView)
-        nativeIdentityContent.setAccessibilityIdentifier(
-            "sidebar.session.identity.default-content"
-        )
-
-        NSLayoutConstraint.activate([
-            nativeIdentityContent.widthAnchor.constraint(
-                equalToConstant: SidebarRowDefaults.iconSlotWidth
-            ),
-            nativeIdentityContent.heightAnchor.constraint(
-                equalToConstant: SidebarRowDefaults.iconSlotWidth
-            ),
-            iconView.topAnchor.constraint(equalTo: nativeIdentityContent.topAnchor),
-            iconView.bottomAnchor.constraint(equalTo: nativeIdentityContent.bottomAnchor),
-            iconView.leadingAnchor.constraint(equalTo: nativeIdentityContent.leadingAnchor),
-            iconView.trailingAnchor.constraint(equalTo: nativeIdentityContent.trailingAnchor)
-        ])
-
-        nativeStack.orientation = .horizontal
-        nativeStack.alignment = .centerY
-        nativeStack.spacing = SidebarRowDefaults.horizontalSpacing
-        nativeStack.translatesAutoresizingMaskIntoConstraints = false
-        nativeStack.setAccessibilityIdentifier("sidebar.session.default-content")
-        nativeStack.setContentHuggingPriority(
-            SidebarRowDefaults.stretchableHugging,
-            for: .horizontal
-        )
-        nativeStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
         // The trailing slot is **not** in the stack.
         //
         // As an arranged view it landed wherever the stack's packing left it: the stack pushes it
@@ -508,29 +458,10 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// Hung off the provider mark rather than laid out beside it, so the native composition
     /// remains compact. A selected identity renderer may still replace this whole container.
     private func accountChipViewForPresentation() -> NSImageView {
-        if let accountChipView { return accountChipView }
-
-        let chip = NSImageView()
-        chip.imageScaling = .scaleProportionallyDown
-        chip.translatesAutoresizingMaskIntoConstraints = false
-        chip.setAccessibilityIdentifier("sidebar.session.account")
-        nativeIdentityContent.addSubview(chip)
-
-        NSLayoutConstraint.activate([
-            chip.widthAnchor.constraint(equalToConstant: AccountBadgeDefaults.chipSize),
-            chip.heightAnchor.constraint(equalToConstant: AccountBadgeDefaults.chipSize),
-            chip.trailingAnchor.constraint(
-                equalTo: iconView.trailingAnchor,
-                constant: AccountBadgeDefaults.cornerOverhang
-            ),
-            chip.bottomAnchor.constraint(
-                equalTo: iconView.bottomAnchor,
-                constant: AccountBadgeDefaults.cornerOverhang
-            )
-        ])
-
-        accountChipView = chip
-        return chip
+        rowVisuals.accountChipViewForPresentation(
+            size: AccountBadgeDefaults.chipSize,
+            cornerOverhang: AccountBadgeDefaults.cornerOverhang
+        )
     }
 
     /// Adds the pin mark only once a pinned row needs it. Reuse keeps the now-warm view hidden,
