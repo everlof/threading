@@ -25,6 +25,8 @@ class ModuleBoundaryTests(unittest.TestCase):
         self.pty_host.mkdir(parents=True)
         self.controller.mkdir(parents=True)
         self.controller_runtime.mkdir(parents=True)
+        # Every declared module root must exist in the fixture, as in the repository.
+        (self.root / "Packages/ThreadingUsage/Sources/ThreadingUsage").mkdir(parents=True)
         (self.controller / "Store.swift").write_text(
             "import Foundation\nimport CControllerSQLite\n", encoding="utf-8"
         )
