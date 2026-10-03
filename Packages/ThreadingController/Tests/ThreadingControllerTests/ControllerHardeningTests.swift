@@ -76,11 +76,13 @@ struct ControllerHardeningTests {
             try await store.bindProviderTranscript(launch.executionID, credential: "wrong", transcript: transcript)
         }
         try await store.bindProviderTranscript(launch.executionID, credential: credential, transcript: transcript)
+        #expect(try await store.launch(launch.executionID).providerTranscriptChanged != true)
         try await store.bindProviderTranscript(launch.executionID, credential: credential, transcript: transcript)
         await #expect(throws: ControllerError.conflict) {
             try await store.bindProviderTranscript(launch.executionID, credential: credential,
                 transcript: ProviderTranscript(sessionID: "other", path: transcript.path))
         }
+        #expect(try await store.launch(launch.executionID).providerTranscriptChanged == true)
         _ = try await store.confirmLaunchStopped(launch.executionID, exitStatus: 0)
         await #expect(throws: ControllerError.forbidden) {
             try await store.bindProviderTranscript(launch.executionID, credential: credential, transcript: transcript)

@@ -20,7 +20,9 @@ public enum ControllerUsageCollector {
         case .codex: found = codex(home: usage.home, transcript: launch.providerTranscript, account: account)
         }
         return try await store.recordUsageReceipt(executionID, runtime: usage.runtime.rawValue, account: account,
-                                                  cells: cells(found.records), coverage: found.coverage, reason: found.reason)
+                                                  cells: cells(found.records),
+                                                  coverage: launch.providerTranscriptChanged == true ? .partial : found.coverage,
+                                                  reason: launch.providerTranscriptChanged == true ? "provider_transcript_changed" : found.reason)
     }
 
     /// Claude writes `<home>/projects/<project>/<session>.jsonl`, and a session's subagents under

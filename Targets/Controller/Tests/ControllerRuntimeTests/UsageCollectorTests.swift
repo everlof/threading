@@ -4,6 +4,34 @@ import ThreadingController
 @testable import ControllerRuntime
 
 struct UsageCollectorTests {
+    @Test func accountFailoverCannotSettleOnlyTheFirstTranscript() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try ControllerStore(path: root.appendingPathComponent("controller.db").path)
+        let worker = WorkerID()
+        _ = try await store.addWorker(id: worker, name: "Fixture")
+        _ = try await store.enqueue(workerID: worker, key: "trial", instruction: "Synthetic")
+        let home = root.appendingPathComponent("claude")
+        let spec = ControllerLaunchSpec(socketPath: "/tmp/unused.sock", executable: "/bin/true", arguments: [], environment: [:],
+            directory: root.path, recipients: ["person:operator"], destination: "fixture", usage: ControllerUsageSource(runtime: .claude, home: home.path, account: "first"))
+        let launch = try #require(await store.prepareLaunch(workerID: worker, spec: spec))
+        _ = try await store.beginLaunch(launch.executionID)
+        let credential = try await store.launchCredential(launch.executionID)
+        let transcript = home.appendingPathComponent("projects/fixture/\(launch.executionID).jsonl")
+        try FileManager.default.createDirectory(at: transcript.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data().write(to: transcript)
+        try await store.bindProviderTranscript(launch.executionID, credential: credential,
+            transcript: ProviderTranscript(sessionID: launch.executionID.description, path: transcript.path))
+        await #expect(throws: ControllerError.forbidden) {
+            try await store.bindProviderTranscript(launch.executionID, credential: credential,
+                transcript: ProviderTranscript(sessionID: launch.executionID.description, path: root.appendingPathComponent("second/account.jsonl").path))
+        }
+        _ = try await store.confirmLaunchStopped(launch.executionID, exitStatus: 0)
+        let receipt = try await ControllerUsageCollector.collect(store: store, executionID: launch.executionID)
+        #expect(receipt.coverage == .partial && receipt.reason == "provider_transcript_changed")
+    }
+
     @Test func consecutiveCodexRunsUseTheirOwnBoundTranscript() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

@@ -9,6 +9,7 @@ public struct ProviderTranscript: Codable, Equatable, Sendable {
 
 extension ControllerStore {
     public func bindProviderTranscript(_ executionID: ExecutionID, credential: String, transcript: ProviderTranscript) throws {
+        var refusal: ControllerError?
         try db.transaction {
             var value = try launch(executionID)
             let expected: String = try required("executionCredential", executionID.description)
@@ -18,14 +19,21 @@ extension ControllerStore {
             try Limits.text(transcript.path, field: "provider_transcript", maximum: 4096)
             let home = URL(fileURLWithPath: source.home).standardizedFileURL.path + "/"
             let path = URL(fileURLWithPath: transcript.path).standardizedFileURL.path
-            guard transcript.path.hasPrefix("/"), path.hasPrefix(home) else { throw ControllerError.forbidden }
-            if let prior = value.providerTranscript {
-                guard prior == transcript else { throw ControllerError.conflict }
+            let insideHome = transcript.path.hasPrefix("/") && path.hasPrefix(home)
+            let changed = value.providerTranscript.map { $0 != transcript } ?? false
+            if !insideHome || changed {
+                // An account failover may copy the conversation to another home. The original
+                // transcript alone cannot claim complete usage, even if the hook refuses rebinding.
+                value.providerTranscriptChanged = true
+                try update("launch", executionID.description, state: value.state.rawValue, value: value)
+                refusal = insideHome ? .conflict : .forbidden
                 return
             }
+            if value.providerTranscript != nil { return }
             value.providerTranscript = transcript
             try update("launch", executionID.description, state: value.state.rawValue, value: value)
             try event("launch.transcript_bound", executionID.description)
         }
+        if let refusal { throw refusal }
     }
 }

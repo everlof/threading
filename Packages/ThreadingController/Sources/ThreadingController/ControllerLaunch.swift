@@ -57,6 +57,7 @@ public struct ControllerLaunch: Codable, Equatable, Sendable {
     public internal(set) var startedAt: String?
     public internal(set) var stoppedAt: String?
     public internal(set) var providerTranscript: ProviderTranscript?
+    public internal(set) var providerTranscriptChanged: Bool?
 }
 
 /// Status deliberately omits argv, environment and credentials. Recipes may contain secrets

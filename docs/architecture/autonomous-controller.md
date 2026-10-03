@@ -637,7 +637,10 @@ Daily cells use the recorded stop day, including delayed collection. Codex trans
 comes from the provider's authenticated `agent-notice` hook (`session_id`, `transcript_path`),
 not directory/time inference. Install the hook even for mailbox-free workers. An unbound path,
 identity mismatch, unreadable child directory or capped child set is an explicit coverage gap.
-Claude's execution UUID remains its exact session lookup. Complete receipts are immutable.
+Claude's execution UUID remains its exact session lookup. An authenticated hook that reports
+a changed session/path or another account home marks coverage partial; the original transcript
+cannot settle a budget after account failover. Per-account split receipts across copied transcripts
+remain future work. Complete receipts are immutable.
 
 A capped worker reserves the remaining daily capacity for one execution until accounting is
 complete. Unknown, partial and pending usage hold new admissions for that UTC day; unresolved
