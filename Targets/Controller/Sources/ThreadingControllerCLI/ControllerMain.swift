@@ -101,6 +101,21 @@ struct ControllerMain {
     mail-outbound HOST_UUID
     mail-sync   (one exchange pass with configured peers)
     mail-rpc --peer HOST_UUID   (a peer's forced SSH command: one bounded JSON request on stdin)
+
+    source-configure SOURCE_UUID EXPECTED_REVISION SPEC_JSON_FILE   (always paused, approval cleared)
+    source-approve SOURCE_UUID EXPECTED_REVISION SHA256
+    source-enable|source-pause|source-delete SOURCE_UUID EXPECTED_REVISION
+    sources [CURSOR]
+    source SOURCE_UUID
+    source-events SOURCE_UUID [CURSOR]
+    source-poll SOURCE_UUID   (one poll now; needs approval, not enabling)
+    trigger-configure TRIGGER_UUID EXPECTED_REVISION SPEC_JSON_FILE   (always paused)
+    trigger-enable|trigger-pause|trigger-delete TRIGGER_UUID EXPECTED_REVISION
+    triggers SOURCE_UUID [CURSOR]
+    trigger TRIGGER_UUID
+    secret-set NAME TEXT_FILE   (owner-only file a source names; never read back)
+    A source is any executable on the probe contract (docs/feature-drafts/portable-trigger-sources.md).
+    It runs with this account's authority, unsandboxed; approval pins its content hash.
     Addresses are HOST_UUID/worker/UUID or HOST_UUID/session/UUID. Sender patterns: an address,
     HOST_UUID/* or *. Grants live on the recipient's host; mail carries information, never authority.
 
@@ -276,6 +291,46 @@ struct ControllerMain {
         case "mail-sync":
             try count(0)
             try output(await ControllerMailSync.sync(store: store).0)
+        case "source-configure", "trigger-configure":
+            try count(3)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            if command == "source-configure" {
+                let spec = try JSONDecoder().decode(ControllerSourceSpec.self, from: Data(file(args[2]).utf8))
+                try output(await store.configureSource(SourceID(args[0]), expectedRevision: revision, spec: spec))
+            } else {
+                let spec = try JSONDecoder().decode(ControllerTriggerSpec.self, from: Data(file(args[2]).utf8))
+                try output(await store.configureTrigger(TriggerRuleID(args[0]), expectedRevision: revision, spec: spec))
+            }
+        case "source-approve":
+            try count(3)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            try output(await store.approveSource(SourceID(args[0]), expectedRevision: revision, hash: args[2]))
+        case "source-enable", "source-pause", "source-delete":
+            try count(2)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            if command == "source-delete" { try output(await store.deleteSource(SourceID(args[0]), expectedRevision: revision)) }
+            else { try output(await store.setSourceEnabled(SourceID(args[0]), expectedRevision: revision, enabled: command == "source-enable")) }
+        case "trigger-enable", "trigger-pause", "trigger-delete":
+            try count(2)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            if command == "trigger-delete" { try output(await store.deleteTrigger(TriggerRuleID(args[0]), expectedRevision: revision)) }
+            else { try output(await store.setTriggerEnabled(TriggerRuleID(args[0]), expectedRevision: revision, enabled: command == "trigger-enable")) }
+        case "sources":
+            let after = try cursor(0); try output(await store.sources(after: after))
+        case "source":
+            try count(1); try output(await store.source(SourceID(args[0])))
+        case "source-events":
+            let after = try cursor(1); try output(await store.sourceEvents(SourceID(args[0]), after: after))
+        case "source-poll":
+            try count(1); try output(await ControllerSourcePoller.poll(store: store, id: SourceID(args[0]), database: database, manual: true))
+        case "triggers":
+            let after = try cursor(1); try output(await store.triggers(source: SourceID(args[0]), after: after))
+        case "trigger":
+            try count(1); try output(await store.trigger(TriggerRuleID(args[0])))
+        case "secret-set":
+            try count(2)
+            try ControllerSourcePoller.storeSecret(args[0], value: file(args[1], maximum: 16_384), database: database)
+            try output(["stored": args[0]])
         case "mail-rpc":
             try count(2)
             guard args[0] == "--peer" else { throw ControllerError.invalidInput("arguments") }

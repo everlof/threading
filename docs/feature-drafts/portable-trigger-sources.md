@@ -1,6 +1,10 @@
 # Portable trigger sources: wake on facts, not on a model
 
-> Status: **draft** (2026-10-03). Nothing here is implemented. Extends
+> Status: **in progress** (2026-10-03). The controller half — the probe contract and runner,
+> approval by content hash, secrets, typed triggers, interval and calendar polling, and mail as the
+> built-in source — is implemented and recorded in
+> [`autonomous-controller.md`](../architecture/autonomous-controller.md#trigger-sources-schema-v8).
+> The Mac's `threading-triggerd` running the same contract is next. Extends
 > [`triggers.md`](../architecture/triggers.md) (the Mac's `listen → match → start` feature) and
 > [`autonomous-controller.md`](../architecture/autonomous-controller.md) (whose workers already
 > accept an `event` admission source that nothing feeds). Companion to

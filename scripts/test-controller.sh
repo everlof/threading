@@ -15,3 +15,4 @@ python3 "$repo_root/scripts/tests/test_controller_runtime.py" \
     "$controller_scratch/cli/debug/threading-controller" "$controller_scratch/ptyd/debug/threading-ptyd"
 python3 "$repo_root/scripts/tests/test_controller_mail.py" \
     "$controller_scratch/cli/debug/threading-controller" "$controller_scratch/ptyd/debug/threading-ptyd"
+python3 "$repo_root/scripts/tests/test_controller_sources.py" "$controller_scratch/cli/debug/threading-controller"

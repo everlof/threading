@@ -31,7 +31,7 @@ final class ControllerDatabase {
             sqlite3_busy_timeout(handle, 3_000)
             try transaction {
                 let version = try rows("PRAGMA user_version").first?.integers[0]
-                guard let version, (0...7).contains(version) else { throw ControllerError.unsupportedSchema }
+                guard let version, (0...8).contains(version) else { throw ControllerError.unsupportedSchema }
                 if version == 0 {
                     guard try rows("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1").isEmpty else {
                         throw ControllerError.unsupportedSchema
@@ -96,6 +96,15 @@ final class ControllerDatabase {
                     try run("CREATE TABLE IF NOT EXISTS mail_outbound (sequence INTEGER PRIMARY KEY AUTOINCREMENT, host TEXT NOT NULL, message TEXT NOT NULL UNIQUE)")
                     try run("CREATE INDEX IF NOT EXISTS mail_outbound_host ON mail_outbound(host,sequence)")
                     try run("PRAGMA user_version=7")
+                }
+            }
+            if current < 8 {
+                // Trigger sources: when each enabled source next polls, read by due time only.
+                try transaction {
+                    try run("CREATE TABLE IF NOT EXISTS source_due (id TEXT PRIMARY KEY, due INTEGER NOT NULL)")
+                    try run("CREATE INDEX IF NOT EXISTS source_due_time ON source_due(due,id)")
+                    try run("CREATE INDEX IF NOT EXISTS trigger_source ON record(parent,sequence) WHERE kind='trigger'")
+                    try run("PRAGMA user_version=8")
                 }
             }
             try run("PRAGMA journal_mode=WAL")

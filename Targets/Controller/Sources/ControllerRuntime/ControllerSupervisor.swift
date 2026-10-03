@@ -18,6 +18,9 @@ public struct SupervisorCycle: Codable, Sendable {
     public var woken: [WorkID] = []
     /// The most recent completed exchange with mail peers, reported once.
     public var mail: ControllerMailSync.Report?
+    /// Source polls finished since the last report: events recorded and issues by source.
+    public var sourceEvents = 0
+    public var sourceIssues: [String] = []
 }
 
 /// One serial sweep owner. The database remains the admission authority across processes.
@@ -35,7 +38,10 @@ public actor ControllerSupervisor {
     private var mailSyncRunning = false
     private var mailSyncStarted = Date.distantPast
     private var finishedMailSync: ControllerMailSync.Report?
-    private enum Budget { static let page = 8; static let starts = 2; static let mailSyncSeconds: TimeInterval = 15 }
+    private var pollingSources: Set<SourceID> = []
+    private var finishedSourceEvents = 0
+    private var finishedSourceIssues: [String] = []
+    private enum Budget { static let page = 8; static let starts = 2; static let mailSyncSeconds: TimeInterval = 15; static let concurrentPolls = 2 }
 
     public init(store: ControllerStore, database: String, controllerBinary: String) {
         self.store = store; self.database = database; self.binary = controllerBinary
@@ -57,6 +63,9 @@ public actor ControllerSupervisor {
         } catch { report.automationIssues.append("mail_wake: \(error)") }
         startMailSyncIfDue()
         if let finished = finishedMailSync { report.mail = finished; finishedMailSync = nil }
+        do { try await startDueSourcePolls() } catch { report.sourceIssues.append("due_sources: \(error)") }
+        report.sourceEvents = finishedSourceEvents; finishedSourceEvents = 0
+        report.sourceIssues += finishedSourceIssues; finishedSourceIssues = []
         let page = try await store.unresolvedLaunches(after: launchCursor, limit: Budget.page)
         launchCursor = page.items.isEmpty ? 0 : page.next
         let active = page.items.filter { $0.state != .prepared }
@@ -127,6 +136,32 @@ public actor ControllerSupervisor {
             self.finishMailSync(result.0, next: result.1)
         }
     }
+    /// Probes run with timeouts of up to five minutes, so at most two run at once, beside launch
+    /// supervision and never inside a tick. A slow source cannot delay another one's deadline
+    /// past the next tick: each is claimed (its next deadline written) before it runs.
+    private func startDueSourcePolls() async throws {
+        let available = Budget.concurrentPolls - pollingSources.count
+        guard available > 0 else { return }
+        for source in try await store.dueSources(limit: Budget.page) where !pollingSources.contains(source.id) {
+            guard pollingSources.count < Budget.concurrentPolls else { break }
+            pollingSources.insert(source.id)
+            let store = store, database = database, id = source.id
+            Task {
+                do {
+                    let events = try await ControllerSourcePoller.poll(store: store, id: id, database: database)
+                    self.finishSourcePoll(id, events: events.count, issue: nil)
+                } catch {
+                    self.finishSourcePoll(id, events: 0, issue: "\(id): \(error)")
+                }
+            }
+        }
+    }
+    private func finishSourcePoll(_ id: SourceID, events: Int, issue: String?) {
+        pollingSources.remove(id)
+        finishedSourceEvents += events
+        if let issue { finishedSourceIssues.append(issue) }
+    }
+
     private func finishMailSync(_ report: ControllerMailSync.Report, next: Int64) {
         mailSyncRunning = false
         mailPeerCursor = next
