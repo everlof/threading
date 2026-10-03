@@ -210,6 +210,24 @@ open class NSView: NSResponder, NSLayoutItem {
         view.updateTrackingAreasInSubtree()
     }
 
+    open func addSubview(_ view: NSView, positioned place: NSWindow.OrderingMode,
+                         relativeTo otherView: NSView?) {
+        precondition(place != .out, "a subview can only be ordered above or below")
+        precondition(otherView !== view, "a subview cannot be positioned relative to itself")
+        precondition(otherView == nil || otherView?.superview === self,
+                     "relative view must be a sibling")
+        addSubview(view)
+        subviews.removeLast()
+        let index: Int
+        if let otherView {
+            let siblingIndex = subviews.firstIndex { $0 === otherView }!
+            index = place == .above ? siblingIndex + 1 : siblingIndex
+        } else {
+            index = place == .above ? subviews.count : 0
+        }
+        subviews.insert(view, at: index)
+    }
+
     open func removeFromSuperview() {
         detachFromSuperview(notifyAppearance: true, notifyWindow: true)
     }
@@ -412,6 +430,9 @@ open class NSView: NSResponder, NSLayoutItem {
                 context.flipVertically(in: frame.height)
             }
             context.alpha = context.alpha * alphaValue
+            // The transform above puts bounds in this view's own coordinate system. Keep the
+            // clip in the saved graphics state so descendants inherit it and siblings do not.
+            NSBezierPath(rect: bounds).addClip()
 
             layout()
             draw(bounds)
@@ -636,6 +657,10 @@ open class NSView: NSResponder, NSLayoutItem {
     /// what it needs to prove is that the *call sites* compile and that a value set through the
     /// animator still lands on the view.
     open func animator() -> Self { self }
+}
+
+public extension NSWindow {
+    enum OrderingMode { case above, below, out }
 }
 
 public struct NSUserInterfaceItemIdentifier: RawRepresentable, Hashable, Sendable {
