@@ -1516,6 +1516,17 @@
         }
       }
     },
+    "%@ · not read yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · inte läst än"
+          }
+        }
+      }
+    },
     "%@ · process %lld" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29969,6 +29980,17 @@
         }
       }
     },
+    "Models, projects, accounts, billing routes, and agents — including connected hosts' workers." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modeller, projekt, konton, debiteringsvägar och agenter – inklusive anslutna värdars arbetare."
+          }
+        }
+      }
+    },
     "Monday at %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -52694,6 +52716,39 @@
         }
       }
     },
+    "The host's controller did not answer: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens styrprogram svarade inte: %@"
+          }
+        }
+      }
+    },
+    "The host's controller repeated a page; reading stopped." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens styrprogram upprepade en sida; läsningen avbröts."
+          }
+        }
+      }
+    },
+    "The host's controller sent a response this Mac cannot read." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens styrprogram skickade ett svar som den här Macen inte kan läsa."
+          }
+        }
+      }
+    },
     "The host's supervisor will then start its worker on this schedule, even while this Mac is offline." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56533,6 +56588,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här filen är för stor att förhandsgranska här."
+          }
+        }
+      }
+    },
+    "This host's connection is incomplete. Connect to its controller in Automations ▸ Remote first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens anslutning är ofullständig. Anslut först till dess styrprogram under Automatiseringar ▸ Fjärranslutning."
           }
         }
       }
@@ -62871,6 +62937,17 @@
         }
       }
     },
+    "Worker %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbetare %@"
+          }
+        }
+      }
+    },
     "Worker ID" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62889,6 +62966,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arbetare: %@\nTid: %@\nRevision: %lld"
+          }
+        }
+      }
+    },
+    "Workers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbetare"
           }
         }
       }
@@ -65712,6 +65800,17 @@
         }
       }
     },
+    "last read %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "senast läst %@"
+          }
+        }
+      }
+    },
     "last seen %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -66430,6 +66529,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "av"
+          }
+        }
+      }
+    },
+    "older days not read" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "äldre dagar inte lästa"
           }
         }
       }
@@ -68713,6 +68823,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“%@” är inte en användbar webbadress."
+          }
+        }
+      }
+    },
+    "“%@” is not a usage operation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” är ingen förbrukningsåtgärd."
           }
         }
       }
