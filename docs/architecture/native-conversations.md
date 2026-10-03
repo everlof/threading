@@ -362,7 +362,14 @@ lands inside that turn. `ConversationTimeline` used to turn a model-bearing init
 `.status(.ready)`, which ended the opening turn for the runtime too: an unattended automation
 run was settled as having ended without a result about a second after it started, while its
 agent kept working. The timeline now reports `.modelReported`, and the view applies Ready only
-when no turn is in flight (`ConversationOpeningTurnTests`). Claude executes a selected action by
+when no turn is in flight (`ConversationOpeningTurnTests`). **Nor is the end of replay.** The
+same run was still settled on the next build: a background launch's prompt waits in the outbox
+until replay ends, `stream.start()` drains it synchronously through the availability callback,
+and `finishReplayAndStart`'s Ready on the following line ended the turn it had just admitted.
+Both readiness signals now go through `applyReadyUnlessTurnInFlight`, so only a turn's own
+`turnFinished` or the process ending can end it. `ConversationBackgroundLaunchTurnTests` drives
+the whole launch through the shipping Claude transport against a fake CLI and asserts the
+session owes its outcome until the prompt's turn finishes, exactly once. Claude executes a selected action by
 sending the exact `/name arguments` text back through its ordinary stream. Successful commands
 such as `/context` can return their only useful text on the terminal `result`; the timeline adds
 that result only when the turn did not already produce an assistant message.

@@ -41,6 +41,11 @@ Every run has two possible stages:
    an existing checkout is clean or uses an isolated managed worktree, and sends a host-authored
    fix prompt.
 
+A run is settled as unreported on the first runtime edge where its session stops owing an
+outcome, so that edge must be the prompt's own turn ending or the process exiting. Two readiness
+signals that ended the opening turn early are documented under "`system/init` is not a turn
+boundary" in [`native-conversations.md`](native-conversations.md).
+
 The grant ends at local edits and tests. Trigger runs cannot push, deploy, open a change request,
 write back to the source or acquire a source resource. Those remain separate future authorities.
 The configured maximum runtime is armed as the session's curfew across both stages.

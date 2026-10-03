@@ -2200,8 +2200,10 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         if !restoreConversationViewportIfAvailable() {
             scrollToBottom()
         }
+        // `start()` can drain a queued opening prompt synchronously, so its turn may already
+        // be in flight here; Ready is the replay ending, not that turn.
         stream.start()
-        apply(.status(.ready(model: nil, lastTurn: nil)))
+        applyReadyUnlessTurnInFlight(model: nil)
         restoreConversationConfiguration()
         refreshConversationControls()
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)

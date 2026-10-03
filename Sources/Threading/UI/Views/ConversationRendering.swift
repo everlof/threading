@@ -15,6 +15,21 @@ extension ConversationViewController {
 
     // MARK: - Changes
 
+    /// Says the session is up and idle, unless a turn is already in flight.
+    ///
+    /// Only a turn's own `turnFinished` (or the process ending) may end a turn. Readiness
+    /// signals are not turn boundaries: replay finishing, and Claude naming its model in
+    /// `system/init`. A background launch's opening prompt can already be in flight when either
+    /// arrives — `stream.start()` drains the outbox synchronously, so the prompt is admitted
+    /// before `finishReplayAndStart` reaches its Ready, and the CLI writes its first init only
+    /// once that prompt runs. Ready there ended the turn for the runtime, and an unattended
+    /// automation run was settled as "ended without reporting a result" a second after launch
+    /// while its agent went on working (`ConversationBackgroundLaunchTurnTests`).
+    func applyReadyUnlessTurnInFlight(model: String?) {
+        guard !isTurnInFlight else { return }
+        apply(.status(.ready(model: model, lastTurn: nil)))
+    }
+
     /// Brings the view tree in line with one change the timeline reported.
     func apply(_ change: ConversationTimeline.Change) {
         remoteRowProjection.apply(change, timelineRows: timeline.rows)
@@ -125,11 +140,8 @@ extension ConversationViewController {
 
         case .modelReported(let model):
             // Claude's first `system/init` arrives after the opening prompt was written, so it
-            // lands inside that turn. Ready there would end the turn for the runtime as well as
-            // the status line, and an unattended automation run was settled as having ended
-            // without a result within a second of starting while its agent went on working.
-            guard !isTurnInFlight else { return }
-            apply(.status(.ready(model: model, lastTurn: nil)))
+            // lands inside that turn.
+            applyReadyUnlessTurnInFlight(model: model)
 
         case .adoptedSessionID(let agentSessionID):
             // The CLI's own identifier wins: a resume can settle on one other than the
