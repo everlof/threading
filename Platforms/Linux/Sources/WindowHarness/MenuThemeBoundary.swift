@@ -57,6 +57,8 @@ extension Design.Symbol {
 extension Design {
     @MainActor enum Text {
         static let label = Specimen.Ink(on: Specimen.bodyGround).label
+        static let selected = Specimen.Ink(on: NSColor(red: 0.16, green: 0.42,
+                                                       blue: 0.78, alpha: 1)).label
         static let secondary = Specimen.Ink(on: Specimen.bodyGround).secondary
         static let tertiary = secondary.withAlphaComponent(0.7)
     }

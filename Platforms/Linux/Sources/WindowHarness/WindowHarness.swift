@@ -359,6 +359,10 @@ struct WindowHarness {
         let decodedMarks = await Task.detached(priority: .utility) { ProviderMarks.decode() }.value
         ProviderMarks.install(decodedMarks)
         let mode = CommandLine.arguments.dropFirst().first
+        if mode == "--project-row-layout-fixture" {
+            ProjectRowLayoutFixture.run()
+            return
+        }
         if mode == "--attach" {
             let args = Array(CommandLine.arguments.dropFirst(2))
             guard args.count == 3 else { throw WindowFailure("usage: WindowHarness --attach STORE SOCKET TERMINAL_UUID") }
@@ -1215,6 +1219,13 @@ struct WindowHarness {
                     Int32((navigatorRoot.bounds.height - rect.maxY) * scale),
                     Int32(rect.width * scale), Int32(rect.height * scale))
         }
+        func projectControlPixels(_ slot: Int, create: Bool)
+            -> (x: Int32, y: Int32, width: Int32, height: Int32)? {
+            guard let control = navigatorRoot.projectControl(at: slot, create: create) else {
+                return nil
+            }
+            return headerPixels(control)
+        }
         func publishHeaderGeometry() {
             contentWindow.layoutIfNeeded()
             let actionsRect = headerPixels(actionsButton)
@@ -1703,24 +1714,21 @@ struct WindowHarness {
                             let project = projects[index]
                             let display = String(project.name.unicodeScalars.prefix(80))
                             let presentation = NavigatorProjectRowPresentation.project(name: display)
-                            let opened = terminals[project.id]
-                            let retained = opened != nil || restoredProjectIDs.contains(project.id)
-                            let text = presentation.title + (retained ? " *" : "")
                             let hiddenCount = project.sessions.addingReportingOverflow(project.terminalCount)
-                            // Like the Mac ProjectRowView, a project without discovered artwork
-                            // gets a stable name-derived tile. Only viewport rows request it;
-                            // GeneratedProjectIcon caps its cross-scroll image cache.
+                            // The native visual subtree is shared with the Mac project cell.
+                            // Only visible rows request artwork; host identity and commands stay
+                            // on the bounded navigator slots.
                             let identity = GeneratedProjectIcon.image(for: project.name)
-                            addNavigatorRow(text, index: index - first, width: width,
-                                            height: height, accent: accent,
-                                            selected: index == selected,
-                                            selectedInk: selectedInk, root: root, textRows: &textRows,
-                                            image: identity, projectPresentation: presentation,
-                                            imageSide: 16,
-                                            trailingCount: hiddenCount.overflow ? Int.max : hiddenCount.partialValue,
-                                            projectActionID: launch == nil ? nil : project.id,
-                                            revealsProjectAction: hoveredProjectID == project.id,
-                                            projectActionEnabled: actionsEnabled)
+                            root.mountNavigatorRow(
+                                frame: navigatorRowRect(index - first, width: width, height: height),
+                                accent: accent, selected: index == selected, ink: selectedInk,
+                                showsMark: false)
+                            root.mountProjectContent(
+                                presentation: presentation, icon: identity,
+                                count: hiddenCount.overflow ? Int.max : hiddenCount.partialValue,
+                                projectID: launch == nil ? nil : project.id,
+                                revealed: hoveredProjectID == project.id,
+                                enabled: actionsEnabled)
                         }
                     }
                 }
@@ -1896,13 +1904,16 @@ struct WindowHarness {
                                                          width: width, height: height)
                             } else {
                                 let bounds = navigatorRowPixels(index - first, width: width, height: height)
+                                guard let create = projectControlPixels(index - first, create: true),
+                                      let action = projectControlPixels(index - first, create: false)
+                                else { throw WindowFailure("mounted project controls have no layout") }
                                 let result = project.id.withCString { identifier in
                                     label.withCString { name in
                                         tw_accessibility_add_project_row(window, identifier, name,
                                             index == selected ? 1 : 0,
                                             bounds.x, bounds.y, bounds.width, bounds.height,
-                                            bounds.x + bounds.width - 96, bounds.y + 2, 40, 40,
-                                            bounds.x + bounds.width - 52, bounds.y + 2, 40, 40,
+                                            create.x, create.y, create.width, create.height,
+                                            action.x, action.y, action.width, action.height,
                                             actionsEnabled ? 1 : 0)
                                     }
                                 }
@@ -2164,11 +2175,12 @@ struct WindowHarness {
                         openProjectCreateMenu(for: target, returnToSidebar: wasSidebarFocused)
                         if actions?.projectID == target {
                             let slot = Int((event.y - navigatorRowsTop) / Int32(navigatorRowStride * 2))
-                            let row = navigatorRowPixels(slot, width: navigatorWidth, height: height)
-                            rowActionMenuSource = NSRect(
-                                x: CGFloat(row.x + row.width - 96), y: CGFloat(row.y + 2),
-                                width: 40, height: 40)
-                            rowActionMenuGesture = true
+                            if let source = projectControlPixels(slot, create: true) {
+                                rowActionMenuSource = NSRect(
+                                    x: CGFloat(source.x), y: CGFloat(source.y),
+                                    width: CGFloat(source.width), height: CGFloat(source.height))
+                                rowActionMenuGesture = true
+                            }
                         }
                         continue
                     }
@@ -2177,11 +2189,12 @@ struct WindowHarness {
                         openActions(for: target, returnToSidebar: true)
                         if actions?.projectID == target {
                             let slot = Int((event.y - navigatorRowsTop) / Int32(navigatorRowStride * 2))
-                            let row = navigatorRowPixels(slot, width: navigatorWidth, height: height)
-                            rowActionMenuSource = NSRect(
-                                x: CGFloat(row.x + row.width - 52), y: CGFloat(row.y + 2),
-                                width: 40, height: 40)
-                            rowActionMenuGesture = true
+                            if let source = projectControlPixels(slot, create: false) {
+                                rowActionMenuSource = NSRect(
+                                    x: CGFloat(source.x), y: CGFloat(source.y),
+                                    width: CGFloat(source.width), height: CGFloat(source.height))
+                                rowActionMenuGesture = true
+                            }
                         }
                         continue
                     }

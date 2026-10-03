@@ -111,22 +111,32 @@ open class NSTextField: NSView {
     open override var isFlipped: Bool { true }
 
     open override var intrinsicContentSize: NSSize {
-        let metric = metrics(at: 1)
-        return NSSize(width: CGFloat(metric.width), height: CGFloat(metric.height))
+        let scale = window?.backingScaleFactor ?? 1
+        let metric = metrics(at: scale)
+        return NSSize(width: CGFloat(metric.width) / scale,
+                      height: CGFloat(metric.height) / scale)
+    }
+
+    open override func viewDidMoveToWindow() {
+        // A tight stack can measure before attachment. Its intrinsic width must be recomputed
+        // at the scale used to shape pixels when the label gains or changes a window.
+        invalidateIntrinsicContentSize()
     }
 
     open override var firstBaselineMetric: NSBaselineMetric { baselineMetric }
     open override var lastBaselineMetric: NSBaselineMetric { baselineMetric }
 
     private var baselineMetric: NSBaselineMetric {
-        let metric = metrics(at: 1)
+        let scale = window?.backingScaleFactor ?? 1
+        let metric = metrics(at: scale)
+        let baseline = CGFloat(metric.baseline) / scale
+        let height = CGFloat(metric.height) / scale
         if effectiveLineBreakMode == .byWordWrapping || effectiveLineBreakMode == .byCharWrapping {
             // The first line is top-aligned. A last-line baseline depends on the width being
             // solved, so this label-only path exposes the first line for both anchors.
-            return NSBaselineMetric(heightFraction: 0, offset: CGFloat(metric.baseline))
+            return NSBaselineMetric(heightFraction: 0, offset: baseline)
         }
-        return NSBaselineMetric(heightFraction: 0.5,
-                                offset: CGFloat(metric.baseline) - CGFloat(metric.height) / 2)
+        return NSBaselineMetric(heightFraction: 0.5, offset: baseline - height / 2)
     }
 
     private func invalidateTextMetrics() {

@@ -137,11 +137,11 @@ struct AppThemeDidChange {}
 }
 
 #if os(Linux)
-private func measured(_ text: String) -> TATMetrics {
+private func measured(_ text: String, scale: CGFloat = 1) -> TATMetrics {
     var metric = TATMetrics(width: 0, height: 0, baseline: 0, glyphs: 0)
     let bytes = Array(text.utf8)
     let success = bytes.withUnsafeBufferPointer {
-        tat_measure($0.baseAddress, Int32($0.count), 0, 0, 13, &metric)
+        tat_measure($0.baseAddress, Int32($0.count), 0, 0, Double(13 * scale), &metric)
     }
     precondition(success == 1)
     return metric
@@ -483,6 +483,19 @@ private struct InkPolicy: Decodable {
         let baseline = measuredLabel.firstBaselineMetric
         precondition(baseline.heightFraction == 0.5 &&
                      baseline.offset == CGFloat(metric.baseline) - CGFloat(metric.height) / 2)
+        let scaleLabel = NSTextField(labelWithString: "WaylandProject")
+        let detachedSize = scaleLabel.intrinsicContentSize
+        let scaleRoot = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 80))
+        scaleRoot.addSubview(scaleLabel)
+        let scaleWindow = NSWindow(backingScaleFactor: 2)
+        scaleWindow.contentView = scaleRoot
+        let scaledMetric = measured("WaylandProject", scale: 2)
+        precondition(scaleLabel.intrinsicContentSize == NSSize(
+            width: CGFloat(scaledMetric.width) / 2, height: CGFloat(scaledMetric.height) / 2),
+            "attached label must measure at the same scale as Pango drawing")
+        scaleWindow.contentView = nil
+        precondition(scaleLabel.intrinsicContentSize == detachedSize,
+                     "detaching must restore the default-scale intrinsic size")
         let wrapping = NSTextField(wrappingLabelWithString: longText)
         precondition(wrapping.firstBaselineMetric.heightFraction == 0)
         let naturalWrapSize = wrapping.intrinsicContentSize
@@ -1104,8 +1117,8 @@ private struct InkPolicy: Decodable {
         sparkline.setValues([0, 4, 1], accessibilityLabel: "Three recent weeks")
         precondition(sparkline.accessibilityLabel() == "Three recent weeks" && sparkline.needsDisplay)
         print("PASS unchanged production sparkline: inherited appearance, distinct pixels and accessibility")
-        precondition(NSFont.monospacedSystemFont(ofSize: 13, weight: .bold).familyName.contains("Bold"))
-        precondition(NSFont.systemFont(ofSize: 13, weight: .semibold).familyName.contains("Semibold"))
+        precondition(NSFont.monospacedSystemFont(ofSize: 13, weight: .bold).familyName?.contains("Bold") == true)
+        precondition(NSFont.systemFont(ofSize: 13, weight: .semibold).familyName?.contains("Semibold") == true)
         precondition(NSFont.systemFont(ofSize: 13, weight: .medium).weight == .medium)
         let weightLabel = NSTextField(labelWithString: "Typography")
         weightLabel.frame = NSRect(x: 6, y: 6, width: 110, height: 28)

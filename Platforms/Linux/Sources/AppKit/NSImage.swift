@@ -18,6 +18,18 @@ public enum NSImageRep {
 /// Decoded, bounded artwork. File decoding and resource lookup belong to the platform worker;
 /// this leaf owns the real image sizing/drawing contract used by TemplateImageDrawing.
 public final class NSImage {
+    /// Symbol sizing requested by a view. The Linux symbol provider remains app-owned; decoded
+    /// artwork keeps its own dimensions, while the configuration travels with the image view.
+    public struct SymbolConfiguration: Sendable {
+        public let pointSize: CGFloat
+        public let weight: NSFont.Weight
+
+        public init(pointSize: CGFloat, weight: NSFont.Weight) {
+            self.pointSize = pointSize
+            self.weight = weight
+        }
+    }
+
     public static let maximumPixelDimension = 1024
     public var size: NSSize {
         didSet {

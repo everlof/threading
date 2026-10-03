@@ -119,7 +119,12 @@ try:
         assert create.get_accessible_id() == 'sidebar.project.create.' + rows[1].get_accessible_id()
         assert create.get_name() == 'New chat or terminal'
         create_rect = create.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert (create_rect.x, create_rect.y, create_rect.width, create_rect.height) == (692, 136, 40, 40)
+        row_rect = rows[1].get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        action_rect = rows[1].get_child_at_index(1).get_component_iface().get_extents(
+            Atspi.CoordType.WINDOW)
+        assert (create_rect.y, create_rect.width, create_rect.height) == (row_rect.y + 2, 40, 40)
+        assert action_rect.x == create_rect.x + create_rect.width + 4
+        assert 0 <= row_rect.x + row_rect.width - (action_rect.x + action_rect.width) <= 8
         assert create.get_action_iface().do_action(0)
         listed = menu(app, 'New in Project', ['linux.project.new-chat',
                       'linux.project.new-manager', 'linux.project.new-shell'], process)

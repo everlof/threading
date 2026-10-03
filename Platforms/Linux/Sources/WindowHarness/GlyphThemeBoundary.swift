@@ -29,6 +29,10 @@ public enum Design {
             surfaceHover = ground.blended(withFraction: 0.22, of: .black)!
             border = ground.blended(withFraction: 0.42, of: .black)!
         }
+
+        public static var selection: Ink {
+            Ink(on: NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1))
+        }
     }
 
     public enum Accessibility { public static let focusRingWidth: CGFloat = 2 }
@@ -52,6 +56,7 @@ public enum Design {
         public static let small: CGFloat = 6
         public static let inset: CGFloat = 12
     }
+    public enum Motion { public static let quick: TimeInterval = 0.15 }
     public enum Size {
         public static let tabHeight: CGFloat = 28
         public static let footerHeight: CGFloat = 48

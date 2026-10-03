@@ -46,11 +46,16 @@ public struct AccessibilityDisplayOptionsDidChange {}
 }
 
 @MainActor public enum InkSource: Equatable {
-    case backdrop, chrome
+    case backdrop, chrome, selection
     private static let backdropInk = Design.Ink(on: Specimen.bodyGround)
     private static let chromeInk = Design.Ink(on: Specimen.headerGround)
+    private static let selectionInk = Design.Ink.selection
     public var ink: Design.Ink {
-        self == .chrome ? Self.chromeInk : Self.backdropInk
+        switch self {
+        case .backdrop: return Self.backdropInk
+        case .chrome: return Self.chromeInk
+        case .selection: return Self.selectionInk
+        }
     }
 }
 

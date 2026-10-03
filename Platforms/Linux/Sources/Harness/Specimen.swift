@@ -202,6 +202,20 @@ enum Specimen {
             nextRowSlot += 1
         }
 
+        #if THREADING_WINDOW_HARNESS
+        /// The visible project slot mounts the same native row subtree used by the Mac cell.
+        /// Slot identity and actions remain with the host's bounded navigator model.
+        func mountProjectContent(
+            presentation: NavigatorProjectRowPresentation, icon: NSImage?, count: Int,
+            projectID: String?, revealed: Bool, enabled: Bool
+        ) {
+            guard nextRowSlot > 0 else { return }
+            mountedRows[nextRowSlot - 1].configureProductionProject(
+                presentation: presentation, icon: icon, count: count,
+                projectID: projectID, revealed: revealed, enabled: enabled)
+        }
+        #endif
+
         func finishNavigatorRows() {
             for index in nextRowSlot..<mountedRows.count { mountedRows[index].isHidden = true }
         }
@@ -230,6 +244,12 @@ enum Specimen {
             guard slot >= 0, slot < nextRowSlot, !mountedRows[slot].isHidden else { return nil }
             return mountedRows[slot]
         }
+
+        #if THREADING_WINDOW_HARNESS
+        func projectControl(at slot: Int, create: Bool) -> NSView? {
+            mountedRow(at: slot)?.productionProjectControl(create: create)
+        }
+        #endif
 
         func takeNavigationStep() -> Int? {
             defer { navigationStep = nil }
@@ -343,6 +363,8 @@ enum Specimen {
         private(set) var disclosure: DisclosureTriangleDrawing.Direction?
         private var iconView: GlyphView?
         #if THREADING_WINDOW_HARNESS
+        private var productionProjectView: ThemedProjectRowView?
+        private var productionProjectActionsRevealed = false
         private var projectCreateButton: ThemedIconButton?
         private var projectActionButton: ThemedIconButton?
         #endif
@@ -386,6 +408,24 @@ enum Specimen {
 
         override func mouseDown(with event: NSEvent) { onPress?() }
 
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            let target = super.hitTest(point)
+            #if THREADING_WINDOW_HARNESS
+            guard let productionProjectView, !productionProjectView.isHidden,
+                  let target else { return target }
+            if !productionProjectActionsRevealed { return self }
+            var ancestor: NSView? = target
+            while let view = ancestor, view !== self {
+                if view === productionProjectView.createButton ||
+                   view === productionProjectView.actionButton { return target }
+                ancestor = view.superview
+            }
+            return self
+            #else
+            return target
+            #endif
+        }
+
         override func keyDown(with event: NSEvent) {
             switch event.keyCode {
             case 126: onNavigation?(-1)
@@ -404,6 +444,9 @@ enum Specimen {
             self.image = image
             self.showsMark = showsMark
             self.disclosure = disclosure
+            #if THREADING_WINDOW_HARNESS
+            productionProjectView?.isHidden = true
+            #endif
             if let image {
                 let iconFrame = Specimen.navigatorRowGeometry.iconRect(in: bounds, side: imageSide)
                 if iconView == nil {
@@ -476,6 +519,53 @@ enum Specimen {
             }
             #endif
         }
+
+        #if THREADING_WINDOW_HARNESS
+        func productionProjectControl(create: Bool) -> NSView? {
+            guard let productionProjectView, !productionProjectView.isHidden else { return nil }
+            return create ? productionProjectView.createButton : productionProjectView.actionButton
+        }
+
+        func configureProductionProject(
+            presentation: NavigatorProjectRowPresentation, icon: NSImage?, count: Int,
+            projectID: String?, revealed: Bool, enabled: Bool
+        ) {
+            let content: ThemedProjectRowView
+            if let productionProjectView {
+                content = productionProjectView
+            } else {
+                content = ThemedProjectRowView(frame: bounds)
+                content.translatesAutoresizingMaskIntoConstraints = true
+                content.createButton.surfaceStateDidChange = { [weak self] in
+                    self?.onProjectControlVisualChange?()
+                }
+                content.actionButton.surfaceStateDidChange = { [weak self] in
+                    self?.onProjectControlVisualChange?()
+                }
+                addSubview(content)
+                productionProjectView = content
+            }
+            if content.frame != bounds { content.frame = bounds }
+            content.isHidden = false
+            content.configure(presentation, icon: icon, count: count,
+                              moreSymbol: projectID == nil ? nil : SidebarRowDefaults.actionSymbol,
+                              showsCreate: projectID != nil)
+            content.setSelection(selected)
+            content.setHoverControlsVisible(revealed, animated: false)
+            productionProjectActionsRevealed = revealed
+            content.createButton.isEnabled = enabled
+            content.actionButton.isEnabled = enabled
+            content.onCreatePress = { [weak self, projectID] _ in
+                guard let projectID else { return }
+                self?.onProjectCreate?(projectID)
+            }
+            content.onActionPress = { [weak self, projectID] _ in
+                guard let projectID else { return }
+                self?.onProjectAction?(projectID)
+            }
+            iconView?.isHidden = true
+        }
+        #endif
 
         override func draw(_ dirtyRect: NSRect) {
             NSBezierPath(rect: bounds).addClip()
