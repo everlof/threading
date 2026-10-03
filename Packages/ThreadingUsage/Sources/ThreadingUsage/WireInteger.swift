@@ -33,14 +33,14 @@ import Foundation
 ///
 /// Neither entry point refuses on sign. A negative count is a provider protocol error rather than
 /// an unrepresentable number, and the readers that care already clamp it where they use it.
-enum WireInteger {
+public enum WireInteger {
 
     /// The number exactly, or nil when `Int64` cannot hold it.
     ///
     /// A non-integral number is refused too, because it is not a whole number: `2.0` reads as
     /// `2` and `1.5` refuses. Use this where the answer is a *claim* about the value — deciding
     /// that a wire number is an integer rather than a real number, say.
-    static func exact(_ number: NSNumber) -> Int64? {
+    public static func exact(_ number: NSNumber) -> Int64? {
         Int64(exactly: number)
     }
 
@@ -50,7 +50,7 @@ enum WireInteger {
     /// Use this where a reader already truncates and only the wrapping needs fixing: the token
     /// counts, which every provider writes as integers and one of which arrived as `100.4` in the
     /// recorded corpus. Truncating is that reader's existing contract; wrapping never was.
-    static func whole(_ number: NSNumber) -> Int64? {
+    public static func whole(_ number: NSNumber) -> Int64? {
         if let exact = Int64(exactly: number) { return exact }
 
         // Not exactly an `Int64`, so either fractional or out of range. `doubleValue` decides
@@ -62,7 +62,7 @@ enum WireInteger {
     }
 
     /// `whole(_:)` as an `Int`. See it for what is refused and why.
-    static func wholeInt(_ number: NSNumber) -> Int? {
+    public static func wholeInt(_ number: NSNumber) -> Int? {
         guard let value = whole(number) else { return nil }
         return Int(exactly: value)
     }

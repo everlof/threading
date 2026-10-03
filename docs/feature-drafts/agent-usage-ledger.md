@@ -1,6 +1,10 @@
 # Agent usage ledger: what each agent spent, kept where it ran
 
-> Status: **draft** (2026-10-03). Nothing here is implemented. Extends
+> Status: **in progress** (2026-10-03). Slices 1–3 are implemented: `Packages/ThreadingUsage`
+> holds the shared adapters and pricing ([`usage-dashboard.md`](../architecture/usage-dashboard.md)),
+> and the controller writes receipts, daily cells and enforces worker and chain budgets
+> ([`autonomous-controller.md`](../architecture/autonomous-controller.md#usage-receipts-and-budgets-schema-v9)).
+> The dashboards (slice 4) are next. Extends
 > [`usage-dashboard.md`](../architecture/usage-dashboard.md) (the Mac's transcript ledger) and
 > [`autonomous-controller.md`](../architecture/autonomous-controller.md) (workers and
 > executions). Read by admission in [`portable-trigger-sources.md`](portable-trigger-sources.md)

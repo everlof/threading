@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import Threading
+import ThreadingUsage
 
 /// Draws the session Info panel from a fixture snapshot and writes each state out as an image —
 /// System light and dark plus the two deliberately different stock themes, per the component

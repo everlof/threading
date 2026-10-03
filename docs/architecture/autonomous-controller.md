@@ -516,3 +516,86 @@ idempotence and spoofing, refused questions, v6 upgrade) and `scripts/tests/test
 the asker continues; a busy agent receives the notice through the real hook command and cannot
 finish before acknowledging; unknown peers, forged senders and a transport reaching the wrong host
 are refused).
+
+## Trigger sources (schema v8)
+
+Waking a worker on facts rather than on a model turn: **source → match → admit → run**. The
+proposal is [`portable-trigger-sources.md`](../feature-drafts/portable-trigger-sources.md);
+`TriggerProbe.swift` (contract, runner, SHA-256) is shared with the Mac's `threading-triggerd`,
+`ControllerSources.swift` owns records, `ControllerSourcePoller` (runtime) runs a poll.
+
+- **A source is any executable on the probe contract**: one JSON request on stdin
+  (`cursor`, `limit`), JSON lines of events and exactly one final cursor on stdout, exit 0 / 75
+  (back off) / 77 (authentication needed). It runs with exactly the configured environment
+  (nothing inherited) in a private per-source directory, in its own process group, which the host
+  kills on timeout, on a report over 1 MiB and when the probe exits. Invalid output fails the poll
+  and commits no cursor. Examples ship in `Packages/ThreadingController/Examples/Probes`.
+- **Approval pins content.** `source-configure` always pauses and clears approval; the owner
+  approves the SHA-256 it was shown (`source-approve ID REV HASH`), which must still match the
+  files on disk. The poller hashes before running anything: an edited executable or script is
+  never run, and the source shows `changed` until approved again. A probe is not sandboxed — it
+  has this account's authority — which is why approval names the exact content.
+- **Secrets by name.** A spec maps environment variables to secret names; `secret-set` writes an
+  owner-only file beside the database that no command reads back, resolved only into the probe's
+  environment at poll time.
+- **Match and admit without a model.** A trigger is a typed AND rule over one source's event
+  fields (`equals`, `notEquals`, `prefix`, `notPrefix`, `contains`, `exists`, `absent`; a missing
+  field matches only `absent`). A match enqueues `event` work for the trigger's worker with a
+  host-authored instruction; the event (fields and bounded evidence) travels as the work's
+  immutable request, never as configuration. Enabling a trigger needs the worker to accept `event`
+  admission. Events are stored once per (id, revision), so redelivery admits nothing twice, and
+  each event keeps a receipt per trigger (`queued`, `notMatched`, `refused` with the reason).
+- **When it polls.** An interval (60 s – 1 day) or a calendar `AutomationSchedule` — so "every
+  ten minutes, check the mailbox" spends nothing until mail arrives. Failures back off
+  exponentially to an hour without moving the cursor. The deadline is claimed before a poll runs,
+  so a crash waits one interval instead of polling in a loop. The resident supervisor runs at most
+  two polls at once beside launch supervision, from a due-time index (`source_due`).
+- **Mail is the built-in source.** Mail admitted under a `wake` grant is the controller's own
+  source with a fixed trigger (one coalesced inbox task per idle worker), described under Agent
+  mail above; it needs no probe.
+
+Validation: `ControllerSourcesTests` (SHA-256 vectors, output parsing, a real probe's environment,
+exit codes, the timeout killing a probe's child, output flood, approval/enable/match/dedupe/
+backoff/changed) and `scripts/tests/test_controller_sources.py` (a resident supervisor polls the
+shipped `file_drop.py`, admits one `event` task for a matching file, ignores a redelivery, refuses
+to run an edited probe; a secret reaches a probe by name and its absence fails the poll with the
+cursor kept).
+
+## Usage receipts and budgets (schema v9)
+
+What each agent spent, kept on the host that ran it. The proposal is
+[`agent-usage-ledger.md`](../feature-drafts/agent-usage-ledger.md); `ControllerUsage.swift` owns
+receipts, daily cells and budgets, `ControllerUsageCollector` (runtime) reads transcripts.
+
+- **One parser.** Transcripts are read through `Packages/ThreadingUsage` — the same Claude and
+  Codex adapters, strict reader and pricing catalogue as the Mac's Usage page — so a worker's
+  spend and a Mac session's spend are computed by identical code.
+- **A receipt per execution, owed from the confirmed stop.** A recipe names its transcript with
+  `usage: {runtime, home, account}`. Confirming a launch stopped records it in `usage_pending` in
+  the same transaction; the supervisor writes receipts beside supervision (two at a time), and
+  `usage-collect` writes one by hand. Attribution — worker, task, the mail chain the execution
+  acted on, the trigger whose event admitted it — comes from controller records only.
+- **Finding the transcript.** Claude: `<home>/projects/*/<execution>.jsonl` plus its
+  `subagents/`, exact because the recipe passes the execution id as the session id. Codex names
+  its own session, so the rollout must be the only one in the launch's date folders written since
+  it started whose recorded working directory is the recipe's; anything else is `unavailable`
+  with the reason, never guessed.
+- **Refuse, don't undercount.** An unreadable transcript makes the receipt `partial` or `failed`;
+  a missing one `unavailable`. Cells are per model with five token categories, requests and cost
+  (provider-reported or catalogue-priced; unpriced tokens counted separately), bounded to 16
+  models with an "other models" cell that keeps totals exact.
+- **Reads are O(days × cells).** Each receipt adds to `usage_daily` (day, worker, account, model)
+  in its transaction; `usage-summary FROM THROUGH` pages those cells, `usage-receipts WORKER`
+  pages receipts. Both go through `owner-rpc` for the Mac's Remote page and Rindabox.
+- **Budgets act at admission, in budget tokens** (uncached input + cache writes + output; cached
+  reads excluded because a long conversation rereads its context every turn). A worker's daily
+  budget (`worker-budget-set`) stops the supervisor starting new executions for it; a mail
+  grant's chain budget stops that chain's mail from waking its recipient, while still delivering
+  it. Nothing running is ever stopped by a budget. Chain totals are those of executions on this
+  host. A fraction-of-account-window ceiling needs usage readings this host does not take yet.
+
+Validation: `ControllerUsageTests` (receipt idempotence and daily cells, a stop that owes nothing,
+the daily budget at admission, a chain past its budget delivering without waking) and
+`scripts/tests/test_controller_usage.py` (an agent under ptyd writes a Claude transcript; the
+resident supervisor writes a complete, priced, attributed receipt and then holds a worker past its
+budget).

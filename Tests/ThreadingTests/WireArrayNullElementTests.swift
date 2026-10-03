@@ -1,5 +1,6 @@
 import XCTest
 @testable import Threading
+import ThreadingUsage
 
 /// Pins what the Claude and ACP readers do with a JSON array holding an element they cannot read.
 ///

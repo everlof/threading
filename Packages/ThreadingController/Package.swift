@@ -6,11 +6,12 @@ let package = Package(
     name: "ThreadingController",
     platforms: [.macOS(.v13)],
     products: [.library(name: "ThreadingController", targets: ["ThreadingController"])],
-    dependencies: [.package(path: "../ThreadingDomain")],
+    dependencies: [.package(path: "../ThreadingDomain"), .package(path: "../ThreadingUsage")],
     targets: [
         .systemLibrary(name: "CControllerSQLite", pkgConfig: "sqlite3",
                        providers: [.apt(["libsqlite3-dev"])]),
-        .target(name: "ThreadingController", dependencies: ["CControllerSQLite", .product(name: "ThreadingDomain", package: "ThreadingDomain")]),
+        .target(name: "ThreadingController", dependencies: ["CControllerSQLite", .product(name: "ThreadingDomain", package: "ThreadingDomain"),
+                                                         .product(name: "ThreadingUsage", package: "ThreadingUsage")]),
         .testTarget(name: "ThreadingControllerTests", dependencies: ["ThreadingController"])
     ]
 )

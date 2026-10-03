@@ -1,5 +1,6 @@
 import XCTest
 @testable import Threading
+import ThreadingUsage
 
 /// The two shapes Codex has written its dialogue in, and the tripwire for a third.
 ///

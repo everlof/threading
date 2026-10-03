@@ -1,5 +1,6 @@
 import XCTest
 @testable import Threading
+import ThreadingUsage
 
 /// The Codex, usage and tool-input half of the reachable array-cast defect.
 ///

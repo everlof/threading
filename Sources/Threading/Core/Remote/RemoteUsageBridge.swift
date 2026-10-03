@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import ThreadingRemoteKit
+import ThreadingUsage
 
 /// Maps the app's bounded semantic projection onto the public wire contract. This boundary owns
 /// the tighter relay budgets; it never receives raw transcript cells or constructs iOS views.

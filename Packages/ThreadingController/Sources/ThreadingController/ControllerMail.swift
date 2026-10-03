@@ -108,6 +108,9 @@ public struct MailGrant: Codable, Equatable, Sendable {
     public let mode: MailMode?
     public let allowsInterrupt: Bool
     public let revision: Int
+    /// Budget tokens a mail chain may have spent on this host before this grant stops waking
+    /// the recipient. Delivery continues; only the work the mail would start is refused.
+    public let chainTokenBudget: Int64?
 }
 
 /// A host this store exchanges mail with. `transport` is the owner-authored argv that reaches
@@ -194,7 +197,7 @@ extension ControllerStore {
     // MARK: - Owner configuration
 
     public func setMailGrant(recipient: MailAddress, sender: String, expectedRevision: Int,
-                             mode: MailMode?, allowsInterrupt: Bool) throws -> MailGrant {
+                             mode: MailMode?, allowsInterrupt: Bool, chainTokenBudget: Int64? = nil) throws -> MailGrant {
         try validateSenderPattern(sender)
         guard expectedRevision >= 0, expectedRevision < Int.max else { throw ControllerError.invalidInput("revision") }
         return try db.transaction {
@@ -202,8 +205,10 @@ extension ControllerStore {
             let id = "\(recipient)>\(sender)"
             let prior: MailGrant? = try optional("mailGrant", id)
             guard (prior?.revision ?? 0) == expectedRevision else { throw ControllerError.conflict }
+            if let chainTokenBudget { guard chainTokenBudget > 0 else { throw ControllerError.invalidInput("chain_budget") } }
             let grant = MailGrant(recipient: recipient, sender: sender, mode: mode,
-                                  allowsInterrupt: mode != nil && allowsInterrupt, revision: expectedRevision + 1)
+                                  allowsInterrupt: mode != nil && allowsInterrupt, revision: expectedRevision + 1,
+                                  chainTokenBudget: chainTokenBudget)
             if prior == nil { try insert("mailGrant", id, parent: recipient.description, key: sender, value: grant) }
             else { try update("mailGrant", id, value: grant) }
             try event("mail.grant_changed", recipient.description)
@@ -450,7 +455,7 @@ extension ControllerStore {
         return original.envelope.sender == envelope.recipient && original.envelope.recipient == envelope.sender
     }
 
-    private func matchingGrant(recipient: MailAddress, sender: MailAddress) throws -> MailGrant? {
+    func matchingGrant(recipient: MailAddress, sender: MailAddress) throws -> MailGrant? {
         // Most specific wins: exact address, then the sender's host, then anyone.
         for pattern in [sender.description, "\(sender.host)/*", "*"] {
             if let grant: MailGrant = try optional("mailGrant", "\(recipient)>\(pattern)") { return grant }
@@ -628,6 +633,17 @@ extension ControllerStore {
                         SELECT MAX(sequence) FROM record WHERE kind='mail' AND parent=? AND state IN ('inbox','noticed')
                         """, [.text(address.description)]).first?.integers[0] else { return nil }
                     let key = "inbox:\(address):\(newest)"
+                    // Spend is limited where it is spent: a chain past its grant's budget still
+                    // delivers mail, but starts no more work.
+                    if let row = try db.rows("SELECT payload FROM record WHERE kind='mail' AND parent=? AND sequence=? LIMIT 1",
+                                             [.text(address.description), .integer(newest)]).first {
+                        let message: MailMessage = try decode(row.text(0))
+                        if let budget = try matchingGrant(recipient: address, sender: message.envelope.sender)?.chainTokenBudget,
+                           try chainUsage(message.envelope.chainID) >= budget {
+                            try event("mail.wake_over_budget", address.description)
+                            return nil
+                        }
+                    }
                     if try db.rows("SELECT id FROM record WHERE kind='work' AND parent=? AND key=? LIMIT 1",
                                    [.text(worker.description), .text(key)]).first != nil { return nil }
                     return try enqueue(workerID: worker, key: key, instruction: MailWake.instruction, source: .event)

@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingUsage
 
 // MARK: - Transcript Usage
 
@@ -165,7 +166,7 @@ enum TranscriptUsageIndex {
         JSONLReader.forEachLine(at: url, limit: .max) { line in
             // The cheap gate first: most records carry no usage at all, and parsing them is
             // the whole cost of this scan.
-            guard contains(marker, in: line),
+            guard UsageLineMarker.contains(marker, in: line),
                   let record = try? JSONSerialization.jsonObject(with: line),
                   let object = record as? [String: Any],
                   let message = object[UsageIndexDefaults.messageKey] as? [String: Any],
@@ -201,23 +202,6 @@ enum TranscriptUsageIndex {
         return Array(byKey.values)
     }
 
-    /// Whether `needle` appears in `haystack`, through `memmem`.
-    ///
-    /// `Data.range(of:)` is the obvious way to write this and is far too slow to run once per
-    /// line across a gigabyte — this gate is the only thing standing between the scan and
-    /// parsing every record in every transcript, so it has to cost almost nothing.
-    static func contains(_ needle: [UInt8], in haystack: Data) -> Bool {
-        guard !needle.isEmpty, haystack.count >= needle.count else { return false }
-
-        return haystack.withUnsafeBytes { raw -> Bool in
-            guard let base = raw.baseAddress else { return false }
-            return needle.withUnsafeBytes { pattern -> Bool in
-                guard let patternBase = pattern.baseAddress else { return false }
-                return memmem(base, raw.count, patternBase, pattern.count) != nil
-            }
-        }
-    }
-
     /// `2026-07-22T14:37:02.000Z` → `2026-07-22T14:30`.
     ///
     /// String surgery on a format both CLIs write identically, because a `DateFormatter` here
@@ -249,29 +233,4 @@ enum TranscriptUsageIndex {
     private static func int(_ value: Any?) -> Int64 {
         (value as? NSNumber)?.int64Value ?? 0
     }
-}
-
-// MARK: - Usage Index Defaults
-
-enum UsageIndexDefaults {
-    /// The substring that makes a line worth parsing. Every priced record carries it, and
-    /// almost nothing else does, so this is what keeps a 250 MB transcript cheap to read.
-    static let usageMarker = "\"usage\""
-
-    static let messageKey = "message"
-    static let usageKey = "usage"
-    static let idKey = "id"
-    static let requestKey = "requestId"
-    static let timestampKey = "timestamp"
-    static let modelKey = "model"
-    static let cwdKey = "cwd"
-
-    static let inputKey = "input_tokens"
-    static let outputKey = "output_tokens"
-    static let cacheWriteKey = "cache_creation_input_tokens"
-    static let cacheWriteDetailKey = "cache_creation"
-    static let cacheWrite1hKey = "ephemeral_1h_input_tokens"
-    static let cacheReadKey = "cache_read_input_tokens"
-
-    static let unknownModel = "unknown"
 }

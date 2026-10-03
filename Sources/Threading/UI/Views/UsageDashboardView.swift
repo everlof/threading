@@ -1,5 +1,6 @@
 import AppKit
 import ThreadingRemoteKit
+import ThreadingUsage
 
 private extension UsageDashboardMetric {
     var title: String {
