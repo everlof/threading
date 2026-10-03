@@ -1,4 +1,4 @@
-@testable import Threading
+@testable import ThreadingUsage
 import XCTest
 
 /// Covers the streaming reader every Claude and Codex transcript is read through.

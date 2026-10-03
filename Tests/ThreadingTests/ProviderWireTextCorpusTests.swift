@@ -1,5 +1,6 @@
 import XCTest
 @testable import Threading
+import ThreadingUsage
 
 /// Pushes realistic payloads **as JSON text** through the five provider adapters that were not
 /// converted to typed values, and renders what comes back.

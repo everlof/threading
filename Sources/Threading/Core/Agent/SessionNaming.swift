@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingUsage
 
 /// Derives session names from the places a name actually exists: the user's explicit rename,
 /// the title the agent gives its own conversation, and the first thing the user asked.

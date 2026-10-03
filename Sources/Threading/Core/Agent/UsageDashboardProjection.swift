@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingUsage
 
 /// A local surface asked the retained Usage page to reveal Limit history for one login.
 struct UsageFocusRequested: AppEvent {

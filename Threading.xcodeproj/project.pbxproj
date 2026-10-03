@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
         A07000010000000000000001 /* ThreadingController in Frameworks */ = {isa = PBXBuildFile; productRef = A07000010000000000000003 /* ThreadingController */; };
+        A07100010000000000000001 /* ThreadingUsage in Frameworks */ = {isa = PBXBuildFile; productRef = A07100010000000000000003 /* ThreadingUsage */; };
 		7C000008000000000000A005 /* PTYHostCLIControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000008000000000000B005 /* PTYHostCLIControl.swift */; };
 		D7C100010000000000000003 /* ThreadingPTYClient in PTYHost Frameworks */ = {isa = PBXBuildFile; productRef = D7C100010000000000000014 /* ThreadingPTYClient */; };
 		D4F83001A8124C5BA937FE10 /* MobilePairingRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F83001A8124C5BA937FE11 /* MobilePairingRecoveryTests.swift */; };
@@ -725,6 +726,7 @@
 				F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */,
 				D0A100010000000000000001 /* ThreadingDomain in Frameworks */,
                 A07000010000000000000001 /* ThreadingController in Frameworks */,
+                A07100010000000000000001 /* ThreadingUsage in Frameworks */,
 				7C000004000000000000000A /* ThreadingPTYHostKit in Frameworks */,
 				D7C100010000000000000001 /* ThreadingPTYClient in Frameworks */,
 				7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */,
@@ -1343,6 +1345,7 @@
 				7C000004000000000000000C /* ThreadingPTYHostKit */,
 				D7C100010000000000000012 /* ThreadingPTYClient */,
                 A07000010000000000000003 /* ThreadingController */,
+                A07100010000000000000003 /* ThreadingUsage */,
 				7C000007000000000000C011 /* ThreadingSimulatorKit */,
 				7C000007000000000000C0F0 /* ThreadingPluginKit */,
 				D3EE00010000000000000004 /* ThreadingPeerTransport */,
@@ -1422,6 +1425,7 @@
 				F4000001000000000000010 /* XCLocalSwiftPackageReference "Packages/ThreadingRemoteKit" */,
 				D0A100010000000000000002 /* XCLocalSwiftPackageReference "Packages/ThreadingDomain" */,
                 A07000010000000000000002 /* ThreadingController */,
+                A07100010000000000000002 /* ThreadingUsage */,
 				7C000004000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingPTYHostKit" */,
 				D7C100010000000000000011 /* XCLocalSwiftPackageReference "Packages/ThreadingPTYClient" */,
 				7C000007000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingSimulatorKit" */,
@@ -3032,6 +3036,7 @@
 
 /* Begin XCLocalSwiftPackageReference section */
         A07000010000000000000002 /* ThreadingController */ = {isa = XCLocalSwiftPackageReference; relativePath = Packages/ThreadingController; };
+        A07100010000000000000002 /* ThreadingUsage */ = {isa = XCLocalSwiftPackageReference; relativePath = Packages/ThreadingUsage; };
 		7A0000010000000000000090 /* XCLocalSwiftPackageReference "Packages/ThreadingWasmRuntime" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingWasmRuntime;
@@ -3124,6 +3129,7 @@
 
 /* Begin XCSwiftPackageProductDependency section */
         A07000010000000000000003 /* ThreadingController */ = {isa = XCSwiftPackageProductDependency; productName = ThreadingController; };
+        A07100010000000000000003 /* ThreadingUsage */ = {isa = XCSwiftPackageProductDependency; productName = ThreadingUsage; };
 		D7C100010000000000000014 /* ThreadingPTYClient */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ThreadingPTYClient;

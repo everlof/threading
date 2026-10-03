@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import Threading
+import ThreadingUsage
 
 /// Visual stories for the dense dashboard, rendered in neutral System, two deliberately
 /// dissimilar authored themes, and the spectrum-chart player material. Geometry assertions guard

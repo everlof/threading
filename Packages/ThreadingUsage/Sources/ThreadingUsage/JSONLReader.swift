@@ -1,5 +1,11 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 
 /// Streams newline-delimited JSON records from a file.
 ///
@@ -14,9 +20,9 @@ import Darwin
 /// - **Reading stops when the caller says so**, not when a guessed prefix is exhausted. The
 ///   opening turn can sit hundreds of kilobytes into a Codex rollout, behind telemetry, so a
 ///   caller that needs it can read on while the common case still costs one chunk.
-enum JSONLReader {
+public enum JSONLReader {
     /// Calls `handle` for each record until it returns false or `limit` bytes have been read.
-    static func forEachRecord(at url: URL, limit: Int, _ handle: ([String: Any]) -> Bool) {
+    public static func forEachRecord(at url: URL, limit: Int, _ handle: ([String: Any]) -> Bool) {
         forEachLine(at: url, limit: limit) { line in
             deliver(line, to: handle)
         }
@@ -26,7 +32,7 @@ enum JSONLReader {
     /// record. Search keeps those offsets as opaque source locators, allowing exact historical
     /// landing to seek rather than replaying a transcript from byte zero.
     @discardableResult
-    static func forEachRecordWithOffsets(
+    public static func forEachRecordWithOffsets(
         at url: URL,
         from offset: UInt64 = 0,
         limit: Int,
@@ -56,7 +62,7 @@ enum JSONLReader {
     /// finite pass is deliberately advanced through without delivery; the next pass detects that
     /// its offset is inside a record and discards through the newline before resuming normally.
     @discardableResult
-    static func forEachRecord(
+    public static func forEachRecord(
         at url: URL,
         from offset: UInt64,
         limit: Int,
@@ -82,7 +88,7 @@ enum JSONLReader {
     ///
     /// The chunking, the newline handling and the never-truncate-a-record rule stay here, so
     /// the two views cannot drift apart.
-    static func forEachLine(at url: URL, limit: Int, _ handle: (Data) -> Bool) {
+    public static func forEachLine(at url: URL, limit: Int, _ handle: (Data) -> Bool) {
         _ = try? scanForward(
             at: url,
             from: 0,
@@ -98,7 +104,7 @@ enum JSONLReader {
     /// distinguish a complete source from a file that could not be opened, stopped reading, or
     /// contained a usage record it could not parse. The streaming implementation remains shared;
     /// only this entry point lets those failures escape.
-    static func forEachLineStrict(
+    public static func forEachLineStrict(
         at url: URL,
         limit: Int,
         _ handle: (Data) throws -> Bool
@@ -258,7 +264,7 @@ enum JSONLReader {
     /// Subagent history uses this to distinguish a child that reached `end_turn` from one whose
     /// process stopped mid-tool. The read grows backwards until it finds the preceding newline,
     /// so even an unusually large final record is never truncated at a guessed byte cap.
-    static func lastRecord(at url: URL) -> [String: Any]? {
+    public static func lastRecord(at url: URL) -> [String: Any]? {
         guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? file.close() }
 
@@ -315,7 +321,7 @@ enum JSONLReader {
     /// `limit` bounds the scan rather than the record, the same rule the forward reader keeps: a
     /// tail made of nothing but tool output answers nothing rather than reading a 250 MB file to
     /// the top.
-    static func forEachRecordFromEnd(at url: URL, limit: Int, _ handle: ([String: Any]) -> Bool) {
+    public static func forEachRecordFromEnd(at url: URL, limit: Int, _ handle: ([String: Any]) -> Bool) {
         guard let file = try? FileHandle(forReadingFrom: url) else { return }
         defer { try? file.close() }
 
@@ -377,6 +383,6 @@ enum JSONLReader {
 
 // MARK: - Defaults
 
-enum JSONLDefaults {
-    static let chunkBytes = 64 * 1024
+public enum JSONLDefaults {
+    public static let chunkBytes = 64 * 1024
 }

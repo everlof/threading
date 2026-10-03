@@ -298,6 +298,22 @@ retained beside those values: root or subagent, plus the provider parent session
 durable source states one. Older cached rows decode with unknown provenance and are replaced by
 the next parser-version scan rather than guessed into the new relationship.
 
+### Where the ledger lives
+
+The provider-neutral half of this section is a Foundation-only local package,
+`Packages/ThreadingUsage`, not app code: `UsageTokenCounts`, `UsageLedgerRecord`, `UsageOrigin`,
+coverage, `UsagePricingCatalog`, the Claude/Codex/OpenCode/Grok adapters, `WireInteger` and
+`JSONLReader` (moved whole, because the strict entry point shares its one streaming
+implementation with the recovery readers). It builds and tests on Linux as well as macOS, because
+the controller on a remote host must produce the same numbers from the same transcript — one
+parser, so an adapter fix reaches both (see
+[`agent-usage-ledger.md`](../feature-drafts/agent-usage-ledger.md)). Everything that knows about
+the app stays in the app: `TranscriptUsageService`, `UsageLedgerBuilder`, `UsageLedgerIndex`,
+the scan caches, account discovery and the views. The package names runtimes with its own
+`UsageRuntime`, whose raw values and display names are persisted in every `UsageOrigin` and are
+pinned equal to `AgentKind`'s by `UsageLedgerTests` in the app. Adapter, pricing and reader tests
+run with `swift test --package-path Packages/ThreadingUsage` (and in `scripts/ci.sh`).
+
 Runtime and biller are different axes. An OpenCode session routed through OpenRouter is stored as
 runtime `opencode`, biller `openrouter`; that distinction survives cache, aggregation, the ranked
 top-tool split, chart and coverage. A direct Claude, Codex, Grok or OpenCode route uses the concise
@@ -749,8 +765,10 @@ still alive when the next file opened.
 
 ## Verification ownership
 
-- `UsageLedgerTests`, `UsageProviderAdapterTests` and `UsageScanCacheTests`: normalization,
-  pricing provenance, direct/routed names, deduplication and cold/warm equality.
+- `UsageLedgerTests`, `UsageProviderAdapterTests`, `JSONLReaderTests` and `WireIntegerTests` in
+  `Packages/ThreadingUsage`: normalization, pricing provenance, direct/routed names, adapter
+  refusals and the streaming reader. The app's `UsageLedgerTests`, `UsageProviderAdapterTests` and
+  `UsageScanCacheTests`: builder deduplication, session projection and cold/warm equality.
 - `SessionUsageTests`: lifetime versus 90-day compatibility, parent/child reconciliation, live
   unindexed deltas, model-row caps and indexed isolation from unrelated sessions.
 - `UsageLimitHistoryTests` and `UsageLimitHistoryJournalTests`: reset proof, projection,
