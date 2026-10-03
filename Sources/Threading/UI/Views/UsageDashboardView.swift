@@ -18,6 +18,7 @@ private extension UsageDashboardBreakdownKind {
         case .projects: return L10n.string("Projects")
         case .accounts: return L10n.string("Accounts")
         case .providers: return L10n.string("Providers")
+        case .agents: return L10n.string("Agents")
         }
     }
 
@@ -29,6 +30,7 @@ private extension UsageDashboardBreakdownKind {
         case .projects: return L10n.string("Project")
         case .accounts: return L10n.string("Account")
         case .providers: return L10n.string("Provider")
+        case .agents: return L10n.string("Agent")
         }
     }
 }
@@ -223,6 +225,15 @@ final class UsageDashboardView: NSView, ThemedComponent {
     var breakdownDebugGeometryForTesting: String { breakdownTable.debugGeometryForTesting }
     /// How many breakdown rows are wearing a provider mark.
     var breakdownProviderMarkCountForTesting: Int { breakdownTable.providerMarkCountForTesting }
+    /// Each breakdown row's agent note (location, staleness), in order; nil where there is none.
+    var breakdownNotesForTesting: [String?] { breakdownTable.notesForTesting }
+    /// Each breakdown row's cost cell, in order.
+    var breakdownCostsForTesting: [String] { breakdownTable.costsForTesting }
+    func selectBreakdownForTesting(_ kind: UsageDashboardBreakdownKind) {
+        selectedBreakdown = kind
+        if let index = Breakdown.allCases.firstIndex(of: kind) { breakdownPopUp.selectItem(at: index) }
+        refreshBreakdown()
+    }
     /// The rescan strip beside the consumption controls: whether it is up, and its fraction.
     var scanStripForTesting: (isVisible: Bool, progress: Double?) {
         (!scanStatus.isHidden, scanProgressBar.isHidden ? nil : scanProgressBar.progress)
@@ -391,7 +402,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
         }
         overviewColumn.addArrangedSubview(sectionHeader(
             title: L10n.string("Breakdown"),
-            detail: L10n.string("Models, projects, accounts, and billing routes."),
+            detail: L10n.string("Models, projects, accounts, billing routes, and agents — including connected hosts' workers."),
             control: breakdownPopUp
         ))
         overviewColumn.addArrangedSubview(breakdownTable)
@@ -785,19 +796,35 @@ final class UsageDashboardView: NSView, ThemedComponent {
         }
         let breakdown = range.breakdown(selectedBreakdown)
         // Share is of whichever metric the page is currently reading, so the column answers the
-        // question the rest of the page is answering rather than a second, silent one.
-        let total = selectedMetric == .cost
-            ? range.cost.totalUSD
-            : Double(range.tokens.processed)
-        var rows = breakdown.rows.map {
-            row(
-                name: $0.title,
-                runtimeID: $0.runtimeID,
-                tokens: $0.tokens,
-                cost: $0.costUSD,
-                records: $0.records,
+        // question the rest of the page is answering rather than a second, silent one. The
+        // Agents breakdown adds hosts' workers, whose spend is billed to those hosts and is not
+        // in this Mac's total, so its share is of its own rows.
+        let total: Double
+        if selectedBreakdown == .agents {
+            let measured = breakdown.rows.filter { !$0.isUnmeasured }
+            total = selectedMetric == .cost
+                ? measured.reduce(0) { $0 + $1.costUSD } + breakdown.omittedCostUSD
+                : Double(measured.reduce(0) { $0 + $1.tokens } + breakdown.omittedTokens)
+        } else {
+            total = selectedMetric == .cost
+                ? range.cost.totalUSD
+                : Double(range.tokens.processed)
+        }
+        var rows = breakdown.rows.map { projection in
+            var row = row(
+                name: projection.title,
+                runtimeID: projection.runtimeID,
+                tokens: projection.tokens,
+                cost: projection.costUSD,
+                records: projection.records,
                 total: total
             )
+            row.note = agentNote(projection)
+            row.noteIsWarning = projection.staleSince != nil || projection.isPartial || projection.isUnmeasured
+            if projection.isUnmeasured {
+                row.cost = "—"; row.share = "—"; row.tokens = "—"; row.requests = "—"
+            }
+            return row
         }
         if breakdown.omittedRowCount > 0 {
             rows.append(row(
@@ -813,6 +840,18 @@ final class UsageDashboardView: NSView, ThemedComponent {
             ))
         }
         breakdownTable.show(rows, subject: subject)
+    }
+
+    /// Where an agent ran and how current its figures are, beside its name.
+    private func agentNote(_ row: UsageDashboardBreakdownRowProjection) -> String? {
+        guard let location = row.location else { return nil }
+        if row.isUnmeasured { return L10n.format("%@ · not read yet", location) }
+        var parts = [location]
+        if let since = row.staleSince {
+            parts.append(L10n.format("last read %@", relativeDateFormatter.localizedString(for: since, relativeTo: Date())))
+        }
+        if row.isPartial { parts.append(L10n.string("older days not read")) }
+        return parts.joined(separator: " · ")
     }
 
     private func row(
@@ -1585,10 +1624,13 @@ private struct UsageBreakdownRow {
     /// The runtime this row can honestly be attributed to, or nil. See
     /// `UsageDashboardBreakdownRowProjection.runtimeID`.
     let runtimeID: String?
-    let cost: String
-    let share: String
-    let tokens: String
-    let requests: String
+    var cost: String
+    var share: String
+    var tokens: String
+    var requests: String
+    /// Where an agent ran, and whether its figures are stale or partial: the Agents breakdown.
+    var note: String? = nil
+    var noteIsWarning = false
 }
 
 /// The ranked breakdown: a named row and four numbers, in columns.
@@ -1679,6 +1721,8 @@ private final class UsageBreakdownTableView: NSView, ThemedComponent, NSTableVie
     var providerMarkCountForTesting: Int {
         rows.filter { $0.runtimeID.flatMap(AgentKind.init(rawValue:)) != nil }.count
     }
+    var notesForTesting: [String?] { rows.map(\.note) }
+    var costsForTesting: [String] { rows.map(\.cost) }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1841,6 +1885,12 @@ private final class UsageBreakdownTableView: NSView, ThemedComponent, NSTableVie
 private final class UsageBreakdownNameCellView: NSTableCellView, ThemedComponent {
     private let mark = NSImageView()
     private let titleField = NSTextField(labelWithString: "")
+    /// Where an agent ran and how current its figures are. Secondary, after the name; empty and
+    /// hidden for every breakdown but Agents.
+    private let noteField = NSTextField(labelWithString: "")
+    private var noteIsWarning = false
+
+    var noteForTesting: String? { noteField.isHidden ? nil : noteField.stringValue }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1853,8 +1903,14 @@ private final class UsageBreakdownNameCellView: NSTableCellView, ThemedComponent
         // Middle rather than tail: a dated model identifier differs from its neighbours at both
         // ends, and a tail ellipsis takes the half that says which one it is.
         titleField.lineBreakMode = .byTruncatingMiddle
+        noteField.applyFont(.detail())
+        noteField.lineBreakMode = .byTruncatingTail
+        noteField.isHidden = true
+        // The name is the row's subject; the note gives way first.
+        noteField.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
+        titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let row = NSStackView(views: [mark, titleField])
+        let row = NSStackView(views: [mark, titleField, noteField])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.distribution = .fill
@@ -1865,9 +1921,10 @@ private final class UsageBreakdownNameCellView: NSTableCellView, ThemedComponent
             mark.widthAnchor.constraint(equalToConstant: Design.UsageDashboard.breakdownIconSlot),
             mark.heightAnchor.constraint(equalToConstant: Design.UsageDashboard.breakdownIconSlot),
             row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.inset),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.small),
+            row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Design.Spacing.small),
             row.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
+        applyNoteColor()
     }
 
     @available(*, unavailable)
@@ -1877,7 +1934,13 @@ private final class UsageBreakdownNameCellView: NSTableCellView, ThemedComponent
         let kind = row.runtimeID.flatMap(AgentKind.init(rawValue:))
         mark.image = kind?.icon
         titleField.stringValue = row.title
-        setAccessibilityLabel(kind.map { "\(row.title), \($0.displayName)" } ?? row.title)
+        noteField.stringValue = row.note ?? ""
+        noteField.isHidden = row.note == nil
+        noteIsWarning = row.noteIsWarning
+        applyNoteColor()
+        var label = kind.map { "\(row.title), \($0.displayName)" } ?? row.title
+        if let note = row.note { label += ", " + note }
+        setAccessibilityLabel(label)
         setAccessibilityValue(L10n.format(
             "%@ · %@ · %@ · %@ requests",
             row.cost,
@@ -1885,6 +1948,17 @@ private final class UsageBreakdownNameCellView: NSTableCellView, ThemedComponent
             row.tokens,
             row.requests
         ))
+    }
+
+    /// Stale and partial figures are said in words; the warning ink only makes them findable.
+    private func applyNoteColor() {
+        noteField.textColor = noteIsWarning ? Design.Status.warning : Design.Text.secondary
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyNoteColor()
+        mark.contentTintColor = Design.Text.secondary
     }
 }
 

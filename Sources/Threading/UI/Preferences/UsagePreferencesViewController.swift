@@ -8,6 +8,7 @@ final class UsagePreferencesViewController: NSViewController {
     typealias AccountsProvider = @MainActor () -> [AgentAccount]
     typealias ReadingProvider = @MainActor (AgentAccount) -> AccountUsageReading
     typealias RefreshProvider = @MainActor (AgentAccount, Bool) -> Void
+    typealias AgentHostsProvider = @MainActor () -> [RemoteAgentUsageHost]
 
     private let appEvents = AppEventObservations()
     private let liveCapacity = AccountUsageFleetView(scrollHost: .nestedPage)
@@ -16,6 +17,10 @@ final class UsagePreferencesViewController: NSViewController {
     private let readingProvider: ReadingProvider
     private let refreshProvider: RefreshProvider
     private let bankedResetService: BankedUsageResetService
+    /// Connected hosts' controllers, whose workers' spend joins the Agents breakdown.
+    private let agentHostsProvider: AgentHostsProvider
+    private let agentUsage: RemoteAgentUsageService
+    private var agentRefreshTask: Task<Void, Never>?
     private var accountsByID: [AccountID: AgentAccount] = [:]
     private var overviewProjection: UsageDashboardOverviewProjection?
     private var limitSeries: [UsageLimitDashboardSeries] = []
@@ -35,8 +40,14 @@ final class UsagePreferencesViewController: NSViewController {
         refreshProvider: @escaping RefreshProvider = {
             AccountUsageService.shared.refresh($0, force: $1)
         },
-        bankedResetService: BankedUsageResetService = .shared
+        bankedResetService: BankedUsageResetService = .shared,
+        agentHostsProvider: @escaping AgentHostsProvider = {
+            RemoteAgentUsageHost.connected(in: RemoteHostStore.shared.ordered)
+        },
+        agentUsage: RemoteAgentUsageService = .shared
     ) {
+        self.agentHostsProvider = agentHostsProvider
+        self.agentUsage = agentUsage
         self.accountsProvider = accountsProvider
         self.readingProvider = readingProvider
         self.refreshProvider = refreshProvider
@@ -88,6 +99,9 @@ final class UsagePreferencesViewController: NSViewController {
             self?.reloadLiveCapacity()
             self?.refreshAuthoritativeLimits(force: false)
         }
+        appEvents.observe(RemoteAgentUsageDidChange.self) { [weak self] _ in
+            self?.prepareOverview(animated: false)
+        }
         appEvents.observe(UsageLimitHistoryDidChange.self) { [weak self] _ in
             self?.loadLimitHistory(animated: true)
         }
@@ -114,6 +128,20 @@ final class UsagePreferencesViewController: NSViewController {
         loadLimitHistory(animated: false)
         TranscriptUsageService.shared.refresh()
         refreshAuthoritativeLimits(force: false)
+        refreshAgentUsage(force: false)
+    }
+
+    /// Reads connected hosts' usage summaries in the background. Each finished host posts
+    /// `RemoteAgentUsageDidChange`, which re-prepares the overview; a host that cannot be reached
+    /// keeps its last summary and is shown stale.
+    private func refreshAgentUsage(force: Bool) {
+        let hosts = agentHostsProvider()
+        guard !hosts.isEmpty, agentRefreshTask == nil || force else { return }
+        let service = agentUsage
+        agentRefreshTask = Task { [weak self] in
+            await service.refresh(hosts: hosts, force: force)
+            self?.agentRefreshTask = nil
+        }
     }
 
     override func viewDidDisappear() {
@@ -145,9 +173,12 @@ final class UsagePreferencesViewController: NSViewController {
             present(animated: animated)
             return
         }
+        let hosts = agentHostsProvider()
+        let service = agentUsage
         overviewTask = Task { [weak self] in
+            let agents = await service.states(for: hosts)
             let preparation = Task.detached(priority: .utility) {
-                UsageDashboardProjector.overview(report: report)
+                UsageDashboardProjector.overview(report: report, agents: agents)
             }
             let prepared = await withTaskCancellationHandler {
                 await preparation.value
@@ -209,6 +240,7 @@ final class UsagePreferencesViewController: NSViewController {
     @objc private func rebuildClicked() {
         TranscriptUsageService.shared.refresh(force: true)
         refreshAuthoritativeLimits(force: true)
+        refreshAgentUsage(force: true)
         loadLimitHistory(animated: true)
     }
 

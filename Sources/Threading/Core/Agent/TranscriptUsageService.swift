@@ -165,6 +165,18 @@ struct UsageReportSelection: Equatable, Sendable {
         var totalUSD: Double { providerReportedUSD + catalogPricedUSD }
     }
 
+    /// Transcript spend by where its sessions ran: this Mac, or one remote host whose mirrored
+    /// transcripts are billed to the host (`remote-host:` accounts). The Agents breakdown's
+    /// session rows; folded in the same pass as everything else.
+    struct Location: Equatable, Sendable {
+        /// The `remote-host:` account id, or nil for this Mac.
+        let hostAccountID: String?
+        let hostName: String?
+        var tokens: UsageTokenCounts
+        var costUSD: Double
+        var records: Int
+    }
+
     let range: Int
     let start: Date
     let end: Date
@@ -177,6 +189,7 @@ struct UsageReportSelection: Equatable, Sendable {
     let days: [TranscriptUsageReport.Slice]
     let accounts: [TranscriptUsageReport.Slice]
     let checkouts: [TranscriptUsageReport.Checkout]
+    let locations: [Location]
 
     init(cells: [TranscriptUsageReport.Cell], range: Int, now: Date, calendar: Calendar) {
         self.range = range
@@ -195,6 +208,7 @@ struct UsageReportSelection: Equatable, Sendable {
         var byDay: [Date: TranscriptUsageReport.Slice] = [:]
         var byAccount: [String: TranscriptUsageReport.Slice] = [:]
         var byCheckout: [String: TranscriptUsageReport.Checkout] = [:]
+        var byLocation: [String: Location] = [:]
 
         for cell in selected {
             total += cell.tokens
@@ -258,6 +272,20 @@ struct UsageReportSelection: Equatable, Sendable {
             checkout.costUSD += cell.costUSD
             if checkout.runtimeID != cell.origin.runtimeID { checkout.runtimeID = nil }
             byCheckout[cell.checkoutPath] = checkout
+
+            let remote = cell.accountID.hasPrefix(UsageReportDefaults.remoteHostAccountPrefix)
+            let locationKey = remote ? cell.accountID : ""
+            var location = byLocation[locationKey] ?? Location(
+                hostAccountID: remote ? cell.accountID : nil,
+                hostName: remote ? cell.accountName : nil,
+                tokens: .init(),
+                costUSD: 0,
+                records: 0
+            )
+            location.tokens += cell.tokens
+            location.costUSD += cell.costUSD
+            location.records += cell.records
+            byLocation[locationKey] = location
         }
 
         self.tokens = total
@@ -277,6 +305,10 @@ struct UsageReportSelection: Equatable, Sendable {
         self.checkouts = byCheckout.values.sorted { lhs, rhs in
             if lhs.costUSD != rhs.costUSD { return lhs.costUSD > rhs.costUSD }
             return lhs.billedTokens > rhs.billedTokens
+        }
+        self.locations = byLocation.values.sorted { lhs, rhs in
+            if lhs.costUSD != rhs.costUSD { return lhs.costUSD > rhs.costUSD }
+            return (lhs.hostAccountID ?? "") < (rhs.hostAccountID ?? "")
         }
     }
 
