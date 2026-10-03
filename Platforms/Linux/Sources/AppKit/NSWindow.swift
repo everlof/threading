@@ -164,6 +164,8 @@ public final class NSWindow: NSResponder {
             }
         case .rightMouseDown:
             pointerTarget(at: delivered.locationInWindow)?.rightMouseDown(with: delivered)
+        case .scrollWheel:
+            root?.hitTest(delivered.locationInWindow)?.scrollWheel(with: delivered)
         case .keyDown:
             // AppKit offers a key equivalent to the visible content tree before ordinary
             // first-responder delivery. A sheet's default/cancel button may answer while a

@@ -6,13 +6,13 @@ import Foundation
 open class NSEvent {
     public enum EventType: Int, Sendable {
         case leftMouseDown, leftMouseUp, leftMouseDragged, mouseMoved, rightMouseDown, keyDown
-        case mouseEntered, mouseExited
+        case mouseEntered, mouseExited, scrollWheel
 
         var mask: EventTypeMask { EventTypeMask(rawValue: 1 << rawValue) }
         var carriesPointer: Bool {
             switch self {
             case .leftMouseDown, .leftMouseUp, .leftMouseDragged, .mouseMoved,
-                 .rightMouseDown, .mouseEntered, .mouseExited: true
+                 .rightMouseDown, .mouseEntered, .mouseExited, .scrollWheel: true
             case .keyDown: false
             }
         }
@@ -27,6 +27,7 @@ open class NSEvent {
         public static let mouseMoved = EventTypeMask(rawValue: 1 << EventType.mouseMoved.rawValue)
         public static let rightMouseDown = EventTypeMask(rawValue: 1 << EventType.rightMouseDown.rawValue)
         public static let keyDown = EventTypeMask(rawValue: 1 << EventType.keyDown.rawValue)
+        public static let scrollWheel = EventTypeMask(rawValue: 1 << EventType.scrollWheel.rawValue)
     }
 
     public struct ModifierFlags: OptionSet, Sendable {
@@ -59,6 +60,8 @@ open class NSEvent {
     private nonisolated let storedModifiers: ModifierFlags
     private nonisolated let storedKeyCode: UInt16
     private nonisolated let storedCharacters: String?
+    private nonisolated let storedScrollingDeltaX: CGFloat
+    private nonisolated let storedScrollingDeltaY: CGFloat
     public private(set) weak var trackingArea: NSTrackingArea?
 
     public init(
@@ -68,7 +71,9 @@ open class NSEvent {
         modifierFlags: ModifierFlags = [],
         keyCode: UInt16 = 0,
         charactersIgnoringModifiers: String? = nil,
-        trackingArea: NSTrackingArea? = nil
+        trackingArea: NSTrackingArea? = nil,
+        scrollingDeltaX: CGFloat = 0,
+        scrollingDeltaY: CGFloat = 0
     ) {
         storedType = type
         storedWindow = window
@@ -76,6 +81,8 @@ open class NSEvent {
         storedModifiers = modifierFlags
         storedKeyCode = keyCode
         storedCharacters = charactersIgnoringModifiers
+        storedScrollingDeltaX = scrollingDeltaX
+        storedScrollingDeltaY = scrollingDeltaY
         self.trackingArea = trackingArea
     }
 
@@ -85,6 +92,8 @@ open class NSEvent {
     open nonisolated var modifierFlags: ModifierFlags { storedModifiers }
     open nonisolated var keyCode: UInt16 { storedKeyCode }
     open nonisolated var charactersIgnoringModifiers: String? { storedCharacters }
+    open nonisolated var scrollingDeltaX: CGFloat { storedScrollingDeltaX }
+    open nonisolated var scrollingDeltaY: CGFloat { storedScrollingDeltaY }
 
     /// The host may provide an event without a window; the receiving content window supplies
     /// the owner before local monitors inspect its screen-space location.
@@ -95,7 +104,8 @@ open class NSEvent {
     func trackingCrossing(_ type: EventType, area: NSTrackingArea) -> NSEvent {
         NSEvent(type: type, window: window, locationInWindow: locationInWindow,
                 modifierFlags: modifierFlags, keyCode: keyCode,
-                charactersIgnoringModifiers: charactersIgnoringModifiers, trackingArea: area)
+                charactersIgnoringModifiers: charactersIgnoringModifiers, trackingArea: area,
+                scrollingDeltaX: scrollingDeltaX, scrollingDeltaY: scrollingDeltaY)
     }
 
     public static func addLocalMonitorForEvents(

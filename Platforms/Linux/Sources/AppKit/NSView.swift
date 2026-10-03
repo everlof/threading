@@ -29,6 +29,7 @@ open class NSResponder: Equatable {
     open func mouseExited(with event: NSEvent) {}
     open func rightMouseDown(with event: NSEvent) {}
     open func keyDown(with event: NSEvent) {}
+    open func scrollWheel(with event: NSEvent) {}
     open func performKeyEquivalent(with event: NSEvent) -> Bool { false }
 }
 
@@ -81,9 +82,25 @@ open class NSView: NSResponder, NSLayoutItem {
         }
     }
 
+    private var storedBoundsOrigin: NSPoint = .zero
+
     open var bounds: NSRect {
-        get { NSRect(origin: .zero, size: frame.size) }
-        set { frame = NSRect(origin: frame.origin, size: newValue.size) }
+        get { NSRect(origin: storedBoundsOrigin, size: frame.size) }
+        set {
+            precondition(newValue.origin.x.isFinite && newValue.origin.y.isFinite,
+                         "invalid bounds origin")
+            let originChanged = storedBoundsOrigin != newValue.origin
+            let sizeChanged = frame.size != newValue.size
+            guard originChanged || sizeChanged else { return }
+            storedBoundsOrigin = newValue.origin
+            if sizeChanged { frame = NSRect(origin: frame.origin, size: newValue.size) }
+            needsDisplay = true
+            updateTrackingAreasInSubtree()
+        }
+    }
+
+    open func setBoundsOrigin(_ point: NSPoint) {
+        bounds = NSRect(origin: point, size: bounds.size)
     }
 
     /// AppKit's default is y-up; a flipped view draws top-down. Both appear in `UI/Design`.
@@ -184,6 +201,10 @@ open class NSView: NSResponder, NSLayoutItem {
 
     open override func keyDown(with event: NSEvent) {
         superview?.keyDown(with: event)
+    }
+
+    open override func scrollWheel(with event: NSEvent) {
+        superview?.scrollWheel(with: event)
     }
 
     open func addSubview(_ view: NSView) {
@@ -429,6 +450,7 @@ open class NSView: NSResponder, NSLayoutItem {
             if isFlipped != (superview?.isFlipped ?? false) {
                 context.flipVertically(in: frame.height)
             }
+            context.translateBy(x: -bounds.minX, y: -bounds.minY)
             context.alpha = context.alpha * alphaValue
             // The transform above puts bounds in this view's own coordinate system. Keep the
             // clip in the saved graphics state so descendants inherit it and siblings do not.
@@ -444,7 +466,12 @@ open class NSView: NSResponder, NSLayoutItem {
 
     open func hitTest(_ point: NSPoint) -> NSView? {
         guard !isHidden, frame.contains(point) else { return nil }
-        let local = NSPoint(x: point.x - frame.minX, y: point.y - frame.minY)
+        let relativeY = point.y - frame.minY
+        let local = NSPoint(
+            x: point.x - frame.minX + bounds.minX,
+            y: (isFlipped == (superview?.isFlipped ?? false)
+                ? relativeY : frame.height - relativeY) + bounds.minY
+        )
         for subview in subviews.reversed() {
             if let hit = subview.hitTest(local) { return hit }
         }
@@ -557,23 +584,26 @@ open class NSView: NSResponder, NSLayoutItem {
 
     private func pointInRoot(_ point: NSPoint) -> NSPoint {
         guard let superview else {
-            return NSPoint(x: frame.minX + point.x,
-                           y: frame.minY + (isFlipped ? frame.height - point.y : point.y))
+            let localY = point.y - bounds.minY
+            return NSPoint(x: frame.minX + point.x - bounds.minX,
+                           y: frame.minY + (isFlipped ? frame.height - localY : localY))
         }
-        let y = isFlipped == superview.isFlipped ? point.y : frame.height - point.y
-        return superview.pointInRoot(NSPoint(x: frame.minX + point.x, y: frame.minY + y))
+        let localY = point.y - bounds.minY
+        let y = isFlipped == superview.isFlipped ? localY : frame.height - localY
+        return superview.pointInRoot(NSPoint(x: frame.minX + point.x - bounds.minX,
+                                             y: frame.minY + y))
     }
 
     private func pointFromRoot(_ point: NSPoint) -> NSPoint {
         guard let superview else {
-            return NSPoint(x: point.x - frame.minX,
-                           y: isFlipped ? frame.height - (point.y - frame.minY)
-                                        : point.y - frame.minY)
+            let localY = point.y - frame.minY
+            return NSPoint(x: point.x - frame.minX + bounds.minX,
+                           y: (isFlipped ? frame.height - localY : localY) + bounds.minY)
         }
         let parent = superview.pointFromRoot(point)
         let y = parent.y - frame.minY
-        return NSPoint(x: parent.x - frame.minX,
-                       y: isFlipped == superview.isFlipped ? y : frame.height - y)
+        return NSPoint(x: parent.x - frame.minX + bounds.minX,
+                       y: (isFlipped == superview.isFlipped ? y : frame.height - y) + bounds.minY)
     }
 
     open func convert(_ point: NSPoint, to view: NSView?) -> NSPoint {
