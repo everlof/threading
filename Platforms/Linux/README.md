@@ -78,6 +78,11 @@ window now mounts that same header with its retained title and `+`/`⋯` control
 their actual laid-out bounds to native input and AT-SPI. The native command menus also mount
 the production `ThemedMenuRowView` through its shared measurement plan. The preview still uses
 one fixed palette; live production themes and complete navigator/menu presentation remain open.
+Visible project slots now mount the same `ThemedProjectRowView` subtree as the Mac
+`ProjectRowView`: icon, shaped title, optional count and trailing `+`/`⋯` controls share one
+production layout. The Linux host retains project identity, selection, menu admission and PTY
+ownership. The shim clips nested views to their bounds and preserves subview ordering so the
+count sits behind hover controls. Account and saved-runtime rows remain diagnostic.
 `tests/text_label/run.sh` checks the Linux-only, Pango-backed `NSTextField` label against
 Unicode shaping, clipping, ellipsis, intrinsic size, baseline behavior and shared neutral-ink
 contrast on eight grounds, then renders that
@@ -125,7 +130,7 @@ attachment and removal, same-window and cross-window reparenting, moving a conte
 windows, and assigning the same root twice. `NSWindow` provides content ownership and
 `layoutIfNeeded()` here; SDL still owns the native window. The native preview now attaches one
 root for the SDL window's lifetime and reuses bounded visible row and label slots across frames.
-It still assembles diagnostic rows rather than a complete production screen. See `FINDINGS.md`
+It still assembles some diagnostic rows rather than a complete production screen. See `FINDINGS.md`
 §§124–125. The content owner now also keeps AppKit first-responder state and offers key
 equivalents down the retained view tree. The focused fixture links the unchanged production
 `KeyEquivalentScopeView` and checks that its shortcut runs only while its subtree owns focus,
@@ -288,7 +293,8 @@ own account handle, so opening one never follows a later chooser change.
 `./package-app.sh` builds a static-Swift archive and installable `.deb` for Ubuntu 24.04 arm64;
 `./bundle-smoke.sh` builds both in the pinned Swift container, then exercises the extracted
 archive and installed package in a fresh Ubuntu runtime container with no Swift toolchain or
-source checkout. The outputs are `out/threading-linux-preview-ubuntu24.04-arm64.tar.gz` and
+source checkout. It also runs the packaged project-row layout fixture through an 800/320/800
+pixel sidebar resize. The outputs are `out/threading-linux-preview-ubuntu24.04-arm64.tar.gz` and
 `out/threading-linux-preview-ubuntu24.04-arm64.deb`; usage is in `BUNDLE_README.md`. The package
 adds a desktop entry and icon, but has no updater or distro-wide compatibility claim. Its host
 binaries currently require Swift's `-enable-testing` build flag because the
@@ -798,10 +804,11 @@ the nested choice, disabled Manager, and terminal creation.
 
 ### Shared surface painting
 
-The native navigator's diagnostic selected project rows use the production `SurfaceDrawing`
+The native navigator's selected project row plates use the production `SurfaceDrawing`
 leaf, copied unchanged by `vendor.sh`. Mac `ThemedSurface` delegates its flat fill/border path to
 that same source and keeps its existing `Shape` API. Fitted radii, concentric inset/outset and
 welded plate portions therefore have one implementation. Mac theme resolution and hard/soft
 bevels remain in the Mac wrapper; the preview still supplies its diagnostic colors and spacing.
-The retained header controls and mounted menu rows are full production components on that
-fixed palette; the project rows remain diagnostic.
+The retained header controls, mounted menu rows and project row content are production
+components on that fixed palette. The selected plate and other navigator row kinds remain
+diagnostic.

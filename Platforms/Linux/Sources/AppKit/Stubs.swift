@@ -96,6 +96,9 @@ public final class NSFont {
             weight.rawValue >= Weight.medium.rawValue ? "-Medium" : ""
         return NSFont(familyName: "System-Mono" + suffix, pointSize: size, weight: weight)
     }
+    public static func monospacedDigitSystemFont(ofSize size: CGFloat, weight: Weight) -> NSFont {
+        monospacedSystemFont(ofSize: size, weight: weight)
+    }
 
     public var boundingRectForFont: NSRect {
         fontBoundsLock.withLock {

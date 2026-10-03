@@ -330,7 +330,10 @@ try:
         key('i')
         eventually(lambda: child_state()['input'] == b'i'.hex(),
                    'initial Actions shortcut release did not suppress subsequent child text', timeout=5)
-        key('ctrl+shift+space')
+        # Keep modifiers held through Space release as above. xdotool's combined key form
+        # sometimes releases them first, so it does not send this exact host shortcut.
+        xdo('windowfocus', '--sync', window, 'keydown', 'Control_L', 'Shift_L', 'space')
+        xdo('keyup', 'space', 'Shift_L', 'Control_L')
         eventually(lambda: listing().get_name() == 'Project actions', 'terminal shortcut opened Actions')
         disabled = command('linux.project.new-shell', False)
         assert 'running' in disabled.get_name() or '8' in disabled.get_name()

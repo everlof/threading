@@ -104,6 +104,17 @@ def slot_ink(rgb, rect, trailing_start, trailing_end):
                for x in range(row_right - trailing_start, row_right - trailing_end))
 
 
+def count_digit_ink(rgb, rect):
+    # The production ellipsis replaces the count in this slot. Its three dots cross the
+    # digit's middle, so sample above and below them to detect a lingering count.
+    row_right = rect.x + rect.width
+    background = pixel(rgb, row_right - 88, rect.y + rect.height // 2)
+    rows = list(range(rect.y + 10, rect.y + 18)) + list(range(rect.y + 26, rect.y + 37))
+    return sum(max(abs(channel - ground) for channel, ground in
+                   zip(pixel(rgb, x, y), background)) > 35
+               for y in rows for x in range(row_right - 20, row_right - 10))
+
+
 process = None
 try:
     # Xvfb keeps the pointer position from the preceding UI fixture. Start this
@@ -138,8 +149,8 @@ try:
         eventually(lambda: log_path.read_text().count('NAVIGATOR_TEXT mounted=') > before_hover,
                    'counted row hover repaint', process)
         hovered = capture(window, 'project-count-alpha-hover.png')
-        assert slot_ink(initial, rect, 20, 10) >= 4, 'baseline count digits missing'
-        assert slot_ink(hovered, rect, 20, 10) == 0, 'count did not yield its trailing slot'
+        assert count_digit_ink(initial, rect) >= 4, 'baseline count digits missing'
+        assert count_digit_ink(hovered, rect) == 0, 'count did not yield its trailing slot'
         assert slot_ink(hovered, rect, 42, 22) >= 5, 'project ellipsis absent on row hover'
         assert slot_ink(hovered, rect, 88, 60) >= 5, 'project creation plus absent on row hover'
         assert project_list(app).get_child_at_index(0).get_name().startswith(

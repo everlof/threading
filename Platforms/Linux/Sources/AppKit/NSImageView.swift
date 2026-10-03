@@ -20,6 +20,9 @@ open class NSImageView: NSView {
     open var imageScaling: NSImageScaling = .scaleProportionallyDown {
         didSet { needsDisplay = true }
     }
+    open var symbolConfiguration: NSImage.SymbolConfiguration? {
+        didSet { needsDisplay = true }
+    }
     open var contentTintColor: NSColor? {
         didSet { needsDisplay = true }
     }

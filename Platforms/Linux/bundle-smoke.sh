@@ -27,6 +27,7 @@ export DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC
 apt-get update -qq >/dev/null
 apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev >/dev/null
 ./package-app.sh
+out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --project-row-layout-fixture
 # Exercise the same Release emulator/client modules before leaving the build container.
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product CoreSliceHarness
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product PortablePTYClientHarness

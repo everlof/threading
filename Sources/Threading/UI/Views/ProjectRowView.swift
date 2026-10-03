@@ -17,32 +17,17 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
     /// The project's icon — discovered, chosen, or the folder fallback. Shown only for
     /// project rows; headings and grouped checkouts keep their text-only shape.
-    private let iconView = NSImageView()
-    private let nameLabel = MorphingTitleLabel()
-    private var worktreePathLabel: MorphingTitleLabel?
-    private var worktreePathMinimumWidth: NSLayoutConstraint?
-    private lazy var nativeStack = NSStackView(views: [iconView, nameLabel])
-    /// Most project rows have no collapsed-session count. Besides an otherwise empty label and
-    /// three constraints, creating this eagerly pays AppKit's cold monospaced-digit font setup
-    /// in the first sidebar layout. Materialize it only when there are digits to show.
-    private var countLabel: NSTextField?
+    private let rowVisuals = ThemedProjectRowView()
+    private var iconView: NSImageView { rowVisuals.iconView }
+    private var nameLabel: MorphingTitleLabel { rowVisuals.titleLabel }
     /// Says this checkout's chats behave differently unless they answered for themselves.
     /// Materialized only when one does; see `setConductMark`.
     private var conductIndicator: NSImageView?
     private var executionHostIndicator: NSImageView?
     private var unavailableCheckoutIndicator: NSImageView?
-    private let nativeContent = NSView()
-    private let afterTitleSlot = NSStackView()
-    private let trailingSlot = NSView()
-    private lazy var contentContainer = ComponentContentContainer(defaultContent: nativeContent)
-    private lazy var rowContentStack = NSStackView(
-        views: [contentContainer, afterTitleSlot]
-    )
-
-    /// The two gutters the column's width moves — see `SidebarDensity`. Held so a narrower
-    /// column is a constant assignment on the rows already on screen.
-    private var contentLeadingConstraint: NSLayoutConstraint?
-    private var trailingSlotConstraint: NSLayoutConstraint?
+    private var afterTitleSlot: NSStackView { rowVisuals.afterTitleSlot }
+    private lazy var contentContainer = ComponentContentContainer(
+        defaultContent: rowVisuals.nativeContent)
     private lazy var customizationHost = ComponentCustomizationHost(
         target: .init(
             component: HostComponentContracts.sidebarProjectRow.id,
@@ -88,22 +73,8 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
     /// The trailing controls revealed under the pointer, crossfaded with the count in the same
     /// slot. A project row shows `+` and `⋯`; a branch heading shows a grouping gear.
-    private let createButton = ThemedIconButton(
-        symbolName: SidebarRowDefaults.createSymbol,
-        accessibility: L10n.string("New chat or terminal"),
-        target: .inline,
-        inkSource: .chrome,
-        glyphMaterialization: .deferred
-    )
-    private let hoverButton = ThemedIconButton(
-        symbolName: SidebarRowDefaults.actionSymbol,
-        accessibility: L10n.string("Project actions"),
-        target: .inline,
-        inkSource: .chrome,
-        glyphMaterialization: .deferred
-    )
-    private let hoverControls = NSStackView()
-    private var trailingWidthConstraint: NSLayoutConstraint?
+    private var createButton: ThemedIconButton { rowVisuals.createButton }
+    private var hoverButton: ThemedIconButton { rowVisuals.actionButton }
 
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
@@ -113,7 +84,6 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// Whether this row has trailing hover controls to crossfade in at all — `+`, `⋯`, or the
     /// grouping gear. False for a row that offers none, such as the archive heading.
     private var showsHoverControls = false
-    private var hasCount = false
 
     /// Invoked when the `⋯`/gear is pressed, carrying the anchor to hang a menu from.
     var onHoverAction: ((NSView) -> Void)?
@@ -135,14 +105,6 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         scheduler.onDismiss = { [weak self] in self?.dismissPopover() }
         return scheduler
     }()
-
-    /// Whether this row draws in the quiet heading ink rather than a row's own.
-    ///
-    /// Not "is a group row": a repository root groups its checkouts and still reads as the
-    /// primary row of its column, because it carries the repository's mark and its `+`. Only a
-    /// row that names something and offers nothing — the archive heading — stays quiet.
-    /// Retained so colours can be reapplied when the selection state changes.
-    private var isHeading = false
 
     /// Whether the name landing on the next content pass renames what this row is already
     /// showing, rather than replacing one row's name with another's.
@@ -387,197 +349,50 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         moreAccessibility: String = "",
         showsCreate: Bool
     ) {
-        createButton.isHidden = !showsCreate
-        hoverButton.isHidden = moreSymbol == nil
-        if let moreSymbol {
-            hoverButton.setSymbol(moreSymbol, accessibility: moreAccessibility)
-        }
-
-        // Whether the row has *any* trailing hover control, not just the `⋯`/gear: the
-        // repository root offers `+` alone, and gating the crossfade on the `⋯` left its `+`
-        // permanently at alpha zero — installed, laid out, and invisible.
         showsHoverControls = moreSymbol != nil || showsCreate
-        trailingWidthConstraint?.constant = showsCreate
-            ? SidebarRowDefaults.projectTrailingSlotWidth
-            : SidebarRowDefaults.trailingSlotSize
-        updateTrailingSlotVisibility()
-
+        rowVisuals.setHoverControls(
+            moreSymbol: moreSymbol,
+            moreAccessibility: moreAccessibility,
+            showsCreate: showsCreate
+        )
         if showsHoverControls {
             setHoverButtonVisible(presentsHoverControls, animated: false)
-        } else {
-            hoverControls.alphaValue = 0
-            countLabel?.alphaValue = 1
         }
     }
 
     // MARK: - Private Methods
 
     private func setupViews() {
-        iconView.imageScaling = .scaleProportionallyDown
-        iconView.symbolConfiguration = NSImage.SymbolConfiguration(
-            pointSize: SidebarRowDefaults.iconSize,
-            weight: .regular
-        )
-        iconView.translatesAutoresizingMaskIntoConstraints = false
-        iconView.setAccessibilityIdentifier("sidebar.project.identity")
-
-        nameLabel.setContentHuggingPriority(
-            SidebarRowDefaults.stretchableHugging,
-            for: .horizontal
-        )
-        nameLabel.setAccessibilityIdentifier("sidebar.project.title")
-
-        // Stated once as a rule: the row's role and selection both move under it, and a
-        // theme switch replaces the colours it resolves to. See `applyTextColors`.
-        nameLabel.setTextColor { [weak self] in
-            guard let self else { return Design.Text.label }
-            if backgroundStyle == .emphasized { return Design.Text.selected }
-            return isHeading ? Design.Text.secondary : Design.Text.label
-        }
-
-        setupTrailingSlot()
-        setupCustomizableContent()
-        setAccessibilityRole(.staticText)
-
-        // Pulled out by the padding the hover button holds around its glyph, the way
-        // `PaneFooterView` places a trailing control — see `OpticalInsetProviding`. The count
-        // inside the slot is pulled back in by the same amount, so the two land on one line
-        // instead of the edge stepping inboard when the pointer arrives.
-        let leading = rowContentStack.leadingAnchor.constraint(
-            equalTo: leadingAnchor,
-            constant: SidebarRowDefaults.leadingInset
-        )
-        let trailing = trailingSlot.trailingAnchor.constraint(
-            equalTo: trailingAnchor,
-            constant: -trailingSlotInset(for: SidebarRowDefaults.trailingInset)
-        )
-        contentLeadingConstraint = leading
-        trailingSlotConstraint = trailing
-
+        rowVisuals.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(rowVisuals)
         NSLayoutConstraint.activate([
-            leading,
-            rowContentStack.trailingAnchor.constraint(
-                lessThanOrEqualTo: trailingSlot.leadingAnchor,
-                constant: -SidebarRowDefaults.horizontalSpacing
-            ),
-            rowContentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            trailing,
-            trailingSlot.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth),
-            iconView.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth)
+            rowVisuals.leadingAnchor.constraint(equalTo: leadingAnchor),
+            rowVisuals.trailingAnchor.constraint(equalTo: trailingAnchor),
+            rowVisuals.topAnchor.constraint(equalTo: topAnchor),
+            rowVisuals.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
-    }
-
-    /// How far inside the row's trailing edge the slot is pinned, for a given gutter. Never
-    /// negative — see `SessionRowView.trailingSlotInset(for:)` for the hit-testing rule this
-    /// keeps, which both rows answer the same way.
-    private func trailingSlotInset(for gutter: CGFloat) -> CGFloat {
-        max(0, gutter - hoverButton.opticalHorizontalInset)
-    }
-
-    /// Builds the visual subtree extensions may replace. Count and hover actions remain in the
-    /// trailing sibling so no replacement can hide or move host-owned project state.
-    private func setupCustomizableContent() {
-        nativeStack.orientation = .horizontal
-        nativeStack.alignment = .centerY
-        nativeStack.spacing = SidebarRowDefaults.horizontalSpacing
-        nativeStack.translatesAutoresizingMaskIntoConstraints = false
-
-        nativeContent.translatesAutoresizingMaskIntoConstraints = false
-        nativeContent.addSubview(nativeStack)
-        NSLayoutConstraint.activate([
-            nativeStack.topAnchor.constraint(equalTo: nativeContent.topAnchor),
-            nativeStack.bottomAnchor.constraint(equalTo: nativeContent.bottomAnchor),
-            nativeStack.leadingAnchor.constraint(equalTo: nativeContent.leadingAnchor),
-            nativeStack.trailingAnchor.constraint(equalTo: nativeContent.trailingAnchor)
-        ])
-
-        nativeContent.setAccessibilityIdentifier("sidebar.project.default-content")
+        rowVisuals.onActionPress = { [weak self] _ in self?.hoverButtonClicked() }
+        rowVisuals.prepareForExternalContent()
+        rowVisuals.installContentContainer(contentContainer)
         contentContainer.setAccessibilityIdentifier("sidebar.project.content")
-        contentContainer.setContentHuggingPriority(
-            SidebarRowDefaults.stretchableHugging,
-            for: .horizontal
-        )
-        contentContainer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        afterTitleSlot.orientation = .horizontal
-        afterTitleSlot.alignment = .centerY
-        afterTitleSlot.spacing = Design.Spacing.tight
-        afterTitleSlot.isHidden = true
-        afterTitleSlot.setAccessibilityIdentifier("sidebar.project.slot.after-title")
-
-        // The trailing slot is **not** in the stack — pinned to the row instead, for the
-        // reason `SessionRowView` states at its own trailing slot: an arranged slot reaches
-        // the edge only when the stack can stretch something to its left, so it came to rest
-        // against the name on some rows and on the margin on others.
-        rowContentStack.orientation = .horizontal
-        rowContentStack.alignment = .centerY
-        rowContentStack.spacing = SidebarRowDefaults.horizontalSpacing
-        rowContentStack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(rowContentStack)
-        addSubview(trailingSlot)
-
         _ = customizationHost
+        setAccessibilityRole(.staticText)
     }
 
-    /// Applies only the native content's visual role. The host still owns the row's actions,
-    /// count, selection, accessibility and extension replacement boundary.
+    /// Applies only the native content's visual role. The host still owns project identity,
+    /// selection, actions, accessibility and extension replacement.
     private func applyNativePresentation(
         _ presentation: NavigatorProjectRowPresentation,
         identityProject: Project? = nil,
         worktreePath: String? = nil
     ) {
-        isHeading = presentation.isQuietHeading
         nativeName = presentation.title
-        switch presentation.titleRole {
-        case .emphasizedBody: nameLabel.applyFont(.emphasizedBody)
-        case .caption: nameLabel.applyFont(.caption)
-        }
-        setWorktreePath(worktreePath, displayedAs: presentation.secondaryPath)
+        rowVisuals.applyPresentation(presentation, path: worktreePath)
         if presentation.showsIdentityMark, let identityProject {
             showIcon(for: identityProject)
         } else {
             hideIcon()
         }
-    }
-
-    /// One optional label per visible checkout; no discovery or filesystem work on this path.
-    private func setWorktreePath(_ path: String?, displayedAs text: String?) {
-        guard let path else {
-            worktreePathMinimumWidth?.isActive = false
-            worktreePathLabel?.isHidden = true
-            nameLabel.setContentHuggingPriority(SidebarRowDefaults.stretchableHugging, for: .horizontal)
-            nameLabel.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-            return
-        }
-        guard let text else {
-            preconditionFailure("Checkout presentation must provide its path text")
-        }
-        let label: MorphingTitleLabel
-        if let worktreePathLabel {
-            label = worktreePathLabel
-        } else {
-            label = MorphingTitleLabel()
-            label.applyFont(.body)
-            label.setAccessibilityIdentifier("sidebar.project.worktree-path")
-            label.setTextColor { [weak self] in
-                self?.backgroundStyle == .emphasized
-                    ? Design.Ink.selection.secondary : Design.Text.tertiary
-            }
-            label.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            nativeStack.addArrangedSubview(label)
-            worktreePathLabel = label
-            worktreePathMinimumWidth = label.widthAnchor.constraint(
-                greaterThanOrEqualTo: nativeStack.widthAnchor,
-                multiplier: SidebarRowDefaults.worktreePathMinimumFraction
-            )
-        }
-        nameLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        label.setStringValue(text, animated: false)
-        label.toolTip = path
-        label.isHidden = false
-        worktreePathMinimumWidth?.isActive = true
     }
 
     /// Shows the project's stored icon, or the folder symbol while it has none.
@@ -691,82 +506,6 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             // Package-relative resources are resolved by the process-backed provider later.
             return nil
         }
-    }
-
-    /// Installs the host-owned trailing shell. Count and hover controls are overlaid and
-    /// crossfaded, so pointer movement never changes the row's layout.
-    private func setupTrailingSlot() {
-        // No size stated here: the button knows its own target and padding.
-        // The actions and the grouping gear alike open a menu, which happens on the press —
-        // see `ThemedIconButton.presentsMenu`.
-        hoverButton.presentsMenu = true
-        hoverButton.onPress = { [weak self] in self?.hoverButtonClicked() }
-        hoverButton.translatesAutoresizingMaskIntoConstraints = false
-
-        // The `+` is a menu again: its press used to make a chat directly, but that is exactly
-        // what clicking the row already does, so the shortcut saved nothing — and it hid
-        // the terminal behind a right-click. The choice is bound to a project in `configure`,
-        // not here — see `bindCreateButton`.
-        createButton.presentsMenu = true
-        createButton.translatesAutoresizingMaskIntoConstraints = false
-        createButton.setAccessibilityIdentifier("sidebar.project.create")
-
-        hoverControls.orientation = .horizontal
-        hoverControls.spacing = SidebarRowDefaults.hoverButtonSpacing
-        hoverControls.alignment = .centerY
-        hoverControls.alphaValue = 0
-        hoverControls.translatesAutoresizingMaskIntoConstraints = false
-        hoverControls.addArrangedSubview(createButton)
-        hoverControls.addArrangedSubview(hoverButton)
-
-        trailingSlot.translatesAutoresizingMaskIntoConstraints = false
-        trailingSlot.setAccessibilityIdentifier("sidebar.project.trailing")
-        hoverControls.setAccessibilityIdentifier("sidebar.project.actions")
-        trailingSlot.addSubview(hoverControls)
-
-        let width = trailingSlot.widthAnchor.constraint(
-            equalToConstant: SidebarRowDefaults.trailingSlotSize
-        )
-        trailingWidthConstraint = width
-        NSLayoutConstraint.activate([
-            width,
-            trailingSlot.heightAnchor.constraint(
-                equalToConstant: SidebarRowDefaults.trailingSlotSize
-            ),
-            hoverControls.trailingAnchor.constraint(
-                equalTo: trailingSlot.trailingAnchor
-            ),
-            hoverControls.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor)
-        ])
-    }
-
-    /// Crosses the count boundary once. A reused row keeps the label warm and merely hides it
-    /// when its next project has no collapsed sessions.
-    private func countLabelForPresentation() -> NSTextField {
-        if let countLabel { return countLabel }
-
-        let label = NSTextField(labelWithString: "")
-        label.applyFont(.numericDetail())
-        label.alignment = .right
-        label.setContentHuggingPriority(.required, for: .horizontal)
-        label.setContentCompressionResistancePriority(.required, for: .horizontal)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.setAccessibilityIdentifier("sidebar.project.count")
-        // Preserve the original crossfade order: hover controls stay above partially faded
-        // count ink while the pointer transition is in flight.
-        trailingSlot.addSubview(label, positioned: .below, relativeTo: hoverControls)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: trailingSlot.leadingAnchor),
-            // A count is text, whose frame *is* its ink, so it takes back the padding the slot
-            // was widened by for the glyph beside it.
-            label.trailingAnchor.constraint(
-                equalTo: trailingSlot.trailingAnchor,
-                constant: -hoverButton.opticalHorizontalInset
-            ),
-            label.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor)
-        ])
-        countLabel = label
-        return label
     }
 
     // MARK: - Hover
@@ -916,24 +655,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// Crossfades the trailing slot between the count and the hover controls. Alpha rather than
     /// visibility, and both permanently installed, so hovering never re-lays out the row.
     private func setHoverButtonVisible(_ visible: Bool, animated: Bool) {
-        guard showsHoverControls else { return }
-
-        if visible {
-            if !createButton.isHidden { createButton.materializeGlyphIfNeeded() }
-            if !hoverButton.isHidden { hoverButton.materializeGlyphIfNeeded() }
-        }
-
-        guard animated else {
-            hoverControls.alphaValue = visible ? 1 : 0
-            countLabel?.alphaValue = visible ? 0 : 1
-            return
-        }
-
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Design.Motion.quick
-            hoverControls.animator().alphaValue = visible ? 1 : 0
-            countLabel?.animator().alphaValue = visible ? 0 : 1
-        }
+        rowVisuals.setHoverControlsVisible(visible, animated: animated)
     }
 
     private func hoverButtonClicked() {
@@ -951,19 +673,10 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     }
 
     private func setCount(_ count: Int) {
-        hasCount = count > 0
-        if count > 0 {
-            let label = countLabelForPresentation()
-            label.stringValue = String(count)
-            label.isHidden = false
-        } else if let countLabel {
-            countLabel.stringValue = ""
-            countLabel.isHidden = true
-        }
-        updateTrailingSlotVisibility()
+        rowVisuals.setCount(count)
     }
 
-    var countLabelIsMaterialized: Bool { countLabel != nil }
+    var countLabelIsMaterialized: Bool { rowVisuals.countLabelIsMaterialized }
 
     /// Adds the settings mark only once a checkout behaves differently, on the session row's
     /// terms exactly: materialized on first need, hidden on reuse, and absent entirely from the
@@ -998,9 +711,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             ? Design.Ink.selection.secondary
             : Design.Text.secondary
 
-        let insertionIndex = rowContentStack.arrangedSubviews.firstIndex(of: afterTitleSlot)
-            ?? rowContentStack.arrangedSubviews.count
-        rowContentStack.insertArrangedSubview(indicator, at: insertionIndex)
+        rowVisuals.insertHostStatusMark(indicator)
         NSLayoutConstraint.activate(indicator.squareSizeConstraints(side: Design.Size.inlineButtonGlyph))
         conductIndicator = indicator
     }
@@ -1036,9 +747,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             ? Design.Ink.selection.secondary
             : Design.Text.secondary
 
-        let insertionIndex = rowContentStack.arrangedSubviews.firstIndex(of: afterTitleSlot)
-            ?? rowContentStack.arrangedSubviews.count
-        rowContentStack.insertArrangedSubview(indicator, at: insertionIndex)
+        rowVisuals.insertHostStatusMark(indicator)
         NSLayoutConstraint.activate(indicator.squareSizeConstraints(side: Design.Size.inlineButtonGlyph))
         executionHostIndicator = indicator
     }
@@ -1068,49 +777,20 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             ? Design.Ink.selection.secondary
             : Design.Text.secondary
 
-        let insertionIndex = rowContentStack.arrangedSubviews.firstIndex(of: afterTitleSlot)
-            ?? rowContentStack.arrangedSubviews.count
-        rowContentStack.insertArrangedSubview(indicator, at: insertionIndex)
+        rowVisuals.insertHostStatusMark(indicator)
         NSLayoutConstraint.activate(indicator.squareSizeConstraints(side: Design.Size.inlineButtonGlyph))
         unavailableCheckoutIndicator = indicator
     }
 
-    private func updateTrailingSlotVisibility() {
-        trailingSlot.isHidden = !showsHoverControls && !hasCount
-    }
-
-    /// Applies the row's colours for its current role and selection state. The icon tint
-    /// only reaches the folder-symbol fallback; a real icon keeps its own colours.
+    /// The Design row handles native title, path, count, icon and control ink. Host-owned
+    /// status marks stay here because an extension cannot replace or hide their meaning.
     private func applyTextColors() {
-        nameLabel.refreshTextColor()
-        worktreePathLabel?.refreshTextColor()
-
-        // The `+` and the `⋯` are drawn controls rather than tinted images, so they are told
-        // which ground they are on rather than handed a colour — see
-        // `BackdropThemedControl.hostGround`. Only the emphasized fill is named: the
-        // unemphasized one is the accent held far back over the sidebar's surface, where the
-        // chrome's ink is still the ink that reads.
-        let ground: InkSource? = backgroundStyle == .emphasized ? .selection : nil
-        createButton.hostGround = ground
-        hoverButton.hostGround = ground
-
-        if backgroundStyle == .emphasized {
-            countLabel?.textColor = Design.Text.selected.withAlphaComponent(
-                SidebarRowDefaults.secondaryTextAlpha
-            )
-            conductIndicator?.contentTintColor = Design.Ink.selection.secondary
-            executionHostIndicator?.contentTintColor = Design.Ink.selection.secondary
-            unavailableCheckoutIndicator?.contentTintColor = Design.Ink.selection.secondary
-            iconView.contentTintColor = Design.Text.selected
-            nativeIconTint = iconView.contentTintColor
-            return
-        }
-
-        countLabel?.textColor = Design.Text.secondary
-        conductIndicator?.contentTintColor = Design.Text.secondary
-        executionHostIndicator?.contentTintColor = Design.Text.secondary
-        unavailableCheckoutIndicator?.contentTintColor = Design.Text.secondary
-        iconView.contentTintColor = Design.Text.secondary
+        rowVisuals.setSelection(backgroundStyle == .emphasized)
+        let tint = backgroundStyle == .emphasized
+            ? Design.Ink.selection.secondary : Design.Text.secondary
+        conductIndicator?.contentTintColor = tint
+        executionHostIndicator?.contentTintColor = tint
+        unavailableCheckoutIndicator?.contentTintColor = tint
         nativeIconTint = iconView.contentTintColor
     }
 }
@@ -1132,7 +812,9 @@ extension ProjectRowView: SidebarDensityAdopting {
     /// Restates the row's two gutters at the width the column now has. Project rows and branch
     /// headings are the same view, so both follow the density their sessions do.
     func applySidebarDensity(_ density: SidebarDensity) {
-        contentLeadingConstraint?.constant = density.rowLeadingInset
-        trailingSlotConstraint?.constant = -trailingSlotInset(for: density.rowTrailingInset)
+        rowVisuals.applySidebarDensity(
+            leading: density.rowLeadingInset,
+            trailing: density.rowTrailingInset
+        )
     }
 }

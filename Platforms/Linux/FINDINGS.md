@@ -4466,3 +4466,49 @@ native buffer commits, AT-SPI Add/Create/Actions, compositor pointer input, righ
 Shift+F10 and drag release. I inspected the installed X11 Actions and Create captures and
 the final Wayland Actions capture. The shell remains a diagnostic preview rather than a full
 production Linux UI.
+
+## 149. Visible project rows share the production native subtree
+
+`ThemedProjectRowView` now owns the icon, shaped title, optional checkout path, collapsed count
+and trailing `+`/`⋯` controls for both the Mac `ProjectRowView` and Linux's visible project
+slots. The existing `NavigatorProjectRowPresentation` supplies the title role. The production
+`SidebarRowDefaults` moved verbatim into Design, linked into DesignKit and Linux, so the row's
+gutter and control geometry have one source. Mac keeps its table cell, title morph,
+customization container, hover card and project model adapter around that shared subtree.
+Linux keeps `ProjectSnapshot` identity, selection, AT-SPI list publication, command validation
+and PTY ownership around it. The Linux project list no longer lays out a separate project
+title, mark, count or control pair in its diagnostic text layer.
+
+The AppKit shim now clips each rendered view to its own bounds, including nested flipped views,
+and honors ordered subview insertion so count ink stays behind the hover controls. It carries
+the image-view symbol configuration requested by production and a monospaced-digit font leaf;
+the host supplies a fixed-palette typography adapter. A focused Linux bitmap fixture checks
+nested bounds, explicit clips, flipped coordinates, sibling restoration, ordering and hit tests.
+Only visible project slots retain native content. Generated icons keep their bounded cache;
+pointer and selection changes reconfigure the retained slots without scanning the project
+catalogue or building hidden rows.
+
+Mounting a count exposed a conflicting intrinsic-width rule: the label was pinned across a
+38-point slot while its hugging and compression priorities both required its natural width.
+The Linux layout solve then failed, leaving the pane header at its old 800-pixel width after a
+terminal narrowed the sidebar to 320 pixels. The count now yields to the slot, and the packaged
+layout fixture checks a retained row and header through 800/320/800-pixel resizes. The shared
+buttons also publish hover-state changes to the host's existing dirty-frame signal, so moving
+from a revealed row into `+` or `⋯` repaints the control without replacing the row.
+The text shim now measures intrinsic width and baselines at the attached window's backing scale,
+matching its Pango raster scale so a wide row does not ellipsize its name early. The host
+publishes AT-SPI control rectangles and held-menu gesture bounds from the laid-out buttons,
+rather than keeping a second set of row offsets.
+
+Customization gate: the Mac `sidebar.project-row@1` replacement and after-title slot remain in
+place. Linux currently mounts the native default content; it does not load extension-provided
+replacement UI. In both hosts, project identity, selection, command admission and process
+ownership remain host decisions. Live production theme roles, outline/table semantics and the
+other navigator row kinds remain outside this preview slice.
+
+Verification on 2026-10-03: the focused Mac row suite passed 22/22 tests; regenerated light and
+dark row-kind renders were inspected and remained byte-identical. Linux `ViewClippingHarness`,
+`TextLabelHarness` and the packaged 800/320/800-pixel project-row fixture passed. The complete
+`bundle-smoke.sh` installed Ubuntu suite and `tests/wayland_smoke.sh --actions` passed. I inspected
+the installed X11 normal/hover/count captures and Wayland's rendered project row: full names,
+count-to-controls crossfade and button hover plates are visible in the real shell.

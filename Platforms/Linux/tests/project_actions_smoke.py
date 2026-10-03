@@ -112,8 +112,8 @@ def changed_pixels(before, after, x0, y0, x1, y1):
     return changed
 
 
-def dark_pixels(image, x0, y0, x1, y1):
-    return sum(max(image[(y * 800 + x) * 3:(y * 800 + x) * 3 + 3]) < 80
+def bright_pixels(image, x0, y0, x1, y1):
+    return sum(min(image[(y * 800 + x) * 3:(y * 800 + x) * 3 + 3]) > 220
                for y in range(y0, y1) for x in range(x0, x1))
 
 
@@ -165,8 +165,8 @@ try:
             assert create.get_accessible_id() == 'sidebar.project.create.' + row.get_accessible_id()
             assert create.get_action_iface().get_n_actions() == 1
             create_rect = extents(create)
-            assert (create_rect.x, create_rect.y, create_rect.width, create_rect.height) == (
-                row_rect.x + row_rect.width - 96, row_rect.y + 2, 40, 40)
+            assert (create_rect.y, create_rect.width, create_rect.height) == (
+                row_rect.y + 2, 40, 40)
             creates.append(create)
             button = row.get_child_at_index(1)
             assert button.get_role_name() == 'push button'
@@ -175,8 +175,9 @@ try:
             assert button.get_state_set().contains(Atspi.StateType.ENABLED)
             assert button.get_action_iface().get_n_actions() == 1
             rect = extents(button)
-            assert (rect.x, rect.y, rect.width, rect.height) == (
-                row_rect.x + row_rect.width - 52, row_rect.y + 2, 40, 40)
+            assert (rect.y, rect.width, rect.height) == (row_rect.y + 2, 40, 40)
+            assert rect.x == create_rect.x + create_rect.width + 4
+            assert 0 <= row_rect.x + row_rect.width - (rect.x + rect.width) <= 8
             actions.append(button)
 
         normal = capture(window, 'project-actions-normal.png')
@@ -198,14 +199,14 @@ try:
             'production ellipsis did not become visible on hover'
         assert changed_pixels(row_hovered, hovered, *action_crop) >= 8, \
             'production control hover plate did not update within the same row'
-        assert dark_pixels(hovered, action_rect.x + 12, action_rect.y + 10,
-                           action_rect.x + 30, action_rect.y + 30) >= 5, \
+        assert bright_pixels(hovered, action_rect.x + 12, action_rect.y + 10,
+                             action_rect.x + 30, action_rect.y + 30) >= 5, \
             'ellipsis glyph is not centered inside its production hover plate'
-        assert dark_pixels(row_hovered, create_rect.x + 12, create_rect.y + 10,
-                           create_rect.x + 32, create_rect.y + 30) >= 5, \
+        assert bright_pixels(row_hovered, create_rect.x + 12, create_rect.y + 10,
+                             create_rect.x + 32, create_rect.y + 30) >= 5, \
             'plus glyph is not centered in the companion 20-point target'
-        assert dark_pixels(hovered, action_rect.x - 16, action_rect.y + 30,
-                           action_rect.x, action_rect.y + 42) == 0, \
+        assert bright_pixels(hovered, action_rect.x - 16, action_rect.y + 30,
+                             action_rect.x, action_rect.y + 42) == 0, \
             'ellipsis glyph leaked outside its 20-point target'
         assert selected(project_rows(app)[0]) and not selected(project_rows(app)[1])
 
