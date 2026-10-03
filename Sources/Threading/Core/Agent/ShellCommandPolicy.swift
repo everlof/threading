@@ -38,21 +38,31 @@ enum ShellCommandPolicy {
 
     /// Whether every part of a command line is a known read-only invocation.
     static func isReadOnly(_ command: String) -> Bool {
+        guard let segments = segments(ofVettable: command) else { return false }
+        return segments.allSatisfy(isReadOnlySegment)
+    }
+
+    /// The simple commands a line consists of, or nil when the line holds a construct that could
+    /// run something none of its segments shows — redirection, substitution, backgrounding, a
+    /// newline — or holds nothing at all.
+    ///
+    /// Shared with automation allow-lists (`AutomationPermissionRule`), which vet each segment the
+    /// same way: a segment is admitted only if it is read-only here or matches a rule the person
+    /// approved, so a chain cannot smuggle a second command past a rule naming the first.
+    static func segments(ofVettable command: String) -> [String]? {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
+        guard !trimmed.isEmpty else { return nil }
 
         // Checked before splitting, because these are precisely the constructs that would let a
         // segment mean something other than the words it appears to contain.
         guard trimmed.rangeOfCharacter(from: Rule.forbiddenCharacters) == nil,
               !Rule.forbiddenSequences.contains(where: trimmed.contains),
               !isBackgrounded(trimmed) else {
-            return false
+            return nil
         }
 
         let segments = split(trimmed)
-        guard !segments.isEmpty else { return false }
-
-        return segments.allSatisfy(isReadOnlySegment)
+        return segments.isEmpty ? nil : segments
     }
 
     // MARK: - Private Methods
@@ -78,7 +88,7 @@ enum ShellCommandPolicy {
             .filter { !$0.isEmpty }
     }
 
-    private static func isReadOnlySegment(_ segment: String) -> Bool {
+    static func isReadOnlySegment(_ segment: String) -> Bool {
         // Match the shell's ordinary IFS word boundaries. Newlines are rejected before this
         // point; tabs must still split, or `find .\t-exec …` hides every argument from the
         // policy while `/bin/sh` executes it as a separate word.
@@ -157,7 +167,7 @@ enum ShellCommandPolicy {
     /// Only ever applied to *arguments*. The command name keeps its quotes and so keeps failing
     /// the allowlist, which is the safe direction: unquoting it would admit `"ls"` — and the
     /// point of this policy is never to widen what passes.
-    private static func unquoted(_ token: String) -> String {
+    static func unquoted(_ token: String) -> String {
         guard token.count >= 2,
               let first = token.first, let last = token.last,
               first == last, first == "\"" || first == "'" else { return token }

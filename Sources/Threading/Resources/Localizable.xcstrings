@@ -7493,6 +7493,17 @@
         }
       }
     },
+    "Allow-list" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåtelselista"
+          }
+        }
+      }
+    },
     "Allowed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7831,6 +7842,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En godkänd bild som hålls över en levande sida. Dra i handtaget; klicka någon annanstans och knappen under svarar."
+          }
+        }
+      }
+    },
+    "An automation can list at most %lld rules." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En automation kan ha högst %lld regler."
           }
         }
       }
@@ -8217,6 +8239,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Alla händelser av den här typen"
+          }
+        }
+      }
+    },
+    "Anything else is refused" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allt annat nekas"
           }
         }
       }
@@ -21390,6 +21423,17 @@
         }
       }
     },
+    "Every command runs without asking" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alla kommandon körs utan att fråga"
+          }
+        }
+      }
+    },
     "Every custom sound" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24042,6 +24086,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fullständigt namn"
+          }
+        }
+      }
+    },
+    "Full permission" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Full behörighet"
+          }
+        }
+      }
+    },
+    "Full permission needs a mode that may edit files: “Task with local edits” or “Assess, then fix if straightforward”." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Full behörighet kräver ett läge som får ändra filer: ”Uppgift med lokala ändringar” eller ”Bedöm, åtgärda sedan om det är enkelt”."
+          }
+        }
+      }
+    },
+    "Full permission takes no rules." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Full behörighet tar inga regler."
           }
         }
       }
@@ -37708,6 +37785,17 @@
         }
       }
     },
+    "Plus read-only commands; anything else is refused" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Även kommandon som bara läser; allt annat nekas"
+          }
+        }
+      }
+    },
     "Point Report" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40208,6 +40296,17 @@
         }
       }
     },
+    "Read-only commands only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bara kommandon som läser"
+          }
+        }
+      }
+    },
     "Read-only provider" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40336,6 +40435,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Läser och föreslår. Ändrar ingenting."
+          }
+        }
+      }
+    },
+    "Reads are always allowed for automation runs, so “%@” is not needed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läsning är alltid tillåten för automationskörningar, så ”%@” behövs inte."
           }
         }
       }
@@ -43701,6 +43811,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rader %lld–%lld av %lld · kolumner %lld–%lld av %lld"
+          }
+        }
+      }
+    },
+    "Rules (one per line)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Regler (en per rad)"
           }
         }
       }
@@ -61452,6 +61573,17 @@
         }
       }
     },
+    "Unattended runs never ask. Bash(command) or Bash(command *), Write(/folder/**), WebFetch(domain:example.com), mcp__server__tool. Reads and read-only commands are always allowed; anything else is refused." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Obevakade körningar frågar aldrig. Bash(kommando) eller Bash(kommando *), Write(/mapp/**), WebFetch(domain:example.com), mcp__server__tool. Läsning och kommandon som bara läser är alltid tillåtna; allt annat nekas."
+          }
+        }
+      }
+    },
     "Unavailable" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -64798,6 +64930,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Utan puff"
+          }
+        }
+      }
+    },
+    "Without asking" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utan att fråga"
           }
         }
       }
@@ -70923,6 +71066,17 @@
         }
       }
     },
+    "“%@” is not a supported rule. Use Bash(…), Write(…), Edit(…), WebFetch(domain:…) or mcp__server__tool." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” är inte en regel som stöds. Använd Bash(…), Write(…), Edit(…), WebFetch(domain:…) eller mcp__server__tool."
+          }
+        }
+      }
+    },
     "“%@” is not a usable web address." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -70967,6 +71121,17 @@
         }
       }
     },
+    "“%@” is too long for a rule." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” är för lång för en regel."
+          }
+        }
+      }
+    },
     "“%@” is unavailable because %@ is not running or no longer registers this panel." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -70985,6 +71150,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "”%@” arbetar i %@"
+          }
+        }
+      }
+    },
+    "“%@” must be one simple command, without ;, &&, |, redirection or substitution." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” måste vara ett enda enkelt kommando, utan ;, &&, |, omdirigering eller substitution."
+          }
+        }
+      }
+    },
+    "“%@” must name an absolute path, such as /Users/you/folder/**." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” måste ange en absolut sökväg, till exempel /Users/du/mapp/**."
           }
         }
       }
@@ -71062,6 +71249,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "”%@” hittades inte, så denna inloggning används: %@"
+          }
+        }
+      }
+    },
+    "“%@” would allow every command. Choose full permission instead." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” skulle tillåta alla kommandon. Välj full behörighet i stället."
           }
         }
       }

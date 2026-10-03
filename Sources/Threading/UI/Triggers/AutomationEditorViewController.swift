@@ -22,6 +22,8 @@ final class AutomationEditorViewController: NSViewController {
     private let effort = ThemedTextField()
     private let runtime = ThemedTextField()
     private let scheduleFields: AutomationScheduleFields
+    private let unattended = ThemedPopUp()
+    private let rules = ThemedTextView.scrolling()
     private let source = ThemedPopUp()
     private let eventKind = ThemedTextField()
     private let sources: [TriggerSourceInstallation]
@@ -106,6 +108,22 @@ final class AutomationEditorViewController: NSViewController {
             addRow("Account", account, to: form); addRow("Model", model, to: form); addRow("Reasoning effort", effort, to: form)
             runtime.stringValue = String(configuration?.maximumRuntimeMinutes ?? 60)
             addRow("Maximum runtime (minutes)", runtime, to: form)
+            // Unattended runs never ask, so what they may do is decided here and approved with
+            // the revision. Remote workers own their permissions and are not offered this.
+            unattended.addItem(withTitle: L10n.string("Allow-list"))
+            unattended.addItem(withTitle: L10n.string("Full permission"))
+            let policy = configuration?.permissions ?? .readOnly
+            unattended.selectItem(at: policy.isFull ? 1 : 0)
+            unattended.target = self; unattended.action = #selector(unattendedChanged)
+            addRow("Without asking", unattended, to: form)
+            rules.textView.string = policy.rules.map(\.text).joined(separator: "\n")
+            rules.textView.setAccessibilityIdentifier("automation.rules")
+            rules.heightAnchor.constraint(equalToConstant: 90).isActive = true
+            addRow("Rules (one per line)", rules, to: form)
+            let grammar = NSTextField(wrappingLabelWithString: L10n.string(
+                "Unattended runs never ask. Bash(command) or Bash(command *), Write(/folder/**), WebFetch(domain:example.com), mcp__server__tool. Reads and read-only commands are always allowed; anything else is refused."))
+            grammar.applyFont(.detail()); grammar.textColor = Design.Text.secondary
+            form.addArrangedSubview(grammar)
         }
         instructions.textView.string = configuration?.instructions ?? remoteSpec?.instruction ?? ""
         instructions.heightAnchor.constraint(equalToConstant: 100).isActive = true
@@ -153,6 +171,7 @@ final class AutomationEditorViewController: NSViewController {
         ])
         for child in form.arrangedSubviews { child.widthAnchor.constraint(equalTo: form.widthAnchor).isActive = true }
         cadenceChanged()
+        unattendedChanged()
     }
     override func viewDidAppear() { super.viewDidAppear(); view.window?.makeFirstResponder(name) }
     private func addRow(_ title: String, _ control: NSView, to form: NSStackView) {
@@ -166,6 +185,10 @@ final class AutomationEditorViewController: NSViewController {
         scheduleFields.updateEnabled()
         let isEvent = scheduleFields.isAlternativeSelected
         source.isEnabled = isEvent; eventKind.isEnabled = isEvent
+    }
+    @objc private func unattendedChanged() {
+        rules.textView.isEditable = unattended.indexOfSelectedItem == 0
+        rules.alphaValue = unattended.indexOfSelectedItem == 0 ? 1 : 0.5
     }
     @objc private func cancelPressed() { presentingViewController?.dismiss(self) }
     @objc private func savePressed() {
@@ -203,6 +226,9 @@ final class AutomationEditorViewController: NSViewController {
         config.account = account.stringValue.isEmpty ? nil : account.stringValue
         config.model = model.stringValue.isEmpty ? nil : model.stringValue
         config.reasoningEffort = effort.stringValue.isEmpty ? nil : effort.stringValue
+        config.permissions = unattended.indexOfSelectedItem == 1
+            ? .full
+            : try AutomationPermissionPolicy.allowList(parsing: rules.textView.string.components(separatedBy: .newlines))
         config.options = .init(schedule: schedule, missedRunPolicy: missed.indexOfSelectedItem == 1 ? .latest : .skip, archiveOnSuccess: archive.state == .on)
         if isEvent {
             guard sources.indices.contains(source.indexOfSelectedItem) else { throw AutomationEditorError.sourceUnavailable }

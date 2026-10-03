@@ -74,6 +74,7 @@ struct AutomationReview: Equatable {
 
         facts.append(.init(label: L10n.string("Permissions"), value: revision.executionMode.displayTitle,
                            detail: revision.checkoutPolicy.displayTitle, identifier: "permissions"))
+        facts.append(allowedFact(revision.effectivePermissions))
 
         let runtime = L10n.format("Stops after %lld minutes", Int64(revision.limits.maximumRuntimeMinutes))
         facts.append(.init(
@@ -121,6 +122,24 @@ struct AutomationReview: Equatable {
             return .init(label: L10n.string("When"),
                          value: L10n.format("“%@” arrives", revision.eventKind),
                          detail: L10n.format("From %@", source), identifier: "when")
+        }
+    }
+
+    /// What the run may do without a person. Full permission is stated in caution tone, and an
+    /// allow-list is shown rule by rule, because this sheet is where that authority is granted.
+    private static func allowedFact(_ policy: AutomationPermissionPolicy) -> FactSheetView.Fact {
+        switch policy {
+        case .full:
+            return .init(label: L10n.string("Without asking"), value: L10n.string("Full permission"),
+                         detail: L10n.string("Every command runs without asking"),
+                         tone: .caution, identifier: "allowed")
+        case .allowList(let rules) where rules.isEmpty:
+            return .init(label: L10n.string("Without asking"), value: L10n.string("Read-only commands only"),
+                         detail: L10n.string("Anything else is refused"), identifier: "allowed")
+        case .allowList(let rules):
+            return .init(label: L10n.string("Without asking"), value: rules.map(\.text).joined(separator: "\n"),
+                         detail: L10n.string("Plus read-only commands; anything else is refused"),
+                         identifier: "allowed")
         }
     }
 

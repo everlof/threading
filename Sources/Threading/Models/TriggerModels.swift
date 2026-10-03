@@ -347,6 +347,9 @@ struct TriggerRevision: Codable, Equatable, Sendable {
     var proposedBySessionID: SessionID?
     let createdAt: Date
     var automation: AutomationOptions? = nil
+    /// What an unattended run may do without asking. Nil only on revisions saved before
+    /// policies existed, which `effectivePermissions` reads as read-only.
+    var permissions: AutomationPermissionPolicy? = nil
 }
 
 struct TriggerDefinition: Codable, Equatable, Sendable {

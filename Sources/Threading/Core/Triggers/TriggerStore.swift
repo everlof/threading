@@ -555,6 +555,14 @@ actor TriggerStore {
 
     private func validate(_ definition: TriggerDefinition, revision: TriggerRevision) throws {
         try revision.automation?.schedule?.validate()
+        // Full permission promises edits without asking, which a read-only mode cannot keep.
+        if revision.effectivePermissions.isFull,
+           revision.executionMode != .taskLocalEdits, revision.executionMode != .assessThenFix {
+            throw AutomationPermissionPolicyError.fullNeedsEditingMode
+        }
+        guard revision.effectivePermissions.rules.count <= AutomationPermissionPolicy.maximumRules else {
+            throw AutomationPermissionPolicyError.tooManyRules
+        }
         guard definition.id == revision.triggerID,
               definition.draftRevisionID == revision.id,
               revision.sequence > 0,
@@ -886,6 +894,7 @@ extension TriggerStore {
             allowSourceResources: existing?.revision.allowSourceResources ?? false,
             proposedBySessionID: proposedBy, createdAt: now)
         revision.automation = config.options
+        revision.permissions = config.permissions ?? .readOnly
         try validate(definition, revision: revision)
         let database = try readyDatabase()
         // The draft and the schedule it replaces commit together: a caller never sees a saved
@@ -1065,7 +1074,18 @@ extension TriggerStore {
 
     /// Reserves the session once, and checks pause/edit again at dispatch. Repeated timer,
     /// notification and run-now delivery cannot create duplicate sessions.
-    func claimDispatch(_ runID: TriggerRunID) throws -> TriggerRun? {
+    /// Reserves the session a run will start in. The run's approved permission policy is bound
+    /// to that session here, before anything is launched in it, so the first tool call of an
+    /// unattended run is already answered by its revision and never by a card nobody watches.
+    func claimDispatch(_ runID: TriggerRunID) async throws -> TriggerRun? {
+        guard let claimed = try reserveDispatchSession(runID),
+              let sessionID = claimed.sessionID,
+              let revision = try revision(id: claimed.triggerRevisionID) else { return nil }
+        await UnattendedRunPermissions.register(revision, for: sessionID)
+        return claimed
+    }
+
+    private func reserveDispatchSession(_ runID: TriggerRunID) throws -> TriggerRun? {
         try readyDatabase().transaction {
         guard var run = try run(id: runID), run.state == .received, run.sessionID == nil else { return nil }
         let manual = run.initiatedManually == true

@@ -42,6 +42,9 @@ struct AutomationConfiguration: Codable, Equatable, Sendable {
     var sourceID: TriggerSourceInstallationID?
     var eventKind: String?
     var conditions: [TriggerCondition]
+    /// What unattended runs may do without asking. Omitted means read-only, and is saved as
+    /// that explicit policy.
+    var permissions: AutomationPermissionPolicy?
 
     init(projectID: ProjectID) {
         self.projectID = projectID; name = ""; instructions = ""; agent = .codex
@@ -65,5 +68,6 @@ struct AutomationConfiguration: Codable, Equatable, Sendable {
         sourceID = options.schedule == nil ? revision.sourceInstallationID : nil
         eventKind = options.schedule == nil ? revision.eventKind : nil
         conditions = revision.conditions
+        permissions = revision.permissions
     }
 }

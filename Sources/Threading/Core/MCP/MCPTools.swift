@@ -8780,6 +8780,8 @@ enum MCPTools {
           projects lists Threading projects with the id configure takes. When the user wants an automation to
           run in a folder that is not a project yet, addProject adds it (idempotent); it starts nothing.
           taskLocalEdits with projectCheckout refuses a dirty git checkout; a folder that is not a git repository counts as clean.
+          An unattended run never shows a permission card: configuration.permissions (an allow-list, or full) decides
+          each call at once and refuses the rest. Ask the user which commands a run needs before configuring.
           For a VPS first use hosts to discover configured connections and workers to discover the target worker IDs.
           Pass remote with the host ID only; Threading uses the controller paths the user connected on the
           Automations ▸ Remote page, and refuses a host that has none.

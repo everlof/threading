@@ -116,6 +116,11 @@ actor TriggerRuntime {
         guard !dispatches.isEmpty else { return }
         await MainActor.run {
             for dispatch in dispatches {
+                // A fix stage recovered after a relaunch: the assessment's registration did not
+                // survive the process, and the fix stage must not fall back to cards either.
+                if let sessionID = dispatch.run.sessionID {
+                    UnattendedRunPermissions.register(dispatch.revision, for: sessionID)
+                }
                 NotificationCenter.default.post(TriggerFixStageDidBecomeReady(dispatch: dispatch))
             }
         }

@@ -19,7 +19,7 @@ final class AutomationApprovalSheetRenderTests: XCTestCase {
         let review = AutomationReview.make(revision, purpose: .runNow, context: Self.context())
 
         XCTAssertEqual(review.facts.map(\.identifier),
-                       ["project", "when", "agent", "account", "permissions", "limits", "afterSuccess", "revision"])
+                       ["project", "when", "agent", "account", "permissions", "allowed", "limits", "afterSuccess", "revision"])
         XCTAssertEqual(fact("project", in: review)?.value, "sonda-automations")
         XCTAssertEqual(fact("project", in: review)?.detail, "~/repo/sonda-automations")
         XCTAssertEqual(fact("when", in: review)?.value, L10n.string("Once, now"))
@@ -60,13 +60,44 @@ final class AutomationApprovalSheetRenderTests: XCTestCase {
         let review = AutomationReview.make(Self.eventRevision(), purpose: .activate, context: Self.context())
 
         XCTAssertEqual(review.facts.map(\.identifier),
-                       ["project", "when", "conditions", "agent", "account", "permissions", "limits", "revision"])
+                       ["project", "when", "conditions", "agent", "account", "permissions", "allowed", "limits", "revision"])
         XCTAssertEqual(fact("when", in: review)?.value, L10n.format("“%@” arrives", "case.review-required"))
         XCTAssertEqual(fact("when", in: review)?.detail, L10n.format("From %@", "Sonda review feed"))
         XCTAssertEqual(fact("conditions", in: review)?.value, "lab  equals  \"ALS\"")
         XCTAssertEqual(fact("limits", in: review)?.detail, L10n.string("One run at a time"))
         XCTAssertEqual(fact("account", in: review)?.value, L10n.format("Default login, %@", "~/.codex"))
         XCTAssertEqual(fact("account", in: review)?.detail, L10n.string("No account chosen for this automation"))
+    }
+
+    func testARevisionSavedBeforePoliciesReadsAsReadOnly() {
+        let review = AutomationReview.make(
+            Self.scheduleRevision(account: "claude-sonda-02"), purpose: .runNow, context: Self.context())
+
+        XCTAssertEqual(fact("allowed", in: review)?.value, L10n.string("Read-only commands only"))
+        XCTAssertEqual(fact("allowed", in: review)?.detail, L10n.string("Anything else is refused"))
+        XCTAssertEqual(fact("allowed", in: review)?.tone, .normal)
+    }
+
+    func testTheSheetStatesTheAllowListRuleByRule() throws {
+        let policy = try AutomationPermissionPolicy.allowList(parsing: Self.bevakningRules)
+        let review = AutomationReview.make(
+            Self.scheduleRevision(account: "claude-sonda-02", permissions: policy),
+            purpose: .enable, context: Self.context())
+
+        XCTAssertEqual(fact("allowed", in: review)?.value, policy.rules.map(\.text).joined(separator: "\n"))
+        XCTAssertEqual(fact("allowed", in: review)?.detail,
+                       L10n.string("Plus read-only commands; anything else is refused"))
+        XCTAssertEqual(fact("allowed", in: review)?.tone, .normal)
+    }
+
+    func testFullPermissionIsStatedAsACaution() {
+        let review = AutomationReview.make(
+            Self.scheduleRevision(account: "claude-sonda-02", permissions: .full),
+            purpose: .enable, context: Self.context())
+
+        XCTAssertEqual(fact("allowed", in: review)?.value, L10n.string("Full permission"))
+        XCTAssertEqual(fact("allowed", in: review)?.detail, L10n.string("Every command runs without asking"))
+        XCTAssertEqual(fact("allowed", in: review)?.tone, .caution)
     }
 
     func testAMissingProjectIsAnnouncedRatherThanShownAsAnIdentifier() {
@@ -115,6 +146,8 @@ final class AutomationApprovalSheetRenderTests: XCTestCase {
         case scheduleEnableDefaultLogin = "schedule-enable-default-login"
         case eventActivate = "event-activate"
         case remoteRun = "remote-run"
+        case scheduleRunAllowList = "schedule-run-allow-list"
+        case scheduleEnableFull = "schedule-enable-full"
     }
 
     func testRendersTheApprovalSheetStorybook() throws {
@@ -167,6 +200,16 @@ final class AutomationApprovalSheetRenderTests: XCTestCase {
         case .remoteRun:
             return AutomationApprovalPresenter.confirmationRequest(
                 for: .remote(.run, automation: Self.remoteAutomation(), hostName: "sonda-vps"))
+        case .scheduleRunAllowList:
+            var revision = Self.scheduleRevision(account: "claude-sonda-02")
+            revision.permissions = try! AutomationPermissionPolicy.allowList(parsing: Self.bevakningRules)
+            return AutomationApprovalPresenter.confirmationRequest(
+                for: .local(.run, name: "Bevakning daglig genomgång", revision: revision), context: Self.context())
+        case .scheduleEnableFull:
+            return AutomationApprovalPresenter.confirmationRequest(
+                for: .local(.enable, name: "Bevakning daglig genomgång",
+                            revision: Self.scheduleRevision(account: "claude-sonda-02", permissions: .full)),
+                context: Self.context())
         }
     }
 
@@ -221,7 +264,15 @@ final class AutomationApprovalSheetRenderTests: XCTestCase {
 
         """, count: 3)
 
-    static func scheduleRevision(account: String?) -> TriggerRevision {
+    static let bevakningRules = [
+        "Bash(python3 /Users/david/repo/sonda-automations/bevakning/collect.py *)",
+        "Bash(python3 /Users/david/repo/sonda-automations/bevakning/send.py *)",
+        "Bash(git -C /Users/david/repo/sonda fetch --quiet origin develop)",
+        "Write(/Users/david/Downloads/Sonda-bevakning/**)",
+        "WebFetch(domain:eur-lex.europa.eu)",
+    ]
+
+    static func scheduleRevision(account: String?, permissions: AutomationPermissionPolicy? = nil) -> TriggerRevision {
         TriggerRevision(
             id: TriggerRevisionID(), triggerID: TriggerID(), sequence: 2,
             sourceInstallationID: TriggerSourceInstallationID(), eventKind: "schedule.due", conditions: [],
@@ -233,7 +284,8 @@ final class AutomationApprovalSheetRenderTests: XCTestCase {
             proposedBySessionID: nil, createdAt: Date(timeIntervalSince1970: 1_790_000_000),
             automation: AutomationOptions(
                 schedule: AutomationSchedule(kind: .daily, timeZone: "Europe/Stockholm", hour: 9, minute: 30),
-                missedRunPolicy: .latest, archiveOnSuccess: true)
+                missedRunPolicy: .latest, archiveOnSuccess: true),
+            permissions: permissions
         )
     }
 

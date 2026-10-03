@@ -654,6 +654,10 @@ the presentation immediately after an answer: the tool row and Execution Audit a
 record, while a second copy of the prompt made the conversation read as still blocked. The modal
 sheet survives only as a fallback for the impossible case — a request with no live conversation.
 
+An unattended automation run is the exception to the card: its session is registered with
+`UnattendedRunPermissions`, and the broker answers from the approved revision's policy at once
+instead of presenting anything (see [`triggers.md`](triggers.md#unattended-permissions)).
+
 Requests are shown **one at a time**: an agent can fire several tool calls in a turn, but
 a stack of cards is answered out of context, so they queue and the next appears only once the
 current one is decided (`permissionQueue` / `activePermissionCard`, `showNextPermissionIfIdle`).

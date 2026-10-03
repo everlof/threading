@@ -58,6 +58,41 @@ The grant ends at local edits and tests. Trigger runs cannot push, deploy, open 
 write back to the source or acquire a source resource. Those remain separate future authorities.
 The configured maximum runtime is armed as the session's curfew across both stages.
 
+### Unattended permissions
+
+A permission card in a chat nobody watches protects nothing: it stops the run until its curfew.
+That happened on 2026-10-03, when a scheduled run's allow-listed `collect.py` waited for a click
+for its whole hour. So an unattended run never raises one. The revision carries an
+`AutomationPermissionPolicy` (`Models/AutomationPermissionPolicy.swift`), which the person
+approves on the sheet with everything else:
+
+- **Allow-list** (the default, and the meaning of every revision saved before policies existed):
+  Threading's read-only allowances, local edits inside the run's own folder when its mode allows
+  edits, and exactly the listed rules. The grammar is Claude's spelling, kept small and validated
+  when the revision is saved: `Bash(command)` / `Bash(command *)` for one simple command,
+  `Write(/abs/glob)` or `Edit(…)`, `WebFetch(domain:host)` and `mcp__server__tool`. A rule that is
+  not understood is refused, never guessed at; `Read(…)` is refused as unnecessary.
+- **Full permission**: every call of a stage that may edit runs without asking. Refused for
+  read-only modes, and an assessment stage before a fix still gets read-only answers. The stage
+  launches in its ordinary mode (`acceptEdits`): every Claude tool call reaches the broker's
+  `PreToolUse` hook, whose answer is final. Codex sandbox limits that raise no approval request
+  still apply.
+
+`UnattendedRunPermissions` holds the policy per session. `TriggerStore.claimDispatch` registers it
+when it reserves the run's session, before anything is launched there; a fix stage recovered
+after a relaunch registers again where `TriggerRuntime` publishes it. It is dropped once the store
+reports the run is no longer active, so a person who keeps working in that chat gets the ordinary
+cards back. `PermissionBroker.decide` asks it before anything else and answers at once:
+allowed with the rule and revision named, or denied with a reason the agent can act on. A command
+line is split the way `ShellCommandPolicy` splits it, and every segment must be read-only or match
+a rule, so a chain cannot carry a second command past a rule naming the first; redirection,
+substitution and backgrounding are refused outright. A call that would raise a macOS permission
+prompt is refused even under full permission, because nobody is there to answer the dialog.
+
+The authority is the approved revision, never the project folder: `.claude/settings*.json` can be
+checked into a repository, and letting it decide would let a clone widen what an approved
+automation may do without the sheet ever showing it.
+
 ## Queue and recovery
 
 `TriggerEngine` performs typed AND matching and decides whether a new run is immediately
@@ -208,6 +243,8 @@ daemon reading the spec's run fields as `TriggerProbeRunSpec` (same JSON shape).
 - `UI/Triggers/TriggerCenterViewController.swift` — the host-owned destination
 - `UI/Windows/SessionCoordinator+Triggers.swift` — two-stage ordinary-session lifecycle
 - `UI/Windows/MainWindowTriggerTools.swift` — built-in MCP application actions
+- `Models/AutomationPermissionPolicy.swift` — the unattended permission policy and its rule grammar
+- `Core/Agent/UnattendedRunPermissions.swift` — per-session registration and the broker's decisions
 
 The cross-process Keychain access group is a signed-Release contract. Unsigned/ad-hoc Debug builds
 can compile and render the feature but cannot prove ServiceManagement registration or credential

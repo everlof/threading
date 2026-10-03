@@ -16,6 +16,11 @@ enum AutomationToolSchema {
         "missedRunPolicy": string("skip or latest (run once on return); no backlog replay"),
         "archiveOnSuccess": .init(type: .boolean, description: "Archive only after successful completion; preserve history")
     ], required: ["missedRunPolicy", "archiveOnSuccess"])
+    /// What an unattended run may do without asking. The person approves it on the sheet.
+    static let permissions = MCPPropertySchema(type: .object, description: "What unattended runs may do without asking; shown on the approval sheet. Omit for read-only commands only. Anything not allowed is refused at once; a run never waits for a person.", properties: [
+        "mode": string("allowList or full. full: every call runs without asking (only with taskLocalEdits or assessThenFix)"),
+        "rules": .init(type: .array, description: "allowList only, at most 64: Bash(command) or Bash(command *) for one simple command; Write(/absolute/glob) or Edit(...) for files outside the project folder (* within a folder, ** across); WebFetch(domain:host); mcp__server__tool. Reads and read-only commands are always allowed; local-edit runs may change files in their project folder.", items: .init(type: .string))
+    ], required: ["mode"])
     static let configuration = MCPPropertySchema(type: .object, description: "Complete local automation replacement. Configure leaves it paused; enable the returned revision when requested by the user.", properties: [
         "name": string("Short name"), "projectID": string("Existing Threading project UUID: from projects or addProject; list_sessions prints this session's own"),
         "instructions": string("Saved task instructions; no credentials"), "agent": string("Native agent kind, e.g. codex or claude"),
@@ -23,6 +28,7 @@ enum AutomationToolSchema {
         "executionMode": string("taskReadOnly, taskLocalEdits, assessOnly, or assessThenFix"),
         "checkoutPolicy": string("projectCheckout or managedWorktree"), "maximumRuntimeMinutes": integer("1–1440"),
         "options": options, "sourceID": string("Event source UUID; omit for schedules"), "eventKind": string("Source event kind; omit for schedules"),
+        "permissions": permissions,
         "conditions": .init(type: .array, description: "Event match conditions. Empty array for schedules.", items: .init(type: .object, properties: [
             "attribute": string("Attribute name"), "comparison": string("equals, notEquals, contains, exists, greaterThan, lessThan"),
             "value": .init(type: .object, description: "Typed event attribute; omit for exists", properties: [

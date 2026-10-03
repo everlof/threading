@@ -286,6 +286,20 @@ enum PermissionBroker {
             completion(decision)
         }
 
+        // An unattended automation run has nobody to ask, so its approved revision answers every
+        // call at once — including a call that would raise a macOS prompt, which it refuses rather
+        // than briefing. Checked first: a card here would only stop the run until its curfew.
+        if let registration = UnattendedRunPermissions.registration(for: request.sessionID) {
+            auditedCompletion(UnattendedRunPermissions.decision(
+                for: request,
+                under: registration,
+                mode: permissionMode(for: request.sessionID),
+                workingDirectory: ProjectStore.shared.workingDirectory(forSessionID: request.sessionID),
+                systemGrantStatus: systemGrantStatus
+            ))
+            return
+        }
+
         // Ahead of every other rule, including the modes that promise not to interrupt. What
         // follows is not one of Threading's permission questions — it is the only warning the
         // user will get that *macOS* is about to put a dialog on their screen naming Threading
@@ -434,7 +448,7 @@ enum PermissionBroker {
     /// Read from the store rather than remembered at launch, so a mode changed mid-session
     /// applies to the next tool call. That is a deliberate difference from the *flags*, which
     /// only a relaunch can restate: this layer is Threading's own and has no such excuse.
-    private static func permissionMode(for sessionID: SessionID) -> AgentPermissionMode? {
+    static func permissionMode(for sessionID: SessionID) -> AgentPermissionMode? {
         guard let session = ProjectStore.shared.session(withID: sessionID) else { return nil }
         return AgentLauncher.permissionMode(for: session)
     }
