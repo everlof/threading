@@ -73,9 +73,12 @@ Two refusal decisions worth their words:
 
 - **Out of scope answers exactly like nonexistent** (`.targetUnknown` for both). Telling them
   apart would let a caller probe the workspace it was not granted.
-- **A busy terminal refuses rather than delivers** (`.targetBusy`). Text typed into a working
-  TUI lands inside whatever is on screen — a permission prompt, a half-typed composer line —
-  the same rule `SessionCoordinator.canAskAgentToRename` applies to the rename request.
+- **A busy terminal is never typed into.** Text typed into a working TUI lands inside whatever
+  is on screen — a permission prompt, a half-typed composer line — the same rule
+  `SessionCoordinator.canAskAgentToRename` applies to the rename request. Since agent mail
+  (below) the plane stores such a message, and one for a dormant session, in the target's
+  mailbox (`storeAsMail`, outcome `.storedInMailbox`); `.targetBusy`/`.targetNotRunning` remain
+  only for a mailbox that could not store it.
 
 ## Manager grants and durable supervision
 
@@ -141,8 +144,8 @@ in Core.
 | Native chat, mid-turn or queue occupied | `acceptAppMessage` → parked in the visible queue | `.queuedBehindTurn` |
 | Terminal, idle **and boot-verified** | `pasteText`, the Return in its own write a beat later — then **wait for the receipt**: the session's own turn-started report, within `SessionMessageDeliveryDefaults.terminalReceiptTimeout` | `.sentNow` only on the receipt |
 | Terminal, typed but never confirmed | the text may sit unsent or have been discarded by a repaint the tracker cannot see | `.typedUnconfirmed` |
-| Terminal, mid-turn or still booting | refused | `.busyTerminal` |
-| Dormant — including a kept conversation whose agent exited | refused; resuming is the user's decision | `.noLiveSurface` |
+| Terminal, mid-turn or still booting | not typed; `send_to_session` stores the message as **agent mail** in the target's mailbox | `.busyTerminal` → `.storedInMailbox` |
+| Dormant — including a kept conversation whose agent exited | not typed (resuming is the user's decision); stored as mail | `.noLiveSurface` → `.storedInMailbox` |
 
 The receipt (`AgentRuntime.awaitReportedTurnStart`) resolves only on *reported* turns, never
 the output heuristic — inferred turns are precisely what a compaction repaint fakes. It was
@@ -340,6 +343,37 @@ Scope is the plane's, not the tool's: `WorkspaceControlPlane.watch` runs the sam
 self-target, membership and archived guards a send runs, minus the ones about a message, so a
 watch reaches exactly as far as a message does.
 
+## Agent mail on the Mac
+
+Durable, addressed mail between agents ([`agent-mail.md`](../feature-drafts/agent-mail.md);
+the store is the controller's, [`autonomous-controller.md`](autonomous-controller.md#agent-mail-schema-v7)).
+The Mac opens a controller store of its own as its mailbox — `MacMailbox`,
+`…/Threading/Mail/mailbox.db`, redirected under hosted tests, reported unavailable and never
+recreated when it cannot be opened — and registers each session lazily as
+`<macHost>/session/<session uuid>` under its title.
+
+- **Tools.** `mail_send`, `mail_inbox`, `mail_ack`, `mail_directory` sit in the same
+  "Other sessions" group (`MCPMailTools.swift`; policy and words in `MailAgentCommandService`).
+  The caller is the URL token, as for every tool here. `to` is a Threading id or a full address.
+- **Scope.** A local target is admitted by `WorkspaceControlPlane.admitMail` — the send's
+  membership-before-operation check, without the surface, limit or curfew checks, because mail
+  is storing, not spending — and then stored with `ownerAdmitted: true`. Out of scope, unknown,
+  a worker address on this Mac and an unknown host all answer with the same words. Another
+  host's address is queued (`mail_outbound`) for that host, whose own grants decide.
+- **Delivery is notices** (`MacMailDelivery`): a live chat gets the controller's one-line notice
+  steered (urgent) or queued visibly; an idle, boot-verified terminal has it typed through the
+  receipt seam; a working terminal is told by its answering hooks
+  ([`session-activity.md`](session-activity.md#answering-mail-hooks)), or at its next settle when
+  its runtime lacks `answeringMailHooks`; a chat's first live edge in a run announces all open
+  mail. Never the body.
+- **Remote hosts** (`MacMailSync`): a host whose controller paths are saved on the Remote
+  automations page is peered both ways through `owner-rpc` (`host`, `mail-peers`,
+  `mail-peer-set`, no transport on either side) and synced over `mail-rpc --peer <macHost>` on
+  the owner SSH runner every 15 s while its tunnel is up and one second after a send to it —
+  four bounded exchanges per direction, a response from any other host id refused. Inbound mail
+  from another host needs a grant on the Mac's store, except a reply to mail the Mac sent; the
+  Mac has no grant-editing surface yet.
+
 ## Handing an agent a session: the dragged row
 
 The user's side of the plane. The habit it replaces was **Copy ▸ Agent Session ID** followed
@@ -404,7 +438,8 @@ Threading ids — the whole reason a hand-typed version of this went wrong.
 
 - **A queued delivery is as durable as the process holding it.** `ConversationOutbox` is
   in-memory; a target that exits before its turn settles takes the queue with it, and the
-  sender learned that from the outcome wording, not from a receipt. Durable scheduled sends
+  sender learned that from the outcome wording, not from a receipt. Agent mail is the durable
+  alternative: what the queue loses, the mailbox keeps until acknowledged. Durable scheduled sends
   are separate, in-flight work built beside this plane — its refusal semantics
   (`.noLiveSurface` over a false `.sentNow`) are what that work stands on.
 - **Provenance authenticates the header, not the body.** A sender can still *say* anything,

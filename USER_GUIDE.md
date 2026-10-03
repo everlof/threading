@@ -4470,6 +4470,29 @@ side chat whose parent is still in the sidebar, with its agent idle and this too
 Messages run on the receiving session's own usage. Switch the group off in
 **Settings ▸ Tools ▸ Other sessions** if you would rather sessions stayed strangers.
 
+#### Agent mail
+
+The same group gives every session a **mailbox**. `mail_send` leaves a durable message for a
+sibling in this project — or, through a remote host's controller, for an agent on that host —
+and it succeeds whether the recipient is idle, busy, not running or on a host that is offline
+right now. `mail_inbox` reads what is waiting, `mail_ack` marks what the agent acted on, and
+`mail_directory` lists the session's own address and who it can write to.
+
+A busy agent is never handed the text. It is told, in one line Threading writes, that mail is
+waiting and from whom — after a tool call, before its turn may end, or when it next starts — and
+reads the message itself. A chat that is working gets that line in its visible queue (or, for a
+message marked urgent, added to the turn it is running). `send_to_session` now uses the mailbox
+too: a message to a terminal that is mid-turn, or to a session that is not running, waits in its
+mailbox instead of being refused.
+
+Each session's **Info** panel has a **Mail** section listing what is waiting for it and what it
+sent lately — who, on which host, and whether it was read, handed to its host, or refused —
+never the text. Mail to and from a remote host moves while this Mac is connected to it and its
+controller is set up on the **Remote automations** page.
+
+Codex users approve Threading's hooks once more after this update: the mail notice adds entries
+to `hooks.json`, and Codex asks again for any changed hook file.
+
 ## Git Review
 
 **View ▸ Git Review** (Cmd+Shift+R) opens a Review tab in the display panel: a native diff
