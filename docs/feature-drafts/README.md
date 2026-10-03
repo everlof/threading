@@ -58,6 +58,23 @@ reshuffling it is a line move.
   the consent" rule with usage-aware accounts §B1, whose app-wide order is still to come.
 ### Next — researched and ready, waiting for a slot
 
+- [Agent mail](agent-mail.md) — durable, cross-host messages between agents: a mailbox per host,
+  store-and-forward over a forced-command SSH `mail-rpc`, and delivery to a busy agent as a
+  host-authored notice (answering `PostToolUse`/`Stop` hooks, steer for native chats) with the body
+  read through `inbox`. Owner grants (`notify`, `wake`, `ask`); spend is limited at admission and
+  message counts are only a loop fuse; a message carries information, never authority. Covers Mac sessions and controller workers alike;
+  Rindabox is one consumer.
+- [Portable trigger sources](portable-trigger-sources.md) — wake agents on facts, not on a model:
+  source → match → admit → run, with tokens spent only in the last step. Any executable (a Python
+  script, say) can be a source on a stdin/stdout JSON-lines contract with a cursor, host-enforced
+  bounds and content-hash approval; the Mac's `threading-triggerd` and the controller's supervisor
+  both run them. A recurring schedule fires a probe, not an agent, by default; agent mail arriving
+  is a built-in source.
+- [Agent usage ledger](agent-usage-ledger.md) — a per-agent token and cost receipt for every
+  controller execution, kept on the host that ran it and attributed by the controller (worker,
+  task, chain, trigger). The Mac's transcript adapters and pricing move into a portable
+  `ThreadingUsage` package so both produce identical numbers; admission reads it for chain
+  budgets, and the Mac's Usage page and Rindabox present it.
 - [Remote execution hosts](remote-execution-hosts.md) — run a session's agent on a Linux machine
   the person owns (a Pi, a VPS, a workstation) by running `threading-ptyd` there and reaching it
   over SSH, with the Mac still the authority for every surface. Slice 1 — the daemon building as a
