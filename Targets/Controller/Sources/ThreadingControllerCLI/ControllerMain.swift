@@ -81,8 +81,65 @@ struct ControllerMain {
     automation-runs AUTOMATION_UUID [CURSOR]
     owner-rpc  (one bounded JSON request on stdin; trusted SSH/OS owner only)
 
+    host
+    host-set-name NAME
+    mail-address WORKER_UUID
+    mail-peer-set HOST_UUID EXPECTED_REVISION NAME PEER_JSON_FILE   ({"transport":[argv]|null,"push":bool,"pull":bool})
+    mail-peers [CURSOR]
+    mail-grant-set RECIPIENT_ADDRESS SENDER_PATTERN EXPECTED_REVISION none|notify|wake|ask normal|interrupt [CHAIN_TOKEN_BUDGET]
+    mail-grants RECIPIENT_ADDRESS [CURSOR]
+    mail-register SESSION_ADDRESS NAME
+    mail-credential SESSION_ADDRESS   (the session's private mail-tool credential, for its launch environment)
+    mail-contact-set ADDRESS NAME|-
+    mail-contacts [CURSOR]
+    mailbox ADDRESS [CURSOR]
+    mail-history ADDRESS [CURSOR]
+    mail-sent ADDRESS
+    mail-forward OLD | mail-forward-revision OLD
+    mail-forward-set OLD NEW REVISION | mail-forward-clear OLD REVISION
+    mail-move OLD NEW   (moves OLD's unacknowledged mail to NEW, keeping message ids)
+    mail-get MESSAGE_UUID
+    mail-send FROM_ADDRESS TO_ADDRESS MESSAGE_UUID TEXT_FILE [normal|interrupt [owner-admitted]]
+    mail-ack ADDRESS MESSAGE_UUID
+    mail-context-reset SESSION_ADDRESS   (a person started a new turn: the session's next mail starts a new chain)
+    mail-notice ADDRESS post-tool-use|stop|session-start
+    mail-outbound HOST_UUID
+    mail-sync   (one exchange pass with configured peers)
+    mail-rpc --peer HOST_UUID   (a peer's forced SSH command: one bounded JSON request on stdin)
+
+    source-configure SOURCE_UUID EXPECTED_REVISION SPEC_JSON_FILE   (always paused, approval cleared)
+    source-approve SOURCE_UUID EXPECTED_REVISION SHA256
+    source-enable|source-pause|source-delete SOURCE_UUID EXPECTED_REVISION
+    sources [CURSOR]
+    source SOURCE_UUID
+    source-events SOURCE_UUID [CURSOR]
+    source-poll SOURCE_UUID   (one poll now; needs approval, not enabling)
+    trigger-configure TRIGGER_UUID EXPECTED_REVISION SPEC_JSON_FILE   (always paused)
+    trigger-enable|trigger-pause|trigger-delete TRIGGER_UUID EXPECTED_REVISION
+    triggers SOURCE_UUID [CURSOR]
+    trigger TRIGGER_UUID
+    secret-set NAME TEXT_FILE   (owner-only file a source names; never read back)
+
+    usage-collect EXECUTION_UUID   (write a stopped execution's receipt now)
+    usage-receipt EXECUTION_UUID
+    usage-receipts WORKER_UUID [CURSOR]
+    usage-summary FROM_DAY THROUGH_DAY [CURSOR]   (UTC days, YYYY-MM-DD; daily cells per worker, account, model)
+    worker-budget WORKER_UUID
+    worker-budget-set WORKER_UUID EXPECTED_REVISION TOKENS_PER_DAY|none
+    A recipe names its transcript with "usage": {"runtime":"claude|codex","home":"/abs","account":"name"}.
+    Budget tokens are uncached input + cache writes + output; cached reads are excluded.
+    A source is any executable on the probe contract (docs/feature-drafts/portable-trigger-sources.md).
+    It runs with this account's authority, unsandboxed; approval pins its content hash.
+    Addresses are HOST_UUID/worker/UUID or HOST_UUID/session/UUID. Sender patterns: an address,
+    HOST_UUID/* or *. Grants live on the recipient's host; mail carries information, never authority.
+
     threading-controller agent REQUEST_JSON_FILE
     threading-controller agent-mcp
+    threading-controller agent-notice post-tool-use|stop|session-start
+    A session (not an execution) uses THREADING_MAILBOX_ADDRESS and THREADING_MAILBOX_CREDENTIAL
+    instead, and agent-mcp then serves only the mail tools.
+    The last is a hook command: it prints a host-authored mail notice as hook JSON, or nothing,
+    and always exits 0 so a hook can never break the agent's turn.
     Scoped agent tools use the execution credential/environment supplied by launch.
     Requests: {"context":{}}, {"questions":{"after":0}}, {"checkpoint":{"text":"..."}},
     {"ask":{"id":"QUESTION_UUID","text":"...","checkpoint":"..."}},
@@ -99,6 +156,7 @@ struct ControllerMain {
         do {
             var arguments = Array(CommandLine.arguments.dropFirst())
             if arguments == ["--help"] { print(help); return }
+            if arguments.first == "agent-notice" { await ControllerAgentNotice.run(arguments); return }
             let environment = ProcessInfo.processInfo.environment
             let agentMode = arguments.first == "agent" || arguments.first == "agent-mcp"
             let path: String
@@ -128,6 +186,13 @@ struct ControllerMain {
             umask(0o077)
             let store = try ControllerStore(path: path)
             if agentMode {
+                if command == "agent-mcp", environment["THREADING_EXECUTION_ID"] == nil,
+                   let address = environment["THREADING_MAILBOX_ADDRESS"],
+                   let credential = environment["THREADING_MAILBOX_CREDENTIAL"] {
+                    // A session's own mail tools, on the host that runs it.
+                    try await ControllerMCPServer.run(store: store, caller: .mailbox(MailAddress(address), credential: credential))
+                    return
+                }
                 guard let execution = environment["THREADING_EXECUTION_ID"],
                       let credential = environment["THREADING_EXECUTION_CREDENTIAL"] else { throw ControllerError.forbidden }
                 if command == "agent-mcp" {
@@ -179,6 +244,155 @@ struct ControllerMain {
             let after = try cursor(1); try output(await store.automationRuns(AutomationID(args[0]), after: after))
         case "owner-rpc":
             try count(0); try await ControllerOwnerRPC.run(store: store, database: database)
+        case "host":
+            try count(0); try output(await store.host())
+        case "host-set-name":
+            try count(1); try output(await store.setHostName(args[0]))
+        case "mail-address":
+            try count(1); try output(await store.mailAddress(worker: WorkerID(args[0])))
+        case "mail-peer-set":
+            try count(4)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            let settings = try JSONDecoder().decode(MailPeerSettings.self, from: Data(file(args[3]).utf8))
+            try output(await store.setMailPeer(host: HostID(args[0]), expectedRevision: revision, name: args[2],
+                                               transport: settings.transport, push: settings.push, pull: settings.pull))
+        case "mail-peers":
+            let after = try cursor(0); try output(await store.mailPeers(after: after))
+        case "mail-grant-set":
+            guard args.count == 5 || args.count == 6 else { throw ControllerError.invalidInput("arguments") }
+            guard let revision = Int(args[2]), let priority = MailPriority(rawValue: args[4]) else { throw ControllerError.invalidInput("mail_grant") }
+            let budget: Int64? = args.count == 6 ? Int64(args[5]) : nil
+            if args.count == 6, budget == nil { throw ControllerError.invalidInput("chain_budget") }
+            let mode: MailMode?
+            if args[3] == "none" { mode = nil } else {
+                guard let value = MailMode(rawValue: args[3]) else { throw ControllerError.invalidInput("mail_mode") }
+                mode = value
+            }
+            try output(await store.setMailGrant(recipient: MailAddress(args[0]), sender: args[1], expectedRevision: revision,
+                                                mode: mode, allowsInterrupt: priority == .interrupt, chainTokenBudget: budget))
+        case "mail-grants":
+            let after = try cursor(1); try output(await store.mailGrants(recipient: MailAddress(args[0]), after: after))
+        case "mail-register":
+            try count(2); try output(await store.registerMailbox(MailAddress(args[0]), name: args[1]))
+        case "mail-credential":
+            try count(1); try output(await store.mailboxCredential(MailAddress(args[0])))
+        case "mail-contact-set":
+            try count(2); try output(await store.setMailContact(MailAddress(args[0]), name: args[1] == "-" ? nil : args[1]))
+        case "mail-contacts":
+            let after = try cursor(0); try output(await store.mailContacts(after: after))
+        case "mailbox":
+            let after = try cursor(1); try output(await store.inbox(MailAddress(args[0]), after: after))
+        case "mail-forward":
+            try count(1); try output(await store.mailForward(MailAddress(args[0])))
+        case "mail-forward-set":
+            try count(3)
+            guard let revision = Int(args[2]) else { throw ControllerError.invalidInput("revision") }
+            try output(await store.setMailForward(from: MailAddress(args[0]), to: MailAddress(args[1]), expectedRevision: revision))
+        case "mail-forward-clear":
+            try count(2)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            try await store.clearMailForward(MailAddress(args[0]), expectedRevision: revision)
+            try output(await store.mailForwardRevision(MailAddress(args[0])))
+        case "mail-forward-revision":
+            try count(1); try output(await store.mailForwardRevision(MailAddress(args[0])))
+        case "mail-move":
+            try count(2); try output(await store.moveMail(from: MailAddress(args[0]), to: MailAddress(args[1])))
+        case "mail-sent":
+            try count(1); try output(await store.recentSentMail(MailAddress(args[0])))
+        case "mail-history":
+            let after = try cursor(1); try output(await store.mailHistory(MailAddress(args[0]), after: after))
+        case "mail-get":
+            try count(1)
+            guard let id = UUID(uuidString: args[0]) else { throw ControllerError.invalidInput("message_id") }
+            try output(await store.mail(id))
+        case "mail-send":
+            guard (4...6).contains(args.count), let id = UUID(uuidString: args[2]) else { throw ControllerError.invalidInput("arguments") }
+            guard let priority = MailPriority(rawValue: args.count >= 5 ? args[4] : "normal") else { throw ControllerError.invalidInput("priority") }
+            // `owner-admitted`: the owner decided admission itself (the Mac's same-project rule)
+            // for a recipient on this host; it never reaches another host's grants.
+            guard args.count < 6 || args[5] == MailOwnerRPCWords.ownerAdmitted else { throw ControllerError.invalidInput("arguments") }
+            try output(await store.sendMail(from: MailAddress(args[0]), to: MailAddress(args[1]), id: id, text: file(args[3]),
+                                            replyTo: nil, priority: priority, ownerAdmitted: args.count == 6))
+        case "mail-context-reset":
+            try count(1); try await store.resetMailContext(MailAddress(args[0])); try output(["reset": args[0]])
+        case "mail-ack":
+            try count(2)
+            guard let id = UUID(uuidString: args[1]) else { throw ControllerError.invalidInput("message_id") }
+            try output(await store.acknowledgeMail(mailbox: MailAddress(args[0]), ids: [id]))
+        case "mail-notice":
+            try count(2)
+            guard let event = MailNoticeEvent(rawValue: args[1]) else { throw ControllerError.invalidInput("event") }
+            try output(await store.mailNotice(MailAddress(args[0]), event: event))
+        case "mail-outbound":
+            try count(1)
+            try output(await store.outboundBatch(for: HostID(args[0])).envelopes)
+        case "mail-sync":
+            try count(0)
+            try output(await ControllerMailSync.sync(store: store).0)
+        case "source-configure", "trigger-configure":
+            try count(3)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            if command == "source-configure" {
+                let spec = try JSONDecoder().decode(ControllerSourceSpec.self, from: Data(file(args[2]).utf8))
+                try output(await store.configureSource(SourceID(args[0]), expectedRevision: revision, spec: spec))
+            } else {
+                let spec = try JSONDecoder().decode(ControllerTriggerSpec.self, from: Data(file(args[2]).utf8))
+                try output(await store.configureTrigger(TriggerRuleID(args[0]), expectedRevision: revision, spec: spec))
+            }
+        case "source-approve":
+            try count(3)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            try output(await store.approveSource(SourceID(args[0]), expectedRevision: revision, hash: args[2]))
+        case "source-enable", "source-pause", "source-delete":
+            try count(2)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            if command == "source-delete" { try output(await store.deleteSource(SourceID(args[0]), expectedRevision: revision)) }
+            else { try output(await store.setSourceEnabled(SourceID(args[0]), expectedRevision: revision, enabled: command == "source-enable")) }
+        case "trigger-enable", "trigger-pause", "trigger-delete":
+            try count(2)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            if command == "trigger-delete" { try output(await store.deleteTrigger(TriggerRuleID(args[0]), expectedRevision: revision)) }
+            else { try output(await store.setTriggerEnabled(TriggerRuleID(args[0]), expectedRevision: revision, enabled: command == "trigger-enable")) }
+        case "sources":
+            let after = try cursor(0); try output(await store.sources(after: after))
+        case "source":
+            try count(1); try output(await store.source(SourceID(args[0])))
+        case "source-events":
+            let after = try cursor(1); try output(await store.sourceEvents(SourceID(args[0]), after: after))
+        case "source-poll":
+            try count(1); try output(await ControllerSourcePoller.poll(store: store, id: SourceID(args[0]), database: database, manual: true))
+        case "triggers":
+            let after = try cursor(1); try output(await store.triggers(source: SourceID(args[0]), after: after))
+        case "trigger":
+            try count(1); try output(await store.trigger(TriggerRuleID(args[0])))
+        case "secret-set":
+            try count(2)
+            try ControllerSourcePoller.storeSecret(args[0], value: file(args[1], maximum: 16_384), database: database)
+            try output(["stored": args[0]])
+        case "usage-collect":
+            try count(1); try output(await ControllerUsageCollector.collect(store: store, executionID: ExecutionID(args[0])))
+        case "usage-receipt":
+            try count(1); try output(await store.usageReceipt(ExecutionID(args[0])))
+        case "usage-receipts":
+            let after = try cursor(1); try output(await store.usageReceipts(worker: WorkerID(args[0]), after: after))
+        case "usage-summary":
+            let after = try cursor(2); try output(await store.usageSummary(from: args[0], through: args[1], after: after))
+        case "worker-budget":
+            try count(1); try output(await store.workerBudget(WorkerID(args[0])))
+        case "worker-budget-set":
+            try count(3)
+            guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
+            let tokens: Int64? = args[2] == "none" ? nil : Int64(args[2])
+            if args[2] != "none", tokens == nil { throw ControllerError.invalidInput("budget") }
+            try output(await store.setWorkerBudget(WorkerID(args[0]), expectedRevision: revision, tokensPerDay: tokens))
+        case "mail-rpc":
+            try count(2)
+            guard args[0] == "--peer" else { throw ControllerError.invalidInput("arguments") }
+            let peer = try HostID(args[1])
+            guard let input = try FileHandle.standardInput.read(upToCount: MailTransportLimits.requestBytes + 1),
+                  input.count <= MailTransportLimits.requestBytes else { throw ControllerError.invalidInput("mail_rpc_size") }
+            let request = try JSONDecoder().decode(MailRPCRequest.self, from: input)
+            try output(await store.handleMailRPC(request, peer: peer))
         case "knowledge-grant":
             try count(4)
             guard let revision = Int(args[2]), let access = KnowledgeAccess(rawValue: args[3]) else { throw ControllerError.invalidInput("knowledge_grant") }
@@ -346,6 +560,7 @@ struct ControllerMain {
         return text
     }
     static func csv(_ value: String) -> [String] { value.components(separatedBy: ",") }
+    struct MailPeerSettings: Decodable { let transport: [String]?; let push: Bool; let pull: Bool }
     static func output<T: Encodable>(_ value: T) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]

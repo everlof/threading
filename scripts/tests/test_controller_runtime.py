@@ -45,7 +45,7 @@ if sys.argv[1] == "mcp":
     assert rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
                               "clientInfo": {"name": "fixture", "version": "1"}})["result"]["protocolVersion"] == "2025-11-25"
     rpc("notifications/initialized", identifier=None)
-    assert {tool["name"] for tool in rpc("tools/list")["result"]["tools"]} == {"work_context", "work_questions", "work_messages", "work_message_consumed", "work_history", "work_checkpoint", "work_ask", "work_finish", "memory_get", "memory_put", "knowledge_get", "knowledge_put"}
+    assert {tool["name"] for tool in rpc("tools/list")["result"]["tools"]} == {"work_context", "work_questions", "work_messages", "work_message_consumed", "work_history", "work_checkpoint", "work_ask", "work_finish", "memory_get", "memory_put", "knowledge_get", "knowledge_put", "mail_send", "mail_ask", "mail_inbox", "mail_ack", "mail_directory"}
     assert rpc("tools/call", {"name": "knowledge_get", "arguments": {"spaceID": str(uuid.uuid4()), "key": "private"}})["result"]["isError"]
     assert rpc("tools/call", {"name": "work_context", "arguments": {"workerID": str(uuid.uuid4())}})["result"]["isError"]
     assert not rpc("tools/call", {"name": "work_context", "arguments": {}})["result"]["isError"]

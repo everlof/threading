@@ -687,6 +687,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             SessionCurfewCenter.shared.start()
             AttentionAlertCenter.shared.start()
             AgentWorkloadMonitor.shared.start()
+            // Agent mail: notices at the boundaries a surface can take them, and the exchange
+            // with remote hosts' controllers while they are connected (`agent-mail.md`).
+            MacMailDelivery.shared.start()
+            MailboxHandover.shared.start()
+            Task { await MacMailSync.shared.start(endpoints: { MacMailSync.liveEndpoints() }) }
             // A theme's answer to turns coming back and sessions waiting; it starts the mood
             // monitor only while the theme in force states moments.
             ThemeMomentPresenter.shared.install()

@@ -38,8 +38,17 @@ enum AutomationToolSchema {
         "schedule": schedule, "missedPolicy": string("skip or latest"),
         "archiveOnSuccess": .init(type: .boolean, description: "Archive after work completion, confirmed delivery and stopped process")
     ], required: ["name", "workerID", "instruction", "missedPolicy", "archiveOnSuccess"])
+    static let sourceSpec = MCPPropertySchema(type: .object, description: "draftSource: a probe source on this Mac. The probe is an executable on the trigger-probe contract (stdin {cursor, limit}; stdout JSON lines of events then one cursor). Drafting leaves it paused and unapproved; only the user approves it.", properties: [
+        "name": string("Short name"), "executable": string("Absolute path of the executable, e.g. /usr/bin/python3"),
+        "script": string("Optional absolute path of the script the executable interprets; must also be the first argument"),
+        "arguments": .init(type: .array, description: "argv after the executable, passed exactly; no shell", items: .init(type: .string)),
+        "environment": .init(type: .object, description: "Environment variables, exactly; nothing is inherited. Never put credentials here."),
+        "secrets": .init(type: .object, description: "Environment variable → secret name. The user stores the value in Keychain on the Sources page; it is never visible to agents."),
+        "intervalSeconds": integer("Poll interval, 60–86400. Give this or schedule, not both"),
+        "schedule": schedule, "timeoutSeconds": integer("1–300; default 30"), "limit": integer("Events per poll, 1–500; default 50")
+    ], required: ["name", "executable"])
     static let input = MCPInputSchema(properties: [
-        "operation": string("hosts, workers (remote), projects, addProject, list, get, configure, enable, pause, delete, run, or runs"),
+        "operation": string("hosts, workers (remote), projects, addProject, list, get, configure, enable, pause, delete, run, runs, or draftSource (this Mac's probe sources)"),
         "id": string("Automation UUID. Supply a new UUID for remote configure."),
         "expectedRevision": string("Current local revision UUID or remote integer revision as a string. Remote creation uses 0."),
         "requestKey": string("Stable unique request key for run; reuse on retry"),
@@ -50,6 +59,7 @@ enum AutomationToolSchema {
             "executable": string("Optional; must match the host's saved controller executable"),
             "database": string("Optional; must match the host's saved controller database")
         ], required: ["hostID"]),
-        "remoteSpec": remoteSpec
+        "remoteSpec": remoteSpec,
+        "sourceSpec": sourceSpec
     ], required: ["operation"])
 }

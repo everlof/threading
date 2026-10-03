@@ -33,6 +33,36 @@ private struct TriggerSourceListPayload: Encodable {
         let name: String
         let enabled: Bool
         let health: String
+        /// Probe sources only. Secret *names* and environment *keys*; values never leave
+        /// Keychain or the configuration, and no tool returns them.
+        let probe: Probe?
+    }
+    struct Probe: Encodable {
+        let revision: Int
+        let executable: String
+        let script: String?
+        let arguments: [String]
+        let environmentKeys: [String]
+        let secretNames: [String]
+        let intervalSeconds: Int?
+        let schedule: String?
+        let sha256: String
+        let approved: Bool
+        let eventKind: String
+
+        init(_ settings: TriggerProbeSourceSettings) {
+            revision = settings.revision
+            executable = settings.spec.executable
+            script = settings.spec.script
+            arguments = settings.spec.arguments
+            environmentKeys = settings.spec.environment.keys.sorted()
+            secretNames = settings.spec.secrets.values.sorted()
+            intervalSeconds = settings.spec.intervalSeconds
+            schedule = settings.spec.schedule?.summary
+            sha256 = settings.hash
+            approved = settings.isApproved
+            eventKind = TriggerProbeDefaults.eventKind
+        }
     }
     let sources: [Item]
     let backgroundListener: String
@@ -78,7 +108,7 @@ enum TriggerToolActions {
                 }
                 let daemonStatuses = (try? await daemonStatusTask.value) ?? [:]
                 let payload = TriggerSourceListPayload(
-                    sources: sources.map { source in
+                    sources: sources.filter { !$0.isDeleted }.map { source in
                         .init(
                             id: source.id.uuidString,
                             type: source.sourceType,
@@ -86,7 +116,8 @@ enum TriggerToolActions {
                             enabled: source.enabled,
                             health: (daemonStatuses[source.id].flatMap { status in
                                 status.lastCheckedAt >= source.updatedAt ? status.health : nil
-                            } ?? source.health).rawValue
+                            } ?? source.health).rawValue,
+                            probe: source.probe.map(TriggerSourceListPayload.Probe.init)
                         )
                     },
                     backgroundListener: await registrationTask.value.rawValue

@@ -61,6 +61,11 @@ enum MCPRemoteSessionToolScope {
         case .listSessions, .sendToSession, .watchSession:
             return true
 
+        // A mail tool carries its whole input in the call, and the mailbox it reads is this
+        // Mac's record of the session. See `docs/feature-drafts/agent-mail.md`, "Mailbox location".
+        case .mailSend, .mailInbox, .mailAck, .mailDirectory:
+            return true
+
         // Supervision starts, moves and costs sessions by reading and launching on this Mac.
         case .listAccounts, .sessionCost, .resumeSession, .spawnSession, .moveSessionToAccount,
              .finishWorkspace, .adoptSession, .releaseSession, .subscribeToChildren, .respondToPermission:
@@ -101,6 +106,15 @@ enum MCPRemoteSessionToolScope {
     static func reaches(toolNamed name: String) -> Bool {
         guard let tool = MCPBuiltInTool(rawValue: name) else { return false }
         return reaches(tool)
+    }
+
+    /// The mail family, which a host-local mailbox answers on the host instead.
+    static func isMailTool(named name: String) -> Bool {
+        guard let tool = MCPBuiltInTool(rawValue: name) else { return false }
+        switch tool {
+        case .mailSend, .mailInbox, .mailAck, .mailDirectory: return true
+        default: return false
+        }
     }
 
     @MainActor

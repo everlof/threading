@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import ThreadingUsage
 
 /// One process's lifecycle cursor. Initial hydration is O(transcript bytes), in 64 KiB worker
 /// passes; subsequent reads are O(appended bytes). Only one pass and one refresh request may be

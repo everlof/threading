@@ -444,6 +444,21 @@ enum HookLifecycleRelay {
             return
         }
 
+        if report.event == .turnStarted {
+            MailStopContinuationLedger.recordTurnStarted(report.sessionID)
+            MailHumanTurn.turnStarted(report.sessionID, prompt: report.prompt)
+        }
+
+        // A mail notice that blocked this `Stop` continued the turn; the finish it reports is
+        // held until the agent proves it went on (see `MailStopContinuationLedger`).
+        if report.event == .turnFinished,
+           MailStopContinuationLedger.absorbsFinish(report, relay: { held in observe(held) }) {
+            ThreadingLogger.agent.debug(
+                "Lifecycle finish held for a mail-continued turn \(report.sessionID.uuidString, privacy: .public)"
+            )
+            return
+        }
+
         observe(report)
     }
 }

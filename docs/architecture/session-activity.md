@@ -1437,6 +1437,50 @@ One bug worth keeping: every command reads stdin **before** its guard
 into a pipe nobody drains, and it is the *unrouted* runs — the user's own terminal sessions —
 that would pay for it. Found by a probe whose hook posted an empty body, and pinned by a test.
 
+## Answering mail hooks
+
+Every lifecycle hook above is silent, and stays so — their commands and the frozen-text test in
+`MCPSessionRegistryTests` are unchanged. Agent mail adds the one deliberate exception
+([`agent-mail.md`](../feature-drafts/agent-mail.md), "Delivery, per surface"): **separate**
+`PostToolUse`, `Stop` and `SessionStart` entries (`MailNoticeHook`), no tool matcher, that POST
+to `/mail-notice/<token>?event=post-tool-use|stop|session-start` and print what comes back.
+`MCPServer.routeMailNotice` answers with the controller's notice (`mailNotice`) as hook JSON —
+`hookSpecificOutput.additionalContext`, or `decision: "block"` with the notice as `reason` at a
+stop — or an empty 200. The notice names counts, senders and hosts, never message text; each
+message is announced once per event kind and blocks a stop at most once, so `stop_hook_active`
+needs no handling of its own. The command keeps `2>/dev/null || true` (Codex: `; true`) and a
+2-second curl timeout, so an absent app prints nothing and exits 0. The "Other sessions" switch
+turns the endpoint silent.
+
+- **Claude** gets the entries in its per-session `--settings` only for a terminal launch with
+  lifecycle reporting on (`mailNotices`, gated by `MailNoticeHook.isWanted`); native sessions use
+  `MacMailDelivery` instead. A remote-host terminal whose mailbox is on its host instead runs
+  `<controller> agent-notice <event>` there (`MailNoticeHook.hostCommand`) — the same JSON, with
+  no dependence on this Mac. After answering, that hook reports through the tunnel what it
+  answered (`?observed=block|seen`), because this Mac's ledger below must know about a Stop it
+  blocked; the Mac records it and answers silently. A Stop that *blocked* reports before the hook
+  returns, so the agent cannot start its next turn before the Mac has heard of the block (a late
+  report would be taken for the next turn's); everything else, every unblocked Stop included,
+  reports in the background, so an unreachable Mac costs a turn end nothing. One whose host has no
+  controller keeps the curl entries, answered through the reverse tunnel.
+- **Codex** gets them in the account's shared `hooks.json` through `CodexHookInstaller`,
+  token-guarded like every entry there. Adding them changed the file's text once, which costs the
+  user **one renewal of their Codex hook trust** — the measured cost recorded under "Codex hooks,
+  measured" in the draft; the rewrite's `EventLog` line says so.
+- Which runtimes get them is `AgentCapabilities.answeringMailHooks` (Claude, Codex). Others are
+  told at turn boundaries by `MacMailDelivery`.
+
+**A blocked `Stop` continues the turn, and the silent `Stop` hook does not know.** Both CLIs fire
+`Stop` again after a block (Codex: same `turn_id`). Relayed as is, the first lifecycle finish
+would show a working agent idle and let the control plane type into it.
+`MailStopContinuationLedger` handles both orders of the race: block first, the next finish is
+held until any later mail-hook call proves the turn went on (then dropped) or 20 s pass without
+one (then relayed — a block the agent never saw must not leave a spinner); finish first, a block
+within 10 s reopens the turn with a synthesized start. A reported turn start forgets the last
+relayed finish, so a block in a short follow-up turn (the notice typed at the idle edge starts
+one) holds that turn's own finish instead of being mistaken for the previous turn's.
+`MailNoticeHookTests` holds the sequences.
+
 ## After a reattach
 
 A session `threading-ptyd` kept running while Threading was closed comes back to a **new** tracker

@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Security
 import ServiceManagement
+import ThreadingController
 
 struct TriggerDaemonSourceConfiguration: Codable, Equatable, Sendable {
     let id: TriggerSourceInstallationID
@@ -16,6 +17,8 @@ struct TriggerDaemonConfiguration: Codable, Equatable, Sendable {
     let generation: UUID
     let sources: [TriggerDaemonSourceConfiguration]
     var nextScheduleUnixTime: Double? = nil
+    /// Approved probe sources, enabled or paused. An unapproved probe is never written here.
+    var probes: [TriggerProbeDaemonSource]? = nil
 }
 
 enum TriggerDaemonLocations {
@@ -31,6 +34,11 @@ enum TriggerDaemonLocations {
 
     static var inbox: URL {
         directory.appendingPathComponent("Inbox", isDirectory: true)
+    }
+
+    /// Manual-poll requests the daemon consumes on its next tick.
+    static var pollRequests: URL {
+        directory.appendingPathComponent("Poll Requests", isDirectory: true)
     }
 }
 
@@ -48,8 +56,11 @@ enum TriggerDaemonConfigurationStore {
         }
     }
 
-    @discardableResult
-    static func publish(_ installations: [TriggerSourceInstallation], nextScheduleAt: Date? = nil) throws -> Bool {
+    /// The credential-free projection the daemon reads. Pure, so the projection rules — above
+    /// all that only an approved probe reaches the daemon — are testable without the file.
+    static func configuration(
+        for installations: [TriggerSourceInstallation], nextScheduleAt: Date? = nil
+    ) throws -> TriggerDaemonConfiguration {
         let sources = try installations.compactMap { source -> TriggerDaemonSourceConfiguration? in
             guard source.enabled, supportedSourceTypes.contains(source.sourceType) else { return nil }
             guard case .string(let rawURL)? = source.configuration["base_url"],
@@ -67,12 +78,26 @@ enum TriggerDaemonConfigurationStore {
                 enabled: true
             )
         }
-        let payload = TriggerDaemonConfiguration(
+        let probes = installations.compactMap { source -> TriggerProbeDaemonSource? in
+            guard source.sourceType == TriggerProbeDefaults.sourceType, let probe = source.probe,
+                  probe.deletedAt == nil, let approvedHash = probe.approvedHash, probe.isApproved else { return nil }
+            return TriggerProbeDaemonSource(id: source.id.rawValue, revision: probe.revision,
+                                            spec: TriggerProbeRunSpec(probe.spec),
+                                            approvedHash: approvedHash, enabled: source.enabled)
+        }
+        // Version 1 still: `probes` is additive and an older reader ignores it.
+        return TriggerDaemonConfiguration(
             schemaVersion: 1,
             generation: UUID(),
             sources: sources,
-            nextScheduleUnixTime: nextScheduleAt?.timeIntervalSince1970
+            nextScheduleUnixTime: nextScheduleAt?.timeIntervalSince1970,
+            probes: probes.isEmpty ? nil : probes
         )
+    }
+
+    @discardableResult
+    static func publish(_ installations: [TriggerSourceInstallation], nextScheduleAt: Date? = nil) throws -> Bool {
+        let payload = try configuration(for: installations, nextScheduleAt: nextScheduleAt)
         try FileManager.default.createDirectory(
             at: TriggerDaemonLocations.directory,
             withIntermediateDirectories: true,
@@ -86,7 +111,73 @@ enum TriggerDaemonConfigurationStore {
             [.posixPermissions: 0o600],
             ofItemAtPath: TriggerDaemonLocations.configuration.path
         )
-        return !sources.isEmpty || nextScheduleAt != nil
+        return !payload.sources.isEmpty || nextScheduleAt != nil
+            || payload.probes?.contains(where: \.enabled) == true
+    }
+
+    /// Asks the daemon for one poll of an approved probe now. The daemon consumes the request on
+    /// its next tick (within seconds) whether or not the probe is still approved by then.
+    static func requestPoll(_ id: TriggerSourceInstallationID) throws {
+        let manager = FileManager.default
+        try manager.createDirectory(at: TriggerDaemonLocations.directory, withIntermediateDirectories: true,
+                                    attributes: [.posixPermissions: 0o700])
+        try manager.createDirectory(at: TriggerDaemonLocations.pollRequests, withIntermediateDirectories: true,
+                                    attributes: [.posixPermissions: 0o700])
+        let file = TriggerDaemonLocations.pollRequests.appendingPathComponent(id.uuidString, isDirectory: false)
+        try Data().write(to: file, options: .atomic)
+        try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
+}
+
+extension TriggerProbeRunSpec {
+    init(_ spec: ControllerSourceSpec) {
+        self.init(executable: spec.executable, script: spec.script, arguments: spec.arguments,
+                  environment: spec.environment, secrets: spec.secrets, intervalSeconds: spec.intervalSeconds,
+                  schedule: spec.schedule, timeoutSeconds: spec.timeoutSeconds, limit: spec.limit)
+    }
+}
+
+/// Probe secrets in Keychain, one generic password per secret name. Values are written here and
+/// read only by the daemon at poll time; nothing reads one back into the app, a prompt or MCP.
+enum TriggerProbeSecretStore {
+    private static var accessGroup: String? {
+        #if DEBUG
+        nil
+        #else
+        "SMQ3E8Y57T.codes.threading.triggers"
+        #endif
+    }
+
+    private static func query(_ name: String) -> [String: Any] {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: TriggerProbeDefaults.secretService,
+            kSecAttrAccount as String: name,
+        ]
+        if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
+        return query
+    }
+
+    static func save(_ value: String, name: String) throws {
+        guard SecretName.isValid(name), !value.isEmpty else {
+            throw TriggerStore.StoreError.invalidRecord("secret name or value")
+        }
+        let data = Data(value.utf8)
+        let updated = SecItemUpdate(query(name) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if updated == errSecSuccess { return }
+        guard updated == errSecItemNotFound else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(updated)) }
+        var insertion = query(name)
+        insertion[kSecValueData as String] = data
+        let added = SecItemAdd(insertion as CFDictionary, nil)
+        guard added == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(added)) }
+    }
+
+    /// Whether a value is stored, without reading it.
+    static func exists(_ name: String) -> Bool {
+        var lookup = query(name)
+        lookup[kSecMatchLimit as String] = kSecMatchLimitOne
+        lookup[kSecReturnAttributes as String] = true
+        return SecItemCopyMatching(lookup as CFDictionary, nil) == errSecSuccess
     }
 }
 

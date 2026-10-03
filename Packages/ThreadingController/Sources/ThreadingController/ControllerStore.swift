@@ -83,12 +83,23 @@ public actor ControllerStore {
     /// No synchronous wait and no process required to keep the question alive.
     public func ask(executionID: ExecutionID, id: QuestionID, recipients: [String],
                     text: String, checkpoint: String) throws -> WorkQuestion {
+        try ask(executionID: executionID, id: id, recipients: recipients, text: text, checkpoint: checkpoint, allowAgentRecipient: false)
+    }
+    /// `agent:` recipients exist only through `askMail`, which sends the question as mail in the
+    /// same transaction; the reply to that mail is the only way to answer one.
+    func ask(executionID: ExecutionID, id: QuestionID, recipients: [String],
+             text: String, checkpoint: String, allowAgentRecipient: Bool) throws -> WorkQuestion {
         try Limits.text(text, field: "question")
         try Limits.text(checkpoint, field: "checkpoint")
         guard (1...32).contains(recipients.count), Set(recipients).count == recipients.count else {
             throw ControllerError.invalidInput("recipients")
         }
-        for recipient in recipients { try Limits.recipient(recipient) }
+        for recipient in recipients {
+            if allowAgentRecipient, recipient.hasPrefix("agent:") {
+                guard recipients.count == 1 else { throw ControllerError.invalidInput("recipients") }
+                _ = try MailAddress(String(recipient.dropFirst("agent:".count)))
+            } else { try Limits.recipient(recipient) }
+        }
         return try db.transaction {
             // A retry after losing the response returns the original committed question.
             if let prior: WorkQuestion = try optional("question", id.description) {
@@ -115,17 +126,28 @@ public actor ControllerStore {
     public func answer(questionID: QuestionID, principal: AnswerPrincipal, text: String) throws -> WorkQuestion {
         try Limits.text(text, field: "answer")
         return try db.transaction {
-            var question: WorkQuestion = try required("question", questionID.description)
+            let question: WorkQuestion = try required("question", questionID.description)
             guard question.recipients.contains(principal.person) ||
                     !principal.groups.isDisjoint(with: question.recipients) else { throw ControllerError.forbidden }
+            return try resolveQuestion(questionID, answeredBy: principal.person, text: text, authorized: true)
+        }
+    }
+    /// `authorized` means the caller already established the answerer. A mail reply answers only
+    /// the question addressed to its sender; an undeliverable question is answered by the host.
+    func resolveQuestion(_ questionID: QuestionID, answeredBy: String, text: String, authorized: Bool) throws -> WorkQuestion {
+        try db.transaction {
+            var question: WorkQuestion = try required("question", questionID.description)
+            if !authorized, !answeredBy.hasPrefix("host:") {
+                guard question.recipients == [answeredBy] else { throw ControllerError.forbidden }
+            }
             if question.answer != nil {
-                guard question.answer == text, question.answeredBy == principal.person else { throw ControllerError.conflict }
+                guard question.answer == text, question.answeredBy == answeredBy else { throw ControllerError.conflict }
                 return question
             }
             var work: WorkItem = try required("work", question.workID.description)
             guard work.state == .waiting else { throw ControllerError.conflict }
             question.answer = text
-            question.answeredBy = principal.person
+            question.answeredBy = answeredBy
             work.state = .queued
             try update("question", questionID.description, state: "answered", value: question)
             try saveWork(work)
@@ -154,6 +176,7 @@ public actor ControllerStore {
             guard try db.rows("SELECT id FROM record WHERE kind='message' AND parent=? AND state='pending' LIMIT 1", [.text(work.id.description)]).isEmpty else {
                 throw ControllerError.conflict // Consume messages received before completion, or ask a question.
             }
+            try requireNoUnreadInterrupt(try mailAddress(worker: work.workerID))
             let delivery = WorkDelivery(id: DeliveryID(), workID: work.id, destination: destination,
                                         payload: payload, state: .pending, attemptID: nil, receipt: nil)
             work.state = .completed

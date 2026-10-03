@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingUsage
 
 /// Per-source cache for usage adapters.
 ///

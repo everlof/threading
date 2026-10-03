@@ -169,6 +169,10 @@ extension AgentCommand {
     builtIn(.sendToSession, value)
   }
   static func watchSession(_ value: WatchSessionArguments) -> Self { builtIn(.watchSession, value) }
+  static func mailSend(_ value: MailSendArguments) -> Self { builtIn(.mailSend, value) }
+  static func mailInbox(_ value: MailInboxArguments) -> Self { builtIn(.mailInbox, value) }
+  static func mailAck(_ value: MailAckArguments) -> Self { builtIn(.mailAck, value) }
+  static func mailDirectory(_ value: EmptyToolArguments = .init()) -> Self { builtIn(.mailDirectory, value) }
   static func listAccounts(_ value: ListAccountsArguments) -> Self { builtIn(.listAccounts, value) }
   static func sessionCost(_ value: SessionCostArguments) -> Self { builtIn(.sessionCost, value) }
   static func resumeSession(_ value: ResumeSessionArguments) -> Self { builtIn(.resumeSession, value) }

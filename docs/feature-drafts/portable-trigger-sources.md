@@ -1,6 +1,14 @@
 # Portable trigger sources: wake on facts, not on a model
 
-> Status: **draft** (2026-10-03). Nothing here is implemented. Extends
+> Status: **in progress** (2026-10-03). The controller half — the probe contract and runner,
+> approval by content hash, secrets, typed triggers, interval and calendar polling, and mail as the
+> built-in source — is implemented and recorded in
+> [`autonomous-controller.md`](../architecture/autonomous-controller.md#trigger-sources-schema-v8).
+>
+> The Mac half (rollout step 2) is implemented too: `threading-triggerd` runs approved probe
+> sources on the same contract, with hash approval in a host sheet, Keychain secrets, run-now and
+> health on the Sources page — see [`triggers.md`](../architecture/triggers.md#probe-sources).
+ Sonda now runs as a built-in source on that contract, sharing the probe's delivery stage. Extends
 > [`triggers.md`](../architecture/triggers.md) (the Mac's `listen → match → start` feature) and
 > [`autonomous-controller.md`](../architecture/autonomous-controller.md) (whose workers already
 > accept an `event` admission source that nothing feeds). Companion to

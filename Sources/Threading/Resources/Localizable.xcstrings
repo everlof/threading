@@ -1384,6 +1384,17 @@
         }
       }
     },
+    "%@ · %@ tokens · %lld executions in the last %lld days" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · %@ token · %lld körningar de senaste %lld dagarna"
+          }
+        }
+      }
+    },
     "%@ · %@ · %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1512,6 +1523,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ · om %@"
+          }
+        }
+      }
+    },
+    "%@ · not read yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · inte läst än"
           }
         }
       }
@@ -2046,6 +2068,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld arkiverade konversationer"
+          }
+        }
+      }
+    },
+    "%lld are partial, failed or unavailable: their spend is missing or short." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld är ofullständiga, misslyckade eller otillgängliga: deras förbrukning saknas eller är för låg."
           }
         }
       }
@@ -2706,6 +2739,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld projekt"
+          }
+        }
+      }
+    },
+    "%lld receipts in range from the first %lld read; more are on the host." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld kvitton i intervallet av de första %lld som lästs; fler finns på värden."
+          }
+        }
+      }
+    },
+    "%lld receipts in range, all read." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld kvitton i intervallet, alla lästa."
           }
         }
       }
@@ -3981,6 +4036,28 @@
         }
       }
     },
+    "<host>/session/<id> or <host>/worker/<id>" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "<värd>/session/<id> eller <värd>/worker/<id>"
+          }
+        }
+      }
+    },
+    "<host>/session/<id>, <host>/worker/<id> or <host>/*" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "<värd>/session/<id>, <värd>/worker/<id> eller <värd>/*"
+          }
+        }
+      }
+    },
     "A %@ draft is already being written." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4190,6 +4267,17 @@
         }
       }
     },
+    "A daily budget is a whole number of tokens above zero, or empty for no limit." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En daglig budget är ett heltal token över noll, eller tom för ingen gräns."
+          }
+        }
+      }
+    },
     "A deliberately custom native subtree may use AppKit chrome inside the narrow host boundary; its colours come from the public semantic plugin palette." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4285,6 +4373,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En hash skickas till Gravatar och sedan adressen till GitHub."
+          }
+        }
+      }
+    },
+    "A ledger of measured columns in tabular figures under headings: a remote worker's spend by day. A partial receipt is drawn in the warning role and says why when spoken. Past its visible rows it scrolls and hands an ended flick back to the page." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En liggare med mätta kolumner i tabellsiffror under rubriker: en fjärrarbetares förbrukning per dag. Ett ofullständigt kvitto ritas i varningsrollen och säger varför när det läses upp. Bortom sina synliga rader rullar den och lämnar ett avslutat svep tillbaka till sidan."
           }
         }
       }
@@ -4493,6 +4592,17 @@
         }
       }
     },
+    "A person has to approve this probe on the Sources page before it can run." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En person måste godkänna den här sonden på sidan Källor innan den kan köras."
+          }
+        }
+      }
+    },
     "A phone away from home cannot reach this Mac while it sleeps." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4603,6 +4713,17 @@
         }
       }
     },
+    "A probe checks something on a schedule and reports events without starting a model. It runs unsandboxed, as you, so each one needs your approval." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En sond kontrollerar något enligt ett schema och rapporterar händelser utan att starta en modell. Den körs utan sandlåda, som du, så var och en behöver ditt godkännande."
+          }
+        }
+      }
+    },
     "A program color conflicts with this terminal theme" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4704,6 +4825,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ett kvitto på något som redan har gjorts, med vägen tillbaka angiven. Tryck på Visa för att skicka ett till panelen nedanför: det glider in ovanför sidfoten, stannar medan pekaren är över det och försvinner annars av sig självt. Tryck igen innan det lämnar så väntar nästa bakom det första, som kanten på ett kort ovanför. Agenten skickar samma kvitto för ett arkiv som ingen klickade på — det anger vem som gjorde det, innehåller deras anledning och stannar mer än dubbelt så länge."
+          }
+        }
+      }
+    },
+    "A removed session" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En borttagen session"
           }
         }
       }
@@ -5600,6 +5732,28 @@
         }
       }
     },
+    "Acknowledge mail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bekräfta post"
+          }
+        }
+      }
+    },
+    "Acknowledged" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bekräftad"
+          }
+        }
+      }
+    },
     "Actions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6024,6 +6178,17 @@
         }
       }
     },
+    "Add a contact" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till en kontakt"
+          }
+        }
+      }
+    },
     "Add a login" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6130,6 +6295,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lägg till bilagor i chatten"
+          }
+        }
+      }
+    },
+    "Add contact…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till kontakt…"
           }
         }
       }
@@ -6295,6 +6471,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lade till den aktuella revisionen i chatten."
+          }
+        }
+      }
+    },
+    "Address" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adress"
           }
         }
       }
@@ -6603,6 +6790,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agentverktyg"
+          }
+        }
+      }
+    },
+    "Agent usage on %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agentförbrukning på %@"
+          }
+        }
+      }
+    },
+    "Agent usage…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agentförbrukning…"
           }
         }
       }
@@ -8299,6 +8508,17 @@
         }
       }
     },
+    "Approve and Enable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkänn och aktivera"
+          }
+        }
+      }
+    },
     "Approve one retry of a recent auto-review denial" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8306,6 +8526,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Godkänn ett nytt försök efter ett nekat automatiskt granskningsanrop"
+          }
+        }
+      }
+    },
+    "Approve the probe “%@”?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkänna sonden ”%@”?"
           }
         }
       }
@@ -8499,6 +8730,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ytan motsvarar storleken. Välj en cirkel för att öppna grenen; välj en fil för att granska den."
+          }
+        }
+      }
+    },
+    "Arguments" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Argument"
+          }
+        }
+      }
+    },
+    "Arguments after the script, one per line" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Argument efter skriptet, ett per rad"
           }
         }
       }
@@ -8879,6 +9132,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Högst %d"
+          }
+        }
+      }
+    },
+    "At most %lld events per poll" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Högst %lld händelser per avläsning"
           }
         }
       }
@@ -10743,6 +11007,28 @@
         }
       }
     },
+    "Budget saved on the host." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Budgeten sparades på värden."
+          }
+        }
+      }
+    },
+    "Budget tokens are uncached input, cache writes and output for the UTC day. At the budget the host's supervisor starts no new executions for this worker; running ones are never stopped. Leave the field empty for no limit." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Budgettoken är ocachad indata, cacheskrivningar och utdata under UTC-dygnet. Vid budgeten startar värdens övervakare inga nya körningar för den här arbetaren; pågående körningar stoppas aldrig. Lämna fältet tomt för ingen gräns."
+          }
+        }
+      }
+    },
     "Build" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10985,6 +11271,17 @@
         }
       }
     },
+    "By mail chain" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Per e-posttråd"
+          }
+        }
+      }
+    },
     "By model" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10992,6 +11289,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Per modell"
+          }
+        }
+      }
+    },
+    "By task" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Per uppgift"
+          }
+        }
+      }
+    },
+    "By trigger" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Per utlösare"
           }
         }
       }
@@ -11161,6 +11480,17 @@
         }
       }
     },
+    "Can ask" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kan fråga"
+          }
+        }
+      }
+    },
     "Can reply" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11201,6 +11531,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kan vi bevisa vilket återanropstillstånd som nådde appen?"
+          }
+        }
+      }
+    },
+    "Can write" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kan skriva"
+          }
+        }
+      }
+    },
+    "Can write and wake" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kan skriva och väcka"
           }
         }
       }
@@ -11557,6 +11909,17 @@
         }
       }
     },
+    "Change the daily budget for “%@” on %@?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändra den dagliga budgeten för ”%@” på %@?"
+          }
+        }
+      }
+    },
     "Change when it starts" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11608,6 +11971,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Endast ändrade filer. Den här runtimen rapporterar inga läsningar eller ändringar."
+          }
+        }
+      }
+    },
+    "Changed since approval" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändrad sedan godkännandet"
           }
         }
       }
@@ -11883,6 +12257,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kontrollera att Tailscale körs på denna Mac och försök sedan igen."
+          }
+        }
+      }
+    },
+    "Checked before every run; a change pauses the probe until you approve it again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrolleras före varje körning; en ändring pausar sonden tills du godkänner den igen."
           }
         }
       }
@@ -17191,6 +17576,17 @@
         }
       }
     },
+    "Coverage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Täckning"
+          }
+        }
+      }
+    },
     "Coverage output" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18116,6 +18512,28 @@
         }
       }
     },
+    "Daily budget %@ tokens. Today: %@ (%@). New executions stop at the budget; running ones are never stopped." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daglig budget %@ token. I dag: %@ (%@). Nya körningar stoppas vid budgeten; pågående stoppas aldrig."
+          }
+        }
+      }
+    },
+    "Daily budget in tokens" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daglig budget i token"
+          }
+        }
+      }
+    },
     "Daily cost" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18134,6 +18552,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dagliga tokens"
+          }
+        }
+      }
+    },
+    "Daily totals are from %@; the host could not be read since. They are its last summary, not zero." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dagssummorna är från %@; värden har inte kunnat läsas sedan dess. De är dess senaste sammanfattning, inte noll."
+          }
+        }
+      }
+    },
+    "Daily totals read %@. Days are UTC, as the host records them." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dagssummorna lästes %@. Dagarna är i UTC, som värden registrerar dem."
           }
         }
       }
@@ -19995,6 +20435,17 @@
         }
       }
     },
+    "Edit budget…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändra budget…"
+          }
+        }
+      }
+    },
     "Edit the CLAUDE.md files and memory settings" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20741,6 +21192,28 @@
         }
       }
     },
+    "Environment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Miljö"
+          }
+        }
+      }
+    },
+    "Environment, one NAME=value per line; nothing else is inherited" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Miljö, en NAMN=värde per rad; inget annat ärvs"
+          }
+        }
+      }
+    },
     "Error" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20818,6 +21291,17 @@
         }
       }
     },
+    "Events per poll (default 50)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Händelser per avläsning (standard 50)"
+          }
+        }
+      }
+    },
     "Events shown as Silent make no sound anywhere unless given one here — the group and one-click choices never turn them on." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20851,6 +21335,28 @@
         }
       }
     },
+    "Every %lld h" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Var %lld:e timme"
+          }
+        }
+      }
+    },
+    "Every %lld min" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Var %lld:e minut"
+          }
+        }
+      }
+    },
     "Every %lld minutes" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20858,6 +21364,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Var %lld minut"
+          }
+        }
+      }
+    },
+    "Every %lld s" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Var %lld:e sekund"
           }
         }
       }
@@ -21126,6 +21643,17 @@
         }
       }
     },
+    "Executable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Program"
+          }
+        }
+      }
+    },
     "Executable used for new sessions: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21139,6 +21667,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Körbar fil för nya sessioner: %@"
+          }
+        }
+      }
+    },
+    "Executable, e.g. /usr/bin/python3" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Program, t.ex. /usr/bin/python3"
           }
         }
       }
@@ -21183,6 +21722,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ExecutionAuditEventView"
+          }
+        }
+      }
+    },
+    "Executions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körningar"
           }
         }
       }
@@ -24174,6 +24724,17 @@
         }
       }
     },
+    "Grant" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ge åtkomst"
+          }
+        }
+      }
+    },
     "Grant Claude access to your Design projects" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24181,6 +24742,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ge Claude åtkomst till dina Design-projekt"
+          }
+        }
+      }
+    },
+    "Grant access…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ge åtkomst…"
           }
         }
       }
@@ -24445,6 +25017,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "URL till HTTPS-server"
+          }
+        }
+      }
+    },
+    "Handed to host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Överlämnad till värden"
           }
         }
       }
@@ -25801,6 +26384,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Följer med rapporten: %@"
+          }
+        }
+      }
+    },
+    "Incomplete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ofullständiga"
           }
         }
       }
@@ -27321,6 +27915,50 @@
         }
       }
     },
+    "Kept on %@, which can’t be reached right now." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förvaras på %@, som inte går att nå just nu."
+          }
+        }
+      }
+    },
+    "Kept on %@, which can’t be reached; as of %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förvaras på %@, som inte går att nå; läst %@."
+          }
+        }
+      }
+    },
+    "Kept on %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förvaras på %@."
+          }
+        }
+      }
+    },
+    "Kept on this Mac: %@ has no controller set up on the Remote automations page." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förvaras på denna Mac: %@ har ingen controller konfigurerad på sidan Fjärrautomationer."
+          }
+        }
+      }
+    },
     "Kept working after %lld interrupts" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27757,6 +28395,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lämna OpenCode"
+          }
+        }
+      }
+    },
+    "Leave a durable message in another agent’s mailbox, here or on another host." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lämna ett beständigt meddelande i en annan agents brevlåda, här eller på en annan värd."
           }
         }
       }
@@ -28258,6 +28907,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "LimitEscapeStripView"
+          }
+        }
+      }
+    },
+    "Limits" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gränser"
           }
         }
       }
@@ -29126,6 +29786,61 @@
         }
       }
     },
+    "Mail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Post"
+          }
+        }
+      }
+    },
+    "Mail access was not changed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poståtkomsten ändrades inte"
+          }
+        }
+      }
+    },
+    "Mail chain" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "E-posttråd"
+          }
+        }
+      }
+    },
+    "Mail directory" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Postkatalog"
+          }
+        }
+      }
+    },
+    "Mail from it to “%@” will be refused from now on. Mail already received stays." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Post från den till ”%@” avvisas från och med nu. Post som redan tagits emot finns kvar."
+          }
+        }
+      }
+    },
     "Main" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29474,6 +30189,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Märkets ritanimation spelades upp igen."
+          }
+        }
+      }
+    },
+    "Mark messages this session acted on." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markera meddelanden som sessionen har hanterat."
           }
         }
       }
@@ -30189,6 +30915,17 @@
         }
       }
     },
+    "Models, projects, accounts, billing routes, and agents — including connected hosts' workers." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modeller, projekt, konton, debiteringsvägar och agenter – inklusive anslutna värdars arbetare."
+          }
+        }
+      }
+    },
     "Monday at %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30597,6 +31334,17 @@
         }
       }
     },
+    "Moved with the session" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flyttad med sessionen"
+          }
+        }
+      }
+    },
     "Moved “%@” to %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30764,6 +31512,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Namn"
+          }
+        }
+      }
+    },
+    "Name an agent’s mail address, or a whole host as <host>/*. “Can write and wake” also lets that agent’s mail start this chat when it is not running, which spends its usage. Agents cannot change this." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange en agents postadress, eller en hel värd som <värd>/*. ”Kan skriva och väcka” låter också agentens post starta chatten när den inte körs, vilket förbrukar dess användning. Agenter kan inte ändra detta."
           }
         }
       }
@@ -31010,6 +31769,17 @@
         }
       }
     },
+    "Needs approval" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Behöver godkännande"
+          }
+        }
+      }
+    },
     "Needs attention" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31210,6 +31980,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nytt Markdown-dokument"
+          }
+        }
+      }
+    },
+    "New Probe Source" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ny sondkälla"
+          }
+        }
+      }
+    },
+    "New Probe…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ny sond…"
           }
         }
       }
@@ -32063,6 +32855,17 @@
         }
       }
     },
+    "No daily budget. Today: %@ budget tokens." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen daglig budget. I dag: %@ budgettoken."
+          }
+        }
+      }
+    },
     "No data in this range" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32295,6 +33098,17 @@
         }
       }
     },
+    "No limit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen gräns"
+          }
+        }
+      }
+    },
     "No limit of yours is holding this account." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32335,6 +33149,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ingen inloggning hittades på en runtime vars fönster kan öppnas på det här sättet."
+          }
+        }
+      }
+    },
+    "No mail." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen post."
           }
         }
       }
@@ -32555,6 +33380,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ingen sparad konversation hittades, så detta kommer att börja från början."
+          }
+        }
+      }
+    },
+    "No schedule" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget schema"
           }
         }
       }
@@ -33198,6 +34034,17 @@
         }
       }
     },
+    "Not from a trigger" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte från en utlösare"
+          }
+        }
+      }
+    },
     "Not measured yet" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33281,6 +34128,17 @@
         }
       }
     },
+    "Not set yet: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte angivna än: %@"
+          }
+        }
+      }
+    },
     "Not signed in" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33336,6 +34194,17 @@
         }
       }
     },
+    "Nothing else is inherited." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget annat ärvs."
+          }
+        }
+      }
+    },
     "Nothing ends this session; it runs until you stop it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33376,6 +34245,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inget här än. Använd Spara som baslinje i webbläsarens alternativ för att spara en bild av en sida du bestämt är rätt."
+          }
+        }
+      }
+    },
+    "Nothing inherited, nothing added" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget ärvs, inget läggs till"
           }
         }
       }
@@ -36883,6 +37763,17 @@
         }
       }
     },
+    "Poll requested" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avläsning begärd"
+          }
+        }
+      }
+    },
     "Popover" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37622,6 +38513,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bilder från privata flikar är först bara dina, eftersom ursprung inte är tillstånd att lämna ut inloggade bildpunkter."
+          }
+        }
+      }
+    },
+    "Probe sources" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sondkällor"
           }
         }
       }
@@ -39091,6 +39993,17 @@
         }
       }
     },
+    "Read from Keychain at each poll, only into the probe's environment." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läses från nyckelringen vid varje avläsning, enbart in i sondens miljö."
+          }
+        }
+      }
+    },
     "Read handoff history" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39098,6 +40011,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Läs överlämningshistorik"
+          }
+        }
+      }
+    },
+    "Read mail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs post"
+          }
+        }
+      }
+    },
+    "Read more receipts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs fler kvitton"
           }
         }
       }
@@ -39229,6 +40164,17 @@
         }
       }
     },
+    "Read this session’s unacknowledged mail." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs sessionens obekräftade post."
+          }
+        }
+      }
+    },
     "Read user-authored notes anchored to the current page." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39324,6 +40270,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Läser leverantör…"
+          }
+        }
+      }
+    },
+    "Reading the host's ledger…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läser värdens förbrukningslogg…"
           }
         }
       }
@@ -39610,6 +40567,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bygg om"
+          }
+        }
+      }
+    },
+    "Receipts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kvitton"
           }
         }
       }
@@ -40073,6 +41041,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppdaterar %@… (%lld av %lld)"
+          }
+        }
+      }
+    },
+    "Refused by host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avvisad av värden"
           }
         }
       }
@@ -42296,6 +43275,17 @@
         }
       }
     },
+    "Review & Approve…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Granska och godkänn…"
+          }
+        }
+      }
+    },
     "Review before publishing" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42594,6 +43584,17 @@
         }
       }
     },
+    "Revoke this access" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återkalla denna åtkomst"
+          }
+        }
+      }
+    },
     "Revoked" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42821,6 +43822,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kör isolerat webbläsartest"
+          }
+        }
+      }
+    },
+    "Run now" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör nu"
           }
         }
       }
@@ -43095,6 +44107,17 @@
         }
       }
     },
+    "Runs unsandboxed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körs utan sandlåda"
+          }
+        }
+      }
+    },
     "Runs while Threading is closed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43135,6 +44158,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "SDK %@"
+          }
+        }
+      }
+    },
+    "SHA-256" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SHA-256"
           }
         }
       }
@@ -43502,6 +44536,17 @@
         }
       }
     },
+    "Saving leaves the probe paused. You approve its exact files before it runs; any later edit needs approval again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När du sparar förblir sonden pausad. Du godkänner dess exakta filer innan den körs; varje senare ändring behöver godkännas igen."
+          }
+        }
+      }
+    },
     "Saving pauses the automation. Enable it when you are ready. Results remain in Activity after a successful run is archived." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43520,6 +44565,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sparar inspelning…"
+          }
+        }
+      }
+    },
+    "Saving the budget on the host…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparar budgeten på värden…"
           }
         }
       }
@@ -43920,6 +44976,17 @@
         }
       }
     },
+    "Script" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skript"
+          }
+        }
+      }
+    },
     "Script %lld has an invalid SF Symbol name." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44015,6 +45082,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skript %lld upprepar ID:t ”%@”."
+          }
+        }
+      }
+    },
+    "Script it runs (optional)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skript som körs (valfritt)"
           }
         }
       }
@@ -44411,6 +45489,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Andra valet"
+          }
+        }
+      }
+    },
+    "Secrets" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hemligheter"
+          }
+        }
+      }
+    },
+    "Secrets for “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hemligheter för ”%@”"
+          }
+        }
+      }
+    },
+    "Secrets, one NAME=secret-name per line; values go in Keychain" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hemligheter, en NAMN=hemlighetsnamn per rad; värdena sparas i nyckelringen"
+          }
+        }
+      }
+    },
+    "Secrets…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hemligheter…"
           }
         }
       }
@@ -44978,6 +46100,17 @@
         }
       }
     },
+    "Send mail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka post"
+          }
+        }
+      }
+    },
     "Send now" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45105,6 +46238,17 @@
         }
       }
     },
+    "Sender" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avsändare"
+          }
+        }
+      }
+    },
     "Sending" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45178,6 +46322,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skickas medan Threading är igång."
+          }
+        }
+      }
+    },
+    "Sent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skickat"
           }
         }
       }
@@ -45690,6 +46845,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ställ in appens tema"
+          }
+        }
+      }
+    },
+    "Set budget" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange budget"
           }
         }
       }
@@ -49496,6 +50662,17 @@
         }
       }
     },
+    "Stops after %lld seconds" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppas efter %lld sekunder"
+          }
+        }
+      }
+    },
     "Stops at its limit" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49822,6 +50999,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "SupervisionRowView"
+          }
+        }
+      }
+    },
+    "Support mailbox" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supportbrevlåda"
           }
         }
       }
@@ -50316,6 +51504,17 @@
         }
       }
     },
+    "Task" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppgift"
+          }
+        }
+      }
+    },
     "Task with local edits" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50724,6 +51923,28 @@
         }
       }
     },
+    "That is not a mail address, a host as <host>/*, or *." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det är inte en postadress, en värd som <värd>/*, eller *."
+          }
+        }
+      }
+    },
+    "That is not a mail address." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det är inte en postadress."
+          }
+        }
+      }
+    },
     "That is the most marks one report carries (%lld)." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50764,6 +51985,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det paketet är “%@”, inte “%@”. Importera det separat istället för att uppdatera detta."
+          }
+        }
+      }
+    },
+    "That probe source was deleted." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den sondkällan har tagits bort."
           }
         }
       }
@@ -50852,6 +52084,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den inställningssidan är inte längre tillgänglig."
+          }
+        }
+      }
+    },
+    "That source is not a probe source." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den källan är ingen sondkälla."
           }
         }
       }
@@ -51160,6 +52403,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den aktiva ytan är inte en terminal."
+          }
+        }
+      }
+    },
+    "The address appears in this chat’s mail directory. Listing it grants nothing: the recipient’s own host still decides whether mail is accepted." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adressen visas i chattens postkatalog. Att den listas ger ingen åtkomst: mottagarens värd avgör fortfarande om posten tas emot."
           }
         }
       }
@@ -53085,6 +54339,50 @@
         }
       }
     },
+    "The host's controller did not answer: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens styrprogram svarade inte: %@"
+          }
+        }
+      }
+    },
+    "The host's controller repeated a page; reading stopped." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens styrprogram upprepade en sida; läsningen avbröts."
+          }
+        }
+      }
+    },
+    "The host's controller sent a response this Mac cannot read." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens styrprogram skickade ett svar som den här Macen inte kan läsa."
+          }
+        }
+      }
+    },
+    "The host's daily totals have not been read yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens dagssummor har inte lästs än."
+          }
+        }
+      }
+    },
     "The host's supervisor will then start its worker on this schedule, even while this Mac is offline." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -53858,6 +55156,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Utkorgen för privata rapporter är full."
+          }
+        }
+      }
+    },
+    "The probe source changed. Inspect it again before retrying." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sondkällan har ändrats. Granska den igen innan du försöker på nytt."
+          }
+        }
+      }
+    },
+    "The probe source is invalid: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sondkällan är ogiltig: %@"
+          }
+        }
+      }
+    },
+    "The probe's files changed after they were reviewed. Review them again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sondens filer ändrades efter granskningen. Granska dem igen."
           }
         }
       }
@@ -55667,6 +56998,17 @@
         }
       }
     },
+    "ThemedLedgerTableView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemedLedgerTableView"
+          }
+        }
+      }
+    },
     "ThemedMultilineTitleLabel" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56950,6 +58292,28 @@
         }
       }
     },
+    "This host has no workers yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här värden har inga arbetare än."
+          }
+        }
+      }
+    },
+    "This host's connection is incomplete. Connect to its controller in Automations ▸ Remote first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens anslutning är ofullständig. Anslut först till dess styrprogram under Automatiseringar ▸ Fjärranslutning."
+          }
+        }
+      }
+    },
     "This iPhone keyboard currently supports standard US text and editing keys." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -57193,6 +58557,17 @@
         }
       }
     },
+    "This probe is not sandboxed. It runs as you, with your account's authority: it can read, change and send anything you can. Approve it only if you trust these exact files. Its events start agents only through automations you activate separately, and their content is shown to agents as untrusted evidence." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här sonden körs utan sandlåda. Den körs som du, med ditt kontos behörighet: den kan läsa, ändra och skicka allt som du kan. Godkänn den bara om du litar på exakt de här filerna. Dess händelser startar agenter bara genom automationer som du aktiverar separat, och deras innehåll visas för agenter som obetrodda uppgifter."
+          }
+        }
+      }
+    },
     "This project already has a baseline named “%@”." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -57365,6 +58740,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här sessionen förblir stängd tills Threading startar normalt."
+          }
+        }
+      }
+    },
+    "This session’s mail address and who it can write to." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sessionens postadress och vilka den kan skriva till."
           }
         }
       }
@@ -57618,6 +59004,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading kan inte läsa %@ just nu, så det spenderar inte det här kontot på egen hand."
+          }
+        }
+      }
+    },
+    "Threading cannot read “%@”." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kan inte läsa ”%@”."
           }
         }
       }
@@ -58409,6 +59806,17 @@
         }
       }
     },
+    "Threading stops polling this probe and removes it from this page. Events it already reported and the runs they started stay in Activity. Its files and Keychain secrets are not touched." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading slutar läsa av sonden och tar bort den från sidan. Händelser den redan rapporterat och körningarna de startade finns kvar i Aktivitet. Dess filer och hemligheter i nyckelringen lämnas orörda."
+          }
+        }
+      }
+    },
     "Threading stops the agent, moves the conversation to a login with room, and queues “continue” there. A login whose fresh reading has no room is refused rather than used." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58625,6 +60033,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading startas om med sina standardinställningar. Dina projekt och konversationer behålls. De nuvarande inställningarna sparas i en datummärkt mapp bredvid dina data, så ingenting kastas bort."
+          }
+        }
+      }
+    },
+    "Threading will run this program on its schedule, without asking again, until you pause it or its files change." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kör programmet enligt dess schema, utan att fråga igen, tills du pausar det eller dess filer ändras."
           }
         }
       }
@@ -58904,6 +60323,17 @@
         }
       }
     },
+    "Timeout in seconds (default 30)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tidsgräns i sekunder (standard 30)"
+          }
+        }
+      }
+    },
     "Tinted template glyphs drawn on the device pixel grid; a slot caps foreign artwork." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59076,6 +60506,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tokens"
+          }
+        }
+      }
+    },
+    "Told, unread" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aviserad, oläst"
           }
         }
       }
@@ -59362,6 +60803,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Behandla .mc-filer som Markdown-dokument."
+          }
+        }
+      }
+    },
+    "Trigger" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utlösare"
           }
         }
       }
@@ -60270,6 +61722,17 @@
         }
       }
     },
+    "Unread" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oläst"
+          }
+        }
+      }
+    },
     "Unschedule this message" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60646,6 +62109,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppgradera till Max för högre gränser och mer Opus"
+          }
+        }
+      }
+    },
+    "Urgent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Brådskande"
           }
         }
       }
@@ -61461,6 +62935,17 @@
         }
       }
     },
+    "Values are stored in your Keychain and handed only to this probe's environment when it runs. Leave a field blank to keep its current value." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdena sparas i din nyckelring och lämnas bara till den här sondens miljö när den körs. Lämna ett fält tomt för att behålla dess nuvarande värde."
+          }
+        }
+      }
+    },
     "Verified chain" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62039,6 +63524,17 @@
         }
       }
     },
+    "Waiting for host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på värden"
+          }
+        }
+      }
+    },
     "Waiting for navigator data." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62191,6 +63687,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Väntar på din iPhone"
+          }
+        }
+      }
+    },
+    "Waiting to be read" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på att läsas"
           }
         }
       }
@@ -63064,6 +64571,28 @@
         }
       }
     },
+    "Who can write" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vem kan skriva"
+          }
+        }
+      }
+    },
+    "Who may write to “%@”?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vem får skriva till ”%@”?"
+          }
+        }
+      }
+    },
     "Whoever wrote the current turn" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63317,6 +64846,17 @@
         }
       }
     },
+    "Worker %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbetare %@"
+          }
+        }
+      }
+    },
     "Worker ID" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63328,6 +64868,17 @@
         }
       }
     },
+    "Worker usage breakdown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdelning av arbetarens förbrukning"
+          }
+        }
+      }
+    },
     "Worker: %@\nTiming: %@\nRevision: %lld" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63335,6 +64886,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arbetare: %@\nTid: %@\nRevision: %lld"
+          }
+        }
+      }
+    },
+    "Workers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbetare"
           }
         }
       }
@@ -64052,6 +65614,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dina egna enheter är parkopplade med den här Mac-datorn, inte med chatten. Ta bort parkopplingen i Inställningar."
+          }
+        }
+      }
+    },
+    "Your own programs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dina egna program"
           }
         }
       }
@@ -65761,6 +67334,17 @@
         }
       }
     },
+    "host %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "värd %@"
+          }
+        }
+      }
+    },
     "hours" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -66198,6 +67782,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "större text"
+          }
+        }
+      }
+    },
+    "last read %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "senast läst %@"
           }
         }
       }
@@ -66957,6 +68552,17 @@
         }
       }
     },
+    "older days not read" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "äldre dagar inte lästa"
+          }
+        }
+      }
+    },
     "on" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -66964,6 +68570,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "på"
+          }
+        }
+      }
+    },
+    "on %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "på %@"
           }
         }
       }
@@ -68657,6 +70274,17 @@
         }
       }
     },
+    "this Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "denna Mac"
+          }
+        }
+      }
+    },
     "this blank page" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -69269,6 +70897,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“%@” är inte en användbar webbadress."
+          }
+        }
+      }
+    },
+    "“%@” is not a usage operation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” är ingen förbrukningsåtgärd."
           }
         }
       }

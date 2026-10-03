@@ -198,6 +198,13 @@ struct AgentCapabilities: OptionSet {
   /// losing Undo or being misrepresented as the destructive delete they also expose.
   static let providerArchive = Self(rawValue: 1 << 24)
 
+  /// The runtime's command hooks can *answer*: a `PostToolUse` or `SessionStart` hook's
+  /// `additionalContext` reaches the model mid-turn, and a `Stop` hook's `decision: "block"`
+  /// continues the same turn. That is what lets a working terminal agent be told mail is waiting
+  /// (`docs/feature-drafts/agent-mail.md`, "Codex hooks, measured"). Claude and Codex. A runtime
+  /// without it gets mail notices only at turn boundaries.
+  static let answeringMailHooks = Self(rawValue: 1 << 41)
+
   /// A terminal interruption is written as a structured transcript record that **names the turn
   /// it aborted**, while the lifecycle hook that ordinarily closes a reported turn is omitted.
   /// Codex only: 0.147.0 appends `event_msg / turn_aborted / reason: interrupted` and returns to
@@ -482,7 +489,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .transcriptInterruptedMessageRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .checkoutScopedConversationStorage, .lifecycleReportedWorkingDirectory,
         .modelAliasResolution, .selectableTerminalRenderer, .remoteExecutionHostLaunch,
-        .longLivedAccountToken
+        .longLivedAccountToken, .answeringMailHooks
       ]
     case .codex:
       return [
@@ -491,7 +498,8 @@ enum AgentKind: String, Codable, CaseIterable {
         .headlessResearch, .providerTitleMetadata, .providerArchive, .transcriptUsageIndex,
         .transcriptInterruptedTurnRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .inlineTerminalViewport, .lifecycleReportedTranscriptPath,
-        .lifecycleReportedWorkingDirectory, .detectableExternalResume, .bankedUsageReset
+        .lifecycleReportedWorkingDirectory, .detectableExternalResume, .bankedUsageReset,
+        .answeringMailHooks
       ]
     case .grok:
       return [

@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingController
 
 actor TriggerStore {
     enum StoreError: LocalizedError {
@@ -94,6 +95,18 @@ actor TriggerStore {
             }
         }
         changed()
+    }
+
+    /// Compare-and-swap for a probe: `expectedRevision` is the probe revision the caller read
+    /// (0 for a new source). Checked and written inside this actor, so two editors cannot both
+    /// succeed against the same revision.
+    func saveProbeSource(_ source: TriggerSourceInstallation, expectedRevision: Int) throws {
+        let current = try self.source(id: source.id)
+        guard current.map({ $0.sourceType == TriggerProbeDefaults.sourceType }) ?? true,
+              (current?.probe?.revision ?? 0) == expectedRevision else {
+            throw TriggerProbeSourceCommands.Failure.revisionChanged
+        }
+        try saveSource(source)
     }
 
     func sources() throws -> [TriggerSourceInstallation] {
@@ -527,6 +540,17 @@ actor TriggerStore {
               (source.boundedDiagnostic?.utf8.count ?? 0) <= 1_024 else {
             throw StoreError.invalidRecord("source fields exceed their bounds")
         }
+        guard (source.sourceType == TriggerProbeDefaults.sourceType) == (source.probe != nil) else {
+            throw StoreError.invalidRecord("a probe source needs its probe settings, and only a probe has them")
+        }
+        if let probe = source.probe {
+            try TriggerProbeSourceCommands.validate(probe.spec)
+            // The store is the last gate: no path, agent or host, saves an enabled probe whose
+            // current content hash a person has not approved.
+            guard !source.enabled || probe.isApproved else {
+                throw StoreError.invalidRecord("a probe source cannot be enabled before its hash is approved")
+            }
+        }
     }
 
     private func validate(_ definition: TriggerDefinition, revision: TriggerRevision) throws {
@@ -578,6 +602,7 @@ actor TriggerStore {
                       && (resource.byteCount ?? 0) >= 0
               }),
               (event.deepLink?.absoluteString.utf8.count ?? 0) <= 4_096,
+              (event.evidence?.utf8.count ?? 0) <= ProbeLimits.evidenceBytes,
               event.deepLink?.user == nil,
               event.deepLink?.password == nil else {
             throw StoreError.invalidRecord("event fields exceed their bounds")

@@ -1378,12 +1378,15 @@ final class ProjectStore {
         guard let index = index(ofProject: projectID) else { return .targetNotFound }
         if let host, !host.isValid { return .unsupportedValue }
         guard projects[index].executionHost != host else { return .unchanged }
+        let previous = projects[index].executionHost
         projects[index].executionHost = host
         guard saveProjectRecord(at: index) else {
             notifyChanged(sidebarImpact: .projectStructure(projectID))
             return .persistenceRefused
         }
         notifyChanged(sidebarImpact: .projectStructure(projectID))
+        // Its sessions' mailboxes move with them (`MailboxHandover`).
+        NotificationCenter.default.post(ProjectExecutionHostDidChange(projectID: projectID, oldHost: previous, newHost: host))
         return .applied
     }
 

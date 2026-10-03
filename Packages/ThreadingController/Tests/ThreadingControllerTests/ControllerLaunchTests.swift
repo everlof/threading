@@ -89,6 +89,6 @@ struct ControllerLaunchTests {
         try connection.run("PRAGMA user_version=1")
         let migrated = try ControllerStore(path: path)
         #expect(try await migrated.work(work.id) == work)
-        #expect(try connection.rows("PRAGMA user_version").first?.integers[0] == 6)
+        #expect(try connection.rows("PRAGMA user_version").first?.integers[0] == 9)
     }
 }

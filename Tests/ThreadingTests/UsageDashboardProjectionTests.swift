@@ -1,6 +1,7 @@
 import XCTest
 import ThreadingRemoteKit
 @testable import Threading
+import ThreadingUsage
 
 final class UsageDashboardProjectionTests: XCTestCase {
     private var calendar: Calendar {

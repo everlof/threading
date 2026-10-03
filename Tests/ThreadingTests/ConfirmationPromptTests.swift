@@ -78,6 +78,8 @@ final class ConfirmationPromptTests: XCTestCase {
             "approveAgentExtensionInstall",
             "connectTriggerSource",
             "approveTriggerActivation",
+            "changeWorkerBudget",
+            "changeMailAccess",
             "shareChatLink",
             "approveSystemPermissionPrompt",
             "conferManagerRole",

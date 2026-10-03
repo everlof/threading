@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingUsage
 
 /// Everything needed to locate one root conversation's durable Claude child index.
 struct ClaudeSubagentTranscriptPlan: Sendable {

@@ -7074,9 +7074,10 @@ enum MCPTools {
         list_sessions prints. The message is delivered as that session's own next turn: \
         an idle chat session receives it immediately, a chat session mid-turn queues it \
         visibly behind the turn in flight (where the user can edit or remove it), and a \
-        terminal session is typed into only while its agent is idle — a busy terminal \
-        refuses rather than typing into whatever its screen is showing. A dormant session \
-        cannot receive messages; resuming it is the user's decision.
+        terminal session is typed into only while its agent is idle. A busy terminal or a \
+        dormant session is never typed into: the message is stored in that session's mailbox \
+        instead, the session is told mail is waiting at a point it can act on it, and it \
+        reads the text with mail_inbox. Resuming a dormant session stays the user's decision.
 
         Every delivered message is prefixed with which session sent it, and it runs on \
         the receiving session's own usage. Send conclusions and briefs, not chatter: the \
@@ -8785,6 +8786,9 @@ enum MCPTools {
           Remote schedules run on that VPS's supervisor even while this Mac is offline. An existing
           worker owns execution permissions; configuring a schedule never enables or changes its recipe.
           On a lost response inspect state; run uses a stable requestKey for safe retries.
+          draftSource writes or edits a probe source on this Mac (id and integer expectedRevision for an edit,
+          omitted/0 for a new one). It is always left paused and unapproved: a probe runs unsandboxed with the
+          user's authority, so only the user approves its exact files on the Sources page. No operation approves it.
           """,
         inputSchema: AutomationToolSchema.input
       ),
@@ -9084,6 +9088,7 @@ enum MCPTools {
         )
       )
     ])
+    declarations.append(contentsOf: mailDeclarations)
     return declarations
   }()
 

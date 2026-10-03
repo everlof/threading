@@ -20,8 +20,16 @@ daemon opens it without activation and repeats the notification.
 
 The first adapter is Sonda's read-only review-required feed. Its stable case ID and review cycle
 become the event identity and revision; its cursor is committed only after every returned event
-has been written to the inbox. The model and store do not know Sonda semantics, and unsupported
+has been written to the inbox. It is a built-in source on the probe contract: the daemon fetches
+the page over HTTPS with the Keychain credential, `SondaFeedAdapter` (in the shared
+`TriggerProbeSources.swift`) validates it and turns it into a `TriggerSourceReport`, and the same
+`TriggerProbeSourceRunner.deliver` stage a probe uses writes the events and then commits the
+cursor. Everything observable is what the compiled-in adapter wrote — event kind
+`case.review-required`, attributes, title, portal deep link, inbox files named by feed cursor, the
+integer `cursors.json`, and health (an HTTP 401/403 or missing credential is authentication
+required; any other failure, including an inbox write, backs off exponentially to five minutes). The model and store do not know Sonda semantics, and unsupported
 `sourceType` values are deliberately left out of daemon configuration until an adapter exists.
+The second source type is `probe`: a person's own program on the portable probe contract, below.
 
 ## Authority
 
@@ -74,6 +82,8 @@ The sidebar's **Triggers** destination has three pages:
   activation plus pause/resume controls.
 - **Activity** shows durable run state and bounded results even when no session started.
 - **Sources** connects the first adapter, overlays daemon health, and pauses or resumes polling.
+  Its **Probe sources** section lists probes with schedule, approval/health, hash prefix and the
+  bounded diagnostic, and offers Review & Approve, Pause/Resume, Run now, Edit and Secrets.
 
 The destination is hosted at the pane's full width, but it draws one centred column at
 `Design.Size.readableWidth` plus the inset `PanelListView` keeps its rows on, installed through
@@ -104,13 +114,82 @@ ordinary session, so existing attention notifications, authenticated remote conv
 and session-owned attachments remain the continuation path. Quick push replies and source
 resource fetching are later additions, not implicit v1 authority.
 
+## Probe sources
+
+A `probe` source is an executable a person (or, as a draft, an agent) wrote, run by the daemon on
+the same `TriggerProbe` contract the controller uses
+([portable-trigger-sources.md](../feature-drafts/portable-trigger-sources.md)): exact argv, no
+inherited environment, `{cursor, limit}` on stdin, event lines then one cursor line, exit 75/77 for
+backoff/authentication, host-enforced timeout, output and event caps. Its record is
+`TriggerSourceInstallation.probe`: the controller's own `ControllerSourceSpec`, a revision for
+compare-and-swap edits, the SHA-256 of the executable and script when configured, and the hash a
+person approved. No schema migration: the field rides in the source's JSON payload.
+
+**Authority.** `TriggerProbeSourceCommands.configure` — the Sources editor and the agent's
+`manage_automation draftSource` alike — always writes the source paused with approval cleared.
+Only `approve`, called after the host sheet showed the exact paths, full hash, schedule,
+arguments, environment keys, secret names and an explicit unsandboxed warning, records the
+approval, and only for the hash still on disk. `TriggerStore` refuses to save an enabled probe
+whose current hash is unapproved, whichever path writes. One Mac rule beyond the controller's
+validation: a configured script must be the first argument, so the hashed script is the one the
+executable runs. No tool, extension or theme seam approves or enables a probe.
+
+**Projection.** `TriggerDaemonConfigurationStore.configuration(for:)` (pure, tested) adds
+`probes` to `sources.json` — approved probes only, paused ones included so **Run now** can poll
+them. The schema version stays 1; an older reader ignores the field. Run now writes an empty
+request file under `Poll Requests/` that the daemon consumes on its next five-second tick,
+whether or not the probe is still approved by then.
+
+**Polling.** `Targets/TriggerDaemon/TriggerProbeSources.swift` holds the pipeline and is compiled
+into both the daemon and the app, so the app's tests run what the daemon runs. Per poll it checks
+the hash first (a mismatch reports health `changed` and runs nothing), resolves secrets by name
+from Keychain service `codes.threading.trigger-probe-secret` into the probe's environment only
+(and redacts their values from the diagnostic), runs the probe, writes each event to the inbox,
+and only then commits the cursor (`probe-cursors.json`); a failure between them redelivers and
+acceptance is idempotent. The probe loop is independent of the Sonda long-poll: each five-second
+tick claims manual requests first, then at most eight due probes, with at most two polls in
+flight and one per source, so a hanging probe cannot delay another past its own timeout.
+Deadlines persist in `probe-schedule.json`; failures back off exponentially from the interval to
+an hour, as the controller's do. Each probe has a private `0700` working directory under
+`Probes/`.
+
+**Deleting** a probe (`TriggerProbeSourceCommands.delete`, host-only, confirmed on the page)
+writes a tombstone: `probe.deletedAt`, approval cleared, paused. It leaves the daemon's
+configuration, so polling stops on the next tick; it disappears from the Sources page, the
+automation editor's source list and `list_trigger_sources`; configure, approve, enable and Run now
+refuse it. The record, its accepted events and their run receipts stay, so Activity keeps naming
+the source. No agent tool deletes a source.
+
+**Timing.** The editor states timing with the automation editor's own schedule controls,
+`AutomationScheduleFields`, which both editors now use. "Fixed interval" becomes the spec's
+`intervalSeconds`; daily, selected weekdays and weekly become its calendar `schedule` (validated,
+with an explicit IANA zone), which the daemon follows with `AutomationSchedule.next(after:)`.
+
+**Events.** A probe event becomes an ordinary `TriggerEvent` of kind `probe.event`: its id and
+revision are the identity, its typed fields become typed attributes (integral numbers as
+`integer`, others `decimal`, booleans, strings), a `title` or `subject` field titles it, and
+`evidence` travels in `TriggerEvent.evidence` — never an attribute, so no condition matches on it —
+inside the prompt's untrusted-evidence block. `TriggerEngine` matching, immutable revisions and
+two-stage authority apply unchanged.
+
+**Why the daemon compiles shared files rather than linking the packages.** Linking
+`ThreadingController` into `threading-triggerd` made Xcode build `ThreadingDomain` as a dynamic
+package framework (the test bundle links it too) that both helper tools copy to
+`Products/Frameworks`, which fails build-for-testing with "Multiple commands produce". The daemon
+therefore compiles `TriggerProbe.swift` and `AutomationSchedule.swift` (both Foundation-only)
+directly, and the shared file's package imports are behind `THREADING_TRIGGER_DAEMON`, with the
+daemon reading the spec's run fields as `TriggerProbeRunSpec` (same JSON shape).
+
 ## Files
 
 - `Models/TriggerModels.swift` — identities, typed events, revisions and run states
 - `Core/Triggers/TriggerStore.swift` — SQLite ownership and durable idempotence
 - `Core/Triggers/TriggerEngine.swift` — matching, holds, recovery and app dispatch
 - `Core/Triggers/TriggerDaemonBridge.swift` — config/inbox/status/Keychain/launch-agent seams
-- `Targets/TriggerDaemon/` — the polling helper and launch-agent property list
+- `Targets/TriggerDaemon/` — the polling helper and launch-agent property list;
+  `TriggerProbeSources.swift` is the probe pipeline shared with the app
+- `Core/Triggers/TriggerProbeSourceCommands.swift` — configure/approve/enable/run-now for probes
+- `UI/Triggers/TriggerProbeSourceViews.swift` — probe rows, approval facts and the editor form
 - `UI/Triggers/TriggerCenterViewController.swift` — the host-owned destination
 - `UI/Windows/SessionCoordinator+Triggers.swift` — two-stage ordinary-session lifecycle
 - `UI/Windows/MainWindowTriggerTools.swift` — built-in MCP application actions

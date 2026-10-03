@@ -1,4 +1,5 @@
 import XCTest
+import ThreadingController
 @testable import Threading
 
 /// Covers the rules that keep installing hooks from damaging a `hooks.json` the user owns.
@@ -248,10 +249,14 @@ final class CodexHookInstallerTests: XCTestCase {
         XCTAssertTrue(commands.contains("/other/tool report"), "the foreign hook was lost")
         XCTAssertFalse(commands.contains(legacyCommand), "the inert pre-rename hook survived")
         XCTAssertEqual(
-            commands.filter { $0.contains(MCPDefaults.hookMarker) }.count,
+            commands.filter {
+                $0.contains(MCPDefaults.hookMarker) && $0.contains(MCPDefaults.lifecyclePathPrefix)
+            }.count,
             1,
             "the migrated lifecycle hook must be installed exactly once"
         )
+        // Beside it, the separate answering mail entry (`MailNoticeHook`), also exactly once.
+        XCTAssertEqual(commands.filter { $0 == CodexHookInstaller.command(for: MailNoticeEvent.sessionStart) }.count, 1)
     }
 
     /// A complete pre-rename installation is now replaced, not preserved.

@@ -98,6 +98,8 @@ extension ControllerStore {
                 AND state IN ('prepared','dispatching','running') LIMIT ?
                 """, [.text(workerID.description), .integer(Int64(policy.maximumConcurrent))])
             guard active.count < policy.maximumConcurrent else { return nil }
+            // A worker over its daily budget starts nothing new; its running work continues.
+            guard try workerWithinBudget(workerID) else { return nil }
             return try prepareLaunch(workerID: workerID, spec: policy.spec, supervisorRevision: policy.revision)
         }
     }

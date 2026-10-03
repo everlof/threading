@@ -9,14 +9,16 @@ let package = Package(
         .package(path: "../../Packages/ThreadingController"),
         .package(path: "../../Packages/ThreadingPTYClient"),
         .package(path: "../../Packages/ThreadingPTYHostKit"),
-        .package(path: "../../Packages/ThreadingDomain")
+        .package(path: "../../Packages/ThreadingDomain"),
+        .package(path: "../../Packages/ThreadingUsage")
     ],
     targets: [
         .target(name: "ControllerRuntime", dependencies: [
             .product(name: "ThreadingController", package: "ThreadingController"),
             .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient"),
             .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit"),
-            .product(name: "ThreadingDomain", package: "ThreadingDomain")
+            .product(name: "ThreadingDomain", package: "ThreadingDomain"),
+            .product(name: "ThreadingUsage", package: "ThreadingUsage")
         ]),
         .executableTarget(name: "ThreadingControllerCLI", dependencies: ["ControllerRuntime",
             .product(name: "ThreadingController", package: "ThreadingController")

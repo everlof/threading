@@ -347,6 +347,8 @@ final class TriggerCenterViewController: NSViewController {
         daemonStatuses: [TriggerSourceInstallationID: TriggerDaemonSourceStatus],
         registrationStatus: TriggerDaemonRegistrationStatus
     ) {
+        // A deleted probe is a tombstone kept for history; it is not a source any more.
+        let sources = sources.filter { !$0.isDeleted }
         list.clear()
         status.stringValue = sources.isEmpty
             ? L10n.string("No sources")
@@ -372,7 +374,10 @@ final class TriggerCenterViewController: NSViewController {
             secondaryActionTitle: nil,
             onSecondaryAction: nil
         ))
-        guard !sources.isEmpty else {
+        let probes = sources.filter { $0.sourceType == TriggerProbeDefaults.sourceType && !$0.isDeleted }
+        let connected = sources.filter { $0.sourceType != TriggerProbeDefaults.sourceType }
+        defer { renderProbes(probes, daemonStatuses: daemonStatuses) }
+        guard !connected.isEmpty else {
             list.addSection(L10n.string("Event sources"))
             list.addNote(L10n.string(
                 "Sources run through Threading’s background listener, so events can wake the app even when its window is closed."
@@ -380,7 +385,7 @@ final class TriggerCenterViewController: NSViewController {
             return
         }
         list.addSection(L10n.string("Event sources"))
-        for source in sources {
+        for source in connected {
             let daemonStatus = daemonStatuses[source.id].flatMap {
                 $0.lastCheckedAt >= source.updatedAt ? $0 : nil
             }
@@ -411,6 +416,169 @@ final class TriggerCenterViewController: NSViewController {
         }
     }
 
+    /// Probe sources: programs a person (or an agent, as a draft) wrote, run unsandboxed on the
+    /// probe contract. Every row says whether it is approved and offers Run now once it is.
+    private func renderProbes(
+        _ probes: [TriggerSourceInstallation],
+        daemonStatuses: [TriggerSourceInstallationID: TriggerDaemonSourceStatus]
+    ) {
+        list.addSection(L10n.string("Probe sources"))
+        list.addRow(TriggerCenterRowView(
+            title: L10n.string("Your own programs"),
+            detail: L10n.string(
+                "A probe checks something on a schedule and reports events without starting a model. It runs unsandboxed, as you, so each one needs your approval."
+            ),
+            actionTitle: L10n.string("New Probe…"),
+            onAction: { [weak self] in self?.editProbe(nil) },
+            secondaryActionTitle: nil,
+            onSecondaryAction: nil,
+            identifier: "probe.new"
+        ))
+        for source in probes.prefix(25) {
+            let status = daemonStatuses[source.id].flatMap { $0.lastCheckedAt >= source.updatedAt ? $0 : nil }
+            let row = TriggerProbePresentation.row(source, daemonStatus: status)
+            var extras: [(title: String, handler: () -> Void)] = [
+                (L10n.string("Edit…"), { [weak self] in self?.editProbe(source) }),
+            ]
+            if row.hasSecrets {
+                extras.append((L10n.string("Secrets…"), { [weak self] in self?.setProbeSecrets(source) }))
+            }
+            extras.append((L10n.string("Delete…"), { [weak self] in self?.deleteProbe(source) }))
+            list.addRow(TriggerCenterRowView(
+                title: row.title,
+                detail: row.detail,
+                actionTitle: row.primaryTitle,
+                onAction: { [weak self] in self?.actOnProbe(source, state: row.state) },
+                secondaryActionTitle: row.canRunNow ? L10n.string("Run now") : nil,
+                onSecondaryAction: { [weak self] in self?.runProbe(source) },
+                extraActions: extras,
+                identifier: "probe.\(source.id.uuidString)"
+            ))
+        }
+    }
+
+    private func editProbe(_ existing: TriggerSourceInstallation?) {
+        let form = TriggerProbeEditorForm(spec: existing?.probe?.spec)
+        let request = TriggerProbePresentation.editorRequest(form, editing: existing?.displayName)
+        ConfirmationAlert.ask(request, in: view.window) { [weak self] approved in
+            guard approved, let self else { return }
+            Task { @MainActor in
+                do {
+                    let spec = try form.spec()
+                    try await TriggerProbeSourceCommands.configure(
+                        id: existing?.id, expectedRevision: existing?.probe?.revision ?? 0, spec: spec, store: self.store)
+                } catch { self.presentSourceFailure(error.localizedDescription) }
+            }
+        }
+    }
+
+    private func actOnProbe(_ source: TriggerSourceInstallation, state: TriggerProbePresentation.State) {
+        switch state {
+        case .needsApproval, .changed: reviewProbe(source)
+        case .paused, .listening:
+            Task { @MainActor [weak self] in
+                guard let self, let revision = source.probe?.revision else { return }
+                do {
+                    try await TriggerProbeSourceCommands.setEnabled(
+                        !source.enabled, id: source.id, expectedRevision: revision, store: self.store)
+                } catch { self.presentSourceFailure(error.localizedDescription) }
+            }
+        }
+    }
+
+    /// The host approval sheet: the only path that approves or enables a probe.
+    private func reviewProbe(_ original: TriggerSourceInstallation) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let source = try await TriggerProbeSourceCommands.prepareReview(original.id, store: self.store)
+                guard let probe = source.probe else { return }
+                let names = Array(Set(probe.spec.secrets.values))
+                let stored = await Task.detached(priority: .utility) {
+                    Set(names.filter(TriggerProbeSecretStore.exists))
+                }.value
+                let request = TriggerProbePresentation.approvalRequest(source, storedSecrets: stored)
+                ConfirmationAlert.ask(request, in: self.view.window) { [weak self] approved in
+                    guard approved, let self else { return }
+                    Task { @MainActor in
+                        do {
+                            try await TriggerProbeSourceCommands.approve(
+                                source.id, expectedRevision: probe.revision, reviewedHash: probe.hash,
+                                enable: true, store: self.store)
+                        } catch { self.presentSourceFailure(error.localizedDescription) }
+                    }
+                }
+            } catch { self.presentSourceFailure(error.localizedDescription) }
+        }
+    }
+
+    private func deleteProbe(_ source: TriggerSourceInstallation) {
+        let request = ConfirmationRequest(
+            prompt: .connectTriggerSource,
+            title: L10n.format("Delete “%@”?", source.displayName),
+            message: L10n.string(
+                "Threading stops polling this probe and removes it from this page. Events it already reported and the runs they started stay in Activity. Its files and Keychain secrets are not touched."
+            ),
+            confirmTitle: L10n.string("Delete")
+        )
+        ConfirmationAlert.ask(request, in: view.window) { [weak self] approved in
+            guard approved, let self, let revision = source.probe?.revision else { return }
+            Task { @MainActor in
+                do {
+                    try await TriggerProbeSourceCommands.delete(source.id, expectedRevision: revision, store: self.store)
+                } catch { self.presentSourceFailure(error.localizedDescription) }
+            }
+        }
+    }
+
+    private func runProbe(_ source: TriggerSourceInstallation) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await TriggerProbeSourceCommands.runNow(source.id, store: self.store)
+                self.status.stringValue = L10n.string("Poll requested")
+            } catch { self.presentSourceFailure(error.localizedDescription) }
+        }
+    }
+
+    /// One secure field per secret name. A blank field leaves that value as it is; nothing is
+    /// read back, so a stored value is never shown.
+    private func setProbeSecrets(_ source: TriggerSourceInstallation) {
+        let names = Array(Set(source.probe.map { Array($0.spec.secrets.values) } ?? [])).sorted()
+        guard !names.isEmpty else { return }
+        let fields = names.map { name -> ThemedSecureField in
+            let field = ThemedSecureField()
+            field.placeholderString = name
+            field.translatesAutoresizingMaskIntoConstraints = false
+            field.widthAnchor.constraint(equalToConstant: TriggerProbeEditorForm.Layout.fieldWidth).isActive = true
+            return field
+        }
+        let stack = NSStackView(views: fields)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        let request = ConfirmationRequest(
+            prompt: .connectTriggerSource,
+            title: L10n.format("Secrets for “%@”", source.displayName),
+            message: L10n.string(
+                "Values are stored in your Keychain and handed only to this probe's environment when it runs. Leave a field blank to keep its current value."
+            ),
+            confirmTitle: L10n.string("Save"),
+            accessory: stack
+        )
+        ConfirmationAlert.ask(request, in: view.window) { [weak self] approved in
+            guard approved else { return }
+            let values = zip(names, fields.map(\.stringValue)).filter { !$0.1.isEmpty }
+            Task { @MainActor in
+                do {
+                    try await Task.detached(priority: .utility) {
+                        for (name, value) in values { try TriggerProbeSecretStore.save(value, name: name) }
+                    }.value
+                } catch { self?.presentSourceFailure(error.localizedDescription) }
+            }
+        }
+    }
+
     @objc private func connectSourcePressed() {
         if page == .sources { connectSource(replacing: nil) }
         else { editAutomation(nil) }
@@ -432,7 +600,7 @@ final class TriggerCenterViewController: NSViewController {
         let config = pair.map { AutomationConfiguration(definition: $0.definition, revision: $0.revision) }
         let automationID = pair?.definition.id ?? TriggerID()
         Task { @MainActor in
-        let sources = (try? await store.sources()) ?? []
+        let sources = ((try? await store.sources()) ?? []).filter { !$0.isDeleted }
         let editor = AutomationEditorViewController(configuration: config, sources: sources)
         editor.onSave = { [weak self] config, _ in
             guard let self, let config else { return }
@@ -721,18 +889,25 @@ extension TriggerCheckoutPolicy {
 private final class TriggerCenterRowView: NSView {
     private let onAction: (() -> Void)?
     private let onSecondaryAction: (() -> Void)?
+    private let extraActions: [(title: String, handler: () -> Void)]
 
+    /// `extraActions` are quieter actions drawn before the secondary one, for a row with more
+    /// than two things to do (a probe's Edit and Secrets).
     init(
         title: String,
         detail: String,
         actionTitle: String?,
         onAction: (() -> Void)?,
         secondaryActionTitle: String?,
-        onSecondaryAction: (() -> Void)?
+        onSecondaryAction: (() -> Void)?,
+        extraActions: [(title: String, handler: () -> Void)] = [],
+        identifier: String? = nil
     ) {
         self.onAction = onAction
         self.onSecondaryAction = onSecondaryAction
+        self.extraActions = extraActions
         super.init(frame: .zero)
+        if let identifier { setAccessibilityIdentifier(identifier) }
         translatesAutoresizingMaskIntoConstraints = false
 
         let titleLabel = NSTextField(labelWithString: title)
@@ -751,6 +926,15 @@ private final class TriggerCenterRowView: NSView {
         copy.spacing = Design.Spacing.tight
 
         var views: [NSView] = [copy]
+        for (index, extra) in extraActions.enumerated() {
+            let button = ThemedButton()
+            button.title = extra.title
+            button.emphasis = .tertiary
+            button.tag = index
+            button.target = self
+            button.action = #selector(extraPressed(_:))
+            views.append(button)
+        }
         if let secondaryActionTitle {
             let button = ThemedButton()
             button.title = secondaryActionTitle
@@ -797,6 +981,11 @@ private final class TriggerCenterRowView: NSView {
 
     @objc private func pressed() { onAction?() }
     @objc private func secondaryPressed() { onSecondaryAction?() }
+    @objc private func extraPressed(_ sender: NSButton) {
+        guard extraActions.indices.contains(sender.tag) else { return }
+        extraActions[sender.tag].handler()
+    }
+
 }
 
 extension TriggerExecutionMode {
@@ -849,7 +1038,7 @@ private extension TriggerRunState {
     }
 }
 
-private extension TriggerSourceHealth {
+extension TriggerSourceHealth {
     var displayTitle: String {
         switch self {
         case .disconnected: return L10n.string("Disconnected")
@@ -858,6 +1047,7 @@ private extension TriggerSourceHealth {
         case .backingOff: return L10n.string("Backing off")
         case .authenticationRequired: return L10n.string("Authentication required")
         case .failed: return L10n.string("Failed")
+        case .changed: return L10n.string("Changed since approval")
         }
     }
 }

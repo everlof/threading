@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingUsage
 
 /// A value-only description of one provider transcript. Filesystem authority remains in this
 /// host-side snapshot; neither the FTS database nor a search result persists its absolute URL.

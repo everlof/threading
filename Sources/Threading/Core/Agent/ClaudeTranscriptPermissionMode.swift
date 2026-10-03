@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingUsage
 
 // MARK: - Claude Transcript Permission Mode
 

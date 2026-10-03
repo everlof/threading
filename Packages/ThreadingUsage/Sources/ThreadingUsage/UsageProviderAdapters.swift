@@ -1,9 +1,9 @@
 import Foundation
 
-enum UsageTranscriptAdapterFailure: Error, Equatable, LocalizedError {
+public enum UsageTranscriptAdapterFailure: Error, Equatable, LocalizedError {
     case unreadableRecord(runtimeID: String, line: Int)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .unreadableRecord(let runtimeID, let line):
             return "An unreadable \(runtimeID) usage record was found at line \(line)"
@@ -15,8 +15,8 @@ enum UsageTranscriptAdapterFailure: Error, Equatable, LocalizedError {
 
 /// Claude's JSONL usage adapter. It emits one record per assistant response and leaves global
 /// deduplication to `UsageLedgerBuilder`, where cache hits and newly parsed files meet.
-enum ClaudeUsageAdapter {
-    static func records(
+public enum ClaudeUsageAdapter {
+    public static func records(
         inTranscriptAt url: URL,
         accountID: String,
         accountName: String
@@ -29,7 +29,7 @@ enum ClaudeUsageAdapter {
 
         try JSONLReader.forEachLineStrict(at: url, limit: .max) { line in
             lineNumber += 1
-            guard TranscriptUsageIndex.contains(marker, in: line) else { return true }
+            guard UsageLineMarker.contains(marker, in: line) else { return true }
 
             guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any]
             else { throw unreadable(lineNumber) }
@@ -98,7 +98,7 @@ enum ClaudeUsageAdapter {
 
     private static func parentSessionID(of transcript: URL) -> String? {
         let directory = transcript.deletingLastPathComponent()
-        guard directory.lastPathComponent == AgentDefaults.claudeSubagentsSubdirectory else {
+        guard directory.lastPathComponent == UsageAdapterDefaults.claudeSubagentsSubdirectory else {
             return nil
         }
         let parent = directory.deletingLastPathComponent().lastPathComponent
@@ -106,7 +106,7 @@ enum ClaudeUsageAdapter {
     }
 
     private static func unreadable(_ line: Int) -> UsageTranscriptAdapterFailure {
-        .unreadableRecord(runtimeID: AgentKind.claude.rawValue, line: line)
+        .unreadableRecord(runtimeID: UsageRuntime.claude.rawValue, line: line)
     }
 }
 
@@ -115,8 +115,8 @@ enum ClaudeUsageAdapter {
 /// Codex rollouts are stateful: session metadata supplies the directory, turn context supplies
 /// the active model, and later `token_count` records carry one response's usage. Input includes
 /// cached input on this wire, so the adapter normalizes it before returning.
-enum CodexUsageAdapter {
-    static func records(
+public enum CodexUsageAdapter {
+    public static func records(
         inRolloutAt url: URL,
         accountID: String,
         accountName: String
@@ -135,7 +135,7 @@ enum CodexUsageAdapter {
 
         try JSONLReader.forEachLineStrict(at: url, limit: .max) { line in
             lineNumber += 1
-            guard markers.contains(where: { TranscriptUsageIndex.contains($0, in: line) }) else {
+            guard markers.contains(where: { UsageLineMarker.contains($0, in: line) }) else {
                 return true
             }
             guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
@@ -262,16 +262,16 @@ enum CodexUsageAdapter {
         return crossedChildBoundary ? afterBoundary : beforeBoundary
     }
 
-    static func rollouts(inAccountAt configPath: String) -> [URL] {
+    public static func rollouts(inAccountAt configPath: String) -> [URL] {
         let sessions = URL(fileURLWithPath: configPath)
-            .appendingPathComponent(CodexBackfillDefaults.sessionsDirectory)
+            .appendingPathComponent(UsageAdapterDefaults.codexSessionsDirectory)
         guard let walker = FileManager.default.enumerator(
             at: sessions,
             includingPropertiesForKeys: nil
         ) else { return [] }
 
         return (walker.allObjects as? [URL] ?? [])
-            .filter { $0.pathExtension == AgentDefaults.transcriptExtension }
+            .filter { $0.pathExtension == UsageAdapterDefaults.transcriptExtension }
     }
 
     private enum CodexMarkers {
@@ -284,7 +284,7 @@ enum CodexUsageAdapter {
     }
 
     private static func unreadable(_ line: Int) -> UsageTranscriptAdapterFailure {
-        .unreadableRecord(runtimeID: AgentKind.codex.rawValue, line: line)
+        .unreadableRecord(runtimeID: UsageRuntime.codex.rawValue, line: line)
     }
 }
 
@@ -292,8 +292,8 @@ enum CodexUsageAdapter {
 
 /// Reads the supported OpenCode export shape. OpenCode owns the runtime while `providerID`
 /// identifies the biller, so OpenRouter and direct-provider routes remain distinct series.
-enum OpenCodeUsageAdapter {
-    enum Failure: Error, Equatable {
+public enum OpenCodeUsageAdapter {
+    public enum Failure: Error, Equatable {
         case unfamiliarExport
         /// The export was the shape this adapter knows, but one of its messages could not be
         /// read — it was not an object, or one of its token counts is a number outside `Int64` —
@@ -320,7 +320,7 @@ enum OpenCodeUsageAdapter {
     ///
     /// A per-message skip *is* still made for a message that is readable and simply not a
     /// billable assistant turn — that is the export saying so, not this reader failing to read.
-    static func records(
+    public static func records(
         fromExport data: Data,
         accountID: String = "opencode",
         accountName: String = "OpenCode"
@@ -410,8 +410,8 @@ enum OpenCodeUsageAdapter {
 /// deliberate: the Usage page includes Grok as partial coverage without manufacturing token
 /// totals from characters. If the CLI begins exporting authoritative usage, its adapter belongs
 /// behind this seam and no shared model or view changes.
-enum GrokUsageAdapter {
-    static let coverageDetail = "Grok reports live context occupancy but no historical token bill."
+public enum GrokUsageAdapter {
+    public static let coverageDetail = "Grok reports live context occupancy but no historical token bill."
 }
 
 // MARK: - Shared Wire Numbers

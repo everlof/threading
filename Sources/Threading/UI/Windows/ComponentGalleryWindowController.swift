@@ -2,6 +2,7 @@ import AppKit
 import ImageIO
 import ThreadingExtensionKit
 import ThinkingOrbs
+import ThreadingUsage
 
 /// A live catalogue of the application's design-system components.
 ///
@@ -206,6 +207,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedScrollView",
         "ThemedScrubber",
         "ThemedSegmentedControl",
+        "ThemedLedgerTableView",
         "ThemedSpinner",
         "ThemedSplitView",
         "ThemedStatusReceiptButton",
@@ -976,6 +978,14 @@ final class ComponentGalleryViewController: NSViewController {
                     segmentedStory
                 ),
                 story(
+                    "ThemedLedgerTableView",
+                    "A ledger of measured columns in tabular figures under headings: a remote "
+                        + "worker's spend by day. A partial receipt is drawn in the warning role and "
+                        + "says why when spoken. Past its visible rows it scrolls and hands an "
+                        + "ended flick back to the page.",
+                    makeLedgerTableStory()
+                ),
+                story(
                     "ModelEffortPickerViewController & ModelEffortMatrixControl",
                     "A provider-sized model-by-effort catalogue in its bounded shipping body. "
                         + "Click a valid combination or use the arrow keys and Return; unavailable "
@@ -1076,6 +1086,28 @@ final class ComponentGalleryViewController: NSViewController {
     /// row's edges are what it demonstrates, and a row sized to its contents has no gap to hold.
     private enum ControlRowStory {
         static let width: CGFloat = 460
+    }
+
+    private func makeLedgerTableStory() -> NSView {
+        let ledger = ThemedLedgerTableView()
+        let days = ["2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05"]
+        ledger.show(
+            columns: [
+                .init(title: "Day", width: Design.Size.readableWidth / 4, alignment: .leading),
+                .init(title: "Tasks", width: Design.Size.readableWidth / 8),
+                .init(title: "Tokens", width: Design.Size.readableWidth / 6),
+                .init(title: "Cost", width: Design.Size.readableWidth / 6)
+            ],
+            rows: days.enumerated().map { index, day in
+                ThemedLedgerTableView.Row(
+                    values: [day, "\(index + 2)", "\((index + 3) * 41_200)", String(format: "$%.2f", Double(index + 3) * 0.61)],
+                    warningColumns: index == 3 ? [2] : [],
+                    accessibilityDetail: index == 3 ? "One receipt is partial: a transcript could not be read." : nil
+                )
+            },
+            accessibilityLabel: "Worker spend by day"
+        )
+        return ledger
     }
 
     private func makeModelEffortPickerStory() -> NSView {

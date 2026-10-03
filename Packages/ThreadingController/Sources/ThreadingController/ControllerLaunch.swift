@@ -9,12 +9,14 @@ public struct ControllerLaunchSpec: Codable, Equatable, Sendable {
     public let directory: String
     public let recipients: [String]
     public let destination: String
+    /// Where the runtime's transcript is, so a receipt can be written when the process stops.
+    public let usage: ControllerUsageSource?
 
     public init(socketPath: String, executable: String, arguments: [String], environment: [String: String],
-                directory: String, recipients: [String], destination: String) {
+                directory: String, recipients: [String], destination: String, usage: ControllerUsageSource? = nil) {
         self.socketPath = socketPath; self.executable = executable; self.arguments = arguments
         self.environment = environment; self.directory = directory
-        self.recipients = recipients; self.destination = destination
+        self.recipients = recipients; self.destination = destination; self.usage = usage
     }
 
     func validate() throws {
@@ -37,6 +39,7 @@ public struct ControllerLaunchSpec: Codable, Equatable, Sendable {
         }
         for recipient in recipients { try Limits.recipient(recipient) }
         try Limits.text(destination, field: "destination", maximum: 256)
+        try usage?.validate()
     }
 }
 
@@ -147,6 +150,9 @@ extension ControllerStore {
             var value = try launch(id)
             if value.state == .stopped { return value }
             value.state = .stopped; value.exitStatus = exitStatus
+            if value.spec.usage != nil {
+                try db.run("INSERT OR IGNORE INTO usage_pending(execution) VALUES(?)", [.text(id.description)])
+            }
             let execution: ControllerExecution = try required("execution", id.description)
             if execution.state == .running { _ = try interrupt(executionID: id) }
             try saveLaunch(value)

@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import ThreadingRemoteKit
+import ThreadingUsage
 
 /// Maps the app's bounded semantic projection onto the public wire contract. This boundary owns
 /// the tighter relay budgets; it never receives raw transcript cells or constructs iOS views.
@@ -110,8 +111,10 @@ enum RemoteUsageBridge {
             activeDayCount: source.activeDayCount,
             costMetric: metric(source.costMetric),
             tokenMetric: metric(source.tokenMetric),
-            breakdowns: UsageDashboardBreakdownKind.allCases.map { kind in
-                breakdown(source.breakdown(kind), kind: kind)
+            // The Agents breakdown is Mac-only for now: its worker rows come from this Mac's
+            // owner connections to hosts, which the phone's wire does not describe.
+            breakdowns: UsageDashboardBreakdownKind.allCases.compactMap { kind in
+                remoteBreakdownKind(kind).map { breakdown(source.breakdown(kind), kind: $0) }
             }
         )
     }
@@ -149,12 +152,12 @@ enum RemoteUsageBridge {
 
     private nonisolated static func breakdown(
         _ source: UsageDashboardBreakdownProjection,
-        kind: UsageDashboardBreakdownKind
+        kind: RemoteUsageBreakdownKindDTO
     ) -> RemoteUsageBreakdownDTO {
         let retained = source.rows.prefix(maximumBreakdownRowsPerKind)
         let additionallyOmitted = source.rows.dropFirst(retained.count)
         return RemoteUsageBreakdownDTO(
-            kind: remoteBreakdownKind(kind),
+            kind: kind,
             rows: retained.map {
                 RemoteUsageBreakdownRowDTO(
                     title: $0.title,
@@ -175,12 +178,13 @@ enum RemoteUsageBridge {
 
     private nonisolated static func remoteBreakdownKind(
         _ kind: UsageDashboardBreakdownKind
-    ) -> RemoteUsageBreakdownKindDTO {
+    ) -> RemoteUsageBreakdownKindDTO? {
         switch kind {
         case .models: return .models
         case .projects: return .projects
         case .accounts: return .accounts
         case .providers: return .providers
+        case .agents: return nil
         }
     }
 

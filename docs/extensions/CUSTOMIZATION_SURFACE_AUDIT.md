@@ -47,6 +47,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Native and mobile work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence, mobile three-chat and Mac five-chat preview/disclosure (the Mac's staged by `SidebarChatPreview`, published to navigators only as the `chat-preview` option), hidden activity counts and scroll return | Host-only |
 | Archived conversations browser | — | host-only navigation/filter around existing additive Archived settings slots | archive chronology/search, provider lifecycle truth, Restore/Delete authority, bounded virtual list | Host-only |
 | Automations editor and remote controller page | — | host-only | execution owner, schedule/revision identity, permissions, SSH trust, activation, archive eligibility and durable run results; themes customize shared controls | Host-only |
+| Usage Agents breakdown and remote worker usage sheet | — | host-only | attribution (host billing, no double counting between transcript ledger and controller cells), host freshness/staleness and unread-is-not-zero, bounded paging, receipt coverage, budget revision and the always-asked `changeWorkerBudget` confirmation; themes customize the shared ledger table and controls | Host-only |
 | Remote hosts settings (machine list, state, setup) | — | host-only | ssh destination validity and trust (the person's own `known_hosts`), component digests and download, host preparation/upgrade truth, which projects a removal moves back to this Mac | Host-only |
 | One-year sign-in card (Agents & Accounts) | — | host-only | token custody in Threading's Keychain item, format validation, delivery to the one login's processes through their environment only, the always-asked store confirmation, the visible models-only caveat, expiry status and Reset Everything erasure | Host-only |
 | Chat checkout move controls (session menu, Tools policy, agent approval) | — | host-only | canonical checkout identity, durable ownership transaction, turn/input fence, authority audit and runtime resume | Host-only |
@@ -92,6 +93,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Attachment preview body | `attachments.preview@1` | exclusive preview-body replacement, offered rather than owned | turn grouping/collapse and chronology, filter, selection, Open in, reveal, delete, pruning, the too-large refusal, editable annotation receipt/revisions and the inspector rail | Implemented |
 | Background sessions (quit choice, launch band, Advanced list) | — | host-only | which children the daemon holds and their identities, the quit answer and what it stops, registration and its removal rule, the stop's attach-then-kill, bounded survey and viewport | Host-only |
 | Trigger center, source connection and activation approval | — | host-only | credential custody, exact immutable revision, project and permission authority, daemon health, queue/run truth and pause/activate actions | Host-only |
+| Probe sources: rows, editor, secrets sheet and probe approval sheet | — | host-only | the approved SHA-256 of exactly what runs unsandboxed, executable/script paths, environment keys, Keychain secret custody, schedule, changed-since-approval health and manual-poll authority | Host-only |
 | Command-line tool installation (Advanced row) | — | host-only | which tools are public, the shim directory and its refresh, what in a user's `~/.local/bin` may be written or removed, the login-shell `PATH` reading, the refusal to edit a shell profile | Host-only |
 | Managed iPhone tooling installation (Advanced row) | — | host-only | explicit network consent, PyPI source and package identity, the app-owned environment, version validation, atomic activation and rollback, stale-version cleanup, and which bundled feature receives the executable path | Host-only |
 | Command-line tools on launched `PATH` (Advanced switch) | — | host-only | the environment composed for every shell and agent, prepend-never-substitute, the absent-`PATH` refusal | Host-only |
@@ -133,6 +135,17 @@ silently started on an expired default — permissions, time limit, after-succes
 revision identity, and the full instructions in the sheet's single scrolling column. Event,
 source and conditions appear only for event rules. Themes style the labels and scroller; no
 extension can reword, reorder or omit a fact.
+
+The probe approval sheet (`TriggerProbePresentation.approvalRequest`) reuses the same view as the
+receipt for a different authority: running a person's own program unsandboxed. It states the
+executable, script, the whole SHA-256 the daemon will check before every run, the schedule,
+arguments, environment keys (never values), secret names with any not yet stored flagged, the
+timeout and event bound, the revision, and a fixed "Runs unsandboxed" warning. Probe rows show
+approval and daemon health — including "Changed since approval" — and offer Run now only for an
+approved probe, and Delete (a confirmed tombstone that keeps history). Agents reach probes only
+through `manage_automation`'s `draftSource`, which writes a paused, unapproved draft; there is no
+tool, extension slot or theme seam that approves or deletes one. The editor's schedule controls
+are the automation editor's (`AutomationScheduleFields`), not a second component.
 
 The two command-line-tool surfaces remain host-only for the same reason as the rows above them,
 one step sharper: both write outside anything Threading owns. One creates and deletes a symlink in
@@ -629,6 +642,16 @@ spending, so Threading owns its persistence, the owner-only remote mutation, the
 row states, the send-time substitution and its receipt, accessibility and dismissal. Themes style
 the native rows; no extension can read or write the list, replace the editor or grant itself a
 login. A reference to a login that is no longer discovered renders as unavailable and is skipped.
+
+The session Info panel's **Mail** section is host-only presentation over the session's mailbox.
+Its entity is one session's mail address. Threading owns addressing, admission, storage,
+acknowledgement, cross-host sync and every notice; the section shows party, host and state from a
+bounded read and never message text. It is built from `SessionInfoRowView` and `PanelListView`,
+reuses the panel's on-screen-only poll, and introduces no extension slot, data or authority. Its
+grant, revoke and contact forms (`SessionMailAccessForm`) are host-only authorization UI: each is
+an always-asked `ConfirmationAlert` (`changeMailAccess`) whose accessory is `ThemedTextField` and
+`ThemedPopUp`; Threading owns validation, the store written and revocation, and no extension can
+read, replace or pre-fill them.
 
 Before adding a component:
 

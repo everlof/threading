@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingUsage
 
 /// A local surface asked the retained Usage page to reveal Limit history for one login.
 struct UsageFocusRequested: AppEvent {
@@ -27,6 +28,9 @@ enum UsageDashboardBreakdownKind: Int, CaseIterable, Sendable {
     case projects
     case accounts
     case providers
+    /// Who spent it: this Mac's sessions by where they ran, and each connected host's workers
+    /// from that host's own ledger. See `AgentUsageProjector`.
+    case agents
 }
 
 struct UsageDashboardBreakdownRowProjection: Equatable, Sendable {
@@ -41,6 +45,15 @@ struct UsageDashboardBreakdownRowProjection: Equatable, Sendable {
     /// second cost axis, and a row that cannot name one runtime honestly wears none rather
     /// than the first one it saw.
     var runtimeID: String?
+    /// Where the agent ran, for rows that are about an agent: "This Mac" or a host's name.
+    var location: String? = nil
+    /// Set only when the figures are a host's last summary rather than a current one: when that
+    /// summary was read. A stale row keeps its numbers; it is never shown as zero.
+    var staleSince: Date? = nil
+    /// The host's summary stopped at its page budget, so older days in the range are missing.
+    var isPartial = false
+    /// Nothing is known — a host never read. The figures are absent, not zero.
+    var isUnmeasured = false
 }
 
 struct UsageDashboardBreakdownProjection: Equatable, Sendable {
@@ -292,6 +305,7 @@ struct UsageLimitDashboardIndexProjection: Equatable, Sendable {
 enum UsageDashboardProjector {
     nonisolated static func overview(
         report: TranscriptUsageReport,
+        agents: [RemoteAgentUsageHostState] = [],
         now: Date = Date(),
         calendar: Calendar = .autoupdatingCurrent
     ) -> UsageDashboardOverviewProjection? {
@@ -300,7 +314,7 @@ enum UsageDashboardProjector {
         for days in UsageDashboardProjectionDefaults.overviewRanges {
             guard !Task.isCancelled else { return nil }
             let selection = report.selection(days: days, now: now, calendar: calendar)
-            ranges.append(overviewRange(selection, calendar: calendar))
+            ranges.append(overviewRange(selection, agents: agents, now: now, calendar: calendar))
         }
         return UsageDashboardOverviewProjection(
             ranges: ranges,
@@ -505,6 +519,8 @@ enum UsageDashboardProjector {
 
     private nonisolated static func overviewRange(
         _ selection: UsageReportSelection,
+        agents: [RemoteAgentUsageHostState],
+        now: Date,
         calendar: Calendar
     ) -> UsageDashboardRangeProjection {
         // `runtimeID` follows the rule stated on `UsageDashboardBreakdownRowProjection`: a row
@@ -563,7 +579,8 @@ enum UsageDashboardProjector {
                 .models: models,
                 .projects: projects,
                 .accounts: accounts,
-                .providers: providers
+                .providers: providers,
+                .agents: AgentUsageProjector.agents(selection: selection, hosts: agents, now: now)
             ]
         )
     }
@@ -642,7 +659,7 @@ enum UsageDashboardProjector {
         return UsageDashboardMetricProjection(providers: providers, chartSeries: chartSeries)
     }
 
-    private nonisolated static func cappedBreakdown(
+    nonisolated static func cappedBreakdown(
         _ rows: [UsageDashboardBreakdownRowProjection]
     ) -> UsageDashboardBreakdownProjection {
         let maximum = UsageDashboardProjectionDefaults.maximumBreakdownRows

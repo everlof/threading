@@ -460,3 +460,166 @@ admission reject archived workers. Schema v6 adds an index to bound the active-s
 These remain host-owned operations. Consumer UI may present requests, forms, history and
 permissions; consumer authentication determines the caller. Neither a message nor a form
 submission becomes a recipe, shell command, recipient attestation or permission grant.
+
+## Agent mail (schema v7)
+
+Durable, addressed messages between agents, on this host and through peers on others. The
+proposal and its reasoning are [`agent-mail.md`](../feature-drafts/agent-mail.md); this section is
+what the controller implements. `ControllerMail.swift` holds the model and store operations,
+`ControllerMailTransport.swift` the wire protocol, `ControllerMailSync` (runtime) the client half.
+
+- **Identity.** Each store mints a stable `HostID` once (`host`, renamed with `host-set-name`).
+  An address is `<host>/worker/<uuid>` or `<host>/session/<uuid>`; the host part is where the
+  agent's process runs. Session mailboxes are registered (`mail-register`); workers need none.
+- **Sending is storing.** `mail_send` succeeds once the message is in a store: the recipient's
+  inbox on this host, or the outbound queue (`mail_outbound`, one row per message per peer host)
+  for another. Busy, idle and not-running recipients differ only in when they read it. Refusals are
+  authority (no grant, an interrupt the grant does not allow), bounds and unknown addresses.
+- **The sender is authenticated.** An agent's sender is its execution's worker; the owner CLI
+  (`mail-send`) attests a local mailbox; a peer may vouch only for senders on its own host, and
+  only for recipients on this one, so nothing is relayed.
+- **Grants live on the recipient's host** (`mail-grant-set RECIPIENT PATTERN REV mode priority`):
+  exact sender, `<host>/*` or `*`, most specific first, revisioned, a `none` mode revokes. Modes
+  are ordered `notify < wake < ask`. A reply to mail the recipient itself sent needs no grant.
+- **Reading is not acknowledging.** `mail_inbox` reads open mail through the `mail_open` partial
+  index with a host-vouched header line per message; `mail_ack` records the acknowledging
+  execution. An unacknowledged `interrupt` refuses `work_finish` in the finish transaction.
+- **Chains bound loops.** A message continues the chain of what it replies to, or of the mail its
+  execution last acknowledged, so omitting `reply_to` does not escape the depth limit (4). A
+  session mailbox has no execution, so its acknowledgements carry into its sends until a person
+  starts a new turn: the Mac resets the context (`mail-context-reset`) on a prompt a person wrote
+  — a native chat's composer, or a terminal prompt that is neither the mail notice
+  (`MailNoticeWords.prefix`) nor a cross-session delivery. Stop-hook continuations, typed notices,
+  deliveries and wakes keep agents going unattended, and the shared chain is what bounds them;
+  a person's next prompt always starts fresh. (Tried first and rejected: keeping the context
+  forever, consuming it on the next send, a time window, and reply-only chains — each either
+  refused legitimate mail or let an unattended exchange escape its bound.) Owner admission is the
+  same-project default, never an override: a revocation for the sender stands. A reply to a forwarded
+  copy carries `answeringFor` — the address the original reached — which only the same mailbox
+  id on another host may claim, so a mailbox that moved still answers what was asked of it; a
+  mailbox that moves onto the asker's own host replaces the asker's sent copy rather than
+  colliding with it. Wake admission keys on the newest open message that may wake the worker
+  and whose chain is within budget, not on whichever message arrived last. Fuses
+  that need no reading: 50 messages per chain on a host, 20 sends a minute per sender, 1,000 open
+  messages per inbox. Spend limits belong to admission ([usage ledger](../feature-drafts/agent-usage-ledger.md)).
+- **Notices, not bodies.** `threading-controller agent-notice post-tool-use|stop|session-start` is
+  the hook command a recipe installs. It prints one host-authored line naming counts, senders and
+  hosts as hook JSON (`hookSpecificOutput.additionalContext`, or `decision: block` once per
+  message at a stop) and always exits 0. Measured on Codex 0.160.0 and the Claude Code hook
+  contract; a model may ignore a notice, which delays mail but cannot lose it.
+- **Ask.** `mail_ask` sends a question as mail and yields the work in one transaction; the
+  question's recipient is `agent:<address>`. The reply (`reply_to` that message) answers it on the
+  asker's host and requeues the work. A question the recipient's host refuses is answered by the
+  asker's host with the refusal, so the work continues instead of waiting forever.
+- **Wake.** Mail admitted under a `wake` or `ask` grant may start an idle worker: the supervisor
+  admits one `event` task per worker with no open work, keyed by the newest open message, so a
+  restart cannot duplicate it and unread mail cannot loop. The owner still decides through
+  `worker-set-sources … event`.
+- **Transport.** `mail-rpc --peer HOST` is the forced command of a per-peer SSH key: one JSON
+  request (≤ 2 MiB) — `push` a batch (≤ 100 messages / 1 MiB) or `pull` after a cursor that
+  acknowledges what the caller already stored, with the caller's refusals of that page. Every
+  response names the answering host, and the caller refuses a response from any other. A pulled
+  page and the pull cursor commit together. The supervisor runs one sync pass every 15 s beside
+  launch supervision; `mail-sync` runs one pass by hand. Peers are owner-authored (`mail-peer-set`
+  with the transport argv), and only peers with a transport are initiated to.
+
+- **Moving a mailbox** (`ControllerMailForward.swift`). A forward is owner-written and
+  revisioned, keyed by the old address (`mail-forward-set OLD NEW REV`, `mail-forward-clear`).
+  On the old store it forwards mail still arriving for the old address once — after the old
+  address's own admission — re-addressed in place or queued to the new host as `moved`. On the
+  new store the same record is the owner's consent: a copy carrying `forwardedFrom` from that
+  host is admitted without a sender-host match or grant. A copy that was forwarded once is never
+  forwarded again. `mail-move OLD NEW` moves unacknowledged mail in one transaction with ids
+  kept, so the receiver's idempotence makes a retry harmless; a mailbox moved away and back
+  replaces the `moved` copy it left under the same id.
+
+Validation: `ControllerMailTests` (11 core cases: grants and revocation, busy recipients, notices,
+interrupts and finish, chain depth, ask/reply, wake coalescing, rate fuse, sessions, push/pull
+idempotence and spoofing, refused questions, v6 upgrade) and `scripts/tests/test_controller_mail.py`
+(real ptyd and two stores: a question crossing hosts wakes the recipient, its reply is pulled and
+the asker continues; a moved session keeps its unread mail and late mail is forwarded once; a busy agent receives the notice through the real hook command and cannot
+finish before acknowledging; unknown peers, forged senders and a transport reaching the wrong host
+are refused).
+
+## Trigger sources (schema v8)
+
+Waking a worker on facts rather than on a model turn: **source → match → admit → run**. The
+proposal is [`portable-trigger-sources.md`](../feature-drafts/portable-trigger-sources.md);
+`TriggerProbe.swift` (contract, runner, SHA-256) is shared with the Mac's `threading-triggerd`,
+`ControllerSources.swift` owns records, `ControllerSourcePoller` (runtime) runs a poll.
+
+- **A source is any executable on the probe contract**: one JSON request on stdin
+  (`cursor`, `limit`), JSON lines of events and exactly one final cursor on stdout, exit 0 / 75
+  (back off) / 77 (authentication needed). It runs with exactly the configured environment
+  (nothing inherited) in a private per-source directory, in its own process group, which the host
+  kills on timeout, on a report over 1 MiB and when the probe exits. Invalid output fails the poll
+  and commits no cursor. Examples ship in `Packages/ThreadingController/Examples/Probes`.
+- **Approval pins content.** `source-configure` always pauses and clears approval; the owner
+  approves the SHA-256 it was shown (`source-approve ID REV HASH`), which must still match the
+  files on disk. The poller hashes before running anything: an edited executable or script is
+  never run, and the source shows `changed` until approved again. A probe is not sandboxed — it
+  has this account's authority — which is why approval names the exact content.
+- **Secrets by name.** A spec maps environment variables to secret names; `secret-set` writes an
+  owner-only file beside the database that no command reads back, resolved only into the probe's
+  environment at poll time.
+- **Match and admit without a model.** A trigger is a typed AND rule over one source's event
+  fields (`equals`, `notEquals`, `prefix`, `notPrefix`, `contains`, `exists`, `absent`; a missing
+  field matches only `absent`). A match enqueues `event` work for the trigger's worker with a
+  host-authored instruction; the event (fields and bounded evidence) travels as the work's
+  immutable request, never as configuration. Enabling a trigger needs the worker to accept `event`
+  admission. Events are stored once per (id, revision), so redelivery admits nothing twice, and
+  each event keeps a receipt per trigger (`queued`, `notMatched`, `refused` with the reason).
+- **When it polls.** An interval (60 s – 1 day) or a calendar `AutomationSchedule` — so "every
+  ten minutes, check the mailbox" spends nothing until mail arrives. Failures back off
+  exponentially to an hour without moving the cursor. The deadline is claimed before a poll runs,
+  so a crash waits one interval instead of polling in a loop. The resident supervisor runs at most
+  two polls at once beside launch supervision, from a due-time index (`source_due`).
+- **Mail is the built-in source.** Mail admitted under a `wake` grant is the controller's own
+  source with a fixed trigger (one coalesced inbox task per idle worker), described under Agent
+  mail above; it needs no probe.
+
+Validation: `ControllerSourcesTests` (SHA-256 vectors, output parsing, a real probe's environment,
+exit codes, the timeout killing a probe's child, output flood, approval/enable/match/dedupe/
+backoff/changed) and `scripts/tests/test_controller_sources.py` (a resident supervisor polls the
+shipped `file_drop.py`, admits one `event` task for a matching file, ignores a redelivery, refuses
+to run an edited probe; a secret reaches a probe by name and its absence fails the poll with the
+cursor kept).
+
+## Usage receipts and budgets (schema v9)
+
+What each agent spent, kept on the host that ran it. The proposal is
+[`agent-usage-ledger.md`](../feature-drafts/agent-usage-ledger.md); `ControllerUsage.swift` owns
+receipts, daily cells and budgets, `ControllerUsageCollector` (runtime) reads transcripts.
+
+- **One parser.** Transcripts are read through `Packages/ThreadingUsage` — the same Claude and
+  Codex adapters, strict reader and pricing catalogue as the Mac's Usage page — so a worker's
+  spend and a Mac session's spend are computed by identical code.
+- **A receipt per execution, owed from the confirmed stop.** A recipe names its transcript with
+  `usage: {runtime, home, account}`. Confirming a launch stopped records it in `usage_pending` in
+  the same transaction; the supervisor writes receipts beside supervision (two at a time), and
+  `usage-collect` writes one by hand. Attribution — worker, task, the mail chain the execution
+  acted on, the trigger whose event admitted it — comes from controller records only.
+- **Finding the transcript.** Claude: `<home>/projects/*/<execution>.jsonl` plus its
+  `subagents/`, exact because the recipe passes the execution id as the session id. Codex names
+  its own session, so the rollout must be the only one in the launch's date folders written since
+  it started whose recorded working directory is the recipe's; anything else is `unavailable`
+  with the reason, never guessed.
+- **Refuse, don't undercount.** An unreadable transcript makes the receipt `partial` or `failed`;
+  a missing one `unavailable`. Cells are per model with five token categories, requests and cost
+  (provider-reported or catalogue-priced; unpriced tokens counted separately), bounded to 16
+  models with an "other models" cell that keeps totals exact.
+- **Reads are O(days × cells).** Each receipt adds to `usage_daily` (day, worker, account, model)
+  in its transaction; `usage-summary FROM THROUGH` pages those cells, `usage-receipts WORKER`
+  pages receipts. Both go through `owner-rpc` for the Mac's Remote page and Rindabox.
+- **Budgets act at admission, in budget tokens** (uncached input + cache writes + output; cached
+  reads excluded because a long conversation rereads its context every turn). A worker's daily
+  budget (`worker-budget-set`) stops the supervisor starting new executions for it; a mail
+  grant's chain budget stops that chain's mail from waking its recipient, while still delivering
+  it. Nothing running is ever stopped by a budget. Chain totals are those of executions on this
+  host. A fraction-of-account-window ceiling needs usage readings this host does not take yet.
+
+Validation: `ControllerUsageTests` (receipt idempotence and daily cells, a stop that owes nothing,
+the daily budget at admission, a chain past its budget delivering without waking) and
+`scripts/tests/test_controller_usage.py` (an agent under ptyd writes a Claude transcript; the
+resident supervisor writes a complete, priced, attributed receipt and then holds a worker past its
+budget).

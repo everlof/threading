@@ -1113,6 +1113,15 @@ final class AgentSessionViewController: NSViewController {
         var survey: RemoteHoldingsSurvey = .notAsked
         /// The launch's settings and MCP configuration, encoded off the main actor once composed.
         var encoding: RemoteLaunchEncoding = .notStarted
+        /// The session's host-local mailbox, registered on the host's controller before launch.
+        var mailbox: RemoteMailboxResolution = .notStarted
+    }
+
+    private enum RemoteMailboxResolution {
+        case notStarted
+        case provisioning
+        /// Nil: the host has no controller, or it did not answer — the Mac keeps the mailbox.
+        case resolved(RemoteSessionMailboxes.Binding?)
     }
 
     private enum RemoteLaunchEncoding {
@@ -1170,6 +1179,31 @@ final class AgentSessionViewController: NSViewController {
                 knownCause: "remoteHost.\(failure.token)"
             ))
         case .ready(let context):
+            // Before the survey, so a reattach learns where its mailbox lives too.
+            switch remote.mailbox {
+            case .notStarted:
+                guard MailNoticeHook.isWanted(for: projectStore.session(withID: sessionID)?.kind ?? .claude),
+                      let endpoint = RemoteSessionMailboxes.endpoint(for: sessionID, projects: projectStore) else {
+                    pendingRemoteLaunch?.mailbox = .resolved(nil)
+                    return resolveRemoteLaunch(pendingRemoteLaunch ?? remote)
+                }
+                pendingRemoteLaunch?.mailbox = .provisioning
+                let title = projectStore.session(withID: sessionID)?.displayTitle ?? ""
+                let sessionID = sessionID
+                Task { @MainActor [weak self] in
+                    let mailboxes = RemoteSessionMailboxes.shared
+                    let binding = await mailboxes.provision(sessionID, name: title, endpoint: endpoint)
+                    if let binding { mailboxes.admitSiblings(of: sessionID, address: binding.address) }
+                    guard let self, self.pendingRemoteLaunch != nil else { return }
+                    self.pendingRemoteLaunch?.mailbox = .resolved(binding)
+                    self.startIfTerminalIsSized()
+                }
+                return .waiting
+            case .provisioning:
+                return .waiting
+            case .resolved:
+                break
+            }
             switch remote.survey {
             case .notAsked:
                 pendingRemoteLaunch?.survey = .asking
@@ -1224,7 +1258,11 @@ final class AgentSessionViewController: NSViewController {
                     in: project,
                     host: remote.host,
                     context: context,
-                    initialPrompt: remote.initialPrompt
+                    initialPrompt: remote.initialPrompt,
+                    mailbox: {
+                        if case .resolved(let binding) = remote.mailbox { return binding }
+                        return nil
+                    }()
                 )
                 pendingRemoteLaunch?.encoding = .encoding
                 DispatchQueue.global(qos: .userInitiated).async {

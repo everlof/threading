@@ -118,6 +118,25 @@ and **Assess, then fix if straightforward**. Local edits use a clean project che
 isolated worktree. Automation permission does not include pushing, deployment or source write-back.
 **Sources** connects the Sonda review-required feed with a scoped API key held in Keychain.
 
+**Probe sources** on the same page run your own programs on a schedule — an IMAP check, a feed
+reader, a script that watches a folder — without starting a model. A probe reads
+`{"cursor": …, "limit": …}` on stdin and prints one JSON line per event and then one cursor line
+(the contract is in `docs/feature-drafts/portable-trigger-sources.md`). **New Probe…** asks for its
+executable, an optional script (which becomes the first argument), further arguments, environment,
+secret names and when it runs — the same **Repeat** choices as an automation: daily, selected
+weekdays or weekly at a time in a time zone, or a fixed interval. Saving leaves it paused. **Review & Approve…** shows the exact files,
+their SHA-256, the schedule, environment keys and secret names, and says plainly that the probe
+runs unsandboxed with your account's authority; approving enables it. **Secrets…** stores secret
+values in Keychain — they are handed only to the probe's environment and never shown again.
+**Run now** asks for one poll immediately; **Pause** and **Resume** stop and restart its schedule.
+**Delete…** stops it for good and removes it from the page; the events it reported and the runs
+they started stay in **Activity**, and its files and Keychain secrets are left alone.
+Threading checks the hash before every run: if either file changes, the row says **Changed since
+approval** and nothing runs until you approve the new content. Any edit needs approval again. A
+probe's events arrive as `probe.event` with the fields it reported, so an automation's conditions
+match them like any other source. An agent may write a probe and draft its source through
+**manage_automation**'s `draftSource`, but only you can approve or enable it.
+
 Agents can use **manage_automation** to list, inspect, create, edit, enable, pause, run, delete and
 read results when you ask. Enabling or running always shows you the exact settings first and
 waits for your approval. Changes name the current revision so an old editor or agent cannot
@@ -130,6 +149,15 @@ The same agent tool supports these remote operations once you have connected the
 always uses the paths you saved. **Enable**, **Run now** and **Delete** ask before acting.
 Connecting does not install a controller or start its supervisor. A remote run is archived only after work completes, result delivery is
 confirmed and its process has stopped; its history remains available.
+
+**Agent usage…** on the Remote page opens what that host's workers spent, read from the host's own
+ledger: choose a worker, then **By day**, **By task**, **By trigger**, **By mail chain** or
+**Receipts** over 7, 30 or 90 UTC days. Each receipt says whether its transcript was read
+completely; partial, failed and unavailable receipts are marked, because their spend is missing or
+short. Receipts are read a few hundred at a time — **Read more receipts** continues. **Edit
+budget…** sets the worker's daily budget in tokens (uncached input, cache writes and output; empty
+for no limit) after a confirmation naming the worker, the host and the new limit. At the budget
+the host starts no new executions for that worker; running ones are never stopped.
 
 ### Manager sessions
 
@@ -4506,6 +4534,42 @@ side chat whose parent is still in the sidebar, with its agent idle and this too
 Messages run on the receiving session's own usage. Switch the group off in
 **Settings ▸ Tools ▸ Other sessions** if you would rather sessions stayed strangers.
 
+#### Agent mail
+
+The same group gives every session a **mailbox**. `mail_send` leaves a durable message for a
+sibling in this project — or, through a remote host's controller, for an agent on that host —
+and it succeeds whether the recipient is idle, busy, not running or on a host that is offline
+right now. `mail_inbox` reads what is waiting, `mail_ack` marks what the agent acted on, and
+`mail_directory` lists the session's own address and who it can write to.
+
+A busy agent is never handed the text. It is told, in one line Threading writes, that mail is
+waiting and from whom — after a tool call, before its turn may end, or when it next starts — and
+reads the message itself. A chat that is working gets that line in its visible queue (or, for a
+message marked urgent, added to the turn it is running). `send_to_session` now uses the mailbox
+too: a message to a terminal that is mid-turn, or to a session that is not running, waits in its
+mailbox instead of being refused.
+
+Each session's **Info** panel has a **Mail** section listing what is waiting for it and what it
+sent lately — who, on which host, and whether it was read, handed to its host, or refused —
+never the text. Mail to and from a remote host moves while this Mac is connected to it and its
+controller is set up on the **Remote automations** page.
+
+A session that runs on a remote host keeps its mail **on that host** when the host's controller
+is set up there: it keeps receiving mail and being told about it while your Mac is asleep, and
+the Info panel shows the last reading with its age while the host can't be reached. Without a
+controller its mail stays on this Mac, and the panel says so.
+
+Only you decide who may write. **Grant access…** in the Mail section lets an agent on another
+host — one address, or a whole host as `<host>/*` — leave mail for this chat (**Can write**) or
+also start it when it is not running (**Can write and wake**, which spends its usage); click a
+grant to revoke it. **Add contact…** names an address so the chat sees it in its directory.
+Every change asks first, and agents cannot make them. A chat woken by mail starts in the
+background with a one-line notice — never the message itself; a terminal session is never
+typed into and hears about its mail when it next starts.
+
+Codex users approve Threading's hooks once more after this update: the mail notice adds entries
+to `hooks.json`, and Codex asks again for any changed hook file.
+
 ## Git Review
 
 **View ▸ Git Review** (Cmd+Shift+R) opens a Review tab in the display panel: a native diff
@@ -5744,6 +5808,15 @@ down rather than the table scrolling sideways. Coverage remains visible
 when an agent source is partial or unavailable. Provider-reported cost wins; otherwise a versioned
 exact-model catalog may estimate it. Unmatched tokens remain visibly unpriced, and the page says
 that estimates are not an invoice.
+
+Choose **Agents** in the breakdown menu to see who spent it: this Mac's sessions, sessions that
+ran on a remote host (billed to that host, not to a Mac account), and each worker on every host
+you have connected in **Automations ▸ Remote**, named and placed by host. Workers' figures come
+from the host's own ledger and are not added to this Mac's total, so this table's **Share** is of
+its own rows. Hosts are read in the background when the page opens (at most every five minutes,
+or on **Rebuild**). A host that cannot be reached keeps its last figures, marked *last read …
+ago*; a host never read shows dashes, never zero; *older days not read* means the host had more
+history than one read takes and only the newest days are complete.
 
 Limit History chooses one account/window and shows its current usage, scheduled reset, projection
 when enough history exists, recorded resets and restored pace. A window that cycles too often for

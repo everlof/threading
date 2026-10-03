@@ -71,6 +71,10 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case listSessions
   case sendToSession
   case watchSession
+  case mailSend
+  case mailInbox
+  case mailAck
+  case mailDirectory
   case listAccounts
   case sessionCost
   case resumeSession

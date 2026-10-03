@@ -143,6 +143,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             self?.performScheduledSend(event.id)
         }
 
+        // Mail admitted under a `wake` grant for a dormant chat. Core decides; the window starts.
+        // See `SessionCoordinator+MailWake`.
+        appEvents.observe(MailWakeRequested.self) { [weak self] event in
+            self?.performMailWake(event)
+        }
+
         appEvents.observe(TriggerDispatchDidBecomeReady.self) { [weak self] event in
             self?.performTriggerDispatch(event.dispatch)
         }

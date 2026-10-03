@@ -1,5 +1,6 @@
 import XCTest
 @testable import Threading
+import ThreadingUsage
 
 /// Reading back what a Claude terminal session *ran*, when nothing configured it.
 ///

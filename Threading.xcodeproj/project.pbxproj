@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
         A07000010000000000000001 /* ThreadingController in Frameworks */ = {isa = PBXBuildFile; productRef = A07000010000000000000003 /* ThreadingController */; };
+        A07100010000000000000001 /* ThreadingUsage in Frameworks */ = {isa = PBXBuildFile; productRef = A07100010000000000000003 /* ThreadingUsage */; };
 		7C000008000000000000A005 /* PTYHostCLIControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000008000000000000B005 /* PTYHostCLIControl.swift */; };
 		D7C100010000000000000003 /* ThreadingPTYClient in PTYHost Frameworks */ = {isa = PBXBuildFile; productRef = D7C100010000000000000014 /* ThreadingPTYClient */; };
 		D4F83001A8124C5BA937FE10 /* MobilePairingRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F83001A8124C5BA937FE11 /* MobilePairingRecoveryTests.swift */; };
@@ -73,6 +74,10 @@
 		7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C011 /* ThreadingSimulatorKit */; };
 		7C000006000000000000A001 /* codes.threading.ptyd.plist in Embed Launch Agents */ = {isa = PBXBuildFile; fileRef = 7C000006000000000000B001 /* codes.threading.ptyd.plist */; };
 		7C00000C000000000000A001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B001 /* main.swift */; };
+		7C00000C000000000000A004 /* TriggerProbeSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B005 /* TriggerProbeSources.swift */; };
+		7C00000C000000000000A005 /* TriggerProbeSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B005 /* TriggerProbeSources.swift */; };
+		7C00000C000000000000A006 /* TriggerProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B006 /* TriggerProbe.swift */; };
+		7C00000C000000000000A007 /* AutomationSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B007 /* AutomationSchedule.swift */; };
 		7C00000C000000000000A002 /* threading-triggerd in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B011 /* threading-triggerd */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		7C00000C000000000000A003 /* codes.threading.triggerd.plist in Embed Launch Agents */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B004 /* codes.threading.triggerd.plist */; };
 		89DB8D32FAE049571D22D568 /* threading-extension-helper-network in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 543E83291094AE2E9DCA09FB /* threading-extension-helper-network */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -397,6 +402,9 @@
 		7C000007000000000000B008 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		7C000007000000000000B009 /* threading-simulator-helper.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-simulator-helper.entitlements"; sourceTree = "<group>"; };
 		7C000007000000000000B011 /* threading-simulator-helper */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-simulator-helper"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7C00000C000000000000B006 /* TriggerProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TriggerProbe.swift; path = Packages/ThreadingController/Sources/ThreadingController/TriggerProbe.swift; sourceTree = SOURCE_ROOT; };
+		7C00000C000000000000B007 /* AutomationSchedule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AutomationSchedule.swift; path = Packages/ThreadingDomain/Sources/ThreadingDomain/AutomationSchedule.swift; sourceTree = SOURCE_ROOT; };
+		7C00000C000000000000B005 /* TriggerProbeSources.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TriggerProbeSources.swift; sourceTree = "<group>"; };
 		7C00000C000000000000B001 /* main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		7C00000C000000000000B002 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		7C00000C000000000000B003 /* threading-triggerd.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-triggerd.entitlements"; sourceTree = "<group>"; };
@@ -734,6 +742,7 @@
 				F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */,
 				D0A100010000000000000001 /* ThreadingDomain in Frameworks */,
                 A07000010000000000000001 /* ThreadingController in Frameworks */,
+                A07100010000000000000001 /* ThreadingUsage in Frameworks */,
 				7C000004000000000000000A /* ThreadingPTYHostKit in Frameworks */,
 				D7C100010000000000000001 /* ThreadingPTYClient in Frameworks */,
 				7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */,
@@ -842,6 +851,9 @@
 			isa = PBXGroup;
 			children = (
 				7C00000C000000000000B001 /* main.swift */,
+				7C00000C000000000000B005 /* TriggerProbeSources.swift */,
+				7C00000C000000000000B006 /* TriggerProbe.swift */,
+				7C00000C000000000000B007 /* AutomationSchedule.swift */,
 				7C00000C000000000000B002 /* Info.plist */,
 				7C00000C000000000000B003 /* threading-triggerd.entitlements */,
 				7C00000C000000000000B004 /* codes.threading.triggerd.plist */,
@@ -1359,6 +1371,7 @@
 				7C000004000000000000000C /* ThreadingPTYHostKit */,
 				D7C100010000000000000012 /* ThreadingPTYClient */,
                 A07000010000000000000003 /* ThreadingController */,
+                A07100010000000000000003 /* ThreadingUsage */,
 				7C000007000000000000C011 /* ThreadingSimulatorKit */,
 				7C000007000000000000C0F0 /* ThreadingPluginKit */,
 				D3EE00010000000000000004 /* ThreadingPeerTransport */,
@@ -1452,6 +1465,7 @@
 				F4000001000000000000010 /* XCLocalSwiftPackageReference "Packages/ThreadingRemoteKit" */,
 				D0A100010000000000000002 /* XCLocalSwiftPackageReference "Packages/ThreadingDomain" */,
                 A07000010000000000000002 /* ThreadingController */,
+                A07100010000000000000002 /* ThreadingUsage */,
 				7C000004000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingPTYHostKit" */,
 				D7C100010000000000000011 /* XCLocalSwiftPackageReference "Packages/ThreadingPTYClient" */,
 				7C000007000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingSimulatorKit" */,
@@ -1758,6 +1772,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				7C00000C000000000000A001 /* main.swift in Sources */,
+				7C00000C000000000000A004 /* TriggerProbeSources.swift in Sources */,
+				7C00000C000000000000A006 /* TriggerProbe.swift in Sources */,
+				7C00000C000000000000A007 /* AutomationSchedule.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1872,6 +1889,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				953EC13AE9B26A038EF6BA1C /* ExtensionRunnerRequest.swift in Sources */,
+				7C00000C000000000000A005 /* TriggerProbeSources.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2292,6 +2310,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.triggerd";
 				PRODUCT_NAME = "threading-triggerd";
 				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) THREADING_TRIGGER_DAEMON";
 				SKIP_INSTALL = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 5.0;
@@ -2315,6 +2334,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.triggerd";
 				PRODUCT_NAME = "threading-triggerd";
 				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) THREADING_TRIGGER_DAEMON";
 				SKIP_INSTALL = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 5.0;
@@ -3115,6 +3135,7 @@
 
 /* Begin XCLocalSwiftPackageReference section */
         A07000010000000000000002 /* ThreadingController */ = {isa = XCLocalSwiftPackageReference; relativePath = Packages/ThreadingController; };
+        A07100010000000000000002 /* ThreadingUsage */ = {isa = XCLocalSwiftPackageReference; relativePath = Packages/ThreadingUsage; };
 		7A0000010000000000000090 /* XCLocalSwiftPackageReference "Packages/ThreadingWasmRuntime" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingWasmRuntime;
@@ -3208,6 +3229,7 @@
 
 /* Begin XCSwiftPackageProductDependency section */
         A07000010000000000000003 /* ThreadingController */ = {isa = XCSwiftPackageProductDependency; productName = ThreadingController; };
+        A07100010000000000000003 /* ThreadingUsage */ = {isa = XCSwiftPackageProductDependency; productName = ThreadingUsage; };
 		D7C100010000000000000014 /* ThreadingPTYClient */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ThreadingPTYClient;
