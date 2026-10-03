@@ -25,7 +25,7 @@ final class ThemedTerminalRowContentView: NSStackView {
 
     func setTitle(_ title: String, animated: Bool = false) {
         #if os(Linux)
-        titleLabel.stringValue = title
+        if titleLabel.stringValue != title { titleLabel.stringValue = title }
         #else
         titleLabel.setStringValue(title, animated: animated)
         #endif

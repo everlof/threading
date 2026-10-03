@@ -87,6 +87,127 @@ private final class NavigatorKeyEvent: NSEvent {
     }
 }
 
+/// Stable outline identity survives a project reorder or a newly prepended saved runtime.
+/// Position is carried only to avoid searching the catalogue while mounting visible cells.
+private struct NavigatorOutlineItem: Hashable {
+    enum Kind: Hashable { case project, agent, terminal }
+    let kind: Kind
+    let projectID: String
+    let id: String
+    let projectIndex: Int
+    let childIndex: Int
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.kind == rhs.kind && lhs.projectID == rhs.projectID && lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(kind)
+        hasher.combine(projectID)
+        hasher.combine(id)
+    }
+
+    init(projectID: String, projectIndex: Int) {
+        kind = .project
+        self.projectID = projectID
+        id = projectID
+        self.projectIndex = projectIndex
+        childIndex = -1
+    }
+
+    init(kind: Kind, projectID: String, id: String, projectIndex: Int, childIndex: Int) {
+        self.kind = kind
+        self.projectID = projectID
+        self.id = id
+        self.projectIndex = projectIndex
+        self.childIndex = childIndex
+    }
+
+    init(_ row: SidebarVisibleRows.Row, projects: [ProjectSnapshot]) {
+        switch row {
+        case .project(let projectIndex, let id):
+            self.init(projectID: id, projectIndex: projectIndex)
+        case .agent(let projectIndex, let childIndex, let id):
+            self.init(kind: .agent, projectID: projects[projectIndex].id, id: id,
+                      projectIndex: projectIndex, childIndex: childIndex)
+        case .terminal(let projectIndex, let childIndex, let id):
+            self.init(kind: .terminal, projectID: projects[projectIndex].id, id: id,
+                      projectIndex: projectIndex, childIndex: childIndex)
+        }
+    }
+
+    func resolvedRow(in projects: [ProjectSnapshot], indexes: [String: Int])
+        -> SidebarVisibleRows.Row? {
+        guard let projectIndex = indexes[projectID], projects.indices.contains(projectIndex),
+              projects[projectIndex].id == projectID else { return nil }
+        let project = projects[projectIndex]
+        switch kind {
+        case .project: return .project(projectIndex: projectIndex, id: projectID)
+        case .agent:
+            let children = project.recentAgents.prefix(SidebarVisibleRows.maximumChildrenPerKind)
+            let current = children.indices.contains(childIndex) && children[childIndex].id == id
+                ? childIndex : children.firstIndex(where: { $0.id == id })
+            guard let childIndex = current else { return nil }
+            return .agent(projectIndex: projectIndex, childIndex: childIndex, id: id)
+        case .terminal:
+            let children = project.recentTerminals.prefix(SidebarVisibleRows.maximumChildrenPerKind)
+            let current = children.indices.contains(childIndex) && children[childIndex].id == id
+                ? childIndex : children.firstIndex(where: { $0.id == id })
+            guard let childIndex = current else { return nil }
+            return .terminal(projectIndex: projectIndex, childIndex: childIndex, id: id)
+        }
+    }
+}
+
+@MainActor
+private final class NavigatorOutlineSource: NSOutlineViewDataSource, NSOutlineViewDelegate {
+    var projects: [ProjectSnapshot] = []
+    var projectIndexes: [String: Int] = [:]
+    var makeRow: ((NSOutlineView, NavigatorOutlineItem) -> NSView?)?
+
+    func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
+        guard let item else { return projects.count }
+        guard let item = item as? NavigatorOutlineItem, item.kind == .project,
+              let index = projectIndexes[item.projectID], projects.indices.contains(index)
+        else { return 0 }
+        let project = projects[index]
+        return min(project.recentAgents.count, SidebarVisibleRows.maximumChildrenPerKind)
+            + min(project.recentTerminals.count, SidebarVisibleRows.maximumChildrenPerKind)
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
+        guard let item else {
+            return NavigatorOutlineItem(projectID: projects[index].id, projectIndex: index)
+        }
+        let parent = item as! NavigatorOutlineItem
+        let projectIndex = projectIndexes[parent.projectID]!
+        let project = projects[projectIndex]
+        let agentCount = min(project.recentAgents.count, SidebarVisibleRows.maximumChildrenPerKind)
+        if index < agentCount {
+            return NavigatorOutlineItem(kind: .agent, projectID: parent.projectID,
+                id: project.recentAgents[index].id, projectIndex: projectIndex, childIndex: index)
+        }
+        let childIndex = index - agentCount
+        return NavigatorOutlineItem(kind: .terminal, projectID: parent.projectID,
+            id: project.recentTerminals[childIndex].id,
+            projectIndex: projectIndex, childIndex: childIndex)
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
+        guard let item = item as? NavigatorOutlineItem, item.kind == .project,
+              let index = projectIndexes[item.projectID], projects.indices.contains(index)
+        else { return false }
+        let project = projects[index]
+        return !project.recentAgents.isEmpty || !project.recentTerminals.isEmpty
+    }
+
+    func outlineView(_ outlineView: NSOutlineView,
+                     viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
+        guard let item = item as? NavigatorOutlineItem else { return nil }
+        return makeRow?(outlineView, item)
+    }
+}
+
 @MainActor
 func render(_ root: NSView, scale: CGFloat = 2, background: NSColor, to path: String) throws {
     let bitmap = Bitmap(width: Int(root.frame.width * scale), height: Int(root.frame.height * scale),
@@ -1240,6 +1361,19 @@ struct WindowHarness {
             header.trailingAnchor.constraint(equalTo: navigatorRoot.trailingAnchor),
             header.topAnchor.constraint(equalTo: navigatorRoot.topAnchor)
         ])
+        let outlineSource = NavigatorOutlineSource()
+        let outline = NSOutlineView(frame: .zero)
+        outline.rowHeight = navigatorRowHeight
+        outline.intercellSpacing = NSSize(width: 0, height: navigatorRowStride - navigatorRowHeight)
+        let outlineColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Projects"))
+        outline.addTableColumn(outlineColumn)
+        outline.outlineTableColumn = outlineColumn
+        outline.dataSource = outlineSource
+        outline.delegate = outlineSource
+        let outlineScroll = NSScrollView(frame: .zero)
+        outlineScroll.verticalLineScroll = navigatorRowStride
+        outlineScroll.documentView = outline
+        navigatorRoot.setNavigatorOutline(outlineScroll, visible: false)
         func headerPixels(_ view: NSView) -> (x: Int32, y: Int32, width: Int32, height: Int32) {
             let rect = view.convert(view.bounds, to: navigatorRoot)
             let scale = contentWindow.backingScaleFactor
@@ -1247,15 +1381,76 @@ struct WindowHarness {
                     Int32((navigatorRoot.bounds.height - rect.maxY) * scale),
                     Int32(rect.width * scale), Int32(rect.height * scale))
         }
-        func projectControlPixels(_ slot: Int, create: Bool)
+        func projectControlPixels(_ rowIndex: Int, create: Bool)
             -> (x: Int32, y: Int32, width: Int32, height: Int32)? {
-            guard let control = navigatorRoot.projectControl(at: slot, create: create) else {
+            guard let row = outline.view(atColumn: 0, row: rowIndex,
+                                         makeIfNecessary: false) as? Specimen.Row,
+                  let control = row.productionProjectControl(create: create) else {
                 return nil
             }
-            return headerPixels(control)
+            let viewport = outlineScroll.convert(outlineScroll.bounds, to: navigatorRoot)
+            let rowBounds = row.convert(row.bounds, to: navigatorRoot).intersection(viewport)
+            let visible = control.convert(control.bounds, to: navigatorRoot).intersection(rowBounds)
+            guard !visible.isEmpty else { return nil }
+            let scale = contentWindow.backingScaleFactor
+            return (Int32(visible.minX * scale),
+                    Int32((navigatorRoot.bounds.height - visible.maxY) * scale),
+                    Int32(visible.width * scale), Int32(visible.height * scale))
         }
+        func outlineRowPixels(_ rowIndex: Int, indent: CGFloat = 0)
+            -> (x: Int32, y: Int32, width: Int32, height: Int32)? {
+            guard let cell = outline.view(atColumn: 0, row: rowIndex,
+                                          makeIfNecessary: false) else { return nil }
+            let viewport = outlineScroll.convert(outlineScroll.bounds, to: navigatorRoot)
+            var rect = cell.convert(cell.bounds, to: navigatorRoot).intersection(viewport)
+            guard !rect.isEmpty else { return nil }
+            rect.origin.x += indent
+            rect.size.width = max(0, rect.width - indent)
+            let scale = contentWindow.backingScaleFactor
+            return (Int32(rect.minX * scale),
+                    Int32((navigatorRoot.bounds.height - rect.maxY) * scale),
+                    Int32(rect.width * scale), Int32(rect.height * scale))
+        }
+        func outlineRowIndex(at event: TWEvent) -> Int? {
+            let scale = contentWindow.backingScaleFactor
+            let point = NSPoint(x: CGFloat(event.x) / scale,
+                                y: navigatorRoot.bounds.height - CGFloat(event.y) / scale)
+            guard outlineScroll.convert(outlineScroll.bounds, to: navigatorRoot).contains(point)
+            else { return nil }
+            let index = outline.row(at: outline.convert(point, from: navigatorRoot))
+            return index >= 0 ? index : nil
+        }
+        func publishOutlineAccessibleRow(_ rowIndex: Int, id: String, label: String,
+                                         selected: Bool, indent: CGFloat = 0) throws {
+            guard let bounds = outlineRowPixels(rowIndex, indent: indent) else {
+                throw WindowFailure("accessible outline row has no mounted cell")
+            }
+            let result = id.withCString { identifier in
+                label.withCString { name in
+                    tw_accessibility_add_row(window, identifier, name, selected ? 1 : 0,
+                        bounds.x, bounds.y, bounds.width, bounds.height)
+                }
+            }
+            guard result == 0 else { throw WindowFailure("native outline row exceeds its bound") }
+        }
+        var laidOutHeaderSize: NSSize?
+        var laidOutHeaderTitle: String?
+        var laidOutAddProjectHidden: Bool?
+        var laidOutActionsHidden: Bool?
         func publishHeaderGeometry() {
-            contentWindow.layoutIfNeeded()
+            // A recycled outline cell can invalidate its own constraints on every wheel tick.
+            // The header's geometry changes only with its containing width, title, or control
+            // visibility, so a scroll must not lay out the entire document to republish it.
+            if laidOutHeaderSize != navigatorRoot.bounds.size ||
+               laidOutHeaderTitle != headerTitle.stringValue ||
+               laidOutAddProjectHidden != addProjectButton.isHidden ||
+               laidOutActionsHidden != actionsButton.isHidden {
+                contentWindow.layoutIfNeeded()
+                laidOutHeaderSize = navigatorRoot.bounds.size
+                laidOutHeaderTitle = headerTitle.stringValue
+                laidOutAddProjectHidden = addProjectButton.isHidden
+                laidOutActionsHidden = actionsButton.isHidden
+            }
             let actionsRect = headerPixels(actionsButton)
             tw_actions_button(window, actionsButton.isSelected ? "Close actions" : "Actions",
                               actionsButton.isEnabled ? 1 : 0, actionsRect.x, actionsRect.y,
@@ -1273,18 +1468,29 @@ struct WindowHarness {
                 pendingMountedRowSlot = nil
                 return slot
             }
+            activatedOutlineItem = nil
             let scale = contentWindow.backingScaleFactor
             let point = NSPoint(x: CGFloat(event.x) / scale,
                                 y: navigatorRoot.bounds.height - CGFloat(event.y) / scale)
             guard let delivered = contentWindow.dispatch(NavigatorMouseEvent(locationInWindow: point))
             else { return nil }
             navigatorRoot.hitTest(point)?.mouseDown(with: delivered)
+            if actions == nil, accountPicker == nil, savedPicker == nil,
+               !projects.isEmpty, let index = outlineRowIndex(at: event),
+               let activatedOutlineItem,
+               outline.row(forItem: activatedOutlineItem) == index {
+                return index - first
+            }
             return navigatorRoot.takeActivatedRowSlot()
         }
         func navigatorStep(for event: TWEvent) -> Int? {
             let direction = event.kind == 3 ? -1 : 1
-            if event.action == 1 { return direction } // Sidebar wheel, not a key event.
+            if event.action == 1 {
+                return actions == nil && accountPicker == nil && savedPicker == nil
+                    ? nil : direction
+            }
             guard sidebarFocused else { return nil }
+            if actions == nil && accountPicker == nil && savedPicker == nil { return direction }
             if accountPicker != nil { return direction }
             _ = contentWindow.dispatchToContent(NavigatorKeyEvent(
                 keyCode: event.kind == 3 ? 126 : 125))
@@ -1335,6 +1541,12 @@ struct WindowHarness {
         var actionsEnabled = true
         var dismissedActionGesture: Int32?
         var hoveredProjectID: String?
+        var outlineNeedsReload = true
+        var outlineExpandedProjectID: String?
+        var outlineScrollSelection = true
+        var activatedOutlineItem: NavigatorOutlineItem?
+        var activatedOutlineProjectActionID: String?
+        var activatedOutlineProjectCreateID: String?
         var rowActionMenuGesture = false
         var rowActionMenuSource: NSRect = .zero
         var rowActionMenuEntered = false
@@ -1363,6 +1575,85 @@ struct WindowHarness {
         defer { pendingFolderImport?.cancel() }
         var dirty = true
         var nextVisibleAttentionExpiry: Date?
+        func configureOutlineRow(_ row: Specimen.Row, item: NavigatorOutlineItem,
+                                 frame: NSRect) {
+            guard let model = item.resolvedRow(in: projects, indexes: projectIndexes) else {
+                return
+            }
+            let accent = NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1)
+            let selectedInk = Specimen.Ink(on: accent)
+            let selectedItem = inlineSelection.map { NavigatorOutlineItem($0, projects: projects) }
+                ?? (projects.indices.contains(selected)
+                    ? NavigatorOutlineItem(projectID: projects[selected].id, projectIndex: selected) : nil)
+            let isSelected = selectedItem == item
+            let ink = isSelected ? selectedInk : navigatorRoot.bodyInk
+            row.configure(frame: frame, accent: accent, selected: isSelected, ink: ink,
+                          image: nil, showsMark: false, disclosure: nil,
+                          preserveProductionContent: true)
+            row.onPress = { activatedOutlineItem = item }
+            row.onNavigation = nil
+            row.onProjectAction = { activatedOutlineProjectActionID = $0 }
+            row.onProjectCreate = { activatedOutlineProjectCreateID = $0 }
+            row.onProjectControlVisualChange = { dirty = true }
+
+            switch model {
+            case .project(let projectIndex, _):
+                let project = projects[projectIndex]
+                let total = project.sessions.addingReportingOverflow(project.terminalCount)
+                let totalRuntimes = total.overflow ? Int.max : total.partialValue
+                let visibleChildren = min(project.recentAgents.count,
+                    SidebarVisibleRows.maximumChildrenPerKind)
+                    + min(project.recentTerminals.count, SidebarVisibleRows.maximumChildrenPerKind)
+                let collapsedCount = expandedProjectID == project.id
+                    ? max(0, totalRuntimes - visibleChildren) : totalRuntimes
+                let hasChildren = !project.recentAgents.isEmpty || !project.recentTerminals.isEmpty
+                let disclosure = hasChildren && launch != nil
+                    ? (expandedProjectID == project.id ? "▾ " : "▸ ") : ""
+                let title = disclosure + String(project.name.unicodeScalars.prefix(80))
+                row.configureProductionProject(
+                    presentation: .project(name: title),
+                    icon: GeneratedProjectIcon.image(for: project.name), count: collapsedCount,
+                    projectID: launch == nil ? nil : project.id,
+                    revealed: hoveredProjectID == project.id, enabled: actionsEnabled)
+                row.configureProductionStatus(nil, color: ink.secondary)
+            case .agent(let projectIndex, let childIndex, _):
+                let project = projects[projectIndex]
+                let runtime = project.recentAgents[childIndex]
+                let retained = retainedRuntime(for: owner(of: .agent(runtime.id),
+                    projectID: project.id)) != nil
+                let now = Date()
+                let status = runtime.attentionTitle(at: now) ?? (retained ? "Retained" : nil)
+                if runtime.attention(at: now) == .snoozed, let expiry = runtime.snoozedUntil {
+                    nextVisibleAttentionExpiry = min(nextVisibleAttentionExpiry ?? expiry, expiry)
+                }
+                row.configureProductionSession(title: readableNavigatorText(runtime.title),
+                    icon: ProviderMarks.image(for: runtime.kind, selected: isSelected),
+                    selected: isSelected, trailingInset: status == nil ? 4 : 72,
+                    leadingIndent: 16)
+                row.configureProductionStatus(status, color: ink.secondary)
+            case .terminal(let projectIndex, let childIndex, _):
+                let project = projects[projectIndex]
+                let runtime = project.recentTerminals[childIndex]
+                let retained = retainedRuntime(for: owner(of: .terminal(runtime.id),
+                    projectID: project.id)) != nil
+                row.configureProductionTerminal(title: readableNavigatorText(runtime.title),
+                    icon: terminalMark, selected: isSelected, running: retained,
+                    leadingIndent: 16)
+                row.configureProductionStatus(nil, color: ink.secondary)
+            }
+        }
+        outlineSource.makeRow = { view, item in
+            let rowIndex = view.row(forItem: item)
+            guard rowIndex >= 0 else { return nil }
+            let frame = view.rect(ofRow: rowIndex)
+            let identifier = NSUserInterfaceItemIdentifier("NavigatorOutlineRow")
+            let row = (view.makeView(withIdentifier: identifier, owner: nil) as? Specimen.Row)
+                ?? Specimen.Row(frame: frame, text: "", accent: .clear, selected: false,
+                                ink: navigatorRoot.bodyInk, showsMark: false)
+            row.identifier = identifier
+            configureOutlineRow(row, item: item, frame: frame)
+            return row
+        }
         let sidebarWidth = 320
         var activePane: WorkspaceTerminalPane?
         var sidebarFocused = true
@@ -1569,6 +1860,8 @@ struct WindowHarness {
                     first = 0
                     inlineSelection = nil
                     expandedProjectID = nil
+                    outlineNeedsReload = true
+                    outlineScrollSelection = true
                     dirty = true
                     print("PROJECT_IMPORTED \(projects[selected].path)"); fflush(nil)
                 case .success(nil):
@@ -1582,7 +1875,7 @@ struct WindowHarness {
             // Consume after import installs its snapshot, and after a pending selection has
             // replayed its committed action. Neither operation may observe shifted row indices.
             if pendingFolderImport == nil, pendingSelection == nil,
-               reconcileTerminals() { dirty = true }
+               reconcileTerminals() { outlineNeedsReload = true; dirty = true }
             if pendingFolderImport == nil, pendingSelection == nil {
                 let selection: (projectID: String, agentID: String)?
                 if let picker = savedPicker, picker.isAgent,
@@ -1602,6 +1895,7 @@ struct WindowHarness {
                        let row = projects[project].recentAgents.firstIndex(where: { $0.id == selection.agentID }) {
                         savedSelected = row
                     }
+                    outlineNeedsReload = true
                     dirty = true
                 }
             }
@@ -1611,6 +1905,15 @@ struct WindowHarness {
                 ? navigatorRowStride : ThemedMenuMetrics.rowHeight
             let count = min(Int(TW_NAVIGATOR_MAX_ROWS),
                 max(1, Int((CGFloat(height / 2) - navigatorHeaderHeight - 2) / visibleRowHeight)))
+            let projectsMode = actions == nil && accountPicker == nil && savedPicker == nil
+            if dirty {
+                navigatorRoot.prepareNavigatorFrame(NSRect(x: 0, y: 0,
+                    width: navigatorWidth / 2, height: height / 2))
+                navigatorRoot.setNavigatorOutline(outlineScroll,
+                    visible: projectsMode && !projects.isEmpty)
+            }
+            outlineSource.projects = projects
+            outlineSource.projectIndexes = projectIndexes
             func actionMenuIndex(at x: Int32, y: Int32) -> Int? {
                 guard let menu = actions, y >= navigatorRowsTop else { return nil }
                 let stride = Int32(ThemedMenuMetrics.rowHeight * contentWindow.backingScaleFactor)
@@ -1656,12 +1959,38 @@ struct WindowHarness {
                 }
                 let expanded = expandedProjectID.flatMap { projectIndexes[$0] }
                 let projection = SidebarVisibleRows(projects: projects,
-                    expandedProjectIndex: expanded, first: first, count: count)
+                    expandedProjectIndex: expanded, first: 0, count: 0)
                 let selectedIndex = inlineSelection.flatMap { projection.index(of: $0) }
                     ?? projection.index(of: selected) ?? 0
-                if selectedIndex < first { first = selectedIndex }
-                if selectedIndex >= first + count { first = selectedIndex - count + 1 }
                 if let row = projection.row(at: selectedIndex) { inlineSelection = row }
+                if outlineNeedsReload {
+                    trace("outline.reload.begin")
+                    outline.reloadData()
+                    trace("outline.reload.end")
+                    outlineNeedsReload = false
+                }
+                if outlineExpandedProjectID != expandedProjectID {
+                    if let old = outlineExpandedProjectID {
+                        outline.collapseItem(NavigatorOutlineItem(projectID: old,
+                            projectIndex: projectIndexes[old] ?? -1))
+                    }
+                    if let expandedProjectID, let index = projectIndexes[expandedProjectID] {
+                        outline.expandItem(NavigatorOutlineItem(projectID: expandedProjectID,
+                            projectIndex: index))
+                    }
+                    outlineExpandedProjectID = expandedProjectID
+                }
+                if outline.numberOfRows > 0 {
+                    trace("outline.selection.begin")
+                    outline.selectRowIndexes(IndexSet(integer: selectedIndex),
+                                             byExtendingSelection: false)
+                    if outlineScrollSelection {
+                        outline.scrollRowToVisible(selectedIndex)
+                        outlineScrollSelection = false
+                    }
+                    trace("outline.selection.end")
+                }
+                first = outline.visibleRowIndexes.first ?? 0
             }
             let sidebarRows = SidebarVisibleRows(projects: projects,
                 expandedProjectIndex: expandedProjectID.flatMap { projectIndexes[$0] },
@@ -1783,65 +2112,19 @@ struct WindowHarness {
                                         height: height, accent: accent, selected: true,
                                         selectedInk: selectedInk, root: root, textRows: &textRows)
                     } else {
-                        end = min(sidebarRows.totalCount, first + count)
-                        for index in first..<end {
-                            guard let row = sidebarRows.row(at: index) else { continue }
-                            let slot = index - first
-                            let isSelected = index == selectedInlineIndex
-                            switch row {
-                            case .project(let projectIndex, _):
-                                let project = projects[projectIndex]
-                                let hasChildren = !project.recentAgents.isEmpty || !project.recentTerminals.isEmpty
-                                let disclosure = hasChildren && launch != nil
-                                    ? (expandedProjectID == project.id ? "▾ " : "▸ ") : ""
-                                let display = disclosure + String(project.name.unicodeScalars.prefix(80))
-                                let presentation = NavigatorProjectRowPresentation.project(name: display)
-                                let hiddenCount = project.sessions.addingReportingOverflow(project.terminalCount)
-                                let totalRuntimes = hiddenCount.overflow ? Int.max : hiddenCount.partialValue
-                                let visibleChildren = project.recentAgents.count + project.recentTerminals.count
-                                let collapsedCount = expandedProjectID == project.id
-                                    ? max(0, totalRuntimes - visibleChildren) : totalRuntimes
-                                // Only visible rows request artwork; identity and commands stay
-                                // on the bounded navigator slots.
-                                let identity = GeneratedProjectIcon.image(for: project.name)
-                                root.mountNavigatorRow(
-                                    frame: navigatorRowRect(slot, width: width, height: height),
-                                    accent: accent, selected: isSelected, ink: selectedInk,
-                                    showsMark: false)
-                                root.mountProjectContent(
-                                    presentation: presentation, icon: identity,
-                                    count: collapsedCount,
-                                    projectID: launch == nil ? nil : project.id,
-                                    revealed: hoveredProjectID == project.id,
-                                    enabled: actionsEnabled)
-                            case .agent(let projectIndex, let childIndex, _):
-                                let project = projects[projectIndex]
-                                let runtime = project.recentAgents[childIndex]
-                                let mark = ProviderMarks.image(for: runtime.kind, selected: isSelected)
-                                let retained = retainedRuntime(for: owner(of: .agent(runtime.id),
-                                    projectID: project.id)) != nil
-                                if runtime.attention(at: presentationDate) == .snoozed,
-                                   let expiry = runtime.snoozedUntil {
-                                    nextVisibleAttentionExpiry = min(nextVisibleAttentionExpiry ?? expiry, expiry)
-                                }
-                                addSavedAgentRow(runtime, retained: retained, at: presentationDate,
-                                    index: slot, width: width, height: height, accent: accent,
-                                    selected: isSelected, selectedInk: selectedInk, root: root,
-                                    textRows: &textRows, image: mark, indent: 16)
-                            case .terminal(let projectIndex, let childIndex, _):
-                                let project = projects[projectIndex]
-                                let runtime = project.recentTerminals[childIndex]
-                                let retained = retainedRuntime(for: owner(of: .terminal(runtime.id),
-                                    projectID: project.id)) != nil
-                                addSavedTerminalRow(runtime, running: retained, index: slot,
-                                    width: width, height: height, accent: accent,
-                                    selected: isSelected, selectedInk: selectedInk,
-                                    root: root, indent: 16)
-                            }
+                        // NSOutlineView owns and recycles the viewport's production row views.
+                        end = (outline.visibleRowIndexes.last.map { $0 + 1 }) ?? first
+                        trace("outline.configure.begin")
+                        for index in outline.visibleRowIndexes {
+                            guard let item = outline.item(atRow: index) as? NavigatorOutlineItem,
+                                  let cell = outline.view(atColumn: 0, row: index,
+                                    makeIfNecessary: false) as? Specimen.Row else { continue }
+                            configureOutlineRow(cell, item: item, frame: outline.rect(ofRow: index))
                         }
+                        trace("outline.configure.end")
                     }
                 }
-                headerTitle.stringValue = actions.map { menu in
+                let nextHeaderTitle = actions.map { menu in
                     switch menu.kind {
                     case .addProject: return "Add Project"
                     case .projectActions: return "Actions"
@@ -1850,14 +2133,23 @@ struct WindowHarness {
                     }
                 } ?? accountPicker.map { $0 == .claude ? "Claude login" : "Codex login" }
                     ?? savedPicker.map { $0.isAgent ? "Agents" : "Terminals" } ?? "Projects"
+                if headerTitle.stringValue != nextHeaderTitle {
+                    headerTitle.stringValue = nextHeaderTitle
+                }
                 root.title = ""
-                addProjectButton.isHidden = launch == nil
+                if addProjectButton.isHidden != (launch == nil) {
+                    addProjectButton.isHidden = launch == nil
+                }
                 addProjectButton.isEnabled = actionsEnabled && accountPicker == nil && savedPicker == nil
-                actionsButton.isHidden = launch == nil
+                if actionsButton.isHidden != (launch == nil) {
+                    actionsButton.isHidden = launch == nil
+                }
                 actionsButton.isEnabled = actionsEnabled
                 actionsButton.isSelected = actions != nil
                 actionsButton.setAccessibilityTitle(actions == nil ? "Actions" : "Close actions")
+                trace("header.layout.begin")
                 publishHeaderGeometry()
+                trace("header.layout.end")
                 let titleRect = headerPixels(headerTitle)
                 let addRect = headerPixels(addProjectButton)
                 let actionsRect = headerPixels(actionsButton)
@@ -1870,8 +2162,15 @@ struct WindowHarness {
                 else if accountPicker != nil { focusedSlot = accountSelected - accountFirst }
                 else if savedPicker != nil { focusedSlot = savedSelected - savedFirst }
                 else { focusedSlot = selectedInlineIndex - first }
+                let focusedView: NSView?
+                if projectsMode && !projects.isEmpty {
+                    focusedView = outline.view(atColumn: 0, row: selectedInlineIndex,
+                                               makeIfNecessary: false)
+                } else {
+                    focusedView = root.mountedRow(at: focusedSlot)
+                }
                 contentWindow.makeFirstResponder(sidebarFocused && accountPicker == nil
-                    ? root.mountedRow(at: focusedSlot) : nil)
+                    ? focusedView : nil)
                 let mountMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - mountStarted) / 1_000_000
                 trace("raster.begin")
                 let bitmap = Bitmap(width: width, height: height, background: Specimen.bodyGround.components)
@@ -2012,8 +2311,9 @@ struct WindowHarness {
                                                  width: width, height: height)
                     } else {
                         for index in first..<end {
-                            guard let row = sidebarRows.row(at: index) else { continue }
-                            let slot = index - first
+                            guard let item = outline.item(atRow: index) as? NavigatorOutlineItem,
+                                  let row = item.resolvedRow(in: projects, indexes: projectIndexes)
+                            else { continue }
                             let isSelected = index == selectedInlineIndex
                             switch row {
                             case .project(let projectIndex, _):
@@ -2021,25 +2321,35 @@ struct WindowHarness {
                                 let retained = terminals[project.id] != nil || restoredProjectIDs.contains(project.id)
                                 let label = "\(boundedAccessibilityLabel(project.name)) [\(project.sessions) agents, \(project.terminalCount) terminals]\(retained ? " retained" : "")"
                                 if launch == nil {
-                                    try publishAccessibleRow(window, id: project.id, label: label,
-                                        selected: isSelected, visibleIndex: slot, width: width, height: height)
+                                    try publishOutlineAccessibleRow(index, id: project.id,
+                                        label: label, selected: isSelected)
                                 } else {
-                                    let bounds = navigatorRowPixels(slot, width: width, height: height)
-                                    guard let create = projectControlPixels(slot, create: true),
-                                          let action = projectControlPixels(slot, create: false)
-                                    else { throw WindowFailure("mounted project controls have no layout") }
-                                    let result = project.id.withCString { identifier in
-                                        label.withCString { name in
-                                            tw_accessibility_add_project_row(window, identifier, name,
-                                                isSelected ? 1 : 0,
-                                                bounds.x, bounds.y, bounds.width, bounds.height,
-                                                create.x, create.y, create.width, create.height,
-                                                action.x, action.y, action.width, action.height,
-                                                actionsEnabled ? 1 : 0)
-                                        }
+                                    guard let bounds = outlineRowPixels(index) else {
+                                        throw WindowFailure("mounted project row has no visible layout")
                                     }
-                                    guard result == 0 else {
-                                        throw WindowFailure("native project action row exceeds its bound")
+                                    if let create = projectControlPixels(index, create: true),
+                                       let action = projectControlPixels(index, create: false) {
+                                        let result = project.id.withCString { identifier in
+                                            label.withCString { name in
+                                                tw_accessibility_add_project_row(window, identifier, name,
+                                                    isSelected ? 1 : 0,
+                                                    bounds.x, bounds.y, bounds.width, bounds.height,
+                                                    create.x, create.y, create.width, create.height,
+                                                    action.x, action.y, action.width, action.height,
+                                                    actionsEnabled ? 1 : 0)
+                                            }
+                                        }
+                                        guard result == 0 else {
+                                            throw WindowFailure("native project action row exceeds its bound")
+                                        }
+                                    } else if bounds.height < Int32(navigatorRowHeight *
+                                        contentWindow.backingScaleFactor) {
+                                        // The clipped edge can show a sliver of the row before
+                                        // either control is visible. Keep the row accessible.
+                                        try publishOutlineAccessibleRow(index, id: project.id,
+                                            label: label, selected: isSelected)
+                                    } else {
+                                        throw WindowFailure("mounted project controls have no layout")
                                     }
                                 }
                             case .agent(let projectIndex, let childIndex, _):
@@ -2053,18 +2363,16 @@ struct WindowHarness {
                                     maximumBytes: 400 - provider.utf8.count - account.utf8.count)
                                 let label = "\(provider)\(title)\(account) [\(String(runtime.id.prefix(8)))]\(retained ? " retained" : "")"
                                     + (runtime.attentionTitle(at: presentationDate).map { " " + $0 } ?? "")
-                                try publishAccessibleRow(window, id: runtime.id, label: label,
-                                    selected: isSelected, visibleIndex: slot, width: width, height: height,
-                                    indent: 16)
+                                try publishOutlineAccessibleRow(index, id: runtime.id,
+                                    label: label, selected: isSelected, indent: 16)
                             case .terminal(let projectIndex, let childIndex, _):
                                 let project = projects[projectIndex]
                                 let runtime = project.recentTerminals[childIndex]
                                 let retained = retainedRuntime(for: owner(of: .terminal(runtime.id),
                                     projectID: project.id)) != nil
                                 let label = "\(runtime.identityTitle) [\(String(runtime.id.prefix(8)))]\(retained ? " retained" : "")"
-                                try publishAccessibleRow(window, id: runtime.id, label: label,
-                                    selected: isSelected, visibleIndex: slot, width: width, height: height,
-                                    indent: 16)
+                                try publishOutlineAccessibleRow(index, id: runtime.id,
+                                    label: label, selected: isSelected, indent: 16)
                             }
                         }
                     }
@@ -2072,6 +2380,9 @@ struct WindowHarness {
                     let title = projects.isEmpty ? "Threading experiment - empty store" : "Threading experiment - \(projects[selected].path)"
                     setNavigatorTitle(title)
                     print("FRAME \(width)x\(height) mounted=\(end - first) selected=\(projects.isEmpty ? "none" : projects[selected].id) total=\(sidebarRows.totalCount)")
+                    if !projects.isEmpty {
+                        print("OUTLINE_FRAME total=\(outline.numberOfRows) first=\(first) visible=\(end - first) mounted=\(outline.mountedViewCount) reusable=\(outline.reusableViewCount) scrollY=\(outlineScroll.contentView.bounds.minY)")
+                    }
                 }
                 trace("accessibility-title.end")
                 traceFirstFrame = false
@@ -2166,9 +2477,10 @@ struct WindowHarness {
                 let slot = Int(event.key)
                 let index = first + slot
                 guard actions == nil, accountPicker == nil, savedPicker == nil,
-                      slot >= 0, slot < count, projects.indices.contains(index),
+                      slot >= 0, slot < outline.visibleRowIndexes.count,
+                      case .some(.project(_, let projectID)) = sidebarRows.row(at: index),
                       let id = String(validatingCString: tw_event_text(&event)),
-                      projects[index].id == id, let target = ProjectID(uuidString: id)
+                      projectID == id, let target = ProjectID(uuidString: id)
                 else { continue }
                 openActions(for: target, returnToSidebar: true)
                 continue
@@ -2178,7 +2490,7 @@ struct WindowHarness {
                 let slot = Int(event.key)
                 let index = first + slot
                 guard actions == nil, accountPicker == nil, savedPicker == nil,
-                      slot >= 0, slot < count,
+                      slot >= 0, slot < outline.visibleRowIndexes.count,
                       case .some(.project(let projectIndex, let projectID)) = sidebarRows.row(at: index),
                       let id = String(validatingCString: tw_event_text(&event)),
                       projectID == id, let target = ProjectID(uuidString: id)
@@ -2202,6 +2514,9 @@ struct WindowHarness {
                     _ = navigatorRoot.takeActivatedRowSlot()
                     _ = navigatorRoot.takeActivatedProjectActionID()
                     _ = navigatorRoot.takeActivatedProjectCreateID()
+                    activatedOutlineItem = nil
+                    activatedOutlineProjectActionID = nil
+                    activatedOutlineProjectCreateID = nil
                     activatedAccountHandle = nil
                     rowActionMenuGesture = false
                     rowActionMenuEntered = false
@@ -2215,16 +2530,13 @@ struct WindowHarness {
                 // a pointer move never scans a stored catalogue or builds hidden controls.
                 var pointerProjectID: String?
                 if actions == nil, accountPicker == nil, savedPicker == nil,
-                   launch != nil, event.y >= navigatorRowsTop {
-                    let slot = Int((event.y - navigatorRowsTop) / Int32(navigatorRowStride * 2))
-                    let index = first + slot
-                    if slot >= 0, slot < count,
-                       case .some(.project(_, let id)) = sidebarRows.row(at: index) {
-                        let row = navigatorRowPixels(slot, width: navigatorWidth, height: height)
-                        if event.x >= row.x, event.x < row.x + row.width,
-                           event.y >= row.y, event.y < row.y + row.height {
-                            pointerProjectID = id
-                        }
+                   launch != nil, let index = outlineRowIndex(at: event),
+                   let item = outline.item(atRow: index) as? NavigatorOutlineItem,
+                   item.kind == .project,
+                   let row = outlineRowPixels(index) {
+                    if event.x >= row.x, event.x < row.x + row.width,
+                       event.y >= row.y, event.y < row.y + row.height {
+                        pointerProjectID = item.projectID
                     }
                 }
                 if hoveredProjectID != pointerProjectID {
@@ -2241,6 +2553,11 @@ struct WindowHarness {
                 }
                 let point = NSPoint(x: CGFloat(event.x) / contentWindow.backingScaleFactor,
                     y: navigatorRoot.bounds.height - CGFloat(event.y) / contentWindow.backingScaleFactor)
+                if event.action == 1 {
+                    activatedOutlineItem = nil
+                    activatedOutlineProjectActionID = nil
+                    activatedOutlineProjectCreateID = nil
+                }
                 _ = contentWindow.dispatchToContent(NSEvent(type: eventType,
                                                               locationInWindow: point))
                 if event.action == 3, let chosen = activatedMenuEntry,
@@ -2280,9 +2597,17 @@ struct WindowHarness {
                     continue
                 }
                 let wasSidebarFocused = sidebarFocused
-                let activatedCreate = navigatorRoot.takeActivatedProjectCreateID()
-                let activatedProject = navigatorRoot.takeActivatedProjectActionID()
+                let activatedCreate = activatedOutlineProjectCreateID
+                    ?? navigatorRoot.takeActivatedProjectCreateID()
+                let activatedProject = activatedOutlineProjectActionID
+                    ?? navigatorRoot.takeActivatedProjectActionID()
+                activatedOutlineProjectCreateID = nil
+                activatedOutlineProjectActionID = nil
                 let activatedRow = navigatorRoot.takeActivatedRowSlot()
+                let activatedOutlineRow = activatedOutlineItem.flatMap {
+                    let index = outline.row(forItem: $0)
+                    return index >= 0 ? index : nil
+                }
                 let pointerPixel = NSPoint(x: CGFloat(event.x), y: CGFloat(event.y))
                 if event.action == 5 {
                     // A project row and its trailing icon share one exact-target menu, as on
@@ -2332,8 +2657,8 @@ struct WindowHarness {
                        pointerProjectID == activatedCreate {
                         openProjectCreateMenu(for: target, returnToSidebar: wasSidebarFocused)
                         if actions?.projectID == target {
-                            let slot = Int((event.y - navigatorRowsTop) / Int32(navigatorRowStride * 2))
-                            if let source = projectControlPixels(slot, create: true) {
+                            if let rowIndex = outlineRowIndex(at: event),
+                               let source = projectControlPixels(rowIndex, create: true) {
                                 rowActionMenuSource = NSRect(
                                     x: CGFloat(source.x), y: CGFloat(source.y),
                                     width: CGFloat(source.width), height: CGFloat(source.height))
@@ -2346,8 +2671,8 @@ struct WindowHarness {
                        pointerProjectID == activatedProject {
                         openActions(for: target, returnToSidebar: true)
                         if actions?.projectID == target {
-                            let slot = Int((event.y - navigatorRowsTop) / Int32(navigatorRowStride * 2))
-                            if let source = projectControlPixels(slot, create: false) {
+                            if let rowIndex = outlineRowIndex(at: event),
+                               let source = projectControlPixels(rowIndex, create: false) {
                                 rowActionMenuSource = NSRect(
                                     x: CGFloat(source.x), y: CGFloat(source.y),
                                     width: CGFloat(source.width), height: CGFloat(source.height))
@@ -2356,8 +2681,8 @@ struct WindowHarness {
                         }
                         continue
                     }
-                    if let activatedRow {
-                        pendingMountedRowSlot = activatedRow
+                    if let pressedRow = activatedOutlineRow.map({ $0 - first }) ?? activatedRow {
+                        pendingMountedRowSlot = pressedRow
                         pointerActivatedRow = true
                         event.kind = 2
                         event.action = 0
@@ -2465,8 +2790,10 @@ struct WindowHarness {
                     let project = projects[savedPicker.projectIndex]
                     listCount = savedPicker.isAgent ? project.recentAgents.count : project.recentTerminals.count
                 } else { listCount = projects.isEmpty && launch != nil ? 1 : sidebarRows.totalCount }
-                let visibleCount = max(0, min(listCount - listFirst, count))
+                let visibleCount = projectsMode && !projects.isEmpty
+                    ? outline.visibleRowIndexes.count : max(0, min(listCount - listFirst, count))
                 let pressedSlot = event.action == 1 ? Int(event.key) : mountedRowPressed(by: event)
+                activatedOutlineItem = nil
                 if let mounted = pressedSlot, mounted >= 0, mounted < visibleCount {
                     if projects.isEmpty, let launch, accountPicker == nil, savedPicker == nil {
                         if event.action != 1 {
@@ -2664,6 +2991,14 @@ struct WindowHarness {
                 try activate(session)
                 dirty = true
             case 3, 4:
+                if event.action == 1, accountPicker == nil, savedPicker == nil,
+                   !projects.isEmpty {
+                    let scroll = NSEvent(type: .scrollWheel,
+                        scrollingDeltaY: event.kind == 3 ? 1 : -1)
+                    outlineScroll.scrollWheel(with: scroll)
+                    dirty = true
+                    break
+                }
                 guard let step = navigatorStep(for: event) else { break }
                 if accountPicker != nil {
                     let next = max(0, min(pickerAccounts.count - 1,
@@ -2684,6 +3019,7 @@ struct WindowHarness {
                              .terminal(let projectIndex, _, _):
                             selected = projectIndex
                         }
+                        outlineScrollSelection = true
                         dirty = true
                     }
                 }

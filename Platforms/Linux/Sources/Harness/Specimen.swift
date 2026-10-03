@@ -156,6 +156,20 @@ enum Specimen {
             nextRowSlot = 0
         }
 
+        /// The outline owns the project viewport. The fixed slots remain for the bounded
+        /// saved-runtime picker and empty-state row, and never sit behind an active outline.
+        func setNavigatorOutline(_ scrollView: NSScrollView, visible: Bool) {
+            if scrollView.superview !== self {
+                addSubview(scrollView, positioned: .below, relativeTo: menuLayer)
+            }
+            let viewport = NSRect(x: 6, y: 0, width: max(0, bounds.width - 12),
+                                  height: max(0, bounds.height - headerHeight - 2))
+            if scrollView.frame != viewport { scrollView.frame = viewport }
+            scrollView.isHidden = !visible
+            rowLayer.isHidden = visible
+            textLayer.isHidden = visible
+        }
+
         /// Menu rows come from the production design component. The host supplies only the
         /// bounded visible page and retains command identity in its own presentation model.
         func mountMenuRows(_ rows: [NSView]) {
@@ -382,6 +396,7 @@ enum Specimen {
         private var productionProjectView: ThemedProjectRowView?
         private var productionSessionView: ThemedSessionRowContentView?
         private var productionTerminalView: ThemedTerminalRowContentView?
+        private var productionStatusView: NSTextField?
         private var productionProjectActionsRevealed = false
         private var projectCreateButton: ThemedIconButton?
         private var projectActionButton: ThemedIconButton?
@@ -427,12 +442,11 @@ enum Specimen {
         override func mouseDown(with event: NSEvent) { onPress?() }
 
         override func hitTest(_ point: NSPoint) -> NSView? {
-            let target = super.hitTest(point)
+            guard let target = super.hitTest(point) else { return nil }
             #if THREADING_WINDOW_HARNESS
             if productionSessionView?.isHidden == false ||
                productionTerminalView?.isHidden == false { return self }
-            guard let productionProjectView, !productionProjectView.isHidden,
-                  let target else { return target }
+            guard let productionProjectView, !productionProjectView.isHidden else { return target }
             if !productionProjectActionsRevealed { return self }
             var ancestor: NSView? = target
             while let view = ancestor, view !== self {
@@ -456,7 +470,8 @@ enum Specimen {
 
         func configure(frame: NSRect, accent: NSColor, selected: Bool, ink: Ink,
                        image: NSImage?, showsMark: Bool,
-                       disclosure: DisclosureTriangleDrawing.Direction?, imageSide: CGFloat = 13) {
+                       disclosure: DisclosureTriangleDrawing.Direction?, imageSide: CGFloat = 13,
+                       preserveProductionContent: Bool = false) {
             if self.frame != frame { self.frame = frame }
             self.accent = accent
             self.selected = selected
@@ -465,9 +480,12 @@ enum Specimen {
             self.showsMark = showsMark
             self.disclosure = disclosure
             #if THREADING_WINDOW_HARNESS
-            productionProjectView?.isHidden = true
-            productionSessionView?.isHidden = true
-            productionTerminalView?.isHidden = true
+            if !preserveProductionContent {
+                productionProjectView?.isHidden = true
+                productionSessionView?.isHidden = true
+                productionTerminalView?.isHidden = true
+                productionStatusView?.isHidden = true
+            }
             #endif
             if let image {
                 let iconFrame = Specimen.navigatorRowGeometry.iconRect(in: bounds, side: imageSide)
@@ -544,7 +562,9 @@ enum Specimen {
 
         #if THREADING_WINDOW_HARNESS
         func configureProductionSession(title: String, icon: NSImage?, selected: Bool,
-                                        trailingInset: CGFloat) {
+                                        trailingInset: CGFloat, leadingIndent: CGFloat = 0) {
+            productionProjectView?.isHidden = true
+            productionTerminalView?.isHidden = true
             let content: ThemedSessionRowContentView
             if let productionSessionView {
                 content = productionSessionView
@@ -554,7 +574,7 @@ enum Specimen {
                 addSubview(content)
                 productionSessionView = content
             }
-            let leading = SidebarRowDefaults.leadingInset
+            let leading = leadingIndent + SidebarRowDefaults.leadingInset
             let width = max(0, bounds.width - leading - trailingInset)
             let frame = NSRect(x: leading, y: 0, width: width, height: bounds.height)
             if content.frame != frame { content.frame = frame }
@@ -566,7 +586,9 @@ enum Specimen {
         }
 
         func configureProductionTerminal(title: String, icon: NSImage, selected: Bool,
-                                         running: Bool) {
+                                         running: Bool, leadingIndent: CGFloat = 0) {
+            productionProjectView?.isHidden = true
+            productionSessionView?.isHidden = true
             let content: ThemedTerminalRowContentView
             if let productionTerminalView {
                 content = productionTerminalView
@@ -576,7 +598,7 @@ enum Specimen {
                 addSubview(content)
                 productionTerminalView = content
             }
-            let leading = SidebarRowDefaults.leadingInset
+            let leading = leadingIndent + SidebarRowDefaults.leadingInset
             let trailing = SidebarRowDefaults.trailingInset +
                 SidebarRowDefaults.trailingSlotSize + SidebarRowDefaults.horizontalSpacing
             let frame = NSRect(x: leading, y: 0,
@@ -590,6 +612,30 @@ enum Specimen {
             iconView?.isHidden = true
         }
 
+        func configureProductionStatus(_ status: String?, color: NSColor) {
+            guard let status else {
+                productionStatusView?.isHidden = true
+                return
+            }
+            let label: NSTextField
+            if let productionStatusView {
+                label = productionStatusView
+            } else {
+                label = NSTextField(labelWithString: "")
+                label.font = NSFont.systemFont(ofSize: 7)
+                label.alignment = .right
+                label.lineBreakMode = .byTruncatingTail
+                label.setAccessibilityElement(false)
+                addSubview(label)
+                productionStatusView = label
+            }
+            if label.stringValue != status { label.stringValue = status }
+            label.textColor = color
+            label.frame = NSRect(x: max(0, bounds.width - 70), y: 0,
+                                 width: min(64, bounds.width), height: bounds.height)
+            label.isHidden = false
+        }
+
         func productionProjectControl(create: Bool) -> NSView? {
             guard let productionProjectView, !productionProjectView.isHidden else { return nil }
             return create ? productionProjectView.createButton : productionProjectView.actionButton
@@ -599,6 +645,8 @@ enum Specimen {
             presentation: NavigatorProjectRowPresentation, icon: NSImage?, count: Int,
             projectID: String?, revealed: Bool, enabled: Bool
         ) {
+            productionSessionView?.isHidden = true
+            productionTerminalView?.isHidden = true
             let content: ThemedProjectRowView
             if let productionProjectView {
                 content = productionProjectView

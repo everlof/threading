@@ -109,6 +109,49 @@ public enum LayoutEngine {
         solve(root, measuring: false).diagnosis
     }
 
+    /// Frame-placed descendants can lay out their own children without joining their parent's
+    /// constraint program. A constraint owned above the frame boundary that reaches into it
+    /// keeps that branch in the parent's solve.
+    static func layoutIsland(_ root: NSView, boundaries: [NSView]) -> Diagnosis {
+        let excluded = Set(boundaries.map(ObjectIdentifier.init))
+        return solve(root, measuring: false, excludingDescendantsOf: excluded).diagnosis
+    }
+
+    static func independentDescendants(of root: NSView) -> [NSView] {
+        var boundaries: [NSView] = []
+
+        func referencedBelow(_ boundary: NSView) -> Bool {
+            var owner = boundary.superview
+            while let view = owner {
+                for constraint in view.activeConstraints {
+                    for item in [constraint.firstItem, constraint.secondItem] {
+                        let referenced = (item as? NSView)
+                            ?? (item as? NSLayoutGuide)?.owningView
+                        if let referenced, referenced !== boundary,
+                           referenced.isDescendant(of: boundary) {
+                            return true
+                        }
+                    }
+                }
+                if view === root { break }
+                owner = view.superview
+            }
+            return false
+        }
+
+        func visit(_ view: NSView) {
+            for child in view.subviews {
+                if child.translatesAutoresizingMaskIntoConstraints && !referencedBelow(child) {
+                    boundaries.append(child)
+                } else {
+                    visit(child)
+                }
+            }
+        }
+        visit(root)
+        return boundaries
+    }
+
     /// Measure the constraints with a 50-priority zero-size proposal, as AppKit's fitting
     /// pass does. This never writes frames into the live tree; a later layout still uses the
     /// actual root frame and its separate warm-start tableau.
@@ -116,7 +159,11 @@ public enum LayoutEngine {
         solve(root, measuring: true).size ?? .zero
     }
 
-    private static func solve(_ root: NSView, measuring: Bool)
+    private static func solve(
+        _ root: NSView,
+        measuring: Bool,
+        excludingDescendantsOf boundaries: Set<ObjectIdentifier> = []
+    )
         -> (diagnosis: Diagnosis, size: NSSize?) {
         let started = Date()
 
@@ -131,6 +178,7 @@ public enum LayoutEngine {
 
         func collect(_ view: NSView) {
             register(view)
+            if view !== root && boundaries.contains(ObjectIdentifier(view)) { return }
             for guide in view.layoutGuides { register(guide) }
             for subview in view.subviews { collect(subview) }
         }
@@ -138,6 +186,7 @@ public enum LayoutEngine {
 
         var constraints: [NSLayoutConstraint] = []
         func gather(_ view: NSView) {
+            if view !== root && boundaries.contains(ObjectIdentifier(view)) { return }
             constraints.append(contentsOf: view.activeConstraints)
             for subview in view.subviews { gather(subview) }
         }
