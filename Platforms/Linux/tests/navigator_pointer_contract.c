@@ -175,6 +175,16 @@ int main(int argc, char **argv) {
     next(window, 15, 3, 120, 170);
     settle();
 
+    // Focus changes without a pending gesture still reach the Swift host, so selection
+    // chrome can change between active and inactive even with no pointer movement.
+    focus.window.event = SDL_WINDOWEVENT_FOCUS_GAINED;
+    assert(SDL_PushEvent(&focus) == 1);
+    next(window, 45, 1, 0, 0);
+    focus.window.event = SDL_WINDOWEVENT_FOCUS_LOST;
+    assert(SDL_PushEvent(&focus) == 1);
+    next(window, 45, 0, 0, 0);
+    settle();
+
     // A standalone navigator accepts its full width; standalone terminal mode does not.
     tw_workspace_mode(window, 0, 0);
     tw_project_mode(window);

@@ -100,7 +100,7 @@ def trailing_ink(rgb, rect):
     return sum(max(abs(channel - ground) for channel, ground in
                    zip(pixel(rgb, x, y), background)) > 35
                for y in range(rect.y + 10, rect.y + 37)
-               for x in range(row_right - 40, row_right - 9))
+               for x in range(row_right - 40, row_right - 13))
 
 
 def slot_ink(rgb, rect, trailing_start, trailing_end):
@@ -114,13 +114,14 @@ def slot_ink(rgb, rect, trailing_start, trailing_end):
 
 def count_digit_ink(rgb, rect):
     # The production ellipsis replaces the count in this slot. Its three dots cross the
-    # digit's middle, so sample above and below them to detect a lingering count.
+    # digit's middle, so sample the count's upper and lower strokes outside the dots.
     row_right = rect.x + rect.width
     background = pixel(rgb, row_right - 88, rect.y + rect.height // 2)
-    rows = list(range(rect.y + 10, rect.y + 18)) + list(range(rect.y + 26, rect.y + 37))
+    center = rect.y + rect.height // 2
+    rows = list(range(center - 12, center - 5)) + list(range(center + 4, center + 10))
     return sum(max(abs(channel - ground) for channel, ground in
                    zip(pixel(rgb, x, y), background)) > 35
-               for y in rows for x in range(row_right - 20, row_right - 10))
+               for y in rows for x in range(row_right - 23, row_right - 13))
 
 
 def terminal_content_ink(rgb, rect, leading_start, leading_end):
@@ -149,7 +150,7 @@ try:
         row_rects = [row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
                      for row in (first, second)]
         for index, rect in enumerate(row_rects):
-            assert (rect.x, rect.y, rect.width, rect.height) == (12, 86 + index * 48, 296, 44)
+            assert (rect.x, rect.y, rect.width, rect.height) == (12, 86 + index * 64, 296, 60)
         window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid',
                                         str(process.pid), '--name', '^Threading experiment - '),
                             'native window', process).splitlines()[0]
@@ -191,7 +192,7 @@ try:
                               'project disclosure opened inline terminal', process)
         child = expanded.get_child_at_index(1)
         child_rect = child.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert (child_rect.x, child_rect.y, child_rect.width, child_rect.height) == (44, 134, 264, 44)
+        assert (child_rect.x, child_rect.y, child_rect.width, child_rect.height) == (44, 150, 264, 56)
         assert child.get_accessible_id() not in (first.get_accessible_id(), second.get_accessible_id())
         assert selected(expanded, 0) and not selected(expanded, 1)
         expanded_pixels = capture(window, 'project-count-alpha-expanded.png')

@@ -414,6 +414,10 @@ enum Specimen {
 
     final class Row: NSView {
         private static let selectionRadius: CGFloat = 5
+        #if THREADING_WINDOW_HARNESS
+        /// The outline's production SidebarHoverRowView owns its own selection capsule.
+        var drawsSelectionBackground = true { didSet { needsDisplay = true } }
+        #endif
         let text: String
         private(set) var accent: NSColor
         private(set) var selected: Bool
@@ -721,7 +725,13 @@ enum Specimen {
 
         override func draw(_ dirtyRect: NSRect) {
             NSBezierPath(rect: bounds).addClip()
-            if selected {
+            let paintsSelection: Bool
+            #if THREADING_WINDOW_HARNESS
+            paintsSelection = selected && drawsSelectionBackground
+            #else
+            paintsSelection = selected
+            #endif
+            if paintsSelection {
                 SurfaceDrawing.draw(bounds, fill: accent,
                                     radius: Self.selectionRadius, borderWidth: 0)
             }

@@ -164,6 +164,7 @@ private final class NavigatorOutlineSource: NSOutlineViewDataSource, NSOutlineVi
     var projects: [ProjectSnapshot] = []
     var projectIndexes: [String: Int] = [:]
     var makeRow: ((NSOutlineView, NavigatorOutlineItem) -> NSView?)?
+    var makeChrome: ((NSOutlineView, NavigatorOutlineItem) -> NSTableRowView?)?
 
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
         guard let item else { return projects.count }
@@ -205,6 +206,18 @@ private final class NavigatorOutlineSource: NSOutlineViewDataSource, NSOutlineVi
                      viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         guard let item = item as? NavigatorOutlineItem else { return nil }
         return makeRow?(outlineView, item)
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any)
+        -> NSTableRowView? {
+        guard let item = item as? NavigatorOutlineItem else { return nil }
+        return makeChrome?(outlineView, item)
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
+        guard let item = item as? NavigatorOutlineItem else { return SidebarDefaults.rowHeight }
+        return item.kind == .project
+            ? SidebarDefaults.projectCompactRowHeight : SidebarDefaults.rowHeight
     }
 }
 
@@ -1327,6 +1340,7 @@ struct WindowHarness {
         // The raster surface is two device pixels per AppKit point. Keep one content owner and
         // root for the native window's lifetime so attachment callbacks describe that lifetime.
         let contentWindow = NSWindow(backingScaleFactor: 2)
+        contentWindow.isKeyWindow = tw_window_has_focus(window) != 0
         let navigatorRoot = Specimen.Window(frame: NSRect(x: 0, y: 0, width: 400, height: 240))
         contentWindow.contentView = navigatorRoot
         navigatorRoot.setThemeAppearance()
@@ -1367,15 +1381,16 @@ struct WindowHarness {
         ])
         let outlineSource = NavigatorOutlineSource()
         let outline = NSOutlineView(frame: .zero)
-        outline.rowHeight = navigatorRowHeight
-        outline.intercellSpacing = NSSize(width: 0, height: navigatorRowStride - navigatorRowHeight)
+        outline.rowHeight = SidebarDefaults.rowHeight
+        outline.intercellSpacing = NSSize(width: 0, height: 2)
         let outlineColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Projects"))
         outline.addTableColumn(outlineColumn)
         outline.outlineTableColumn = outlineColumn
         outline.dataSource = outlineSource
         outline.delegate = outlineSource
         let outlineScroll = NSScrollView(frame: .zero)
-        outlineScroll.verticalLineScroll = navigatorRowStride
+        outlineScroll.verticalLineScroll = SidebarDefaults.rowHeight
+            + outline.intercellSpacing.height
         outlineScroll.documentView = outline
         navigatorRoot.setNavigatorOutline(outlineScroll, visible: false)
         func headerPixels(_ view: NSView) -> (x: Int32, y: Int32, width: Int32, height: Int32) {
@@ -1585,8 +1600,8 @@ struct WindowHarness {
             guard let model = item.resolvedRow(in: projects, indexes: projectIndexes) else {
                 return
             }
-            let accent = NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1)
-            let selectedInk = Specimen.Ink(on: accent)
+            let accent = Design.Surface.selectionFill
+            let selectedInk = LinuxTheme.neutralInk(on: accent, dark: LinuxTheme.isDark)
             let selectedItem = inlineSelection.map { NavigatorOutlineItem($0, projects: projects) }
                 ?? (projects.indices.contains(selected)
                     ? NavigatorOutlineItem(projectID: projects[selected].id, projectIndex: selected) : nil)
@@ -1595,6 +1610,7 @@ struct WindowHarness {
             row.configure(frame: frame, accent: accent, selected: isSelected, ink: ink,
                           image: nil, showsMark: false, disclosure: nil,
                           preserveProductionContent: true)
+            row.drawsSelectionBackground = false
             row.onPress = { activatedOutlineItem = item }
             row.onNavigation = nil
             row.onProjectAction = { activatedOutlineProjectActionID = $0 }
@@ -1647,6 +1663,13 @@ struct WindowHarness {
                 row.configureProductionStatus(nil, color: ink.secondary)
             }
         }
+        func configureOutlineChrome(_ row: SidebarHoverRowView, in view: NSOutlineView) {
+            row.isHoverEnabled = true
+            row.showsGroupRule = false
+            row.applySidebarDensity(SidebarDensity(width: view.bounds.width,
+                floor: min(SidebarDefaults.tightDensityWidth, view.bounds.width)))
+            row.setActivityBeam(workload: .none)
+        }
         outlineSource.makeRow = { view, item in
             let rowIndex = view.row(forItem: item)
             guard rowIndex >= 0 else { return nil }
@@ -1657,6 +1680,14 @@ struct WindowHarness {
                                 ink: navigatorRoot.bodyInk, showsMark: false)
             row.identifier = identifier
             configureOutlineRow(row, item: item, frame: frame)
+            return row
+        }
+        outlineSource.makeChrome = { view, _ in
+            let identifier = NSUserInterfaceItemIdentifier("SidebarHoverRow")
+            let row = (view.makeView(withIdentifier: identifier, owner: nil)
+                as? SidebarHoverRowView) ?? SidebarHoverRowView(frame: .zero)
+            row.identifier = identifier
+            configureOutlineChrome(row, in: view)
             return row
         }
         var placeholderActionRequested = false
@@ -2264,6 +2295,10 @@ struct WindowHarness {
                                   let cell = outline.view(atColumn: 0, row: index,
                                     makeIfNecessary: false) as? Specimen.Row else { continue }
                             configureOutlineRow(cell, item: item, frame: outline.rect(ofRow: index))
+                            if let chrome = outline.rowView(atRow: index,
+                                makeIfNecessary: false) as? SidebarHoverRowView {
+                                configureOutlineChrome(chrome, in: outline)
+                            }
                         }
                         trace("outline.configure.end")
                     }
@@ -2489,7 +2524,7 @@ struct WindowHarness {
                                         guard result == 0 else {
                                             throw WindowFailure("native project action row exceeds its bound")
                                         }
-                                    } else if bounds.height < Int32(navigatorRowHeight *
+                                    } else if bounds.height < Int32(SidebarDefaults.projectCompactRowHeight *
                                         contentWindow.backingScaleFactor) {
                                         // The clipped edge can show a sliver of the row before
                                         // either control is visible. Keep the row accessible.
@@ -2601,6 +2636,18 @@ struct WindowHarness {
                 }
             }
             trace("event kind=\(event.kind) action=\(event.action)")
+            let windowIsKey = tw_window_has_focus(window) != 0
+            if contentWindow.isKeyWindow != windowIsKey {
+                contentWindow.isKeyWindow = windowIsKey
+                if !windowIsKey { contentWindow.cancelPointerGesture() }
+                for index in outline.visibleRowIndexes {
+                    guard let chrome = outline.rowView(atRow: index,
+                        makeIfNecessary: false) as? SidebarHoverRowView else { continue }
+                    chrome.isEmphasized = windowIsKey
+                }
+                dirty = true
+            }
+            if event.kind == 45 { continue }
             if event.kind == 44 {
                 LinuxTheme.setDark(!LinuxTheme.isDark)
                 navigatorRoot.setThemeAppearance()
@@ -2690,7 +2737,7 @@ struct WindowHarness {
                     dirty = true
                     continue
                 }
-                // Row hover has one fixed-height arithmetic lookup and one geometry check;
+                // Row hover uses the outline's indexed offset lookup and one geometry check;
                 // a pointer move never scans a stored catalogue or builds hidden controls.
                 var pointerProjectID: String?
                 if actions == nil, accountPicker == nil, savedPicker == nil,

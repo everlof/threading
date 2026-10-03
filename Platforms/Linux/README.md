@@ -129,9 +129,13 @@ expanded project and verifies
 pointer, keyboard, AT-SPI and inline saved-terminal activation.
 The table and outline shims now mount each visible cell inside a reusable `NSTableRowView`,
 with row-view delegate hooks and selection state tied to stable row identity. The focused
-outline fixture bounds row chrome allocation while scrolling a 5,100-project tree. The full
-production `SidebarHoverRowView` still needs the theme and activity-beam stack before it can
-replace the preview's diagnostic selection paint.
+outline fixture bounds row chrome allocation while scrolling a 5,100-project tree and checks
+that moving selection clears the previous visible row. Cached row offsets support the production
+28-point runtime and 30-point project heights without scanning the catalogue on pointer movement
+or viewport changes. The native navigator mounts the unchanged production
+`SidebarHoverRowView` for hover and selected-row chrome, including live Threading theme colors
+and native-window selection strength. The Linux snapshot does not yet carry a verified working
+state, so its activity beam remains inactive.
 `tests/text_label/run.sh` checks the Linux-only, Pango-backed `NSTextField` label against
 Unicode shaping, clipping, ellipsis, intrinsic size, baseline behavior and shared neutral-ink
 contrast on eight grounds, then renders that

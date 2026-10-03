@@ -199,6 +199,14 @@ private func measured(_ text: String, scale: CGFloat = 1) -> TATMetrics {
     }
 }
 
+@MainActor private final class SuperviewMoveProbe: NSView {
+    var parents: [NSView?] = []
+
+    override func viewDidMoveToSuperview() {
+        parents.append(superview)
+    }
+}
+
 @MainActor private final class DynamicColorProbe: NSView {
     let named = NSColor(name: NSColor.Name("fixture.appearance")) { appearance in
         appearance.name == .darkAqua
@@ -920,6 +928,18 @@ private struct InkPolicy: Decodable {
         windowLog.entries.removeAll()
         secondWindow.contentView = windowRoot
         precondition(windowLog.entries.isEmpty, "assigning the same content root must be inert")
+        let firstParent = NSView(frame: .zero)
+        let secondParent = NSView(frame: .zero)
+        let superviewProbe = SuperviewMoveProbe(frame: .zero)
+        firstParent.addSubview(superviewProbe)
+        secondParent.addSubview(superviewProbe)
+        superviewProbe.removeFromSuperview()
+        precondition(superviewProbe.parents.count == 4 &&
+                     superviewProbe.parents[0] === firstParent &&
+                     superviewProbe.parents[1] == nil &&
+                     superviewProbe.parents[2] === secondParent &&
+                     superviewProbe.parents[3] == nil,
+                     "superview callbacks must observe attach, reparent and detach")
         print("PASS content-window attachment, subtree callback order and direct reparenting")
 
         // The production scope must answer chords only for its own focused subtree, including

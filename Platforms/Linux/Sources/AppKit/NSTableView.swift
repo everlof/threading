@@ -40,12 +40,14 @@ public protocol NSTableViewDataSource: AnyObject {
 public protocol NSTableViewDelegate: AnyObject {
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView?
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView?
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool
     func tableViewSelectionDidChange(_ notification: Notification)
 }
 
 public extension NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { nil }
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat { tableView.rowHeight }
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { true }
     func tableViewSelectionDidChange(_ notification: Notification) {}
 }
@@ -54,9 +56,10 @@ public extension Notification.Name {
     static let NSTableViewSelectionDidChange = Notification.Name("NSTableViewSelectionDidChange")
 }
 
-/// A uniform-height, view-based table document. The data source owns values; the table owns
+/// A view-based table document. The data source owns values; the table owns
 /// viewport cells. Reloads may enumerate the source, but scroll and resize only touch mounted
-/// rows. A table is normally the direct documentView of an NSScrollView.
+/// rows. Row offsets are indexed during reload, not during scroll. A table is normally the
+/// direct documentView of an NSScrollView.
 @MainActor
 open class NSTableView: NSView, NSClipViewDocumentObserver {
     private struct MountedRow {
@@ -92,6 +95,8 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
     private var reusableRows: [NSTableRowView] = []
     private var selectedIdentities: Set<AnyHashable> = []
     private var rowForIdentity: [AnyHashable: Int] = [:]
+    private var rowHeights: [CGFloat] = []
+    private var rowOffsets: [CGFloat] = [0]
     private var changingDocumentGeometry = false
 
     open override var isFlipped: Bool { true }
@@ -160,15 +165,16 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
 
     open func rect(ofRow row: Int) -> NSRect {
         guard row >= 0, row < numberOfRows else { return .zero }
-        return NSRect(x: 0, y: CGFloat(row) * rowStride,
-                      width: frame.width, height: rowHeight)
+        return NSRect(x: 0, y: rowOffsets[row],
+                      width: frame.width, height: rowHeights[row])
     }
 
     open func row(at point: NSPoint) -> Int {
         guard point.y >= 0, point.y < frame.height, point.x >= 0,
               point.x < frame.width else { return -1 }
-        let index = Int(point.y / rowStride)
-        guard index < numberOfRows, point.y < rect(ofRow: index).maxY else { return -1 }
+        let index = firstOffset(after: point.y) - 1
+        guard index >= 0, index < numberOfRows,
+              point.y < rowOffsets[index] + rowHeights[index] else { return -1 }
         return index
     }
 
@@ -245,6 +251,11 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         (delegate as? NSTableViewDelegate)?.tableView(self, rowViewForRow: row)
     }
 
+    /// Read on explicit reload or a row-metric change, never from a viewport callback.
+    open func heightOfRow(_ row: Int) -> CGFloat {
+        (delegate as? NSTableViewDelegate)?.tableView(self, heightOfRow: row) ?? rowHeight
+    }
+
     open func shouldSelectRow(_ row: Int) -> Bool {
         (delegate as? NSTableViewDelegate)?.tableView(self, shouldSelectRow: row) ?? true
     }
@@ -268,11 +279,21 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         reconcileVisibleRows()
     }
 
-    private var rowStride: CGFloat { rowHeight + intercellSpacing.height }
-
     private func updateDocumentGeometry() {
-        let height = CGFloat(numberOfRows) * rowStride
-        precondition(height.isFinite, "table document exceeds finite geometry")
+        rowHeights.removeAll(keepingCapacity: true)
+        rowHeights.reserveCapacity(numberOfRows)
+        rowOffsets.removeAll(keepingCapacity: true)
+        rowOffsets.reserveCapacity(numberOfRows + 1)
+        rowOffsets.append(0)
+        for row in 0..<numberOfRows {
+            let height = heightOfRow(row)
+            precondition(height.isFinite && height > 0, "table row height must be positive")
+            let nextOffset = rowOffsets[row] + height + intercellSpacing.height
+            precondition(nextOffset.isFinite, "table document exceeds finite geometry")
+            rowHeights.append(height)
+            rowOffsets.append(nextOffset)
+        }
+        let height = rowOffsets[numberOfRows]
         changingDocumentGeometry = true
         if frame.height != height { frame.size.height = height }
         changingDocumentGeometry = false
@@ -285,9 +306,35 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
               numberOfRows > 0 else { return 0..<0 }
         let visible = clip.documentVisibleRect
         guard !visible.isEmpty else { return 0..<0 }
-        let lower = max(0, min(numberOfRows, Int(floor(visible.minY / rowStride))))
-        let upper = max(lower, min(numberOfRows, Int(ceil(visible.maxY / rowStride))))
+        var lower = max(0, min(numberOfRows, firstOffset(after: visible.minY) - 1))
+        if lower < numberOfRows,
+           visible.minY >= rowOffsets[lower] + rowHeights[lower] {
+            lower += 1
+        }
+        let upper = max(lower, min(numberOfRows, firstOffset(atOrAfter: visible.maxY)))
         return lower..<upper
+    }
+
+    /// First prefix offset greater than `value` (upper bound).
+    private func firstOffset(after value: CGFloat) -> Int {
+        var low = 0
+        var high = rowOffsets.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if rowOffsets[middle] <= value { low = middle + 1 } else { high = middle }
+        }
+        return low
+    }
+
+    /// First prefix offset greater than or equal to `value` (lower bound).
+    private func firstOffset(atOrAfter value: CGFloat) -> Int {
+        var low = 0
+        var high = rowOffsets.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if rowOffsets[middle] < value { low = middle + 1 } else { high = middle }
+        }
+        return low
     }
 
     private func reconcileVisibleRows() {

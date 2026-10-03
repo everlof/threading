@@ -146,12 +146,16 @@ def verify_viewport(app, log_path, expected, total):
     for index in range(listed.get_child_count()):
         row = listed.get_child_at_index(index)
         rect = row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert 0 < rect.height <= 44 and rect.width in (264, 296), \
+        assert 0 < rect.height <= 60 and rect.width in (264, 296), \
             (index, rect.x, rect.y, rect.width, rect.height)
         assert 82 <= rect.y and rect.y + rect.height <= window_height, \
             (index, rect.y, rect.height, window_height)
         assert rect.x == (12 if expected[first + index] in project_id_set else 44), \
             (index, rect.x, expected[first + index])
+        row_height = 60 if expected[first + index] in project_id_set else 56
+        if index > 0 and rect.y + rect.height < window_height:
+            assert rect.height == row_height, \
+                (index, expected[first + index], rect.height, row_height)
     return frame, listed
 
 

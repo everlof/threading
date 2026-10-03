@@ -12,12 +12,16 @@ public protocol NSOutlineViewDelegate: AnyObject {
     func outlineView(_ outlineView: NSOutlineView,
                      viewFor tableColumn: NSTableColumn?, item: Any) -> NSView?
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView?
+    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool
     func outlineViewSelectionDidChange(_ notification: Notification)
 }
 
 public extension NSOutlineViewDelegate {
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? { nil }
+    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
+        outlineView.rowHeight
+    }
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool { true }
     func outlineViewSelectionDidChange(_ notification: Notification) {}
 }
@@ -140,6 +144,12 @@ open class NSOutlineView: NSTableView {
             rowViewForItem: rows[row].item)
     }
 
+    open override func heightOfRow(_ row: Int) -> CGFloat {
+        guard rows.indices.contains(row) else { return rowHeight }
+        return (delegate as? NSOutlineViewDelegate)?.outlineView(self,
+            heightOfRowByItem: rows[row].item) ?? rowHeight
+    }
+
     open override func shouldSelectRow(_ row: Int) -> Bool {
         guard rows.indices.contains(row) else { return false }
         return (delegate as? NSOutlineViewDelegate)?.outlineView(self,
@@ -147,6 +157,7 @@ open class NSOutlineView: NSTableView {
     }
 
     open override func selectionDidChange() {
+        super.selectionDidChange()
         (delegate as? NSOutlineViewDelegate)?.outlineViewSelectionDidChange(
             Notification(name: .NSOutlineViewSelectionDidChange, object: self))
     }

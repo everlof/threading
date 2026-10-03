@@ -161,7 +161,7 @@ try:
         for index, row in enumerate(rows):
             row_rect = extents(row)
             assert (row_rect.x, row_rect.y, row_rect.width, row_rect.height) == (
-                12, 86 + index * 48, 296, 44)
+                12, 86 + index * 64, 296, 60)
             assert row.get_child_count() == 2
             create = row.get_child_at_index(0)
             assert create.get_role_name() == 'push button'
@@ -170,7 +170,7 @@ try:
             assert create.get_action_iface().get_n_actions() == 1
             create_rect = extents(create)
             assert (create_rect.y, create_rect.width, create_rect.height) == (
-                row_rect.y + 2, 40, 40)
+                row_rect.y + 10, 40, 40)
             creates.append(create)
             button = row.get_child_at_index(1)
             assert button.get_role_name() == 'push button'
@@ -179,7 +179,7 @@ try:
             assert button.get_state_set().contains(Atspi.StateType.ENABLED)
             assert button.get_action_iface().get_n_actions() == 1
             rect = extents(button)
-            assert (rect.y, rect.width, rect.height) == (row_rect.y + 2, 40, 40)
+            assert (rect.y, rect.width, rect.height) == (row_rect.y + 10, 40, 40)
             assert rect.x == create_rect.x + create_rect.width + 4
             assert 0 <= row_rect.x + row_rect.width - (rect.x + rect.width) <= 8
             actions.append(button)

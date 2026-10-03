@@ -93,11 +93,11 @@ with log_path.open('w+') as log:
                                stdout=log, stderr=log)
     try:
         app = eventually(application, 'AT-SPI application registration')
-        listed = eventually(lambda: content(app) if content(app).get_child_count() == 9 else None,
+        listed = eventually(lambda: content(app) if content(app).get_child_count() == 7 else None,
                             'bounded project list')
         assert listed.get_role_name() == 'list'
-        assert listed.get_description() == 'Showing 1 through 9 of 15 items'
-        assert listed.get_child_count() == 9
+        assert listed.get_description() == 'Showing 1 through 7 of 15 items'
+        assert listed.get_child_count() == 7
         first = listed.get_child_at_index(0)
         assert first.get_role_name() == 'list item'
         assert re.fullmatch(r'[0-9A-Fa-f-]{36}', first.get_accessible_id())
@@ -158,11 +158,11 @@ with log_path.open('w+') as log:
             button_rect[0] + button_rect[2] // 2,
             button_rect[1] + button_rect[3] // 2,
             Atspi.CoordType.WINDOW).get_accessible_id() == 'linux.placeholder.action'
-        assert rect(first_component) == (12, 86, 296, 44)
-        assert rect(first_component, Atspi.CoordType.PARENT) == (12, 4, 296, 44)
+        assert rect(first_component) == (12, 86, 296, 60)
+        assert rect(first_component, Atspi.CoordType.PARENT) == (12, 4, 296, 60)
         assert list_component.get_accessible_at_point(
             40, 108, Atspi.CoordType.WINDOW).get_accessible_id() == first.get_accessible_id()
-        assert list_component.get_accessible_at_point(40, 131, Atspi.CoordType.WINDOW) is None
+        assert list_component.get_accessible_at_point(40, 148, Atspi.CoordType.WINDOW) is None
         geometry = subprocess.run(['xdotool', 'getwindowgeometry', '--shell', window_id],
                                   capture_output=True, text=True, check=True, timeout=5)
         window_geometry = dict(re.findall(r'^(X|Y|WIDTH|HEIGHT)=(-?\d+)$',
@@ -170,7 +170,7 @@ with log_path.open('w+') as log:
         assert rect(frame_component, Atspi.CoordType.SCREEN) == (
             int(window_geometry['X']), int(window_geometry['Y']), 1120, 480)
         assert rect(first_component, Atspi.CoordType.SCREEN) == (
-            int(window_geometry['X']) + 12, int(window_geometry['Y']) + 86, 296, 44)
+            int(window_geometry['X']) + 12, int(window_geometry['Y']) + 86, 296, 60)
         before_pixels = pixels(window_id)
         before_rasters = log_path.read_text().count('stage=raster.begin')
         before_repaints = log_path.read_text().count('stage=repaint.end')
@@ -239,7 +239,7 @@ with log_path.open('w+') as log:
         eventually(lambda: rect(list_component) if rect(list_component) ==
                    (0, 82, 320, 399) else None, 'odd-size navigator frame')
         assert rect(idle.get_component_iface()) == (320, 0, 801, 481)
-        assert rect(first_component) == (12, 86, 296, 44)
+        assert rect(first_component) == (12, 86, 296, 60)
         subprocess.run(['import', '-window', window_id,
                         str(Path.cwd() / 'out' / 'accessibility-list-odd.png')], check=True, timeout=5)
         subprocess.run(['xdotool', 'windowsize', window_id, '1120', '480'], check=True, timeout=5)
@@ -254,13 +254,13 @@ with log_path.open('w+') as log:
             eventually(lambda: window_title().endswith('/' + project_name),
                        f'keyboard selected {project_name}')
         listed = eventually(lambda: content(app)
-                            if content(app).get_description() == 'Showing 3 through 11 of 15 items'
+                            if content(app).get_description() == 'Showing 5 through 11 of 15 items'
                             else None, 'scrolled accessible viewport')
-        assert listed.get_child_count() == 9
-        assert listed.get_child_at_index(8).get_state_set().contains(Atspi.StateType.SELECTED)
-        assert listed.get_child_at_index(8).get_state_set().contains(Atspi.StateType.FOCUSED)
+        assert listed.get_child_count() == 7
+        assert listed.get_child_at_index(6).get_state_set().contains(Atspi.StateType.SELECTED)
+        assert listed.get_child_at_index(6).get_state_set().contains(Atspi.StateType.FOCUSED)
         assert selection.get_n_selected_children() == 1
-        assert selection.is_child_selected(8)
+        assert selection.is_child_selected(6)
         target_index = next(index for index in range(listed.get_child_count())
                             if '界' in listed.get_child_at_index(index).get_name())
         target = listed.get_child_at_index(target_index)
@@ -321,8 +321,8 @@ with log_path.open('w+') as log:
         assert frame_component.get_accessible_at_point(
             *title_center, Atspi.CoordType.WINDOW).get_accessible_id() == 'linux.page-title'
         selected_bounds = rect(selected.get_component_iface())
-        assert selected_bounds[0] == 12 and selected_bounds[2:] == (296, 44), selected_bounds
-        assert 82 <= selected_bounds[1] and selected_bounds[1] + 44 <= 480, selected_bounds
+        assert selected_bounds[0] == 12 and selected_bounds[2:] == (296, 60), selected_bounds
+        assert 82 <= selected_bounds[1] and selected_bounds[1] + 60 <= 480, selected_bounds
         assert frame_component.get_accessible_at_point(
             360, 108, Atspi.CoordType.WINDOW).get_role_name() == 'terminal'
         assert frame_component.get_accessible_at_point(
