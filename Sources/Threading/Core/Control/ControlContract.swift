@@ -181,6 +181,12 @@ enum ControlSendOutcome: Equatable, Sendable {
     /// Joined the target's running turn — no new turn, no queue row; it shares that turn's
     /// context and settles under its terminal event.
     case steered(into: ControlSessionOverview)
+    /// The target could not take it now — a terminal mid-turn or still booting, or no live
+    /// surface at all — so the message was stored durably as agent mail in the target's own
+    /// mailbox instead of being refused. Busy agents are told only that mail is waiting and read
+    /// the text with `mail_inbox`; a dormant session is told at its next launch. Nothing was
+    /// typed and nothing was queued in memory.
+    case storedInMailbox(for: ControlSessionOverview)
     case refused(ControlRefusal)
 }
 

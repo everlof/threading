@@ -1,0 +1,48 @@
+import Foundation
+import ThreadingController
+
+// MARK: - Mail Notice Hook
+
+/// The answering hook entries for agent mail, for both runtimes whose hooks can answer
+/// (`AgentCapabilities.answeringMailHooks`).
+///
+/// They sit **beside** the silent lifecycle hooks, never inside them: the lifecycle commands and
+/// their frozen-text test are unchanged. These differ in exactly one respect — curl's stdout is
+/// the hook's stdout, because the reply is the point — and keep everything else: stderr is
+/// discarded, failure is swallowed so the hook always exits 0, and the timeout is short. An app
+/// that is not running therefore prints nothing, and the agent carries on.
+enum MailNoticeHook {
+    /// Registered for these three events, each as its own entry with no tool matcher.
+    static let events: [MailNoticeEvent] = [.postToolUse, .stop, .sessionStart]
+
+    /// The runtime's own hook name for an event. Claude and Codex spell all three the same.
+    static func hookName(for event: MailNoticeEvent) -> String {
+        switch event {
+        case .postToolUse: return "PostToolUse"
+        case .stop: return "Stop"
+        case .sessionStart: return "SessionStart"
+        }
+    }
+
+    /// Whether a terminal launch of this runtime gets the answering entries: its hooks must be
+    /// able to answer, and the "Other sessions" tools — whose `mail_inbox` the notice names —
+    /// must be on.
+    @MainActor
+    static func isWanted(for kind: AgentKind) -> Bool {
+        kind.supports(.answeringMailHooks) && MCPToolCatalog.isEnabled(MCPToolCatalog.workspace)
+    }
+
+    static func endpoint(token: String, event: MailNoticeEvent) -> String {
+        "\(MCPDefaults.mailNoticePathPrefix)\(token)?\(MCPDefaults.mailNoticeEventParameter)=\(event.rawValue)"
+    }
+
+    /// Claude's entry: the token is baked into the per-session `--settings` file.
+    static func claudeCommand(token: String, event: MailNoticeEvent) -> String {
+        let payload = "threading_hook_payload"
+        return "\(payload)=$(cat); " + MCPDefaults.hookPostCommand(
+            payloadVariable: payload,
+            endpointSuffix: endpoint(token: token, event: event),
+            timeout: MCPDefaults.mailNoticeTimeout
+        ) + " 2>/dev/null || true"
+    }
+}

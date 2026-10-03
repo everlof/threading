@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingController
 
 // MARK: - Codex Hook Installer
 
@@ -193,6 +194,29 @@ enum CodexHookInstaller {
             + " >/dev/null 2>&1; true \(MCPDefaults.hookMarker)"
     }
 
+    /// The command one answering mail hook runs (`MailNoticeHook`).
+    ///
+    /// The one Codex entry besides the broker whose stdout is its answer: a notice as hook JSON,
+    /// or nothing. Token-guarded and stdin-draining exactly like the lifecycle entries, so a
+    /// Codex run that is not Threading's says nothing and costs one `cat`. Measured on Codex
+    /// 0.160.0: `additionalContext` reaches the model mid-turn after a `PostToolUse`, and a
+    /// `Stop` block continues the same turn. Adding these entries changed this file's text once,
+    /// which is one renewal of the user's Codex hook trust (the `EventLog` line at the rewrite).
+    static func command(for event: MailNoticeEvent) -> String {
+        let endpoint = MailNoticeHook.endpoint(
+            token: "$\(MCPDefaults.sessionTokenEnvironmentKey)",
+            event: event
+        )
+        return "\(Key.payloadVariable)=$(cat);"
+            + " [ -n \"$\(MCPDefaults.sessionTokenEnvironmentKey)\" ] &&"
+            + " " + MCPDefaults.hookPostCommand(
+                payloadVariable: Key.payloadVariable,
+                endpointSuffix: endpoint,
+                timeout: MCPDefaults.mailNoticeTimeout
+            )
+            + " 2>/dev/null; true \(MCPDefaults.hookMarker)"
+    }
+
     /// The command the `PreToolUse` hook runs, which asks Threading whether a tool may proceed.
     ///
     /// Unlike the lifecycle hooks this one **blocks and speaks**: curl's stdout is the hook's
@@ -267,6 +291,17 @@ enum CodexHookInstaller {
                     matcher: registration.toolMatcher
                 ))
             }
+        }
+
+        // The answering mail entries, separate from the silent lifecycle ones above. Inert for a
+        // run without a session token, like every entry here.
+        for event in MailNoticeHook.events {
+            let name = MailNoticeHook.hookName(for: event)
+            if installed[name] == nil { installed[name] = foreignEntries(in: hooks[name]) }
+            installed[name, default: []].append(entry(
+                command: command(for: event),
+                timeout: MCPDefaults.mailNoticeTimeout + MailNoticeHookDefaults.codexTimeoutSlack
+            ))
         }
 
         // Written unconditionally, and inert until a launch exports the broker variable. The
@@ -370,4 +405,10 @@ enum CodexHookInstaller {
         /// Recognised, never written: see `ownedMarkers`.
         static let legacyHookMarker = "# skalman-lifecycle"
     }
+}
+
+enum MailNoticeHookDefaults {
+    /// Codex's own kill deadline sits a little past curl's, so curl's timeout is what ends a
+    /// slow answer and the hook still exits 0.
+    static let codexTimeoutSlack: TimeInterval = 1
 }

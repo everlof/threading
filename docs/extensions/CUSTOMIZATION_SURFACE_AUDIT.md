@@ -623,6 +623,12 @@ row states, the send-time substitution and its receipt, accessibility and dismis
 the native rows; no extension can read or write the list, replace the editor or grant itself a
 login. A reference to a login that is no longer discovered renders as unavailable and is skipped.
 
+The session Info panel's **Mail** section is host-only presentation over the session's mailbox.
+Its entity is one session's mail address. Threading owns addressing, admission, storage,
+acknowledgement, cross-host sync and every notice; the section shows party, host and state from a
+bounded read and never message text. It is built from `SessionInfoRowView` and `PanelListView`,
+reuses the panel's on-screen-only poll, and introduces no extension slot, data or authority.
+
 Before adding a component:
 
 1. Name the durable semantic surface and its entity context. For a popover, register its stable

@@ -405,6 +405,20 @@ MCP behavior annotations are emitted from the typed identity as conservative pro
 clients. Unknown or state-changing behavior is not marked read-only or idempotent. Tools that
 can affect resources beyond Threading's local process are marked open-world.
 
+### The mail notice endpoint
+
+The listener's fourth hook route, `/mail-notice/<token>?event=…`, is the only one whose reply an
+agent reads: hook JSON carrying one host-authored mail notice, or an empty 200
+(`MCPServerMailNotice.swift`, `MacMailHookOutput`). It shares the session tokens and the
+socket/port fallback with lifecycle reports and answers within the hook's 2-second budget. See
+[`session-activity.md`](session-activity.md#answering-mail-hooks).
+
+The four `mail_*` tools are ordinary built-ins in the `workspace-control` group, declared in
+`MCPMailTools.swift` and appended to `authoredDeclarations` in one line, so the shared registry
+files change only additively. `MCPRemoteSessionToolScope` admits them for remote-host sessions:
+their mailbox is this Mac's record until the host-local mailbox (draft, "Mailbox location")
+exists.
+
 ## Scoped ad-hoc endpoints and the AI settings search
 
 The settings search's Ask AI button runs a one-shot helper (`SettingsSearchResearch`) that must

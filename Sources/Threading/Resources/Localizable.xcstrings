@@ -4763,6 +4763,17 @@
         }
       }
     },
+    "A removed session" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En borttagen session"
+          }
+        }
+      }
+    },
     "A reported text/background pair shown touching, for the diagnostic that has to say two colours are the same colour. Nothing is drawn between the halves: the third sample is one white on the same white, and it has to read as one field with its specimen gone." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5651,6 +5662,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppdaterade konton: %lld av %lld."
+          }
+        }
+      }
+    },
+    "Acknowledge mail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bekräfta post"
+          }
+        }
+      }
+    },
+    "Acknowledged" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bekräftad"
           }
         }
       }
@@ -24713,6 +24746,17 @@
         }
       }
     },
+    "Handed to host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Överlämnad till värden"
+          }
+        }
+      }
+    },
     "Handled by OpenCode's terminal after launch" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28025,6 +28069,17 @@
         }
       }
     },
+    "Leave a durable message in another agent’s mailbox, here or on another host." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lämna ett beständigt meddelande i en annan agents brevlåda, här eller på en annan värd."
+          }
+        }
+      }
+    },
     "Leave the CLI" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29401,6 +29456,17 @@
         }
       }
     },
+    "Mail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Post"
+          }
+        }
+      }
+    },
     "Mail chain" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29408,6 +29474,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "E-posttråd"
+          }
+        }
+      }
+    },
+    "Mail directory" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Postkatalog"
           }
         }
       }
@@ -29749,6 +29826,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Märkets ritanimation spelades upp igen."
+          }
+        }
+      }
+    },
+    "Mark messages this session acted on." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markera meddelanden som sessionen har hanterat."
           }
         }
       }
@@ -32621,6 +32709,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ingen inloggning hittades på en runtime vars fönster kan öppnas på det här sättet."
+          }
+        }
+      }
+    },
+    "No mail." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen post."
           }
         }
       }
@@ -39404,6 +39503,17 @@
         }
       }
     },
+    "Read mail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs post"
+          }
+        }
+      }
+    },
     "Read more receipts" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39538,6 +39648,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Läs projektets sessioner — namn, id:n, agenter och vem som arbetar."
+          }
+        }
+      }
+    },
+    "Read this session’s unacknowledged mail." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs sessionens obekräftade post."
           }
         }
       }
@@ -40408,6 +40529,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppdaterar %@… (%lld av %lld)"
+          }
+        }
+      }
+    },
+    "Refused by host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avvisad av värden"
           }
         }
       }
@@ -45379,6 +45511,17 @@
         }
       }
     },
+    "Send mail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka post"
+          }
+        }
+      }
+    },
     "Send now" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45579,6 +45722,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skickas medan Threading är igång."
+          }
+        }
+      }
+    },
+    "Sent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skickat"
           }
         }
       }
@@ -57891,6 +58045,17 @@
         }
       }
     },
+    "This session’s mail address and who it can write to." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sessionens postadress och vilka den kan skriva till."
+          }
+        }
+      }
+    },
     "This single-use invitation opens only this chat and expires after 24 hours if nobody accepts it. Once accepted, that member keeps access until you stop sharing. Choose permission approval only for someone you trust." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59646,6 +59811,17 @@
         }
       }
     },
+    "Told, unread" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aviserad, oläst"
+          }
+        }
+      }
+    },
     "Tomorrow" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60836,6 +61012,17 @@
         }
       }
     },
+    "Unread" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oläst"
+          }
+        }
+      }
+    },
     "Unschedule this message" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -61201,6 +61388,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppgradera till Max för högre gränser och mer Opus"
+          }
+        }
+      }
+    },
+    "Urgent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Brådskande"
           }
         }
       }
@@ -62605,6 +62803,17 @@
         }
       }
     },
+    "Waiting for host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på värden"
+          }
+        }
+      }
+    },
     "Waiting for navigator data." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62757,6 +62966,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Väntar på din iPhone"
+          }
+        }
+      }
+    },
+    "Waiting to be read" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på att läsas"
           }
         }
       }
@@ -66327,6 +66547,17 @@
         }
       }
     },
+    "host %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "värd %@"
+          }
+        }
+      }
+    },
     "hours" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -67519,6 +67750,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "på"
+          }
+        }
+      }
+    },
+    "on %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "på %@"
           }
         }
       }
@@ -69208,6 +69450,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "de två fönstren är %lld och %lld sekunder långa, så antalen går inte att jämföra"
+          }
+        }
+      }
+    },
+    "this Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "denna Mac"
           }
         }
       }

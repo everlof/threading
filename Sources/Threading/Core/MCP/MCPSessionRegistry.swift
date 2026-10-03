@@ -284,7 +284,8 @@ enum MCPSessionRegistry {
         remoteControl: Bool? = nil,
         fastMode: Bool? = nil,
         statusLineOverride: String? = nil,
-        theme: String? = nil
+        theme: String? = nil,
+        mailNotices: Bool = false
     ) -> String? {
         // This is what makes terminal opt-out complete rather than an empty hooks dictionary
         // still carried through `--settings`.
@@ -295,7 +296,8 @@ enum MCPSessionRegistry {
             remoteControl: remoteControl,
             fastMode: fastMode,
             statusLineOverride: statusLineOverride,
-            theme: theme
+            theme: theme,
+            mailNotices: mailNotices
         ) else {
             removeSettingsFile(for: sessionID)
             return nil
@@ -330,7 +332,8 @@ enum MCPSessionRegistry {
         remoteControl: Bool? = nil,
         fastMode: Bool? = nil,
         statusLineOverride: String? = nil,
-        theme: String? = nil
+        theme: String? = nil,
+        mailNotices: Bool = false
     ) -> [String: Any]? {
         let needsListener = brokersPermissions || reportsLifecycle
 
@@ -346,7 +349,8 @@ enum MCPSessionRegistry {
                 to: &hooks,
                 token: token(for: sessionID),
                 brokersPermissions: brokersPermissions,
-                reportsLifecycle: reportsLifecycle
+                reportsLifecycle: reportsLifecycle,
+                mailNotices: mailNotices && reportsLifecycle
             )
         }
 
@@ -384,7 +388,8 @@ enum MCPSessionRegistry {
         to hooks: inout [String: Any],
         token: String,
         brokersPermissions: Bool,
-        reportsLifecycle: Bool
+        reportsLifecycle: Bool,
+        mailNotices: Bool
     ) {
         // Accumulated per hook name rather than assigned, because one name can carry entries
         // from both halves of this function: `PreToolUse` is how a native session brokers
@@ -455,6 +460,17 @@ enum MCPSessionRegistry {
                         group(command: command, matcher: registration.toolMatcher)
                     )
                 }
+            }
+        }
+
+        // The answering mail hooks: separate entries beside the silent lifecycle ones, never a
+        // change to them. Their stdout is the reply — a notice as hook JSON, or nothing — and
+        // stderr and failure are still swallowed, so an absent app prints nothing and exits 0.
+        if mailNotices {
+            for event in MailNoticeHook.events {
+                groups[MailNoticeHook.hookName(for: event), default: []].append(
+                    group(command: MailNoticeHook.claudeCommand(token: token, event: event), matcher: nil)
+                )
             }
         }
 

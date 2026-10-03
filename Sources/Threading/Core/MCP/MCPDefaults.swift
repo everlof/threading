@@ -35,6 +35,16 @@ enum MCPDefaults {
     /// callback can never inherit the turn-start checkpoint barrier.
     static let runProgressPathPrefix = "/progress/"
 
+    /// The one hook endpoint that answers: a mail notice for `PostToolUse`, `Stop` or
+    /// `SessionStart`, as hook JSON, or an empty body. Separate from lifecycle because those
+    /// hooks are silent by contract and this one is the deliberate, narrow exception
+    /// (`docs/feature-drafts/agent-mail.md`, "Delivery, per surface").
+    static let mailNoticePathPrefix = "/mail-notice/"
+    static let mailNoticeEventParameter = "event"
+    /// A notice is a hint on the agent's hot path: an unreachable app or a busy store costs this
+    /// much and prints nothing.
+    static let mailNoticeTimeout: TimeInterval = 2
+
     /// The query parameter naming which lifecycle event a report describes.
     ///
     /// The event is carried in the URL rather than read from the payload so that one endpoint

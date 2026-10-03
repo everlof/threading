@@ -979,7 +979,8 @@ enum AgentLauncher {
             remoteControl: remoteControlAtStartup(for: session),
             fastMode: fastModeAtStartup(for: session),
             statusLineOverride: statusLineOverride(for: session, in: project),
-            theme: terminalTheme(for: session)
+            theme: terminalTheme(for: session),
+            mailNotices: MailNoticeHook.isWanted(for: session.kind)
         ) {
             command.append(flag: "--settings", value: settingsPath)
         }

@@ -3,8 +3,13 @@
 > Status: **in progress** (2026-10-03). The controller half — mailboxes, grants, notices, ask,
 > wake and the SSH transport — is implemented and recorded in
 > [`autonomous-controller.md`](../architecture/autonomous-controller.md#agent-mail-schema-v7).
-> The Mac half (session mailboxes, Mac MCP tools, Claude/Codex answering hooks, sync over the
-> remote-host tunnel) is next. Supersedes the worker-only
+> The Mac half — session mailboxes (`MacMailbox`), the four Mac MCP tools, `send_to_session`
+> storing undeliverable messages as mail, Claude/Codex answering hooks, native-chat and boundary
+> notices, sync with remote hosts' controllers over owner SSH, and a Mail section in the session
+> Info panel — is implemented (2026-10-03) and recorded in
+> [`control-plane.md`](../architecture/control-plane.md#agent-mail-on-the-mac). Not yet: remote-host
+> sessions keeping their mailbox on the host (they use the Mac's, through the tunnel), a Mac
+> surface for grants and contacts, and `wake`/`ask` for Mac sessions. Supersedes the worker-only
 > `agent-messaging.md` draft (2026-10-02), whose grant modes, chain bounds and Rindabox notes are
 > folded in below. Extends [`control-plane.md`](../architecture/control-plane.md) (interactive
 > sessions), [`autonomous-controller.md`](../architecture/autonomous-controller.md) (workers) and
