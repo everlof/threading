@@ -28,6 +28,12 @@ public struct MarkdownPreviewDocument: Sendable {
 
 public actor MarkdownPreviewWorker {
     public static let shared = MarkdownPreviewWorker()
+    private let themeDomain: String
+
+    /// `themeDomain` is injectable so a test never writes the developer's own snapshot.
+    public init(themeDomain: String = MarkdownPreviewThemes.preferenceDomain) {
+        self.themeDomain = themeDomain
+    }
 
     public func read(_ url: URL) throws -> MarkdownPreviewDocument {
         try Task.checkCancellation()
@@ -44,19 +50,14 @@ public actor MarkdownPreviewWorker {
     }
 
     public func themes() -> MarkdownPreviewThemes? {
-        guard let directory = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: MarkdownPreviewThemes.groupIdentifier) else { return nil }
-        let url = directory.appendingPathComponent(MarkdownPreviewThemes.filename)
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-        guard let data = try? handle.read(upToCount: 16_385), data.count <= 16_384 else { return nil }
+        guard let data = UserDefaults(suiteName: themeDomain)?.data(forKey: MarkdownPreviewThemes.preferenceKey),
+              data.count <= MarkdownPreviewThemes.maximumBytes else { return nil }
         return try? JSONDecoder().decode(MarkdownPreviewThemes.self, from: data)
     }
 
     public func publish(_ themes: MarkdownPreviewThemes) throws {
-        guard let directory = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: MarkdownPreviewThemes.groupIdentifier) else { return }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(themes)
-        guard data.count <= 16_384 else { return }
-        try data.write(to: directory.appendingPathComponent(MarkdownPreviewThemes.filename), options: .atomic)
+        guard data.count <= MarkdownPreviewThemes.maximumBytes else { return }
+        UserDefaults(suiteName: themeDomain)?.set(data, forKey: MarkdownPreviewThemes.preferenceKey)
     }
 }

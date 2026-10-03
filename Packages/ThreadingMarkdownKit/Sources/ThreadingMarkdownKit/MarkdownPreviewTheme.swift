@@ -34,8 +34,15 @@ public struct MarkdownPreviewTheme: Codable, Sendable {
 }
 
 public struct MarkdownPreviewThemes: Codable, Sendable {
-    public static let groupIdentifier = "SMQ3E8Y57T.codes.threading.markdown"
-    public static let filename = "markdown-preview-theme.json"
+    /// The preferences domain the app publishes into and the sandboxed preview reads through its
+    /// `temporary-exception.shared-preference.read-only` entitlement. An App Group would need a
+    /// provisioning profile that authorizes it, and a Developer ID profile without one stopped
+    /// every local install and release; this exception needs none. Developer ID only — the Mac
+    /// App Store refuses temporary exceptions, and this app runs unsandboxed for its PTYs anyway.
+    public static let preferenceDomain = "codes.threading.markdown-preview-theme"
+    static let preferenceKey = "themes"
+    /// Presentation only; anything larger is not a snapshot this preview wrote.
+    static let maximumBytes = 16_384
     public let light, dark: MarkdownPreviewTheme
     public init(light: MarkdownPreviewTheme, dark: MarkdownPreviewTheme) { self.light = light; self.dark = dark }
 }

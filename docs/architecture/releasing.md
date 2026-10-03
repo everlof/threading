@@ -223,6 +223,11 @@ error: "Threading" requires a provisioning profile. Select a provisioning profil
 ```
 
 for three days, leaving `/Applications/Threading.app` at the last commit that happened to build.
+It happened again on 2026-10-03 with `com.apple.security.application-groups`: the Markdown Quick
+Look theme snapshot used an App Group, `Threading Provisioning Profile` does not authorize one, and
+every auto-install failed its profile check from that commit until the snapshot moved to a
+read-only shared-preference exception, which no profile has to back. Before adding any key this
+module names, check that the installed profile's entitlements dict carries it.
 The profile-signed release path is unaffected: the Developer ID profile's entitlements dict
 carries `keychain-access-groups` (see [the Sign in with Apple
 section](#sign-in-with-apple-cannot-be-shipped-by-developer-id) for what that dict actually holds),

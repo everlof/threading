@@ -57,6 +57,22 @@ final class MarkdownPreviewTests: XCTestCase {
         XCTAssertTrue(html.range(of: "html \\{[^}]*min-height: 100%[^}]*background-image", options: .regularExpression) != nil)
     }
 
+    /// The snapshot crosses into the sandboxed preview through one preferences domain, which the
+    /// preview's read-only exception names; no App Group or provisioning profile is involved.
+    func testThemeSnapshotRoundTripsThroughItsPreferenceDomain() async throws {
+        let domain = "codes.threading.tests.markdown-preview-theme.\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: domain) }
+        let worker = MarkdownPreviewWorker(themeDomain: domain)
+        let empty = await worker.themes()
+        XCTAssertNil(empty, "No snapshot means System light/dark")
+        var dark = MarkdownPreviewTheme.system(dark: true)
+        dark.accent = "#ff00aa"
+        try await worker.publish(MarkdownPreviewThemes(light: .system(dark: false), dark: dark))
+        let read = await worker.themes()
+        XCTAssertEqual(read?.dark.accent, "#ff00aa")
+        XCTAssertEqual(MarkdownPreviewThemes.preferenceDomain, "codes.threading.markdown-preview-theme")
+    }
+
     func testSourceBlocksReportTheLineEachStartsOn() {
         let blocks = Markdown.sourceBlockLines("# Title\n\nOne\ntwo\n\n```\ncode\n\nmore\n```\n- item")
         XCTAssertEqual(blocks.map(\.line), [0, 2, 5, 10])

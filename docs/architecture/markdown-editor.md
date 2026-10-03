@@ -146,11 +146,16 @@ and 32 KiB per block before attributed styling. Larger documents show an explici
 this preview does not claim to show the complete source. Source planning and file/theme I/O are
 serial worker operations. Only bounded font/inline styling is main-actor work.
 
-The host publishes two resolved light/dark theme snapshots, capped at 16 KiB, into the signed
-`SMQ3E8Y57T.codes.threading.markdown` App Group at launch and theme changes. The extension reads
-that snapshot without starting the app; it contains presentation only, never source, session
-state or file paths. Missing snapshots use System light/dark. Preview colours, family names,
+The host publishes two resolved light/dark theme snapshots, capped at 16 KiB, into its
+`codes.threading.markdown-preview-theme` preferences domain at launch and theme changes. The
+sandboxed extension reads that one domain through a
+`temporary-exception.shared-preference.read-only` entitlement, without starting the app; it can
+neither write it nor read any other domain. The snapshot contains presentation only, never
+source, session state or file paths. This was first an App Group, which is profile-backed: the
+Developer ID profile did not authorize it, so every auto-install from the commit that added it
+failed and a release would have too. The exception needs no profile; the Mac App Store refuses
+temporary exceptions, which costs nothing for an app that runs unsandboxed for its PTYs. Missing snapshots use System light/dark. Preview colours, family names,
 radii and static grid/dot patterns follow the theme; bespoke assets, animation and process-local
 custom font registration are deliberately outside the Quick Look contract. UI scenarios do not
-publish into the user's shared container. Document editing, saves, conflicts and default-handler
+publish into the user's preferences. Document editing, saves, conflicts and default-handler
 registration remain host-owned.

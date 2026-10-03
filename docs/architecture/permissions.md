@@ -19,6 +19,13 @@ accepts that combination, but taskgated kills it before `main`.
 | `com.apple.security.cs.allow-unsigned-executable-memory` | JIT for the in-process WASM extension runtime | both |
 | `com.apple.security.get-task-allow` | Lets a debugger attach | **Debug only** |
 
+The Markdown Quick Look extension is the one sandboxed bundle the app embeds under `PlugIns`. Its
+whole declaration is `com.apple.security.app-sandbox` plus
+`com.apple.security.temporary-exception.shared-preference.read-only` for
+`codes.threading.markdown-preview-theme`, the domain the app publishes its theme snapshot into.
+Neither needs a provisioning profile. An App Group would, and the Developer ID profile does not
+authorize one — see [`markdown-editor.md`](markdown-editor.md#finder-quick-look).
+
 ## get-task-allow is decided twice, and only one of them is this file
 
 Both configurations pointed at one entitlements file, so the shipped set requested
