@@ -8026,6 +8026,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "ThemedScroller",
                 "ThemedScrollView",
                 "ThemedScrubber",
+                "ThemedLedgerTableView",
                 "ThemedSegmentedControl",
                 "ThemedSpinner",
                 "ThemedSplitView",

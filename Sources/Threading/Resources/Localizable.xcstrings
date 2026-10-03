@@ -4322,6 +4322,17 @@
         }
       }
     },
+    "A ledger of measured columns in tabular figures under headings: a remote worker's spend by day. A partial receipt is drawn in the warning role and says why when spoken. Past its visible rows it scrolls and hands an ended flick back to the page." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En liggare med mätta kolumner i tabellsiffror under rubriker: en fjärrarbetares förbrukning per dag. Ett ofullständigt kvitto ritas i varningsrollen och säger varför när det läses upp. Bortom sina synliga rader rullar den och lämnar ett avslutat svep tillbaka till sidan."
+          }
+        }
+      }
+    },
     "A limit here is yours, ahead of the provider's. Depending on the one you pick it tells you, holds back what Threading would send on its own, or parks sessions on that account at their next turn. It never stops the keyboard: a turn you type and send goes, whatever your limits say. The percentage you are told about is always the one the window itself reads." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56339,6 +56350,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ThemedImagePreview"
+          }
+        }
+      }
+    },
+    "ThemedLedgerTableView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemedLedgerTableView"
           }
         }
       }
