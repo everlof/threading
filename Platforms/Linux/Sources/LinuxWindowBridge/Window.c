@@ -473,6 +473,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 if (w->sidebarWidth) tw_workspace_focus(w, 1);
                 out->kind = 2;
                 out->action = 1; // Accessibility selection precedes a separate open action.
+                out->key = (int)(intptr_t)e.user.data1; // Validated visible slot, independent of pointer hit testing.
             } else if (e.user.code == 2) {
                 if (!tw_accessibility_row_can_open((int)(intptr_t)e.user.data1)) continue;
                 out->kind = 8;
@@ -714,6 +715,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             }
             else if (e.key.keysym.sym == SDLK_UP) out->kind = 3;
             else if (e.key.keysym.sym == SDLK_DOWN) out->kind = 4;
+            else if (e.key.keysym.sym == SDLK_SPACE && !e.key.repeat) out->kind = 36;
             else if (e.key.keysym.sym == SDLK_RIGHT) out->kind = 10;
             else if (e.key.keysym.sym == SDLK_LEFT) out->kind = 11;
             else if (e.key.keysym.sym == SDLK_ESCAPE) out->kind = 12;

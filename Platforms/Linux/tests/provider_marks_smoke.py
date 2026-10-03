@@ -134,13 +134,15 @@ def idle_labels():
 
 def labels(selected):
     listed, terminal = panes()
-    assert listed.get_child_count() == 2
+    assert listed.get_child_count() == 2, ('row count', listed.get_child_count())
     actual = {listed.get_child_at_index(i).get_accessible_id(): listed.get_child_at_index(i).get_name()
               for i in range(2)}
     assert actual == expected, actual
-    assert listed.get_selection_iface().get_selected_child(0).get_accessible_id() == selected
-    assert not terminal.get_state_set().contains(Atspi.StateType.FOCUSED)
-    assert 'Saved shell start 1' in Atspi.Text.get_text(terminal.get_text_iface(), 0, -1)
+    chosen = listed.get_selection_iface().get_selected_child(0).get_accessible_id()
+    assert chosen == selected, ('selected', chosen, selected)
+    assert not terminal.get_state_set().contains(Atspi.StateType.FOCUSED), 'terminal kept focus'
+    terminal_text = Atspi.Text.get_text(terminal.get_text_iface(), 0, -1)
+    assert 'Saved shell start 1' in terminal_text, ('terminal text', terminal_text)
     return True
 
 
@@ -188,24 +190,30 @@ def capture(name):
     listed, _ = panes()
     for index in range(2):
         rect = listed.get_child_at_index(index).get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        # Specimen.Row's 13pt glyph occupies26px, offset15px inside the native44px row.
-        geometry = f'26x26+{rect.x + 15}+{rect.y + (rect.height - 26) // 2}'
+        # The shared Mac session content owns a 16pt icon slot, inset 4pt in the row.
+        # Two pixels around its 32px bounds make the corner-transparency check meaningful.
+        geometry = f'36x36+{rect.x + 6}+{rect.y + 4}'
         raw = subprocess.run(['convert', str(destination), '-crop', geometry, '+repage',
                               '-depth', '8', 'rgba:-'], check=True, capture_output=True, timeout=5).stdout
-        assert len(raw) == 26 * 26 * 4
+        assert len(raw) == 36 * 36 * 4
         pixels = [raw[i:i + 4] for i in range(0, len(raw), 4)]
         background = pixels[0]
         mask = tuple(pixel != background for pixel in pixels)
-        assert 20 < sum(mask) < 26 * 26 - 20, (name, index, 'empty or opaque-square mark', sum(mask))
-        assert not any(mask[y * 26 + x] for x, y in [(0, 0), (25, 0), (0, 25), (25, 25)])
-        # Identity is its own second line, so a long primary title cannot consume its pixels.
-        # The lower eight pixels were blank under the previous single centered text run.
-        detail_geometry = f'{rect.width - 64}x8+{rect.x + 52}+{rect.y + 34}'
+        assert 20 < sum(mask) < 36 * 36 - 20, (name, index, 'empty or opaque-square mark', sum(mask))
+        assert not any(mask[y * 36 + x] for x, y in [(0, 0), (35, 0), (0, 35), (35, 35)])
+        # The production title is one line beside the mark. The older diagnostic identity
+        # line must not overlap it; complete identity remains in the AT-SPI row label above.
+        title_geometry = f'120x24+{rect.x + 52}+{rect.y + 7}'
+        title = subprocess.run(['convert', str(destination), '-crop', title_geometry, '+repage',
+                                '-depth', '8', 'rgba:-'], check=True, capture_output=True, timeout=5).stdout
+        assert any(title[i:i + 4] != background for i in range(0, len(title), 4)), \
+            (name, index, 'production session title was not painted')
+        detail_geometry = f'120x8+{rect.x + 52}+{rect.y + 34}'
         detail = subprocess.run(['convert', str(destination), '-crop', detail_geometry, '+repage',
                                  '-depth', '8', 'rgba:-'], check=True, capture_output=True, timeout=5).stdout
-        assert len(detail) == (rect.width - 64) * 8 * 4
-        assert any(detail[i:i + 4] != background for i in range(0, len(detail), 4)), \
-            (name, index, 'provider/account detail was lost below the long title')
+        assert len(detail) == 120 * 8 * 4
+        assert sum(detail[i:i + 4] != background for i in range(0, len(detail), 4)) < 5, \
+            (name, index, 'diagnostic detail overlapped the production title')
         crops.append(mask)
     return crops
 

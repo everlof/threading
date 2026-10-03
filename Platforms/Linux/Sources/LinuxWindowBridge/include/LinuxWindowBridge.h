@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 typedef struct TWWindow TWWindow;
-// 1 repaint/resize, 2 project click (action=1 for AT-SPI select),
+// 1 repaint/resize, 2 project click (action=1 for AT-SPI select, key=validated visible slot),
 // 3/4 project navigation, 5 window quit. For 3/4, action=0 is an arrow key and action=1
 // is a sidebar wheel turn; keep those origins distinct when routing through responders.
 // Terminal kinds 15/16/17 carry button (key 0/1/2, action 1 press/3 release), wheel (signed
@@ -26,6 +26,7 @@ typedef struct TWWindow TWWindow;
 // admits each chosen operation through the same command gate as its shortcut.
 // Kind33 opens the mounted project's inline `+` choices through AT-SPI. key is its
 // visible row slot and text is the exact project ID, revalidated by the Swift host.
+// Kind36 toggles the selected project's inline saved-runtime disclosure on Space.
 typedef struct {
     int kind, x, y, width, height;
     char text[1024];
