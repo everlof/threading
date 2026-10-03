@@ -18,12 +18,24 @@ private final class RowView: NSView {
 }
 
 @MainActor
+private final class ChromeRowView: NSTableRowView {
+    var representedID = -1
+    private(set) var backgroundDraws = 0
+    private(set) var selectionDraws = 0
+
+    override func drawBackground(in dirtyRect: NSRect) { backgroundDraws += 1 }
+    override func drawSelection(in dirtyRect: NSRect) { selectionDraws += 1 }
+}
+
+@MainActor
 private final class TreeSource: NSOutlineViewDataSource, NSOutlineViewDelegate {
     let roots: [Node]
     private(set) var constructedViews = 0
     private(set) var configuredViews = 0
+    private(set) var constructedChromeRows = 0
     private(set) var selectionChanges = 0
     private let identifier = NSUserInterfaceItemIdentifier("StressOutlineRow")
+    private let chromeIdentifier = NSUserInterfaceItemIdentifier("StressOutlineChrome")
 
     init() {
         let children = (0..<1_024).map { Node(id: 10_000 + $0) }
@@ -58,6 +70,21 @@ private final class TreeSource: NSOutlineViewDataSource, NSOutlineViewDelegate {
         return view
     }
 
+    func outlineView(_ outlineView: NSOutlineView,
+                     rowViewForItem item: Any) -> NSTableRowView? {
+        let row: ChromeRowView
+        if let recycled = outlineView.makeView(withIdentifier: chromeIdentifier,
+                                               owner: self) as? ChromeRowView {
+            row = recycled
+        } else {
+            constructedChromeRows += 1
+            row = ChromeRowView(frame: .zero)
+            row.identifier = chromeIdentifier
+        }
+        row.representedID = (item as! Node).id
+        return row
+    }
+
     func outlineViewSelectionDidChange(_ notification: Notification) {
         selectionChanges += 1
     }
@@ -71,20 +98,37 @@ private func assertViewportBound(_ outline: NSOutlineView, _ scroll: NSScrollVie
                  "\(context): mounted \(outline.mountedViewCount) > \(ceiling)")
     precondition(outline.reusableViewCount <= max(8, ceiling + 2),
                  "\(context): unbounded reuse pool")
+    precondition(outline.reusableRowViewCount <= ceiling + 2,
+                 "\(context): unbounded default chrome reuse pool")
     precondition(outline.subviews.count == outline.mountedViewCount,
                  "\(context): table retained hidden row subviews")
     for row in outline.visibleRowIndexes {
         let item = outline.item(atRow: row) as! Node
         let view = outline.view(atColumn: 0, row: row, makeIfNecessary: true) as! RowView
+        let chrome = outline.rowView(atRow: row, makeIfNecessary: true) as! ChromeRowView
         precondition(view.representedID == item.id, "\(context): recycled row has stale content")
-        precondition(view.frame == outline.rect(ofRow: row), "\(context): stale row geometry")
+        precondition(chrome.representedID == item.id, "\(context): recycled chrome has stale identity")
+        precondition(chrome.frame == outline.rect(ofRow: row), "\(context): stale row geometry")
+        precondition(view.frame == NSRect(origin: .zero, size: chrome.bounds.size),
+                     "\(context): cell escaped row-local geometry")
+        precondition(view.superview === chrome, "\(context): row chrome does not own cell")
+        precondition(chrome.isSelected == (outline.selectedRow == row),
+                     "\(context): row chrome selection is stale")
+        if let root = scroll.superview {
+            let viewport = scroll.convert(scroll.bounds, to: root)
+            let converted = view.convert(view.bounds, to: root)
+            precondition(!converted.intersection(viewport).isEmpty,
+                         "\(context): mounted cell missed viewport: cell=\(converted), viewport=\(viewport)")
+        }
     }
 }
 
 @MainActor
 private func run() {
     let source = TreeSource()
+    let root = NSView(frame: NSRect(x: 0, y: 0, width: 332, height: 248))
     let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 320, height: 220))
+    root.addSubview(scroll)
     let outline = NSOutlineView(frame: .zero)
     outline.rowHeight = 44
     outline.dataSource = source
@@ -97,6 +141,12 @@ private func run() {
     precondition(outline.mountedViewCount == 0, "detached outline eagerly built rows")
     scroll.documentView = outline
     assertViewportBound(outline, scroll, context: "first viewport")
+    _ = root.layoutSubtreeIfNeeded()
+    assertViewportBound(outline, scroll, context: "laid out first viewport")
+    let initialChrome = outline.rowView(atRow: 0, makeIfNecessary: false) as! ChromeRowView
+    initialChrome.draw(initialChrome.bounds)
+    precondition(initialChrome.backgroundDraws == 1 && initialChrome.selectionDraws == 0,
+                 "unselected row chrome drew selection")
     precondition(outline.visibleRowIndexes.first == 0, "initial viewport did not start at first row")
     let configurationsBeforeItemReload = source.configuredViews
     outline.reloadItem(source.roots[0])
@@ -112,6 +162,12 @@ private func run() {
     precondition(outline.selectedRow == 5_099, "offscreen selection was lost")
     outline.scrollRowToVisible(5_099)
     assertViewportBound(outline, scroll, context: "last viewport")
+    let selectedChrome = outline.rowView(atRow: 5_099, makeIfNecessary: false) as! ChromeRowView
+    precondition(selectedChrome.isSelected, "selected row chrome did not update")
+    let selectionDraws = selectedChrome.selectionDraws
+    selectedChrome.draw(selectedChrome.bounds)
+    precondition(selectedChrome.selectionDraws == selectionDraws + 1,
+                 "selected row chrome did not own selection drawing")
     precondition(outline.visibleRowIndexes.contains(5_099), "scrollRowToVisible missed last row")
     precondition(outline.item(atRow: outline.selectedRow) as? Node === lastRoot,
                  "selection changed identity during scroll")
@@ -156,7 +212,7 @@ private func run() {
     assertViewportBound(outline, scroll, context: "re-expanded viewport")
 
     let window = NSWindow()
-    window.contentView = scroll
+    window.contentView = root
     let beforeWheel = scroll.contentView.bounds.minY
     window.dispatchToContent(NSEvent(type: .scrollWheel,
                                      locationInWindow: NSPoint(x: 100, y: 60),
@@ -165,6 +221,7 @@ private func run() {
                  "wheel did not advance the clip viewport")
     assertViewportBound(outline, scroll, context: "wheel viewport")
     precondition(source.constructedViews <= 12, "view creation followed row count")
+    precondition(source.constructedChromeRows <= 12, "chrome creation followed row count")
     precondition(source.selectionChanges == 3, "selection change notification count")
     scroll.documentView = nil
     precondition(outline.mountedViewCount == 0 && outline.subviews.isEmpty,

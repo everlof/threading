@@ -472,7 +472,12 @@ enum Specimen {
                        image: NSImage?, showsMark: Bool,
                        disclosure: DisclosureTriangleDrawing.Direction?, imageSide: CGFloat = 13,
                        preserveProductionContent: Bool = false) {
-            if self.frame != frame { self.frame = frame }
+            // The outline supplies its document-space row rectangle. Once AppKit has placed
+            // this cell inside an NSTableRowView, its frame is local to that row shell. A
+            // visible-row refresh must not move the cell out of the row's viewport geometry.
+            let mountedFrame = superview is NSTableRowView
+                ? NSRect(origin: .zero, size: frame.size) : frame
+            if self.frame != mountedFrame { self.frame = mountedFrame }
             self.accent = accent
             self.selected = selected
             self.ink = ink
@@ -830,6 +835,15 @@ enum Specimen {
         reusedWindow.hitTest(textPoint)?.mouseDown(with: NSEvent())
         precondition(reusedWindow.takeActivatedRowSlot() == nil,
                      "a hidden recycled row answered a native press")
+        let outlineChrome = NSTableRowView(frame: NSRect(x: 0, y: 48, width: 120, height: 22))
+        let outlineCell = Row(frame: .zero, text: "", accent: accent, selected: false,
+                              ink: reusedWindow.bodyInk, showsMark: false)
+        outlineChrome.addSubview(outlineCell)
+        outlineCell.configure(frame: outlineChrome.frame, accent: accent, selected: false,
+                              ink: reusedWindow.bodyInk, image: nil, showsMark: false,
+                              disclosure: nil)
+        precondition(outlineCell.frame == outlineChrome.bounds,
+                     "outline refresh moved cell out of its row-local geometry")
         verifyKeyEquivalentDispatch()
         print("PASS retained navigator row/icon geometry and label slot identity")
 

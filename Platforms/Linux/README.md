@@ -81,7 +81,10 @@ one fixed palette; live production themes and complete navigator/menu presentati
 `tests/page_title/run.sh` links the production `PageTitleView` with a Linux Pango label adapter
 for its Apple-only title animation. The native workspace mounts that title in a separate
 41-point right-pane header. Its press reveals the active project or saved runtime in the
-navigator; the session Actions control stays hidden until that menu exists on Linux. Terminal
+navigator. Saved agent pages now show its production Actions control and a retained overlay
+of production `ThemedMenuRowView` rows. The scoped Linux menu copies the saved session ID or
+owning project path; the host revalidates the active page and project before each command.
+Pointer, keyboard and AT-SPI actions reach the same menu and clipboard path. Terminal
 paint, PTY grid size, pointer input, IME caret and AT-SPI text geometry share the resulting
 82-pixel content inset. The right header is retained separately from terminal frames, so PTY
 output does not rerasterize it.
@@ -119,6 +122,11 @@ bounded child projection; `--session-row-layout-fixture` and `--terminal-row-lay
 check the shared title/icon stacks at their native slot sizes. The installed X11 smoke captures an
 expanded project and verifies
 pointer, keyboard, AT-SPI and inline saved-terminal activation.
+The table and outline shims now mount each visible cell inside a reusable `NSTableRowView`,
+with row-view delegate hooks and selection state tied to stable row identity. The focused
+outline fixture bounds row chrome allocation while scrolling a 5,100-project tree. The full
+production `SidebarHoverRowView` still needs the theme and activity-beam stack before it can
+replace the preview's diagnostic selection paint.
 `tests/text_label/run.sh` checks the Linux-only, Pango-backed `NSTextField` label against
 Unicode shaping, clipping, ellipsis, intrinsic size, baseline behavior and shared neutral-ink
 contrast on eight grounds, then renders that

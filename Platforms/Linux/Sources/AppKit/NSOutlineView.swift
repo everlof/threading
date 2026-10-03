@@ -11,11 +11,13 @@ public protocol NSOutlineViewDataSource: AnyObject {
 public protocol NSOutlineViewDelegate: AnyObject {
     func outlineView(_ outlineView: NSOutlineView,
                      viewFor tableColumn: NSTableColumn?, item: Any) -> NSView?
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView?
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool
     func outlineViewSelectionDidChange(_ notification: Notification)
 }
 
 public extension NSOutlineViewDelegate {
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? { nil }
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool { true }
     func outlineViewSelectionDidChange(_ notification: Notification) {}
 }
@@ -130,6 +132,12 @@ open class NSOutlineView: NSTableView {
         let column = outlineTableColumn ?? tableColumns.first
         return (delegate as? NSOutlineViewDelegate)?.outlineView(self, viewFor: column,
                                                                   item: rows[row].item)
+    }
+
+    open override func rowViewForRow(_ row: Int) -> NSTableRowView? {
+        guard rows.indices.contains(row) else { return nil }
+        return (delegate as? NSOutlineViewDelegate)?.outlineView(self,
+            rowViewForItem: rows[row].item)
     }
 
     open override func shouldSelectRow(_ row: Int) -> Bool {

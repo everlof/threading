@@ -75,6 +75,7 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/project_create_menu_smoke.py:/project_create_menu_smoke.py:ro" \
   -v "$PWD/tests/add_project_button_smoke.py:/add_project_button_smoke.py:ro" \
   -v "$PWD/tests/actions_smoke.py:/actions_smoke.py:ro" \
+  -v "$PWD/tests/session_actions_smoke.py:/session_actions_smoke.py:ro" \
   -v "$PWD/tests/actions_mark_contract.py:/actions_mark_contract.py:ro" \
   -v "$PWD/tests/saved_terminal_child.py:/saved_terminal_child.py:ro" \
   -v "$PWD/tests/saved_terminal_refusal_smoke.py:/saved_terminal_refusal_smoke.py:ro" \
