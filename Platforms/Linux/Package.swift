@@ -73,6 +73,8 @@ let package = Package(
         .executableTarget(name: "Harness", dependencies: ["AppKit", "CoreText"]),
         .executableTarget(name: "ViewClippingHarness", dependencies: ["AppKit"],
             path: "tests/view_clipping"),
+        .executableTarget(name: "OutlineViewHarness", dependencies: ["AppKit"],
+            path: "tests/outline_view", exclude: ["run.sh", "README.md"]),
         .executableTarget(name: "TextLabelHarness", dependencies: ["AppKit",
             .target(name: "AppKitTextBridge", condition: .when(platforms: [.linux]))],
             path: "tests/text_label", exclude: ["run.sh"],
