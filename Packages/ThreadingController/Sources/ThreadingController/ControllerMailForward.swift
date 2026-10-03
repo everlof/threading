@@ -176,6 +176,15 @@ extension ControllerStore {
         return true
     }
 
+    /// Whether `address` is a mailbox here: a registered session mailbox or an existing worker.
+    public func hasMailbox(_ address: MailAddress) throws -> Bool {
+        guard address.host == (try host().id) else { return false }
+        switch address.kind {
+        case .session: return (try optional("mailbox", address.description) as MailMailbox?) != nil
+        case .worker: return (try optional("worker", WorkerID(address.id).description) as ControllerWorker?) != nil
+        }
+    }
+
     private func requireMailbox(_ address: MailAddress) throws {
         switch address.kind {
         case .session: let _: MailMailbox = try required("mailbox", address.description)

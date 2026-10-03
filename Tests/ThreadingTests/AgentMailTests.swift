@@ -442,6 +442,46 @@ final class MailNoticeHookTests: XCTestCase {
         XCTAssertFalse(MailStopContinuationLedger.absorbsFinish(finish) { _ in })
     }
 
+    /// A host-local notice hook answers on the host and also tells this Mac whether it blocked a
+    /// Stop, so the Mac's continuation ledger sees a block it would otherwise never hear about.
+    func testTheHostNoticeHookReportsItsAnswerBackToTheMac() throws {
+        let command = MailNoticeHook.hostCommand(executable: "/opt/threading/threading-controller", event: .stop)
+        XCTAssertTrue(command.contains("agent-notice stop"))
+        XCTAssertTrue(command.contains("\(MCPDefaults.mailNoticeObservedParameter)=$threading_mail_observed"))
+        XCTAssertTrue(command.contains("threading_mail_observed=\(MCPDefaults.mailNoticeObservedBlock)"))
+        XCTAssertTrue(command.hasSuffix("printf '%s' \"$threading_mail_answer\"; true"), "the agent still gets the host's answer")
+        XCTAssertEqual(MCPServer.mailNoticeObserved(inQuery: "event=stop&observed=block"), MCPDefaults.mailNoticeObservedBlock)
+        XCTAssertNil(MCPServer.mailNoticeObserved(inQuery: "event=stop&observed=anything-else"))
+
+        // Reported over the tunnel, the block holds the finish like a block answered here.
+        let session = SessionID()
+        let finish = try XCTUnwrap(HookLifecycleReport(sessionID: session, event: .turnFinished, payload: [:]))
+        MCPServer.recordMailHookCall(session, event: .stop, blocked: true)
+        XCTAssertTrue(MailStopContinuationLedger.absorbsFinish(finish) { _ in })
+        MailStopContinuationLedger.reset()
+    }
+
+    /// The notice typed at the idle edge starts a short new turn, and its Stop is blocked a few
+    /// seconds after the previous turn's relayed finish. That block belongs to the new turn: its
+    /// finish must be held, not treated as already relayed.
+    func testABlockInAFreshTurnSoonAfterTheLastFinishHoldsThatTurnsFinish() throws {
+        let session = SessionID()
+        let previous = HookLifecycleRelay.observe
+        var relayed: [HookLifecycleReport] = []
+        HookLifecycleRelay.observe = { relayed.append($0) }
+        defer { HookLifecycleRelay.observe = previous }
+        let finish = try XCTUnwrap(HookLifecycleReport(sessionID: session, event: .turnFinished, payload: [:]))
+        let start = try XCTUnwrap(HookLifecycleReport(sessionID: session, event: .turnStarted, payload: [:]))
+
+        HookLifecycleRelay.deliver(finish)
+        HookLifecycleRelay.deliver(start)
+        XCTAssertEqual(MailStopContinuationLedger.recordBlock(session, now: Date().addingTimeInterval(6)), .holdNextFinish)
+        HookLifecycleRelay.deliver(finish)
+        XCTAssertEqual(relayed.map(\.event), [.turnFinished, .turnStarted],
+                       "the blocked turn's own finish is held, so the session is not shown idle")
+        MailStopContinuationLedger.reset()
+    }
+
     func testABlockAfterTheFinishWasRelayedReopensTheTurn() throws {
         let session = SessionID()
         let finish = try XCTUnwrap(HookLifecycleReport(sessionID: session, event: .turnFinished, payload: [:]))

@@ -42,7 +42,9 @@ final class RemoteSessionMailboxes {
     static let shared = RemoteSessionMailboxes()
 
     private(set) var bindings: [SessionID: Binding] = [:]
-    private var provisioning: Set<SessionID> = []
+    /// One provisioning per session at a time; a second caller (a launch racing a handover)
+    /// waits for the first one's answer instead of concluding there is no host mailbox.
+    private var provisioning: [SessionID: (endpoint: RemoteControllerEndpoint, task: Task<Binding?, Never>)] = [:]
     /// The last mailbox read for each host-backed session, kept so an unreachable host still
     /// shows what was last seen, with its age.
     private var lastRead: [SessionID: (presentation: SessionMailPresentation, at: Date)] = [:]
@@ -95,9 +97,19 @@ final class RemoteSessionMailboxes {
         endpoint: RemoteControllerEndpoint
     ) async -> Binding? {
         if let binding = bindings[sessionID], binding.endpoint == endpoint { return binding }
-        guard !provisioning.contains(sessionID) else { return nil }
-        provisioning.insert(sessionID)
-        defer { provisioning.remove(sessionID) }
+        if let running = provisioning[sessionID] {
+            let binding = await running.task.value
+            // The same host: its answer is ours. Another host: provision there after it.
+            if running.endpoint == endpoint { return binding }
+        }
+        let task = Task { await self.register(sessionID, name: name, endpoint: endpoint) }
+        provisioning[sessionID] = (endpoint, task)
+        let binding = await task.value
+        if provisioning[sessionID]?.endpoint == endpoint { provisioning[sessionID] = nil }
+        return binding
+    }
+
+    private func register(_ sessionID: SessionID, name: String, endpoint: RemoteControllerEndpoint) async -> Binding? {
         let rpc = RemoteControllerRPC(endpoint: endpoint, runner: runner, timeout: RemoteControllerRPCDefaults.launchTimeout)
         do {
             let host = try await ensurePeered(endpoint)
@@ -145,6 +157,21 @@ final class RemoteSessionMailboxes {
                 _ = try? await mailbox.ensureGrant(recipient: recipient, sender: address.description, mode: .notify)
             }
         }
+    }
+
+    // MARK: - Sending
+
+    /// Sends as a host-local mailbox, through its host's controller, so the reply comes back to
+    /// the mailbox the agent actually reads. The Mac's control plane has already admitted the
+    /// pair, so a recipient on that host is owner-admitted; one elsewhere is queued and its own
+    /// host's grants decide (this Mac's are written for project siblings at launch).
+    func send(as binding: Binding, to recipient: MailAddress, text: String) async throws -> MailMessage {
+        let rpc = RemoteControllerRPC(endpoint: binding.endpoint, runner: runner, timeout: RemoteControllerRPCDefaults.launchTimeout)
+        return try await rpc.owner("mail-send", [
+            .init(value: binding.address.description), .init(value: recipient.description),
+            .init(value: UUID().uuidString), .init(text: text),
+            .init(value: MailPriority.normal.rawValue), .init(value: MacMailDefaults.ownerAdmittedArgument)
+        ])
     }
 
     // MARK: - Reading

@@ -182,15 +182,17 @@ actor MacMailbox {
     /// Grants `sender` (an address, `<host>/*` or `*`) `mode` on a session mailbox here, unless an
     /// equal grant already stands. Owner-only: no agent tool reaches this.
     @discardableResult
-    func ensureGrant(recipient: MailAddress, sender: String, mode: MailMode?, allowsInterrupt: Bool = false) async throws -> MailGrant {
+    func ensureGrant(recipient: MailAddress, sender: String, mode: MailMode?, allowsInterrupt: Bool = false,
+                     chainTokenBudget: Int64? = nil) async throws -> MailGrant {
         let store = try await openStore()
         return try await refusing {
             let prior = try await store.mailGrants(recipient: recipient, limit: MacMailDefaults.grantPage).items
                 .first { $0.sender == sender }
-            if let prior, prior.mode == mode, prior.allowsInterrupt == (mode != nil && allowsInterrupt) { return prior }
+            if let prior, prior.mode == mode, prior.allowsInterrupt == (mode != nil && allowsInterrupt),
+               prior.chainTokenBudget == chainTokenBudget { return prior }
             return try await store.setMailGrant(
                 recipient: recipient, sender: sender, expectedRevision: prior?.revision ?? 0,
-                mode: mode, allowsInterrupt: allowsInterrupt
+                mode: mode, allowsInterrupt: allowsInterrupt, chainTokenBudget: chainTokenBudget
             )
         }
     }
@@ -298,6 +300,8 @@ actor MacMailbox {
 // MARK: - Defaults
 
 enum MacMailDefaults {
+    /// `mail-send`'s last argument when the owner (this Mac's control plane) admitted the pair.
+    static let ownerAdmittedArgument = "owner-admitted"
     static let directoryName = "Mail"
     static let databaseFileName = "mailbox.db"
     static let directoryPermissions = 0o700

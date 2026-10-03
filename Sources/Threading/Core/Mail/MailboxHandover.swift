@@ -47,6 +47,12 @@ final class MailboxHandover {
 
     private let observations = AppEventObservations()
     private var inFlight: Set<SessionID> = []
+    /// A move asked for while this session's previous one is still running; run after it, in
+    /// order, so a quick A→B→C ends with the mailbox at C and a forward at each step.
+    private var queued: [SessionID: [(title: String, old: Side, new: Side)]] = [:]
+    /// Old locations a move could not reach (the host was down — often why the project moved).
+    /// Retried after that host's next successful sync; bounded by the sessions moved.
+    private(set) var pending: [SessionID: (title: String, old: Side, new: Side)] = [:]
 
     func start() {
         observations.observe(ProjectExecutionHostDidChange.self) { [weak self] event in
@@ -76,10 +82,34 @@ final class MailboxHandover {
 
     @discardableResult
     func move(_ sessionID: SessionID, title: String, from old: Side, to new: Side) async -> Outcome {
-        var outcome = Outcome()
-        guard old != new, !inFlight.contains(sessionID) else { return outcome }
+        guard old != new else { return Outcome() }
+        guard !inFlight.contains(sessionID) else {
+            queued[sessionID, default: []].append((title, old, new))
+            return Outcome()
+        }
         inFlight.insert(sessionID)
-        defer { inFlight.remove(sessionID) }
+        var outcome = await moveNow(sessionID, title: title, from: old, to: new)
+        while let next = queued[sessionID]?.first {
+            queued[sessionID]?.removeFirst()
+            if queued[sessionID]?.isEmpty == true { queued[sessionID] = nil }
+            let later = await moveNow(sessionID, title: next.title, from: next.old, to: next.new)
+            outcome.moved += later.moved; outcome.grantsCopied += later.grantsCopied; outcome.issues += later.issues
+        }
+        inFlight.remove(sessionID)
+        return outcome
+    }
+
+    /// Finishes moves whose old host could not be reached, now that `endpoint` answered.
+    func retryPending(reachable endpoint: RemoteControllerEndpoint) {
+        for (sessionID, move) in pending {
+            guard case .host(let old) = move.old, old.hostID == endpoint.hostID else { continue }
+            pending[sessionID] = nil
+            Task { @MainActor in _ = await self.move(sessionID, title: move.title, from: move.old, to: move.new) }
+        }
+    }
+
+    private func moveNow(_ sessionID: SessionID, title: String, from old: Side, to new: Side) async -> Outcome {
+        var outcome = Outcome()
         do {
             let macHost = try await mailbox.host().id
             // The new mailbox, ready before anything is moved to it.
@@ -95,25 +125,41 @@ final class MailboxHandover {
                 newAddress = binding.address
             }
 
+            // A mailbox coming back to an address it once left: that forward ends here.
+            try await clearForward(newAddress, on: new)
+
             // Where the old mail can be: this Mac's address always (a host that could not be
-            // reached at launch left it here), and the old host's when it has a controller.
+            // reached at launch left it here), and the old host's when it has a controller. Each
+            // is moved on its own, so an old host that is down does not hold back this Mac's.
             var olds: [(Side, MailAddress)] = [(.thisMac, MailAddress(host: macHost, kind: .session, id: sessionID.rawValue))]
             if case .host(let endpoint) = old {
-                let host = try await ensurePeered(endpoint)
-                olds.append((old, MailAddress(host: host, kind: .session, id: sessionID.rawValue)))
+                do {
+                    let host = try await ensurePeered(endpoint)
+                    olds.append((old, MailAddress(host: host, kind: .session, id: sessionID.rawValue)))
+                } catch {
+                    pending[sessionID] = (title, old, new)
+                    outcome.issues.append(RemoteControllerRPC.describe(error))
+                    EventLog.shared.record(.mcp, "Old host unreachable; its mail moves when it answers again", [
+                        "session": sessionID.uuidString,
+                        "reason": RemoteControllerRPC.describe(error)
+                    ])
+                }
             }
 
             for (side, oldAddress) in olds where oldAddress != newAddress {
-                guard try await hasMailbox(oldAddress, on: side) else { continue }
-                // A mailbox coming back to an address it once left: that forward ends here.
-                try await clearForward(newAddress, on: new)
-                if !Self.sameStore(side, new) {
-                    try await setForward(from: oldAddress, to: newAddress, on: new)
+                do {
+                    guard try await hasMailbox(oldAddress, on: side) else { continue }
+                    if !Self.sameStore(side, new) {
+                        try await setForward(from: oldAddress, to: newAddress, on: new)
+                    }
+                    outcome.moved += try await moveMail(from: oldAddress, to: newAddress, on: side)
+                    outcome.grantsCopied += try await copyGrants(from: oldAddress, on: side, to: newAddress, on: new)
+                    if case .host = side { kick(newAddress.host) }
+                } catch {
+                    if case .host = side { pending[sessionID] = (title, old, new) }
+                    outcome.issues.append(RemoteControllerRPC.describe(error))
                 }
-                outcome.moved += try await moveMail(from: oldAddress, to: newAddress, on: side)
-                outcome.grantsCopied += try await copyGrants(from: oldAddress, on: side, to: newAddress, on: new)
             }
-            for (side, _) in olds { if case .host = side { kick(newAddress.host) } }
             if case .host = new { kick(newAddress.host) }
         } catch {
             outcome.issues.append(RemoteControllerRPC.describe(error))
@@ -143,8 +189,9 @@ final class MailboxHandover {
         switch side {
         case .thisMac:
             let store = try await mailbox.controllerStore()
-            return (try? await store.mailHistory(address, limit: 1)) != nil
+            return try await store.hasMailbox(address)
         case .host:
+            // The host's own `mail-move` finds nothing for an address it never held.
             return true
         }
     }
@@ -205,17 +252,23 @@ final class MailboxHandover {
         for grant in grants where grant.mode != nil {
             switch newSide {
             case .thisMac:
-                try await mailbox.ensureGrant(recipient: new, sender: grant.sender, mode: grant.mode, allowsInterrupt: grant.allowsInterrupt)
+                try await mailbox.ensureGrant(recipient: new, sender: grant.sender, mode: grant.mode,
+                                              allowsInterrupt: grant.allowsInterrupt, chainTokenBudget: grant.chainTokenBudget)
             case .host(let endpoint):
                 let rpc = rpc(endpoint)
                 let page: ControllerPage<MailGrant> = try await rpc.owner("mail-grants", [.init(value: new.description)])
                 let prior = page.items.first { $0.sender == grant.sender }
-                guard prior?.mode != grant.mode || prior?.allowsInterrupt != grant.allowsInterrupt else { continue }
-                let _: MailGrant = try await rpc.owner("mail-grant-set", [
+                guard prior?.mode != grant.mode || prior?.allowsInterrupt != grant.allowsInterrupt
+                        || prior?.chainTokenBudget != grant.chainTokenBudget else { continue }
+                // The chain budget is the spend fuse; a grant that lost it on the way would let a
+                // moved mailbox's conversations start unlimited work.
+                var arguments: [RemoteControllerRPC.OwnerArgument] = [
                     .init(value: new.description), .init(value: grant.sender), .init(value: String(prior?.revision ?? 0)),
                     .init(value: grant.mode!.rawValue),
                     .init(value: grant.allowsInterrupt ? MailPriority.interrupt.rawValue : MailPriority.normal.rawValue)
-                ])
+                ]
+                if let budget = grant.chainTokenBudget { arguments.append(.init(value: String(budget))) }
+                let _: MailGrant = try await rpc.owner("mail-grant-set", arguments)
             }
             copied += 1
         }

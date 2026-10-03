@@ -29,6 +29,18 @@ extension MCPServer {
             return
         }
 
+        if let observed = Self.mailNoticeObserved(inQuery: query) {
+            // A host-local hook reporting what it already answered on the host. It changes
+            // nothing but the continuation ledger, and is always answered empty.
+            Task { @MainActor in
+                if RemoteSessionMailboxes.shared.keepsMailOnHost(sessionID) {
+                    Self.recordMailHookCall(sessionID, event: event, blocked: observed == MCPDefaults.mailNoticeObservedBlock)
+                }
+                respond(MacMailHookOutput.silence)
+            }
+            return
+        }
+
         Task { @MainActor in
             // The Tools page's "Other sessions" switch is the off switch for mail too.
             // A host-local mailbox is told about by the host's own `agent-notice`.
@@ -41,15 +53,34 @@ extension MCPServer {
             guard let notice = await MacMailbox.shared.notice(for: sessionID, event: event) else {
                 return respond(MacMailHookOutput.silence)
             }
-            if event == .stop,
-               MailStopContinuationLedger.recordBlock(sessionID) == .reopenTurn,
-               let reopened = HookLifecycleReport(sessionID: sessionID, event: .turnStarted, payload: [:]) {
-                // The silent Stop hook's finish was already relayed: the turn this block
-                // continues has to be open again before anything treats the session as idle.
-                HookLifecycleRelay.observe?(reopened)
-            }
+            if event == .stop { Self.recordStopBlock(sessionID) }
             respond(MacMailHookOutput.response(event: event, notice: notice))
         }
+    }
+
+    /// One mail-hook call, answered here or on the host: evidence the turn goes on, and — for a
+    /// Stop that was blocked — the block itself.
+    @MainActor
+    static func recordMailHookCall(_ sessionID: SessionID, event: MailNoticeEvent, blocked: Bool) {
+        MailStopContinuationLedger.recordEvidence(sessionID)
+        if event == .stop && blocked { recordStopBlock(sessionID) }
+    }
+
+    @MainActor
+    static func recordStopBlock(_ sessionID: SessionID) {
+        if MailStopContinuationLedger.recordBlock(sessionID) == .reopenTurn,
+           let reopened = HookLifecycleReport(sessionID: sessionID, event: .turnStarted, payload: [:]) {
+            // The silent Stop hook's finish was already relayed: the turn this block continues
+            // has to be open again before anything treats the session as idle.
+            HookLifecycleRelay.observe?(reopened)
+        }
+    }
+
+    static func mailNoticeObserved(inQuery query: String?) -> String? {
+        guard let query, let value = URLComponents(string: "?\(query)")?.queryItems?
+            .first(where: { $0.name == MCPDefaults.mailNoticeObservedParameter })?.value,
+              [MCPDefaults.mailNoticeObservedBlock, MCPDefaults.mailNoticeObservedSeen].contains(value) else { return nil }
+        return value
     }
 
     static func mailNoticeEvent(inQuery query: String?) -> MailNoticeEvent? {

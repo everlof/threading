@@ -72,6 +72,12 @@ enum MailStopContinuationLedger {
         return .holdNextFinish
     }
 
+    /// A turn reported its own start: the finish remembered for "finish first" belonged to the
+    /// turn before, so a block from here on is in a turn whose finish has not been relayed yet.
+    static func recordTurnStarted(_ sessionID: SessionID) {
+        lastRelayedFinish[sessionID] = nil
+    }
+
     /// Any mail-hook call from the session: the agent is still running its turn.
     static func recordEvidence(_ sessionID: SessionID) {
         guard var entry = entries[sessionID] else { return }

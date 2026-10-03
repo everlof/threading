@@ -40,8 +40,35 @@ enum MailNoticeHook {
     /// the controller's own `agent-notice`, which reads the mailbox address and credential from
     /// the agent's environment and prints the same hook JSON, or nothing. It needs neither this
     /// Mac nor the tunnel. Stderr and failure are swallowed exactly as above.
+    ///
+    /// The Mac still has to *know* when that hook blocked a Stop: its silent lifecycle Stop hook
+    /// reports a finished turn either way, and `MailStopContinuationLedger` keeps the session from
+    /// being shown idle while the agent continues. So after answering, the hook also tells this
+    /// Mac what it answered — in the background, through the tunnel like the lifecycle hooks, and
+    /// only while a session token is set. The Mac's reply to that is always empty; a host that
+    /// cannot reach the Mac answers its agent exactly the same.
     static func hostCommand(executable: String, event: MailNoticeEvent) -> String {
-        ShellCommand(word: executable).source + " agent-notice \(event.rawValue) 2>/dev/null || true"
+        let payload = "threading_hook_payload", answer = "threading_mail_answer"
+        let observed = "threading_mail_observed"
+        let report = MCPDefaults.hookPostCommand(
+            payloadVariable: payload,
+            endpointSuffix: observedEndpoint(event: event, observedVariable: observed),
+            timeout: MCPDefaults.mailNoticeTimeout
+        )
+        return "\(payload)=$(cat); "
+            + "\(answer)=$(printf '%s' \"$\(payload)\" | \(ShellCommand(word: executable).source) agent-notice \(event.rawValue) 2>/dev/null); "
+            + "\(observed)=\(MCPDefaults.mailNoticeObservedSeen); "
+            + "[ -n \"$\(answer)\" ] && \(observed)=\(MCPDefaults.mailNoticeObservedBlock); "
+            + "[ -n \"$\(MCPDefaults.sessionTokenEnvironmentKey)\" ] && { \(payload)='{}'; \(report) >/dev/null 2>&1 & }; "
+            + "printf '%s' \"$\(answer)\"; true"
+    }
+
+    /// `/mail-notice/$THREADING_SESSION_TOKEN?event=…&observed=$…`: the session token expands on
+    /// the host, as the Codex entries' does.
+    static func observedEndpoint(event: MailNoticeEvent, observedVariable: String) -> String {
+        "\(MCPDefaults.mailNoticePathPrefix)$\(MCPDefaults.sessionTokenEnvironmentKey)"
+            + "?\(MCPDefaults.mailNoticeEventParameter)=\(event.rawValue)"
+            + "&\(MCPDefaults.mailNoticeObservedParameter)=$\(observedVariable)"
     }
 
     /// `settings` with the host-local notice entries appended beside whatever hooks it holds.

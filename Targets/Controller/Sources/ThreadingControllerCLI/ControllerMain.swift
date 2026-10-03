@@ -99,7 +99,7 @@ struct ControllerMain {
     mail-forward-set OLD NEW REVISION | mail-forward-clear OLD REVISION
     mail-move OLD NEW   (moves OLD's unacknowledged mail to NEW, keeping message ids)
     mail-get MESSAGE_UUID
-    mail-send FROM_ADDRESS TO_ADDRESS MESSAGE_UUID TEXT_FILE [normal|interrupt]
+    mail-send FROM_ADDRESS TO_ADDRESS MESSAGE_UUID TEXT_FILE [normal|interrupt [owner-admitted]]
     mail-ack ADDRESS MESSAGE_UUID
     mail-notice ADDRESS post-tool-use|stop|session-start
     mail-outbound HOST_UUID
@@ -305,10 +305,13 @@ struct ControllerMain {
             guard let id = UUID(uuidString: args[0]) else { throw ControllerError.invalidInput("message_id") }
             try output(await store.mail(id))
         case "mail-send":
-            guard args.count == 4 || args.count == 5, let id = UUID(uuidString: args[2]) else { throw ControllerError.invalidInput("arguments") }
-            guard let priority = MailPriority(rawValue: args.count == 5 ? args[4] : "normal") else { throw ControllerError.invalidInput("priority") }
+            guard (4...6).contains(args.count), let id = UUID(uuidString: args[2]) else { throw ControllerError.invalidInput("arguments") }
+            guard let priority = MailPriority(rawValue: args.count >= 5 ? args[4] : "normal") else { throw ControllerError.invalidInput("priority") }
+            // `owner-admitted`: the owner decided admission itself (the Mac's same-project rule)
+            // for a recipient on this host; it never reaches another host's grants.
+            guard args.count < 6 || args[5] == "owner-admitted" else { throw ControllerError.invalidInput("arguments") }
             try output(await store.sendMail(from: MailAddress(args[0]), to: MailAddress(args[1]), id: id, text: file(args[3]),
-                                            replyTo: nil, priority: priority))
+                                            replyTo: nil, priority: priority, ownerAdmitted: args.count == 6))
         case "mail-ack":
             try count(2)
             guard let id = UUID(uuidString: args[1]) else { throw ControllerError.invalidInput("message_id") }

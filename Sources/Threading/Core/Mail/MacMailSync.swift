@@ -138,6 +138,10 @@ actor MacMailSync {
             // A failure may mean the host was rebuilt; learn its identity again next time.
             peered[endpoint.hostID] = nil
         }
+        if report.issues.isEmpty {
+            // The host answered: a mailbox move that could not reach it before can finish now.
+            await MainActor.run { MailboxHandover.shared.retryPending(reachable: endpoint) }
+        }
         if !report.recipients.isEmpty {
             let recipients = report.recipients
             await MainActor.run {

@@ -41,6 +41,11 @@ enum MCPDefaults {
     /// (`docs/feature-drafts/agent-mail.md`, "Delivery, per surface").
     static let mailNoticePathPrefix = "/mail-notice/"
     static let mailNoticeEventParameter = "event"
+    /// Set by a host-local notice hook reporting what it already answered on the host:
+    /// `block` (its Stop answer blocked) or `seen` (anything else). The Mac answers it silently.
+    static let mailNoticeObservedParameter = "observed"
+    static let mailNoticeObservedBlock = "block"
+    static let mailNoticeObservedSeen = "seen"
     /// A notice is a hint on the agent's hot path: an unreachable app or a busy store costs this
     /// much and prints nothing.
     static let mailNoticeTimeout: TimeInterval = 2

@@ -75,7 +75,9 @@ final class RemoteSessionMailboxTests: XCTestCase {
             let commands = (hooks[MailNoticeHook.hookName(for: event)] ?? [])
                 .flatMap { ($0["hooks"] as? [[String: Any]] ?? []).compactMap { $0["command"] as? String } }
             XCTAssertTrue(commands.contains(MailNoticeHook.hostCommand(executable: "/opt/threading/threading-controller", event: event)))
-            XCTAssertFalse(commands.contains { $0.contains(MCPDefaults.mailNoticePathPrefix) },
+            // The Mac's own answering entry is absent; the host's entry only *reports* to the
+            // Mac (`observed=`), which the Mac answers with silence.
+            XCTAssertFalse(commands.contains { $0.contains(MCPDefaults.mailNoticePathPrefix) && !$0.contains(MCPDefaults.mailNoticeObservedParameter) },
                            "the Mac must not also answer notices for a host mailbox")
         }
         // Owner-only files, never argv.
@@ -193,7 +195,12 @@ final class OwnerRPCFake: RemoteHostCommandRunning, @unchecked Sendable {
         case "mail-grant-set":
             return try encode(try await store.setMailGrant(
                 recipient: MailAddress(args[0]), sender: args[1], expectedRevision: Int(args[2])!,
-                mode: args[3] == "none" ? nil : MailMode(rawValue: args[3]), allowsInterrupt: args[4] == "interrupt"))
+                mode: args[3] == "none" ? nil : MailMode(rawValue: args[3]), allowsInterrupt: args[4] == "interrupt",
+                chainTokenBudget: args.count > 5 ? Int64(args[5]) : nil))
+        case "mail-send":
+            return try encode(try await store.sendMail(
+                from: MailAddress(args[0]), to: MailAddress(args[1]), id: UUID(uuidString: args[2])!, text: args[3],
+                replyTo: nil, priority: MailPriority(rawValue: args[4]) ?? .normal, ownerAdmitted: args.count > 5))
         case "mailbox": return try encode(try await store.inbox(MailAddress(args[0])))
         case "mail-sent": return try encode(try await store.recentSentMail(MailAddress(args[0])))
         case "mail-contact-set": return try encode(try await store.setMailContact(MailAddress(args[0]), name: args[1]))
@@ -395,4 +402,116 @@ final class MailboxHandoverTests: XCTestCase {
         XCTAssertEqual(outcome.moved, 0)
         XCTAssertFalse(outcome.issues.isEmpty)
     }
+
+    // MARK: Review fixes
+
+    private func hostEndpoint(_ name: String = "vps-1") -> RemoteControllerEndpoint {
+        RemoteControllerEndpoint(
+            hostID: RemoteHostID(), name: name, destination: RemoteHostDestination(alias: name, configFile: nil),
+            executable: "/opt/threading/threading-controller", database: "/var/lib/threading/controller.db"
+        )
+    }
+
+    /// A Mac, one reachable host, and a handover wired to them.
+    private func world() async throws -> (mac: MacMailbox, macStore: ControllerStore, remote: ControllerStore, remoteHost: HostID,
+                                          mailboxes: RemoteSessionMailboxes, handover: MailboxHandover, endpoint: RemoteControllerEndpoint) {
+        let remote = try ControllerStore(path: directory.appendingPathComponent("host/controller.db").path)
+        let remoteHost = try await remote.host().id
+        let mac = MacMailbox(databaseURL: directory.appendingPathComponent("mac/mailbox.db"))
+        let macHost = try await mac.host().id
+        let macStore = try await mac.controllerStore()
+        _ = try await remote.setMailPeer(host: macHost, expectedRevision: 0, name: "mac", transport: nil, push: false, pull: false)
+        _ = try await macStore.setMailPeer(host: remoteHost, expectedRevision: 0, name: "vps-1", transport: nil, push: false, pull: false)
+        let mailboxes = RemoteSessionMailboxes()
+        mailboxes.runner = OwnerRPCFake(store: remote)
+        mailboxes.mailbox = mac
+        mailboxes.ensurePeered = { _ in remoteHost }
+        let handover = MailboxHandover()
+        handover.mailbox = mac
+        handover.mailboxes = mailboxes
+        handover.ensurePeered = { _ in remoteHost }
+        handover.kick = { _ in }
+        return (mac, macStore, remote, remoteHost, mailboxes, handover, hostEndpoint())
+    }
+
+    func testAMovedGrantKeepsItsChainBudget() async throws {
+        let w = try await world()
+        let session = SessionID()
+        let onMac = try await w.mac.register(session, name: "Deploy")
+        let worker = MailAddress(host: w.remoteHost, kind: .worker, id: UUID())
+        try await w.mac.ensureGrant(recipient: onMac, sender: worker.description, mode: .wake, chainTokenBudget: 200_000)
+        let outcome = await w.handover.move(session, title: "Deploy", from: .thisMac, to: .host(w.endpoint))
+        XCTAssertEqual(outcome.issues, [])
+        let onHost = MailAddress(host: w.remoteHost, kind: .session, id: session.rawValue)
+        let copied = try await w.remote.mailGrants(recipient: onHost).items.first { $0.sender == worker.description }
+        XCTAssertEqual(copied?.chainTokenBudget, 200_000, "the spend fuse moves with the grant")
+    }
+
+    func testAnUnreachableOldHostDoesNotHoldBackThisMacsMailAndIsRetried() async throws {
+        let w = try await world()
+        let session = SessionID()
+        // Mail waiting on this Mac (left here when the old host could not be reached at launch).
+        let onMac = try await w.mac.register(session, name: "Deploy")
+        _ = try await w.mac.send(from: SessionID(), senderName: "Review", to: onMac, id: UUID(), text: "unread",
+                                 replyTo: nil, priority: .normal, ownerAdmitted: true)
+        let down = hostEndpoint("down")
+        w.handover.ensurePeered = { endpoint in
+            if endpoint.name == "down" { throw RemoteControllerRPC.Failure.transport("down") }
+            return w.remoteHost
+        }
+        let outcome = await w.handover.move(session, title: "Deploy", from: .host(down), to: .host(w.endpoint))
+        XCTAssertEqual(outcome.moved, 1, "this Mac's mail moved although the old host was down")
+        XCTAssertFalse(outcome.issues.isEmpty)
+        XCTAssertNotNil(w.handover.pending[session], "the old host's part is retried when it answers")
+    }
+
+    func testAMacAddressThatNeverHeldAMailboxGetsNoForward() async throws {
+        let w = try await world()
+        let session = SessionID()
+        let macHost = try await w.mac.host().id
+        let macAddress = MailAddress(host: macHost, kind: .session, id: session.rawValue)
+        let outcome = await w.handover.move(session, title: "Deploy", from: .thisMac, to: .host(w.endpoint))
+        XCTAssertEqual(outcome.issues, [])
+        let forward = try await w.macStore.mailForward(macAddress)
+        XCTAssertNil(forward, "nothing to forward from an address that never existed here")
+    }
+
+    func testAMoveAskedForDuringAnotherRunsAfterIt() async throws {
+        let w = try await world()
+        let session = SessionID()
+        _ = try await w.mac.register(session, name: "Deploy")
+        async let first = w.handover.move(session, title: "Deploy", from: .thisMac, to: .host(w.endpoint))
+        async let second = w.handover.move(session, title: "Deploy", from: .host(w.endpoint), to: .thisMac)
+        _ = await (first, second)
+        XCTAssertNil(w.mailboxes.binding(for: session), "the later move ran: the mailbox is back on this Mac")
+    }
+
+    func testConcurrentProvisioningBothGetTheHostMailbox() async throws {
+        let w = try await world()
+        let session = SessionID()
+        async let a = w.mailboxes.provision(session, name: "Deploy", endpoint: w.endpoint)
+        async let b = w.mailboxes.provision(session, name: "Deploy", endpoint: w.endpoint)
+        let (first, second) = await (a, b)
+        XCTAssertNotNil(first)
+        XCTAssertEqual(first, second, "the second caller waits for the first instead of falling back to this Mac")
+    }
+
+    func testFallbackMailFromAHostMailboxIsSentFromTheHost() async throws {
+        let w = try await world()
+        let caller = SessionID(), target = SessionID()
+        let provisioned = await w.mailboxes.provision(caller, name: "Caller", endpoint: w.endpoint)
+        let binding = try XCTUnwrap(provisioned)
+        let delivery = MacMailDelivery(mailbox: w.mac)
+        delivery.mailboxes = w.mailboxes
+        let stored = expectation(description: "stored")
+        delivery.storeUndeliverable("busy? read this", to: target, from: caller) { ok in
+            XCTAssertTrue(ok); stored.fulfill()
+        }
+        await fulfillment(of: [stored], timeout: 10)
+        let sent = try await w.remote.recentSentMail(binding.address)
+        XCTAssertEqual(sent.map(\.envelope.text), ["busy? read this"], "sent as the mailbox the caller reads")
+        let macHost = try await w.mac.host().id
+        XCTAssertEqual(sent.first?.envelope.recipient.host, macHost)
+    }
+
 }

@@ -390,9 +390,17 @@ recreated when it cannot be opened — and registers each session lazily as
   on the new host, or registered here), the store that will hold it gets the forward as consent,
   the old store gets the forward and `mail-move`s the unacknowledged mail (ids kept), and the old
   mailbox's live grants are written on the new one. This Mac's address is always checked as an
-  old location too, since a host unreachable at launch left the mailbox here. Host → host needs
-  the old host to have the new one as a transport peer; otherwise the mail stays and the event
-  log says so. Every step is idempotent.
+  old location too, since a host unreachable at launch left the mailbox here — when a mailbox
+  was registered there (`hasMailbox`), not merely because the address could exist. Each old
+  location is moved on its own: an old host that is down (often why the project moved) does not
+  hold back this Mac's part, and its part is retried after that host's next successful sync. A
+  move asked for while another for the same session runs is queued behind it. Copied grants keep
+  their chain token budget. Host → host needs the old host to have the new one as a transport
+  peer; otherwise the mail stays and the event log says so. Every step is idempotent.
+- **A session whose mailbox is on its host sends from there.** `send_to_session`'s mailbox
+  fallback for such a caller goes through that host's controller (`mail-send … owner-admitted`),
+  so the reply reaches the mailbox the agent reads. Concurrent provisionings of one session (a
+  launch racing a move) share one answer instead of the second falling back to this Mac.
 - **Grants and contacts are the owner's** (`MailAccessService`, `SessionMailAccessForm`): the
   Mail section lists live grants and offers grant, revoke and add-contact forms, each an
   always-asked `ConfirmationPrompt.changeMailAccess`, written to whichever store holds the

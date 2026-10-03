@@ -57,6 +57,9 @@ final class MacMailDelivery {
 
     // MARK: - Properties
 
+    /// Where host-local session mailboxes are bound. Injected for tests.
+    var mailboxes: RemoteSessionMailboxes = .shared
+
     static let shared = MacMailDelivery(mailbox: .shared)
 
     private let mailbox: MacMailbox
@@ -180,20 +183,29 @@ final class MacMailDelivery {
         let senderName = Self.title(of: callerID)
         let targetName = Self.title(of: targetID)
         let mailbox = mailbox
-        let hosted = RemoteSessionMailboxes.shared.binding(for: targetID)?.address
+        let mailboxes = mailboxes
+        let hosted = mailboxes.binding(for: targetID)?.address
+        let callerHosted = mailboxes.binding(for: callerID)
         Task { @MainActor in
             do {
                 // A target whose mailbox lives on its host is queued for that host; its
                 // `<macHost>/*` grant stands for the admission the control plane already made.
                 let recipient: MailAddress
                 if let hosted { recipient = hosted } else { recipient = try await mailbox.register(targetID, name: targetName) }
-                _ = try await mailbox.send(
-                    from: callerID, senderName: senderName, to: recipient, id: UUID(), text: text,
-                    replyTo: nil, priority: .normal, ownerAdmitted: hosted == nil
-                )
+                if let callerHosted {
+                    // A caller whose mailbox lives on its host sends from there, so the reply
+                    // reaches the mailbox it reads (the Mac answers no mail tools for it).
+                    _ = try await mailboxes.send(as: callerHosted, to: recipient, text: text)
+                    MacMailSync.shared.kick(host: callerHosted.address.host)
+                } else {
+                    _ = try await mailbox.send(
+                        from: callerID, senderName: senderName, to: recipient, id: UUID(), text: text,
+                        replyTo: nil, priority: .normal, ownerAdmitted: hosted == nil
+                    )
+                    if let hosted { MacMailSync.shared.kick(host: hosted.host) }
+                }
                 completion(true)
-                if let hosted { MacMailSync.shared.kick(host: hosted.host) }
-                else { self.arrived(for: targetID, priority: .normal) }
+                if hosted == nil && callerHosted == nil { self.arrived(for: targetID, priority: .normal) }
             } catch {
                 EventLog.shared.record(.mcp, "Undeliverable session message could not be stored as mail", [
                     "target": targetID.uuidString,

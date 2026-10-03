@@ -485,7 +485,16 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   index with a host-vouched header line per message; `mail_ack` records the acknowledging
   execution. An unacknowledged `interrupt` refuses `work_finish` in the finish transaction.
 - **Chains bound loops.** A message continues the chain of what it replies to, or of the mail its
-  execution last acknowledged, so omitting `reply_to` does not escape the depth limit (4). Fuses
+  execution last acknowledged, so omitting `reply_to` does not escape the depth limit (4). A
+  session mailbox has no execution, so its context is the mail it acknowledged *since it last
+  sent*, consumed by that send: a ping-pong keeps its chain and stays bounded, while its next
+  unrelated message starts a new chain. (Keeping the deepest context forever, as first shipped,
+  refused every fresh message from a session after one deep exchange.) A reply to a forwarded
+  copy carries `answeringFor` — the address the original reached — which only the same mailbox
+  id on another host may claim, so a mailbox that moved still answers what was asked of it; a
+  mailbox that moves onto the asker's own host replaces the asker's sent copy rather than
+  colliding with it. Wake admission keys on the newest open message that may wake the worker
+  and whose chain is within budget, not on whichever message arrived last. Fuses
   that need no reading: 50 messages per chain on a host, 20 sends a minute per sender, 1,000 open
   messages per inbox. Spend limits belong to admission ([usage ledger](../feature-drafts/agent-usage-ledger.md)).
 - **Notices, not bodies.** `threading-controller agent-notice post-tool-use|stop|session-start` is

@@ -1456,7 +1456,9 @@ turns the endpoint silent.
   lifecycle reporting on (`mailNotices`, gated by `MailNoticeHook.isWanted`); native sessions use
   `MacMailDelivery` instead. A remote-host terminal whose mailbox is on its host instead runs
   `<controller> agent-notice <event>` there (`MailNoticeHook.hostCommand`) — the same JSON, with
-  no dependence on this Mac — and this Mac's endpoint answers it silently; one whose host has no
+  no dependence on this Mac. After answering, that hook reports in the background, through the
+  tunnel, what it answered (`?observed=block|seen`), because this Mac's ledger below must know
+  about a Stop it blocked; the Mac records it and answers silently. One whose host has no
   controller keeps the curl entries, answered through the reverse tunnel.
 - **Codex** gets them in the account's shared `hooks.json` through `CodexHookInstaller`,
   token-guarded like every entry there. Adding them changed the file's text once, which costs the
@@ -1471,7 +1473,10 @@ would show a working agent idle and let the control plane type into it.
 `MailStopContinuationLedger` handles both orders of the race: block first, the next finish is
 held until any later mail-hook call proves the turn went on (then dropped) or 20 s pass without
 one (then relayed — a block the agent never saw must not leave a spinner); finish first, a block
-within 10 s reopens the turn with a synthesized start. `MailNoticeHookTests` holds the sequences.
+within 10 s reopens the turn with a synthesized start. A reported turn start forgets the last
+relayed finish, so a block in a short follow-up turn (the notice typed at the idle edge starts
+one) holds that turn's own finish instead of being mistaken for the previous turn's.
+`MailNoticeHookTests` holds the sequences.
 
 ## After a reattach
 
