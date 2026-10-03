@@ -1384,6 +1384,17 @@
         }
       }
     },
+    "%@ · %@ tokens · %lld executions in the last %lld days" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · %@ token · %lld körningar de senaste %lld dagarna"
+          }
+        }
+      }
+    },
     "%@ · %@ · %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1512,6 +1523,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ · om %@"
+          }
+        }
+      }
+    },
+    "%@ · not read yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · inte läst än"
           }
         }
       }
@@ -2035,6 +2057,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld arkiverade konversationer"
+          }
+        }
+      }
+    },
+    "%lld are partial, failed or unavailable: their spend is missing or short." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld är ofullständiga, misslyckade eller otillgängliga: deras förbrukning saknas eller är för låg."
           }
         }
       }
@@ -2695,6 +2728,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld projekt"
+          }
+        }
+      }
+    },
+    "%lld receipts in range from the first %lld read; more are on the host." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld kvitton i intervallet av de första %lld som lästs; fler finns på värden."
+          }
+        }
+      }
+    },
+    "%lld receipts in range, all read." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld kvitton i intervallet, alla lästa."
           }
         }
       }
@@ -4153,6 +4208,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En spärrtid avslutar en sessions spenderande vid en tid du väljer — från skrivfältet när du startar en session, eller från en sessions meny. Innan den ber Threading agenten att avsluta; vid tidpunkten slutar Threading skicka på egen hand; efter en frist avbryts det som fortfarande körs. Du behåller samtalet och kan fortsätta det för hand. Tysta timmar är en spärrtid som varje session följer dagligen om den inte är undantagen."
+          }
+        }
+      }
+    },
+    "A daily budget is a whole number of tokens above zero, or empty for no limit." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En daglig budget är ett heltal token över noll, eller tom för ingen gräns."
           }
         }
       }
@@ -6581,6 +6647,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agentverktyg"
+          }
+        }
+      }
+    },
+    "Agent usage on %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agentförbrukning på %@"
+          }
+        }
+      }
+    },
+    "Agent usage…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agentförbrukning…"
           }
         }
       }
@@ -10743,6 +10831,28 @@
         }
       }
     },
+    "Budget saved on the host." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Budgeten sparades på värden."
+          }
+        }
+      }
+    },
+    "Budget tokens are uncached input, cache writes and output for the UTC day. At the budget the host's supervisor starts no new executions for this worker; running ones are never stopped. Leave the field empty for no limit." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Budgettoken är ocachad indata, cacheskrivningar och utdata under UTC-dygnet. Vid budgeten startar värdens övervakare inga nya körningar för den här arbetaren; pågående körningar stoppas aldrig. Lämna fältet tomt för ingen gräns."
+          }
+        }
+      }
+    },
     "Build" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10985,6 +11095,17 @@
         }
       }
     },
+    "By mail chain" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Per e-posttråd"
+          }
+        }
+      }
+    },
     "By model" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10992,6 +11113,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Per modell"
+          }
+        }
+      }
+    },
+    "By task" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Per uppgift"
+          }
+        }
+      }
+    },
+    "By trigger" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Per utlösare"
           }
         }
       }
@@ -11553,6 +11696,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ändringsbegäranden kräver en utcheckad gren."
+          }
+        }
+      }
+    },
+    "Change the daily budget for “%@” on %@?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändra den dagliga budgeten för ”%@” på %@?"
           }
         }
       }
@@ -17169,6 +17323,17 @@
         }
       }
     },
+    "Coverage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Täckning"
+          }
+        }
+      }
+    },
     "Coverage output" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18094,6 +18259,28 @@
         }
       }
     },
+    "Daily budget %@ tokens. Today: %@ (%@). New executions stop at the budget; running ones are never stopped." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daglig budget %@ token. I dag: %@ (%@). Nya körningar stoppas vid budgeten; pågående stoppas aldrig."
+          }
+        }
+      }
+    },
+    "Daily budget in tokens" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daglig budget i token"
+          }
+        }
+      }
+    },
     "Daily cost" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18112,6 +18299,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dagliga tokens"
+          }
+        }
+      }
+    },
+    "Daily totals are from %@; the host could not be read since. They are its last summary, not zero." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dagssummorna är från %@; värden har inte kunnat läsas sedan dess. De är dess senaste sammanfattning, inte noll."
+          }
+        }
+      }
+    },
+    "Daily totals read %@. Days are UTC, as the host records them." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dagssummorna lästes %@. Dagarna är i UTC, som värden registrerar dem."
           }
         }
       }
@@ -19940,6 +20149,17 @@
         }
       }
     },
+    "Edit budget…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändra budget…"
+          }
+        }
+      }
+    },
     "Edit the CLAUDE.md files and memory settings" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21216,6 +21436,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ExecutionAuditEventView"
+          }
+        }
+      }
+    },
+    "Executions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körningar"
           }
         }
       }
@@ -25838,6 +26069,17 @@
         }
       }
     },
+    "Incomplete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ofullständiga"
+          }
+        }
+      }
+    },
     "Increase diff text size" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29159,6 +29401,17 @@
         }
       }
     },
+    "Mail chain" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "E-posttråd"
+          }
+        }
+      }
+    },
     "Main" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30163,6 +30416,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Modeller, projekt, konton och faktureringsvägar."
+          }
+        }
+      }
+    },
+    "Models, projects, accounts, billing routes, and agents — including connected hosts' workers." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modeller, projekt, konton, debiteringsvägar och agenter – inklusive anslutna värdars arbetare."
           }
         }
       }
@@ -32063,6 +32327,17 @@
         }
       }
     },
+    "No daily budget. Today: %@ budget tokens." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen daglig budget. I dag: %@ budgettoken."
+          }
+        }
+      }
+    },
     "No data in this range" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32291,6 +32566,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inget ikon hittades för detta projekt."
+          }
+        }
+      }
+    },
+    "No limit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen gräns"
           }
         }
       }
@@ -33205,6 +33491,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hittades inte i ditt inloggningsskals PATH"
+          }
+        }
+      }
+    },
+    "Not from a trigger" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte från en utlösare"
           }
         }
       }
@@ -39107,6 +39404,17 @@
         }
       }
     },
+    "Read more receipts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs fler kvitton"
+          }
+        }
+      }
+    },
     "Read my GitHub username" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39329,6 +39637,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Läser leverantör…"
+          }
+        }
+      }
+    },
+    "Reading the host's ledger…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läser värdens förbrukningslogg…"
           }
         }
       }
@@ -39615,6 +39934,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bygg om"
+          }
+        }
+      }
+    },
+    "Receipts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kvitton"
           }
         }
       }
@@ -43529,6 +43859,17 @@
         }
       }
     },
+    "Saving the budget on the host…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparar budgeten på värden…"
+          }
+        }
+      }
+    },
     "Saving…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45750,6 +46091,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ställ in appens tema"
+          }
+        }
+      }
+    },
+    "Set budget" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange budget"
           }
         }
       }
@@ -50387,6 +50739,17 @@
         }
       }
     },
+    "Task" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppgift"
+          }
+        }
+      }
+    },
     "Task with local edits" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -53163,6 +53526,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Värden sparades inte"
+          }
+        }
+      }
+    },
+    "The host's controller did not answer: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens styrprogram svarade inte: %@"
+          }
+        }
+      }
+    },
+    "The host's controller repeated a page; reading stopped." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens styrprogram upprepade en sida; läsningen avbröts."
+          }
+        }
+      }
+    },
+    "The host's controller sent a response this Mac cannot read." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens styrprogram skickade ett svar som den här Macen inte kan läsa."
+          }
+        }
+      }
+    },
+    "The host's daily totals have not been read yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens dagssummor har inte lästs än."
           }
         }
       }
@@ -57043,6 +57450,28 @@
         }
       }
     },
+    "This host has no workers yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här värden har inga arbetare än."
+          }
+        }
+      }
+    },
+    "This host's connection is incomplete. Connect to its controller in Automations ▸ Remote first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens anslutning är ofullständig. Anslut först till dess styrprogram under Automatiseringar ▸ Fjärranslutning."
+          }
+        }
+      }
+    },
     "This iPhone keyboard currently supports standard US text and editing keys." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59488,6 +59917,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Transkription av %@"
+          }
+        }
+      }
+    },
+    "Trigger" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utlösare"
           }
         }
       }
@@ -63443,6 +63883,17 @@
         }
       }
     },
+    "Worker %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbetare %@"
+          }
+        }
+      }
+    },
     "Worker ID" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63454,6 +63905,17 @@
         }
       }
     },
+    "Worker usage breakdown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdelning av arbetarens förbrukning"
+          }
+        }
+      }
+    },
     "Worker: %@\nTiming: %@\nRevision: %lld" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63461,6 +63923,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arbetare: %@\nTid: %@\nRevision: %lld"
+          }
+        }
+      }
+    },
+    "Workers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbetare"
           }
         }
       }
@@ -66295,6 +66768,17 @@
         }
       }
     },
+    "last read %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "senast läst %@"
+          }
+        }
+      }
+    },
     "last seen %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -67013,6 +67497,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "av"
+          }
+        }
+      }
+    },
+    "older days not read" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "äldre dagar inte lästa"
           }
         }
       }
@@ -69296,6 +69791,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“%@” är inte en användbar webbadress."
+          }
+        }
+      }
+    },
+    "“%@” is not a usage operation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” är ingen förbrukningsåtgärd."
           }
         }
       }

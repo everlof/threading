@@ -1107,6 +1107,22 @@ public enum Design {
         public static let cellCount = 6
     }
 
+    /// A remote worker's usage sheet (Automations ▸ Remote ▸ Agent usage). Its ledger table
+    /// reuses the Usage breakdown's row, header and numeric column measures.
+    public enum RemoteWorkerUsage {
+        /// Tall enough for the header facts, ten ledger rows and the receipt line without the
+        /// sheet scrolling inside the window that presents it.
+        public static let sheetHeight: CGFloat = 720
+        /// The leading name column's floor: a UTC day, an eight-character task id or a trigger.
+        public static let nameColumnWidth: CGFloat = 160
+        /// Executions, requests and incomplete counts: `12,345` in `numericBody`.
+        public static let countColumnWidth: CGFloat = 96
+        /// `Unavailable`, the longest coverage word.
+        public static let coverageColumnWidth: CGFloat = 110
+        /// A daily token budget: `10000000000` fits without scrolling.
+        public static let budgetFieldWidth: CGFloat = 200
+    }
+
     public enum UsageDashboard {
         public static let metricCardHeight: CGFloat = 76
 
