@@ -24,7 +24,13 @@ final class WorkspacePlaceholderPane {
         }
         root.onAction = onAction
         window.contentView = root
+        setThemeAppearance()
         configure(hasProjects: hasProjects)
+    }
+
+    func setThemeAppearance() {
+        root.appearance = LinuxTheme.appearance
+        needsPresentation = true
     }
 
     func configure(hasProjects: Bool) {
@@ -88,7 +94,7 @@ final class WorkspacePlaceholderPane {
         let buttonHeight = Int((button.height * scale).rounded())
 
         let bitmap = Bitmap(width: width, height: height,
-                            background: Specimen.bodyGround.components)
+                            background: LinuxTheme.components("ground"))
         root.render(in: NSGraphicsContext(bitmap: bitmap, scale: scale))
         let result = bitmap.pixels.withUnsafeBufferPointer {
             tw_present_placeholder(nativeWindow, $0.baseAddress,

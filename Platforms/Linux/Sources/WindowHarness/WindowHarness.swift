@@ -1329,6 +1329,7 @@ struct WindowHarness {
         let contentWindow = NSWindow(backingScaleFactor: 2)
         let navigatorRoot = Specimen.Window(frame: NSRect(x: 0, y: 0, width: 400, height: 240))
         contentWindow.contentView = navigatorRoot
+        navigatorRoot.setThemeAppearance()
         navigatorRoot.headerHeight = navigatorHeaderHeight
         navigatorRoot.hasMountedHeader = true
         // Retain the real production pane band and its controls for the window lifetime.
@@ -1663,6 +1664,7 @@ struct WindowHarness {
             WorkspacePlaceholderPane(hasProjects: !projects.isEmpty,
                                      onAction: { placeholderActionRequested = true })
         }
+        idlePane?.setThemeAppearance()
         var activePane: WorkspaceTerminalPane?
         var activePageTarget: NavigatorOutlineItem?
         var pendingPageReveal: NavigatorOutlineItem?
@@ -1884,6 +1886,7 @@ struct WindowHarness {
                 pageIdentity: pageIdentity, icon: pageIcon,
                 showsSessionActions: pageTarget.kind == .agent && pageTarget.childIndex >= 0,
                 onReveal: { pendingPageReveal = pageTarget })
+            activePane?.setThemeAppearance()
             activePageTarget = pageTarget
             tw_workspace_placeholder_mode(window, 0)
             sidebarFocused = false
@@ -2315,7 +2318,7 @@ struct WindowHarness {
                 let mountMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - mountStarted) / 1_000_000
                 trace("raster.begin")
                 let bitmap = Bitmap(width: navigatorWidth, height: height,
-                                    background: Specimen.bodyGround.components)
+                                    background: LinuxTheme.components("surface"))
                 let context = NSGraphicsContext(bitmap: bitmap, scale: 2)
                 NSGraphicsContext.current = context
                 let renderStarted = DispatchTime.now().uptimeNanoseconds
@@ -2598,6 +2601,17 @@ struct WindowHarness {
                 }
             }
             trace("event kind=\(event.kind) action=\(event.action)")
+            if event.kind == 44 {
+                LinuxTheme.setDark(!LinuxTheme.isDark)
+                navigatorRoot.setThemeAppearance()
+                headerTitle.textColor = navigatorRoot.headerInk.label
+                idlePane?.setThemeAppearance()
+                activePane?.setThemeAppearance()
+                dirty = true
+                print("THEME_APPEARANCE \(LinuxTheme.isDark ? "dark" : "light")")
+                fflush(nil)
+                continue
+            }
             if let button = dismissedActionGesture {
                 if event.kind == 17 { continue }
                 if event.kind == 15, event.key == button, event.action == 3 {

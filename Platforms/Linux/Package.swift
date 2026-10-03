@@ -36,7 +36,7 @@ let package = Package(
             .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit"),
             .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient"),
             .target(name: "LinuxWindowBridge", condition: .when(platforms: [.linux]))],
-            resources: [.copy("Resources/ProviderMarks")],
+            resources: [.copy("Resources/ProviderMarks"), .copy("Resources/Theme")],
             swiftSettings: [.define("THREADING_WINDOW_HARNESS")]),
         // Apple's Compression framework, reduced to the two symbols GzipWriter uses. See its header.
         .target(name: "Compression", dependencies: ["CZlib"]),

@@ -1,8 +1,8 @@
 import AppKit
 
-// The installed preview has a fixed diagnostic palette. These two font roles and the primary
-// button are the narrow host leaves needed by the production idle placeholder; they do not
-// replace the Mac theme engine or change the placeholder's layout and action ownership.
+// The installed preview uses a checked production palette. These two font roles and the primary
+// button are the narrow host leaves needed by the production idle placeholder; its layout and
+// action ownership stay in the unchanged production component.
 extension Design.Spacing {
     static let pane: CGFloat = 32
 }
@@ -32,7 +32,7 @@ extension NSTextField {
 /// leaf implements the primary placeholder action over the same fixed accent as selection.
 @MainActor
 final class ThemedButton: ThemedControl {
-    private static let accent = NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1)
+    private static var accent: NSColor { LinuxTheme.color("accent") }
     private static let titleFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
 
     var title = "" {
@@ -47,7 +47,7 @@ final class ThemedButton: ThemedControl {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let fill = isProminent ? Self.accent : Specimen.bodyGround
+        let fill = isProminent ? Self.accent : LinuxTheme.color("panel")
         let ground = isPressed ? fill.blended(withFraction: 0.2, of: .black)! : fill
         let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
                                  xRadius: Design.Radius.control,
@@ -58,7 +58,7 @@ final class ThemedButton: ThemedControl {
         shape.lineWidth = 1
         shape.stroke()
 
-        let ink = isProminent ? Design.Ink(on: fill).label : Design.Text.label
+        let ink = isProminent ? Specimen.Ink(on: fill).label : Design.Text.label
         let attributes: [NSAttributedString.Key: Any] = [.font: Self.titleFont,
                                                           .foregroundColor: ink]
         let measured = (title as NSString).size(withAttributes: attributes)

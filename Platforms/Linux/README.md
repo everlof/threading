@@ -76,8 +76,13 @@ targets, separator and bounded constraints through a wide/narrow/wide resize. It
 rendered states and geometry are written to `out/pane-header-{linux,mac}/`. The native
 window now mounts that same header with its retained title and `+`/`⋯` controls, and publishes
 their actual laid-out bounds to native input and AT-SPI. The native command menus also mount
-the production `ThemedMenuRowView` through its shared measurement plan. The preview still uses
-one fixed palette; live production themes and complete navigator/menu presentation remain open.
+the production `ThemedMenuRowView` through its shared measurement plan. The installed shell
+uses a source-derived light/dark snapshot of `AppThemeStyles.threading`. Ctrl+Shift+T switches the
+appearance in the same window, invalidating the retained sidebar, idle pane, terminal header,
+open menu and visible terminal grid. `scripts/export_theme_snapshot.py` regenerates the resource;
+`LinuxThemeSnapshotTests` compares its values with production theme resolution on macOS. The
+Linux AppKit shim only resolves the selected named colors. Full theme configuration and complete
+navigator/menu presentation remain open.
 `tests/page_title/run.sh` links the production `PageTitleView` with a Linux Pango label adapter
 for its Apple-only title animation. The native workspace mounts that title in a separate
 41-point right-pane header. Its press reveals the active project or saved runtime in the
@@ -500,8 +505,8 @@ not change the store in this store-only diagnostic mode. Store open/recovery run
 
 Only visible rows are mounted, and project labels are bounded to 80 Unicode scalars before drawing. The
 software-rendering experiment limits windows to 1280×900 pixels. The project-list mode does not provide terminal rendering/input. The separate terminal mode
-below adds the initial runtime surface; neither mode provides complete IME or AT-SPI coverage, production
-theme switching or extension composition. Navigator title and mounted rows retain Unicode through
+below adds the initial runtime surface; neither mode provides complete IME or AT-SPI coverage or
+extension composition. Navigator title and mounted rows retain Unicode through
 Pango shaping; the native window title retains the original path.
 Customization classification: this diagnostic harness is host-only and defines no durable product
 component or public API. Product navigation must still use the existing semantic component IDs,
@@ -585,7 +590,7 @@ off the PTY, and Pango draws a bounded Unicode preview beside the terminal curso
 text enters the same ordered input path as other text. `THREADING_LINUX_IME_ONLY=1
 ./window-smoke.sh` checks X11/IBus Pinyin composition and the exact `你好` commit in a real child.
 Other IMEs and Wayland are unverified. Pango shapes individual cell graphemes; cross-cell joining,
-complete accessibility and live profile/theme configuration remain outstanding.
+complete accessibility and a theme/profile settings UI remain outstanding.
 
 The native pointer sends button presses, releases and bounded wheel steps through SwiftTerm's
 live DEC mouse mode and encoding. X10 sends presses only; VT200-style modes send releases too.

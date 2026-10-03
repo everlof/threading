@@ -112,8 +112,12 @@ def changed_pixels(before, after, x0, y0, x1, y1):
     return changed
 
 
-def bright_pixels(image, x0, y0, x1, y1):
-    return sum(min(image[(y * 1120 + x) * 3:(y * 1120 + x) * 3 + 3]) > 220
+def contrasting_pixels(image, x0, y0, x1, y1):
+    # Production light and dark palettes both tint these template glyphs. Compare with the
+    # local plate instead of requiring the old fixed palette's white glyph pixels.
+    reference = image[(y0 * 1120 + x0) * 3:(y0 * 1120 + x0) * 3 + 3]
+    return sum(max(abs(image[(y * 1120 + x) * 3 + channel] - reference[channel])
+                   for channel in range(3)) > 40
                for y in range(y0, y1) for x in range(x0, x1))
 
 
@@ -199,13 +203,13 @@ try:
             'production ellipsis did not become visible on hover'
         assert changed_pixels(row_hovered, hovered, *action_crop) >= 8, \
             'production control hover plate did not update within the same row'
-        assert bright_pixels(hovered, action_rect.x + 12, action_rect.y + 10,
+        assert contrasting_pixels(hovered, action_rect.x + 12, action_rect.y + 10,
                              action_rect.x + 30, action_rect.y + 30) >= 5, \
             'ellipsis glyph is not centered inside its production hover plate'
-        assert bright_pixels(row_hovered, create_rect.x + 12, create_rect.y + 10,
+        assert contrasting_pixels(row_hovered, create_rect.x + 12, create_rect.y + 10,
                              create_rect.x + 32, create_rect.y + 30) >= 5, \
             'plus glyph is not centered in the companion 20-point target'
-        assert bright_pixels(hovered, action_rect.x - 16, action_rect.y + 30,
+        assert contrasting_pixels(hovered, action_rect.x - 16, action_rect.y + 30,
                              action_rect.x, action_rect.y + 42) == 0, \
             'ellipsis glyph leaked outside its 20-point target'
         assert selected(project_rows(app)[0]) and not selected(project_rows(app)[1])

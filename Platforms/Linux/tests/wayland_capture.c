@@ -25,6 +25,8 @@ void SDL_RenderPresent(SDL_Renderer *renderer) {
         }
         if ((strcmp(requested, "normal") == 0 || strcmp(requested, "alternate") == 0
              || strcmp(requested, "open") == 0 || strcmp(requested, "idle") == 0
+             || strcmp(requested, "dark-idle") == 0
+             || strcmp(requested, "light-idle") == 0
              || strcmp(requested, "terminal") == 0
              || strcmp(requested, "other-selected") == 0
              || strcmp(requested, "title-reveal") == 0)

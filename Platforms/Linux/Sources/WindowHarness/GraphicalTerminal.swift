@@ -141,6 +141,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var initialViewport: (Int, Int)?
     // Worker-owned runtime. Every emulator operation stays off the UI actor.
     private var emulator: PTYEmulator?
+    private var themeColors: (foreground: UInt32, background: UInt32, ansi: [UInt32])?
     private var client: PTYHostClient?
     private var connectionGeneration = 0
     private var identity: PTYHostSessionIdentity?
@@ -273,6 +274,11 @@ final class GraphicalTerminal: @unchecked Sendable {
         let generation = connectionGeneration
         emulator = try PTYEmulator(columns: columns, rows: rows) { [weak self] data in
             do { try self?.client?.sendInput(data) } catch { self?.fail(error) }
+        }
+        if let themeColors {
+            emulator?.setThemeColors(foregroundRGB: themeColors.foreground,
+                                     backgroundRGB: themeColors.background,
+                                     ansiRGB: themeColors.ansi)
         }
         let link = PTYHostClient(socketPath: socket, build: "linux-native-window", events: .init(
             frame: { [weak self] frame in
@@ -1202,6 +1208,16 @@ final class GraphicalTerminal: @unchecked Sendable {
     }
     func invalidateFrame() {
         worker.async { [self] in dirty = true }
+    }
+    func setThemeColors(foregroundRGB: UInt32, backgroundRGB: UInt32,
+                        ansiRGB: [UInt32]) {
+        precondition(ansiRGB.count == 16)
+        worker.async { [self] in
+            themeColors = (foregroundRGB, backgroundRGB, ansiRGB)
+            emulator?.setThemeColors(foregroundRGB: foregroundRGB,
+                                     backgroundRGB: backgroundRGB, ansiRGB: ansiRGB)
+            dirty = true
+        }
     }
     func setPreedit(_ text: String?, cursor: Int = 0, selectionLength: Int = 0) {
         worker.async { [self] in

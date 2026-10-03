@@ -156,6 +156,23 @@ final class PTYEmulator: TerminalDelegate {
         terminal.foregroundColor = Color(red: 0xd4d4, green: 0xd4d4, blue: 0xd4d4)
         terminal.backgroundColor = Color(red: 0x1717, green: 0x1919, blue: 0x1d1d)
     }
+
+    /// Apply the host's terminal ground and default ink without touching explicit SGR colors.
+    /// The serial GraphicalTerminal worker calls this between input and snapshot requests.
+    func setThemeColors(foregroundRGB: UInt32, backgroundRGB: UInt32,
+                        ansiRGB: [UInt32]) {
+        precondition(ansiRGB.count == 16)
+        func color(_ rgb: UInt32) -> Color {
+            Color(red: UInt16((rgb >> 16) & 0xff) * 257,
+                  green: UInt16((rgb >> 8) & 0xff) * 257,
+                  blue: UInt16(rgb & 0xff) * 257)
+        }
+        terminal.terminalLock.withLock {
+            terminal.foregroundColor = color(foregroundRGB)
+            terminal.backgroundColor = color(backgroundRGB)
+            terminal.installPalette(colors: ansiRGB.map(color))
+        }
+    }
     private static func valid(_ columns: Int, _ rows: Int) -> Bool {
         (2...240).contains(columns) && (1...100).contains(rows)
     }

@@ -229,10 +229,14 @@ try:
         label = 'fallback' if missing else 'bundled'
         launch_binary = binary
         if missing:
-            isolated = root / 'without-resources'
+            isolated = root / 'without-provider-marks'
             isolated.mkdir()
             launch_binary = str(isolated / 'WindowHarness')
             shutil.copy2(binary, launch_binary)
+            resources = Path(binary).parent / 'LinuxAppKitSpike_WindowHarness.resources'
+            isolated_resources = isolated / resources.name
+            shutil.copytree(resources, isolated_resources)
+            shutil.rmtree(isolated_resources / 'ProviderMarks')
         # Return to the ordinary project entry point; the existing terminal is explicitly reused.
         with sqlite3.connect(store / 'threading.db') as database:
             database.execute("DELETE FROM app_state WHERE key IN ('selectedSessionID', 'selectedTerminalID')")

@@ -105,6 +105,18 @@ def clipboard():
                                    text=True, timeout=3)
 
 
+def screenshot(name):
+    path = Path(evidence) / name
+    subprocess.run(['import', '-window', window, str(path)], check=True, timeout=5)
+    return path
+
+
+def pixel(path, x, y):
+    return subprocess.check_output(
+        ['convert', str(path), '-format', f'%[pixel:p{{{x},{y}}}]', 'info:'],
+        text=True, timeout=5).strip()
+
+
 try:
     window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid',
                                     str(process.pid)).splitlines()[0], 'installed window')
@@ -124,8 +136,32 @@ try:
     assert [row.get_name() for row in rows] == ['Copy Session ID', 'Copy Project Path']
     assert [row.get_accessible_id() for row in rows] == ['copySessionID', 'copyProjectPath']
     assert all(row.get_action_iface().get_n_actions() == 1 for row in rows)
-    subprocess.run(['import', '-window', window, str(Path(evidence) / 'session-actions-open.png')],
-                   check=True, timeout=5)
+    light = screenshot('session-actions-open.png')
+    before_theme = input_log.read_bytes()
+    navigator_frames = log_path.read_text().count('NAVIGATOR_TEXT mounted=')
+    terminal_frames = log_path.read_text().count('TERMINAL_FRAME ')
+    xdo('windowfocus', '--sync', window, 'key', 'ctrl+shift+t')
+    eventually(lambda: 'THEME_APPEARANCE dark' in log_path.read_text(), 'dark appearance')
+    eventually(lambda: log_path.read_text().count('NAVIGATOR_TEXT mounted=') > navigator_frames,
+               'dark navigator frame')
+    eventually(lambda: log_path.read_text().count('TERMINAL_FRAME ') > terminal_frames,
+               'dark terminal frame')
+    eventually(menu, 'menu preserved across dark appearance')
+    dark = screenshot('session-actions-dark.png')
+    for x, y in [(300, 300), (800, 30), (1100, 400)]:
+        assert pixel(light, x, y) != pixel(dark, x, y), \
+            f'appearance left pane pixel unchanged at {(x, y)}'
+    assert input_log.read_bytes() == before_theme, 'theme shortcut reached live PTY'
+    navigator_frames = log_path.read_text().count('NAVIGATOR_TEXT mounted=')
+    xdo('key', 'ctrl+shift+t')
+    eventually(lambda: 'THEME_APPEARANCE light' in log_path.read_text(), 'light appearance')
+    eventually(lambda: log_path.read_text().count('NAVIGATOR_TEXT mounted=') > navigator_frames,
+               'restored light navigator frame')
+    eventually(menu, 'menu preserved across light appearance')
+    restored = screenshot('session-actions-light-restored.png')
+    for x, y in [(300, 300), (800, 30), (1100, 400)]:
+        assert pixel(light, x, y) == pixel(restored, x, y), \
+            f'light appearance did not restore pane pixel at {(x, y)}'
     assert rows[0].get_action_iface().do_action(0), 'AT-SPI menu row press refused'
     eventually(lambda: clipboard() == session_id, 'exact saved session ID copied')
     eventually(lambda: child('linux.session-actions') is None, 'menu dismissed after choice')
