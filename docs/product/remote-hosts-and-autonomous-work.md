@@ -954,10 +954,14 @@ What this does not protect, stated plainly:
 | Units stop when you log out; nothing runs after reboot | Linger is off | `sudo loginctl enable-linger <user>` |
 | `systemctl --user`: "Failed to connect to bus" | No user manager session in this shell | Log in as the account over SSH, or `sudo machinectl shell <user>@` |
 | ptyd exits 75 at start | Another daemon holds that state directory's lock | `threading-ptyd status`; stop the duplicate unit |
+| ptyd exits 73 at start ("already listening on …") | A live daemon of another state directory (for example the Mac's) answers on the same socket | Stop one of them, or give one its own `--socket` (reinstall with `--ptyd-socket`) |
+| Installer: `ptyd_socket_in_use` | The same, found before writing the unit; the message names the other daemon's pid, build and state | As above, then rerun the installer |
+| `host-state.py restore`: `secrets_destination_exists` | A `secrets/` is already beside the destination database | Move the old `secrets/` aside, then restore again |
 | `held: … host_unavailable` | ptyd socket missing, refusing or backing off | `systemctl --user status threading-ptyd`; check the recipe's `socketPath` |
 | `held: … global_capacity` / `host_capacity` | 32 store-wide or 16 per-socket unresolved launches | `launch-occupancy`; resolve stale launches with `launch-status` and the fenced repairs |
 | `held: … usageUnsettled` / `worker_capacity` | A stopped execution's usage is not settled, or the budget is spent | `worker-capacity W`; `usage-receipt E`; `usage-collect E`; `usage-waive E REASON` |
 | Manual `launch`: `agent_broker_unavailable` | No resident supervisor is serving the broker | Start `threading-controller.service`; the legacy store-path mode (`THREADING_CONTROLLER_LEGACY_AGENT_DATABASE=1`) is for same-account testing only |
+| `supervisor-tick`: `conflict` | The resident supervisor holds the lock; a tick never runs beside it | Read the unit's journal instead, or stop the unit before a diagnostic tick |
 | Supervisor issue `agent_broker_unavailable` after `supervisor-tick` | One-shot tick without a resident supervisor; the intent stays prepared | Start the resident supervisor; it dispatches the intent if the same policy revision is still enabled |
 | Work stays `running`, process long gone | Launch unresolved: no receipt and no inventory (e.g. ptyd state lost) | `launch-status E`; `launch-confirm-stopped E running` with evidence; `retry WORK` |
 | `interrupt` refused | The launch is unresolved | Confirm the launch first; that interrupts the work |
