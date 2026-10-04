@@ -53,6 +53,7 @@ actor TriggerRuntime {
         }
         do {
             try await settleInterruptedRuns()
+            try await store.settleStaleQueuedRuns()
             try await publish(try await store.receivedDispatches())
             try await publishFixStages(try await store.fixStageDispatches())
             try await publish(try await store.scheduledDispatches())
@@ -74,16 +75,35 @@ actor TriggerRuntime {
     }
 
     func drainDaemonInbox() async {
+        await drainDaemonInbox(directory: TriggerDaemonLocations.inbox, journal: .shared)
+    }
+
+    /// Ingests, acknowledges and dispatches every inbox file, a bounded page at a time. A file
+    /// that does not decode, or that the store refuses on its bounds, is quarantined and the
+    /// drain continues; only a failure that could succeed later (the store itself) stops it.
+    func drainDaemonInbox(directory: URL, journal: EventLog) async {
         do {
-            let items = try await Task.detached(priority: .utility) {
-                try TriggerDaemonInbox.load()
-            }.value
-            for item in items {
-                let result = try await engine.ingest(item.event)
-                try await Task.detached(priority: .utility) {
-                    try TriggerDaemonInbox.acknowledge(item)
+            while true {
+                let page = try await Task.detached(priority: .utility) {
+                    try TriggerDaemonInbox.load(directory: directory, journal: journal)
                 }.value
-                try await publish(result.dispatches)
+                for item in page.items {
+                    let result: TriggerIngestionResult
+                    do {
+                        result = try await engine.ingest(item.event)
+                    } catch TriggerStore.StoreError.invalidRecord {
+                        try await Task.detached(priority: .utility) {
+                            try TriggerDaemonInbox.quarantine(item.file, reason: .invalid, journal: journal)
+                        }.value
+                        continue
+                    }
+                    try await Task.detached(priority: .utility) {
+                        try TriggerDaemonInbox.acknowledge(item)
+                    }.value
+                    try await publish(result.dispatches)
+                }
+                // Every examined file was acknowledged or set aside, so a full page means more.
+                guard page.examined == TriggerDaemonInbox.pageLimit else { return }
             }
         } catch {
             ThreadingLogger.app.error(
@@ -231,35 +251,37 @@ actor TriggerEngine {
 
     /// Re-evaluates only pre-launch holds. Revision identity remains frozen, while activation,
     /// source pause, quiet hours and concurrency are checked again at the moment of release.
+    ///
+    /// Selection is per trigger: SQL returns only triggers that are active at their held runs'
+    /// revision, whose source is enabled and which have a free slot, and each contributes at most
+    /// its free slots. A burst held behind one trigger's limit therefore never stands in front
+    /// of another trigger's run, and the work is bounded by the catalogue, not the queue depth.
     func releaseEligibleQueuedRuns(limit: Int = 100) async throws -> [TriggerDispatch] {
-        let queued = try await store.queuedDispatches(limit: limit)
-        let active = try await store.activeTriggers()
+        let candidates = try await store.queueReleaseCandidates()
         let acceptedAt = now()
         var dispatches: [TriggerDispatch] = []
 
-        for dispatch in queued {
-            guard active.contains(where: {
-                $0.definition.id == dispatch.run.triggerID
-                    && $0.revision.id == dispatch.run.triggerRevisionID
-            }),
-            try await store.source(id: dispatch.event.sourceInstallationID)?.enabled == true else {
-                continue
+        for candidate in candidates where dispatches.count < limit {
+            guard candidate.revision.quietHours?.contains(acceptedAt) != true else { continue }
+            let freeSlots = candidate.revision.limits.maximumConcurrentRuns - candidate.activeRunCount
+            guard freeSlots > 0 else { continue }
+            let held = try await store.queuedDispatches(
+                triggerID: candidate.triggerID,
+                revision: candidate.revision,
+                limit: min(freeSlots, limit - dispatches.count)
+            )
+            for dispatch in held {
+                var run = dispatch.run
+                run.state = .received
+                run.holdReason = nil
+                run.boundedDiagnostic = nil
+                try await store.updateRun(run)
+                dispatches.append(TriggerDispatch(
+                    run: run,
+                    revision: dispatch.revision,
+                    event: dispatch.event
+                ))
             }
-            let activeCount = try await store.activeRunCount(triggerID: dispatch.run.triggerID)
-            let heldForQuietHours = dispatch.revision.quietHours?.contains(acceptedAt) == true
-            let heldForConcurrency = activeCount >= dispatch.revision.limits.maximumConcurrentRuns
-            guard !heldForQuietHours, !heldForConcurrency else { continue }
-
-            var run = dispatch.run
-            run.state = .received
-            run.holdReason = nil
-            run.boundedDiagnostic = nil
-            try await store.updateRun(run)
-            dispatches.append(TriggerDispatch(
-                run: run,
-                revision: dispatch.revision,
-                event: dispatch.event
-            ))
         }
         return dispatches
     }

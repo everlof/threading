@@ -290,6 +290,8 @@ struct TriggerLimits: Codable, Equatable, Sendable {
     var maximumRuntimeMinutes: Int
 
     static let conservative = TriggerLimits(maximumConcurrentRuns: 1, maximumRuntimeMinutes: 60)
+    /// The most concurrent runs a revision may allow.
+    static let maximumConcurrentRunsBound = 8
 }
 
 struct TriggerNotificationPolicy: Codable, Equatable, Sendable {
@@ -377,6 +379,25 @@ enum TriggerRunState: String, Codable, CaseIterable, Sendable {
     case cancelled
     case running
     case finishing
+}
+
+/// Why a held run was settled without starting: what authorized it no longer exists, so
+/// waiting longer could never start it. Recorded as the run's receipt diagnostic.
+enum QueuedRunSettlement: Sendable {
+    case revisionSuperseded
+    case automationRemoved
+    case sourceRemoved
+
+    var diagnostic: String {
+        switch self {
+        case .revisionSuperseded:
+            L10n.string("The automation was edited while this run waited; it ran under neither revision.")
+        case .automationRemoved:
+            L10n.string("The automation was deleted while this run waited.")
+        case .sourceRemoved:
+            L10n.string("The event source was deleted while this run waited.")
+        }
+    }
 }
 
 enum TriggerRunHoldReason: String, Codable, Sendable {

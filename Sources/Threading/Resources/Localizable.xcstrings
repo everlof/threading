@@ -53744,6 +53744,28 @@
         }
       }
     },
+    "The automation was deleted while this run waited." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automationen togs bort medan körningen väntade."
+          }
+        }
+      }
+    },
+    "The automation was edited while this run waited; it ran under neither revision." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automationen redigerades medan körningen väntade; den kördes under ingen av versionerna."
+          }
+        }
+      }
+    },
     "The background host cannot open its socket: the path inside your home folder is too long." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54516,6 +54538,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kvällspasset — de lugna timmarna."
+          }
+        }
+      }
+    },
+    "The event source was deleted while this run waited." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Händelsekällan togs bort medan körningen väntade."
           }
         }
       }
