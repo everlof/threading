@@ -59,6 +59,8 @@ final class PTYHostDaemonTests: XCTestCase {
         static let expectedSourceRevisionKey = "THREADING_SOURCE_REVISION"
         /// The daemon's `EX_TEMPFAIL`: another daemon owns the state directory.
         static let stateDirectoryHeldExitCode: Int32 = 75
+        /// The daemon's `EX_CANTCREAT`: a live daemon of another state directory has the socket.
+        static let socketHeldExitCode: Int32 = 73
         static let shell = "/bin/sh"
 
         /// Larger than the daemon's 512 KiB ring, so the replay has to be a cut.
@@ -737,6 +739,78 @@ final class PTYHostDaemonTests: XCTestCase {
         observer.send(.hello(PTYHostHello(build: "test", pid: getpid())))
         _ = try nextHello(on: observer)
         XCTAssertEqual(try nextLost(on: observer).ids, [id], "a crashed owner's lock is released")
+    }
+
+    /// Two daemons with **different** state directories pointed at one socket — the controller
+    /// host bundle and the Mac's remote-host installer both default to
+    /// `~/.local/state/threading/pty/ptyd.sock`. Each holds its own lock, so the lock cannot
+    /// refuse the second; it used to unlink the first one's live socket and bind its own, leaving
+    /// the first one's agents running where no client could reach them.
+    ///
+    /// The owner's agent is detached across the intruder's launch for the same reason as in the
+    /// state-directory test above.
+    func testASecondDaemonRefusesASocketALiveDaemonServes() throws {
+        let owner = try startDaemon()
+        let spawner = try connect(to: owner)
+        let id = Self.newIdentity()
+        let spawned = try spawn(on: spawner, id: id, script: "printf READY; sleep 60")
+        try spawner.waitForOutput(containing: "READY", timeout: Fixture.childTimeout)
+        spawner.hangUp()
+        let socketBefore = try FileManager.default.attributesOfItem(atPath: owner.socketPath)[.systemFileNumber]
+
+        let intruder = try DaemonProcess(
+            helper: try helperURL(),
+            socketPath: owner.socketPath,
+            stateDirectory: directory.appendingPathComponent("x", isDirectory: true),
+            ringBudget: nil
+        )
+        // Not in `daemons`: if the refusal regresses it has taken the owner's endpoint, and the
+        // teardown must still drain the owner rather than it.
+        defer {
+            intruder.terminateIfRunning()
+            intruder.finishDiagnostics()
+        }
+        XCTAssertTrue(
+            intruder.waitUntilExited(timeout: Fixture.replyTimeout),
+            "a daemon whose socket a live daemon serves exits instead of taking it over: \(intruder.diagnosticText)"
+        )
+        XCTAssertEqual(intruder.terminationStatus, Fixture.socketHeldExitCode)
+        XCTAssertTrue(
+            intruder.diagnosticText.contains("already listening on \(owner.socketPath)"),
+            "the refusal names the conflict: \(intruder.diagnosticText)"
+        )
+        XCTAssertEqual(
+            try FileManager.default.attributesOfItem(atPath: owner.socketPath)[.systemFileNumber] as? Int,
+            socketBefore as? Int,
+            "the owner's socket file was neither unlinked nor replaced"
+        )
+        XCTAssertEqual(DaemonTestPOSIX.kill(spawned.pid, 0), 0, "the owner's agent is still running")
+        let client = try connect(to: owner)
+        client.send(.list)
+        let held = try nextSessions(on: client)
+        XCTAssertEqual(held.map(\.id), [id], "the owner is still the one answering on its socket")
+        XCTAssertNil(held.first?.exit)
+    }
+
+    /// The other half of the rule: a socket nothing listens on any more is a crashed daemon's
+    /// leftover, and a daemon of *any* state directory may replace it.
+    func testADaemonReplacesASocketNothingListensOn() throws {
+        let crashed = try startDaemon()
+        crashed.crash()
+        try waitUntil(timeout: Fixture.exitTimeout, "the first daemon is gone") { !crashed.isRunning }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: crashed.socketPath), "a crash leaves its socket file")
+
+        let successor = try DaemonProcess(
+            helper: try helperURL(),
+            socketPath: crashed.socketPath,
+            stateDirectory: directory.appendingPathComponent("y", isDirectory: true),
+            ringBudget: nil
+        )
+        daemons.append(successor)
+        try successor.waitUntilListening(timeout: Fixture.replyTimeout)
+        let client = try connect(to: successor)
+        client.send(.list)
+        XCTAssertEqual(try nextSessions(on: client), [])
     }
 
     #if SWIFT_PACKAGE

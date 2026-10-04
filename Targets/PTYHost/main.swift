@@ -157,6 +157,8 @@ enum ThreadingPTYHost {
             break
         case .stateDirectoryHeld:
             exit(PTYHostDefaults.stateDirectoryHeldExitCode)
+        case .socketHeld:
+            exit(PTYHostDefaults.socketHeldExitCode)
         case .failed:
             exit(PTYHostDefaults.startupFailureExitCode)
         }

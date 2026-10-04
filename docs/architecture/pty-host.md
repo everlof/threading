@@ -634,7 +634,24 @@ than one that ended. It is R4 in the design's risk register, answered.
   with the owner's agent killed.
 - **The daemon unlinks a stale socket, not the app.** It is the only process that may be listening
   there, so it is the only one that can tell a leftover file from a live listener without a race —
-  and, holding the state directory's lock, the only daemon that can be doing so.
+  and, holding the state directory's lock, the only daemon of *that* directory that can be doing so.
+- **One daemon per socket, too, and a live socket is never unlinked.** The lock is per state
+  directory, so it cannot see a second daemon of a *different* directory pointed at the same
+  rendezvous — which the controller host bundle (`--state …/pty/host`) and the Mac's remote-host
+  installer (`--state …/pty`) both do by default, at `~/.local/state/threading/pty/ptyd.sock`. The
+  later one used to unlink the earlier one's socket and bind its own, and every session the earlier
+  one held went on running where no client could reach it. So after taking its lock, and before
+  recovery or the journal touch anything, the daemon connects to whatever socket is already there
+  and says `hello` (bounded by `occupantProbeTimeout`, never `retire`). A refused connect, or no
+  socket at all, is a crashed daemon's leftover and is unlinked as before; anything that accepts —
+  a daemon that answers, an incompatible one, a wedged one that says nothing — is somebody's live
+  listener. The daemon then names it on standard error and exits `EX_CANTCREAT` (73), which, unlike
+  a held state directory, does not clear by waiting: one of the two has to be given another
+  `--socket`. Retirement is unaffected, because a retiring daemon unlinks its socket at once and
+  its successor finds nothing there.
+  `PTYHostDaemonTests/testASecondDaemonRefusesASocketALiveDaemonServes` fails without it, with the
+  owner's socket replaced and its session list answered by the intruder;
+  `testADaemonReplacesASocketNothingListensOn` holds the stale half.
 - **The state directory is created `0700` and set `0700` again**, because it may already exist from
   a run with a different mask. That directory is the whole authorization boundary: no frame carries
   a token, and this is why none needs to.

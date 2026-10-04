@@ -125,6 +125,11 @@ enum PTYHostDefaults {
     /// reading must not be able to hold a descriptor open by never draining it.
     static let closeFlushTimeout: TimeInterval = 2
 
+    /// How long startup waits for whatever is at its socket path to accept and answer `hello`
+    /// before calling it a live listener anyway. A daemon answers in milliseconds; this bounds a
+    /// stopped or wedged one, which is still not a file to unlink.
+    static let occupantProbeTimeout: TimeInterval = 3
+
     /// How long a retiring daemon lets its last writes reach the socket before `exit(0)`.
     ///
     /// Writes are asynchronous, so exiting the instant the last session is released can truncate
@@ -192,6 +197,10 @@ enum PTYHostDefaults {
     /// `EX_TEMPFAIL`. Another daemon holds the state directory. Not this process's failure and not
     /// permanent: that daemon may be draining towards an exit, after which a start succeeds.
     static let stateDirectoryHeldExitCode: Int32 = 75
+    /// `EX_CANTCREAT`. A live daemon of another state directory already answers on the socket
+    /// path. Unlike a held state directory this does not clear by waiting: somebody pointed two
+    /// daemons at one rendezvous, and only changing one of them resolves it.
+    static let socketHeldExitCode: Int32 = 73
     static let successExitCode: Int32 = 0
 
     // MARK: - Wire

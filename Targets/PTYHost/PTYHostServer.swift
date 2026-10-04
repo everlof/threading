@@ -7,6 +7,7 @@ import Musl
 #endif
 import Dispatch
 import Foundation
+import ThreadingPTYClient
 import ThreadingPTYHostKit
 
 // MARK: - Server
@@ -106,6 +107,10 @@ final class PTYHostServer: @unchecked Sendable {
     enum StartOutcome {
         case listening
         case stateDirectoryHeld
+        /// A live listener already answers on the socket path, and it is not this state
+        /// directory's daemon (that one would have held the lock). Not unlinked: see
+        /// `occupant(ofSocket:build:)`.
+        case socketHeld
         case failed
     }
 
@@ -148,6 +153,18 @@ final class PTYHostServer: @unchecked Sendable {
                 "threading-ptyd: cannot lock \(stateDirectory.path): \(String(cString: strerror(code)))\n".utf8
             ))
             return .failed
+        }
+
+        // Before recovery and before the journal: a refused start must leave this state directory
+        // exactly as it found it. Holding the lock already rules out this directory's own daemon,
+        // so whatever answers here belongs to a different state directory.
+        if case .occupied(let description) = Self.occupant(ofSocket: socketPath, build: build) {
+            FileHandle.standardError.write(Data((
+                "threading-ptyd: \(description) is already listening on \(socketPath), and it is not the "
+                + "daemon for \(stateDirectory.path); not starting. Two daemons cannot share one socket: "
+                + "stop the other one, or give this one a different --socket.\n"
+            ).utf8))
+            return .socketHeld
         }
 
         journal.prune()
@@ -272,11 +289,68 @@ final class PTYHostServer: @unchecked Sendable {
         lostSince = earliest
     }
 
+    /// What `start()` found at the socket path before binding it.
+    enum SocketOccupant: Equatable {
+        /// Nothing, or a file nobody is listening on: a crashed daemon's leftover. Safe to unlink.
+        case vacant
+        /// Something accepted a connection — a daemon that answered `hello`, or a listener that
+        /// did not. Never unlinked.
+        case occupied(String)
+    }
+
+    /// Asks whatever is at `path` whether it is alive, the way a client would.
+    ///
+    /// **Unlinking a live socket is not "taking over a stale file".** Two daemons with different
+    /// state directories can be pointed at one rendezvous — the controller host bundle and the
+    /// Mac's remote-host installer both default to `~/.local/state/threading/pty/ptyd.sock` — and
+    /// the state-directory lock cannot see that, because each holds its own. Before this check the
+    /// second to start unlinked the first one's socket and bound its own, and every session the
+    /// first held went on running where no client could ever reach it again.
+    ///
+    /// So only a refused connect (or no socket at all) counts as stale. A daemon that answers
+    /// `hello` is named in the refusal; one that accepts and says nothing, or whose connect fails
+    /// any other way, is still somebody's listener and is left alone. The probe never sends
+    /// `retire`: replacing a daemon is the upgrade policy's decision, made by the side that owns
+    /// that daemon.
+    static func occupant(ofSocket path: String, build: String) -> SocketOccupant {
+        let type = (try? FileManager.default.attributesOfItem(atPath: path))?[.type] as? FileAttributeType
+        guard type == .typeSocket else { return .vacant }
+
+        let client = PTYHostClient(
+            socketPath: path,
+            build: build,
+            events: .ignored,
+            journal: { _, _ in },
+            connectTimeout: PTYHostDefaults.occupantProbeTimeout,
+            helloTimeout: PTYHostDefaults.occupantProbeTimeout,
+            retiresOlderDaemon: false
+        )
+        defer { client.close() }
+        do {
+            let hello = try client.connect()
+            return .occupied("another threading-ptyd (pid \(hello.pid), build \(hello.build))")
+        } catch let error as PTYHostClientError {
+            switch error {
+            case .connectFailed(let code) where code == ECONNREFUSED || code == ENOENT || code == ENOTSOCK:
+                return .vacant
+            case .pathTooLong:
+                // `bindListener` reports the length; there is nothing at a path nobody can bind.
+                return .vacant
+            case .incompatible:
+                return .occupied("a threading-ptyd speaking another protocol version")
+            default:
+                return .occupied("a listener that did not answer as a daemon (\(error.token))")
+            }
+        } catch {
+            return .occupied("a listener that did not answer as a daemon")
+        }
+    }
+
     /// Binds the rendezvous.
     ///
     /// The daemon unlinks a stale socket, not the app: this is the only process that may be
     /// listening there, so it is the only one that can tell a leftover file from a live listener
-    /// without a race.
+    /// without a race. `start()` has already refused a live one (`occupant(ofSocket:build:)`).
     private func bindListener() -> Bool {
         guard let address = PTYHostPOSIX.unixAddress(path: socketPath) else {
             let message = "threading-ptyd: socket path is \(socketPath.utf8.count) bytes, over the "
