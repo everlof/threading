@@ -136,7 +136,42 @@ struct ControllerHardeningTests {
         let next = try await reopened.agentRequest(executionID: launch.executionID, credential: credential,
             request: .memoryList(after: context.memoryKeys?.next ?? 0))
         #expect(next.memoryKeys?.items.count == 5)
-        #expect(try await reopened.memoryKeys(workerID: second.workerID).items.isEmpty)
+    }
+
+    /// The agent routes derive the worker from the authenticated execution, so a running agent that
+    /// knows another worker's memory key — or holds that worker's execution id — still cannot read,
+    /// list or overwrite that worker's note. Both workers share one store, as on a host.
+    @Test func runningAgentCannotReachAnotherWorkersMemory() async throws {
+        let (directory, store) = try fixture.fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let first = try await fixture.seed(store)
+        let second = try await fixture.seed(store, worker: WorkerID(), key: "other")
+        let key = "deploy-credentials-location"
+        let secret = "Second worker's private note"
+        _ = try await store.putMemory(workerID: second.workerID, key: key, expectedRevision: 0, content: secret)
+
+        let launch = try #require(await store.prepareLaunch(workerID: first.workerID, spec: usage.spec()))
+        _ = try await store.beginLaunch(launch.executionID)
+        let credential = try await store.launchCredential(launch.executionID)
+        let otherLaunch = try #require(await store.prepareLaunch(workerID: second.workerID, spec: usage.spec()))
+        _ = try await store.beginLaunch(otherLaunch.executionID)
+
+        let read = try await store.agentRequest(executionID: launch.executionID, credential: credential, request: .memoryGet(key: key))
+        #expect(read.memory == nil)
+        let context = try await store.agentRequest(executionID: launch.executionID, credential: credential, request: .context)
+        #expect(context.memoryKeys?.items.isEmpty == true)
+        let listed = try await store.agentRequest(executionID: launch.executionID, credential: credential, request: .memoryList(after: 0))
+        #expect(listed.memoryKeys?.items.isEmpty == true)
+        // Presenting this execution's credential for the other worker's running execution is refused.
+        await #expect(throws: ControllerError.forbidden) {
+            try await store.agentRequest(executionID: otherLaunch.executionID, credential: credential, request: .memoryGet(key: key))
+        }
+        // A write under the same key lands in the caller's own namespace and leaves the other note intact.
+        let written = try await store.agentRequest(executionID: launch.executionID, credential: credential,
+            request: .memoryPut(key: key, expectedRevision: 0, content: "First worker's note"))
+        #expect(written.memory?.workerID == first.workerID)
+        let untouched = try #require(await store.memory(workerID: second.workerID, key: key))
+        #expect(untouched.revision == 1 && untouched.content == secret)
     }
 
 }

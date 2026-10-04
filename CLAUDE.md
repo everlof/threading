@@ -508,13 +508,18 @@ journal rather than from timed UI observations. Their scope, evidence and the st
 two-shipping-app chaos lane are documented in
 [`docs/CONNECTIVITY_TESTING.md`](docs/CONNECTIVITY_TESTING.md).
 
-**`all` is enforced on push.** `scripts/install_git_hooks.sh` installs the gate; run it once per
-clone. `core.hooksPath` points at a shared `~/.git-hooks` whose `pre-commit` already delegates to
-an optional `.git/hooks/pre-commit.local`, so the installer teaches `pre-push` the same trick
-rather than shadowing the global hooks and having to reimplement Git LFS. The shim under `.git/`
-is one line; the logic is `scripts/pre_push.sh`, which is versioned and reviewable. Deletion-only
-pushes skip the gate. Bypass deliberately with `THREADING_SKIP_TESTS=1 git push` — prefer it over
-`--no-verify`, which also skips Git LFS.
+**`all` is enforced on push, after the packages and the controller.** The gate runs
+`scripts/test-packages.sh` (every local package with its own test target, the same list
+`scripts/ci.sh` uses), then `scripts/test-controller.sh` (the portable controller against the real
+CLI and ptyd, with a persistent scratch under `.build/pre-push/`), then `scripts/test.sh all`;
+the first two open no windows and fail before the long run starts. A new package with tests is
+added to `scripts/test-packages.sh`, never to one caller. `scripts/install_git_hooks.sh` installs
+the gate; run it once per clone. `core.hooksPath` points at a shared `~/.git-hooks` whose
+`pre-commit` already delegates to an optional `.git/hooks/pre-commit.local`, so the installer
+teaches `pre-push` the same trick rather than shadowing the global hooks and having to reimplement
+Git LFS. The shim under `.git/` is one line; the logic is `scripts/pre_push.sh`, which is
+versioned and reviewable. Deletion-only pushes skip the gate. Bypass every test lane deliberately
+with `THREADING_SKIP_TESTS=1 git push` — prefer it over `--no-verify`, which also skips Git LFS.
 
 The canonical non-interactive CI/release gate builds `ThreadingMobile` for a generic iOS Simulator
 destination and then runs its complete test target through `scripts/test-mobile.sh`. That runner

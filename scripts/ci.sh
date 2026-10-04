@@ -2,9 +2,10 @@
 #
 # One reproducible, non-interactive quality gate for CI and release preflight.
 #
-# The app has no root Package.swift, so "swift test" alone silently omits the product. Test the
-# six local protocol/runtime/test-contract packages explicitly, then run the app's off-screen
-# Xcode plan. Application-level UI scenarios stay in their separate GUI lane.
+# The app has no root Package.swift, so "swift test" alone silently omits the product. Test every
+# local package with its own test target explicitly (scripts/test-packages.sh holds the list, which
+# the push gate shares), the portable controller with the real processes it drives, then the app's
+# off-screen Xcode plan. Application-level UI scenarios stay in their separate GUI lane.
 #
 # `--mac-release` is the direct-distribution lane. Threading's downloadable artifact is the Mac
 # app, and release builds force Remote Access off; the companion is neither embedded nor
@@ -89,23 +90,11 @@ else
     say "Skipping the unshipped ThreadingMobile lane for the Mac release"
 fi
 
-for package in ThreadingExtensionKit ThreadingPluginKit ThreadingRemoteKit ThreadingGlanceKit ThreadingWasmRuntime ThreadingScenarioKit ThreadingPeerTransport ThreadingSimulatorKit ThreadingUsage; do
-    say "Testing ${package}"
-    swift test --package-path "${repository_directory}/Packages/${package}"
-done
+say "Testing local packages"
+"${script_directory}/test-packages.sh"
 
 say "Testing portable controller and real host processes"
 bash "${script_directory}/test-controller.sh" "${ci_scratch}/controller"
-
-# The plugins are their own packages under a different root, and until now their tests ran in no
-# lane at all: the Xcode plans build one target (ThreadingTests), and the loop above only walks
-# Packages/. Every test defending the device-log pane's behaviour was therefore only ever run by
-# hand. The app target does compile these same sources, so the warning ratchet already covered
-# them — it was the assertions that nothing ran.
-for plugin in DeviceLogsPlugin MarketeerPanelPlugin; do
-    say "Testing ${plugin}"
-    swift test --package-path "${repository_directory}/Plugins/${plugin}"
-done
 
 say "Checking generated component inventory"
 swift run \

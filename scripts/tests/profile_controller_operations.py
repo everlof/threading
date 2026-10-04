@@ -12,6 +12,9 @@ import time
 import uuid
 
 binary = str(Path(sys.argv[1]).resolve())
+count = int(sys.argv[2]) if len(sys.argv) > 2 else 100_000
+if not 100 <= count <= 1_000_000:
+    raise SystemExit("history count must be 100..1000000")
 with tempfile.TemporaryDirectory(prefix="controller-operations-profile-") as directory:
     root = Path(directory)
     database = root / "controller.db"
@@ -33,8 +36,8 @@ with tempfile.TemporaryDirectory(prefix="controller-operations-profile-") as dir
     start = time.perf_counter()
     with sqlite3.connect(database) as connection:
         connection.executemany("INSERT INTO record(kind,id,parent,state,scope,payload) VALUES(?,?,?,?,?,?)",
-            (("delivery" if index % 2 else "question", f"history-{index}", "synthetic", "delivered" if index % 2 else "answered", worker, "opaque-closed-history") for index in range(100000)))
+            (("delivery" if index % 2 else "question", f"history-{index}", "synthetic", "delivered" if index % 2 else "answered", worker, "opaque-closed-history") for index in range(count)))
         plans = [row[3] for row in connection.execute("EXPLAIN QUERY PLAN SELECT sequence,payload FROM record INDEXED BY unresolved_delivery WHERE kind='delivery' AND state IN ('pending','sending','uncertain') AND sequence>0 ORDER BY sequence LIMIT 8")]
         assert any("unresolved_delivery" in plan for plan in plans), plans
     manufacture_ms = round((time.perf_counter() - start) * 1000, 2)
-    print(json.dumps({"history_rows": 100000, "manufacture_ms": manufacture_ms, "before": before, "after": measure(), "query_plan": plans}, indent=2))
+    print(json.dumps({"history_rows": count, "manufacture_ms": manufacture_ms, "before": before, "after": measure(), "query_plan": plans}, indent=2))

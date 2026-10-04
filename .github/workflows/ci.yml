@@ -102,3 +102,26 @@ jobs:
           persist-credentials: false
       - run: apt-get update && apt-get install -y libsqlite3-dev pkg-config python3
       - run: bash scripts/test-controller.sh /tmp/controller-tests
+      - name: Run the controller stress fixtures at a bounded cardinality
+        # The opt-in profiles default to 100,000 rows. 2,000 keeps each under a few seconds on a
+        # hosted runner while still exceeding every bound they defend: the 50-row page, the 8-row
+        # active sweeps and the 15 claimable items, and each asserts its index in the query plan,
+        # which does not depend on the row count.
+        run: |
+          cli=/tmp/controller-tests/cli/debug/threading-controller
+          python3 scripts/tests/profile_controller.py "$cli" 2000
+          python3 scripts/tests/profile_controller_supervisor.py "$cli" 2000
+          python3 scripts/tests/profile_controller_operations.py "$cli" 2000
+
+  ptyd-linux:
+    # The static, generation-stamped Linux daemon a remote host runs, built and tested through the
+    # same script a release uses, on the architecture the hosted runner has (amd64; a Mac run covers
+    # arm64). The script pins the Swift image and the Static Linux SDK by checksum.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Build and test threading-ptyd and threading-mcp-bridge for Linux
+        run: scripts/test-ptyd-linux.sh

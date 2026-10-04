@@ -622,7 +622,12 @@ than one that ended. It is R4 in the design's risk register, answered.
 
 The same sources build for Linux, so a session's agent can run on a machine the person owns and be
 reached over SSH — the plan is [`remote-execution-hosts.md`](../feature-drafts/remote-execution-hosts.md).
-Nothing registers or starts a Linux daemon yet; what exists is the build and the evidence.
+Two installers register a Linux daemon, both as a **systemd user unit** under the host account
+and both from the static binary below: the app's remote-host setup (`RemoteHostInstall`, a
+`threading-ptyd@<id>` template unit, from the components `scripts/publish_remote_components.sh`
+publishes) and the controller host bundle (`scripts/build-controller-host.sh`, whose
+`install-host.py` writes `threading-ptyd.service` and starts it only with `--start`). Both build the
+daemon through `scripts/linux/build-ptyd-static.sh` and run the daemon suite against that file.
 
 - **One program, one shim.** Every call whose *spelling* differs is in `PTYHostPlatform.swift`
   (`PTYHostPOSIX`), and the calls Swift cannot make portably on Linux — `forkpty`, the
@@ -683,7 +688,10 @@ one hang in 24 runs of an empty test here, so a 77-case bundle in one process al
 finishes. The watchdog backtraces a case still running after ten seconds and retries it only when
 the main thread is inside `awaitUsingExpectation` — the harness wrapper, never a test body — and
 prints every retry. Anything else still running at 180 seconds fails with its backtrace, and a skip
-is reported as a skip, not a pass. Delete the runner when the pinned toolchain has the fix.
+is reported as a skip, not a pass. Every ptyd lane also passes `--expected-skips`: the skipped set
+must equal `scripts/linux/ptyd-expected-skips.txt` (today the three launchd `status` cases; none
+for the kit), so a case that starts skipping, or a listed one that starts running, fails the lane.
+Delete the runner when the pinned toolchain has the fix.
 
 **Under x86_64 emulation the watchdog cannot tell that hang from a real one.** Docker Desktop's
 emulated `linux/amd64` gives LLDB no frames — every thread's backtrace is empty — so a case caught
