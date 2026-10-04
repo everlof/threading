@@ -4,10 +4,16 @@ import AppKit
 @MainActor protocol ThemedComponent: AnyObject {}
 
 @MainActor enum Design {
-    enum Text { static let label = NSColor(white: 0.08, alpha: 1) }
+    enum Text {
+        static let label = NSColor(white: 0.08, alpha: 1)
+        static let tertiary = NSColor(white: 0.35, alpha: 1)
+    }
     enum Surface {
         static let ground = NSColor(white: 1, alpha: 1)
         static let accent = NSColor(red: 0.18, green: 0.36, blue: 0.84, alpha: 1)
+    }
+    enum Typography {
+        static func body() -> NSFont { .systemFont(ofSize: 13) }
     }
 }
 

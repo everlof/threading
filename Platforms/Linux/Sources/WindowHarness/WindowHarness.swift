@@ -1696,7 +1696,8 @@ struct WindowHarness {
         var pendingComposerProjectID: String?
         var idlePane = launch.map { _ in
             WorkspacePlaceholderPane(hasProjects: !projects.isEmpty,
-                                     onAction: { placeholderActionRequested = true })
+                                     onAction: { placeholderActionRequested = true },
+                                     onSubmit: { composerSubmitRequested = true })
         }
         idlePane?.setThemeAppearance()
         var activePane: WorkspaceTerminalPane?
@@ -1870,6 +1871,7 @@ struct WindowHarness {
                     }
                 } else if event.action != 3 {
                     if Int(event.key) == TW_KEY_ESCAPE {
+                        if idlePane.cancelMarkedText() { return true }
                         composerChoice = nil
                         idlePane.configure(hasProjects: !projects.isEmpty)
                         _ = tw_workspace_editor_focus(window, 0)

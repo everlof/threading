@@ -1,6 +1,19 @@
 import AppKit
 import Foundation
 
+@MainActor
+private final class PlaceholderInk: NSView {
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        "Describe your task".draw(
+            at: NSPoint(x: 4, y: 4),
+            withAttributes: [.font: NSFont.systemFont(ofSize: 13),
+                             .foregroundColor: NSColor.black]
+        )
+    }
+}
+
 @main
 @MainActor
 enum Fixture {
@@ -102,6 +115,49 @@ enum Fixture {
         precondition(scroll.textView.selectedRange().location < endSelection,
                      "SDL up arrow must move through visual lines")
 
+        let prompt = PromptTextView.scrollingPrompt()
+        prompt.frame = NSRect(x: 0, y: 0, width: 180, height: 58)
+        precondition(!prompt.hasVerticalScroller,
+                     "production prompt hides the scroll chrome")
+        prompt.textView.string = (0..<15).map { "Prompt line \($0) 🙂" }.joined(separator: "\n")
+        prompt.textView.setSelectedRange(NSRange(
+            location: (prompt.textView.string as NSString).length, length: 0))
+        precondition(prompt.contentView.bounds.minY > 0,
+                     "production prompt must reveal its caret in a fixed-height viewport")
+        let promptText = prompt.textView
+        var submitIntents: [PromptSubmitIntent] = []
+        promptText.onSubmit = { submitIntents.append($0) }
+        promptText.string = "Draft"
+        promptText.setSelectedRange(NSRange(location: 5, length: 0))
+        promptText.submitsOnReturn = { true }
+        promptText.keyDown(with: NSEvent(type: .keyDown, keyCode: 36,
+                                        charactersIgnoringModifiers: "\n"))
+        precondition(submitIntents == [.standard] && promptText.string == "Draft",
+                     "bare Return must submit without changing the draft")
+        promptText.keyDown(with: NSEvent(type: .keyDown, modifierFlags: [.command],
+                                        keyCode: 36, charactersIgnoringModifiers: "\n"))
+        precondition(submitIntents == [.standard, .immediate],
+                     "Command-Return must request immediate submit")
+        promptText.keyDown(with: NSEvent(type: .keyDown, modifierFlags: [.shift],
+                                        keyCode: 36, charactersIgnoringModifiers: "\n"))
+        precondition(promptText.string == "Draft\n" && submitIntents.count == 2,
+                     "Shift-Return must insert a newline without submitting")
+        promptText.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0),
+                                 replacementRange: NSRange(location: NSNotFound, length: 0))
+        promptText.keyDown(with: NSEvent(type: .keyDown, keyCode: 36,
+                                        charactersIgnoringModifiers: "\n"))
+        precondition(promptText.hasMarkedText() && promptText.string == "Draft\nか"
+                     && submitIntents.count == 2,
+                     "IME Return must wait for committed text instead of sending or inserting")
+        promptText.insertText("仮名", replacementRange: NSRange(location: NSNotFound, length: 0))
+        precondition(promptText.string == "Draft\n仮名" && !promptText.hasMarkedText(),
+                     "the committed IME candidate must replace provisional text once")
+        promptText.submitsOnReturn = { false }
+        promptText.keyDown(with: NSEvent(type: .keyDown, keyCode: 36,
+                                        charactersIgnoringModifiers: "\n"))
+        precondition(promptText.string == "Draft\n仮名\n" && submitIntents.count == 2,
+                     "an external-submit composer must use bare Return for a newline")
+
         let paint = ThemedTextView(frame: NSRect(x: 0, y: 0, width: 180, height: 40),
                                    textContainer: nil)
         paint.string = "Ink selected"
@@ -114,6 +170,17 @@ enum Fixture {
             return count + (red < 245 || green < 245 || blue < 245 ? 1 : 0)
         }
         precondition(colored > 100, "Pango text and selection must paint pixels")
+        let placeholder = PlaceholderInk(frame: NSRect(x: 0, y: 0, width: 180, height: 40))
+        let placeholderBitmap = Bitmap(width: 180, height: 40, background: (1, 1, 1, 1))
+        placeholder.render(in: NSGraphicsContext(bitmap: placeholderBitmap, scale: 1))
+        let placeholderInk = stride(from: 0, to: placeholderBitmap.pixels.count, by: 4)
+            .reduce(0) { count, index in
+                count + (placeholderBitmap.pixels[index] < 245 ? 1 : 0)
+            }
+        precondition(placeholderInk > 50,
+                     "a Swift String placeholder must draw through the AppKit shim")
+        let placeholderOutput = URL(fileURLWithPath: "/repo/Platforms/Linux/out/text-editor-placeholder.png")
+        try! PNGWriter.write(placeholderBitmap, to: placeholderOutput)
         let output = URL(fileURLWithPath: "/repo/Platforms/Linux/out/text-editor-fixture.png")
         try! PNGWriter.write(bitmap, to: output)
         print("text editor fixture passed; rendered \(output.path)")

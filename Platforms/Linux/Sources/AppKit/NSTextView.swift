@@ -129,6 +129,24 @@ open class NSTextView: NSText {
     open var selectedTextAttributes: [NSAttributedString.Key: Any] = [:] { didSet { needsDisplay = true } }
     open var isEditable = true
     open var isSelectable = true
+    /// This renderer stores and edits plain text only. Refuse opt-ins whose TextKit behavior
+    /// the shim cannot provide, while allowing shared prompt setup to state its plain-text
+    /// contract explicitly.
+    open var isRichText = false {
+        didSet { precondition(!isRichText, "Linux NSTextView does not support rich-text editing") }
+    }
+    open var isAutomaticQuoteSubstitutionEnabled = false {
+        didSet { precondition(!isAutomaticQuoteSubstitutionEnabled,
+                              "Linux NSTextView does not support automatic quote substitution") }
+    }
+    open var isAutomaticDashSubstitutionEnabled = false {
+        didSet { precondition(!isAutomaticDashSubstitutionEnabled,
+                              "Linux NSTextView does not support automatic dash substitution") }
+    }
+    open var isAutomaticTextReplacementEnabled = false {
+        didSet { precondition(!isAutomaticTextReplacementEnabled,
+                              "Linux NSTextView does not support automatic text replacement") }
+    }
     open var allowsUndo = false { didSet { if !allowsUndo { clearHistory() } } }
     open var isVerticallyResizable = false { didSet { invalidateTextLayout() } }
     open var isHorizontallyResizable = false
@@ -326,6 +344,11 @@ open class NSTextView: NSText {
 
     open override func keyDown(with event: NSEvent) {
         guard isEditable || isSelectable else { return }
+        // SDL reports IME composition through TEXTEDITING and the final candidate through
+        // TEXTINPUT. Its intervening keydown belongs to the input method, including Return,
+        // arrows and Backspace; applying it here would replace the provisional text or send
+        // a prompt before the committed candidate arrives.
+        if marked != nil { return }
         let characters = event.charactersIgnoringModifiers ?? ""
         if event.modifierFlags.contains(.control) || event.modifierFlags.contains(.command) {
             if characters.lowercased() == "z" || event.keyCode == 29 {
