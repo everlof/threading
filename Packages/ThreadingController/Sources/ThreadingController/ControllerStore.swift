@@ -21,10 +21,20 @@ public actor ControllerStore {
     }
 
     /// The source supplies a stable key. Reusing it with different content is a conflict.
-    public func enqueue(workerID: WorkerID, key: String, instruction: String, request: String? = nil, source: WorkSource = .request) throws -> WorkItem {
+    /// `after` names work that must complete before this item can be claimed (see `WorkDependencies`).
+    public func enqueue(workerID: WorkerID, key: String, instruction: String, request: String? = nil,
+                        source: WorkSource = .request, after: [WorkID] = []) throws -> WorkItem {
+        try enqueue(workerID: workerID, key: key, instruction: instruction, request: request, source: source, after: after, scope: nil)
+    }
+    /// `scope` is an indexed admission owner (a trigger), so a backlog is counted without a scan.
+    func enqueue(workerID: WorkerID, key: String, instruction: String, request: String?,
+                 source: WorkSource, after: [WorkID], scope: String?) throws -> WorkItem {
         try Limits.text(key, field: "key", maximum: 256)
         try Limits.text(instruction, field: "instruction")
         if let request { try Limits.text(request, field: "request") }
+        guard after.count <= WorkDependencies.maximumPerItem, Set(after).count == after.count else {
+            throw ControllerError.invalidInput("dependencies")
+        }
         return try db.transaction {
             let _: ControllerWorker = try required("worker", workerID.description)
             try requireActiveWorker(workerID)
@@ -32,13 +42,16 @@ public actor ControllerStore {
             if let row = try db.rows("SELECT payload FROM record WHERE kind='work' AND parent=? AND key=? LIMIT 1",
                                      [.text(workerID.description), .text(key)]).first {
                 let existing: WorkItem = try decode(row.text(0))
-                guard existing.instruction == instruction, existing.request == request, (existing.source ?? .request) == source else { throw ControllerError.conflict }
+                guard existing.instruction == instruction, existing.request == request, (existing.source ?? .request) == source,
+                      (existing.dependsOn ?? []) == after else { throw ControllerError.conflict }
                 return existing
             }
-            let work = WorkItem(id: WorkID(), workerID: workerID, key: key, instruction: instruction,
+            var work = WorkItem(id: WorkID(), workerID: workerID, key: key, instruction: instruction,
                                 request: request, source: source, state: .queued, checkpoint: "", executionID: nil)
+            if !after.isEmpty { work.dependsOn = after }
             try insert("work", work.id.description, parent: workerID.description, key: key,
-                       state: work.state.rawValue, value: work)
+                       state: work.state.rawValue, scope: scope, value: work)
+            try recordDependencies(of: work)
             try event("work.queued", work.id.description)
             return work
         }
@@ -56,6 +69,7 @@ public actor ControllerStore {
                     SELECT payload FROM record AS work WHERE kind='work' AND parent=? AND state='queued'
                     AND NOT EXISTS (SELECT 1 FROM record AS launch WHERE launch.kind='launch'
                         AND launch.parent=work.id AND launch.state IN ('prepared','dispatching','running'))
+                    AND \(WorkDependencies.satisfiedClause)
                     ORDER BY sequence LIMIT 1
                     """,
                                            [.text(workerID.description)]).first else { return nil }
@@ -68,6 +82,7 @@ public actor ControllerStore {
                         try saveWork(work)
                         try event("mail.wake_withdrawn", work.id.description)
                         try event("work.cancelled", work.id.description)
+                        try cancelDependents(of: work.id)
                         continue
                     }
                 }
@@ -233,6 +248,12 @@ public actor ControllerStore {
             try event("work.queued", workID.description)
             return work
         }
+    }
+
+    /// Commit count and longest write-lock hold since the previous call, which resets them.
+    func takeTransactionStatistics() -> ControllerDatabase.Statistics {
+        defer { db.statistics = ControllerDatabase.Statistics() }
+        return db.statistics
     }
 
     public func workers(after: Int64 = 0, limit: Int = 50) throws -> ControllerPage<ControllerWorker> {

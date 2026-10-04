@@ -45,17 +45,22 @@ if sys.argv[1] == "mcp":
     assert rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
                               "clientInfo": {"name": "fixture", "version": "1"}})["result"]["protocolVersion"] == "2025-11-25"
     rpc("notifications/initialized", identifier=None)
-    assert {tool["name"] for tool in rpc("tools/list")["result"]["tools"]} == {"work_context", "work_questions", "work_messages", "work_message_consumed", "work_history", "work_checkpoint", "work_ask", "work_finish", "memory_list", "memory_get", "memory_put", "knowledge_get", "knowledge_put", "mail_send", "mail_ask", "mail_inbox", "mail_ack", "mail_directory"}
+    assert {tool["name"] for tool in rpc("tools/list")["result"]["tools"]} == {"work_context", "work_questions", "work_messages", "work_message_consumed", "work_history", "work_checkpoint", "work_ask", "work_finish", "memory_list", "memory_get", "memory_put", "memory_delete", "knowledge_get", "knowledge_put", "mail_send", "mail_ask", "mail_inbox", "mail_ack", "mail_directory"}
     assert rpc("tools/call", {"name": "knowledge_get", "arguments": {"spaceID": str(uuid.uuid4()), "key": "private"}})["result"]["isError"]
     assert rpc("tools/call", {"name": "work_context", "arguments": {"workerID": str(uuid.uuid4())}})["result"]["isError"]
     assert not rpc("tools/call", {"name": "work_context", "arguments": {}})["result"]["isError"]
     assert not rpc("tools/call", {"name": "work_messages", "arguments": {"after": 0}})["result"]["isError"]
     assert not rpc("tools/call", {"name": "work_history", "arguments": {"after": 0}})["result"]["isError"]
     assert rpc("tools/call", {"name": "work_message_consumed", "arguments": {"id": str(uuid.uuid4())}})["result"]["isError"]
+    assert not rpc("tools/call", {"name": "memory_put", "arguments": {"key": "scratch-" + work["id"], "expectedRevision": 0, "content": "Temporary"}})["result"]["isError"]
+    assert rpc("tools/call", {"name": "memory_delete", "arguments": {"key": "scratch-" + work["id"], "expectedRevision": 0}})["result"]["isError"]
+    assert not rpc("tools/call", {"name": "memory_delete", "arguments": {"key": "scratch-" + work["id"], "expectedRevision": 1}})["result"]["isError"]
     assert not rpc("tools/call", {"name": "work_finish", "arguments": {"payload": "MCP draft"}})["result"]["isError"]
     assert rpc("tools/call", {"name": "memory_put", "arguments": {"key": "stale", "expectedRevision": 0, "content": "Forbidden"}})["result"]["isError"]
     server.stdin.close()
     assert server.wait(timeout=5) == 0
+elif sys.argv[1] == "secret":
+    pathlib.Path("secret-seen.txt").write_text(os.environ.get("API_TOKEN", "missing"))
 elif sys.argv[1] == "hold":
     time.sleep(60)
 elif sys.argv[1] in ("question", "auto"):
@@ -175,6 +180,33 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(deliveries[0]["payload"], "MCP draft")
         self.wait(lambda: self.call("launch-status", launch["executionID"])["presence"] == "stopped")
         self.assertEqual(self.call("memory-get", self.worker, "stale"), None)
+        deleted = self.call("memory-get", self.worker, "scratch-" + self.work["id"])
+        self.assertEqual((deleted["state"], deleted["content"], deleted["revision"]), ("deleted", "", 2))
+        history = self.call("memory-history", self.worker, "scratch-" + self.work["id"])["items"]
+        self.assertEqual([item["provenance"]["actor"] for item in history], ["agent", "agent"])
+        self.assertEqual({item["provenance"]["executionID"] for item in history}, {launch["executionID"]})
+        self.assertEqual(self.call("memory-list", self.worker)["items"], [])
+
+    def test_launch_secret_is_resolved_at_dispatch_and_never_stored(self):
+        recipe = json.loads(Path(self.recipe("secret")).read_text())
+        recipe["secrets"] = {"API_TOKEN": "api-token"}
+        path = self.file("secret-recipe.json", json.dumps(recipe))
+        refused = self.call("launch", self.worker, path, ok=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("secret_unavailable", refused.stderr)
+        prepared = self.call("launches", self.work["id"])["items"]
+        self.assertEqual([item["state"] for item in prepared], ["prepared"])
+        value = "tok-" + uuid.uuid4().hex
+        self.call("secret-set", "api-token", self.file("token.txt", value))
+        os.remove(self.root / "token.txt")
+        launch = self.call("launch-dispatch", prepared[0]["executionID"])
+        self.assertNotIn(value, json.dumps(launch))
+        seen = self.wait(lambda: (self.root / "secret-seen.txt").exists() and (self.root / "secret-seen.txt").read_text())
+        self.assertEqual(seen, value)
+        with sqlite3.connect(self.db) as connection:
+            stored = connection.execute("SELECT group_concat(payload, char(10)) FROM record").fetchone()[0]
+        self.assertIn("api-token", stored)
+        self.assertNotIn(value, stored)
 
     def test_daemon_restart_does_not_turn_absence_into_a_retry(self):
         launch = self.call("launch", self.worker, self.recipe())

@@ -148,6 +148,9 @@ final class ControllerDatabase {
             }
             try run("PRAGMA journal_mode=WAL")
             try run("PRAGMA synchronous=FULL")
+            // Overwritten and deleted cells are zeroed inside the page being written anyway (no
+            // extra I/O), so a replaced memory body leaves no residue for a later forget to miss.
+            try run("PRAGMA secure_delete=FAST")
         } catch {
             sqlite3_close(handle)
             handle = nil
@@ -210,17 +213,31 @@ final class ControllerDatabase {
         }
     }
     func run(_ sql: String, _ values: [Value] = []) throws { _ = try rows(sql, values) }
+    /// Rows the most recent INSERT/UPDATE/DELETE changed.
+    func changes() -> Int { Int(sqlite3_changes(handle)) }
+    struct Statistics: Sendable {
+        var commits = 0
+        var longestNanoseconds: UInt64 = 0
+    }
+    /// Write transactions committed and the longest one, since the last reset.
+    var statistics = Statistics()
     func transaction<T>(_ body: () throws -> T) throws -> T {
         // Actor-isolated synchronous composition: admission and the existing mutation share
         // one write transaction. Savepoints also roll back a caught inner failure correctly.
         let savepoint = "controller_\(transactionDepth)"
         let outer = transactionDepth == 0
         try run(outer ? "BEGIN IMMEDIATE" : "SAVEPOINT \(savepoint)")
+        let began = outer ? DispatchTime.now().uptimeNanoseconds : 0
         transactionDepth += 1
         defer { transactionDepth -= 1 }
         do {
             let result = try body()
             try run(outer ? "COMMIT" : "RELEASE \(savepoint)")
+            if outer {
+                // How long this connection held the write lock: two integers per commit.
+                statistics.commits += 1
+                statistics.longestNanoseconds = max(statistics.longestNanoseconds, DispatchTime.now().uptimeNanoseconds - began)
+            }
             return result
         } catch {
             // Preserve the originating error; SQLite closes/rolls back an abandoned transaction.

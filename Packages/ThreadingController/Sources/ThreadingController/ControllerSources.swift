@@ -171,6 +171,28 @@ public struct TriggerWorkRequest: Codable, Sendable {
     public let event: ProbeEvent
 }
 
+/// Bounds on what one poll may admit. See `recordPoll`.
+public enum TriggerAdmissionLimits {
+    /// Events stored (with their admissions) per write transaction.
+    public static let eventsPerCommit = 25
+    /// Tasks admitted per write transaction before it commits (an event's own matches are
+    /// never split, so a commit admits fewer than this plus one event's triggers).
+    public static let admissionsPerCommit = 20
+    /// Tasks one poll may admit across all of a source's triggers.
+    public static let admissionsPerPoll = 100
+    /// Queued, unclaimed tasks one trigger may hold; a match beyond it is refused.
+    public static let backlogPerTrigger = 50
+    /// How soon a poll that left events for later runs again (the shortest polling interval).
+    public static let deferredPollDelay: TimeInterval = 60
+    public static let backlogReason = "backlog"
+    static func scope(_ trigger: TriggerRuleID) -> String { "trigger:\(trigger)" }
+}
+struct TriggerPollAdmission {
+    var admitted = 0
+    var deferred = false
+    var backlog: [TriggerRuleID: Int] = [:]
+}
+
 /// What one poll needs: exactly the approved revision's spec, with the hash to verify first.
 public struct SourcePollIntent: Codable, Sendable {
     public let source: ControllerSource
@@ -266,9 +288,38 @@ extension ControllerStore {
     }
 
     /// Records one poll: verifies the files still match the approval, stores new events once,
-    /// admits work for every enabled trigger they match, and moves the cursor — together.
+    /// admits work for every enabled trigger they match, then moves the cursor.
+    ///
+    /// Admission is bounded three ways (`TriggerAdmissionLimits`): events commit in short chunks
+    /// so the write lock is held briefly; a trigger whose queued backlog is at its ceiling
+    /// records `refused: backlog` instead of queueing; and once a poll has admitted its cap,
+    /// the remaining events are not recorded and the cursor stays where it was, so the probe
+    /// redelivers them to a prompt follow-up poll. A crash between chunks leaves the cursor
+    /// unmoved; redelivered events already stored are skipped by their (id, revision) key.
     public func recordPoll(_ id: SourceID, revision: Int, observedHash: String?, run: ProbeRun) throws -> [SourceEvent] {
-        try db.transaction {
+        let initial = try requireSource(id)
+        guard initial.revision == revision, !initial.deleted, initial.approvedHash == initial.hash else { throw ControllerError.conflict }
+        var recorded: [SourceEvent] = []
+        var admission = TriggerPollAdmission()
+        if run.outcome == .healthy, observedHash == initial.approvedHash {
+            let events = Array(run.events.prefix(initial.spec.limit))
+            var index = 0
+            while index < events.count, !admission.deferred {
+                try db.transaction {
+                    let source = try requireSource(id)
+                    guard source.revision == revision, !source.deleted, source.approvedHash == source.hash else { throw ControllerError.conflict }
+                    let triggers = try activeTriggers(source.id)
+                    let end = min(index + TriggerAdmissionLimits.eventsPerCommit, events.count)
+                    let admittedBefore = admission.admitted
+                    while index < end, admission.admitted - admittedBefore < TriggerAdmissionLimits.admissionsPerCommit {
+                        guard let outcome = try recordEvent(events[index], source: source, triggers: triggers, admission: &admission) else { break }
+                        if let stored = outcome { recorded.append(stored) }
+                        index += 1
+                    }
+                }
+            }
+        }
+        return try db.transaction {
             var source = try requireSource(id)
             guard source.revision == revision, !source.deleted, source.approvedHash == source.hash else { throw ControllerError.conflict }
             let now = Date()
@@ -283,23 +334,23 @@ extension ControllerStore {
                 try event("source.changed", id.description)
                 return []
             }
-            var recorded: [SourceEvent] = []
             switch run.outcome {
             case .healthy:
-                for probeEvent in run.events.prefix(source.spec.limit) {
-                    if let stored = try recordEvent(probeEvent, source: source) { recorded.append(stored) }
-                }
-                source.cursor = run.cursor
+                // Deferred events are redelivered from the unmoved cursor.
+                if !admission.deferred { source.cursor = run.cursor }
                 source.health.state = .healthy
                 source.health.failures = 0
-                source.health.detail = run.diagnostics.isEmpty ? nil : String(run.diagnostics.prefix(1_024))
+                source.health.detail = admission.deferred
+                    ? "Admitted \(admission.admitted) tasks, the most one poll may; later events wait for the next poll."
+                    : (run.diagnostics.isEmpty ? nil : String(run.diagnostics.prefix(1_024)))
             case .backoff, .authenticationNeeded, .failed:
                 source.health.state = run.outcome == .backoff ? .backoff : run.outcome == .authenticationNeeded ? .authenticationNeeded : .failed
                 source.health.failures += 1
                 source.health.detail = String(run.diagnostics.prefix(1_024))
             }
             if source.enabled {
-                let next = try nextPoll(source, after: now, failures: source.health.failures)
+                var next = try nextPoll(source, after: now, failures: source.health.failures)
+                if admission.deferred { next = min(next, now.addingTimeInterval(TriggerAdmissionLimits.deferredPollDelay)) }
                 source.health.nextPollAt = ISO8601DateFormatter().string(from: next)
                 try schedulePoll(id, at: next)
             }
@@ -309,27 +360,49 @@ extension ControllerStore {
         }
     }
 
-    private func recordEvent(_ probeEvent: ProbeEvent, source: ControllerSource) throws -> SourceEvent? {
+    private func activeTriggers(_ source: SourceID) throws -> [ControllerTrigger] {
+        let rows = try db.rows("SELECT payload FROM record WHERE kind='trigger' AND parent=? AND json_extract(payload,'$.enabled')=1 AND json_extract(payload,'$.deleted')=0 ORDER BY sequence LIMIT 101",
+                               [.text(source.description)])
+        guard rows.count <= 100 else { throw ControllerError.invalidInput("active_trigger_limit") }
+        return try rows.map { row -> ControllerTrigger in try decode(row.text(0)) }.filter { $0.enabled && !$0.deleted }
+    }
+
+    /// Nil: the poll's admission cap is reached and this event is left for the next poll.
+    /// `.some(nil)`: already stored. `.some(event)`: stored now, with one receipt per trigger.
+    private func recordEvent(_ probeEvent: ProbeEvent, source: ControllerSource, triggers: [ControllerTrigger],
+                             admission: inout TriggerPollAdmission) throws -> SourceEvent?? {
         let key = "\(probeEvent.id)\u{1f}\(probeEvent.revision)"
         if try !db.rows("SELECT id FROM record WHERE kind='sourceEvent' AND parent=? AND key=? LIMIT 1",
-                        [.text(source.id.description), .text(key)]).isEmpty { return nil }
+                        [.text(source.id.description), .text(key)]).isEmpty { return .some(nil) }
+        let matched = Set(triggers.filter { trigger in trigger.spec.match.allSatisfy { $0.matches(probeEvent.fields) } }.map(\.id))
+        // Checked per event, so a poll admits at most max(cap, active triggers) tasks and
+        // always makes progress.
+        if admission.admitted > 0, admission.admitted + matched.count > TriggerAdmissionLimits.admissionsPerPoll {
+            admission.deferred = true
+            return nil
+        }
         let recordID = UUID().uuidString.lowercased()
         var receipts: [TriggerReceipt] = []
-        let triggers = try db.rows("SELECT payload FROM record WHERE kind='trigger' AND parent=? AND json_extract(payload,'$.enabled')=1 AND json_extract(payload,'$.deleted')=0 ORDER BY sequence LIMIT 101",
-                                   [.text(source.id.description)])
-        guard triggers.count <= 100 else { throw ControllerError.invalidInput("active_trigger_limit") }
-        for row in triggers {
-            let trigger: ControllerTrigger = try decode(row.text(0))
-            guard trigger.enabled, !trigger.deleted else { continue }
-            guard trigger.spec.match.allSatisfy({ $0.matches(probeEvent.fields) }) else {
+        for trigger in triggers {
+            guard matched.contains(trigger.id) else {
                 receipts.append(TriggerReceipt(triggerID: trigger.id, admission: .notMatched, workID: nil, reason: nil)); continue
+            }
+            let scope = TriggerAdmissionLimits.scope(trigger.id)
+            let backlog = try admission.backlog[trigger.id] ?? queuedBacklog(scope)
+            admission.backlog[trigger.id] = backlog
+            guard backlog < TriggerAdmissionLimits.backlogPerTrigger else {
+                receipts.append(TriggerReceipt(triggerID: trigger.id, admission: .refused, workID: nil,
+                                               reason: TriggerAdmissionLimits.backlogReason)); continue
             }
             let request = TriggerWorkRequest(kind: "threading.trigger-event", source: source.spec.name, trigger: trigger.spec.name, event: probeEvent)
             do {
                 let work = try db.transaction {
                     try enqueue(workerID: trigger.spec.workerID, key: "trigger:\(trigger.id):\(recordID)",
-                                instruction: trigger.spec.instruction, request: try encode(request), source: .event)
+                                instruction: trigger.spec.instruction, request: try encode(request), source: .event,
+                                after: [], scope: scope)
                 }
+                admission.admitted += 1
+                admission.backlog[trigger.id] = backlog + 1
                 receipts.append(TriggerReceipt(triggerID: trigger.id, admission: .queued, workID: work.id, reason: nil))
             } catch let error as ControllerError {
                 if case .storage = error { throw error }
@@ -339,7 +412,16 @@ extension ControllerStore {
         let value = SourceEvent(sourceID: source.id, event: probeEvent, receivedAt: Self.now(), receipts: receipts)
         try insert("sourceEvent", recordID, parent: source.id.description, key: key, value: value)
         try event("source.event", source.id.description)
-        return value
+        return .some(value)
+    }
+    /// Queued (unclaimed) work one trigger admitted, read from the scope/state index and
+    /// stopped at the ceiling: O(ceiling), independent of completed history.
+    private func queuedBacklog(_ scope: String) throws -> Int {
+        let rows = try db.rows("""
+            SELECT COUNT(*) FROM (SELECT 1 FROM record INDEXED BY record_scope_state
+            WHERE kind='work' AND scope=? AND state='queued' LIMIT ?)
+            """, [.text(scope), .integer(Int64(TriggerAdmissionLimits.backlogPerTrigger))])
+        return Int(rows.first?.integers[0] ?? 0)
     }
 
     private func nextPoll(_ source: ControllerSource, after date: Date, failures: Int) throws -> Date {

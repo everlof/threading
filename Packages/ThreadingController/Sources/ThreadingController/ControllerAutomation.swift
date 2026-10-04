@@ -41,9 +41,12 @@ public struct ControllerAutomationRun: Codable, Equatable, Sendable {
     public let scheduledAt: Date
     public let recordedAt: Date
     public let workID: WorkID?
-    /// enqueued, missed, or overlap. Execution state is read from the durable work receipt.
+    /// enqueued, missed, overlap or refused. Execution state is read from the durable work receipt.
     public let admission: String
     public let archiveOnSuccess: Bool
+    /// Why a `refused` occurrence could not be admitted (for example `forbidden`: the worker no
+    /// longer accepts scheduled work). Nil otherwise and on older records.
+    public var reason: String? = nil
 }
 public struct ControllerAutomationRunStatus: Codable, Sendable {
     public let run: ControllerAutomationRun
@@ -118,9 +121,11 @@ extension ControllerStore {
     }
     /// Indexed due queue; at most 32 rules and one occurrence per rule in a sweep. Occurrence,
     /// work and next deadline commit together. Missed intervals never expand into a backlog.
-    /// Each rule is admitted in its own savepoint: one that cannot be admitted rolls back alone,
-    /// is retried later and leaves a durable event, rather than failing the sweep that also
-    /// carries every other rule and the supervisor's launch pass.
+    /// Each rule is admitted in its own savepoint: one that cannot be admitted rolls back alone
+    /// and its occurrence is recorded as `refused` with the reason — never later relabelled
+    /// `missed` by the lateness rule — and the rule moves on to its next occurrence. A rule
+    /// whose next occurrence cannot even be computed is retried later; the sweep, every other
+    /// rule and the supervisor's launch pass continue.
     public func tickAutomations(now: Date = Date(), limit: Int = 32) throws -> [ControllerAutomationRun] {
         try Limits.page(0, limit)
         return try db.transaction {
@@ -132,8 +137,14 @@ extension ControllerStore {
                 do {
                     if let run = try db.transaction({ try admitDue(raw, now: now) }) { result.append(run) }
                 } catch {
-                    try db.run("UPDATE automation_due SET due=? WHERE id=?",
-                        [.integer(Self.milliseconds(now.addingTimeInterval(Self.failedAdmissionRetry))), .text(raw)])
+                    let reason = (error as? ControllerError)?.description ?? "admission_failed"
+                    do {
+                        if let run = try db.transaction({ try refuseDue(raw, now: now, reason: reason) }) { result.append(run) }
+                    } catch {
+                        // Not even the refusal could be recorded (an unreadable stored rule).
+                        try db.run("UPDATE automation_due SET due=? WHERE id=?",
+                            [.integer(Self.milliseconds(now.addingTimeInterval(Self.failedAdmissionRetry))), .text(raw)])
+                    }
                     try event("automation.admission_failed", raw)
                 }
             }
@@ -208,6 +219,34 @@ extension ControllerStore {
         try saveAutomation(value)
         return run
     }
+    /// Records the due occurrence as refused and advances past it. If the schedule cannot name
+    /// a next occurrence the rule is retried later; the retry finds this receipt, not a miss.
+    private func refuseDue(_ raw: String, now: Date, reason: String) throws -> ControllerAutomationRun? {
+        var value = try automation(AutomationID(raw))
+        guard value.enabled, !value.deleted, let due = value.nextRunAt else {
+            try db.run("DELETE FROM automation_due WHERE id=?", [.text(raw)])
+            return nil
+        }
+        let key = "scheduled:\(value.revision):\(Self.milliseconds(due))"
+        var run = try automationRun(value.id, key: key)
+        if run == nil {
+            var refused = ControllerAutomationRun(id: UUID(), automationID: value.id, revision: value.revision,
+                key: key, scheduledAt: due, recordedAt: now, workID: nil, admission: "refused",
+                archiveOnSuccess: value.spec.archiveOnSuccess)
+            refused.reason = String(reason.prefix(Self.refusalReasonBytes))
+            try insert("automationRun", refused.id.uuidString.lowercased(), parent: value.id.description, key: key, value: refused)
+            try event("automation.refused", refused.id.uuidString.lowercased())
+            run = refused
+        }
+        if let next = try? value.spec.schedule?.next(after: now) {
+            value.nextRunAt = next
+            try saveAutomation(value)
+        } else {
+            try db.run("UPDATE automation_due SET due=? WHERE id=?",
+                [.integer(Self.milliseconds(now.addingTimeInterval(Self.failedAdmissionRetry))), .text(raw)])
+        }
+        return run
+    }
     private func automationRun(_ id: AutomationID, key: String) throws -> ControllerAutomationRun? {
         guard let row = try db.rows("SELECT payload FROM record WHERE kind='automationRun' AND parent=? AND key=? LIMIT 1",
             [.text(id.description), .text(key)]).first else { return nil }
@@ -241,8 +280,9 @@ extension ControllerStore {
     }
     private static func milliseconds(_ date: Date) -> Int64 { Int64(date.timeIntervalSince1970 * 1_000) }
     private static let workKeyPrefix = "automation:"
-    /// A rule that could not be admitted is retried after this, not on every supervisor pass.
+    /// A rule whose next occurrence cannot be computed is retried after this, not on every pass.
     static let failedAdmissionRetry: TimeInterval = 300
+    static let refusalReasonBytes = 256
     /// Encoded bytes per run page, leaving room under the Mac's 2 MiB owner-transport capture.
     static let runPageBytes = 1_048_576
 }
