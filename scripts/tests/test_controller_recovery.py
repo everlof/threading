@@ -67,13 +67,23 @@ class RecoveryTests(unittest.TestCase):
     # MARK: - Fixture
 
     def start_daemon(self, nproc=None):
+        # Linux counts threads against RLIMIT_NPROC, and every task the user already runs: a daemon
+        # started under the limit cannot create the threads that answer a greeting, so the
+        # controller never reaches a spawn. There the limit is applied once the daemon is serving
+        # (prlimit on its pid), which leaves its threads and fails only the fork. macOS counts
+        # processes, so the limit applies from exec.
+        linux = sys.platform.startswith("linux")
         def limit():
-            if nproc is not None:
+            if nproc is not None and not linux:
                 resource.setrlimit(resource.RLIMIT_NPROC, (nproc, nproc))
         self.socket.unlink(missing_ok=True)
         self.daemon = subprocess.Popen([PTYD, "--socket", str(self.socket), "--state", str(self.root / "pty")],
                                        stdout=self.log, stderr=self.log, preexec_fn=limit)
         self.wait(lambda: self.socket.exists())
+        if nproc is not None and linux:
+            self.wait(lambda: subprocess.run([PTYD, "status", "--socket", str(self.socket)],
+                                             capture_output=True, text=True).stdout.find("protocol") >= 0)
+            resource.prlimit(self.daemon.pid, resource.RLIMIT_NPROC, (nproc, nproc))
 
     def crash_daemon(self):
         self.daemon.send_signal(signal.SIGKILL)
