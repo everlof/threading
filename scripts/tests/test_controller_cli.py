@@ -140,6 +140,48 @@ class ControllerCLI(unittest.TestCase):
             connection.execute("PRAGMA user_version=999")
         self.assertIn("unsupported_schema", self.run_cli("events", success=False))
 
+    def rpc(self, command, *arguments, success=True):
+        request = {"command": command, "arguments": list(arguments)}
+        result = subprocess.run([BINARY, "--database", str(self.database), "owner-rpc"],
+                                input=json.dumps(request), capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode == 0, success, result.stderr)
+        return json.loads(result.stdout) if success else result.stderr
+
+    def test_dependencies_order_claims_and_cancellation_cascades(self):
+        first = self.seed()
+        after = self.run_cli("enqueue", self.worker, "event:2", self.text("After the first"), first["id"])
+        self.assertEqual(after["dependsOn"], [first["id"]])
+        independent = self.rpc("enqueue-request", {"value": self.worker}, {"value": "event:3"},
+                               {"text": "Independent"}, {"text": "{}"})
+        self.assertEqual(self.run_cli("claim", self.worker)["work"]["id"], first["id"])
+        self.assertEqual(self.run_cli("claim", self.worker)["work"]["id"], independent["id"])
+        self.assertIsNone(self.run_cli("claim", self.worker))
+        root = self.run_cli("enqueue", self.worker, "event:4", self.text("Root"))
+        child = self.rpc("enqueue", {"value": self.worker}, {"value": "event:5"}, {"text": "Child"}, {"value": root["id"]})
+        self.run_cli("work-cancel", root["id"])
+        cancelled = self.run_cli("work", child["id"])
+        self.assertEqual((cancelled["state"], cancelled["cancelReason"]), ("cancelled", "dependency_cancelled: " + root["id"]))
+        self.assertIn("dependency_cancelled", self.run_cli("enqueue", self.worker, "event:6", self.text("Late"), root["id"], success=False))
+
+    def test_owner_memory_delete_forget_and_prune_over_owner_rpc(self):
+        self.run_cli("worker-add", self.worker, "Fixture")
+        key = {"value": "note"}
+        written = self.rpc("memory-put", {"value": self.worker}, key, {"value": "0"}, {"text": "PRIVATE-NOTE"})
+        self.assertEqual(written["provenance"]["actor"], "owner")
+        self.rpc("memory-delete", {"value": self.worker}, key, {"value": "0"}, success=False)
+        deleted = self.rpc("memory-delete", {"value": self.worker}, key, {"value": "1"})
+        self.assertEqual((deleted["state"], deleted["revision"]), ("deleted", 2))
+        self.assertEqual(self.rpc("memory-list", {"value": self.worker})["items"], [])
+        forgotten = self.rpc("memory-forget", {"value": self.worker}, key)
+        self.assertEqual(forgotten["state"], "forgotten")
+        history = self.rpc("memory-history", {"value": self.worker}, key)["items"]
+        self.assertEqual([item["content"] for item in history], ["", "", ""])
+        self.assertNotIn(b"PRIVATE-NOTE", self.database.read_bytes())
+        self.assertIn("prune_too_recent", self.rpc("prune", {"value": "--before"}, {"value": "2999-01-01"}, success=False))
+        pruned = self.rpc("prune", {"value": "--before"}, {"value": "2000-01-01"})
+        self.assertEqual((pruned["events"], pruned["more"]), (0, False))
+        self.rpc("prune", {"value": "--before"}, {"value": "yesterday"}, success=False)
+
     def test_unknown_command_missing_args_and_bad_cursor(self):
         self.run_cli("unexpected", success=False)
         self.run_cli("enqueue", success=False)

@@ -18,8 +18,9 @@ struct ControllerMain {
 
     workers [CURSOR]
     worker-add WORKER_UUID NAME
-    enqueue WORKER_UUID SOURCE_KEY INSTRUCTION_FILE
-    enqueue-request WORKER_UUID SOURCE_KEY INSTRUCTION_FILE REQUEST_FILE
+    enqueue WORKER_UUID SOURCE_KEY INSTRUCTION_FILE [AFTER_WORK_UUIDS_CSV]
+    enqueue-request WORKER_UUID SOURCE_KEY INSTRUCTION_FILE REQUEST_FILE [AFTER_WORK_UUIDS_CSV]
+      (AFTER: up to 16 tasks that must complete first; cancelling one cancels this task)
     work-message WORK_UUID MESSAGE_UUID PERSON TEXT_FILE
     work-messages WORK_UUID [CURSOR]
     work-history WORK_UUID [CURSOR]
@@ -52,10 +53,15 @@ struct ControllerMain {
     memory-get WORKER_UUID KEY
     memory-put WORKER_UUID KEY EXPECTED_REVISION TEXT_FILE
     memory-history WORKER_UUID KEY [CURSOR]
+    memory-delete WORKER_UUID KEY EXPECTED_REVISION   (tombstone; history kept)
+    memory-forget WORKER_UUID KEY   (erase every stored body of the entry; tombstone kept)
     knowledge-grant SPACE_UUID WORKER_UUID EXPECTED_REVISION none|read|write
     knowledge-get SPACE_UUID KEY
     knowledge-put SPACE_UUID KEY EXPECTED_REVISION TEXT_FILE
     knowledge-history SPACE_UUID KEY [CURSOR]
+    knowledge-forget SPACE_UUID KEY
+    prune --before DATE [--after CURSOR]   (DATE: YYYY-MM-DD or ISO 8601, at least a day ago;
+      deletes journal events and finished tasks' activity, drops trigger event evidence; repeat with next while more)
     events [CURSOR]
     launch WORKER_UUID RECIPE_JSON_FILE
     launch-prepare WORKER_UUID RECIPE_JSON_FILE
@@ -132,6 +138,8 @@ struct ControllerMain {
     Budget tokens are uncached input + cache writes + output; cached reads are excluded.
     A source is any executable on the probe contract (docs/feature-drafts/portable-trigger-sources.md).
     It runs with this account's authority, unsandboxed; approval pins its content hash.
+    A recipe's "environment" values are stored in plain text; credentials go in "secrets":
+    {"ENV_NAME":"SECRET_NAME"}, resolved from secret-set files at dispatch and never stored.
     Addresses are HOST_UUID/worker/UUID or HOST_UUID/session/UUID. Sender patterns: an address,
     HOST_UUID/* or *. Grants live on the recipient's host; mail carries information, never authority.
 
@@ -146,7 +154,8 @@ struct ControllerMain {
     Requests: {"context":{}}, {"questions":{"after":0}}, {"checkpoint":{"text":"..."}},
     {"ask":{"id":"QUESTION_UUID","text":"...","checkpoint":"..."}},
     {"finish":{"payload":"..."}}, {"memoryGet":{"key":"..."}},
-    {"memoryPut":{"key":"...","expectedRevision":0,"content":"..."}}.
+    {"memoryPut":{"key":"...","expectedRevision":0,"content":"..."}},
+    {"memoryDelete":{"key":"...","expectedRevision":1}}.
     After ask/finish, exit. The question/result is durable; no human waits on this process.
 
     Recipients: person:identifier,group:identifier. One authorized answer resolves a question.
@@ -158,7 +167,7 @@ struct ControllerMain {
         do {
             var arguments = Array(CommandLine.arguments.dropFirst())
             if arguments == ["--version"] {
-                try output(["protocol": "1", "schema": "10", "capabilities": "work,mail,triggers,memory,usage,capacity,transcript-binding"])
+                try output(["protocol": "1", "schema": "10", "capabilities": "work,mail,triggers,memory,usage,capacity,transcript-binding,work-dependencies,memory-forget,retention,launch-secrets"])
                 return
             }
             if arguments == ["--help"] { print(help); return }
@@ -435,9 +444,13 @@ struct ControllerMain {
         case "worker-add":
             try count(2); try output(await store.addWorker(id: WorkerID(args[0]), name: args[1]))
         case "enqueue":
-            try count(3); try output(await store.enqueue(workerID: WorkerID(args[0]), key: args[1], instruction: file(args[2])))
+            guard args.count == 3 || args.count == 4 else { throw ControllerError.invalidInput("arguments") }
+            try output(await store.enqueue(workerID: WorkerID(args[0]), key: args[1], instruction: file(args[2]),
+                                           after: workIDs(args.count == 4 ? args[3] : nil)))
         case "enqueue-request":
-            try count(4); try output(await store.enqueue(workerID: WorkerID(args[0]), key: args[1], instruction: file(args[2]), request: file(args[3])))
+            guard args.count == 4 || args.count == 5 else { throw ControllerError.invalidInput("arguments") }
+            try output(await store.enqueue(workerID: WorkerID(args[0]), key: args[1], instruction: file(args[2]), request: file(args[3]),
+                                           after: workIDs(args.count == 5 ? args[4] : nil)))
         case "work-message":
             try count(4)
             guard let id = UUID(uuidString: args[1]) else { throw ControllerError.invalidInput("message_id") }
@@ -517,6 +530,24 @@ struct ControllerMain {
             try output(await store.putMemory(workerID: WorkerID(args[0]), key: args[1], expectedRevision: revision, content: file(args[3])))
         case "memory-history":
             let after = try cursor(2); try output(await store.memoryHistory(workerID: WorkerID(args[0]), key: args[1], after: after))
+        case "memory-delete":
+            try count(3)
+            guard let revision = Int(args[2]) else { throw ControllerError.invalidInput("revision") }
+            try output(await store.deleteMemory(workerID: WorkerID(args[0]), key: args[1], expectedRevision: revision))
+        case "memory-forget":
+            try count(2); try output(await store.forgetMemory(workerID: WorkerID(args[0]), key: args[1]))
+        case "knowledge-forget":
+            try count(2); try output(await store.forgetKnowledge(spaceID: KnowledgeSpaceID(args[0]), key: args[1]))
+        case "prune":
+            guard (args.count == 2 || args.count == 4), args[0] == "--before", let before = pruneDate(args[1]) else {
+                throw ControllerError.invalidInput("prune_arguments")
+            }
+            var after: Int64 = 0
+            if args.count == 4 {
+                guard args[2] == "--after", let value = Int64(args[3]), value >= 0 else { throw ControllerError.invalidInput("cursor") }
+                after = value
+            }
+            try output(await store.prune(before: before, after: after))
         case "events":
             let after = try cursor(0); try output(await store.events(after: after))
         case "launch", "launch-prepare":
@@ -570,6 +601,15 @@ struct ControllerMain {
         return text
     }
     static func csv(_ value: String) -> [String] { value.components(separatedBy: ",") }
+    static func workIDs(_ value: String?) throws -> [WorkID] { try value.map { try csv($0).map(WorkID.init) } ?? [] }
+    /// A UTC day (midnight) or a full ISO 8601 timestamp.
+    static func pruneDate(_ value: String) -> Date? {
+        let full = ISO8601DateFormatter()
+        if let date = full.date(from: value) { return date }
+        let day = ISO8601DateFormatter()
+        day.formatOptions = [.withFullDate]
+        return day.date(from: value)
+    }
     struct MailPeerSettings: Decodable { let transport: [String]?; let push: Bool; let pull: Bool }
     static func output<T: Encodable>(_ value: T) throws {
         let encoder = JSONEncoder()

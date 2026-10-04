@@ -23,12 +23,17 @@ public enum ControllerPTYRuntime {
     public static func dispatch(store: ControllerStore, executionID: ExecutionID,
                                 database: String, controllerBinary: String) async throws -> ControllerLaunch {
         let intent = try await store.launch(executionID)
+        // Secrets are read by name before the spawn right is consumed: a missing one leaves the
+        // intent prepared and dispatchable once the owner stores it.
+        let root = URL(fileURLWithPath: database).deletingLastPathComponent()
+        var secrets: [String: String] = [:]
+        for (variable, name) in intent.spec.secrets { secrets[variable] = try ControllerSourcePoller.secret(name, root: root) }
         let peer = try ControllerPeer(path: intent.spec.socketPath)
         defer { peer.close() }
         // Connecting is harmless to retry. The commit below consumes the only spawn right.
         let launch = try await store.beginLaunch(executionID)
         let credential = try await store.launchCredential(executionID)
-        var environment = launch.spec.environment
+        var environment = launch.spec.environment.merging(secrets) { _, secret in secret }
         environment["THREADING_CONTROLLER_BIN"] = controllerBinary
         environment["THREADING_CONTROLLER_DATABASE"] = database
         environment["THREADING_EXECUTION_ID"] = executionID.description
