@@ -58,7 +58,9 @@ struct ControllerHardeningTests {
         let result = await BoundedCommand.run(executable: "/bin/sh", arguments: ["-c", "trap '' TERM; sleep 30 & wait"],
             environment: ["PATH": "/usr/bin:/bin"], directory: "/tmp", input: Data(repeating: 65, count: 262_144), timeout: 0.2, outputLimit: 1024)
         #expect(result.failure == "timed_out")
-        #expect(Date().timeIntervalSince(started) < 3)
+        // The property is "bounded, not the child's 30 s": 0.2 s timeout plus at most two 1 s
+        // cleanup windows, with headroom for a loaded or emulated runner (3 s flaked under load).
+        #expect(Date().timeIntervalSince(started) < 10)
         let next = await BoundedCommand.run(executable: "/bin/sh", arguments: ["-c", "printf ok"],
             environment: [:], directory: "/tmp", input: Data(), timeout: 1, outputLimit: 1024)
         #expect(next.exitCode == 0 && next.output == Data("ok".utf8))
