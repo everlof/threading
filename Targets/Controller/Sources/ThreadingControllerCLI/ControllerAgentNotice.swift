@@ -1,5 +1,6 @@
 import Foundation
 import ThreadingController
+import ControllerRuntime
 
 /// The hook entry point for mail notices. Prints one host-authored line as hook JSON, or nothing.
 /// It never fails loudly: a hook error would surface inside the agent's turn, and a missed
@@ -11,15 +12,20 @@ enum ControllerAgentNotice {
         // prompt, transcript body or credential is emitted. Stdin may already be closed.
         let input = try? FileHandle.standardInput.read(upToCount: 262_144)
         let environment = ProcessInfo.processInfo.environment
-        guard let database = environment["THREADING_CONTROLLER_DATABASE"],
+        if let socket = environment[ControllerAgentAccess.socketEnvironment] {
+            // Through the supervisor's broker; this process opens no store.
+            let client = ControllerAgentClient(socket: socket, environment: environment)
+            guard let notice = client.notice(event: event, hookInput: input) else { return }
+            try? ControllerMain.output(hookOutput(event: event, notice: notice))
+            return
+        }
+        guard let database = environment[ControllerAgentAccess.databaseEnvironment],
               let store = try? ControllerStore(path: database) else { return }
         let response: ControllerAgentResponse?
         if let execution = environment["THREADING_EXECUTION_ID"], let credential = environment["THREADING_EXECUTION_CREDENTIAL"],
            let executionID = try? ExecutionID(execution) {
-            struct Hook: Decodable { let session_id: String; let transcript_path: String? }
-            if let input, let hook = try? JSONDecoder().decode(Hook.self, from: input), let path = hook.transcript_path {
-                try? await store.bindProviderTranscript(executionID, credential: credential,
-                    transcript: ProviderTranscript(sessionID: hook.session_id, path: path))
+            if let transcript = transcript(from: input) {
+                try? await store.bindProviderTranscript(executionID, credential: credential, transcript: transcript)
             }
             response = try? await store.agentRequest(executionID: executionID, credential: credential, request: .mailNotice(event: event))
         } else if let address = environment["THREADING_MAILBOX_ADDRESS"], let credential = environment["THREADING_MAILBOX_CREDENTIAL"],
@@ -28,6 +34,13 @@ enum ControllerAgentNotice {
         } else { response = nil }
         guard let notice = response?.notice else { return }
         try? ControllerMain.output(hookOutput(event: event, notice: notice))
+    }
+
+    /// The provider's own session id and transcript path from the hook's stdin, if it gave both.
+    static func transcript(from input: Data?) -> ProviderTranscript? {
+        struct Hook: Decodable { let session_id: String; let transcript_path: String? }
+        guard let input, let hook = try? JSONDecoder().decode(Hook.self, from: input), let path = hook.transcript_path else { return nil }
+        return ProviderTranscript(sessionID: hook.session_id, path: path)
     }
 
     /// The shape both Claude Code and Codex accept: additional context after a tool call or at

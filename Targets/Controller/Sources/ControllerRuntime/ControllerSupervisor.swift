@@ -111,8 +111,12 @@ public actor ControllerSupervisor {
         }
     }
 
-    public init(store: ControllerStore, database: String, controllerBinary: String) {
-        self.store = store; self.database = database; self.binary = controllerBinary
+    /// nil: no broker answers and the owner did not opt into the legacy store path, so nothing
+    /// is dispatched (each due launch reports `agent_broker_unavailable` and stays prepared).
+    private let agentAccess: ControllerAgentAccess?
+
+    public init(store: ControllerStore, database: String, controllerBinary: String, agentAccess: ControllerAgentAccess?) {
+        self.store = store; self.database = database; self.binary = controllerBinary; self.agentAccess = agentAccess
     }
 
     /// `reportAllHolds` includes the current holds even when unchanged (a one-shot pass).
@@ -336,8 +340,13 @@ public actor ControllerSupervisor {
 
     private func dispatch(_ id: ExecutionID, socketPath: String, report: inout SupervisorCycle) async throws {
         let key = "launch:\(id)"
+        guard let agentAccess else {
+            report.issues.append(.init(executionID: id, code: "agent_broker_unavailable"))
+            return
+        }
         do {
-            _ = try await ControllerPTYRuntime.dispatch(store: store, executionID: id, database: database, controllerBinary: binary)
+            _ = try await ControllerPTYRuntime.dispatch(store: store, executionID: id, database: database,
+                                                        controllerBinary: binary, agentAccess: agentAccess)
             report.started.append(id)
             hostBackoff[socketPath] = nil
         } catch ControllerRuntimeError.spawnRefused(let reason) {

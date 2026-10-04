@@ -42,6 +42,7 @@ public struct ControllerAgentResponse: Codable, Sendable {
     public var directory: [MailContact]?
     public var address: MailAddress?
     public var notice: String?
+    public init() {}
 }
 
 extension ControllerStore {

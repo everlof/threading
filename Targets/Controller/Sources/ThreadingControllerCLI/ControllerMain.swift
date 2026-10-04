@@ -77,7 +77,11 @@ struct ControllerMain {
     worker-configure WORKER_UUID EXPECTED_REVISION MAX_CONCURRENT RECIPE_JSON_FILE
     worker-enable WORKER_UUID EXPECTED_REVISION
     worker-pause WORKER_UUID EXPECTED_REVISION
-    supervise [POLL_MILLISECONDS]
+    supervise [POLL_MILLISECONDS] [--agent-socket ABSOLUTE_PATH]
+      (serves agent tools there, mode 0660, default DATABASE_DIR/agent.sock; children get the
+       socket, never the store path. One-shot supervisor-tick and manual launch use a running
+       supervisor's socket, or refuse unless THREADING_CONTROLLER_LEGACY_AGENT_DATABASE=1, which
+       hands children the store path: same-account only)
     supervisor-tick
     automations [CURSOR]
     automation AUTOMATION_UUID
@@ -98,7 +102,8 @@ struct ControllerMain {
     mail-grant-set RECIPIENT_ADDRESS SENDER_PATTERN EXPECTED_REVISION none|notify|wake|ask normal|interrupt [CHAIN_TOKEN_BUDGET]
     mail-grants RECIPIENT_ADDRESS [CURSOR]
     mail-register SESSION_ADDRESS NAME
-    mail-credential SESSION_ADDRESS   (the session's private mail-tool credential, for its launch environment)
+    mail-credential SESSION_ADDRESS   (issues the session's private mail-tool credential for its launch
+      environment; only a digest is stored, so each call replaces the previous one)
     mail-credential-rotate SESSION_ADDRESS   (replaces it; the old credential stops working at once)
     mail-contact-set ADDRESS NAME|-
     mail-contacts [CURSOR]
@@ -159,6 +164,8 @@ struct ControllerMain {
     threading-controller agent-notice post-tool-use|stop|session-start
     A session (not an execution) uses THREADING_MAILBOX_ADDRESS and THREADING_MAILBOX_CREDENTIAL
     instead, and agent-mcp then serves only the mail tools.
+    With THREADING_CONTROLLER_AGENT_SOCKET these are clients of the supervisor's broker and open
+    no store; otherwise they need THREADING_CONTROLLER_DATABASE (the legacy, same-account path).
     The last is a hook command: it prints a host-authored mail notice as hook JSON, or nothing,
     and always exits 0 so a hook can never break the agent's turn.
     Scoped agent tools use the execution credential/environment supplied by launch.
@@ -188,11 +195,20 @@ struct ControllerMain {
             let path: String
             let command: String
             if agentMode {
-                guard arguments.count == (arguments.first == "agent-mcp" ? 1 : 2),
-                      let database = environment["THREADING_CONTROLLER_DATABASE"] else {
+                guard arguments.count == (arguments.first == "agent-mcp" ? 1 : 2) else {
                     throw ControllerError.invalidInput("agent_environment")
                 }
-                path = database; command = arguments.removeFirst()
+                command = arguments.removeFirst()
+                // A broker socket means this process never opens a store, even if a store path is
+                // also set. Without either, there is nothing to open.
+                if let socket = environment[ControllerAgentAccess.socketEnvironment] {
+                    try await ControllerAgentClient(socket: socket, environment: environment).run(command, arguments)
+                    return
+                }
+                guard let database = environment[ControllerAgentAccess.databaseEnvironment] else {
+                    throw ControllerError.invalidInput("agent_environment")
+                }
+                path = database
             } else {
                 guard arguments.count >= 3, arguments.removeFirst() == "--database" else {
                     throw ControllerError.invalidInput("usage; use --help")
@@ -231,10 +247,16 @@ struct ControllerMain {
                 try await execute(command, arguments, store, database: URL(fileURLWithPath: path).standardizedFileURL.path)
             }
         } catch {
-            let message = (error as? ControllerError)?.description ?? "controller_io_or_decode_error"
+            let message = (error as? ControllerError)?.description ?? (error as? ControllerBrokerFailure)?.description
+                ?? "controller_io_or_decode_error"
             FileHandle.standardError.write(Data((message + "\n").utf8))
             exit(1)
         }
+    }
+    /// The owner's opt-in to hand a child the store path when no broker answers (a manual
+    /// `launch` or one-shot `supervisor-tick` without a resident supervisor). Same-account only.
+    static var legacyAgentDatabaseAllowed: Bool {
+        ProcessInfo.processInfo.environment[ControllerAgentAccess.legacyOptInEnvironment] == "1"
     }
     static func execute(_ command: String, _ args: [String], _ store: ControllerStore, database: String) async throws {
         func count(_ n: Int) throws { guard args.count == n else { throw ControllerError.invalidInput("arguments") } }
@@ -271,7 +293,11 @@ struct ControllerMain {
         case "owner-rpc":
             try count(0); try await ControllerOwnerRPC.run(store: store, database: database)
         case "host":
-            try count(0); try output(HostDescription(host: await store.host(), version: .current))
+            try count(0)
+            let access = await ControllerAgentAccess.resolve(store: store, database: database, allowLegacy: false)
+            var agentSocket: String?
+            if case .broker(let socket) = access { agentSocket = socket }
+            try output(HostDescription(host: await store.host(), version: .current, agentSocket: agentSocket))
         case "version":
             try count(0); try output(ControllerVersion.current)
         case "launch-occupancy":
@@ -465,9 +491,17 @@ struct ControllerMain {
             guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
             try output(await store.setWorkerEnabled(WorkerID(args[0]), expectedRevision: revision, enabled: command == "worker-enable"))
         case "supervise", "supervisor-tick":
-            guard args.count <= (command == "supervise" ? 1 : 0),
-                  let interval = args.isEmpty ? 2_000 : Int(args[0]) else { throw ControllerError.invalidInput("supervisor_arguments") }
-            try await ControllerSupervisorCommand.run(store: store, database: database, intervalMilliseconds: interval, once: command == "supervisor-tick")
+            var rest = args
+            var agentSocket: String?
+            if command == "supervise", let flag = rest.firstIndex(of: "--agent-socket") {
+                guard flag + 1 < rest.count, rest[flag + 1].hasPrefix("/") else { throw ControllerError.invalidInput("supervisor_arguments") }
+                agentSocket = rest[flag + 1]
+                rest.removeSubrange(flag...(flag + 1))
+            }
+            guard rest.count <= (command == "supervise" ? 1 : 0),
+                  let interval = rest.isEmpty ? 2_000 : Int(rest[0]) else { throw ControllerError.invalidInput("supervisor_arguments") }
+            try await ControllerSupervisorCommand.run(store: store, database: database, intervalMilliseconds: interval,
+                                                      once: command == "supervisor-tick", agentSocket: agentSocket)
         case "workers":
             let after = try cursor(0); try output(await store.workers(after: after))
         case "worker-add":
@@ -584,12 +618,16 @@ struct ControllerMain {
                 throw ControllerError.invalidInput("arguments")
             }
             let spec = try JSONDecoder().decode(ControllerLaunchSpec.self, from: Data(file(args[1]).utf8))
+            // Decided before anything is claimed, so a refusal leaves no prepared launch behind.
+            let access = command == "launch" ? try await agentAccess(store, database) : nil
             let launch = try await store.prepareLaunch(workerID: WorkerID(args[0]), spec: spec, overrideBudget: args.count == 3)
-            if command == "launch", let launch {
-                try output(ControllerLaunchStatus(await dispatch(store, launch.executionID, database)))
+            if let access, let launch {
+                try output(ControllerLaunchStatus(await dispatch(store, launch.executionID, database, access)))
             } else { try output(launch.map(ControllerLaunchStatus.init)) }
         case "launch-dispatch":
-            try count(1); try output(ControllerLaunchStatus(await dispatch(store, ExecutionID(args[0]), database)))
+            try count(1)
+            let access = try await agentAccess(store, database)
+            try output(ControllerLaunchStatus(await dispatch(store, ExecutionID(args[0]), database, access)))
         case "launch-status":
             try count(1); try output(await ControllerPTYRuntime.observe(store: store, executionID: ExecutionID(args[0])))
         case "launch-record":
@@ -624,17 +662,23 @@ struct ControllerMain {
         /// interrupt, launch-dispatch, delivery-confirm-absent). `host-receipts`: ptyd exit/loss
         /// receipts are consumed and acknowledged. `launch-failure`: launch records carry a
         /// bounded failure and redacted output tail. `launch-occupancy`: per-host capacity.
-        /// `schema-fence`: every write re-checks the schema.
+        /// `schema-fence`: every write re-checks the schema. `agent-broker`: a resident supervisor
+        /// serves agent tools on a socket (`host` reports it as `agentSocket` while it answers) and
+        /// launched children get no store path. `credential-digest`: agent credentials are stored
+        /// as digests, so `mail-credential` issues a new one instead of reading it back.
         static let addedFeatures = ["launch-repair", "host-receipts", "launch-failure", "launch-occupancy", "schema-fence",
                                      "usage-accounts", "usage-waive", "capacity-hold", "work-dependencies", "memory-forget",
-                                     "retention", "launch-secrets", "mail-credential-rotate", "mail-outbound-cancel"]
+                                     "retention", "launch-secrets", "mail-credential-rotate", "mail-outbound-cancel",
+                                     "agent-broker", "credential-digest"]
         static let current = ControllerVersion(protocol: ownerProtocol, schema: String(ControllerStore.schemaVersion),
             capabilities: originalCapabilities.joined(separator: ","), features: originalCapabilities + addedFeatures)
     }
     struct HostDescription: Encodable {
         let host: ControllerHost
         let version: ControllerVersion
-        enum CodingKeys: String, CodingKey { case id, name, revision, `protocol`, schema, features }
+        /// The resident supervisor's agent broker, present only while it answers.
+        var agentSocket: String?
+        enum CodingKeys: String, CodingKey { case id, name, revision, `protocol`, schema, features, agentSocket }
         func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode(host.id, forKey: .id)
@@ -643,12 +687,24 @@ struct ControllerMain {
             try container.encode(version.protocol, forKey: .protocol)
             try container.encode(version.schema, forKey: .schema)
             try container.encode(version.features, forKey: .features)
+            try container.encodeIfPresent(agentSocket, forKey: .agentSocket)
         }
     }
 
-    static func dispatch(_ store: ControllerStore, _ id: ExecutionID, _ database: String) async throws -> ControllerLaunch {
+    /// A manual dispatch uses the resident supervisor's broker when it answers. Without one it
+    /// refuses before consuming the spawn right, unless the owner opted into the legacy path.
+    static func agentAccess(_ store: ControllerStore, _ database: String) async throws -> ControllerAgentAccess {
+        guard let access = await ControllerAgentAccess.resolve(store: store, database: database,
+                                                               allowLegacy: legacyAgentDatabaseAllowed) else {
+            throw ControllerError.invalidInput("agent_broker_unavailable")
+        }
+        return access
+    }
+    static func dispatch(_ store: ControllerStore, _ id: ExecutionID, _ database: String,
+                         _ access: ControllerAgentAccess) async throws -> ControllerLaunch {
         guard let binary = Bundle.main.executableURL?.path else { throw ControllerError.invalidInput("controller_executable") }
-        return try await ControllerPTYRuntime.dispatch(store: store, executionID: id, database: database, controllerBinary: binary)
+        return try await ControllerPTYRuntime.dispatch(store: store, executionID: id, database: database,
+                                                       controllerBinary: binary, agentAccess: access)
     }
     /// A spec file wraps a whole bounded instruction in JSON, whose escaping can grow it several
     /// times over; the instruction itself is still held to its own limit when the spec validates.

@@ -44,8 +44,11 @@ public struct HostEvidence: Sendable {
 public enum ControllerPTYRuntime {
     static let spawnGrid = PTYHostGrid(cols: 120, rows: 40)
 
-    public static func dispatch(store: ControllerStore, executionID: ExecutionID,
-                                database: String, controllerBinary: String) async throws -> ControllerLaunch {
+    /// `agentAccess` decides how the child reaches its tools: through the supervisor's broker
+    /// (no store path in its environment) or, in the same-account compatibility mode, by opening
+    /// the store itself. The caller resolves it before anything is consumed.
+    public static func dispatch(store: ControllerStore, executionID: ExecutionID, database: String,
+                                controllerBinary: String, agentAccess: ControllerAgentAccess) async throws -> ControllerLaunch {
         let intent = try await store.launch(executionID)
         // Secrets are read by name before the spawn right is consumed: a missing one leaves the
         // intent prepared and dispatchable once the owner stores it.
@@ -59,7 +62,16 @@ public enum ControllerPTYRuntime {
         let credential = try await store.launchCredential(executionID)
         var environment = launch.spec.environment.merging(secrets) { _, secret in secret }
         environment["THREADING_CONTROLLER_BIN"] = controllerBinary
-        environment["THREADING_CONTROLLER_DATABASE"] = database
+        switch agentAccess {
+        case .broker(let socket):
+            // Never the store path, not even one a recipe named itself.
+            environment[ControllerAgentAccess.socketEnvironment] = socket
+            environment[ControllerAgentAccess.databaseEnvironment] = nil
+        case .legacyDatabase(let path):
+            environment[ControllerAgentAccess.databaseEnvironment] = path
+            environment[ControllerAgentAccess.socketEnvironment] = nil
+            try? await store.recordLegacyAgentDatabase(executionID)
+        }
         environment["THREADING_EXECUTION_ID"] = executionID.description
         environment["THREADING_EXECUTION_CREDENTIAL"] = credential
         let identity = identity(executionID)

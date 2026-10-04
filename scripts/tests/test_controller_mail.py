@@ -13,6 +13,11 @@ import time
 import unittest
 import uuid
 
+# These fixtures launch and tick without a resident supervisor, so children take the
+# same-account legacy store path; test_controller_broker.py covers the broker.
+os.environ["THREADING_CONTROLLER_LEGACY_AGENT_DATABASE"] = "1"
+
+
 CONTROLLER, PTYD = map(os.path.abspath, sys.argv[1:3])
 del sys.argv[1:3]
 
@@ -269,7 +274,6 @@ class MailTests(unittest.TestCase):
         old = self.vps.call("mail-credential", session)
         new = self.owner_rpc(self.vps, "mail-credential-rotate", session)
         self.assertNotEqual(old, new)
-        self.assertEqual(self.vps.call("mail-credential", session), new)
 
         def inbox(credential):
             env = {"PATH": "/usr/bin:/bin", "THREADING_CONTROLLER_DATABASE": str(self.vps.db),
@@ -287,6 +291,11 @@ class MailTests(unittest.TestCase):
 
         self.assertFalse(inbox(old))
         self.assertTrue(inbox(new))
+        # Only a digest is stored: mail-credential issues a fresh credential, revoking the last.
+        issued = self.vps.call("mail-credential", session)
+        self.assertNotEqual(issued, new)
+        self.assertFalse(inbox(new))
+        self.assertTrue(inbox(issued))
 
     def test_queued_mail_for_a_peer_can_be_cancelled_and_bounces_to_its_sender(self):
         _, recipient, _ = self.worker(self.vps, "Reviewer", None)

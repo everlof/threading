@@ -1,5 +1,6 @@
 import Foundation
 import ThreadingController
+import ControllerRuntime
 #if canImport(Darwin)
 import Darwin
 #else
@@ -72,10 +73,16 @@ enum ControllerMCPServer {
     static func run(store: ControllerStore, executionID: ExecutionID, credential: String) async throws {
         try await run(store: store, caller: .execution(executionID, credential: credential))
     }
+    /// The legacy, same-account path: this process opened the store itself.
     static func run(store: ControllerStore, caller: Caller) async throws {
+        try await run(caller: caller) { try await caller.perform(store, $0) }
+    }
+    /// `perform` is the store (legacy) or the supervisor's broker; the protocol is the same.
+    static func run(caller: Caller, perform: (ControllerAgentRequest) async throws -> ControllerAgentResponse) async throws {
+        // Refuse to serve at all with a credential that does not authenticate.
         switch caller {
-        case .execution: _ = try await caller.perform(store, .context)
-        case .mailbox: _ = try await caller.perform(store, .mailDirectory)
+        case .execution: _ = try await perform(.context)
+        case .mailbox: _ = try await perform(.mailDirectory)
         }
         let tools = caller.tools
         var initialized = false
@@ -119,11 +126,12 @@ enum ControllerMCPServer {
                 case "tools/call":
                     do {
                         let request = try request(message["params"], tools: tools)
-                        let response = try await caller.perform(store, request)
+                        let response = try await perform(request)
                         let text = String(decoding: try JSONEncoder().encode(response), as: UTF8.self)
                         try reply(id, result: toolResult(text, failed: false))
                     } catch {
-                        let text = (error as? ControllerError)?.description ?? "tool_operation_failed"
+                        let text = (error as? ControllerError)?.description ?? (error as? ControllerBrokerFailure)?.description
+                            ?? "tool_operation_failed"
                         try reply(id, result: toolResult(text, failed: true))
                     }
                 default: try reply(id, error: (-32601, "method_not_found"))

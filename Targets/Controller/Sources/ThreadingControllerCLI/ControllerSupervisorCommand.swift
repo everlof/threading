@@ -8,36 +8,66 @@ import Glibc
 #endif
 
 enum ControllerSupervisorCommand {
-    static func run(store: ControllerStore, database: String, intervalMilliseconds: Int, once: Bool) async throws {
+    /// `agentSocket`: the resident loop always serves agent tools there (default beside the
+    /// store). A one-shot pass serves none; it dispatches through a resident supervisor's broker
+    /// when one answers, or with the legacy store path only when the owner opted in.
+    static func run(store: ControllerStore, database: String, intervalMilliseconds: Int, once: Bool,
+                    agentSocket: String?) async throws {
         guard (100...60_000).contains(intervalMilliseconds), let binary = Bundle.main.executableURL?.path else {
             throw ControllerError.invalidInput("supervisor_interval")
         }
         let lifetime = try SupervisorLifetime(path: database + ".supervisor.lock")
         defer { lifetime.close() }
-        let supervisor = ControllerSupervisor(store: store, database: database, controllerBinary: binary)
-        repeat {
-            if lifetime.shouldStop { break }
-            let cycle: SupervisorCycle
-            do { cycle = try await supervisor.tick(reportAllHolds: once) } catch {
-                // Only a store this process can no longer trust or write ends the loop. A busy
-                // store or any other whole-pass failure is reported and retried next interval,
-                // so one lock held past the busy timeout cannot exhaust a service restart budget.
-                if let error = error as? ControllerError, error.isFatalStorage { throw error }
-                cycle = SupervisorCycle.failedPass(error)
-            }
-            // Always return one-shot results; a resident idle loop produces no log flood.
-            if once || !cycle.isQuiet {
-                try ControllerMain.output(cycle)
-            }
-            if once || lifetime.shouldStop { break }
-            // Short cancellable waits keep SIGTERM responsive without cancelling a sent spawn.
-            var remaining = intervalMilliseconds
-            while remaining > 0 && !lifetime.shouldStop {
-                let part = min(remaining, 100)
-                try await Task.sleep(for: .milliseconds(part))
-                remaining -= part
-            }
-        } while !lifetime.shouldStop
+        let access: ControllerAgentAccess?
+        var broker: ControllerAgentBroker?
+        if once {
+            access = await ControllerAgentAccess.resolve(store: store, database: database,
+                                                         allowLegacy: ControllerMain.legacyAgentDatabaseAllowed)
+        } else {
+            // Its own store connection: broker traffic never queues behind this loop's actor.
+            let socket = agentSocket ?? ControllerAgentBroker.defaultSocketPath(database: database)
+            let served = try ControllerAgentBroker(socketPath: socket, store: try ControllerStore(path: database))
+            served.start()
+            broker = served
+            do { _ = try await store.advertiseAgentBroker(socket: socket) } catch { served.stop(); throw error }
+            access = .broker(socket: socket)
+        }
+        let supervisor = ControllerSupervisor(store: store, database: database, controllerBinary: binary, agentAccess: access)
+        // The broker stops (bounded) and its advertisement is withdrawn on every way out.
+        func shutdown() async {
+            guard let broker else { return }
+            broker.stop()
+            try? await store.withdrawAgentBroker(socket: broker.socketPath)
+        }
+        do {
+            repeat {
+                if lifetime.shouldStop { break }
+                let cycle: SupervisorCycle
+                do { cycle = try await supervisor.tick(reportAllHolds: once) } catch {
+                    // Only a store this process can no longer trust or write ends the loop. A busy
+                    // store or any other whole-pass failure is reported and retried next interval,
+                    // so one lock held past the busy timeout cannot exhaust a service restart budget.
+                    if let error = error as? ControllerError, error.isFatalStorage { throw error }
+                    cycle = SupervisorCycle.failedPass(error)
+                }
+                // Always return one-shot results; a resident idle loop produces no log flood.
+                if once || !cycle.isQuiet {
+                    try ControllerMain.output(cycle)
+                }
+                if once || lifetime.shouldStop { break }
+                // Short cancellable waits keep SIGTERM responsive without cancelling a sent spawn.
+                var remaining = intervalMilliseconds
+                while remaining > 0 && !lifetime.shouldStop {
+                    let part = min(remaining, 100)
+                    try await Task.sleep(for: .milliseconds(part))
+                    remaining -= part
+                }
+            } while !lifetime.shouldStop
+        } catch {
+            await shutdown()
+            throw error
+        }
+        await shutdown()
     }
 }
 

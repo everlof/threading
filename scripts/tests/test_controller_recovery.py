@@ -19,6 +19,11 @@ import time
 import unittest
 import uuid
 
+# These fixtures launch and tick without a resident supervisor, so children take the
+# same-account legacy store path; test_controller_broker.py covers the broker.
+os.environ["THREADING_CONTROLLER_LEGACY_AGENT_DATABASE"] = "1"
+
+
 CONTROLLER, PTYD = map(os.path.abspath, sys.argv[1:3])
 del sys.argv[1:3]
 
