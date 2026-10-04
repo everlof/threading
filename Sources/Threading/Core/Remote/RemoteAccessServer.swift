@@ -2254,13 +2254,16 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
-        DispatchQueue.main.async {
+        Task { @MainActor in
             let appliedThemeID: AppThemeID
-            switch self.services.settings.applyAppTheme(id: AppThemeID(choice.themeID)) {
+            switch await self.services.settings.applyAppTheme(id: AppThemeID(choice.themeID)) {
             case let .applied(themeID):
                 appliedThemeID = themeID
             case .unknownTheme:
                 respond(.respond(RemoteRouter.error(422, "Unknown Theme", code: .unknownTheme)))
+                return
+            case .failed(let reason):
+                respond(.respond(RemoteRouter.error(409, reason)))
                 return
             }
             self.services.eventLog.recordRemoteEvent("App theme changed remotely", [

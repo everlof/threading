@@ -738,6 +738,17 @@
         }
       }
     },
+    "%@ has changed. Edit the pack to review its current contents." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ har ändrats. Redigera paketet för att granska det aktuella innehållet."
+          }
+        }
+      }
+    },
     "%@ has no git installed, so its checkout can’t be reviewed." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4570,6 +4581,17 @@
         }
       }
     },
+    "A pack can enable at most 16 extensions." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ett paket kan aktivera högst 16 tillägg."
+          }
+        }
+      }
+    },
     "A paired device can see and manage your chats, send prompts, and review permission requests." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5772,6 +5794,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktivera"
+          }
+        }
+      }
+    },
+    "Activate %@ Pack" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera paketet %@"
           }
         }
       }
@@ -7614,6 +7647,17 @@
         }
       }
     },
+    "Also deactivates %@ Pack" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inaktiverar även paketet %@"
+          }
+        }
+      }
+    },
     "Also reachable at %@." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8144,6 +8188,17 @@
         }
       }
     },
+    "Another appearance change is in progress. Try again when it finishes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En annan utseendeändring pågår. Försök igen när den är klar."
+          }
+        }
+      }
+    },
     "Another host already connects to %@." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8338,6 +8393,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Utseende"
+          }
+        }
+      }
+    },
+    "Appearance change failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utseendet kunde inte ändras"
+          }
+        }
+      }
+    },
+    "Appearance choices are still loading." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utseendevalen läses fortfarande in."
+          }
+        }
+      }
+    },
+    "Appearance packs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utseendepaket"
+          }
+        }
+      }
+    },
+    "Appearance packs are unavailable while extensions are held back for this launch." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utseendepaket är inte tillgängliga när tilläggen är pausade för den här starten."
           }
         }
       }
@@ -12818,6 +12917,28 @@
         }
       }
     },
+    "Choose a theme and its companion extensions." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj ett tema och dess tillhörande tillägg."
+          }
+        }
+      }
+    },
+    "Choose a theme and up to 16 installed extensions. Saving does not enable them. Use the pack from the command palette." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj ett tema och upp till 16 installerade tillägg. De aktiveras inte när du sparar. Använd paketet från kommandopaletten."
+          }
+        }
+      }
+    },
     "Choose among %lld conversations whose current turns are still running." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13033,6 +13154,17 @@
         }
       }
     },
+    "Choose the default, a project, a session or a terminal." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj standard, ett projekt, en session eller en terminal."
+          }
+        }
+      }
+    },
     "Choose the folder to keep the scratchpad in." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13088,6 +13220,17 @@
         }
       }
     },
+    "Choose theme scope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj temats omfattning"
+          }
+        }
+      }
+    },
     "Choose two files to compare" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13128,6 +13271,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj vad som visas i terminalens titel"
+          }
+        }
+      }
+    },
+    "Choose where to apply this terminal theme." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj var terminaltemat ska användas."
           }
         }
       }
@@ -15094,6 +15248,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kompanjon %@ deklarerar inte operation %@."
+          }
+        }
+      }
+    },
+    "Companion extensions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillhörande tillägg"
           }
         }
       }
@@ -17675,6 +17840,28 @@
         }
       }
     },
+    "Create Appearance Pack" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skapa utseendepaket"
+          }
+        }
+      }
+    },
+    "Create Appearance Pack…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skapa utseendepaket…"
+          }
+        }
+      }
+    },
     "Create New Folder…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17682,6 +17869,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skapa ny mapp…"
+          }
+        }
+      }
+    },
+    "Create Pack…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skapa paket…"
           }
         }
       }
@@ -18128,6 +18326,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktuell version finns i chatten"
+          }
+        }
+      }
+    },
+    "Current theme · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktuellt tema · %@"
           }
         }
       }
@@ -18710,6 +18919,17 @@
         }
       }
     },
+    "Deactivate %@ Pack" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inaktivera paketet %@"
+          }
+        }
+      }
+    },
     "Debug experiment using only a disposable Keychain credential. Requires a paired iPhone on a pinned HTTPS connection." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18884,6 +19104,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Standardmodell"
+          }
+        }
+      }
+    },
+    "Default terminal theme" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standardtema för terminaler"
           }
         }
       }
@@ -19496,6 +19727,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dimensioner:"
+          }
+        }
+      }
+    },
+    "Disable %@ Extension" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inaktivera tillägget %@"
           }
         }
       }
@@ -20413,6 +20655,17 @@
         }
       }
     },
+    "Edit %@ Pack…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redigera paketet %@…"
+          }
+        }
+      }
+    },
     "Edit %@ color" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20431,6 +20684,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Redigera anteckning %lld"
+          }
+        }
+      }
+    },
+    "Edit Appearance Pack" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redigera utseendepaket"
           }
         }
       }
@@ -20683,6 +20947,17 @@
         }
       }
     },
+    "Enable %@ Extension" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera tillägget %@"
+          }
+        }
+      }
+    },
     "Enable HTTPS certificates in the Tailscale admin console, then retry." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20821,6 +21096,17 @@
         }
       }
     },
+    "Enable or include the required extension %@ first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera eller inkludera det nödvändiga tillägget %@ först."
+          }
+        }
+      }
+    },
     "Enable rich preview" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20887,6 +21173,17 @@
         }
       }
     },
+    "Enabled by %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktiverat av %@"
+          }
+        }
+      }
+    },
     "Enabled in Login Items" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20894,6 +21191,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktiverad under Inloggningsobjekt"
+          }
+        }
+      }
+    },
+    "Enabled manually" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manuellt aktiverat"
+          }
+        }
+      }
+    },
+    "Enabled manually and by %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktiverat manuellt och av %@"
           }
         }
       }
@@ -25236,6 +25555,17 @@
         }
       }
     },
+    "Held back for this launch" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pausat för den här starten"
+          }
+        }
+      }
+    },
     "Held by curfew since %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26406,6 +26736,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "I ordning"
+          }
+        }
+      }
+    },
+    "Include %@ in pack" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inkludera %@ i paketet"
           }
         }
       }
@@ -27790,6 +28131,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Håll %1$@ under %2$@"
+          }
+        }
+      }
+    },
+    "Keep %@ Enabled Without Pack" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Behåll %@ aktiverat utan paket"
           }
         }
       }
@@ -31868,6 +32220,17 @@
         }
       }
     },
+    "Needs attention: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Behöver åtgärdas: %@"
+          }
+        }
+      }
+    },
     "Negative" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33082,6 +33445,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inget tillägg med identifierare %@ är installerat."
+          }
+        }
+      }
+    },
+    "No extensions are installed. You can still save a theme-only pack." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga tillägg är installerade. Du kan ändå spara ett paket med bara ett tema."
           }
         }
       }
@@ -36906,6 +37280,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ägare"
+          }
+        }
+      }
+    },
+    "Pack name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paketnamn"
+          }
+        }
+      }
+    },
+    "Pack theme" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paketets tema"
           }
         }
       }
@@ -41546,6 +41942,17 @@
         }
       }
     },
+    "Remove %@ Pack" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta bort paketet %@"
+          }
+        }
+      }
+    },
     "Remove %@ from the order" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41702,6 +42109,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ta bort anslutningen till %@?"
+          }
+        }
+      }
+    },
+    "Remove the saved combination. Installed themes and extensions stay." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta bort den sparade kombinationen. Installerade teman och tillägg behålls."
           }
         }
       }
@@ -43121,6 +43539,17 @@
         }
       }
     },
+    "Retry %@ Pack" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Försök igen med paketet %@"
+          }
+        }
+      }
+    },
     "Retry Checkout Move" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44437,6 +44866,17 @@
         }
       }
     },
+    "Save Pack" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara paket"
+          }
+        }
+      }
+    },
     "Save Screenshot" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44477,6 +44917,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spara en ögonblicksbild av enheten (högerklicka för alternativ)"
+          }
+        }
+      }
+    },
+    "Save a theme with companion extensions, then activate or deactivate the pack from the command palette." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara ett tema med tillhörande tillägg och aktivera eller inaktivera sedan paketet från kommandopaletten."
           }
         }
       }
@@ -44543,6 +44994,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sparad"
+          }
+        }
+      }
+    },
+    "Saved appearance choices need recovery. The unreadable file has been preserved." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparade utseendeval behöver återställas. Den oläsbara filen har bevarats."
           }
         }
       }
@@ -46817,6 +47279,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Konversation pågår"
+          }
+        }
+      }
+    },
+    "Session · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Session · %@"
           }
         }
       }
@@ -51801,6 +52274,17 @@
         }
       }
     },
+    "Terminal · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminal · %@"
+          }
+        }
+      }
+    },
     "Terminal's Own Scrolling" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51841,6 +52325,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Terminaler först"
+          }
+        }
+      }
+    },
+    "Terminals without a project or session override" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminaler utan ett eget projekt- eller sessionstema"
           }
         }
       }
@@ -52139,6 +52634,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det resultatet är inte längre tillgängligt."
+          }
+        }
+      }
+    },
+    "That selection is no longer available." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det valet är inte längre tillgängligt."
           }
         }
       }
@@ -53047,6 +53553,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Appens globala utseende som visas i det här fönstret."
+          }
+        }
+      }
+    },
+    "The appearance change could not be saved. Your previous choices are still in use." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utseendeändringen kunde inte sparas. Dina tidigare val används fortfarande."
+          }
+        }
+      }
+    },
+    "The appearance pack has an invalid name, theme or extension list." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utseendepaketet har ett ogiltigt namn, tema eller en ogiltig tilläggslista."
           }
         }
       }
@@ -53961,6 +54489,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Experimentet kunde inte komma åt sin tillfälliga nyckelringspost. Lås upp Macens inloggningsnyckelring och försök igen."
+          }
+        }
+      }
+    },
+    "The extension %@ is unavailable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillägget %@ är inte tillgängligt."
           }
         }
       }
@@ -55892,6 +56431,17 @@
         }
       }
     },
+    "The saved appearance choices could not be read." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "De sparade utseendevalen kunde inte läsas."
+          }
+        }
+      }
+    },
     "The scratchpad could not be moved" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56504,6 +57054,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Målgrenen flyttades medan sessionen arbetade. Arbetsytan behölls för granskning."
+          }
+        }
+      }
+    },
+    "The terminal theme could not be saved for that selection." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminaltemat kunde inte sparas för det valet."
           }
         }
       }
@@ -57972,6 +58533,17 @@
         }
       }
     },
+    "This appearance pack is no longer available." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det här utseendepaketet är inte längre tillgängligt."
+          }
+        }
+      }
+    },
     "This baseline was captured by the user, so only the user can replace or remove it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58960,6 +59532,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Endast den här terminalen. Den för ingen anteckning om varför en ljudsignal ljöd, så raderna för ljudsignaler nedan gäller varje signal den gör."
+          }
+        }
+      }
+    },
+    "This theme is no longer available." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det här temat är inte längre tillgängligt."
           }
         }
       }
@@ -60561,6 +61144,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dagens plan"
+          }
+        }
+      }
+    },
+    "Toggle %@ Pack" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Växla paketet %@"
           }
         }
       }
@@ -62479,6 +63073,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "UsageReadingLabel"
+          }
+        }
+      }
+    },
+    "Use %@ Terminal Theme…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd terminaltemat %@…"
+          }
+        }
+      }
+    },
+    "Use %@ Theme" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd temat %@"
           }
         }
       }

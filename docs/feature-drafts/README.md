@@ -38,6 +38,12 @@ reshuffling it is a line move.
 
 ### Now — in active design
 
+- [Customization packs and personal effects controls](customization-packs.md) — Share an
+  individual theme/chrome/extension or a named collection such as Matrix Pack; one portable
+  file, inspected contents, dependency ownership and explicit activation. Global motion,
+  activity reactions, music and sound remain the recipient's choices across every pack.
+  [Theme commands and pack activation](appearance-pack-activation.md) specifies the palette
+  actions, runtime ownership, persistent selection and failure behavior for the same pack model.
 - [Usage-aware accounts](usage-aware-accounts.md) — tell an agent what its budget is, let the user
   rank which logins may be spent automatically, move work to the next best one before a
   weekly window strands it, and keep a drained fleet's anchored windows cycling at reset. It is
@@ -60,6 +66,8 @@ reshuffling it is a line move.
   plan: named agent identities shared by chats and autonomous workers, explicit revisioned memory,
   protected export/recovery and bounded retrieval. Includes Rindabox's concrete acceptance cases,
   UUID-preserving adoption and a consumer-managed remote chat path that retains application grants.
+  The [rollout handoff](persistent-agents-rollout.md) records the overall-review prerequisites,
+  execution order, phase gates and implementing-agent prompt.
 
 ### Next — researched and ready, waiting for a slot
 

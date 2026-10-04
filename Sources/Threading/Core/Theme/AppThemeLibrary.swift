@@ -65,8 +65,8 @@ enum AppThemeLibrary {
     /// agent or a user creates through `AppThemeStore`.
     static var stock: [AppTheme] { [.system] + AppThemeStyles.all }
 
-    /// Themes enabled extensions contribute — a third tier between stock and custom: present
-    /// while their extension is enabled, never editable (an update to the package is how they
+    /// Themes installed extensions contribute — a third tier between stock and custom: present
+    /// while their package is installed and valid, never editable (an update to the package is how they
     /// change), and namespaced ids (`ext.<extension>.<theme>`) so they cannot collide with or
     /// impersonate anything in the other two tiers.
     static var contributed: [AppTheme] { ExtensionAppearanceRegistry.shared.themes }
@@ -160,19 +160,19 @@ enum AppThemeLibrary {
             ThreadingLogger.theme.warning(
                 "Active contributed theme became unavailable theme=\(current.id.rawValue, privacy: .private(mask: .hash)); falling back to default"
             )
-            apply(defaultTheme)
-        } else if let stored = defaults.string(forKey: Keys.currentThemeID),
-                  let standing = theme(withID: AppThemeID(stored)),
+            apply(fallbackAfterRemoval)
+        } else if let stored = storedThemeID,
+                  let standing = theme(withID: stored),
                   standing.id != current.id {
             // Compared by the *resolved* id: a stored retired slug resolves to the theme already
             // in force, and re-applying it here would only rewrite the preference.
-            apply(standing)
+            installResolved(standing)
         } else if let refreshed = theme(withID: current.id), refreshed != current {
             // The active theme kept its identity and changed its answers — a live-reloaded
             // document, or a package update. `current` is a value copy, so without this the
             // window keeps wearing the old colours while every list already shows the new
             // ones; re-applying is what lets a chrome follow the weather or the hour.
-            apply(refreshed)
+            installResolved(refreshed)
         }
         NotificationCenter.default.post(AppThemeLibraryDidChange())
     }
@@ -196,9 +196,10 @@ enum AppThemeLibrary {
     /// `AppThemeEditing.duplicate` (a pure value copy) cannot take. A custom source's asset
     /// folder is copied under the new id; a contributed source's bytes are lifted out of its
     /// package registry and materialised into the store, with the document's asset names
-    /// rewritten to the store's slot names — the copy has to own its images, or disabling
+    /// rewritten to the store's slot names — the copy has to own its images, or removing
     /// the extension would strip the sidebar and the backdrop off a theme the user now owns.
     static func duplicate(_ source: AppTheme, name: String) throws -> AppTheme {
+        guard !AppearanceActivationHost.shared.isChanging else { throw AppearanceActivationError.changeInProgress }
         var copy = try AppThemeEditing.duplicate(
             source,
             id: makeCustomID(),
@@ -353,6 +354,7 @@ enum AppThemeLibrary {
     }
 
     static func update(_ theme: AppTheme) throws {
+        guard !AppearanceActivationHost.shared.isChanging else { throw AppearanceActivationError.changeInProgress }
         guard isCustom(theme) else {
             throw AppThemeEditingError.invalid(
                 isContributed(theme)
@@ -380,12 +382,13 @@ enum AppThemeLibrary {
         )
         NotificationCenter.default.post(AppThemeLibraryDidChange())
         if current.id == theme.id {
-            apply(theme)
+            installResolved(theme)
         }
     }
 
     @discardableResult
     static func delete(_ theme: AppTheme) -> Bool {
+        guard !AppearanceActivationHost.shared.isChanging else { return false }
         guard isCustom(theme) else {
             ThreadingLogger.theme.notice(
                 "App theme deletion refused theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) reason=not_custom"
@@ -409,7 +412,7 @@ enum AppThemeLibrary {
         // the picker fall back to recovery's System while the next launch fell back to the
         // default, and the confirmation names the default.
         if current.id == theme.id || storedThemeID == theme.id {
-            apply(defaultTheme)
+            apply(fallbackAfterRemoval)
         }
         ThreadingLogger.theme.info(
             "App theme deleted theme=\(theme.id.rawValue, privacy: .private(mask: .hash))"
@@ -428,6 +431,15 @@ enum AppThemeLibrary {
     /// the Appearance page must still show what the user actually chose, or opening the page and
     /// clicking the entry that looks selected would overwrite their theme with System.
     static var storedThemeID: AppThemeID? {
+        AppearanceActivationHost.shared.selectedThemeID ?? legacyStoredThemeID
+    }
+
+    private static var fallbackAfterRemoval: AppTheme {
+        guard let id = AppearanceActivationHost.shared.state?.standaloneThemeID else { return defaultTheme }
+        return theme(withID: AppThemeID(id)) ?? defaultTheme
+    }
+
+    static var legacyStoredThemeID: AppThemeID? {
         defaults.string(forKey: Keys.currentThemeID).map { AppThemeID($0) }
     }
 
@@ -471,6 +483,7 @@ enum AppThemeLibrary {
             restored = .system
         }
         current = restored
+        ExtensionAppearanceRegistry.shared.prepareResources(for: restored)
         AppThemePalette.set(restored)
         applyAppearance(for: restored)
         ThreadingLogger.theme.info(
@@ -490,11 +503,21 @@ enum AppThemeLibrary {
 
     /// Switches the app's theme and repaints everything already on screen.
     static func apply(_ theme: AppTheme) {
+        if AppearanceActivationHost.shared.isInstalled {
+            AppearanceActivationHost.shared.requestTheme(theme)
+            return
+        }
         // Recorded before the no-op guard: a pick that changes nothing on screen is still the
         // user's answer. The case that found this: launch falls back because a contributed
         // theme's extension is disabled, the user then picks System deliberately — a choice
         // the early return used to swallow, leaving the stored id pointing at the old theme.
         defaults.set(theme.id.rawValue, forKey: Keys.currentThemeID)
+        installResolved(theme)
+    }
+
+    /// Paint an already committed choice or refreshed document without changing its owner.
+    static func installResolved(_ theme: AppTheme) {
+        ExtensionAppearanceRegistry.shared.prepareResources(for: theme)
         guard theme != current else {
             ThreadingLogger.theme.debug(
                 "App theme selection persisted without visual change theme=\(theme.id.rawValue, privacy: .private(mask: .hash))"

@@ -828,7 +828,8 @@ public enum Design {
         /// show. Dot-prefixed families are the system's hidden faces and are filtered the way
         /// `NSFontManager` already filters them.
         public static var availableFamilies: [String] {
-            ((CTFontManagerCopyAvailableFontFamilyNames() as? [String]) ?? [])
+            Set((CTFontManagerCopyAvailableFontFamilyNames() as? [String]) ?? [])
+                .union(ExtensionAppearanceRegistry.shared.availableFontFamilies)
                 .filter { !$0.hasPrefix(".") }
                 .sorted()
         }

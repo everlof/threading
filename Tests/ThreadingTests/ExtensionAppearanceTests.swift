@@ -637,6 +637,30 @@ final class ExtensionAppearanceTests: XCTestCase {
 
     // MARK: - Fonts Bookkeeping
 
+    func testInstalledCatalogueDoesNotRegisterUndemandedFontsAndDisableKeepsSelectedAssets() {
+        let theme = contributedTheme()
+        let font = URL(fileURLWithPath: "/tmp/pack-font.ttf")
+        let registry = ExtensionAppearanceRegistry.shared
+        registry.prepareResources(for: .system)
+        let installed = ExtensionAppearanceRegistry.Contribution(
+            extensionIdentifier: "com.example.pack", extensionName: "Pack", themes: [theme],
+            fontURLs: [font], fontFamilies: [font: ["Pack Font"]], runtimeEnabled: false
+        )
+        registry.replace(contributions: [installed])
+        XCTAssertTrue(registry.activeFontURLs.isEmpty)
+        XCTAssertTrue(registry.availableFontFamilies.contains("Pack Font"))
+        XCTAssertNotNil(AppThemeLibrary.theme(withID: theme.id))
+        registry.prepareResources(for: theme)
+        XCTAssertEqual(registry.activeFontURLs, [font])
+        registry.replace(contributions: [installed])
+        XCTAssertEqual(registry.activeFontURLs, [font], "disabled code does not withdraw a selected theme's fonts")
+        registry.prepareResources(for: .system)
+        XCTAssertTrue(registry.activeFontURLs.isEmpty)
+        XCTAssertNotNil(AppThemeLibrary.theme(withID: theme.id))
+        registry.replace(contributions: [])
+        XCTAssertNil(AppThemeLibrary.theme(withID: theme.id))
+    }
+
     func testFontRegistrationFollowsEnablementAndSkipsFailures() {
         var activated: [URL] = []
         var deactivated: [URL] = []

@@ -118,9 +118,9 @@ final class AppThemeLayerReportTests: XCTestCase {
 
     // MARK: - Through the Tool
 
-    func testTheCreateToolAppendsTheReport() throws {
+    func testTheCreateToolAppendsTheReport() async throws {
         let name = "Layer Report Theme \(UUID().uuidString)"
-        let result = coordinator().createAppTheme(CreateAppThemeArguments(
+        let result = await coordinator().createAppTheme(CreateAppThemeArguments(
             name: name,
             baseID: AppTheme.system.id.rawValue,
             appearance: "dark",

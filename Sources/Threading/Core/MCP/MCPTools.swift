@@ -8004,7 +8004,7 @@ enum MCPTools {
       },
       observesPanel: false,
       executeArguments: { handler, arguments, sessionID, completion in
-        completion(handler.setAppTheme(arguments))
+        Task { @MainActor in completion(await handler.setAppTheme(arguments)) }
       },
       description: """
         Apply an app-chrome theme immediately and app-wide. There is one window chrome, \
@@ -8053,7 +8053,7 @@ enum MCPTools {
       },
       observesPanel: false,
       executeArguments: { handler, arguments, sessionID, completion in
-        completion(handler.createAppTheme(arguments))
+        Task { @MainActor in completion(await handler.createAppTheme(arguments)) }
       },
       description: """
         Decide how far the theme goes before calling this. A theme has four layers: \
@@ -8166,7 +8166,7 @@ enum MCPTools {
       },
       observesPanel: false,
       executeArguments: { handler, arguments, sessionID, completion in
-        completion(handler.duplicateAppTheme(arguments))
+        Task { @MainActor in completion(await handler.duplicateAppTheme(arguments)) }
       },
       description: """
         Duplicate any app-chrome theme into an editable custom theme. Returns the copy's \
@@ -8222,7 +8222,7 @@ enum MCPTools {
       },
       observesPanel: false,
       executeArguments: { handler, arguments, sessionID, completion in
-        completion(handler.updateAppTheme(arguments))
+        Task { @MainActor in completion(await handler.updateAppTheme(arguments)) }
       },
       description: """
         Patch an existing custom app-chrome theme in place while keeping its stable ID. \

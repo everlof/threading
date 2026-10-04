@@ -19,11 +19,13 @@ struct AppCommand {
         case view = "View"
         case inspect = "Inspect"
         case extensions = "Extensions"
+        case appearance = "Appearance"
         case system = "System"
     }
 
     enum Origin: Equatable {
         case builtIn
+        case appearance
         case extensionCommand(identifier: String, name: String, localID: String)
         case projectScript(localID: String)
 
@@ -41,7 +43,7 @@ struct AppCommand {
             switch self {
             case .extensionCommand(_, _, let localID), .projectScript(let localID):
                 return localID
-            case .builtIn:
+            case .builtIn, .appearance:
                 return nil
             }
         }
@@ -70,6 +72,7 @@ struct AppCommand {
     let extensionInput: ExtensionCommandInput?
     let iconName: String?
     let panelTarget: PanelCommandTarget?
+    let appearanceTarget: AppearanceCommandTarget?
 
     init(
         id: String,
@@ -84,7 +87,8 @@ struct AppCommand {
         menuPlacements: [ExtensionMenuPlacement] = [],
         extensionInput: ExtensionCommandInput? = nil,
         iconName: String? = nil,
-        panelTarget: PanelCommandTarget? = nil
+        panelTarget: PanelCommandTarget? = nil,
+        appearanceTarget: AppearanceCommandTarget? = nil
     ) {
         self.id = id
         self.group = group
@@ -92,7 +96,7 @@ struct AppCommand {
         case .builtIn:
             self.title = L10n.string(title)
             self.detail = detail.map { L10n.string($0) }
-        case .extensionCommand, .projectScript:
+        case .extensionCommand, .projectScript, .appearance:
             self.title = title
             self.detail = detail
         }
@@ -105,6 +109,7 @@ struct AppCommand {
         self.extensionInput = extensionInput
         self.iconName = iconName
         self.panelTarget = panelTarget
+        self.appearanceTarget = appearanceTarget
     }
 }
 
@@ -120,6 +125,8 @@ extension AppCommand {
         switch origin {
         case .builtIn:
             hostOrigin = .builtIn
+        case .appearance:
+            hostOrigin = .appearance
         case .extensionCommand(let identifier, let name, let localID):
             hostOrigin = .extensionCommand(
                 identifier: identifier,
@@ -159,7 +166,8 @@ extension AppCommand {
             risk: hostRisk,
             availability: availability,
             nextInput: nextInput,
-            shortcutEditable: isEditable
+            shortcutEditable: isEditable,
+            keywords: appearanceTarget?.keywords ?? []
         )
     }
 }

@@ -5454,10 +5454,10 @@ private final class RecordingRemoteSettingsMutator: RemoteSettingsMutating {
         return appSettings.applyRemoteMutation(identity: identity, value: value)
     }
 
-    func applyAppTheme(id: AppThemeID) -> RemoteAppThemeMutationResult {
+    func applyAppTheme(id: AppThemeID) async -> RemoteAppThemeMutationResult {
         appThemeIDs.append(id)
         if appliesAppThemesToHost {
-            return LiveRemoteSettingsMutator(appSettings: appSettings).applyAppTheme(id: id)
+            return await LiveRemoteSettingsMutator(appSettings: appSettings).applyAppTheme(id: id)
         }
         guard let theme = AppThemeLibrary.theme(withID: id) else { return .unknownTheme }
         return .applied(theme.id)

@@ -447,6 +447,43 @@ final class ExtensionManager:
         ExtensionCompanionSystemPermissionAuthorizing
     private var packages: [String: InstalledExtensionPackage] = [:]
     private var enabledIdentifiers: Set<String> = []
+    private var appearanceDesiredIdentifiers: Set<String>?
+    private var appearanceRegistryIsDirty = true
+    private var appearanceMutationInProgress = false
+    private var installationsInProgress = 0
+    private var hasStartedEnabledExtensions = false
+    var appearanceEnablementRequest: ((Bool, String) throws -> Void)?
+    var appearanceRuntimeAdmission: ((String) -> String?)?
+    var appearancePrepareForRemoval: ((String) async throws -> Void)?
+
+    var currentDesiredExtensionIDs: Set<String> { enabledIdentifiers }
+    var appearanceInventoryIsStable: Bool {
+        inventoryErrorDescription == nil && updatingIdentifiers.isEmpty && installationsInProgress == 0
+    }
+
+    func beginAppearanceMutation() throws {
+        guard !appearanceMutationInProgress, updatingIdentifiers.isEmpty, installationsInProgress == 0 else {
+            throw AppearanceActivationError.changeInProgress
+        }
+        appearanceMutationInProgress = true
+    }
+
+    func endAppearanceMutation() { appearanceMutationInProgress = false }
+
+    /// A committed intent projection. Shared members keep their running generation.
+    func adoptAppearanceEnablement(_ desired: Set<String>, startRuntimes: Bool) {
+        let previous = enabledIdentifiers
+        appearanceDesiredIdentifiers = desired
+        enabledIdentifiers = desired
+        if previous != desired { appearanceRegistryIsDirty = true }
+        for identifier in previous.subtracting(desired) {
+            stop(identifier, status: .disabled)
+        }
+        if startRuntimes && hasStartedEnabledExtensions {
+            for identifier in desired.subtracting(previous).sorted() { start(identifier) }
+        }
+        notifyChange()
+    }
     private var statuses: [String: InstalledExtensionStatus] = [:]
     private var sessions: [String: ExtensionProcessSession] = [:]
     private var sessionGenerations: [String: String] = [:]
@@ -1769,6 +1806,7 @@ final class ExtensionManager:
 
     /// Starts every valid package whose persisted desired state is enabled.
     func startEnabledExtensions() {
+        hasStartedEnabledExtensions = true
         refreshInventory(postChange: false)
         syncAppearanceRegistry()
         for identifier in enabledIdentifiers.sorted() {
@@ -1777,7 +1815,7 @@ final class ExtensionManager:
         }
     }
 
-    /// Registers enabled packages' themes and fonts without starting any process.
+    /// Publishes installed themes and demanded fonts without starting any process.
     ///
     /// Called before `AppThemeLibrary.restore()` at launch: contributions are data the
     /// inspector already read, so a stored contributed theme — and any font it names — must
@@ -1796,6 +1834,11 @@ final class ExtensionManager:
             Result<InstalledExtensionSnapshot, Error>
         ) -> Void
     ) {
+        guard !appearanceMutationInProgress else {
+            completion(.failure(AppearanceActivationError.changeInProgress))
+            return
+        }
+        installationsInProgress += 1
         ThreadingLogger.extensions.info(
             "Extension installation started source=\(sourceURL.path, privacy: .private(mask: .hash))"
         )
@@ -1806,6 +1849,7 @@ final class ExtensionManager:
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                self.installationsInProgress -= 1
                 self.refreshInventory(postChange: true)
                 switch result {
                 case .failure(let error):
@@ -1875,6 +1919,10 @@ final class ExtensionManager:
             Result<InstalledExtensionSnapshot, Error>
         ) -> Void
     ) {
+        guard !appearanceMutationInProgress else {
+            completion(.failure(AppearanceActivationError.changeInProgress))
+            return
+        }
         let identifier = plan.identifier
         guard packages[identifier] != nil else {
             completion(.failure(ExtensionPackageStoreError.notInstalled(identifier)))
@@ -1938,6 +1986,10 @@ final class ExtensionManager:
     }
 
     func setEnabled(_ enabled: Bool, identifier: String) throws {
+        if let appearanceEnablementRequest {
+            try appearanceEnablementRequest(enabled, identifier)
+            return
+        }
         guard !updatingIdentifiers.contains(identifier) else {
             throw ExtensionManagerError.operationInProgress(identifier)
         }
@@ -1950,6 +2002,7 @@ final class ExtensionManager:
 
         try store.setEnabled(enabled, identifier: identifier)
         enabledIdentifiers = store.enabledIdentifiers()
+        appearanceRegistryIsDirty = true
         ThreadingLogger.extensions.info(
             "Extension enablement changed identifier=\(identifier, privacy: .public) enabled=\(enabled, privacy: .public)"
         )
@@ -2006,9 +2059,19 @@ final class ExtensionManager:
 
     /// Removes a package from discovery while preserving it under Extensions/Removed.
     @discardableResult
-    func uninstall(identifier: String) throws -> URL {
+    func uninstall(identifier: String) async throws -> URL {
+        guard !appearanceMutationInProgress else { throw AppearanceActivationError.changeInProgress }
         guard !updatingIdentifiers.contains(identifier) else {
             throw ExtensionManagerError.operationInProgress(identifier)
+        }
+        // Persist the release before removing bytes. A rapid reinstall (or a crash between
+        // removal and inventory publication) must never revive the old enablement reason.
+        try await appearancePrepareForRemoval?(identifier)
+        guard !appearanceMutationInProgress, !updatingIdentifiers.contains(identifier) else {
+            throw AppearanceActivationError.changeInProgress
+        }
+        guard appearanceDesiredIdentifiers == nil || !enabledIdentifiers.contains(identifier) else {
+            throw AppearanceActivationError.changeInProgress
         }
         stop(identifier, status: .disabled)
         let recoveredAt: URL
@@ -2080,6 +2143,12 @@ final class ExtensionManager:
               enabledIdentifiers.contains(identifier),
               sessions[identifier] == nil,
               let bundle = packages[identifier]?.bundle else {
+            return
+        }
+
+        if let reason = appearanceRuntimeAdmission?(identifier) {
+            statuses[identifier] = .failed(reason)
+            notifyChange()
             return
         }
 
@@ -2619,7 +2688,8 @@ final class ExtensionManager:
             inventory.map { ($0.identifier, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        enabledIdentifiers = store.enabledIdentifiers()
+        appearanceRegistryIsDirty = true
+        enabledIdentifiers = appearanceDesiredIdentifiers ?? store.enabledIdentifiers()
 
         statuses = statuses.filter { packages[$0.key] != nil }
         for package in inventory {
@@ -2643,12 +2713,14 @@ final class ExtensionManager:
         NotificationCenter.default.post(ExtensionsDidChange())
     }
 
-    /// Rebuilds the appearance registry from the enabled, valid packages — the same
+    /// Rebuilds the appearance registry from installed, valid packages — the same
     /// wholesale-replacement shape as `syncSettingsRegistry`, so enable, disable, update and
     /// uninstall all converge through one diff instead of each maintaining its own edge.
     private func syncAppearanceRegistry() {
+        guard appearanceRegistryIsDirty else { return }
+        appearanceRegistryIsDirty = false
         ExtensionAppearanceRegistry.shared.replace(
-            contributions: enabledIdentifiers.sorted().compactMap { identifier in
+            contributions: packages.keys.sorted().compactMap { identifier in
                 guard let bundle = packages[identifier]?.bundle,
                       !bundle.themes.isEmpty || !bundle.fonts.isEmpty else { return nil }
                 let localization = ExtensionLocalizationResolver(
@@ -2661,6 +2733,9 @@ final class ExtensionManager:
                         localization.theme($0.theme)
                     },
                     fontURLs: bundle.fonts.map(\.url),
+                    fontFamilies: Dictionary(uniqueKeysWithValues: bundle.fonts.map { ($0.url, $0.familyNames) }),
+                    fontPostScriptNames: Dictionary(uniqueKeysWithValues: bundle.fonts.map { ($0.url, $0.postScriptNames) }),
+                    runtimeEnabled: enabledIdentifiers.contains(identifier),
                     iconMarks: bundle.themes.reduce(into: [:]) { marks, document in
                         guard let mark = document.iconMark else { return }
                         marks[document.theme.id] = mark
@@ -2675,12 +2750,12 @@ final class ExtensionManager:
         reconcileThemeWatchers()
     }
 
-    /// Keeps one live-reload watcher per enabled theme-contributing package — started,
+    /// Keeps one live-reload watcher per installed theme-contributing package — started,
     /// restarted on a moved root, and stopped through the same wholesale reconcile the
     /// registries use, so no edge (enable, disable, update, uninstall) needs its own wiring.
     private func reconcileThemeWatchers() {
         var desired: [String: URL] = [:]
-        for identifier in enabledIdentifiers {
+        for identifier in packages.keys {
             guard let bundle = packages[identifier]?.bundle,
                   !bundle.themes.isEmpty else { continue }
             desired[identifier] = bundle.rootURL
@@ -2709,8 +2784,7 @@ final class ExtensionManager:
     /// half-saved JSON would punish the author for the moment this feature exists for. The
     /// refusal is logged so a *persistently* broken edit is discoverable rather than silent.
     private func refreshContributedThemes(for identifier: String) {
-        guard enabledIdentifiers.contains(identifier),
-              let package = packages[identifier],
+        guard let package = packages[identifier],
               let bundle = package.bundle,
               !bundle.manifest.themes.isEmpty else { return }
 
@@ -2727,6 +2801,7 @@ final class ExtensionManager:
                 provenance: package.provenance,
                 problem: package.problem
             )
+            appearanceRegistryIsDirty = true
             syncAppearanceRegistry()
         } catch {
             let reason = (error as? LocalizedError)?.errorDescription

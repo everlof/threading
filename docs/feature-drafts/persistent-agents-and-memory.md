@@ -19,6 +19,10 @@ controller **Workers** to it, and extend the portable memory implementation alre
 Threading. Keep one authoritative memory store per agent. Preserve Rindabox's existing UUIDs,
 memory revisions, task admission, instruction snapshots and application permission checks.
 
+The [rollout handoff](persistent-agents-rollout.md) gives the implementation sequence,
+cross-orchestration review decisions, phase gates and a prompt for the next agent. The user
+requested the wider review before implementation; record its outcome there before starting.
+
 ## What already exists
 
 These observations come from the local working trees on 2026-10-03, based on Threading

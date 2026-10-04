@@ -315,6 +315,16 @@ public final class RecoverableFileStore<Value: Codable> {
         self.dateDecodingStrategy = dateDecodingStrategy
     }
 
+    /// Recovery launches may inspect a choice without quarantining it or enabling fallback
+    /// writes. The ordinary loader below retains its preserve-and-report recovery behavior.
+    public func readPreservingOriginal(validate: (Value) throws -> Void = { _ in }) throws -> Value? {
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        let data = try BoundedFileReader.read(url, maximumBytes: sizePolicy.maximumBytes)
+        let value = try decode(data)
+        try validate(value)
+        return value
+    }
+
     public func load(
         defaultValue: @autoclosure () -> Value,
         validate: (Value) throws -> Void = { _ in }
@@ -324,12 +334,9 @@ public final class RecoverableFileStore<Value: Codable> {
         }
 
         do {
-            let data = try BoundedFileReader.read(
-                url,
-                maximumBytes: sizePolicy.maximumBytes
-            )
-            let value = try decode(data)
-            try validate(value)
+            guard let value = try readPreservingOriginal(validate: validate) else {
+                return .missing(defaultValue: defaultValue())
+            }
             return .loaded(value)
         } catch {
             let fallback = defaultValue()

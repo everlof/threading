@@ -665,7 +665,7 @@ final class ThemeCharacterTests: XCTestCase {
         )
     }
 
-    func testAgentCanGiveAThemeACharacterAndReadItBack() throws {
+    func testAgentCanGiveAThemeACharacterAndReadItBack() async throws {
         let name = "Character Tool Theme \(UUID().uuidString)"
         let picture = AppThemeImageArguments(path: nil, base64: try png().base64EncodedString())
         let variant = AppThemeVariantArguments(
@@ -705,7 +705,7 @@ final class ThemeCharacterTests: XCTestCase {
             ),
             words: AppThemeWordsArguments(working: ["Herding…"], composerPlaceholder: "Woof?")
         )
-        let created = coordinator().createAppTheme(CreateAppThemeArguments(
+        let created = await coordinator().createAppTheme(CreateAppThemeArguments(
             name: name,
             baseID: AppThemeStyles.threading.id.rawValue,
             appearance: "dark",
@@ -752,7 +752,7 @@ final class ThemeCharacterTests: XCTestCase {
         XCTAssertEqual((sidebar["image"] as? [String: Any])?["alignment"] as? String, "bottom")
 
         // Removing a sprite something still names is refused; the document stays as it was.
-        let refused = coordinator().updateAppTheme(UpdateAppThemeArguments(
+        let refused = await coordinator().updateAppTheme(UpdateAppThemeArguments(
             themeID: stored.id.rawValue,
             name: nil,
             appearance: nil,
@@ -768,7 +768,7 @@ final class ThemeCharacterTests: XCTestCase {
         XCTAssertTrue(refused.text.contains("sprites"), refused.text)
 
         // A patch restyles without re-uploading, and merges the rest.
-        let updated = coordinator().updateAppTheme(UpdateAppThemeArguments(
+        let updated = await coordinator().updateAppTheme(UpdateAppThemeArguments(
             themeID: stored.id.rawValue,
             name: nil,
             appearance: nil,
@@ -807,10 +807,10 @@ final class ThemeCharacterTests: XCTestCase {
 
     // MARK: - Preview
 
-    func testThePreviewDrawsTheMascotInEveryMoodItStates() throws {
+    func testThePreviewDrawsTheMascotInEveryMoodItStates() async throws {
         let name = "Character Preview \(UUID().uuidString)"
         let picture = AppThemeImageArguments(path: nil, base64: try png(color: .systemOrange).base64EncodedString())
-        let created = coordinator().createAppTheme(CreateAppThemeArguments(
+        let created = await coordinator().createAppTheme(CreateAppThemeArguments(
             name: name,
             baseID: AppThemeStyles.threading.id.rawValue,
             appearance: "dark",

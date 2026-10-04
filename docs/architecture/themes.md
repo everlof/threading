@@ -4,6 +4,11 @@ Terminal themes, app themes, and the three scopes both resolve through.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+Theme selection and extension enablement now share the
+[appearance activation service](appearance-activation.md). Its installed-content rule supersedes
+the historical enabled-package lifetime described below: disabling code keeps installed themes
+available, and resource registrations follow actual demand.
+
 Historical frame takeovers additionally carry a component-by-component evidence ledger under
 [`docs/references/chrome/`](../references/chrome/README.md). A chrome is not considered
 reference-complete merely because its title band exists: every manifest must account for the

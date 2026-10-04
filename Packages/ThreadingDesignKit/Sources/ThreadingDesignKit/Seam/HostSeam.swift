@@ -158,6 +158,8 @@ public enum UsageForecast {
 public final class ExtensionAppearanceRegistry: @unchecked Sendable {
     public static let shared = ExtensionAppearanceRegistry()
     public func sidebarAsset(named name: String, forThemeID id: AppThemeID) -> NSImage? { nil }
+    public var availableFontFamilies: Set<String> { [] }
+    public func prepareResources(for theme: AppTheme) {}
 }
 
 /// The pane header's silhouette, as the components read it.

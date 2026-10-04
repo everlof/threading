@@ -34,6 +34,7 @@ enum RecoveryModeCommandPolicy {
     ]
 
     static func allows(commandID: String) -> Bool {
+        if commandID.hasPrefix("appearance.pack.deactivate.") { return true }
         if allowedAppCommands.contains(commandID) { return true }
         return AppCommands.command(id: commandID)?.group == .system
     }

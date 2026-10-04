@@ -30,6 +30,7 @@ final class CommandRegistry {
     private var extensions: [String: ExtensionCommands] = [:]
     private var nativePluginBundles: [URL] = []
     private var projectScripts: [ProjectScript] = []
+    private var appearanceCommands: [AppCommand] = []
     private var resolvedCommands: [AppCommand]
 
     init(builtInCommands: [AppCommand] = AppCommands.all) {
@@ -102,6 +103,15 @@ final class CommandRegistry {
     }
 
     var panelCommands: [AppCommand] { resolvedCommands.filter { $0.panelTarget != nil } }
+
+    func replaceAppearanceCommands(_ commands: [AppCommand]) {
+        let unchanged = commands.count == appearanceCommands.count && zip(commands, appearanceCommands).allSatisfy {
+            $0.id == $1.id && $0.title == $1.title && $0.detail == $1.detail
+        }
+        guard !unchanged else { return }
+        appearanceCommands = commands
+        rebuildAndNotify()
+    }
 
     static func qualifiedID(extensionIdentifier: String, commandID: String) -> String {
         "extension.\(extensionIdentifier).\(commandID)"
@@ -180,7 +190,7 @@ final class CommandRegistry {
                            panelTarget: .extensionPanel(identifier: identifier, panelID: panel.id))
             }
         }
-        resolvedCommands = builtInCommands + scriptCommands + extensionCommands + nativePanels + extensionPanels
+        resolvedCommands = builtInCommands + scriptCommands + extensionCommands + nativePanels + extensionPanels + appearanceCommands
         NotificationCenter.default.post(CommandRegistryDidChange())
     }
 }

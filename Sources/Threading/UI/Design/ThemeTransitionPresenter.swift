@@ -15,7 +15,11 @@ import AppKit
 enum ThemeSwitch {
 
     static func apply(_ theme: AppTheme) {
-        ThemeTransitionPresenter.shared.present(theme)
+        if AppearanceActivationHost.shared.isInstalled {
+            AppearanceActivationHost.shared.requestTheme(theme)
+        } else {
+            ThemeTransitionPresenter.shared.present(theme)
+        }
     }
 }
 
@@ -41,6 +45,7 @@ final class ThemeTransitionPresenter {
         var hasSwapped: Bool
         var overlays: [ThemeTransitionOverlayView]
         let generation: Int
+        let recordsChoice: Bool
     }
 
     private var playing: Playing?
@@ -61,18 +66,26 @@ final class ThemeTransitionPresenter {
     // MARK: - Public Methods
 
     func present(_ theme: AppTheme) {
+        present(theme, recordsChoice: true)
+    }
+
+    func presentResolved(_ theme: AppTheme) {
+        present(theme, recordsChoice: false)
+    }
+
+    private func present(_ theme: AppTheme, recordsChoice: Bool) {
         finishPlaying()
 
         guard theme != AppThemeLibrary.current,
               let palette = Self.palette(for: theme),
               ThemeParticleHold.motionAllowed else {
-            AppThemeLibrary.apply(theme)
+            apply(theme, recordsChoice: recordsChoice)
             return
         }
 
         let hosts = windowsProvider().filter { $0.contentView != nil }
         guard !hosts.isEmpty else {
-            AppThemeLibrary.apply(theme)
+            apply(theme, recordsChoice: recordsChoice)
             return
         }
 
@@ -85,7 +98,8 @@ final class ThemeTransitionPresenter {
             root.addSubview(overlay, positioned: .above, relativeTo: nil)
             overlays.append(overlay)
         }
-        playing = Playing(theme: theme, hasSwapped: false, overlays: overlays, generation: generation)
+        playing = Playing(theme: theme, hasSwapped: false, overlays: overlays, generation: generation,
+                          recordsChoice: recordsChoice)
 
         for overlay in overlays {
             overlay.play(palette) { [weak self] in
@@ -111,7 +125,7 @@ final class ThemeTransitionPresenter {
         }
         current.hasSwapped = true
         playing = current
-        AppThemeLibrary.apply(current.theme)
+        apply(current.theme, recordsChoice: current.recordsChoice)
     }
 
     private func overlayDidFinish(_ overlay: ThemeTransitionOverlayView, generation: Int) {
@@ -129,8 +143,13 @@ final class ThemeTransitionPresenter {
             overlay.removeFromSuperview()
         }
         if !current.hasSwapped {
-            AppThemeLibrary.apply(current.theme)
+            apply(current.theme, recordsChoice: current.recordsChoice)
         }
+    }
+
+    private func apply(_ theme: AppTheme, recordsChoice: Bool) {
+        if recordsChoice { AppThemeLibrary.apply(theme) }
+        else { AppThemeLibrary.installResolved(theme) }
     }
 
     /// The incoming theme's transition with its inks resolved for the appearance it will be

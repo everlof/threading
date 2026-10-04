@@ -4,6 +4,24 @@ import XCTest
 
 @MainActor
 final class CommandPaletteFocusTests: XCTestCase {
+    func testThemeShortcutScopeInputReturnsToCommandsThenRestoresFocus() throws {
+        let (window, terminal) = fixture()
+        let command = AppearanceCommands.command(.terminalTheme("test-theme"), title: "Use Test Terminal Theme…", detail: nil)
+        let input = HostCommandInputRequest(kind: .terminalThemeScope, prompt: "Choose scope", searchPlaceholder: "Choose scope")
+        let controller = CommandPaletteViewController(catalog: {
+            [command.hostDescriptor(shortcut: nil, availability: .available, nextInput: input)]
+        }, inputOptions: { _ in [.init(id: "default", title: "Default", detail: nil)] },
+            invokeRequest: { .invoked(commandID: $0.commandID) }, shortcutEditing: nil)
+        XCTAssertTrue(window.makeFirstResponder(terminal))
+        controller.present(in: window)
+        controller.requestInput(for: command.id)
+        drain { controller.visibleInputIDsForTesting == ["default"] }
+        XCTAssertTrue(controller.handleKeyForTesting(try escape(in: window)))
+        XCTAssertTrue(controller.isPresentedForTesting)
+        XCTAssertTrue(controller.handleKeyForTesting(try escape(in: window)))
+        XCTAssertTrue(window.firstResponder === terminal)
+    }
+
     func testEscapeRestoresTheTerminalResponderAndDismissesOnce() throws {
         let (window, terminal) = fixture()
         let controller = palette()

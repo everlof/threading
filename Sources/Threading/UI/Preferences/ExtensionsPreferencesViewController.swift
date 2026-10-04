@@ -173,6 +173,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         appEvents.observe(ExtensionsDidChange.self) { [weak self] _ in
             self?.render()
         }
+        appEvents.observe(AppearanceActivationDidChange.self) { [weak self] _ in self?.render() }
         appEvents.observe(ExtensionIdentityResolversDidChange.self) { [weak self] _ in
             self?.render()
         }
@@ -709,19 +710,25 @@ final class ExtensionsPreferencesViewController: NSViewController {
             action: #selector(extensionToggled(_:))
         )
         toggle.isEnabled = {
+            if AppearanceActivationHost.shared.isChanging { return false }
             if case .updating = item.status { return false }
             if case .invalid = item.status { return item.isEnabled }
             return true
         }()
         toggle.setAccessibilityIdentifier("settings.extensions.enabled.\(item.identifier)")
         toggle.setAccessibilityLabel(item.name)
+        if let pack = AppearanceActivationHost.shared.state?.activePack,
+           pack.extensionIDs.contains(item.identifier) {
+            toggle.toolTip = L10n.format("Also deactivates %@ Pack", pack.name)
+            toggle.setAccessibilityHelp(toggle.toolTip)
+        }
         remember(toggle, action: .toggle, identifier: item.identifier)
 
         let version = item.version.map {
             L10n.format("Version %@ · %@", $0, item.identifier)
         }
             ?? item.identifier
-        let subtitle: String
+        var subtitle: String
         if item.navigatorIntents.isEmpty {
             subtitle = version
         } else {
@@ -732,6 +739,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
             subtitle = version + "\n" + L10n.format("Navigator actions: %@", verbs)
         }
 
+        if let reason = AppearanceActivationHost.shared.enablementDetail(identifier: item.identifier) {
+            subtitle += "\n" + reason
+        }
         let identifier = item.identifier
         let status = shortStatus(item.status)
         return SettingsUI.disclosureHeader(
@@ -1266,17 +1276,20 @@ final class ExtensionsPreferencesViewController: NSViewController {
         )
         guard ConfirmationAlert.ask(request) else { return }
 
-        do {
-            let recoveredAt = try manager.uninstall(identifier: identifier)
-            presentAlert(
-                title: L10n.string("Extension Removed"),
-                message: L10n.format(
-                    "The package was moved to %@ and can be recovered from there.",
-                    recoveredAt.path
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let recoveredAt = try await manager.uninstall(identifier: identifier)
+                presentAlert(
+                    title: L10n.string("Extension Removed"),
+                    message: L10n.format(
+                        "The package was moved to %@ and can be recovered from there.",
+                        recoveredAt.path
+                    )
                 )
-            )
-        } catch {
-            present(error: error)
+            } catch {
+                present(error: error)
+            }
         }
     }
 

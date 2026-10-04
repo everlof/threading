@@ -24,6 +24,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 
 | Surface | Proposed contract | First authority | Host must retain | Status |
 | --- | --- | --- | --- | --- |
+| Appearance pack editor and activation commands | deliberately host-only; shared themed controls | host appearance service | exact membership/digest review, enablement ownership, capability disclosure, persistence, runtime admission, focus and failure truth | Implemented |
 | Public browser guest client | deliberately host-only | existing RemoteClient UI with transport adapter | invitation decoding, service origin, membership/device binding, scope, approval, expiry and revocation | Implemented |
 | Chat invitation sheet | deliberately host-only | host form | capability scope, permission approval, route reachability, expiry, credential issuance and revocation | Implemented |
 | Hosted Direct enrollment controls | — | host-only | explicit Internet opt-in, installation-secret custody, service identity removal, device revocation and reachable status | Host-only |

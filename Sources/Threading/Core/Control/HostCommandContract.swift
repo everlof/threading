@@ -7,6 +7,7 @@ import Foundation
 struct HostCommandDescriptor: Equatable, Sendable {
     enum Origin: Equatable, Sendable {
         case builtIn
+        case appearance
         case extensionCommand(identifier: String, name: String, localID: String)
         /// A command the open checkout declares in `.threading.json`. It is neither the host's
         /// own nor an installed extension's, and the palette says so: what runs is decided by
@@ -100,6 +101,7 @@ struct HostCommandInputRequest: Equatable, Sendable {
     enum Kind: String, Equatable, Sendable {
         case session
         case project
+        case terminalThemeScope
     }
 
     let kind: Kind
@@ -243,7 +245,7 @@ enum HostCommandSearch {
             case .projectScript: origin = command.group.folded
             // Same reasoning one step over: a settings destination's origin word is its group,
             // so "settings" answers with the set rather than with nothing.
-            case .settings: origin = command.group.folded
+            case .settings, .appearance: origin = command.group.folded
             }
             let score: Int
             if title == query { score = 0 }

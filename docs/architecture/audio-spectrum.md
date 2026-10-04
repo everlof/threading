@@ -113,15 +113,15 @@ Wasm example compiled, and the real shell's System light/dark, Classic Player, N
 unavailable-state renders were inspected. These checks establish the analysis, lifecycle,
 public bindings and presentation; they do not establish working hardware capture.
 
-The opt-in HAL integration test currently fails on the development Mac (macOS 26.5): a
+The initial opt-in HAL integration test failed on the development Mac (macOS 26.5): a
 controlled tone source opens successfully but delivers zero callbacks/frames. Spotify was
 also detected with `kAudioProcessPropertyIsRunningOutput == 1` and delivered no callbacks.
 Registration waits inside Core Audio's `_TellServerAboutStreamUsage`; starting without tap
 auto-start returns `MACH_RCV_TIMED_OUT` (`0x10004003`). A C callback, an output-only speaker
 clock, a separately launched app with its own usage description, and a test host signed with
 Threading's normal Developer ID did not resolve it. The test build was restored afterward.
-The cause is still unresolved; do not treat live capture as verified until the HAL test
-delivers the expected 1 kHz spectrum. Missing delivery remains unavailable in the public API.
+The cause remained unresolved during that run. Missing delivery remains unavailable in
+the public API; the recovery checks below establish subsequent live delivery.
 
 The installed app's Motion preview also stalled in `AudioDeviceStart` on this Mac. A
 fresh, Developer ID-signed diagnostic confirmed that the aggregate contains the correct
@@ -132,3 +132,17 @@ enumeration before its 45-second process deadline, even though TCC reported Thre
 Screen Recording grant as allowed. This narrows the failure to capture startup rather
 than FFT or theme rendering, but does not establish its cause. No capture-backend fallback,
 system-service restart, or privacy-grant change was made during these checks.
+
+### Live capture recovery, 3 October 2026
+
+After the user restarted the Mac's audio service, standalone apps signed with Threading's
+normal Developer ID and using the unmodified production `AudioSpectrumCapture` opened and
+closed promptly. The controlled 1 kHz source delivered 310 callbacks and 88 readings;
+its peak level was 0.384 and band 3 was strongest, as expected. Playing Spotify delivered
+313 callbacks and 88 readings, with a peak level of 0.720 and nonzero values across all
+eight bands. The all-system source also delivered 312 callbacks and 88 readings, with a
+peak level of 0.777. These checks establish real process-tap delivery and analysis on this Mac,
+without changing the capture implementation or the user's saved audio settings. The
+earlier failed XCTest HAL run was not rerun by these standalone checks. The underlying
+cause of the original service stall remains unknown; restart recovery does not establish
+that the stall cannot recur.

@@ -316,7 +316,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(arguments.terminalColors?["cursor"], "#AA77FF")
     }
 
-    func testAgentCanCreateAnAdaptiveThemeAndGetAReusableVariantDocument() throws {
+    func testAgentCanCreateAnAdaptiveThemeAndGetAReusableVariantDocument() async throws {
         let name = "Adaptive Tool Theme \(UUID().uuidString)"
         let arguments = CreateAppThemeArguments(
             name: name,
@@ -342,7 +342,7 @@ final class ThemeToolTests: XCTestCase {
             apply: false
         )
 
-        let result = coordinator().createAppTheme(arguments)
+        let result = await coordinator().createAppTheme(arguments)
         XCTAssertFalse(result.isError, result.text)
         let created = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer { _ = AppThemeLibrary.delete(created) }
@@ -374,7 +374,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertNil(terminal["brightMagenta"])
     }
 
-    func testAgentCanAddAMissingVariantThenMakeThemeAdaptive() throws {
+    func testAgentCanAddAMissingVariantThenMakeThemeAdaptive() async throws {
         let name = "Growing Tool Theme \(UUID().uuidString)"
         let create = CreateAppThemeArguments(
             name: name,
@@ -394,7 +394,7 @@ final class ThemeToolTests: XCTestCase {
             terminalColors: nil,
             apply: false
         )
-        let createResult = coordinator().createAppTheme(create)
+        let createResult = await coordinator().createAppTheme(create)
         XCTAssertFalse(createResult.isError, createResult.text)
         let created = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer {
@@ -422,7 +422,7 @@ final class ThemeToolTests: XCTestCase {
             terminalColors: nil,
             apply: false
         )
-        let updateResult = coordinator().updateAppTheme(update)
+        let updateResult = await coordinator().updateAppTheme(update)
         XCTAssertFalse(updateResult.isError, updateResult.text)
 
         let updated = try XCTUnwrap(AppThemeLibrary.theme(withID: created.id))
@@ -521,7 +521,7 @@ final class ThemeToolTests: XCTestCase {
     /// The whole loop an agent actually runs: create a theme whose sidebar carries a gradient,
     /// an image (stored from bytes), and a brand; read it back in the same vocabulary; take
     /// the block away again. The asset dies with the theme.
-    func testAgentCanDressReadAndUndressTheSidebar() throws {
+    func testAgentCanDressReadAndUndressTheSidebar() async throws {
         let name = "Sidebar Tool Theme \(UUID().uuidString)"
         let kind = AppThemeStyles.cyberpunk.availableVariants[0]
         let surface = AppThemeStyles.cyberpunk.resolved(
@@ -585,7 +585,7 @@ final class ThemeToolTests: XCTestCase {
             terminalColors: nil,
             apply: false
         )
-        let created = coordinator().createAppTheme(create)
+        let created = await coordinator().createAppTheme(create)
         XCTAssertFalse(created.isError, created.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer {
@@ -643,7 +643,7 @@ final class ThemeToolTests: XCTestCase {
             terminalColors: nil,
             apply: false
         )
-        let undressed = coordinator().updateAppTheme(undress)
+        let undressed = await coordinator().updateAppTheme(undress)
         XCTAssertFalse(undressed.isError, undressed.text)
         let bare = try XCTUnwrap(AppThemeLibrary.theme(withID: theme.id))
         XCTAssertNil(bare.variant(kind)?.sidebar)
@@ -658,7 +658,7 @@ final class ThemeToolTests: XCTestCase {
     /// The same loop for the material's backdrop: create a theme whose panes carry a wash and
     /// a picture (stored from bytes), read it back in the same vocabulary, take the block away
     /// again. The asset dies with the theme.
-    func testAgentCanDressReadAndUndressTheBackdrop() throws {
+    func testAgentCanDressReadAndUndressTheBackdrop() async throws {
         let name = "Backdrop Tool Theme \(UUID().uuidString)"
         let base = AppThemeStyles.cyberpunk
         let kind = base.availableVariants[0]
@@ -709,7 +709,7 @@ final class ThemeToolTests: XCTestCase {
             }
             """.utf8)
         )
-        let created = coordinator().createAppTheme(create)
+        let created = await coordinator().createAppTheme(create)
         XCTAssertFalse(created.isError, created.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer {
@@ -762,7 +762,7 @@ final class ThemeToolTests: XCTestCase {
             }
             """.utf8)
         )
-        let undressed = coordinator().updateAppTheme(undress)
+        let undressed = await coordinator().updateAppTheme(undress)
         XCTAssertFalse(undressed.isError, undressed.text)
         let bare = try XCTUnwrap(AppThemeLibrary.theme(withID: theme.id))
         XCTAssertNil(bare.variant(kind)?.material.backdrop)
@@ -799,7 +799,7 @@ final class ThemeToolTests: XCTestCase {
     /// Asset bytes and the theme document are one logical update. If a later field refuses the
     /// patch, a replaced file must return to its old bytes and a newly introduced slot must not
     /// survive under the standing document.
-    func testRefusedThemeUpdateRollsBackReplacedAndIntroducedAssets() throws {
+    func testRefusedThemeUpdateRollsBackReplacedAndIntroducedAssets() async throws {
         func png(_ color: NSColor) throws -> Data {
             let image = NSImage(size: NSSize(width: 8, height: 8), flipped: false) { rect in
                 color.setFill()
@@ -825,7 +825,7 @@ final class ThemeToolTests: XCTestCase {
         let originalPNG = try png(.systemTeal)
         let replacementPNG = try png(.systemPink)
 
-        let seed = coordinator().updateAppTheme(UpdateAppThemeArguments(
+        let seed = await coordinator().updateAppTheme(UpdateAppThemeArguments(
             themeID: theme.id.rawValue,
             name: nil,
             appearance: nil,
@@ -856,7 +856,7 @@ final class ThemeToolTests: XCTestCase {
             ThemeAssetStore.pngData(named: backgroundName, for: theme.id)
         )
 
-        let refused = coordinator().updateAppTheme(UpdateAppThemeArguments(
+        let refused = await coordinator().updateAppTheme(UpdateAppThemeArguments(
             themeID: theme.id.rawValue,
             name: nil,
             appearance: nil,
@@ -904,7 +904,7 @@ final class ThemeToolTests: XCTestCase {
 
     /// The gate travels the tool path too: a wash the label cannot be read on is refused with
     /// the reason, and nothing is created — including the asset folder.
-    func testAnUnreadableGradientIsRefusedThroughTheTool() throws {
+    func testAnUnreadableGradientIsRefusedThroughTheTool() async throws {
         let name = "Unreadable Sidebar \(UUID().uuidString)"
         let kind = AppThemeStyles.cyberpunk.availableVariants[0]
         let label = AppThemeStyles.cyberpunk.resolved(
@@ -939,7 +939,7 @@ final class ThemeToolTests: XCTestCase {
             terminalColors: nil,
             apply: false
         )
-        let result = coordinator().createAppTheme(create)
+        let result = await coordinator().createAppTheme(create)
         XCTAssertTrue(result.isError, "a gradient in the label's own colour was accepted")
         XCTAssertTrue(result.text.contains("contrast"), result.text)
         XCTAssertNil(AppThemeLibrary.all.first { $0.name == name })
@@ -1023,7 +1023,7 @@ final class ThemeToolTests: XCTestCase {
     /// The whole loop an agent runs on the frame: create a takeover theme, read the block
     /// back in the same vocabulary, prove an unrelated patch inherits it untouched, and hand
     /// the frame back with `remove`.
-    func testAgentCanTakeOverReadAndReturnTheWindowFrame() throws {
+    func testAgentCanTakeOverReadAndReturnTheWindowFrame() async throws {
         let name = "Chrome Tool Theme \(UUID().uuidString)"
         let kind = AppThemeStyles.cyberpunk.availableVariants[0]
 
@@ -1064,7 +1064,7 @@ final class ThemeToolTests: XCTestCase {
             terminalColors: nil,
             apply: false
         )
-        let created = coordinator().createAppTheme(create)
+        let created = await coordinator().createAppTheme(create)
         XCTAssertFalse(created.isError, created.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer {
@@ -1109,7 +1109,7 @@ final class ThemeToolTests: XCTestCase {
             terminalColors: nil,
             apply: false
         )
-        let recolored = coordinator().updateAppTheme(recolor)
+        let recolored = await coordinator().updateAppTheme(recolor)
         XCTAssertFalse(recolored.isError, recolored.text)
         let kept = try XCTUnwrap(AppThemeLibrary.theme(withID: theme.id))
         XCTAssertNotNil(kept.variant(kind)?.chrome, "an unrelated patch stripped the chrome")
@@ -1130,7 +1130,7 @@ final class ThemeToolTests: XCTestCase {
             terminalColors: nil,
             apply: false
         )
-        let returned = coordinator().updateAppTheme(handBack)
+        let returned = await coordinator().updateAppTheme(handBack)
         XCTAssertFalse(returned.isError, returned.text)
         let bare = try XCTUnwrap(AppThemeLibrary.theme(withID: theme.id))
         XCTAssertNil(bare.variant(kind)?.chrome)
@@ -1138,7 +1138,7 @@ final class ThemeToolTests: XCTestCase {
     }
 
     /// The band's gate travels the tool path: ink the band swallows is refused verbatim.
-    func testAnUnreadableBandIsRefusedThroughTheTool() throws {
+    func testAnUnreadableBandIsRefusedThroughTheTool() async throws {
         let name = "Unreadable Chrome \(UUID().uuidString)"
         let kind = AppThemeStyles.cyberpunk.availableVariants[0]
 
@@ -1176,7 +1176,7 @@ final class ThemeToolTests: XCTestCase {
             terminalColors: nil,
             apply: false
         )
-        let result = coordinator().createAppTheme(create)
+        let result = await coordinator().createAppTheme(create)
         XCTAssertTrue(result.isError, "white ink on a white band was accepted")
         XCTAssertTrue(result.text.contains("contrast"), result.text)
         XCTAssertNil(AppThemeLibrary.all.first { $0.name == name })
@@ -1185,7 +1185,7 @@ final class ThemeToolTests: XCTestCase {
     /// A theme can say the window's own commands share its caption, and is answered when the
     /// band it states could not hold one. The floor is not decoration: a toolbar control's
     /// height is required, so a 20-point caption asking for one draws it outside the band.
-    func testAgentCanSeatTheWindowCommandsInACaptionTallEnoughToHoldThem() throws {
+    func testAgentCanSeatTheWindowCommandsInACaptionTallEnoughToHoldThem() async throws {
         let name = "Merged Caption Theme \(UUID().uuidString)"
         let kind = AppThemeStyles.cyberpunk.availableVariants[0]
 
@@ -1222,11 +1222,11 @@ final class ThemeToolTests: XCTestCase {
             )
         }
 
-        let refused = coordinator().createAppTheme(create(height: 20))
+        let refused = await coordinator().createAppTheme(create(height: 20))
         XCTAssertTrue(refused.isError, "a caption too short for a toolbar control was accepted")
         XCTAssertTrue(refused.text.contains("commands"), refused.text)
 
-        let created = coordinator().createAppTheme(create(height: 36))
+        let created = await coordinator().createAppTheme(create(height: 36))
         XCTAssertFalse(created.isError, created.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer {
@@ -1291,7 +1291,7 @@ final class ThemeToolTests: XCTestCase {
     /// The end-to-end customization contract for the first non-Windows takeover style: an
     /// agent can author Platinum's layout and texture, read every choice back, then remove
     /// the optional treatment without rebuilding the theme.
-    func testAgentCanAuthorReadAndRevisePlatinumChrome() throws {
+    func testAgentCanAuthorReadAndRevisePlatinumChrome() async throws {
         let name = "Platinum Tool Theme \(UUID().uuidString)"
         let createCall = try call("""
             {
@@ -1348,7 +1348,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(decodedTitle.activeTexture?.kind, "pinstripes")
         XCTAssertEqual(decodedTitle.activeTexture?.spacing, 2)
 
-        let result = coordinator().createAppTheme(create)
+        let result = await coordinator().createAppTheme(create)
         XCTAssertFalse(result.isError, result.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer {
@@ -1408,7 +1408,7 @@ final class ThemeToolTests: XCTestCase {
           updateCall,
           tool: .updateAppTheme
         )
-        let revised = coordinator().updateAppTheme(update)
+        let revised = await coordinator().updateAppTheme(update)
         XCTAssertFalse(revised.isError, revised.text)
         let updated = try XCTUnwrap(AppThemeLibrary.theme(withID: theme.id))
         XCTAssertNil(updated.variant(.light)?.chrome?.titleBar.activeTexture)
@@ -1418,7 +1418,7 @@ final class ThemeToolTests: XCTestCase {
 
     /// BeOS exercises the structural half of the public contract: a prompt can author the
     /// partial tab, omit Minimize, and retrieve those choices without knowing a stock ID.
-    func testAgentCanAuthorAndReadABeOSTitleTab() throws {
+    func testAgentCanAuthorAndReadABeOSTitleTab() async throws {
         let name = "BeOS Tool Theme \(UUID().uuidString)"
         let createCall = try call("""
             {
@@ -1464,7 +1464,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(decoded.tabWidth, 210)
         XCTAssertEqual(decoded.visibleButtons, ["close", "zoom"])
 
-        let result = coordinator().createAppTheme(create)
+        let result = await coordinator().createAppTheme(create)
         XCTAssertFalse(result.isError, result.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer {
@@ -1497,7 +1497,7 @@ final class ThemeToolTests: XCTestCase {
 
     /// Every IRIX-specific choice is ordinary public chrome vocabulary: an agent can author
     /// the italic stippled band and real Window-menu role without selecting the stock theme.
-    func testAgentCanAuthorAndReadIRIXChrome() throws {
+    func testAgentCanAuthorAndReadIRIXChrome() async throws {
         let name = "IRIX Tool Theme \(UUID().uuidString)"
         let createCall = try call("""
             {
@@ -1545,7 +1545,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(decoded.activeTexture?.kind, "dither")
         XCTAssertEqual(decoded.visibleButtons, ["window_menu", "minimize", "zoom"])
 
-        let result = coordinator().createAppTheme(create)
+        let result = await coordinator().createAppTheme(create)
         XCTAssertFalse(result.isError, result.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer {
@@ -1586,7 +1586,7 @@ final class ThemeToolTests: XCTestCase {
 
     /// Workbench's contribution is public vocabulary too: the exact gadget family and the
     /// semantic Depth operation can be authored by a prompt that never names the stock ID.
-    func testAgentCanAuthorAndReadAmigaChrome() throws {
+    func testAgentCanAuthorAndReadAmigaChrome() async throws {
         let name = "Amiga Tool Theme \(UUID().uuidString)"
         let createCall = try call("""
             {
@@ -1631,7 +1631,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(decoded.buttonGlyphStyle, "amiga")
         XCTAssertEqual(decoded.visibleButtons, ["close", "zoom", "depth"])
 
-        let result = coordinator().createAppTheme(create)
+        let result = await coordinator().createAppTheme(create)
         XCTAssertFalse(result.isError, result.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer {
@@ -2075,7 +2075,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertNil(material.headingStyle)
     }
 
-    func testAgentCanAuthorAndReadPopoverMaterial() throws {
+    func testAgentCanAuthorAndReadPopoverMaterial() async throws {
         let name = "Popover Material \(UUID().uuidString)"
         let createCall = try call("""
             {
@@ -2101,7 +2101,7 @@ final class ThemeToolTests: XCTestCase {
           createCall,
           tool: .createAppTheme
         )
-        let result = coordinator().createAppTheme(arguments)
+        let result = await coordinator().createAppTheme(arguments)
         XCTAssertFalse(result.isError, result.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer { _ = AppThemeLibrary.delete(theme) }
@@ -2131,7 +2131,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(popover["corner_radius"] as? Double, 1)
     }
 
-    func testAgentCanAuthorAnUnavailableHistoricalFaceWithAnInstalledFallback() throws {
+    func testAgentCanAuthorAnUnavailableHistoricalFaceWithAnInstalledFallback() async throws {
         let name = "Historical Font Theme \(UUID().uuidString)"
         let createCall = try call("""
             {
@@ -2153,7 +2153,7 @@ final class ThemeToolTests: XCTestCase {
           tool: .createAppTheme
         )
 
-        let result = coordinator().createAppTheme(arguments)
+        let result = await coordinator().createAppTheme(arguments)
         XCTAssertFalse(result.isError, result.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer { _ = AppThemeLibrary.delete(theme) }
@@ -2163,7 +2163,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(material.fontFallbacks, ["Also Missing Historical Face", "Helvetica"])
     }
 
-    func testAgentCanAuthorAndReadAReferenceButtonStyle() throws {
+    func testAgentCanAuthorAndReadAReferenceButtonStyle() async throws {
         let name = "Reference Button Theme \(UUID().uuidString)"
         let createCall = try call("""
             {
@@ -2225,7 +2225,7 @@ final class ThemeToolTests: XCTestCase {
           tool: .createAppTheme
         )
 
-        let result = coordinator().createAppTheme(create)
+        let result = await coordinator().createAppTheme(create)
         XCTAssertFalse(result.isError, result.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer {
@@ -2315,7 +2315,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(heading["italic"] as? Bool, true)
     }
 
-    func testAgentCanAuthorAndReadOpenStepScrollerMaterial() throws {
+    func testAgentCanAuthorAndReadOpenStepScrollerMaterial() async throws {
         let name = "OPENSTEP Tool Theme \(UUID().uuidString)"
         let createCall = try call("""
             {
@@ -2372,7 +2372,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(materialPatch.toggleStyle, "on_off_button")
         XCTAssertEqual(materialPatch.choiceHeight, 16)
 
-        let result = coordinator().createAppTheme(create)
+        let result = await coordinator().createAppTheme(create)
         XCTAssertFalse(result.isError, result.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer {
@@ -2657,9 +2657,9 @@ final class ThemeToolTests: XCTestCase {
 
     /// The same merge, on the other tool that performs it: an app theme's paired terminal
     /// palette is built by the same rule, so it is held to the same behaviour.
-    func testAppThemePaletteGivesAStatedTextColourToABoldTextThatWasNotStated() throws {
+    func testAppThemePaletteGivesAStatedTextColourToABoldTextThatWasNotStated() async throws {
         let name = "Adopted App Heading \(UUID().uuidString)"
-        let result = coordinator().createAppTheme(
+        let result = await coordinator().createAppTheme(
             CreateAppThemeArguments(
                 name: name,
                 baseID: AppThemeStyles.cyberpunk.id.rawValue,
@@ -2684,8 +2684,8 @@ final class ThemeToolTests: XCTestCase {
     }
 
     /// And the same gate: a variant can arrive with a readable body and an unreadable heading.
-    func testCreateAppThemeRefusesABoldTextThatCannotBeReadOnItsGround() {
-        let result = coordinator().createAppTheme(
+    func testCreateAppThemeRefusesABoldTextThatCannotBeReadOnItsGround() async {
+        let result = await coordinator().createAppTheme(
             CreateAppThemeArguments(
                 name: "Illegible App Heading \(UUID().uuidString)",
                 baseID: AppThemeStyles.cyberpunk.id.rawValue,

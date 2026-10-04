@@ -59,6 +59,7 @@ struct ThreadingExtensionBundle: Equatable, Sendable {
 struct ThreadingExtensionFontFile: Equatable, Sendable {
     let url: URL
     let familyNames: [String]
+    var postScriptNames: [String] = []
 }
 
 /// One bounded, statically inspected extension translation table.
@@ -622,7 +623,10 @@ enum ExtensionBundleInspector {
             }
             return ThreadingExtensionFontFile(
                 url: url,
-                familyNames: Array(Set(families)).sorted()
+                familyNames: Array(Set(families)).sorted(),
+                postScriptNames: descriptors.compactMap {
+                    CTFontDescriptorCopyAttribute($0, kCTFontNameAttribute) as? String
+                }
             )
         }
     }

@@ -244,7 +244,7 @@ final class ShopVocabularyTests: XCTestCase {
         XCTAssertEqual(material.badgeStyle, .plain)
     }
 
-    func testTheToolAuthorsAndReportsEveryShopValue() throws {
+    func testTheToolAuthorsAndReportsEveryShopValue() async throws {
         let name = "Shop Vocabulary Theme \(UUID().uuidString)"
         let created = try call("""
             {
@@ -284,7 +284,7 @@ final class ShopVocabularyTests: XCTestCase {
             created,
             tool: .createAppTheme
         )
-        let result = coordinator().createAppTheme(arguments)
+        let result = await coordinator().createAppTheme(arguments)
         XCTAssertFalse(result.isError, result.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer { _ = AppThemeLibrary.delete(theme) }
@@ -308,7 +308,7 @@ final class ShopVocabularyTests: XCTestCase {
         }
     }
 
-    func testRefusalsNameTheNewValues() throws {
+    func testRefusalsNameTheNewValues() async throws {
         let refused = try call("""
             {
               "name": "create_app_theme",
@@ -325,7 +325,7 @@ final class ShopVocabularyTests: XCTestCase {
             refused,
             tool: .createAppTheme
         )
-        let result = coordinator().createAppTheme(arguments)
+        let result = await coordinator().createAppTheme(arguments)
         XCTAssertTrue(result.isError)
         XCTAssertTrue(result.text.contains("\"outlined\""), result.text)
     }

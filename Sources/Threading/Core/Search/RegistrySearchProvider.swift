@@ -140,6 +140,7 @@ struct RegistrySearchProvider: UniversalSearchProvider {
         case let .extensionCommand(_, name, _): return name
         case .projectScript: return "Project Scripts"
         case .settings: return "Settings"
+        case .appearance: return "Appearance"
         }
     }
 

@@ -6211,6 +6211,20 @@ move and Return to run. The result area shows at most six rows at once and scrol
 more. **Escape** closes the palette and returns keyboard focus to the terminal or control you
 were using before opening it.
 
+**Themes and appearance packs are commands too.** Search a theme's name and choose **Use …
+Theme** to apply it. Installed extension themes are available even when their extension is off.
+Terminal-theme commands ask whether to change the default, a project, a session or a terminal.
+
+Choose **Create Appearance Pack…** in the palette, or **Create Pack…** in **Settings ▸ Themes**,
+to save a theme together with selected installed extensions. Saving does not turn anything on.
+Search the pack's name to activate, deactivate, toggle, edit or remove it, or assign a shortcut.
+One pack can be active at a time. Turning it off restores your standalone theme; extensions
+you enabled manually stay on. **Keep … Enabled Without Pack** makes a member independent.
+Disabling a required member also deactivates its pack. An extension that stops shows **Needs
+attention**, with Retry and Deactivate still available. If its installed content changes,
+edit the pack to review the new version before activating it again. Packs do not change your
+sound, motion or audio-capture preferences. Portable pack import/export is not available yet.
+
 Session commands do not require you to select a chat first. If a command such as **Close Session**
 or **Rename Session** only needs a session and none is selected, press **Tab or Return** to move to
 an inline session search, type part of the chat, project, or provider name, and press Return on the

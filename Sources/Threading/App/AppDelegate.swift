@@ -164,6 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var remoteUniversalSearchService: RemoteUniversalSearchService?
     private var universalSearchController: UniversalSearchSessionController?
     private var agentCLIUpdateCoordinator: AgentCLIUpdateCoordinator?
+    var appearanceHost = AppearanceActivationHost.shared
 
     /// The same semantic catalog and invocation route feeds menus, shortcuts and the palette.
     /// It deliberately re-resolves window context each time either closure runs.
@@ -275,7 +276,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // startup then: the tests exercise types directly and must not spawn agents, start the MCP
         // server, or touch the user's stores.
         if NSClassFromString("XCTestCase") != nil { return }
+        Task { @MainActor in await finishLaunching() }
+    }
 
+    private func finishLaunching() async {
         switch SimulatorCompatibilityProbeArguments.resolve(CommandLine.arguments) {
         case .notRequested:
             break
@@ -491,6 +495,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if plan.startsExtensions {
             ExtensionManager.shared.prepareAppearanceContributions()
         }
+        await AppearanceActivationHost.shared.prepare(startsExtensions: plan.startsExtensions)
         // A custom theme's own fonts, for the same reason and under the same recovery rule:
         // the restore wears System in recovery, so nothing needs them.
         if !plan.isRecovery {
@@ -623,6 +628,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         } else {
             mainWindowController.showWindow(nil)
         }
+        // Appearance restoration now yields before constructing the first window. Fulfil the
+        // foreground launch request once that window exists, rather than relying on AppKit's
+        // did-finish-launching activation while there was still nothing to make key.
+        NSApp.activate(ignoringOtherApps: true)
         startupProfile?.windowOrderedNanoseconds = DispatchTime.now().uptimeNanoseconds
         noteFirstWindowVisible(armsStability: plan.armsStabilityCheckpoint)
         if plan.isRecovery {
@@ -759,6 +768,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // suppresses routine foreground banners; this monitor lets the Mac withhold an owner's
         // routine completion push while Threading itself is the recently used device.
         macNotificationActivityMonitor.start()
+
+        if let failure = appearanceHost.failure {
+            appearanceHost.presentFailure(failure)
+        }
 
         if plan.startsExtensions {
             let factPipeline = installHostFactPipeline()
@@ -2202,6 +2215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     /// Holds the shortcut-change subscription for the process lifetime.
     private let menuEvents = AppEventObservations()
+    private var appearanceMenu: NSMenu?
 
     /// Builds a menu item that takes its shortcut from the command table instead of a literal.
     private func commandItem(_ id: String, action: Selector) -> NSMenuItem {
@@ -2238,6 +2252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     /// The same, for a stated key window, so a test can read the menu bar both ways.
     func applyShortcutBindings(documentIsKey: Bool) {
+        rebuildAppearanceMenu()
         let document = documentIsKey ? MarkdownEditorDefaults.documentShortcuts : [:]
         let claimed = Set(document.values)
         showsDocumentShortcuts = !document.isEmpty
@@ -2297,6 +2312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menuEvents.observe(CommandRegistryDidChange.self) { [weak self] _ in
             self?.rebuildExtensionMenus()
             self?.rebuildPanelCommandsMenu()
+            self?.rebuildAppearanceMenu()
         }
         menuEvents.observe(ProjectScriptsDidChange.self) { [weak self] _ in
             self?.rebuildProjectScriptsMenu()
@@ -2328,6 +2344,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         for command in CommandRegistry.shared.panelCommands {
             let item = commandItem(command.id, action: #selector(performHostMenuCommand(_:)))
             item.target = self
+            menu.addItem(item)
+        }
+    }
+
+    /// Only assigned shortcuts need AppKit carriers. Thousands of searchable theme values do
+    /// not become thousands of menu items on every menu validation pass.
+    private func rebuildAppearanceMenu() {
+        guard let menu = appearanceMenu else { return }
+        menu.removeAllItems()
+        for id in Array(commandItems.keys) where id.hasPrefix("appearance.") {
+            commandItems.removeValue(forKey: id)
+        }
+        for command in CommandRegistry.shared.all where command.appearanceTarget != nil {
+            let visible: Bool
+            switch command.appearanceTarget {
+            case .edit(nil): visible = true
+            case .deactivate(let id): visible = appearanceHost.state?.activePackID == id
+            default: visible = false
+            }
+            guard visible || ShortcutOverrideStore.shared.shortcut(for: command) != nil else { continue }
+            let item = commandItem(command.id, action: #selector(performHostMenuCommand(_:)))
+            item.target = self
+            item.isHidden = !visible
+            item.allowsKeyEquivalentWhenHidden = !visible
             menu.addItem(item)
         }
     }
@@ -2659,6 +2699,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let menu = NSMenu(title: MenuIdentifiers.viewMenu)
 
         menu.addItem(commandItem(AppCommands.ID.commandPalette, action: #selector(openCommandPalette)))
+        let appearance = NSMenuItem()
+        appearance.title = L10n.string("Appearance")
+        appearance.submenu = NSMenu(title: appearance.title)
+        appearanceMenu = appearance.submenu
+        menu.addItem(appearance)
+        rebuildAppearanceMenu()
         menu.addItem(.separator())
         menu.addItem(commandItem(AppCommands.ID.toggleSidebar, action: #selector(toggleSidebar)))
         for id in [
@@ -3138,6 +3184,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         input: HostCommandInputRequest
     ) -> [HostCommandInputOption] {
         switch input.kind {
+        case .terminalThemeScope:
+            return TerminalThemeCommands.options(projects: ProjectStore.shared.projects)
         case .session:
             return mainWindowController?.commandSessionOptions(for: commandID) ?? []
         case .project:
@@ -3199,6 +3247,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private func hostCommandState(for command: AppCommand) -> HostCommandState {
         if RecoveryMode.isActive, !RecoveryModeCommandPolicy.allows(commandID: command.id) {
             return .unavailable(L10n.string("This command is unavailable in Recovery Mode."))
+        }
+        if let target = command.appearanceTarget {
+            if case .terminalTheme = target,
+               AppearanceCommands.unavailableReason(target, host: appearanceHost) == nil {
+                return HostCommandState(availability: .available, nextInput: .init(
+                    kind: .terminalThemeScope, prompt: L10n.string("Choose where to apply this terminal theme."),
+                    searchPlaceholder: L10n.string("Choose theme scope")
+                ))
+            }
+            return AppearanceCommands.unavailableReason(target, host: appearanceHost).map(HostCommandState.unavailable)
+                ?? .available
         }
         // A script is available exactly while its declaration still resolves to something
         // runnable in the active checkout; the service's reason beats any scope inference.
@@ -3372,6 +3431,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         if let input = request.input {
             switch input.kind {
+            case .terminalThemeScope:
+                guard case .terminalTheme(let themeID) = command.appearanceTarget else {
+                    return .refused(commandID: id, reason: L10n.string("This command is no longer available."))
+                }
+                let reason = TerminalThemeCommands.apply(themeID: themeID, targetID: input.id)
+                return reason.map { .refused(commandID: id, reason: $0) } ?? .invoked(commandID: id)
             case .project:
                 guard command.extensionInput?.kind == .project,
                       case .extensionCommand = command.origin,
@@ -3471,6 +3536,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 return .refused(commandID: id, reason: L10n.string("This panel could not be opened."))
             }
             return .invoked(commandID: id)
+        }
+
+        if let target = command.appearanceTarget {
+            let host = appearanceHost
+            let reason: String?
+            switch target {
+            case .edit(let packID):
+                AppearancePackEditor.present(packID: packID, in: mainWindowController?.window, host: host)
+                reason = nil
+            case .retry(let packID):
+                reason = host.retry(packID)
+            case .toggle(let packID):
+                reason = host.submit(host.state?.activePackID == packID
+                    ? .deactivatePack(packID) : .activatePack(packID))
+            default:
+                reason = target.action.flatMap { host.submit($0) }
+            }
+            return reason.map { .refused(commandID: id, reason: $0) } ?? .invoked(commandID: id)
         }
 
         if case .extensionCommand = command.origin, command.panelTarget == nil {
@@ -3788,6 +3871,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc private func performHostMenuCommand(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
+        if let command = CommandRegistry.shared.command(id: id),
+           case .terminalTheme = command.appearanceTarget,
+           hostCommandState(for: command).nextInput != nil {
+            showCommandPalette()
+            commandPaletteController?.requestInput(for: id)
+            return
+        }
         _ = hostCommandPlane.invoke(commandID: id)
     }
 

@@ -46,15 +46,25 @@ extension AgentToolCoordinator {
         return .success(appThemeDocument(theme))
     }
 
-    func setAppTheme(_ arguments: SetAppThemeArguments) -> MCPToolResult {
+    private func applyAppThemeChoice(_ theme: AppTheme) async throws {
+        if AppearanceActivationHost.shared.isInstalled {
+            try await AppearanceActivationHost.shared.perform(.selectTheme(theme.id.rawValue))
+        } else {
+            ThemeSwitch.apply(theme)
+        }
+    }
+
+    func setAppTheme(_ arguments: SetAppThemeArguments) async -> MCPToolResult {
         guard let theme = appTheme(referencedBy: arguments.themeID) else {
             return missingAppTheme(arguments.themeID)
         }
-        ThemeSwitch.apply(theme)
-        return .success("Applied \(theme.name) (\(theme.id.rawValue)) app-wide.")
+        do {
+            try await applyAppThemeChoice(theme)
+            return .success("Applied \(theme.name) (\(theme.id.rawValue)) app-wide.")
+        } catch { return .failure(error.localizedDescription) }
     }
 
-    func createAppTheme(_ arguments: CreateAppThemeArguments) -> MCPToolResult {
+    func createAppTheme(_ arguments: CreateAppThemeArguments) async -> MCPToolResult {
         guard let rawName = arguments.name else {
             return .failure("Provide a name for the app theme.")
         }
@@ -72,6 +82,7 @@ extension AgentToolCoordinator {
         // the store files them under the theme's id. A failure anywhere below removes the
         // folder again, so a refused create leaves nothing behind.
         let newID = AppThemeLibrary.makeCustomID()
+        var didCreate = false
         do {
             let patches = try appThemeVariantPatches(arguments.variants)
             let usesLegacyPatch = hasLegacyVariantPatch(
@@ -131,13 +142,14 @@ extension AgentToolCoordinator {
                 variants: variants
             )
             try AppThemeLibrary.create(theme)
+            didCreate = true
             let layers = AppThemeLayerReport(
                 theme: theme,
                 startingFrom: base,
                 origin: .base(name: base.name)
             ).text
             if arguments.apply ?? true {
-                ThemeSwitch.apply(theme)
+                try await applyAppThemeChoice(theme)
                 return .success(
                     "Created and applied \(theme.name) (\(theme.id.rawValue)).\n\n\(layers)"
                 )
@@ -146,7 +158,7 @@ extension AgentToolCoordinator {
                 "Created \(theme.name) (\(theme.id.rawValue)) without applying it.\n\n\(layers)"
             )
         } catch {
-            ThemeAssetStore.removeAll(for: newID)
+            if !didCreate { ThemeAssetStore.removeAll(for: newID) }
             return .failure(error.localizedDescription)
         }
     }
@@ -165,7 +177,7 @@ extension AgentToolCoordinator {
         Task { @MainActor in completion(await AppThemeFontService.add(arguments)) }
     }
 
-    func duplicateAppTheme(_ arguments: DuplicateAppThemeArguments) -> MCPToolResult {
+    func duplicateAppTheme(_ arguments: DuplicateAppThemeArguments) async -> MCPToolResult {
         guard let source = appTheme(referencedBy: arguments.themeID) else {
             return missingAppTheme(arguments.themeID)
         }
@@ -174,7 +186,7 @@ extension AgentToolCoordinator {
             let name = cleaned(arguments.name) ?? AppThemeLibrary.uniqueCopyName(of: source)
             let copy = try AppThemeLibrary.duplicate(source, name: name)
             if arguments.apply ?? false {
-                AppThemeLibrary.apply(copy)
+                try await applyAppThemeChoice(copy)
                 return .success(
                     "Duplicated \(source.name) as \(copy.name) (\(copy.id.rawValue)) and applied it."
                 )
@@ -187,7 +199,7 @@ extension AgentToolCoordinator {
         }
     }
 
-    func updateAppTheme(_ arguments: UpdateAppThemeArguments) -> MCPToolResult {
+    func updateAppTheme(_ arguments: UpdateAppThemeArguments) async -> MCPToolResult {
         guard let source = appTheme(referencedBy: arguments.themeID) else {
             return missingAppTheme(arguments.themeID)
         }
@@ -326,8 +338,8 @@ extension AgentToolCoordinator {
             )
             let wasActive = AppThemeLibrary.current.id == source.id
             try AppThemeLibrary.update(updated)
-            if arguments.apply == true && !wasActive {
-                ThemeSwitch.apply(updated)
+            if arguments.apply == true {
+                try await applyAppThemeChoice(updated)
             }
 
             let state = (wasActive || arguments.apply == true)

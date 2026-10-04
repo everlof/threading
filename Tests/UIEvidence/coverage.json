@@ -1784,12 +1784,15 @@
         "Filtered session target input",
         "Shortcut recording",
         "Refresh Models action",
-        "Browser panel commands"
+        "Browser panel commands",
+        "Themes and active appearance packs",
+        "Pack runtime needs attention",
+        "Appearance pack editor in the native shell"
       ],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],
-        "sizes": ["760×520-point native shell"]
+        "sizes": ["760×520-point native shell", "Attached pack editor"]
       },
       "source": {
         "path": "Tests/ThreadingTests/CommandPaletteRenderTests.swift",

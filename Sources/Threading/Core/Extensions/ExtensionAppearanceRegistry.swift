@@ -1,23 +1,11 @@
 import AppKit
 import CoreText
 
-/// The themes and fonts enabled extensions contribute to the app's own appearance.
-///
-/// Mirrors `ExtensionSettingsRegistry`: derived state, replaced wholesale from the manager's
-/// enabled-and-valid packages whenever inventory or enablement changes, never mutated
-/// incrementally — so install, enable, disable, update and uninstall all converge through one
-/// idempotent diff. Everything here is data the host read at inspection time; no extension
-/// code has to be running (or even startable) for its themes and fonts to be in force, which
-/// is what lets `AppThemeLibrary.restore()` resolve a contributed theme before the first
-/// window exists.
-///
-/// Fonts are registered **process-scoped** through `CTFontManager`, and both halves of that
-/// were probed rather than assumed (2026-07-27, font-probe.swift): a process registration is
-/// visible to the descriptor matching `Design.Typography.inFamily` does — live, in both
-/// directions, so disabling an extension makes a theme naming its font degrade one rung
-/// exactly like any uninstalled family — while `NSFontManager.availableFontFamilies` snapshots
-/// on first access and never sees it, which is why every enumeration for pickers goes through
-/// `Design.Typography.availableFamilies` instead.
+/// Installed themes and inspected resources, independent of executable enablement.
+/// Inventory and live edits replace contribution values; status-only notifications do not
+/// rebuild them. Artwork decodes on demand into a two-theme cache. Font metadata stays visible
+/// in pickers while registrations follow runtime, selected-theme and explicit-family demand.
+/// CoreText process registrations are live; NSFontManager's cached enumeration is not.
 @MainActor
 final class ExtensionAppearanceRegistry {
 
@@ -28,6 +16,9 @@ final class ExtensionAppearanceRegistry {
         let extensionName: String
         let themes: [AppTheme]
         let fontURLs: [URL]
+        let fontFamilies: [URL: [String]]
+        let fontPostScriptNames: [URL: [String]]
+        let runtimeEnabled: Bool
         /// PNG bytes per theme, already decode-gated and shape-checked by
         /// `ExtensionBundleLoader`. Kept as bytes so a contribution stays `Equatable` and the
         /// wholesale diff below still recognises an unchanged package.
@@ -44,6 +35,9 @@ final class ExtensionAppearanceRegistry {
             extensionName: String,
             themes: [AppTheme],
             fontURLs: [URL],
+            fontFamilies: [URL: [String]] = [:],
+            fontPostScriptNames: [URL: [String]] = [:],
+            runtimeEnabled: Bool = true,
             iconMarks: [AppThemeID: Data] = [:],
             sidebarAssets: [AppThemeID: [String: Data]] = [:]
         ) {
@@ -51,6 +45,9 @@ final class ExtensionAppearanceRegistry {
             self.extensionName = extensionName
             self.themes = themes
             self.fontURLs = fontURLs
+            self.fontFamilies = fontFamilies
+            self.fontPostScriptNames = fontPostScriptNames
+            self.runtimeEnabled = runtimeEnabled
             self.iconMarks = iconMarks
             self.sidebarAssets = sidebarAssets
         }
@@ -72,6 +69,12 @@ final class ExtensionAppearanceRegistry {
     private(set) var activeFontURLs: Set<URL> = []
     private var decodedMarks: [AppThemeID: NSImage] = [:]
     private var decodedSidebarAssets: [AppThemeID: [String: NSImage]] = [:]
+    private var decodedThemeOrder: [AppThemeID] = []
+    private var demandedTheme: AppTheme?
+
+    var availableFontFamilies: Set<String> {
+        Set(contributions.flatMap { $0.fontFamilies.values.flatMap { $0 } })
+    }
 
     var themes: [AppTheme] { contributions.flatMap(\.themes) }
 
@@ -87,6 +90,7 @@ final class ExtensionAppearanceRegistry {
     /// keeps its theme's identity and changes its artwork is exactly the case a keyed-by-id
     /// cache would get wrong.
     func iconMark(forThemeID id: AppThemeID) -> NSImage? {
+        retainDecodedResources(for: id)
         if let cached = decodedMarks[id] { return cached }
         guard let data = contributions.compactMap({ $0.iconMarks[id] }).first,
               let image = NSImage(data: data) else { return nil }
@@ -101,6 +105,7 @@ final class ExtensionAppearanceRegistry {
     /// unnecessary. Nil for a name the package never shipped — the caller degrades to the
     /// default treatment, never to an error.
     func sidebarAsset(named name: String, forThemeID id: AppThemeID) -> NSImage? {
+        retainDecodedResources(for: id)
         if let cached = decodedSidebarAssets[id]?[name] { return cached }
         guard let data = sidebarAssetData(named: name, forThemeID: id),
               let image = NSImage(data: data) else { return nil }
@@ -109,33 +114,27 @@ final class ExtensionAppearanceRegistry {
     }
 
     /// The raw bytes behind a sidebar asset, for duplicating a contributed theme into the
-    /// custom tier — the copy has to own its assets, or disabling the extension would strip
+    /// custom tier — the copy has to own its assets, or uninstalling the extension would strip
     /// the sidebar off a theme the user now owns.
     func sidebarAssetData(named name: String, forThemeID id: AppThemeID) -> Data? {
         contributions.compactMap({ $0.sidebarAssets[id]?[name] }).first
     }
 
     func replace(contributions newContributions: [Contribution]) {
+        guard newContributions != contributions else { return }
         // Values, not ids: a live-reloaded or updated package keeps a theme's identity while
         // changing what it says, and a diff that only watched ids left the app wearing the
         // old colours until the next manual theme switch.
         let previousThemes = themes
         let previousFonts = activeFontURLs
 
-        let desiredFonts = Set(newContributions.flatMap(\.fontURLs))
-        for url in previousFonts.subtracting(desiredFonts) {
-            deactivateFont(url)
-            activeFontURLs.remove(url)
-        }
-        for url in desiredFonts.subtracting(previousFonts) where activateFont(url) {
-            activeFontURLs.insert(url)
-        }
-
         let previousMarks = contributions.map(\.iconMarks)
         let previousSidebarAssets = contributions.map(\.sidebarAssets)
         contributions = newContributions
+        updateFontRegistrations()
         decodedMarks = [:]
         decodedSidebarAssets = [:]
+        decodedThemeOrder = []
 
         // A package can change a theme's artwork without changing its identity — an update is
         // the ordinary way that happens — so the icon (and the sidebar wearing its assets) has
@@ -159,6 +158,51 @@ final class ExtensionAppearanceRegistry {
             NotificationCenter.default.post(
                 AppThemeDidChange(themeID: AppThemeLibrary.current.id)
             )
+        }
+    }
+
+    /// Catalogue entries are inert. Only the chosen appearance, running extensions and explicit
+    /// font choices retain registrations. Inspection already supplied these family names.
+    func prepareResources(for theme: AppTheme) {
+        demandedTheme = theme
+        updateFontRegistrations()
+    }
+
+    private func updateFontRegistrations() {
+        let theme = demandedTheme
+        var families = Set([AppSettings.chromeFontFamily, AppSettings.conversationFontFamily,
+                            ProfileStorage.shared.defaultProfile.fontName].compactMap { $0 })
+        for variant in theme?.variants.values.map({ $0 }) ?? [] {
+            families.formUnion([variant.material.fontFamily, variant.material.buttonStyle.fontFamily,
+                                variant.material.headingStyle?.fontFamily, variant.sidebar?.brand?.title?.fontFamily]
+                .compactMap { $0 })
+            families.formUnion(variant.material.fontFallbacks)
+        }
+        let desired = Set(contributions.flatMap { contribution in
+            if contribution.runtimeEnabled || contribution.themes.contains(where: { $0.id == theme?.id }) {
+                return contribution.fontURLs
+            }
+            return contribution.fontURLs.filter { url in
+                contribution.fontFamilies[url]?.contains(where: families.contains) == true
+                    || contribution.fontPostScriptNames[url]?.contains(where: families.contains) == true
+            }
+        })
+        for url in activeFontURLs.subtracting(desired) {
+            deactivateFont(url)
+            activeFontURLs.remove(url)
+        }
+        for url in desired.subtracting(activeFontURLs) where activateFont(url) {
+            activeFontURLs.insert(url)
+        }
+    }
+
+    private func retainDecodedResources(for id: AppThemeID) {
+        decodedThemeOrder.removeAll { $0 == id }
+        decodedThemeOrder.append(id)
+        while decodedThemeOrder.count > 2 {
+            let removed = decodedThemeOrder.removeFirst()
+            decodedMarks[removed] = nil
+            decodedSidebarAssets[removed] = nil
         }
     }
 }

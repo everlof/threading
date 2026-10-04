@@ -169,6 +169,9 @@ final class CommandPaletteViewController: NSViewController {
         appEvents.observe(CommandRegistryDidChange.self) { [weak self] _ in
             self?.reloadCatalog()
         }
+        appEvents.observe(AppearanceActivationDidChange.self) { [weak self] _ in
+            self?.reloadCatalog()
+        }
         appEvents.observe(KeyboardShortcutsDidChange.self) { [weak self] _ in
             self?.reloadCatalog()
         }
@@ -440,6 +443,12 @@ final class CommandPaletteViewController: NSViewController {
         }
     }
 
+    func requestInput(for commandID: String) {
+        guard let command = catalog().first(where: { $0.id == commandID }),
+              let request = command.nextInput else { return }
+        beginInput(for: command, request: request)
+    }
+
     private func beginInput(
         for command: HostCommandDescriptor,
         request: HostCommandInputRequest
@@ -589,6 +598,7 @@ final class CommandPaletteViewController: NSViewController {
         case .extensionCommand(_, let name, _): return name
         case .projectScript: return L10n.string("Project Scripts")
         case .settings: return L10n.string("Settings")
+        case .appearance: return L10n.string("Appearance")
         }
     }
 

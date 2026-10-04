@@ -5,6 +5,11 @@ with the rules in one place for every caller.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+The host command catalogue also exposes [appearance activation](appearance-activation.md):
+stable theme and pack identities, explicit runtime ownership, and terminal-theme commands whose
+next input names an assignment scope and target. Settings, palette, MCP and remote app-theme
+selection share the same durable operation.
+
 ## Where this came from, and where it goes
 
 The trigger was a review of [get-bb/bb](https://github.com/get-bb/bb) (2026-08-06), whose most

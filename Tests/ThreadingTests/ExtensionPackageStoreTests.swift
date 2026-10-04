@@ -1196,6 +1196,39 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertEqual(try result.get(), response)
     }
 
+    func testAppearancePackProjectionKeepsSharedGenerationAndRevokesDepartingRuntime() async throws {
+        let panel = ExtensionPanel(id: "pack-test", title: "Pack Test", root: .status("Ready", role: .neutral))
+        let source = try makePackage(panel: panel)
+        let store = ExtensionPackageStore(rootURL: temporaryDirectory("appearance-ownership"))
+        _ = try store.install(from: source)
+        let manager = ExtensionManager(store: store)
+        defer { manager.terminateAll() }
+        manager.startEnabledExtensions()
+        let id = "com.example.installed-test"
+        manager.adoptAppearanceEnablement([id], startRuntimes: true)
+        let registered = await waitUntil { !manager.extensionPanelInventory.isEmpty }
+        XCTAssertTrue(registered)
+        let generation = try XCTUnwrap(manager.extensionPanelInventory.first?.processGeneration)
+        manager.adoptAppearanceEnablement([id], startRuntimes: true)
+        XCTAssertEqual(manager.extensionPanelInventory.first?.processGeneration, generation)
+        XCTAssertEqual(store.enabledIdentifiers(), [], "pack ownership must not become a manual legacy flag")
+        manager.appearancePrepareForRemoval = { _ in throw AppearanceActivationError.persistenceFailed }
+        do { _ = try await manager.uninstall(identifier: id); XCTFail("save failure must refuse removal") } catch {}
+        XCTAssertEqual(manager.extensionPanelInventory.first?.processGeneration, generation)
+        XCTAssertEqual(try store.inventory().count, 1)
+        manager.appearancePrepareForRemoval = nil
+        try manager.beginAppearanceMutation()
+        do { _ = try await manager.uninstall(identifier: id); XCTFail("mutation reservation must refuse removal") } catch {}
+        manager.endAppearanceMutation()
+        manager.adoptAppearanceEnablement([], startRuntimes: true)
+        XCTAssertTrue(manager.extensionPanelInventory.isEmpty)
+        XCTAssertEqual(manager.installedExtensions.first?.status, .disabled)
+        manager.appearanceRuntimeAdmission = { _ in "Review changed content" }
+        manager.adoptAppearanceEnablement([id], startRuntimes: true)
+        XCTAssertEqual(manager.installedExtensions.first?.status, .failed("Review changed content"))
+        XCTAssertTrue(manager.extensionPanelInventory.isEmpty)
+    }
+
     func testManagerRegistersRoutesAndRemovesExtensionCommands() async throws {
         let command = ExtensionCommand(
             id: "open-build",
@@ -3160,9 +3193,12 @@ final class ExtensionPackageStoreTests: XCTestCase {
                 return XCTFail("unexpected error: \($0)")
             }
         }
-        XCTAssertThrowsError(try manager.uninstall(identifier: "com.example.versioned")) {
-            guard case .operationInProgress = $0 as? ExtensionManagerError else {
-                return XCTFail("unexpected error: \($0)")
+        do {
+            _ = try await manager.uninstall(identifier: "com.example.versioned")
+            XCTFail("update must refuse removal")
+        } catch {
+            guard case .operationInProgress = error as? ExtensionManagerError else {
+                return XCTFail("unexpected error: \(error)")
             }
         }
         // Simulate an administrative desired-state change outside the manager while its main

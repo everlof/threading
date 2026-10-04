@@ -329,10 +329,10 @@ protocol MCPBuiltInToolExecuting: AnyObject {
   func createTheme(_ arguments: CreateThemeArguments, for sessionID: SessionID) -> MCPToolResult
   func listAppThemes() -> MCPToolResult
   func getAppTheme(_ arguments: AppThemeReferenceArguments) -> MCPToolResult
-  func setAppTheme(_ arguments: SetAppThemeArguments) -> MCPToolResult
-  func createAppTheme(_ arguments: CreateAppThemeArguments) -> MCPToolResult
-  func duplicateAppTheme(_ arguments: DuplicateAppThemeArguments) -> MCPToolResult
-  func updateAppTheme(_ arguments: UpdateAppThemeArguments) -> MCPToolResult
+  func setAppTheme(_ arguments: SetAppThemeArguments) async -> MCPToolResult
+  func createAppTheme(_ arguments: CreateAppThemeArguments) async -> MCPToolResult
+  func duplicateAppTheme(_ arguments: DuplicateAppThemeArguments) async -> MCPToolResult
+  func updateAppTheme(_ arguments: UpdateAppThemeArguments) async -> MCPToolResult
   func previewAppTheme(
     _ arguments: PreviewAppThemeArguments,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void

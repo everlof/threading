@@ -449,6 +449,7 @@ public enum AppThemeRefresh {
                 let overrides = currentFontOverrides
                 guard overrides != lastFontOverrides else { return }
                 lastFontOverrides = overrides
+                ExtensionAppearanceRegistry.shared.prepareResources(for: AppThemeLibrary.current)
                 repaintEverything()
                 NotificationCenter.default.post(
                     AppThemeDidChange(themeID: AppThemeLibrary.current.id)

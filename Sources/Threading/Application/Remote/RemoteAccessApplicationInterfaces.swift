@@ -63,6 +63,7 @@ protocol RemoteRuntimeStatus: Sendable {
 enum RemoteAppThemeMutationResult: Equatable {
     case applied(AppThemeID)
     case unknownTheme
+    case failed(String)
 }
 
 /// Settings mutations exposed to an authenticated owner. Validation and persistence stay behind
@@ -73,7 +74,7 @@ protocol RemoteSettingsMutating: Sendable {
         identity: String,
         value: AppSettingStoredValue
     ) -> AppSettingRemoteMutationResult
-    func applyAppTheme(id: AppThemeID) -> RemoteAppThemeMutationResult
+    func applyAppTheme(id: AppThemeID) async -> RemoteAppThemeMutationResult
     func setSessionTheme(
         id: TerminalThemeID?,
         for sessionID: SessionID
@@ -193,9 +194,12 @@ struct LiveRemoteSettingsMutator: RemoteSettingsMutating {
         appSettings.applyRemoteMutation(identity: identity, value: value)
     }
 
-    func applyAppTheme(id: AppThemeID) -> RemoteAppThemeMutationResult {
+    func applyAppTheme(id: AppThemeID) async -> RemoteAppThemeMutationResult {
         guard let theme = AppThemeLibrary.theme(withID: id) else { return .unknownTheme }
-        AppThemeLibrary.apply(theme)
+        if AppearanceActivationHost.shared.isInstalled {
+            do { try await AppearanceActivationHost.shared.perform(.selectTheme(id.rawValue)) }
+            catch { return .failed(error.localizedDescription) }
+        } else { AppThemeLibrary.apply(theme) }
         return .applied(theme.id)
     }
 

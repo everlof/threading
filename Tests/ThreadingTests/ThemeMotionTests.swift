@@ -459,7 +459,7 @@ final class ThemeMotionTests: XCTestCase {
         )
     }
 
-    func testAgentCanDressAThemeInMotionAndReadItBack() throws {
+    func testAgentCanDressAThemeInMotionAndReadItBack() async throws {
         let name = "Motion Tool Theme \(UUID().uuidString)"
         let logo = NSImage(size: NSSize(width: 16, height: 32), flipped: false) { rect in
             NSColor(srgbRed: 0.9, green: 0, blue: 0.05, alpha: 1).setFill()
@@ -509,7 +509,7 @@ final class ThemeMotionTests: XCTestCase {
             terminalColors: nil,
             apply: false
         )
-        let created = coordinator().createAppTheme(create)
+        let created = await coordinator().createAppTheme(create)
         XCTAssertFalse(created.isError, created.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer {
@@ -556,7 +556,7 @@ final class ThemeMotionTests: XCTestCase {
             terminalColors: nil,
             apply: false
         )
-        let updated = coordinator().updateAppTheme(update)
+        let updated = await coordinator().updateAppTheme(update)
         XCTAssertFalse(updated.isError, updated.text)
         let after = try XCTUnwrap(AppThemeLibrary.theme(withID: theme.id)?.variant(.dark))
         XCTAssertEqual(after.sidebar?.background?.particles?.density, 0.9)

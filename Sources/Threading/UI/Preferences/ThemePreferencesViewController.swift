@@ -196,6 +196,7 @@ final class ThemePreferencesViewController: NSViewController {
         // The app-theme entry *is* the app theme's palette, so a switch changes what this list
         // shows as well as what the window is painted in.
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.appThemeDidChange() }
+        appEvents.observe(AppearanceActivationDidChange.self) { [weak self] _ in self?.reloadAppThemeControls() }
         appEvents.observe(AppThemeLibraryDidChange.self) { [weak self] _ in
             self?.appThemeLibraryDidChange()
         }
@@ -312,6 +313,11 @@ final class ThemePreferencesViewController: NSViewController {
                 subtitleField: &appThemeSubtitle
             ),
             SettingsUI.row(
+                title: "Appearance packs",
+                subtitle: "Save a theme with companion extensions, then activate or deactivate the pack from the command palette.",
+                control: SettingsUI.button("Create Pack…", target: self, action: #selector(createAppearancePack))
+            ),
+            SettingsUI.row(
                 title: "Classic skins",
                 subtitle: "Import a classic Winamp .wsz skin, or drop one on this page. Files stay on this Mac.",
                 control: importButton
@@ -350,6 +356,10 @@ final class ThemePreferencesViewController: NSViewController {
         stack.alignment = .leading
         stack.spacing = Design.Spacing.small
         return stack
+    }
+
+    @objc private func createAppearancePack() {
+        AppearancePackEditor.present(packID: nil, in: view.window)
     }
 
     // MARK: - Fonts
@@ -560,6 +570,10 @@ final class ThemePreferencesViewController: NSViewController {
     private func applyAppTheme(id: AppThemeID) {
         guard let theme = AppThemeLibrary.theme(withID: id) else { return }
         ThemeSwitch.apply(theme)
+        if AppearanceActivationHost.shared.isInstalled {
+            reloadAppThemeControls()
+            return
+        }
         // The subtitle describes the *chosen* theme, so it moves with the choice — otherwise
         // it keeps describing the theme that was selected when the card was built.
         appThemeSubtitle?.stringValue = theme.summary ?? ""
@@ -572,6 +586,7 @@ final class ThemePreferencesViewController: NSViewController {
 
     private func reloadAppThemeControls() {
         guard let popUp = appThemePopUp else { return }
+        popUp.isEnabled = !AppearanceActivationHost.shared.isChanging
         popUp.removeAllItems()
         // Twenty-nine names in one flat column, with the tier written into each row's own title
         // (`— Custom`, `— <extension>`) because there was nowhere else to put it. The heads say
