@@ -122,6 +122,8 @@ final class PTYSession: @unchecked Sendable {
     var pendingInputBytes = 0
     /// Set by `kill`, so an exit that follows is not reported as a surprise in the journal.
     var wasKilled = false
+    /// The spawner asked for this child's ending to be kept until acknowledged.
+    var retainReceipt = false
 
     // MARK: - Initialization
 

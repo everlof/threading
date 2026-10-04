@@ -155,6 +155,20 @@ public enum PTYHostFrame: Codable, Equatable, Sendable {
 
     /// Daemon → app: an in-band failure that does not end the connection.
     case error(PTYHostErrorFrame)
+
+    /// Client → daemon: the retained endings of `retainReceipt` sessions. Sent only to a daemon
+    /// whose `hello` names `PTYHostFeature.retainedReceipts`; an older daemon would refuse the
+    /// unknown frame and close the connection, which is why the feature list gates it.
+    case receiptList
+
+    /// Daemon → client: those endings, exits and losses alike, until each is acknowledged.
+    case receipts(PTYHostReceipts)
+
+    /// Client → daemon: these endings are durably recorded elsewhere and may be forgotten.
+    /// Gated by the same feature. Unanswered: a `list` sent after it on the same connection is
+    /// answered only once it has been applied, because one connection's frames are served in
+    /// order.
+    case acknowledge(PTYHostAcknowledge)
 }
 
 // MARK: - Frame bodies
@@ -168,25 +182,42 @@ public struct PTYHostHello: Codable, Equatable, Sendable {
     /// see `PTYHostProtocol`.
     public let build: String
     public let pid: Int32
+    /// Optional capabilities the sender serves beyond the protocol pair (`PTYHostFeature`).
+    /// Additive: an older peer omits the field and ignores it, so absence means "none". A
+    /// feature never admits or refuses a connection; it only says which optional frames a
+    /// client may send without being disconnected for an unknown type.
+    public let features: [String]?
 
     public init(
         protocolVersion: Int = PTYHostProtocol.current,
         minimumSupported: Int = PTYHostProtocol.minimumSupported,
         build: String,
-        pid: Int32
+        pid: Int32,
+        features: [String]? = nil
     ) {
         self.protocolVersion = protocolVersion
         self.minimumSupported = minimumSupported
         self.build = build
         self.pid = pid
+        self.features = features
     }
+
+    public func serves(_ feature: String) -> Bool { features?.contains(feature) == true }
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol"
         case minimumSupported
         case build
         case pid
+        case features
     }
+}
+
+/// Optional daemon capabilities a `hello` may name. Tokens, never sentences.
+public enum PTYHostFeature {
+    /// The daemon honours `PTYHostSpawnRequest.retainReceipt`, answers `receiptList` and accepts
+    /// `acknowledge`.
+    public static let retainedReceipts = "retainedReceipts"
 }
 
 public struct PTYHostHelloRefusal: Codable, Equatable, Sendable {
@@ -271,6 +302,11 @@ public struct PTYHostSpawnRequest: Codable, Equatable, Sendable {
     /// Optional for additive compatibility: an older app omits it, and an older daemon ignores
     /// it. A new daemon treats only `true` as replacement authority.
     public let replaceExisting: Bool?
+    /// The caller is an unattended owner that must learn how this child ended even if it looks
+    /// long afterwards or after the daemon restarted: the daemon keeps a bounded, durable receipt
+    /// of the exit or loss until `acknowledge`. Optional for additive compatibility; an older
+    /// daemon ignores it and keeps its ordinary retention window.
+    public let retainReceipt: Bool?
 
     public init(
         id: PTYHostSessionIdentity,
@@ -280,7 +316,8 @@ public struct PTYHostSpawnRequest: Codable, Equatable, Sendable {
         execName: String? = nil,
         environment: [String],
         cwd: String? = nil,
-        replaceExisting: Bool = false
+        replaceExisting: Bool = false,
+        retainReceipt: Bool = false
     ) {
         self.id = id
         self.channel = channel
@@ -290,6 +327,7 @@ public struct PTYHostSpawnRequest: Codable, Equatable, Sendable {
         self.environment = environment
         self.cwd = cwd
         self.replaceExisting = replaceExisting ? true : nil
+        self.retainReceipt = retainReceipt ? true : nil
     }
 }
 
@@ -634,11 +672,72 @@ public struct PTYHostErrorFrame: Codable, Equatable, Sendable {
     public let code: PTYHostError
     /// A bounded machine token qualifying `code`, such as the guard clause that refused.
     public let detail: String?
+    /// The session the failure is about, when there is one: a `spawnFailed` names the spawn
+    /// that started no process, so an owner can record that definite outcome rather than an
+    /// unanswered request. Optional and additive; an older peer ignores it.
+    public let id: PTYHostSessionIdentity?
+    /// The operating system's error number for a machine failure such as `fork`. A number, not
+    /// a message, so it carries nothing a person wrote.
+    public let errorNumber: Int32?
 
-    public init(code: PTYHostError, detail: String? = nil) {
+    public init(code: PTYHostError, detail: String? = nil,
+                id: PTYHostSessionIdentity? = nil, errorNumber: Int32? = nil) {
         self.code = code
         self.detail = detail
+        self.id = id
+        self.errorNumber = errorNumber
     }
+}
+
+/// How a `retainReceipt` session ended, kept until acknowledged.
+public struct PTYHostReceipt: Codable, Equatable, Sendable {
+    public enum Ending: String, Codable, Sendable {
+        /// Reaped by this daemon or by a predecessor that wrote the exit down.
+        case exited
+        /// A restarted daemon found it unaccounted for and reclaimed its process group.
+        case lost
+    }
+    public let id: PTYHostSessionIdentity
+    public let pid: Int32
+    public let startTime: PTYHostProcessStartTime?
+    public let ending: Ending
+    /// `exited` only: the exit code, or the signal number when `signalled`.
+    public let status: Int32?
+    public let signalled: Bool?
+    /// `lost` only: the recovery event that found it, when it was this daemon's own.
+    public let incidentID: UUID?
+    public let at: Date
+    /// `exited` only, and only while the daemon that reaped it is alive: the last bytes the
+    /// child wrote, bounded by `PTYHostReceiptLimits.tailBytes`. Never written to disk.
+    public let tail: Data?
+
+    public init(id: PTYHostSessionIdentity, pid: Int32, startTime: PTYHostProcessStartTime?,
+                ending: Ending, status: Int32? = nil, signalled: Bool? = nil,
+                incidentID: UUID? = nil, at: Date, tail: Data? = nil) {
+        self.id = id; self.pid = pid; self.startTime = startTime; self.ending = ending
+        self.status = status; self.signalled = signalled; self.incidentID = incidentID
+        self.at = at; self.tail = tail
+    }
+}
+
+public struct PTYHostReceipts: Codable, Equatable, Sendable {
+    public let receipts: [PTYHostReceipt]
+    public init(receipts: [PTYHostReceipt]) { self.receipts = receipts }
+}
+
+public struct PTYHostAcknowledge: Codable, Equatable, Sendable {
+    public let ids: [PTYHostSessionIdentity]
+    public init(ids: [PTYHostSessionIdentity]) { self.ids = ids }
+}
+
+/// The bounds both ends hold receipts to, stated once.
+public enum PTYHostReceiptLimits {
+    /// Receipts a daemon keeps; the oldest is evicted, and journalled, beyond this.
+    public static let retained = 256
+    /// Identities one `acknowledge` may name; a longer list is refused.
+    public static let acknowledgedPerFrame = 64
+    /// Output tail kept with an exit receipt.
+    public static let tailBytes = 4_096
 }
 
 // MARK: - Codable
@@ -668,6 +767,9 @@ extension PTYHostFrame {
         case journalTail
         case journal
         case error
+        case receiptList
+        case receipts
+        case acknowledge
     }
 
     enum CodingKeys: String, CodingKey {
@@ -703,6 +805,9 @@ extension PTYHostFrame {
         case .journalTail: self = .journalTail(try Self.body(container, raw))
         case .journal: self = .journal(try Self.body(container, raw))
         case .error: self = .error(try Self.body(container, raw))
+        case .receiptList: self = .receiptList
+        case .receipts: self = .receipts(try Self.body(container, raw))
+        case .acknowledge: self = .acknowledge(try Self.body(container, raw))
         }
     }
 
@@ -769,6 +874,14 @@ extension PTYHostFrame {
             try container.encode(value, forKey: .body)
         case .error(let value):
             try container.encode(FrameType.error, forKey: .type)
+            try container.encode(value, forKey: .body)
+        case .receiptList:
+            try container.encode(FrameType.receiptList, forKey: .type)
+        case .receipts(let value):
+            try container.encode(FrameType.receipts, forKey: .type)
+            try container.encode(value, forKey: .body)
+        case .acknowledge(let value):
+            try container.encode(FrameType.acknowledge, forKey: .type)
             try container.encode(value, forKey: .body)
         }
     }

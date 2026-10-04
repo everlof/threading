@@ -66,6 +66,13 @@ final class PTYHostServer: @unchecked Sendable {
     private var lossIncidentID: UUID?
     private var lossDetectedAt: Date?
 
+    /// Endings of `retainReceipt` sessions nobody has acknowledged, exits and losses alike,
+    /// including those a predecessor wrote down. Bounded by `PTYHostReceiptLimits.retained`;
+    /// the oldest is evicted and journalled beyond it. This is the acknowledged state the
+    /// `lost` frame deliberately does without: an unattended owner may look long after the
+    /// ordinary retention window, or after a second restart, and is owed the same answer.
+    private var receipts: [PTYHostSessionIdentity: PTYHostReceipt] = [:]
+
     private var isRetiring = false
 
     /// The descriptor holding the state directory's exclusive lock. Never closed: the kernel
@@ -226,10 +233,13 @@ final class PTYHostServer: @unchecked Sendable {
     /// nothing else will ever clean this one up, and an agent still working in a session no
     /// surface can reach is worse than one that ended.
     private func recoverPreviousSessions() {
-        let (unaccounted, skipped) = state.unaccountedSessions()
+        let recovered = state.recover()
+        let unaccounted = recovered.unaccounted
+        let skipped = recovered.skippedLines
         if skipped > 0 {
             journal.record(.stateLineSkipped, [Field.lines: String(skipped)])
         }
+        for receipt in recovered.receipts { retain(receipt) }
         guard !unaccounted.isEmpty else { return }
 
         lossIncidentID = UUID()
@@ -247,7 +257,12 @@ final class PTYHostServer: @unchecked Sendable {
                 Field.channel: entry.channel.rawValue,
                 Field.detail: stillRunning ? "groupKilled" : "processGone"
             ])
-            state.append(PTYHostStateRecord(edge: .lost, id: entry.id, pid: entry.pid))
+            state.append(PTYHostStateRecord(edge: .lost, id: entry.id, pid: entry.pid,
+                                            incidentID: lossIncidentID))
+            if entry.retain {
+                retain(PTYHostReceipt(id: entry.id, pid: entry.pid, startTime: entry.startTime,
+                                      ending: .lost, incidentID: lossIncidentID, at: lossDetectedAt ?? Date()))
+            }
             lostSessions.append(entry.id)
             earliest = min(earliest, entry.since)
         }
@@ -479,8 +494,14 @@ final class PTYHostServer: @unchecked Sendable {
             connection.send(.journal(PTYHostJournal(
                 lines: journal.tail(maxBytes: request.maxBytes)
             )))
+        case .receiptList:
+            connection.send(.receipts(PTYHostReceipts(
+                receipts: receipts.values.sorted { $0.at < $1.at }
+            )))
+        case .acknowledge(let request):
+            acknowledge(request.ids, from: connection)
         case .helloRefused, .sessions, .spawned, .spawnRefused, .attached, .resized,
-             .exited, .foreground, .lost, .journal, .error:
+             .exited, .foreground, .lost, .journal, .error, .receipts:
             // Every one of these is the daemon's to send. Receiving one means the peer is
             // speaking the protocol backwards, which is not a state to keep serving.
             refuse(connection, code: .malformedFrame, detail: "daemonFrameFromClient")
@@ -518,7 +539,8 @@ final class PTYHostServer: @unchecked Sendable {
         }
 
         connection.hasGreeted = true
-        connection.send(.hello(PTYHostHello(build: build, pid: getpid())))
+        connection.send(.hello(PTYHostHello(build: build, pid: getpid(),
+                                            features: [PTYHostFeature.retainedReceipts])))
         if !lostSessions.isEmpty {
             connection.send(.lost(PTYHostLost(
                 ids: lostSessions,
@@ -647,7 +669,10 @@ final class PTYHostServer: @unchecked Sendable {
                 return
             }
         }
+        session.retainReceipt = request.retainReceipt == true
         sessions[request.id] = session
+        // A new incarnation supersedes an unacknowledged ending of the same identity.
+        receipts.removeValue(forKey: request.id)
 
         // Written before the reply, because the whole point of the file is to be the last thing
         // that happened before a crash: a child nobody recorded is a child a restart cannot even
@@ -658,7 +683,8 @@ final class PTYHostServer: @unchecked Sendable {
             pid: session.pid,
             startTime: session.startTime,
             executable: session.executable,
-            channel: session.channel
+            channel: session.channel,
+            retain: session.retainReceipt
         ))
         journal.record(.spawned, [
             Field.session: session.id.description,
@@ -700,7 +726,34 @@ final class PTYHostServer: @unchecked Sendable {
                 Field.session: id.description,
                 Field.reason: String(cString: strerror(code))
             ])
-            connection.send(.error(PTYHostErrorFrame(code: .spawnFailed)))
+            // Names the spawn and the errno, so an unattended owner records a definite "no
+            // process started" instead of an unanswered request it may never resolve.
+            connection.send(.error(PTYHostErrorFrame(code: .spawnFailed, detail: "fork",
+                                                     id: id, errorNumber: code)))
+        }
+    }
+
+    // MARK: - Private Methods — receipts
+
+    private func retain(_ receipt: PTYHostReceipt) {
+        receipts[receipt.id] = receipt
+        guard receipts.count > PTYHostReceiptLimits.retained,
+              let oldest = receipts.values.min(by: { $0.at < $1.at }) else { return }
+        receipts.removeValue(forKey: oldest.id)
+        journal.record(.receiptEvicted, [Field.session: oldest.id.description])
+    }
+
+    /// Forgets receipts their owner has recorded. A live session cannot be acknowledged — there
+    /// is no ending yet — so an identity without a receipt is simply ignored.
+    private func acknowledge(_ ids: [PTYHostSessionIdentity], from connection: PTYHostConnection) {
+        guard ids.count <= PTYHostReceiptLimits.acknowledgedPerFrame else {
+            refuse(connection, code: .malformedFrame, detail: "acknowledgeTooMany")
+            return
+        }
+        for id in ids {
+            guard let receipt = receipts.removeValue(forKey: id) else { continue }
+            state.append(PTYHostStateRecord(edge: .acknowledged, id: id, pid: receipt.pid))
+            journal.record(.receiptAcknowledged, [Field.session: id.description])
         }
     }
 
@@ -1207,6 +1260,14 @@ final class PTYHostServer: @unchecked Sendable {
         session.exitDelivered = true
         session.foregroundTimer?.cancel()
         session.foregroundTimer = nil
+        if session.retainReceipt {
+            // After the drain, so the tail holds the child's last words. The `exited` edge is
+            // already on disk, so a crash before this line still leaves a receipt to recover.
+            let tail = session.ring.snapshot().suffix(PTYHostReceiptLimits.tailBytes)
+            retain(PTYHostReceipt(id: session.id, pid: session.pid, startTime: session.startTime,
+                                  ending: .exited, status: exit.status, signalled: exit.signalled,
+                                  at: exit.at, tail: tail.isEmpty ? nil : Data(tail)))
+        }
         for watcher in session.watchers {
             watcher.send(.exited(PTYHostExited(
                 id: session.id,

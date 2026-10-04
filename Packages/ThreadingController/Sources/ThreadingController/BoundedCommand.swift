@@ -1,7 +1,18 @@
 import Foundation
+#if canImport(Glibc)
+import Glibc
+#endif
 
 /// Shared host subprocess boundary: exact environment, bounded streams and wall time, and a
 /// private process group. Pipe draining never waits for EOF from an escaped descendant.
+///
+/// **A set `failure` is a failure, whatever `exitCode` says.** A descendant that left the process
+/// group (`setsid`) survives the group kill while holding the output pipes; the command can then
+/// report exit 0 together with `cleanup_incomplete`. Every caller (trigger probes, mail
+/// transport) treats any failure as a failed run. On Linux the cleanup additionally finds the
+/// processes still holding this command's output pipes through `/proc` and kills them, reported
+/// as `escaped_descendant_killed`; elsewhere an escapee is reported and survives, because there
+/// is no portable way to name it without a container or cgroup boundary.
 public enum BoundedCommand {
     public struct Result: Sendable {
         public let output: Data
@@ -78,6 +89,9 @@ public enum BoundedCommand {
         var output = Data(), errors = Data()
         var ended = [false, false]
         var buffer = [UInt8](repeating: 0, count: 65_536)
+        #if os(Linux)
+        var swept = false
+        #endif
         while true {
             let now = ProcessInfo.processInfo.systemUptime
             if !reaped {
@@ -113,7 +127,19 @@ public enum BoundedCommand {
                 } else if errno != EAGAIN && errno != EINTR { ended[stream] = true }
             }
             if reaped && ended.allSatisfy({ $0 }) { break }
-            if let cleanupDeadline, now >= cleanupDeadline { failure = failure ?? "cleanup_incomplete"; break }
+            if let deadline = cleanupDeadline, now >= deadline {
+                #if os(Linux)
+                if !swept {
+                    swept = true
+                    if PipeHolders.kill(holding: Array(descriptors.dropFirst())) > 0 {
+                        failure = failure ?? "escaped_descendant_killed"
+                        cleanupDeadline = now + cleanupSeconds
+                        continue
+                    }
+                }
+                #endif
+                failure = failure ?? "cleanup_incomplete"; break
+            }
             _ = poll(nil, 0, 10)
         }
         if !reaped { _ = kill(-pid, SIGKILL); _ = waitpid(pid, &status, WNOHANG) }
@@ -121,3 +147,35 @@ public enum BoundedCommand {
         return Result(output: output, errors: errors, exitCode: code, failure: failure)
     }
 }
+
+#if os(Linux)
+/// Finds processes that hold a given pipe open, by the pipe's inode in `/proc/*/fd`. Bounded in
+/// processes and descriptors examined; used only on the rare escaped-descendant path.
+enum PipeHolders {
+    static let maximumProcesses = 32_768
+    static let maximumDescriptors = 4_096
+
+    static func kill(holding descriptors: [Int32]) -> Int {
+        var inodes = Set<String>()
+        for descriptor in descriptors {
+            var info = stat()
+            if fstat(descriptor, &info) == 0 { inodes.insert("pipe:[\(info.st_ino)]") }
+        }
+        guard !inodes.isEmpty,
+              let entries = try? FileManager.default.contentsOfDirectory(atPath: "/proc") else { return 0 }
+        let me = getpid()
+        var killed = 0
+        for name in entries.prefix(maximumProcesses) {
+            guard let pid = Int32(name), pid != me,
+                  let fds = try? FileManager.default.contentsOfDirectory(atPath: "/proc/\(name)/fd") else { continue }
+            for fd in fds.prefix(maximumDescriptors) {
+                guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(name)/fd/\(fd)"),
+                      inodes.contains(target) else { continue }
+                if Glibc.kill(pid, SIGKILL) == 0 { killed += 1 }
+                break
+            }
+        }
+        return killed
+    }
+}
+#endif

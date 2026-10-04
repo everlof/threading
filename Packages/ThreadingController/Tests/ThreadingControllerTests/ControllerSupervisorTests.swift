@@ -6,6 +6,11 @@ struct ControllerSupervisorTests {
     let helpers = ControllerStoreTests()
     let launches = ControllerLaunchTests()
 
+    func spec(socket: String) -> ControllerLaunchSpec {
+        .init(socketPath: socket, executable: "/bin/sh", arguments: [], environment: [:],
+              directory: "/tmp", recipients: ["group:ops"], destination: "draft")
+    }
+
     @Test func globalCapacityIncludesOtherWorkersAndManualIntents() async throws {
         let (directory, store) = try helpers.fixture()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -13,15 +18,47 @@ struct ControllerSupervisorTests {
         var oldest: ExecutionID?
         for index in 0..<ControllerSupervisorLimits.maximumActiveLaunches {
             _ = try await helpers.seed(store, worker: busyWorker, key: "busy:\(index)")
-            let launch = try #require(await store.prepareLaunch(workerID: busyWorker, spec: launches.spec()))
+            // Spread over other hosts, so the global ceiling is what holds the next worker back.
+            let launch = try #require(await store.prepareLaunch(workerID: busyWorker, spec: spec(socket: "/tmp/busy-\(index % 4).sock")))
             if oldest == nil { oldest = launch.executionID }
         }
         let other = try await helpers.seed(store)
         _ = try await store.configureWorker(other.workerID, expectedRevision: 0, maximumConcurrent: 1, spec: launches.spec())
         _ = try await store.setWorkerEnabled(other.workerID, expectedRevision: 1, enabled: true)
-        #expect(try await store.prepareSupervisedLaunch(other.workerID) == nil)
+        #expect(try await store.admitSupervisedLaunch(other.workerID) == .held("global_capacity"))
         _ = try await store.confirmLaunchStopped(#require(oldest), exitStatus: nil)
         #expect(try await store.prepareSupervisedLaunch(other.workerID)?.workID == other.id)
+    }
+
+    /// A host whose launches cannot be resolved holds at most its own share of capacity, and a
+    /// host the supervisor just failed to reach is not handed more intents.
+    @Test func admissionNamesItsHoldAndBoundsOneHost() async throws {
+        let (directory, store) = try helpers.fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let crowded = "/tmp/crowded.sock"
+        let busyWorker = WorkerID()
+        for index in 0..<ControllerSupervisorLimits.maximumActiveLaunchesPerHost {
+            _ = try await helpers.seed(store, worker: busyWorker, key: "uncertain:\(index)")
+            _ = try #require(await store.prepareLaunch(workerID: busyWorker, spec: spec(socket: crowded)))
+        }
+        let work = try await helpers.seed(store)
+        let policy = try await store.configureWorker(work.workerID, expectedRevision: 0, maximumConcurrent: 2, spec: spec(socket: crowded))
+        _ = try await store.setWorkerEnabled(work.workerID, expectedRevision: policy.revision, enabled: true)
+        #expect(try await store.admitSupervisedLaunch(work.workerID) == .held("host_capacity"))
+        let occupancy = try await store.launchOccupancy()
+        #expect(occupancy.hosts.first { $0.socketPath == crowded }?.prepared == ControllerSupervisorLimits.maximumActiveLaunchesPerHost)
+        #expect(occupancy.perHostLimit == ControllerSupervisorLimits.maximumActiveLaunchesPerHost)
+
+        let elsewhere = try await helpers.seed(store, worker: WorkerID(), key: "elsewhere")
+        let healthy = "/tmp/healthy.sock"
+        let other = try await store.configureWorker(elsewhere.workerID, expectedRevision: 0, maximumConcurrent: 1, spec: spec(socket: healthy))
+        _ = try await store.setWorkerEnabled(elsewhere.workerID, expectedRevision: other.revision, enabled: true)
+        #expect(try await store.admitSupervisedLaunch(elsewhere.workerID, unavailableHosts: [healthy]) == .held("host_unavailable"))
+        #expect(try await store.works(workerID: elsewhere.workerID).items.first?.state == .queued, "nothing was claimed")
+        guard case .prepared = try await store.admitSupervisedLaunch(elsewhere.workerID) else {
+            Issue.record("a reachable host admits"); return
+        }
+        #expect(try await store.admitSupervisedLaunch(elsewhere.workerID) == .idle, "no queued work is not a hold")
     }
 
     @Test func concurrentSupervisorsRespectSlotsAndUncertaintyOccupiesOne() async throws {
