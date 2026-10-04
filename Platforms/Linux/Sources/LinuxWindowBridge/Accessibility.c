@@ -11,7 +11,8 @@
 
 enum { MAX_VISIBLE_ROWS = 32, MAX_ROW_NAME = 512, MAX_ROW_ID = 64,
        MAX_TERMINAL_TEXT = 64 * 1024, MAX_TERMINAL_RUNS = 128 * 40 + 40,
-       MAX_SESSION_MENU_ROWS = 8, MAX_COMPOSER_TEXT = 64 * 1024 };
+       MAX_SESSION_MENU_ROWS = 8, MAX_COMPOSER_TEXT = 64 * 1024,
+       MAX_COMPOSER_EDITS = 16, MAX_COMPOSER_ID = 128 };
 enum { PROJECT_CONTROL_NONE, PROJECT_CONTROL_CREATE, PROJECT_CONTROL_ACTIONS };
 
 typedef struct {
@@ -58,8 +59,10 @@ typedef struct {
 } ComposerEditorNode;
 typedef struct { ComponentNodeClass parent; } ComposerEditorNodeClass;
 static void composer_text_interface_init(AtkTextIface *iface);
+static void composer_editable_interface_init(AtkEditableTextIface *iface);
 G_DEFINE_TYPE_WITH_CODE(ComposerEditorNode, composer_editor_node, component_node_get_type(),
-                        G_IMPLEMENT_INTERFACE(ATK_TYPE_TEXT, composer_text_interface_init))
+                        G_IMPLEMENT_INTERFACE(ATK_TYPE_TEXT, composer_text_interface_init)
+                        G_IMPLEMENT_INTERFACE(ATK_TYPE_EDITABLE_TEXT, composer_editable_interface_init))
 
 static AccessibleNode *app, *frame, *list, *actionsButton, *addProjectButton, *pageTitleButton;
 static AccessibleNode *pageActionsButton, *sessionMenuList;
@@ -67,6 +70,16 @@ static AccessibleNode *placeholder, *placeholderTitle, *placeholderDetail, *plac
 static int actionsVisible, addProjectVisible, pageTitleVisible, placeholderVisible, placeholderActionVisible;
 static ComposerEditorNode *composerEditor;
 static int composerEditorVisible, composerEditorFocused;
+typedef struct {
+    uint32_t serial, incarnation;
+    int operation, start, end, length;
+    char identity[MAX_COMPOSER_ID];
+    char *text;
+} ComposerEdit;
+static GQueue *composerEdits;
+static char composerIdentity[MAX_COMPOSER_ID];
+static uint32_t composerIncarnation = 1, composerEditSerial;
+static int composerPredictedCharacters, composerPredictionValid;
 static int pageActionsVisible, sessionMenuVisible;
 static char pageTitleIdentity[128];
 static char pageActionsIdentity[128], sessionMenuIdentity[128];
@@ -821,6 +834,113 @@ static gchar *composer_string_at(AtkText *text, gint offset, AtkTextGranularity 
     *start = first; *end = last;
     return g_strndup(left, (gsize)(right - left));
 }
+static void free_composer_edit(gpointer data) {
+    ComposerEdit *edit = data;
+    g_free(edit->text);
+    g_free(edit);
+}
+static void clear_composer_edits(void) {
+    if (composerEdits) g_queue_clear_full(composerEdits, free_composer_edit);
+    composerPredictedCharacters = 0;
+    composerPredictionValid = 0;
+    composerIncarnation++;
+    if (!composerIncarnation) composerIncarnation++;
+}
+static gboolean enqueue_composer_edit(int operation, int start, int end,
+                                      const char *text, int length) {
+    if (!bridgeReady || !composerEditorVisible || !composerEdits ||
+        !node_mounted(ATK_OBJECT(composerEditor)) || !composerIdentity[0] ||
+        !composerPredictionValid ||
+        g_queue_get_length(composerEdits) >= MAX_COMPOSER_EDITS ||
+        start < 0 || end < start || end > composerPredictedCharacters ||
+        length < 0 || length > MAX_COMPOSER_TEXT || (length && !text) ||
+        (text && (memchr(text, 0, (size_t)length) || !g_utf8_validate(text, length, NULL))) ||
+        eventType == UINT32_MAX) return FALSE;
+    int nextCharacters = composerPredictedCharacters;
+    if (operation == 1) nextCharacters += (int)g_utf8_strlen(text ? text : "", length) - (end - start);
+    else if (operation == 4) nextCharacters -= end - start;
+    if (nextCharacters < 0 || nextCharacters > MAX_COMPOSER_TEXT) return FALSE;
+    ComposerEdit *edit = g_new0(ComposerEdit, 1);
+    edit->serial = ++composerEditSerial;
+    if (!edit->serial) edit->serial = ++composerEditSerial;
+    edit->incarnation = composerIncarnation;
+    edit->operation = operation;
+    edit->start = start;
+    edit->end = end;
+    edit->length = length;
+    g_strlcpy(edit->identity, composerIdentity, sizeof(edit->identity));
+    edit->text = g_strndup(text ? text : "", (gsize)length);
+    SDL_Event event = {0};
+    event.type = eventType;
+    event.user.code = 11;
+    event.user.data1 = (void *)(uintptr_t)edit->serial;
+    event.user.data2 = (void *)(uintptr_t)edit->incarnation;
+    if (SDL_PushEvent(&event) != 1) { free_composer_edit(edit); return FALSE; }
+    g_queue_push_tail(composerEdits, edit);
+    composerPredictedCharacters = nextCharacters;
+    if (operation == 5) composerPredictionValid = 0; // Clipboard size belongs to the host.
+    return TRUE;
+}
+static gboolean composer_set_caret(AtkText *text, gint offset) {
+    (void)text;
+    return enqueue_composer_edit(2, offset, offset, NULL, 0);
+}
+static gboolean composer_add_selection(AtkText *text, gint start, gint end) {
+    (void)text;
+    return enqueue_composer_edit(2, start, end, NULL, 0);
+}
+static gboolean composer_remove_selection(AtkText *text, gint index) {
+    ComposerEditorNode *node = (ComposerEditorNode *)text;
+    if (index != 0 || node->selectionStart == node->selectionEnd) return FALSE;
+    return enqueue_composer_edit(2, node->selectionEnd, node->selectionEnd, NULL, 0);
+}
+static gboolean composer_set_selection(AtkText *text, gint index, gint start, gint end) {
+    (void)text;
+    if (index != 0) return FALSE;
+    return enqueue_composer_edit(2, start, end, NULL, 0);
+}
+static void composer_set_contents(AtkEditableText *text, const gchar *value) {
+    (void)text;
+    if (!value) return;
+    size_t length = strnlen(value, MAX_COMPOSER_TEXT + 1);
+    if (length > MAX_COMPOSER_TEXT) return;
+    enqueue_composer_edit(1, 0, composerPredictedCharacters, value, (int)length);
+}
+static void composer_insert(AtkEditableText *text, const gchar *value, gint length,
+                            gint *position) {
+    (void)text;
+    if (!value || !position || *position < 0 || length < -1) return;
+    size_t measured = strnlen(value, MAX_COMPOSER_TEXT + 1);
+    if (measured > MAX_COMPOSER_TEXT || (length >= 0 && (size_t)length > measured)) return;
+    if (length == -1) length = (gint)measured;
+    if (length > MAX_COMPOSER_TEXT ||
+        !enqueue_composer_edit(1, *position, *position, value, length)) return;
+    *position += (gint)g_utf8_strlen(value, length);
+}
+static void composer_copy(AtkEditableText *text, gint start, gint end) {
+    (void)text;
+    enqueue_composer_edit(3, start, end, NULL, 0);
+}
+static void composer_cut(AtkEditableText *text, gint start, gint end) {
+    (void)text;
+    enqueue_composer_edit(4, start, end, NULL, 0);
+}
+static void composer_delete(AtkEditableText *text, gint start, gint end) {
+    (void)text;
+    enqueue_composer_edit(1, start, end, NULL, 0);
+}
+static void composer_paste(AtkEditableText *text, gint position) {
+    (void)text;
+    enqueue_composer_edit(5, position, position, NULL, 0);
+}
+static void composer_editable_interface_init(AtkEditableTextIface *iface) {
+    iface->set_text_contents = composer_set_contents;
+    iface->insert_text = composer_insert;
+    iface->copy_text = composer_copy;
+    iface->cut_text = composer_cut;
+    iface->delete_text = composer_delete;
+    iface->paste_text = composer_paste;
+}
 static void composer_text_interface_init(AtkTextIface *iface) {
     iface->get_text = composer_get_text;
     iface->get_character_at_offset = composer_character;
@@ -829,6 +949,10 @@ static void composer_text_interface_init(AtkTextIface *iface) {
     iface->get_n_selections = composer_selections;
     iface->get_selection = composer_selection;
     iface->get_string_at_offset = composer_string_at;
+    iface->set_caret_offset = composer_set_caret;
+    iface->add_selection = composer_add_selection;
+    iface->remove_selection = composer_remove_selection;
+    iface->set_selection = composer_set_selection;
 }
 static void composer_editor_node_finalize(GObject *object) {
     g_free(((ComposerEditorNode *)object)->text);
@@ -974,6 +1098,8 @@ void tw_accessibility_open(TWWindow *window) {
     placeholderAction = new_component(ATK_ROLE_PUSH_BUTTON, "New Session");
     placeholderAction->id = g_strdup("linux.placeholder.action");
     atk_object_set_accessible_id(ATK_OBJECT(placeholderAction), placeholderAction->id);
+    composerEdits = g_queue_new();
+    composerIdentity[0] = '\0';
     composerEditor = g_object_new(composer_editor_node_get_type(), NULL);
     atk_object_set_role(ATK_OBJECT(composerEditor), ATK_ROLE_TEXT);
     atk_object_set_name(ATK_OBJECT(composerEditor), "New session brief");
@@ -1008,6 +1134,9 @@ void tw_accessibility_open(TWWindow *window) {
 void tw_accessibility_close(void) {
     if (!app) return;
     set_focused(NULL);
+    clear_composer_edits();
+    g_clear_pointer(&composerEdits, g_queue_free);
+    composerIdentity[0] = '\0';
     if (bridgeReady) atk_bridge_adaptor_cleanup();
     bridgeReady = 0; activeList = NULL; eventType = UINT32_MAX; windowFocused = 0;
     clear_children(list);
@@ -1298,6 +1427,8 @@ void tw_accessibility_placeholder(TWWindow *window, const char *title, const cha
     placeholderVisible = visible;
     placeholderActionVisible = actionVisible;
     if (!visible && composerEditorVisible) {
+        clear_composer_edits();
+        composerIdentity[0] = '\0';
         composerEditorVisible = composerEditorFocused = 0;
         atk_object_notify_state_change(ATK_OBJECT(composerEditor), ATK_STATE_EDITABLE, FALSE);
         set_composer_text("", 0, 0, 0, 0);
@@ -1318,12 +1449,15 @@ void tw_accessibility_placeholder(TWWindow *window, const char *title, const cha
     show_content(activeList ? list : (placeholderVisible ? placeholder : (AccessibleNode *)terminal));
     refresh_focus();
 }
-void tw_accessibility_composer_editor(TWWindow *window, const char *utf8, int length,
+void tw_accessibility_composer_editor(TWWindow *window, const char *identity,
+                                      const char *utf8, int length,
                                       int selectionStart, int selectionEnd, int hasFocus,
                                       int x, int y, int width, int height) {
     if (!bridgeReady || window != hostWindow || !placeholderVisible) return;
     if (!utf8) {
         if (!composerEditorVisible) return;
+        clear_composer_edits();
+        composerIdentity[0] = '\0';
         composerEditorVisible = composerEditorFocused = 0;
         atk_object_notify_state_change(ATK_OBJECT(composerEditor), ATK_STATE_EDITABLE, FALSE);
         set_composer_text("", 0, 0, 0, 0);
@@ -1334,12 +1468,22 @@ void tw_accessibility_composer_editor(TWWindow *window, const char *utf8, int le
     int originX, originY, windowWidth, windowHeight;
     tw_window_geometry(window, &originX, &originY, &windowWidth, &windowHeight);
     const int sidebarWidth = tw_workspace_sidebar_width(window);
-    if (length < 0 || length > MAX_COMPOSER_TEXT ||
+    if (!identity || !identity[0] || strnlen(identity, MAX_COMPOSER_ID) >= MAX_COMPOSER_ID ||
+        !g_utf8_validate(identity, -1, NULL) ||
+        length < 0 || length > MAX_COMPOSER_TEXT ||
         memchr(utf8, 0, (size_t)length) || !g_utf8_validate(utf8, length, NULL) ||
         x < sidebarWidth || x >= windowWidth || width <= 0 || width > windowWidth - x ||
         y < 0 || y >= windowHeight || height <= 0 || height > windowHeight - y) return;
     const int characters = (int)g_utf8_strlen(utf8, length);
     if (selectionStart < 0 || selectionStart > selectionEnd || selectionEnd > characters) return;
+    if (strcmp(composerIdentity, identity) != 0) {
+        clear_composer_edits();
+        g_strlcpy(composerIdentity, identity, sizeof(composerIdentity));
+    }
+    if (g_queue_is_empty(composerEdits)) {
+        composerPredictedCharacters = characters;
+        composerPredictionValid = 1;
+    }
     const int wasVisible = composerEditorVisible;
     composerEditorVisible = 1;
     composerEditorFocused = hasFocus != 0;
@@ -1348,6 +1492,30 @@ void tw_accessibility_composer_editor(TWWindow *window, const char *utf8, int le
     rebuild_placeholder_children();
     if (!wasVisible) atk_object_notify_state_change(ATK_OBJECT(composerEditor), ATK_STATE_EDITABLE, TRUE);
     refresh_focus();
+}
+int tw_accessibility_composer_edit_pending(TWWindow *window, uint32_t serial,
+                                            uint32_t incarnation) {
+    if (!bridgeReady || window != hostWindow || !composerEditorVisible || !composerEdits ||
+        incarnation != composerIncarnation || !composerIdentity[0]) return 0;
+    ComposerEdit *edit = g_queue_peek_head(composerEdits);
+    return edit && edit->serial == serial && edit->incarnation == incarnation &&
+        strcmp(edit->identity, composerIdentity) == 0;
+}
+int tw_accessibility_take_composer_edit(TWWindow *window, int serial, int *operation,
+                                        int *start, int *end, char *identity,
+                                        int identityCapacity, char *utf8, int textCapacity) {
+    if (!tw_accessibility_composer_edit_pending(window, (uint32_t)serial, composerIncarnation) ||
+        !operation || !start || !end || !identity || identityCapacity < MAX_COMPOSER_ID ||
+        !utf8 || textCapacity < MAX_COMPOSER_TEXT + 1) return -1;
+    ComposerEdit *edit = g_queue_pop_head(composerEdits);
+    *operation = edit->operation;
+    *start = edit->start;
+    *end = edit->end;
+    strcpy(identity, edit->identity);
+    memcpy(utf8, edit->text, (size_t)edit->length + 1);
+    const int length = edit->length;
+    free_composer_edit(edit);
+    return length;
 }
 void tw_accessibility_window_focus(TWWindow *window, int hasFocus) {
     (void)window;

@@ -52,6 +52,8 @@ typedef struct TWWindow TWWindow;
 // Backspace/Delete text events are dropped because kind48 already carries those keys.
 // All three kinds
 // are editor-owned and must never be sent to the terminal PTY or sidebar navigation.
+// Kind49 announces a queued AT-SPI composer edit; key is its opaque native serial.
+// Read it exactly once with tw_accessibility_take_composer_edit. The event carries no text.
 typedef struct {
     int kind, x, y, width, height;
     char text[1024];
@@ -155,11 +157,22 @@ void tw_accessibility_placeholder(TWWindow *, const char *title, const char *det
 // bounds are ordered Unicode scalar offsets (not UTF-16 indices); the end is the caret.
 // Bounds are window pixels inside the right pane. Invalid updates leave the previous
 // projection intact. Text changes emit only the changed span, not the whole draft.
-// The native keyboard route performs editing; this projection does not implement AT-SPI
-// programmatic EditableText mutations.
-void tw_accessibility_composer_editor(TWWindow *, const char *utf8, int length,
+// The native keyboard route performs editing. AT-SPI EditableText mutations are queued
+// (at most 16, each at most 64 KiB) for the host and never alter this projection inside an
+// accessibility callback. Invalid scalar offsets and full queues are refused on entry.
+// identity is a fresh, <=127-byte UTF-8 token for each composer opening; NULL utf8 unmounts.
+void tw_accessibility_composer_editor(TWWindow *, const char *identity,
+                                      const char *utf8, int length,
                                       int selectionStart, int selectionEnd, int focused,
                                       int x, int y, int width, int height);
+// Returns a queued edit's UTF-8 byte count (0...65536), or -1 if stale/absent.
+// Buffers must hold at least 128 and 65537 bytes respectively. Offsets are Unicode scalars.
+// Operations: 1 replace [start,end) with payload; 2 select [start,end);
+// 3 copy [start,end); 4 cut [start,end); 5 paste clipboard at start.
+// The host must revalidate identity against its active composer before applying an edit.
+int tw_accessibility_take_composer_edit(TWWindow *, int serial, int *operation,
+                                        int *start, int *end, char *identity,
+                                        int identityCapacity, char *utf8, int textCapacity);
 // SDL window focus is the source of truth; the bridge focuses the mounted selected row or terminal.
 void tw_accessibility_window_focus(TWWindow *, int focused);
 // The accessibility projection uses the rendered cell positions, including wide and combined

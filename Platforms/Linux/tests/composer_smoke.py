@@ -159,6 +159,42 @@ try:
         xdo('key', 'Right')
         eventually(lambda: editor_text.get_n_selections() == 0,
                    'AT-SPI editor selection cleared', process)
+        editable = editor.get_editable_text_iface()
+        editable.set_text_contents('Delete me🦉\nSecond line')
+        eventually(lambda: Atspi.Text.get_text(editor_text, 0, -1)
+                   == 'Delete me🦉\nSecond line', 'AT-SPI set contents', process)
+        editable.delete_text(0, len('Delete me'))
+        eventually(lambda: Atspi.Text.get_text(editor_text, 0, -1)
+                   == '🦉\nSecond line', 'AT-SPI delete range', process)
+        editable.delete_text(1, 2)
+        eventually(lambda: Atspi.Text.get_text(editor_text, 0, -1)
+                   == '🦉Second line', 'AT-SPI scalar offset after emoji', process)
+        editable.insert_text(1, '\n', 1)
+        eventually(lambda: Atspi.Text.get_text(editor_text, 0, -1)
+                   == '🦉\nSecond line', 'AT-SPI insert after emoji', process)
+        editable.insert_text(0, 'Please inspect ', len('Please inspect '))
+        prompt = 'Please inspect 🦉\nSecond line'
+        eventually(lambda: Atspi.Text.get_text(editor_text, 0, -1) == prompt,
+                   'AT-SPI insert text', process)
+        prefix = 'Please inspect '
+        editable.copy_text(0, len(prefix))
+        eventually(lambda: subprocess.check_output(['xclip', '-selection', 'clipboard', '-o'],
+                   timeout=3).decode() == prefix, 'AT-SPI copy text', process)
+        editable.cut_text(0, len(prefix))
+        eventually(lambda: Atspi.Text.get_text(editor_text, 0, -1)
+                   == '🦉\nSecond line', 'AT-SPI cut text', process)
+        editable.paste_text(0)
+        eventually(lambda: Atspi.Text.get_text(editor_text, 0, -1) == prompt,
+                   'AT-SPI paste text', process)
+        assert editor_text.add_selection(len(prefix), len(prefix) + 1)
+        eventually(lambda: editor_text.get_n_selections() == 1,
+                   'AT-SPI select emoji', process)
+        assert editor_text.remove_selection(0)
+        eventually(lambda: editor_text.get_n_selections() == 0,
+                   'AT-SPI clear selection', process)
+        subprocess.run(['import', '-window', window,
+                        str(output / 'composer-accessibility-edited.png')],
+                       check=True, timeout=5)
         assert composer.get_child_at_index(composer.get_child_count() - 1).get_action_iface().do_action(0)
         marker = project / 'composer-agent.json'
         report = eventually(lambda: json.loads(marker.read_text()) if marker.exists() else None,
@@ -173,8 +209,8 @@ try:
         xdo('key', 'q')
         eventually(lambda: (project / 'composer-agent-complete').exists(),
                    'agent received only its own terminal input', process)
-        print('PASS right-pane composer, multiline Unicode clipboard brief, exact project '
-              'and one agent launch', flush=True)
+        print('PASS right-pane composer, keyboard and AT-SPI multiline Unicode edits, '
+              'exact project and one agent launch', flush=True)
 finally:
     if process is not None and process.poll() is None:
         process.terminate()

@@ -801,6 +801,14 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             out->kind = 29; out->action = 1;
         } else if (e.type == SDL_QUIT) out->kind = 5;
         else if (e.type == tw_accessibility_event_type()) {
+            if (e.user.code == 11) {
+                const uint32_t serial = (uint32_t)(uintptr_t)e.user.data1;
+                const uint32_t incarnation = (uint32_t)(uintptr_t)e.user.data2;
+                if (!tw_accessibility_composer_edit_pending(w, serial, incarnation)) continue;
+                out->kind = 49;
+                out->key = (int)serial;
+                return 1;
+            }
             const int current = tw_accessibility_event_is_current((uint32_t)(uintptr_t)e.user.data2);
             tw_navigation_trace_dequeue(&e, current);
             if (!current) continue;

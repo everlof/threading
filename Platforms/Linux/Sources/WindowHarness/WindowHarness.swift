@@ -1830,6 +1830,27 @@ struct WindowHarness {
             fflush(nil)
         }
         func routeTerminalInput(_ event: TWEvent) -> Bool {
+            if event.kind == 49 {
+                var operation: Int32 = 0
+                var start: Int32 = 0
+                var end: Int32 = 0
+                var identity = [CChar](repeating: 0, count: 128)
+                var payload = [CChar](repeating: 0, count: 65_537)
+                let count = tw_accessibility_take_composer_edit(window, event.key,
+                    &operation, &start, &end, &identity, Int32(identity.count),
+                    &payload, Int32(payload.count))
+                guard count >= 0, activePane == nil, let idlePane, idlePane.isComposing,
+                      let currentID = idlePane.composerIdentity,
+                      let queuedID = String(bytes: identity.prefix(while: { $0 != 0 })
+                          .map(UInt8.init(bitPattern:)), encoding: .utf8),
+                      queuedID == currentID,
+                      let value = String(bytes: payload.prefix(Int(count)).map(UInt8.init(bitPattern:)),
+                                         encoding: .utf8)
+                else { return true }
+                _ = idlePane.applyAccessibilityEdit(operation: operation, start: start,
+                                                     end: end, text: value)
+                return true
+            }
             if event.kind == 46 || event.kind == 47 || event.kind == 48 {
                 guard activePane == nil, let idlePane, idlePane.isComposing else { return true }
                 if event.kind == 46 {

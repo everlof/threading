@@ -10,6 +10,8 @@ void tw_accessibility_poll(void);
 void tw_accessibility_title(const char *title);
 uint32_t tw_accessibility_event_type(void);
 int tw_accessibility_event_is_current(uint32_t generation);
+int tw_accessibility_composer_edit_pending(TWWindow *window, uint32_t serial,
+                                            uint32_t incarnation);
 int tw_accessibility_row_center(int row, int *x, int *y);
 int tw_accessibility_row_can_open(int row);
 int tw_accessibility_project_action_identity(int row, char *id, int capacity);

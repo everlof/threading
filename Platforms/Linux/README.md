@@ -199,11 +199,13 @@ this preview; broader production chrome remains outside the diagnostic shell. Se
 
 `tests/wayland_smoke.sh` installs the current `.deb` into Swift-free Ubuntu under headless Weston,
 checks two distinct rendered project frames, and verifies Wayland toplevel/buffer commits. Its
-separate `--actions` mode checks AT-SPI Actions open/close and changed pixels. The package
-selects Ubuntu's Cairo libdecor plugin for its Wayland window, preserving the custom Actions
-accessibility tree alongside client decorations. The default installed package passes both
-smoke modes under headless Weston. Its compositor-injected seat verifies header and project-row
-pointer actions, right-click, Shift+F10 and menu drag release. Physical devices and IME behavior
+separate `--actions` mode checks AT-SPI Actions open/close and changed pixels. A `--composer`
+mode types a two-line Swedish brief through Weston's seat, checks the editable text and rendered
+frame, and launches one agent in the exact project. The package selects Ubuntu's Cairo libdecor
+plugin for its Wayland window, preserving the custom Actions accessibility tree alongside client
+decorations. The installed package passes the headless Weston modes. Its compositor-injected seat
+verifies header and project-row pointer actions, right-click, Shift+F10 and menu drag release.
+Physical devices and IME behavior
 remain unverified.
 
 ## Runner checks
@@ -481,7 +483,9 @@ launch. `tests/text_editor/run.sh` exercises the editor itself;
 `THREADING_LINUX_COMPOSER_ONLY=1 ./window-smoke.sh` exercises the native X11 window,
 AT-SPI text, screenshot, and agent launch.
 The installed `bundle-smoke.sh` repeats that journey from the packaged binary. AT-SPI publishes
-up to 64 KiB of composer text; programmatic AT-SPI editing is not implemented. Full Mac composer
+up to 64 KiB of composer text and queues programmatic text, selection and clipboard edits through
+the same TextKit editor as keyboard input. Each queued edit carries a fresh composer identity so
+closing or reopening the pane cannot apply an old edit to a new brief. Full Mac composer
 behavior, including attachments and durable drafts, remains open. Other editing surfaces,
 full table and outline behavior, animation,
 system services, and the remaining AppKit shims need work. The layout solver still solves a whole

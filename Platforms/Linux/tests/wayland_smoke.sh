@@ -4,7 +4,9 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 mode=${1:-render}
-[[ $mode == render || $mode == --actions ]] || { echo 'usage: wayland_smoke.sh [--actions]' >&2; exit 64; }
+[[ $mode == render || $mode == --actions || $mode == --composer ]] || {
+  echo 'usage: wayland_smoke.sh [--actions|--composer]' >&2; exit 64;
+}
 mkdir -p out
 evidence=$(mktemp -d "$PWD/out/wayland-smoke.XXXXXXXX")
 package=${THREADING_WAYLAND_PACKAGE:-$PWD/out/threading-linux-preview-ubuntu24.04-arm64.deb}
@@ -21,6 +23,7 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/wayland_atspi_smoke.py:/wayland_atspi_smoke.py:ro" \
   -v "$PWD/tests/wayland_input_module.c:/wayland_input_module.c:ro" \
   -v "$PWD/tests/wayland_input_smoke.py:/wayland_input_smoke.py:ro" \
+  -v "$PWD/tests/wayland_composer_smoke.py:/wayland_composer_smoke.py:ro" \
   -v "$evidence:/evidence" ubuntu:24.04 bash -s <<'RUN'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC
@@ -51,8 +54,13 @@ chmod 700 /tmp/xdg-run
 export XDG_RUNTIME_DIR=/tmp/xdg-run WAYLAND_DISPLAY=wayland-0 SDL_VIDEODRIVER=wayland
 export THREADING_WESTON_INPUT_SOCKET=/tmp/xdg-run/threading-input
 unset DISPLAY
+cat >/tmp/threading-weston.ini <<'CONFIG'
+[keyboard]
+keymap_layout=se
+CONFIG
 weston --backend=headless-backend.so --renderer=pixman --socket=wayland-0 \
-  --width=1280 --height=800 --no-config --modules=/tmp/wayland_input_module.so \
+  --width=1280 --height=800 --config=/tmp/threading-weston.ini \
+  --modules=/tmp/wayland_input_module.so \
   --log=/evidence/weston.log &
 weston_pid=$!
 trap 'kill "$weston_pid" 2>/dev/null || true; wait "$weston_pid" 2>/dev/null || true' EXIT
@@ -63,8 +71,10 @@ for ((attempt=0; attempt<100; attempt++)); do
 done
 [[ -S /tmp/xdg-run/wayland-0 ]]
 [[ -S "$THREADING_WESTON_INPUT_SOCKET" ]]
-dbus-run-session -- python3 /wayland_render_smoke.py \
-  /opt/threading-linux-preview/run-app.sh /evidence/render
+if [[ $THREADING_WAYLAND_SMOKE_MODE != --composer ]]; then
+  dbus-run-session -- python3 /wayland_render_smoke.py \
+    /opt/threading-linux-preview/run-app.sh /evidence/render
+fi
 if [[ $THREADING_WAYLAND_SMOKE_MODE == --actions ]]; then
   mkdir -p /evidence/actions
   dbus-run-session -- python3 /wayland_atspi_smoke.py \
@@ -73,5 +83,10 @@ if [[ $THREADING_WAYLAND_SMOKE_MODE == --actions ]]; then
   mkdir -p /evidence/input
   dbus-run-session -- python3 /wayland_input_smoke.py \
     /opt/threading-linux-preview/run-app.sh /tmp/WaylandProject /evidence/input
+fi
+if [[ $THREADING_WAYLAND_SMOKE_MODE == --actions || $THREADING_WAYLAND_SMOKE_MODE == --composer ]]; then
+  mkdir -p /evidence/composer
+  dbus-run-session -- python3 /wayland_composer_smoke.py \
+    /opt/threading-linux-preview/run-app.sh WaylandComposerProject /evidence/composer
 fi
 RUN
