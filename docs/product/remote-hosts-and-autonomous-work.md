@@ -98,7 +98,7 @@ The controller host bundle installs into the service account's home:
 
 | Path | Contents | Mode |
 |---|---|---|
-| `~/.local/lib/threading/hosts/<generation>/` | `threading-controller`, `threading-ptyd`, `host-state.py`, `install-host.py`. `<generation>` is the SHA-256 of the bundle manifest, so every build gets its own directory. | `0700` dir and files |
+| `~/.local/lib/threading/hosts/<generation>/` | `threading-controller`, `threading-ptyd`, `host-state.py`, `install-host.py`, and (when it installs ptyd) the `.threading-managed-by` marker reading `external:threading-host-bundle`. `<generation>` is the SHA-256 of the bundle manifest, so every build gets its own directory. | `0700` dir and files, marker `0600` |
 | `~/.local/state/threading/controller/controller.db` (+ `-wal`, `-shm`) | The controller's SQLite store | `0600` in a `0700` directory |
 | `~/.local/state/threading/controller/controller.db.supervisor.lock` | The resident supervisor's exclusive lock (never unlinked) | `0600` |
 | `~/.local/state/threading/controller/agent.sock` | The agent tool broker (default location) | `0660` |
@@ -192,20 +192,30 @@ python3 /path/to/bundle/install-host.py /path/to/bundle --start    # also daemon
 | `--start` | `systemctl --user daemon-reload` and `enable --now` the units it wrote. Intended for a new installation. |
 | `--role all\|controller\|ptyd` | Which units this account runs: both (default), or one half of a separate-agent-user host |
 | `--agent-socket PATH` | `--role all` or `controller`: serve the broker at this absolute path instead of `agent.sock` beside the store |
+| `--agent-binary PATH` | `--role all` or `controller`: the controller executable agents run their tools with, passed to `supervise --agent-binary`. It must be an absolute path to an existing executable; you create it (see mode B) |
 | `--ptyd-socket PATH` | `--role all` or `ptyd`: listen here. With `--role ptyd` it also adds `--group-socket` and `UMask=0027` |
 
 Before writing anything it checks that the manifest matches this system and machine, that every file
-matches its digest, and that the controller's live `--version` equals the manifest's. It then copies
-the files into `~/.local/lib/threading/hosts/<generation>/`, creates the state directories `0700`,
-and writes the units. It prints one JSON line: `generation`, `schema`, `servicesStarted`, `units`.
+matches its digest, and that the controller's live `--version` equals the manifest's. When it
+installs ptyd it also says `hello` to whatever is at the ptyd socket path: a live daemon there that is
+not this installation's own (its `--state` is not `~/.local/state/threading/pty/host`) is refused with
+`ptyd_socket_in_use`, naming its pid, build and state directory, and nothing is written. A leftover
+socket nothing listens on is not a conflict. It then copies the files into
+`~/.local/lib/threading/hosts/<generation>/`, marks that directory `external:threading-host-bundle`
+when it installs ptyd (so the Mac never retires, disables or prunes it), creates the state
+directories `0700`, and writes the units. It prints one JSON line: `generation`, `schema`,
+`servicesStarted`, `units`; a refusal prints `install-host: <reason>` on standard error and exits 1.
 
-It deliberately does **not**: create users or groups, enable linger, restart an existing service,
+It deliberately does **not**: create users, groups or directories outside the account's home, copy
+the agent binary anywhere, enable linger, restart an existing service,
 overwrite a unit whose text differs (`existing_service_requires_explicit_upgrade`), delete older
 generations, or write any SSH configuration.
 
 Refusals you may see: `incompatible_bundle`, `invalid_manifest`, `bundle_digest_mismatch`,
 `controller_capability_mismatch`, `installed_digest_mismatch`, `owned_service_home_required`,
-`invalid_socket_path`, `option_does_not_apply_to_role`, `start_requires_current_nonroot_service_account`.
+`invalid_socket_path`, `option_does_not_apply_to_role`, `agent_binary_must_be_an_absolute_executable_path`,
+`ptyd_socket_in_use`, `install_directory_marked_by_another_installer`,
+`start_requires_current_nonroot_service_account`.
 
 ### The units
 
@@ -215,7 +225,7 @@ For `--role all` the installer writes, in the service account's user manager:
 threading-ptyd.service        <gen>/threading-ptyd --socket ~/.local/state/threading/pty/ptyd.sock
                                                    --state  ~/.local/state/threading/pty/host
 threading-controller.service  <gen>/threading-controller --database ~/.local/state/threading/controller/controller.db
-                                                          supervise 2000 [--agent-socket PATH]
+                                                          supervise 2000 [--agent-socket PATH] [--agent-binary PATH]
 ```
 
 Both use `Restart=on-failure` (10 s delay, at most 5 starts in 300 s), `NoNewPrivileges=yes`,
@@ -266,7 +276,8 @@ scoped routing, not a security boundary. Use it only for agents you would trust 
 ### Deployment mode B: agents as a separate Unix user
 
 The broker is what lets agents run without the controller's file permissions. Install twice from the
-same bundle. The installer creates no users, groups or shared directories; do this first, as root:
+same bundle. The accounts, the shared group, the shared directories, the agent-binary copy and
+linger are manual steps: the installer does none of them. Do them first, as root:
 
 ```bash
 groupadd threading-agents
@@ -276,6 +287,8 @@ usermod -aG threading-agents threading
 usermod -aG threading-agents agent
 install -d -o threading -g threading-agents -m 2750 /srv/threading/broker   # setgid: socket takes the group
 install -d -o agent     -g threading-agents -m 2750 /srv/threading/pty
+install -d -m 0755 /opt/threading
+install -m 0755 bundle/threading-controller /opt/threading/threading-controller   # agents run their tools with this copy
 loginctl enable-linger threading
 loginctl enable-linger agent
 ```
@@ -286,24 +299,15 @@ Then, as each account:
 # as agent
 python3 bundle/install-host.py bundle --role ptyd --ptyd-socket /srv/threading/pty/ptyd.sock --start
 # as threading
-python3 bundle/install-host.py bundle --role controller --agent-socket /srv/threading/broker/agent.sock --start
+python3 bundle/install-host.py bundle --role controller --agent-socket /srv/threading/broker/agent.sock \
+    --agent-binary /opt/threading/threading-controller --start
 ```
 
-**The agent-binary step the installer does not do.** Agents run the controller executable for their
-tools (`agent-mcp`, `agent-notice`), but the controller's own copy sits in its `0700` home. Install a
-copy every agent can execute, for example `install -m 0755 bundle/threading-controller
-/opt/threading/threading-controller`, and pass it to the supervisor with `--agent-binary`. The
-installer has no option for this, so add a systemd drop-in as the controller user:
-
-```ini
-# ~/.config/systemd/user/threading-controller.service.d/agent-binary.conf
-[Service]
-ExecStart=
-ExecStart=/home/threading/.local/lib/threading/hosts/<generation>/threading-controller --database /home/threading/.local/state/threading/controller/controller.db supervise 2000 --agent-socket /srv/threading/broker/agent.sock --agent-binary /opt/threading/threading-controller
-```
-
-then `systemctl --user daemon-reload && systemctl --user restart threading-controller`. The drop-in
-names a generation, so update it (and the `/opt` copy) on every upgrade.
+**Why `--agent-binary`.** Agents run the controller executable for their tools (`agent-mcp`,
+`agent-notice`), but the controller's own copy sits in its `0700` home, which the agent user cannot
+enter. `--agent-binary` puts the `/opt` copy on the supervisor's command line, and the supervisor
+hands that path to every agent. The installer checks that the path exists and is executable but
+never creates or updates it, so replace the `/opt` copy with the new bundle's on every upgrade.
 
 Recipes on this host must name `"socketPath": "/srv/threading/pty/ptyd.sock"` and a `directory` the
 agent user owns. Provider homes declared under `usage.accounts` belong to the agent user, but the
@@ -342,17 +346,20 @@ unmarked generation back to the Mac, write `threading-mac` into its marker.
 **Mixing the controller bundle with Mac-prepared chats on one account.** The bundle's ptyd listens at
 `~/.local/state/threading/pty/ptyd.sock`, the same rendezvous the Mac uses, but keeps its state in
 `pty/host/` while a Mac-installed daemon keeps it in `pty/`. While the bundle's daemon answers, the
-Mac sees an external daemon and uses it. Two cautions:
+Mac sees an external daemon and uses it. What keeps the two apart:
 
-- `install-host.py` writes no `.threading-managed-by` marker, and its install directory
-  (`hosts/<generation>/`) is outside the paths the Mac's probe lists, so the Mac learns of the
-  bundle's daemon only by its answer at the rendezvous.
-- The two daemons lock different state directories, and each daemon unlinks whatever is at its
-  socket path when it binds. If the Mac prepares the host while the bundle's ptyd is down, it starts
-  its own instance; when the bundle's daemon starts again it takes the socket path, and the Mac's
-  sessions keep running but become unreachable there.
+- `install-host.py` marks its ptyd install directory `external:threading-host-bundle`, so nothing
+  the Mac does to its own generations can reach the bundle's.
+- **Only one daemon can hold the socket.** A ptyd that finds another live daemon answering at its
+  socket path refuses to start (it names the other daemon's pid and build on standard error and
+  exits 73) instead of taking the path over; only a leftover socket nothing listens on is replaced.
+  `install-host.py` refuses up front, with `ptyd_socket_in_use`, to write a ptyd unit for a socket
+  another daemon answers.
 
-Keep the bundle's ptyd running on such hosts, or give one of them its own account.
+So if the Mac prepares the host while the bundle's ptyd is down, the Mac's daemon owns the socket
+and the bundle's unit fails to start (`systemctl --user status threading-ptyd` shows why) rather than
+stranding the Mac's sessions. Keep the bundle's ptyd running on such hosts, or give one of them its
+own account or its own `--ptyd-socket`.
 
 ## Connecting from the Mac
 
@@ -871,8 +878,9 @@ then refuses it. Plan:
    `systemctl --user stop threading-controller`. Running agents are unaffected.
 3. Back up with `host-state.py capture`.
 4. Move the two unit files aside (the installer refuses to overwrite a unit whose text differs), run
-   the new installer without `--start`, `systemctl --user daemon-reload`, and update any drop-in, the
-   `/opt` agent-binary copy, your stable symlink, consumers' forced commands and the Mac's saved
+   the new installer without `--start` (with the same `--role`, socket and `--agent-binary` options),
+   `systemctl --user daemon-reload`, and update the `/opt` agent-binary copy, your stable symlink,
+   consumers' forced commands and the Mac's saved
    executable path.
 5. `systemctl --user start threading-controller`; check `--version`, `host`, the journal and
    `launch-occupancy`; re-enable what you paused.

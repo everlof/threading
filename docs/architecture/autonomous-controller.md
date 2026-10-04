@@ -216,7 +216,9 @@ socket); `host` reports it as `agentSocket` only while a connect succeeds, and `
 ## Running agents as another Unix user
 
 The broker is what lets agents run without the controller's file permissions. On Linux, with
-`install-host.py` from the controller host bundle (it creates no users or groups):
+`install-host.py` from the controller host bundle. The installer writes units and copies the bundle
+into each account's home, nothing else: the accounts, the group, the shared directories, the
+agent-binary copy and linger are manual steps, done as root before it runs.
 
 1. Accounts: a controller user (say `threading`) and an agent user (`agent`), both members of a
    group shared for the two rendezvous (`threading-agents`). The agent user is in no other group
@@ -229,6 +231,9 @@ The broker is what lets agents run without the controller's file permissions. On
    `install-host.py BUNDLE --role controller --agent-socket /srv/threading/broker/agent.sock
    --agent-binary /opt/threading/threading-controller`, where the agent binary is a copy of the
    same controller every agent can execute (the service's own copy under its `0700` home is not).
+   The installer refuses an `--agent-binary` that is not an absolute path to an existing
+   executable and passes it through to the unit's `supervise --agent-binary`; making and
+   upgrading the copy is the operator's.
 4. ptyd: a directory like `/srv/threading/pty`, owned `agent:threading-agents`, mode `2750`.
    Install the daemon half as the agent user with `install-host.py BUNDLE --role ptyd
    --ptyd-socket /srv/threading/pty/ptyd.sock`: the unit runs `threading-ptyd --group-socket`
@@ -1036,7 +1041,11 @@ static Swift runtime, stripped at link), ptyd (the static musl, generation-stamp
 SHA-256 manifest of those final bytes, `install-host.py`, and `host-state.py`, then runs
 `install-host.py` against a throwaway home. Consumers must not strip or rewrite bundle files after
 the manifest: the installer refuses any digest mismatch. Installation verifies architecture,
-content and protocol before writing private per-user files. It does not start services unless
+content and protocol before writing private per-user files. A ptyd install refuses
+(`ptyd_socket_in_use`) when a live daemon of another state directory already answers `hello` on its
+socket, the same rule the daemon applies to itself at startup (pty-host.md, "Failure model"), and
+writes `external:threading-host-bundle` into its release directory's `.threading-managed-by` so the Mac's
+Remote Hosts setup never retires or prunes it. It does not start services unless
 `--start` is supplied and refuses an implicit replacement of an existing unit. Existing-host
 upgrades remain an explicit stop, online snapshot, verified artifact/unit switch, restart and
 health-check operation. Rindabox's Ansible adapter retains its own destinations and credentials.

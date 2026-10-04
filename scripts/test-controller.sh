@@ -37,4 +37,5 @@ python3 "$repo_root/scripts/tests/test_controller_sources.py" "$controller_scrat
 python3 "$repo_root/scripts/tests/test_controller_usage.py" \
     "$controller_scratch/cli/debug/threading-controller" "$controller_scratch/ptyd/debug/threading-ptyd"
 
-python3 "$repo_root/scripts/tests/test_controller_host.py" "$controller_scratch/cli/debug/threading-controller"
+python3 "$repo_root/scripts/tests/test_controller_host.py" \
+    "$controller_scratch/cli/debug/threading-controller" "$controller_scratch/ptyd/debug/threading-ptyd"
