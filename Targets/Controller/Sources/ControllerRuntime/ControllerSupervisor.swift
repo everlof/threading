@@ -16,6 +16,8 @@ public struct SupervisorCycle: Codable, Sendable {
     public var automationIssues: [String] = []
     /// Tasks admitted because mail arrived for an idle worker whose grant lets it wake.
     public var woken: [WorkID] = []
+    /// Outbound mail that waited past its lifetime for a peer and bounced this pass.
+    public var expiredMail: [UUID] = []
     /// The most recent completed exchange with mail peers, reported once.
     public var mail: ControllerMailSync.Report?
     /// Source polls finished since the last report: events recorded and issues by source.
@@ -65,6 +67,8 @@ public actor ControllerSupervisor {
             mailWakeCursor = wake.next
             report.woken = wake.admitted.map(\.id)
         } catch { report.automationIssues.append("mail_wake: \(error)") }
+        do { report.expiredMail = try await store.expireOutboundMail(limit: Budget.page) }
+        catch { report.automationIssues.append("mail_expiry: \(error)") }
         startMailSyncIfDue()
         if let finished = finishedMailSync { report.mail = finished; finishedMailSync = nil }
         do { try await startDueSourcePolls() } catch { report.sourceIssues.append("due_sources: \(error)") }

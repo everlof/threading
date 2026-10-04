@@ -128,7 +128,9 @@ What it costs, and how each is paid:
 - **Moving a session.** When a project's execution host changes, its sessions' addresses change.
   The old host keeps a forwarding record (old address → new address, owner-written, revisioned)
   and moves unacknowledged mail with the session at the hand-over; a message arriving at the old
-  address afterwards is forwarded once, not relayed onward again.
+  address afterwards is forwarded once, not relayed onward again. As built, the forward vouches only
+  for the old host's own senders (others need the new host's own grants), and only for seven days
+  ([`autonomous-controller.md`](../architecture/autonomous-controller.md#agent-mail-schema-v7)).
 - **Wake still needs the Mac.** The Mac is the authority that launches a remote-host session, so
   a `wake` for a dormant one waits until the Mac can reach the host. Mail is never lost meanwhile;
   `directory` reports the recipient as "wakes when its Mac is connected".

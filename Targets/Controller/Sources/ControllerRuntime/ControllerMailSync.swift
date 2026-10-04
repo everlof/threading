@@ -45,7 +45,9 @@ public enum ControllerMailSync {
             for _ in 0..<Limits.exchangesPerDirection {
                 let response = try await exchange(transport, MailRPCRequest(pull: MailPull(after: current.pullCursor, refused: current.pendingRefusals)), expecting: peer.host)
                 let messages = response.messages ?? []
-                try await store.acceptPulled(messages, from: peer.host, next: response.next ?? current.pullCursor)
+                let complete = try await store.acceptPulled(messages, from: peer.host, next: response.next ?? current.pullCursor)
+                // A page this store could not write stays unacknowledged; the next pass pulls it again.
+                guard complete else { report.issues.append("\(peer.host): \(MailRefusalReason.unavailable)"); break }
                 report.pulled += messages.count
                 guard !messages.isEmpty, let reloaded = try await store.mailPeer(peer.host) else { break }
                 current = reloaded

@@ -471,6 +471,10 @@ what the controller implements. `ControllerMail.swift` holds the model and store
 - **Identity.** Each store mints a stable `HostID` once (`host`, renamed with `host-set-name`).
   An address is `<host>/worker/<uuid>` or `<host>/session/<uuid>`; the host part is where the
   agent's process runs. Session mailboxes are registered (`mail-register`); workers need none.
+  A session mailbox's tool credential is read by the owner for each launch (`mail-credential`)
+  and replaced with `mail-credential-rotate`, which stops the old one in the same transaction.
+  It is stored readable, like an execution credential, because the owner hands it to every
+  launch; rotation is the revocation.
 - **Sending is storing.** `mail_send` succeeds once the message is in a store: the recipient's
   inbox on this host, or the outbound queue (`mail_outbound`, one row per message per peer host)
   for another. Busy, idle and not-running recipients differ only in when they read it. Refusals are
@@ -480,12 +484,21 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   only for recipients on this one, so nothing is relayed.
 - **Grants live on the recipient's host** (`mail-grant-set RECIPIENT PATTERN REV mode priority`):
   exact sender, `<host>/*` or `*`, most specific first, revisioned, a `none` mode revokes. Modes
-  are ordered `notify < wake < ask`. A reply to mail the recipient itself sent needs no grant.
+  are ordered `notify < wake < ask`. A reply to mail the recipient itself sent needs no grant —
+  unless the owner explicitly revoked its sender: an effective `none` refuses replies too, and
+  writing it answers the questions that worker's open work asked of that sender with a host
+  refusal ("Undeliverable: … revoked"), so the work continues instead of waiting for a reply that
+  can no longer arrive.
 - **Reading is not acknowledging.** `mail_inbox` reads open mail through the `mail_open` partial
   index with a host-vouched header line per message; `mail_ack` records the acknowledging
   execution. An unacknowledged `interrupt` refuses `work_finish` in the finish transaction.
-- **Chains bound loops.** A message continues the chain of what it replies to, or of the mail its
-  execution last acknowledged, so omitting `reply_to` does not escape the depth limit (4). A
+- **Chains bound loops.** A message continues the chain of what it replies to, or of the deepest
+  mail its execution read, acknowledged or was woken by, so neither omitting `reply_to` nor never
+  calling `mail_ack` escapes the depth limit (4). (Measured before: two workers waking each
+  other and reading without acknowledging ping-ponged twelve rounds at depth 0.) A task mail
+  started inherits the waking message's chain when it is claimed, so its spend is that chain's
+  on its receipt too. The context record's `parent` is the chain id, which makes "executions in
+  this chain" one indexed read. A
   session mailbox has no execution, so its acknowledgements carry into its sends until a person
   starts a new turn: the Mac resets the context (`mail-context-reset`) on a prompt a person wrote
   — a native chat's composer, or a terminal prompt that is neither the mail notice
@@ -500,8 +513,8 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   mailbox that moves onto the asker's own host replaces the asker's sent copy rather than
   colliding with it. Wake admission keys on the newest open message that may wake the worker
   and whose chain is within budget, not on whichever message arrived last. Fuses
-  that need no reading: 50 messages per chain on a host, 20 sends a minute per sender, 1,000 open
-  messages per inbox. Spend limits belong to admission ([usage ledger](../feature-drafts/agent-usage-ledger.md)).
+  that need no reading: 50 messages and 16 wakes per chain on a host, 20 sends a minute per
+  sender, 1,000 open messages per inbox. Spend limits belong to admission ([usage ledger](../feature-drafts/agent-usage-ledger.md)).
 - **Notices, not bodies.** `threading-controller agent-notice post-tool-use|stop|session-start` is
   the hook command a recipe installs. It prints one host-authored line naming counts, senders and
   hosts as hook JSON (`hookSpecificOutput.additionalContext`, or `decision: block` once per
@@ -514,32 +527,63 @@ what the controller implements. `ControllerMail.swift` holds the model and store
 - **Wake.** Mail admitted under a `wake` or `ask` grant may start an idle worker: the supervisor
   admits one `event` task per worker with no open work, keyed by the newest open message, so a
   restart cannot duplicate it and unread mail cannot loop. The owner still decides through
-  `worker-set-sources … event`.
+  `worker-set-sources … event`. The claim admits it again (`mailWakeAdmission`): a revocation,
+  a spent chain budget or an inbox emptied since admission withdraws the queued task as
+  cancelled (`mail.wake_withdrawn`) instead of running it. A claim records the newest open
+  sequence as what that wake saw (`mailWakeMark`); only mail newer than the mark wakes the worker
+  again, so a task that acknowledges one message of five is not re-woken once for each of the
+  other four. (Measured before: five wakes for five messages.)
 - **Transport.** `mail-rpc --peer HOST` is the forced command of a per-peer SSH key: one JSON
   request (≤ 2 MiB) — `push` a batch (≤ 100 messages / 1 MiB) or `pull` after a cursor that
   acknowledges what the caller already stored, with the caller's refusals of that page. Every
   response names the answering host, and the caller refuses a response from any other. A pulled
-  page and the pull cursor commit together. The supervisor runs one sync pass every 15 s beside
+  page and the pull cursor commit together. A message the puller could not write (a storage
+  error, reported as `unavailable`) is not a refusal: the page stops there without moving the
+  cursor, so the whole page is offered again and what was stored returns as duplicates; a holder
+  that receives an `unavailable` refusal from an older puller re-queues the message. (Before, the
+  transient failure was reported back as a refusal and bounced the message permanently, answering
+  a question it carried "Undeliverable".) The supervisor runs one sync pass every 15 s beside
   launch supervision; `mail-sync` runs one pass by hand. Peers are owner-authored (`mail-peer-set`
   with the transport argv), and only peers with a transport are initiated to.
+- **Outbound mail ends.** Mail queued for a peer bounces to its sender — state `bounced`, a
+  carried question answered "Undeliverable: this host stopped trying…" — when the owner cancels
+  it (`mail-outbound-cancel MESSAGE`) or after seven days in the queue (`queuedAt`). The
+  supervisor expires a page per pass from the head of the queue, which is in queueing order, so
+  the scan stops at the first message still within its lifetime.
 
 - **Moving a mailbox** (`ControllerMailForward.swift`). A forward is owner-written and
   revisioned, keyed by the old address (`mail-forward-set OLD NEW REV`, `mail-forward-clear`).
   On the old store it forwards mail still arriving for the old address once — after the old
   address's own admission — re-addressed in place or queued to the new host as `moved`. On the
-  new store the same record is the owner's consent: a copy carrying `forwardedFrom` from that
-  host is admitted without a sender-host match or grant. A copy that was forwarded once is never
-  forwarded again. `mail-move OLD NEW` moves unacknowledged mail in one transaction with ids
-  kept, so the receiver's idempotence makes a retry harmless; a mailbox moved away and back
-  replaces the `moved` copy it left under the same id.
+  new store the same record is the owner's consent to take copies carrying `forwardedFrom` from
+  that host without a grant — but the old host still vouches only for what it can: senders on
+  itself, or a sender on the receiving host whose copy of that very message the receiving store
+  already holds (a mailbox moving back, or onto the sender's host). Any other sender on this
+  host is refused. A sender on a third host is the old host's word alone: it is accepted only if
+  this store also peers with that host, and then only under this store's own grants for that
+  sender (the handover copies the old mailbox's grants), never under the forward's consent, and
+  urgent only where a grant allows it — so a Mac session's mail to a hosted session still follows
+  a host-to-host move. (Before, the forward let the old host inject mail as any sender,
+  including this host's own agents, urgent and under any name.) A forwarded copy's header says
+  "forwarded via <old host>". The consent lapses seven
+  days after the forward was written (`acceptsUntil`); re-writing it renews. An explicit
+  revocation on the receiving store stands against forwarded copies too. A copy that was
+  forwarded once is never forwarded again. `mail-move OLD NEW` moves unacknowledged mail in one
+  transaction with ids kept, so the receiver's idempotence makes a retry harmless; a mailbox
+  moved away and back replaces the `moved` copy it left under the same id.
 
 Validation: `ControllerMailTests` (11 core cases: grants and revocation, busy recipients, notices,
 interrupts and finish, chain depth, ask/reply, wake coalescing, rate fuse, sessions, push/pull
-idempotence and spoofing, refused questions, v6 upgrade) and `scripts/tests/test_controller_mail.py`
+idempotence and spoofing, refused questions, v6 upgrade), `ControllerMailAuthorityTests` (unacked
+wake ping-pong bounded in one chain, a budget held by unsettled and admitted spend, forward
+vouching and lapse, replies after revocation, a queued wake withdrawn at claim, no re-wake after a
+partial ack, an unwritable pulled page pulled again, credential rotation, outbound cancel and
+expiry) and `scripts/tests/test_controller_mail.py`
 (real ptyd and two stores: a question crossing hosts wakes the recipient, its reply is pulled and
 the asker continues; a moved session keeps its unread mail and late mail is forwarded once; a busy agent receives the notice through the real hook command and cannot
 finish before acknowledging; unknown peers, forged senders and a transport reaching the wrong host
-are refused).
+are refused; a rotated session credential locks out the old one through the real `agent-mcp`; an
+owner-cancelled outbound message bounces and is never pushed).
 
 ## Trigger sources (schema v8)
 
@@ -615,8 +659,10 @@ receipts, daily cells and budgets, `ControllerUsageCollector` (runtime) reads tr
   reads excluded because a long conversation rereads its context every turn). A worker's daily
   budget (`worker-budget-set`) stops the supervisor starting new executions for it; a mail
   grant's chain budget stops that chain's mail from waking its recipient, while still delivering
-  it. Nothing running is ever stopped by a budget. Chain totals are those of executions on this
-  host. A fraction-of-account-window ceiling needs usage readings this host does not take yet.
+  it. Spend that is not known yet counts as unknown, not as zero: while any execution in the
+  chain has unsettled usage, or a wake admitted in it has not started, the budget holds further
+  wakes in that chain (a waived or settled receipt releases it). Nothing running is ever stopped
+  by a budget. Chain totals are those of executions on this host. A fraction-of-account-window ceiling needs usage readings this host does not take yet.
 
 Validation: `ControllerUsageTests` (receipt idempotence and daily cells, a stop that owes nothing,
 the daily budget at admission, a chain past its budget delivering without waking) and
@@ -657,8 +703,8 @@ Trigger dispatch indexes active rules and supports at most 100 enabled rules per
 Paused/deleted history does not consume this limit; enabling excess rules is refused before
 admission. Existing over-limit stores fail the poll without advancing its cursor.
 
-Wake admission rechecks current mail authority. Explicit revocations prevent future work even
-from retained mail. Mac default provisioning preserves revocations; its bounded eight-host sync
+Wake admission, and again the claim of a wake task, rechecks current mail authority. Explicit
+revocations prevent future work even from retained mail, and refuse replies. Mac default provisioning preserves revocations; its bounded eight-host sync
 pass rotates through all hosts. Mail transport and probes share `BoundedCommand`: private process
 groups, nonblocking bounded streams, bounded cleanup, and no unbounded wait for descendant EOF.
 

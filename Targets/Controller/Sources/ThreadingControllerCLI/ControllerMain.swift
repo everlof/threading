@@ -91,6 +91,7 @@ struct ControllerMain {
     mail-grants RECIPIENT_ADDRESS [CURSOR]
     mail-register SESSION_ADDRESS NAME
     mail-credential SESSION_ADDRESS   (the session's private mail-tool credential, for its launch environment)
+    mail-credential-rotate SESSION_ADDRESS   (replaces it; the old credential stops working at once)
     mail-contact-set ADDRESS NAME|-
     mail-contacts [CURSOR]
     mailbox ADDRESS [CURSOR]
@@ -105,6 +106,8 @@ struct ControllerMain {
     mail-context-reset SESSION_ADDRESS   (a person started a new turn: the session's next mail starts a new chain)
     mail-notice ADDRESS post-tool-use|stop|session-start
     mail-outbound HOST_UUID
+    mail-outbound-cancel MESSAGE_UUID   (stops delivering queued mail; it bounces to its sender as cancelled.
+        Queued mail older than seven days bounces as expired on its own)
     mail-sync   (one exchange pass with configured peers)
     mail-rpc --peer HOST_UUID   (a peer's forced SSH command: one bounded JSON request on stdin)
 
@@ -282,6 +285,8 @@ struct ControllerMain {
             try count(2); try output(await store.registerMailbox(MailAddress(args[0]), name: args[1]))
         case "mail-credential":
             try count(1); try output(await store.mailboxCredential(MailAddress(args[0])))
+        case "mail-credential-rotate":
+            try count(1); try output(await store.rotateMailboxCredential(MailAddress(args[0])))
         case "mail-contact-set":
             try count(2); try output(await store.setMailContact(MailAddress(args[0]), name: args[1] == "-" ? nil : args[1]))
         case "mail-contacts":
@@ -332,6 +337,10 @@ struct ControllerMain {
         case "mail-outbound":
             try count(1)
             try output(await store.outboundBatch(for: HostID(args[0])).envelopes)
+        case "mail-outbound-cancel":
+            try count(1)
+            guard let id = UUID(uuidString: args[0]) else { throw ControllerError.invalidInput("message_id") }
+            try output(await store.cancelOutboundMail(id))
         case "mail-sync":
             try count(0)
             try output(await ControllerMailSync.sync(store: store).0)
