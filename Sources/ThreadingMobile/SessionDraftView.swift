@@ -623,7 +623,7 @@ private struct SessionDraftComposerScreen: View {
                 .padding(.bottom, keyboardOverlap)
                 .offset(y: keyboardRideOffset)
         }
-        .background(theme.ground)
+        .mobileThemeBackdrop(theme)
         // The composer follows the keyboard through `keyboardOverlap`, on the keyboard's own
         // duration. Automatic avoidance moved it on a schedule of its own — see the state's
         // comment — so it is switched off rather than doubled.

@@ -32,7 +32,8 @@ final class ThemeBackdropMotionView: NSView, ThemedComponent, ThemeParticleHoldi
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     func configure(angleDegrees: Double, drift: ThemeGradientDrift, frozenPhase: Double? = nil) {
-        animator.configure(angleDegrees: angleDegrees, flipped: false, drift: drift, frozenPhase: frozenPhase)
+        animator.configure(angleDegrees: angleDegrees, flipped: false, drift: drift,
+            frozenPhase: frozenPhase ?? ThemeParticleHold.stillPhase)
         refreshMotion()
     }
 

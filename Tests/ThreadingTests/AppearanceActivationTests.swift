@@ -184,6 +184,37 @@ final class AppearanceActivationTests: XCTestCase {
         XCTAssertEqual(service.state.revision, 2)
     }
 
+    func testThemePickerActivatesTheSavedPackAndThemeSelectionReleasesIt() async throws {
+        let pack = pack("Rain", members: [rain])
+        let state = AppearanceActivationState(standaloneThemeID: "system",
+            manuallyEnabledExtensionIDs: [manual], packs: [pack])
+        let service = AppearanceActivationService(state: state, persistence: AppearanceTestPersistence(),
+            inventory: { self.inventory() }, reconcile: { _, _ in })
+        let host = AppearanceActivationHost(service: service, inventory: { self.inventory() })
+        let picker = ThemedPopUp()
+        AppThemePicker.populate(picker, selectedThemeID: .system, host: host)
+        let offer = try XCTUnwrap(picker.indexOfItem {
+            $0.representedValue as? UUID == pack.id && $0.title == L10n.format("Use with “%@” pack", pack.name)
+        })
+        XCTAssertGreaterThan(offer, 0, "the matching saved pack remains an explicit actionable row")
+        let index = try XCTUnwrap(picker.indexOfItem { $0.representedValue as? UUID == pack.id })
+        picker.selectItem(at: index)
+        XCTAssertTrue(AppThemePicker.activatePackIfSelected(picker, host: host))
+        for _ in 0..<200 where service.state.activePackID == nil { try await Task.sleep(nanoseconds: 1_000_000) }
+        XCTAssertEqual(service.state.desiredExtensionIDs, [manual, rain])
+        try await service.perform(.selectTheme("system"))
+        AppThemePicker.populate(picker, selectedThemeID: .system, host: host)
+        XCTAssertFalse(AppThemePicker.activatePackIfSelected(picker, host: host))
+        XCTAssertEqual(service.state.desiredExtensionIDs, [manual])
+        XCTAssertNil(service.state.activePackID)
+        let restoredIndex = try XCTUnwrap(picker.indexOfItem { $0.representedValue as? UUID == pack.id })
+        picker.selectItem(at: restoredIndex)
+        XCTAssertTrue(AppThemePicker.activatePackIfSelected(picker, host: host))
+        for _ in 0..<200 where service.state.activePackID == nil { try await Task.sleep(nanoseconds: 1_000_000) }
+        XCTAssertEqual(service.state.activePackID, pack.id)
+        XCTAssertEqual(service.state.desiredExtensionIDs, [manual, rain])
+    }
+
     func testTerminalScopeKeepsIdentityAndRefusesMissingTarget() {
         let scopes: [TerminalThemeCommandScope] = [.defaultTheme, .project(ProjectID()), .session(SessionID()), .terminal(TerminalID())]
         for scope in scopes { XCTAssertEqual(TerminalThemeCommandScope(id: scope.id), scope) }

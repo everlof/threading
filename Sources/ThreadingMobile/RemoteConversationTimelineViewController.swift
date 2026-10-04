@@ -549,6 +549,7 @@ final class RemoteConversationLayout: UICollectionViewLayout {
 
 @MainActor
 final class RemoteConversationTimelineViewController: UIViewController {
+    private let themeBackdrop = MobileThemeBackdropView()
     private enum Item: Hashable {
         case history
         case row(String)
@@ -661,9 +662,15 @@ final class RemoteConversationTimelineViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        themeBackdrop.isPresentationActive = true
         hasTimelineAppeared = true
         positionInitialBottomAfterLayout()
         reportPerformanceFirstPaintIfReady()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        themeBackdrop.isPresentationActive = false
     }
 
     override func viewDidLayoutSubviews() {
@@ -675,7 +682,8 @@ final class RemoteConversationTimelineViewController: UIViewController {
         guard self.theme != theme else { return }
         self.theme = theme
         view.backgroundColor = theme.uiGround
-        collectionView.backgroundColor = theme.uiGround
+        collectionView.backgroundColor = .clear
+        themeBackdrop.apply(theme)
         applyLatestButtonTheme()
         reconfigureVisibleContent()
     }
@@ -731,7 +739,9 @@ final class RemoteConversationTimelineViewController: UIViewController {
             )
         )
         collectionView.translatesAutoresizingMaskIntoConstraints = false
-        collectionView.backgroundColor = theme.uiGround
+        collectionView.backgroundColor = .clear
+        themeBackdrop.apply(theme)
+        collectionView.backgroundView = themeBackdrop
         collectionView.alwaysBounceVertical = true
         collectionView.keyboardDismissMode = .interactive
         collectionView.delegate = self
@@ -1927,10 +1937,10 @@ private final class RemoteConversationRowCell: UICollectionViewCell {
     }
 
     func configureStreaming(_ text: String, theme: RemoteThemePalette) {
-        if let view = hostedView as? RemoteStreamingMessageView {
-            view.configure(text: text, theme: theme)
+        if let view = hostedView as? RemoteAssistantMessageView {
+            view.configure(source: text, document: nil, theme: theme)
         } else {
-            install(RemoteStreamingMessageView(text: text, theme: theme))
+            install(RemoteAssistantMessageView(source: text, document: nil, theme: theme))
         }
     }
 
@@ -2186,7 +2196,7 @@ private final class RemoteUserMessageView: UIView {
         }
         hasConfigured = true
         bubble.applyRemoteSurface(
-            fill: theme.uiControlResting,
+            fill: theme.uiUserMessageSurface,
             radius: theme.panelRadius
         )
         configureContext(context, theme: theme)
@@ -2311,6 +2321,8 @@ private final class RemoteAssistantMessageView: UIStackView {
     ) {
         let isReused = hasConfigured
         hasConfigured = true
+        isLayoutMarginsRelativeArrangement = theme.hasBackdropDecoration
+        layoutMargins = applyConversationReadingPlate(theme)
         guard let document else {
             if arrangedSubviews.count == 1,
                let streaming = arrangedSubviews[0] as? RemoteStreamingMessageView {
@@ -2531,7 +2543,7 @@ private final class RemoteExpandedHitButton: UIButton {
     }
 }
 
-private final class RemoteExpandableMessageView: UIView {
+final class RemoteExpandableMessageView: UIView {
     init(
         title: String,
         text: String,
@@ -2570,11 +2582,8 @@ private final class RemoteExpandableMessageView: UIView {
             ))
         }
         addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        let inset = applyConversationReadingPlate(theme)
+        NSLayoutConstraint.activate(stack.edgeConstraints(to: self, insets: inset) + [
             button.heightAnchor.constraint(
                 greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget
             ),
@@ -2627,7 +2636,7 @@ final class RemoteToolMessageView: UIView {
         toggle: @escaping () -> Void
     ) {
         applyRemoteSurface(
-            fill: theme.uiPanel,
+            fill: theme.uiConversationPanel,
             radius: theme.panelRadius,
             border: theme.uiBorder,
             borderWidth: theme.borderWidth,
@@ -2693,7 +2702,7 @@ final class RemoteToolMessageView: UIView {
     }
 }
 
-private final class RemoteNoticeMessageView: UIView {
+final class RemoteNoticeMessageView: UIView {
     init(row: RemoteConversationRowDTO, theme: RemoteThemePalette) {
         super.init(frame: .zero)
         let stack = UIStackView()
@@ -2715,12 +2724,9 @@ private final class RemoteNoticeMessageView: UIView {
         stack.addArrangedSubview(image)
         stack.addArrangedSubview(label)
         addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
+        NSLayoutConstraint.activate(
+            stack.edgeConstraints(to: self, insets: applyConversationReadingPlate(theme))
+        )
     }
 
     @available(*, unavailable)
@@ -2774,7 +2780,7 @@ private extension RemoteAssistantMessageView {
 
 // MARK: - Permission and history cells
 
-private final class RemoteConversationPermissionCell: UICollectionViewCell {
+final class RemoteConversationPermissionCell: UICollectionViewCell {
     static let reuseIdentifier = "RemoteConversationPermissionCell"
 
     private var hostedView: UIView?
@@ -2794,7 +2800,7 @@ private final class RemoteConversationPermissionCell: UICollectionViewCell {
         let panel = UIView()
         panel.translatesAutoresizingMaskIntoConstraints = false
         panel.applyRemoteSurface(
-            fill: theme.uiPanel,
+            fill: theme.uiConversationPanel,
             radius: theme.panelRadius,
             border: theme.uiBorder,
             borderWidth: theme.borderWidth,
@@ -3111,6 +3117,31 @@ private final class RemoteConversationHistoryCell: UICollectionViewCell {
 }
 
 extension UIView {
+    /// A transcript row's own reading plate: the opaque conversation ground, so a picture,
+    /// particles or a shader passing behind the timeline never shows through its text. Over a
+    /// decorated ground the plate is a card in the theme's radius, and the returned insets keep
+    /// text off its edge; over a plain ground it is the ground itself and the row keeps its
+    /// established geometry.
+    @discardableResult
+    func applyConversationReadingPlate(_ theme: RemoteThemePalette) -> UIEdgeInsets {
+        let decorated = theme.hasBackdropDecoration
+        applyRemoteSurface(fill: theme.uiConversationGround, radius: decorated ? theme.panelRadius : 0)
+        return decorated
+            ? UIEdgeInsets(top: MobileDesign.Spacing.medium, left: MobileDesign.Spacing.inset,
+                           bottom: MobileDesign.Spacing.medium, right: MobileDesign.Spacing.inset)
+            : .zero
+    }
+
+    /// Edge constraints holding this view inside `container` at `insets`.
+    func edgeConstraints(to container: UIView, insets: UIEdgeInsets) -> [NSLayoutConstraint] {
+        [
+            leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: insets.left),
+            trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -insets.right),
+            topAnchor.constraint(equalTo: container.topAnchor, constant: insets.top),
+            bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -insets.bottom),
+        ]
+    }
+
     func applyRemoteSurface(
         fill: UIColor,
         radius: CGFloat,

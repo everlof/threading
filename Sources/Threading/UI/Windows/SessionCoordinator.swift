@@ -1072,6 +1072,23 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             toastPresenter(Self.sessionStartFolderFailureToast(folderFailure))
             return false
         }
+        // Refused before a row exists, the way a missing folder is: a launch would only reach
+        // `command not found` in a terminal and leave a session that can never start. Only a
+        // probe's own "missing" refuses — an unknown answer launches exactly as before.
+        if AgentCLIAvailability.shared.isKnownMissing(kind) {
+            environment.eventLog.record(.composer, "Session start refused", [
+                "project": targetProjectID.uuidString,
+                "cause": SessionLaunchDiagnosis.Cause.executableMissing
+            ])
+            toastPresenter(Self.sessionStartMissingCLIToast(kind) { [weak composer] in
+                guard let composer else { return }
+                AgentCLIInstallViewController.present(kind, from: composer)
+            })
+            // A CLI installed in another terminal since the last probe is found for the next
+            // press rather than at the next app activation.
+            AgentCLIAvailability.shared.refresh()
+            return false
+        }
 
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         var opening = NewChatOpeningMessage.compose(
@@ -1662,6 +1679,28 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 L10n.string("Your brief is still here. Check the selected project and try again.")
             ].joined(separator: " "),
             identifier: "sidebar.toast.session-start.folder-missing",
+            persistsUntilDismissed: true
+        )
+    }
+
+    /// The agent chosen in the composer is not on the login shell's PATH. Says so in the user's
+    /// terms, keeps the brief, and offers the install as the band's one action.
+    static func sessionStartMissingCLIToast(
+        _ kind: AgentKind,
+        install: @escaping () -> Void
+    ) -> ToastRequest {
+        ToastRequest(
+            message: L10n.format("%@ isn’t installed", kind.displayName),
+            detail: [
+                L10n.format(
+                    "Threading couldn’t find %@ on your login shell’s PATH.",
+                    kind.executableName
+                ),
+                L10n.string("Your brief is still here.")
+            ].joined(separator: " "),
+            actionTitle: L10n.string("Install…"),
+            action: install,
+            identifier: "sidebar.toast.session-start.cli-missing",
             persistsUntilDismissed: true
         )
     }

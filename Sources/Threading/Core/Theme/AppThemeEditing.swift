@@ -1,4 +1,35 @@
 import AppKit
+import ThreadingRemoteKit
+
+/// Material bounds the validator enforces, shared with every control that moves them, so a
+/// track cannot offer a value the validator refuses.
+public enum AppThemeMaterialLimits {
+    public static let panelRadiusRange: ClosedRange<CGFloat> = 0...40
+    public static let controlRadiusRange: ClosedRange<CGFloat> = 0...24
+    public static let imageOpacityRange: ClosedRange<Double> = 0...1
+}
+
+/// The one spelling of a bound in validator messages and tool descriptions, generated from the
+/// constant it describes so the prose cannot drift from the check: `8–120`, `0.02–0.25`.
+/// Machine-facing English, so formatting is locale-independent.
+public enum ThemeLimitText {
+    public static func number(_ value: Double) -> String {
+        String(format: "%g", value)
+    }
+
+    public static func span<Bound: BinaryFloatingPoint>(_ range: ClosedRange<Bound>) -> String {
+        "\(number(Double(range.lowerBound)))–\(number(Double(range.upperBound)))"
+    }
+
+    public static func span(_ range: ClosedRange<Int>) -> String {
+        "\(range.lowerBound)–\(range.upperBound)"
+    }
+
+    public static var driftDuration: String { span(ThemeGradientDrift.durationRange) }
+    public static var driftDistance: String { span(ThemeGradientDrift.distanceRange) }
+    public static var defaultDriftDuration: String { number(ThemeGradientDrift.defaultDuration) }
+    public static var defaultDriftDistance: String { number(ThemeGradientDrift.defaultDistance) }
+}
 
 public enum AppThemeEditingError: LocalizedError {
     case invalid(String)
@@ -433,11 +464,15 @@ public enum AppThemeEditing {
         }
 
         let material = variant.material
-        guard (0...40).contains(material.panelRadius) else {
-            throw AppThemeEditingError.invalid("panel_radius must be between 0 and 40.")
+        guard AppThemeMaterialLimits.panelRadiusRange.contains(material.panelRadius) else {
+            throw AppThemeEditingError.invalid("panel_radius must be between "
+                + "\(ThemeLimitText.number(Double(AppThemeMaterialLimits.panelRadiusRange.lowerBound))) and "
+                + "\(ThemeLimitText.number(Double(AppThemeMaterialLimits.panelRadiusRange.upperBound))).")
         }
-        guard (0...24).contains(material.controlRadius) else {
-            throw AppThemeEditingError.invalid("control_radius must be between 0 and 24.")
+        guard AppThemeMaterialLimits.controlRadiusRange.contains(material.controlRadius) else {
+            throw AppThemeEditingError.invalid("control_radius must be between "
+                + "\(ThemeLimitText.number(Double(AppThemeMaterialLimits.controlRadiusRange.lowerBound))) and "
+                + "\(ThemeLimitText.number(Double(AppThemeMaterialLimits.controlRadiusRange.upperBound))).")
         }
         guard (0.5...4).contains(material.borderWidth) else {
             throw AppThemeEditingError.invalid("border_width must be between 0.5 and 4.")
@@ -1291,7 +1326,8 @@ public enum AppThemeEditing {
             }
             if let drift = gradient.drift, !drift.isValid {
                 throw AppThemeEditingError.invalid(
-                    "\(prefix).gradient.drift needs a duration of 8–120 seconds and distance of 0.02–0.25."
+                    "\(prefix).gradient.drift needs a duration of \(ThemeLimitText.driftDuration) seconds "
+                        + "and distance of \(ThemeLimitText.driftDistance)."
                 )
             }
             guard (2...ThemeBackdropLimits.maximumGradientStops).contains(gradient.stops.count) else {
@@ -1321,7 +1357,7 @@ public enum AppThemeEditing {
         }
 
         if let image = backdrop.image {
-            guard (0...1).contains(image.opacity) else {
+            guard AppThemeMaterialLimits.imageOpacityRange.contains(image.opacity) else {
                 throw AppThemeEditingError.invalid(
                     "\(prefix).image.opacity must be between 0 and 1."
                 )

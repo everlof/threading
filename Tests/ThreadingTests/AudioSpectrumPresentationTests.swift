@@ -85,7 +85,7 @@ final class AudioSpectrumPresentationTests: HostedStoreTestCase {
                                                             themeID: themeID, kind: .dark))
     }
 
-    func testReferenceShaderUsesMeasuredBandsAndFallsBackWhenMotionStops() throws {
+    func testReferenceShaderUsesMeasuredBandsAndFallsBackWhenMotionStops() async throws {
         guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
         let previousSettings = DesignSettings.current
         let previousMotion = Design.Motion.reduceMotionOverrideForTesting
@@ -101,6 +101,7 @@ final class AudioSpectrumPresentationTests: HostedStoreTestCase {
                                  inputs: ExtensionHostSignal.audioBands.enumerated().map { index, signal in
                 .init(name: "band.\(index)", value: .signal(signal, mapping: .identity))
             }), source: try shaderSource(), signalProvider: { _, _ in available ? 0.8 : nil })
+        try await surface.waitForPreparation()
         XCTAssertNil(surface.hitTest(.zero))
         XCTAssertEqual(surface.preferredFramesPerSecond, 30)
         let playing = try XCTUnwrap(surface.snapshotImage(size: CGSize(width: 128, height: 64), time: 1))

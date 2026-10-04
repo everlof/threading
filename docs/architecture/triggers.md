@@ -121,16 +121,38 @@ The sidebar's **Triggers** destination has three pages:
   bounded diagnostic, and offers Review & Approve, Pause/Resume, Run now, Edit and Secrets.
 
 The destination is hosted at the pane's full width, but it draws one centred column at
-`Design.Size.readableWidth` plus the inset `PanelListView` keeps its rows on, installed through
-the same `SettingsUI.install(page:in:top:width:)` the Settings pages use. It is the display
-panel's list vocabulary — a name, a detail line, an action just beyond the copy — and given a
-whole wide window it stopped reading as one: the three page tabs stretched across the window
-because `ThemedSegmentedControl` states `noIntrinsicMetric`, the count sat alone in the opposite
-corner, and a row's button stood a thousand points from the name it acts on. The page count now
+`Design.Size.settingsContentWidth` plus the inset `PanelListView` keeps its rows on, installed
+through the same `SettingsUI.install(page:in:top:width:)` the Settings pages use, so its ink stands
+on the same edges as every Settings page. It was the 620-point readable measure until 2026-10-04,
+when the page was reported as small and hard to take in: a two-line row in a narrow strip of a
+wide window, and an automation's facts wrapping to a third of the room they had. At the wider
+measure a row's actions stand far from its name, so every row draws a hairline under itself that
+joins the two. The page tabs size to their own titles (`ThemedSegmentedControl.sizesToTitles`):
+a three-choice constant for four pages drew "Activi…" under a monospaced theme. The page count
 stands beside the tabs it counts, and a row's copy asks for the row the way `ControlRowView`
 does, since a wrapping label has no intrinsic width to hug with and a spacer beside it broke the
 detail line after two words. `TriggerCenterRenderTests` renders at a real wide pane and asserts
-both measures, because none of this was visible at the fixture width that shipped.
+both measures.
+
+**An automation has a page of its own.** A row says its state in the state's ink (Active, Paused,
+Draft — not active), when it runs and with what authority, and when it runs next and how it last
+ran (`AutomationSummary`, one value the row and the page share). **Details** opens the page in
+place: the way back, the name and state, every action as its own button — Pause/Resume or
+Review & Activate, Run now, Edit…, Delete… — then the exact settings a run uses (the approval
+sheet's own `AutomationReview` facts, through `FactSheetView` at the page's measure), the whole
+brief, and the ten most recent runs, each with Details and, while its chat exists, Open chat. It
+replaced a "Manage…" alert holding a 120-point window onto the instructions and a pop-up of three
+verbs behind a Continue button. Run now on an approved revision runs on the press — the page is
+the receipt and the person is acting; a draft's first run goes through the `.runNow` review, as
+an agent's run request does. Delete confirms. A run's Details shows `AutomationRunReview`: result,
+start and finish, changed paths and tests as facts, and the agent's summary under them.
+
+The editor is a sheet sized from its window (up to `Layout.preferredHeight`) with one label
+column and five sections — Task, When, Agent, Permissions, After a run. Only the controls the
+chosen schedule reads are on it (`AutomationScheduleFields.reads…`): a daily rule shows no
+weekdays, an event rule no time, and the rules field and its grammar leave when Full permission
+is chosen, which shows its caution instead. A refusal stands beside Save, not at the end of a
+form that may be scrolled away from it.
 
 Opening the destination clears the project sidebar's selection (`setTriggersMode(true)` calls
 `clearSelection()`). The page belongs to no row, and a session left highlighted beside it was
@@ -241,6 +263,8 @@ daemon reading the spec's run fields as `TriggerProbeRunSpec` (same JSON shape).
 - `Core/Triggers/TriggerProbeSourceCommands.swift` — configure/approve/enable/run-now for probes
 - `UI/Triggers/TriggerProbeSourceViews.swift` — probe rows, approval facts and the editor form
 - `UI/Triggers/TriggerCenterViewController.swift` — the host-owned destination
+- `UI/Triggers/AutomationDetail.swift` — the row/page summary, state inks, a run's receipt and the
+  automation page's header
 - `UI/Windows/SessionCoordinator+Triggers.swift` — two-stage ordinary-session lifecycle
 - `UI/Windows/MainWindowTriggerTools.swift` — built-in MCP application actions
 - `Models/AutomationPermissionPolicy.swift` — the unattended permission policy and its rule grammar

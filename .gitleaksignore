@@ -59,3 +59,5 @@ cc509f204580817f1640fc0b0600e7141cd73a3d:ThreadingRemoteKit/Tests/ThreadingRemot
 45e10945c11824fa21967a24054ae2695bc40fd7:ThreadingRemoteKit/Tests/ThreadingRemoteKitTests/RemoteProtocolTests.swift:generic-api-key:764
 7ab2018a4c565ceff2f92e3bbec5b27891c1de9a:ThreadingRemoteKit/Tests/ThreadingRemoteKitTests/RemoteProtocolTests.swift:generic-api-key:764
 6bd8c008dd19ea6f8eb0ca46281922cdbd397e3a:ThreadingRemoteKit/Tests/ThreadingRemoteKitTests/RemoteProtocolTests.swift:generic-api-key:764
+# Synthetic redaction fixture: sk-fixture-0123456789, never an issued credential.
+f9a047a10b2406ffa3e8f7a5809c88b8c9383b0c:Packages/ThreadingController/Tests/ThreadingControllerTests/ControllerRecoveryTests.swift:generic-api-key:77

@@ -56,13 +56,23 @@ final class AutomationScheduleFields {
         AutomationSchedule.Kind.allCases[min(AutomationSchedule.Kind.allCases.count - 1, max(0, cadence.indexOfSelectedItem))]
     }
 
-    /// Enables only the controls the current choice reads.
+    /// Whether the current choice reads the time of day.
+    var readsTime: Bool { !isAlternativeSelected && selectedKind != .interval }
+    /// Whether the current choice reads the time zone: every calendar rule does; an interval
+    /// advances from its anchor and does not.
+    var readsZone: Bool { readsTime }
+    /// Whether the current choice reads the weekday toggles.
+    var readsDays: Bool { !isAlternativeSelected && (selectedKind == .weekly || selectedKind == .weekdays) }
+    /// Whether the current choice reads the interval.
+    var readsInterval: Bool { !isAlternativeSelected && selectedKind == .interval }
+
+    /// Enables only the controls the current choice reads. An owner with room to rearrange
+    /// hides the rest instead, from the `reads…` answers.
     func updateEnabled() {
-        let isAlternative = isAlternativeSelected
-        let kind = selectedKind
-        time.isEnabled = !isAlternative && kind != .interval
-        interval.isEnabled = !isAlternative && kind == .interval
-        for toggle in dayToggles { toggle.isEnabled = !isAlternative && (kind == .weekly || kind == .weekdays) }
+        time.isEnabled = readsTime
+        zone.isEnabled = readsZone
+        interval.isEnabled = readsInterval
+        for toggle in dayToggles { toggle.isEnabled = readsDays }
     }
 
     /// The schedule the controls state. Validation is the caller's: an alternative choice reads

@@ -680,8 +680,9 @@ enum MCPToolCatalog {
       behind the list (images arrive as {path} or {base64} and are stored with the \
       theme), an optional opaque navigator_well with raised/sunken/flat edges, a custom \
       logo in place of the Threading mark, and the wordmark's text, face, size and weight. \
-      Gradient and navigator fills must keep the theme's label readable; image \
-      legibility is yours — wash a photograph well below 0.4 opacity. Absent means the \
+      Gradient and navigator fills must keep the theme's label readable; an image is \
+      sampled after saving and the result warns, with a suggested opacity, when labels \
+      would fall below 3:1 over it. Absent means the \
       default sidebar, and each remove_* field takes one choice back.
 
       A variant's `chrome` block is the deepest a theme reaches: stating it opts the \

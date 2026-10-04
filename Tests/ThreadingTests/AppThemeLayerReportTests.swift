@@ -196,7 +196,7 @@ final class AppThemeLayerReportTests: XCTestCase {
     func testTheSchemaAsksForTheTerminalInEveryVariant() throws {
         let create = try XCTUnwrap(MCPTools.definitions.first { $0.name == MCPTools.createAppTheme })
         XCTAssertTrue(create.description.contains("State both halves in every variant"))
-        let json = try XCTUnwrap(String(data: try JSONEncoder().encode(create), encoding: .utf8))
+        let json = try XCTUnwrap(String(data: try JSONEncoder().encode(MCPTools.appVariantSchema), encoding: .utf8))
         XCTAssertTrue(json.contains("agents' TUIs"), "terminal_colors says who draws in it")
         XCTAssertTrue(json.contains("errors and removed diff lines"), "slots say what they carry")
     }

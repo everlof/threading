@@ -1,4 +1,6 @@
+import SwiftUI
 import ThreadingRemoteKit
+import UIKit
 import XCTest
 @testable import ThreadingMobile
 
@@ -181,33 +183,123 @@ final class MobileCollaborationPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testTerminalInputPreferenceIsRememberedPerSessionOnThisDevice() {
+    func testTerminalToggleIsSharedAcrossSessionsAndSurvivesRecreation() throws {
         let suiteName = "MobileCollaborationPresentationTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
+        func connection(_ id: String) throws -> RemoteSessionConnection {
+            let connection = RemoteSessionConnection(
+                session: .init(id: id, title: id, agentKind: "codex", surface: .terminal,
+                               state: .idle, projectName: "Fixture"),
+                client: RemoteClient(link: try XCTUnwrap(RemoteConnectionLink(
+                    string: "https://fixture.invalid/#terminal"
+                )))
+            )
+            func receive(_ value: some Encodable) throws {
+                connection.receiveServerTextForTesting(String(decoding: try JSONEncoder().encode(value), as: UTF8.self))
+            }
+            try receive(RemoteHelloDTO(
+                surface: .terminal, capability: .interact, cols: 80, rows: 24, title: id,
+                features: [RemoteWebSocketFeature.atomicTerminalSubmission.rawValue,
+                           RemoteWebSocketFeature.focusedInputControl.rawValue]
+            ))
+            try receive(inputControlState(participants: [owner]))
+            return connection
+        }
+
         let store = MobileSessionContinuityStore(defaults: defaults)
-        store.setTerminalInputPreference(.compose, hostID: "mac-a", sessionID: "terminal-a")
+        let model = RemoteAppModel(continuity: store)
+        model.startDemo()
+        func host(_ connection: RemoteSessionConnection, preferences: UserDefaults) -> UIViewController {
+            UIHostingController(rootView: TerminalRemoteView(
+                connection: connection, openingLoaderOwner: .terminalSurface,
+                inputPreferences: preferences
+            )
+            .environmentObject(model)
+            .environmentObject(store)
+            .environmentObject(RemoteNotificationManager())
+            .environmentObject(MobileTerminalKeyboardStore(defaults: defaults)))
+        }
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let first = try connection("first")
+        let navigation = UINavigationController(rootViewController: host(first, preferences: defaults))
+        window.rootViewController = navigation
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        func settle() {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            window.layoutIfNeeded()
+        }
+        func element(_ label: String, in root: NSObject) -> NSObject? {
+            if (root as? UIView)?.isHidden == true { return nil }
+            if root.accessibilityLabel == MobileL10n.string(label) { return root }
+            for child in (root.accessibilityElements as? [NSObject]) ?? [] {
+                if let found = element(label, in: child) { return found }
+            }
+            for child in (root as? UIView)?.subviews ?? [] {
+                if let found = element(label, in: child) { return found }
+            }
+            return nil
+        }
+        func toggle(_ label: String) throws {
+            let button = try XCTUnwrap(element(label, in: window))
+            XCTAssertTrue(button.accessibilityActivate())
+            settle()
+        }
+        settle()
+        try toggle("Compose terminal input")
+        XCTAssertEqual(defaults.string(forKey: MobileTerminalInputPreference.preferenceKey), "compose")
 
-        XCTAssertEqual(
-            MobileSessionContinuityStore(defaults: defaults)
-                .state(hostID: "mac-a", sessionID: "terminal-a")
-                .terminalInputPreference,
-            .compose
-        )
-        XCTAssertNil(
-            MobileSessionContinuityStore(defaults: defaults)
-                .state(hostID: "mac-a", sessionID: "terminal-b")
-                .terminalInputPreference
-        )
+        let second = try connection("second")
+        navigation.pushViewController(host(second, preferences: try XCTUnwrap(UserDefaults(suiteName: suiteName))), animated: false)
+        settle()
+        try toggle("Use direct terminal input")
+        XCTAssertEqual(defaults.string(forKey: MobileTerminalInputPreference.preferenceKey), "direct")
+        navigation.popViewController(animated: false)
+        settle()
+        XCTAssertNotNil(element("Compose terminal input", in: window))
 
-        store.setTerminalInputPreference(.direct, hostID: "mac-a", sessionID: "terminal-a")
-        XCTAssertEqual(
-            MobileSessionContinuityStore(defaults: defaults)
-                .state(hostID: "mac-a", sessionID: "terminal-a")
-                .terminalInputPreference,
-            .direct
-        )
+        // The same write as Settings must update an already-mounted terminal too.
+        defaults.set("compose", forKey: MobileTerminalInputPreference.preferenceKey)
+        settle()
+        XCTAssertNotNil(element("Use direct terminal input", in: window))
+        defaults.set("direct", forKey: MobileTerminalInputPreference.preferenceKey)
+        settle()
+
+        let shared = inputControlState(participants: [owner,
+            .init(id: "guest", displayName: "Guest", role: .member, isOnline: true)])
+        first.receiveServerTextForTesting(String(decoding: try JSONEncoder().encode(shared), as: UTF8.self))
+        settle()
+        XCTAssertNotNil(element("Compose terminal input is required", in: window))
+        XCTAssertEqual(defaults.string(forKey: MobileTerminalInputPreference.preferenceKey), "direct")
+        first.receiveServerTextForTesting(String(decoding: try JSONEncoder().encode(
+            inputControlState(participants: [owner])
+        ), as: UTF8.self))
+        settle()
+        XCTAssertNotNil(element("Compose terminal input", in: window))
+    }
+
+    @MainActor
+    func testLegacySessionInputChoicesDoNotPreventDraftRestoration() throws {
+        let suiteName = "MobileCollaborationPresentationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = MobileSessionContinuityStore(defaults: defaults)
+        store.setDraft("Unsent", surface: .terminal, hostID: "mac", sessionID: "chat")
+        let key = "threading.mobile.session-continuity.v1"
+        var archive = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(defaults.data(forKey: key))) as? [String: Any])
+        var states = try XCTUnwrap(archive["states"] as? [String: [String: Any]])
+        let stateKey = try XCTUnwrap(states.keys.first)
+        states[stateKey]?["terminalInputPreference"] = "compose"
+        archive["states"] = states
+        defaults.set(try JSONSerialization.data(withJSONObject: archive), forKey: key)
+
+        let reloaded = MobileSessionContinuityStore(defaults: defaults)
+        XCTAssertNil(reloaded.recoveryMessage)
+        XCTAssertEqual(reloaded.draft(surface: .terminal, hostID: "mac", sessionID: "chat"), "Unsent")
     }
 
     func testOwnDevicesNeverShowPresenceOrTypingEvenWithAcceptedMembers() {

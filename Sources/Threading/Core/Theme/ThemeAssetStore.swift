@@ -47,7 +47,7 @@ enum ThemeAssetStore {
         return directory.appendingPathComponent(themeID.rawValue, isDirectory: true)
     }
 
-    private static func assetURL(named assetName: String, for themeID: AppThemeID) -> URL? {
+    static func assetURL(named assetName: String, for themeID: AppThemeID) -> URL? {
         guard AppThemeID.isSafePathComponent(assetName), let folder = folder(for: themeID) else {
             return nil
         }

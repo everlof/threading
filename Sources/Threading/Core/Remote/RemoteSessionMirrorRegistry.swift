@@ -170,13 +170,16 @@ final class RemoteSessionMirrorRegistry {
         // reconnect-only preference. Broadcast broadly and resolve per session: assignments can
         // change one terminal, while profile and app-theme changes can affect many.
         appEvents.observe(ProfileDidChange.self) { [weak self] _ in
-            self?.broadcastThemes()
+            self?.themesDidChange()
         }
         appEvents.observe(ThemeAssignmentsDidChange.self) { [weak self] _ in
-            self?.broadcastThemes()
+            self?.themesDidChange()
+        }
+        appEvents.observe(RemoteThemeAssetsDidChange.self) { [weak self] _ in
+            self?.themesDidChange()
         }
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
-            self?.broadcastThemes()
+            self?.themesDidChange()
         }
         // Archiving is an authorization change, not only a sidebar filter. A live runtime may
         // intentionally survive it, so revoke any attached socket as soon as the store changes.
@@ -213,7 +216,7 @@ final class RemoteSessionMirrorRegistry {
         appearanceObservation = NSApplication.shared.observe(\.effectiveAppearance) {
             [weak self] _, _ in
             Task { @MainActor [weak self] in
-                self?.broadcastThemes()
+                self?.themesDidChange()
             }
         }
     }
@@ -521,6 +524,10 @@ final class RemoteSessionMirrorRegistry {
     private var startingSessions: [SessionID: StartingSession] = [:]
     private var startupSessionByConnection: [ObjectIdentifier: SessionID] = [:]
     private var themeEventSubscribers: [ObjectIdentifier: RemoteConnection] = [:]
+    /// Coalesces pointer-rate theme changes into at most one broadcast per interval.
+    private static let themeBroadcastInterval: Duration = .milliseconds(100)
+    private var lastThemeBroadcast: ContinuousClock.Instant?
+    private var pendingThemeBroadcast: Task<Void, Never>?
     private var catalogueStreamIDs: [ObjectIdentifier: String] = [:]
     private var catalogueStreamSequences: [ObjectIdentifier: UInt64] = [:]
     private var pendingConversationBroadcasts: [SessionID: DispatchWorkItem] = [:]
@@ -747,8 +754,8 @@ final class RemoteSessionMirrorRegistry {
             sessions: sessions,
             terminals: terminals,
             host: RemoteAccessCoordinator.shared.hostIdentity(for: authorization),
-            theme: RemoteThemeBridge.appTheme(),
-            themeCatalog: canManageThemes(authorization) ? RemoteThemeBridge.catalog() : nil,
+            theme: RemoteThemeBridge.appTheme(for: authorization),
+            themeCatalog: canManageThemes(authorization) ? RemoteThemeBridge.catalog(for: authorization) : nil,
             archivedSessions: archivedSessions,
             newSessionCatalog: newSessionCatalog,
             features: restFeatures(for: authorization)
@@ -1346,7 +1353,7 @@ final class RemoteSessionMirrorRegistry {
             cols: snapshot.grid.cols,
             rows: snapshot.grid.rows,
             title: snapshot.title,
-            theme: RemoteThemeBridge.appTheme(),
+            theme: RemoteThemeBridge.appTheme(for: authorization),
             terminalTheme: RemoteThemeBridge.terminalTheme(for: terminalID),
             // Standalone shells implement the baseline byte stream and viewport protocol only.
             // Chat collaboration, atomic line submission, attention and attachment features all
@@ -1432,7 +1439,7 @@ final class RemoteSessionMirrorRegistry {
             revision: catalogueRevision
         )))
         connection.sendText(encode(RemoteAppThemeUpdateDTO(
-            theme: RemoteThemeBridge.appTheme()
+            theme: RemoteThemeBridge.appTheme(for: connection.authorization)
         )))
     }
 
@@ -1561,7 +1568,7 @@ final class RemoteSessionMirrorRegistry {
             cols: snapshot.grid.cols,
             rows: snapshot.grid.rows,
             title: snapshot.title,
-            theme: RemoteThemeBridge.appTheme(),
+            theme: RemoteThemeBridge.appTheme(for: connection.authorization),
             terminalTheme: RemoteThemeBridge.terminalTheme(for: sessionID),
             features: Self.advertisedFeatures(for: connection.authorization)
         )
@@ -1672,7 +1679,7 @@ final class RemoteSessionMirrorRegistry {
             cols: 0,
             rows: 0,
             title: ProjectStore.shared.session(withID: sessionID)?.presentedTitle ?? "",
-            theme: RemoteThemeBridge.appTheme(),
+            theme: RemoteThemeBridge.appTheme(for: authorization),
             terminalTheme: RemoteThemeBridge.terminalTheme(for: sessionID),
             features: Self.advertisedFeatures(for: authorization)
         )))
@@ -3191,17 +3198,62 @@ final class RemoteSessionMirrorRegistry {
         }
     }
 
-    /// Pushes chrome and the per-session terminal palette to already-open clients.
-    private func broadcastThemes() {
+    func themeAssetPayload(for digest: String) -> RemoteThemeAssetPayload? {
+        RemoteThemeAssets.shared.payload(for: digest)
+    }
+
+    func themeAssetDescriptor(for digest: String) -> RemoteThemeAsset? {
+        RemoteThemeAssets.shared.descriptor(for: digest)
+    }
+
+    /// Live tuning posts a theme change per pointer event; a phone needs the settled chrome, not
+    /// every frame of a drag. `/api/me` is invalidated at once, the first broadcast goes out at
+    /// once, and further changes inside the interval fold into one trailing broadcast.
+    private func themesDidChange() {
         invalidateMeCatalogue()
-        let appMessage = encode(RemoteAppThemeUpdateDTO(theme: RemoteThemeBridge.appTheme()))
+        guard pendingThemeBroadcast == nil else { return }
+        let now = ContinuousClock.now
+        guard let last = lastThemeBroadcast, now - last < Self.themeBroadcastInterval else {
+            broadcastThemes()
+            return
+        }
+        pendingThemeBroadcast = Task { @MainActor [weak self] in
+            try? await Task.sleep(until: last + Self.themeBroadcastInterval, clock: .continuous)
+            guard let self else { return }
+            pendingThemeBroadcast = nil
+            broadcastThemes()
+        }
+    }
+
+    /// Pushes chrome and the per-session terminal palette to already-open clients.
+    ///
+    /// Each connection receives the projection its authorization may use: owner-only assets
+    /// (fonts, the extension surface recipe) are left out for anyone the asset route would
+    /// refuse. With no open client nothing is resolved, so a Mac without a paired device never
+    /// starts theme-asset preparation from here.
+    private func broadcastThemes() {
+        lastThemeBroadcast = ContinuousClock.now
+        invalidateMeCatalogue()
+        var appMessages: [Bool: String] = [:]
         for connection in themeEventSubscribers.values {
-            connection.sendText(appMessage)
+            let owner = RemoteThemeBridge.receivesOwnerAssets(connection.authorization)
+            if appMessages[owner] == nil {
+                appMessages[owner] = encode(RemoteAppThemeUpdateDTO(
+                    theme: RemoteThemeBridge.appTheme(for: connection.authorization)
+                ))
+            }
+            connection.sendText(appMessages[owner]!)
         }
         for (sessionID, mirror) in mirrors where !mirror.subscribers.isEmpty {
-            let message = encode(RemoteThemeBridge.update(for: sessionID))
+            var messages: [Bool: String] = [:]
             for connection in mirror.subscribers.values {
-                connection.sendText(message)
+                let owner = RemoteThemeBridge.receivesOwnerAssets(connection.authorization)
+                if messages[owner] == nil {
+                    messages[owner] = encode(RemoteThemeBridge.update(
+                        for: sessionID, authorization: connection.authorization
+                    ))
+                }
+                connection.sendText(messages[owner]!)
             }
         }
     }

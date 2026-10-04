@@ -314,7 +314,7 @@ final class UsageHistoryStore {
     ) -> UsageLimitSampleSource {
         switch (provider, usageSource) {
         case (.claude, .api): return .claudeAPI
-        case (.claude, .localCache): return .claudeLocalCache
+        case (.claude, .localCache), (.claude, .profileSnapshot): return .claudeLocalCache
         case (.codex, _): return .codexAPI
         case (.grok, _): return .grokRuntime
         case (.openCode, _): return .openCodeRuntime

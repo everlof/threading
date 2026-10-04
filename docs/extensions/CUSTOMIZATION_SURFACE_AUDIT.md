@@ -24,6 +24,8 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 
 | Surface | Proposed contract | First authority | Host must retain | Status |
 | --- | --- | --- | --- | --- |
+| Current Theme tuning and pack picker | — | host-only authoring over the public theme document | validated ranges, built-in immutability, live-preview ownership, one durable revision per drag, explicit pack activation/release and user choices | Host-only |
+| Mobile theme backdrop and character header | existing theme data projected through RemoteKit, no extension execution | palette, system typeface, words, morph recipe, identity ink, particles and bounded image renditions | authenticated asset admission, cache/decoder/emitter budgets, layout, navigation, session state and accessibility truth, device-local motion/power gates, one visible animator and one mascot slot | Host-owned presentation |
 | Appearance pack editor and activation commands | deliberately host-only; shared themed controls | host appearance service | exact membership/digest review, enablement ownership, capability disclosure, persistence, runtime admission, focus and failure truth | Implemented |
 | Public browser guest client | deliberately host-only | existing RemoteClient UI with transport adapter | invitation decoding, service origin, membership/device binding, scope, approval, expiry and revocation | Implemented |
 | Chat invitation sheet | deliberately host-only | host form | capability scope, permission approval, route reachability, expiry, credential issuance and revocation | Implemented |
@@ -72,8 +74,8 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Sentry app diagnostics settings | — | host-only | exact device-local consent, SDK lifecycle, payload sanitizer, sampling and immediate revocation | Host-only |
 | Main-thread stall readout | — | host-only | main-queue watchdog truth, bounded incident and trace recording, local opt-in and disclosure of active semantic spans | Host-only |
 | Session hover card | `sidebar.session-hover-card@1` | hook, replacement | hover, popover, session lifecycle | Implemented |
-| Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival | Implemented |
-| All-account usage fleet | — | host-only | discovery/refresh pacing, current-account identity, migration eligibility/action, bounded scrolling and popover lifecycle | Host-only |
+| Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival, reading-source wording, and the keychain **Allow…** offer with the prompt it starts | Implemented |
+| All-account usage fleet | — | host-only | discovery/refresh pacing, current-account identity, migration eligibility/action, keychain grant offer/action, bounded scrolling and popover lifecycle | Host-only |
 | Usage analytics section switch | — | host-only | selected native analysis, retained chart state, keyboard and accessibility navigation | Host-only |
 | Banked usage reset actions | — | host-only | exact account and credit identity, fresh confirmation, provider idempotency, authoritative post-read, owed-continuation release | Host-only |
 | Curfew surfaces (draft moon button and chip, chat chip, sidebar Curfew fold, strip source, Settings section) | — | host-only | the deadline and its instance identity, hold admission, the wind-down record, interrupt/stop decisions and their receipts, the watched-turn rule, Lift | Host-only |
@@ -152,6 +154,11 @@ approved probe, and Delete (a confirmed tombstone that keeps history). Agents re
 through `manage_automation`'s `draftSource`, which writes a paused, unapproved draft; there is no
 tool, extension slot or theme seam that approves or deletes one. The editor's schedule controls
 are the automation editor's (`AutomationScheduleFields`), not a second component.
+
+An automation's own page (`AutomationDetailHeaderView` over the same `AutomationReview` facts)
+is host-only for the same reason as the sheet: its state word, its Run now / Pause / Delete
+actions and its settings are the receipt for what will run. Themes style its controls, labels
+and inks; no slot adds, reorders or relabels an action or a fact.
 
 The two command-line-tool surfaces remain host-only for the same reason as the rows above them,
 one step sharper: both write outside anything Threading owns. One creates and deletes a symlink in
@@ -718,4 +725,16 @@ data. Rendering and lifecycle are deliberately host-owned: Threading retains lay
 content, the stop/geometry budget, visibility and power gates, Reduce Motion, accessibility
 silence, hit testing, navigation and exact scroll position. A missing/invalid recipe draws the
 ordinary ground or still gradient. The existing `sidebar.backdrop@1` extension hook remains a
-separate Mac surface and does not grant a phone shader renderer.
+separate authored surface; the 2026-10-04 projection below admits its reviewed backdrop on
+the phone without granting extension execution.
+
+## 2026-10-04 — Portable fonts, backdrop shader, sounds and widget accent
+
+These reuse authored theme and existing reviewed sidebar surface contracts; no public component
+or new extension executable authority is added. The phone's backdrop accepts a bounded source
+projection of the Mac's current enabled reviewed sidebar overlay. Threading keeps pack activation,
+authorization, source admission, scalar binding, layering, one-visible-surface ownership, shader
+compilation and GPU/power/visibility budgets. Font parsing, process registration, sound conversion,
+verified receipts and notification consent remain host-owned. The usage widget is deliberately
+host-only: it accepts one pinned accent while WidgetKit rendering mode, identity, dates, readings,
+contrast and deep links retain ownership. A theme cannot replace these rules or supply controls.

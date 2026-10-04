@@ -137,6 +137,22 @@ Selection no longer retries. The retry is a button on the surface, which is a de
 a side effect of navigating, and it clears the record first so the gate that sent us there does
 not refuse it.
 
+### A missing CLI leads with its cure
+
+`executable-missing` is the one cause whose remedy is known and is not "again", so its actions are
+their own list (`missingExecutableActions`): **Install <runtime>…** first and primary, then
+**Try Again**, then **Copy Details**. The install opens `AgentCLIInstallViewController` — the same
+sheet onboarding, the composer's refusal and Settings ▸ Agent tools open — and a run that ends with
+the CLI found relaunches the session itself. **Report a Problem…** is left off: nothing in
+Threading failed, and offering it invited reports about a tool that had not been installed yet.
+
+Most of these failures no longer happen at all. `AgentCLIAvailability` keeps the login shell's
+answer for every runtime (one `PATH` read per refresh, re-asked on activation and after an
+install), and `SessionCoordinator` refuses a composer send to a runtime the probe *proved* missing
+before a row exists — a persistent toast that keeps the brief and carries **Install…**. An unknown
+answer launches exactly as before; only sessions that start without the composer (schedules,
+automations, a phone, the MCP tools) can still reach this surface for a missing CLI.
+
 ### A refused write must not turn into a desktop-only dialog
 
 The terminal launch bookkeeping used to call `ThemedAlert.runModal()` when saving `hasLaunched`

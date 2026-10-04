@@ -267,10 +267,15 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
     private var items: [AccountUsageFleetItem] = []
     private var indexByAccountID: [AccountID: Int] = [:]
     private var limitsByAccountID: [AccountID: [CustomLimit]] = [:]
+    /// Whether each card offers **Allow…**, fixed when its row was last measured so the height
+    /// the table was told and the card it draws can never disagree.
+    private var offersGrantByAccountID: [AccountID: Bool] = [:]
     private var summaryIndex = AccountUsageFleetSummaryIndex()
     private var estimatedContentHeight: CGFloat = 0
     private var now = Date()
     private var tableIsBound = false
+    private let keychainAccess: ClaudeKeychainAccess
+    private let appEvents = AppEventObservations()
 
     var onHandoff: ((AgentAccount) -> Void)?
 
@@ -294,19 +299,37 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
     }
     var hasInternalScrollViewForTesting: Bool { scroll?.superview != nil }
     var showsLimitLegendForTesting: Bool { !limitLegend.isHidden }
+    /// The accounts whose materialized card offers **Allow…**.
+    var keychainGrantAccountIDsForTesting: [AccountID] {
+        items.indices.compactMap { row in
+            guard let host = table.view(atColumn: 0, row: row, makeIfNecessary: false) else {
+                return nil
+            }
+            let offers = host.subviews.contains { ($0 as? AccountUsageFleetCardView)?.offersKeychainGrant == true }
+            return offers ? items[row].account.id : nil
+        }
+    }
 
     init(
         maximumHeight: CGFloat = Design.AccountUsageFleet.settingsMaximumHeight,
         scrollHost: ScrollHost = .standalone,
         limitsProvider: @escaping LimitsProvider = {
             CustomLimitSettings.shared.rules(for: $0)
-        }
+        },
+        keychainAccess: ClaudeKeychainAccess = .shared
     ) {
         self.maximumHeight = maximumHeight
         self.scrollHost = scrollHost
         self.limitsProvider = limitsProvider
+        self.keychainAccess = keychainAccess
         super.init(frame: .zero)
         setupViews()
+        // A login's keychain answer changes without its reading changing — a grant in flight,
+        // a refusal learnt by the fetcher — so the fleet listens for it itself rather than
+        // asking every host to forward a second event.
+        appEvents.observe(ClaudeKeychainAccessDidChange.self) { [weak self] event in
+            self?.keychainAccessChanged(configPath: event.configPath)
+        }
     }
 
     @available(*, unavailable)
@@ -320,6 +343,9 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
         )
         limitsByAccountID = Dictionary(uniqueKeysWithValues: items.map {
             ($0.account.id, limitsProvider($0.account.id))
+        })
+        offersGrantByAccountID = Dictionary(uniqueKeysWithValues: items.map {
+            ($0.account.id, keychainAccess.offersGrant(for: $0.account))
         })
         summaryIndex.rebuild(items: items, now: now)
         estimatedContentHeight = items.reduce(CGFloat.zero) { partial, item in
@@ -347,9 +373,11 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
             isCurrent: previous.isCurrent,
             allowsHandoff: previous.allowsHandoff
         )
+        let previousHeight = estimatedHeight(for: previous)
         items[index] = updated
+        offersGrantByAccountID[accountID] = keychainAccess.offersGrant(for: updated.account)
         summaryIndex.update(item: updated, now: now)
-        estimatedContentHeight += estimatedHeight(for: updated) - estimatedHeight(for: previous)
+        estimatedContentHeight += estimatedHeight(for: updated) - previousHeight
         applySummary()
         applyLimitLegend()
         applyContentHeight()
@@ -363,6 +391,15 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
             )
         }
         return true
+    }
+
+    /// Re-draws the one card whose login's keychain answer changed — its height and its
+    /// **Allow…** row — without rebuilding the fleet.
+    private func keychainAccessChanged(configPath: String) {
+        guard let index = items.firstIndex(where: { $0.account.configPath == configPath })
+        else { return }
+        let reading = items[index].reading
+        update(reading: reading, for: items[index].account.id)
     }
 
     private func applySummary() {
@@ -585,9 +622,13 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
             Design.AccountUsageFleet.maximumWindowsPerAccount
         )
         let action = item.allowsHandoff ? Design.AccountUsageFleet.estimatedActionHeight : 0
+        let grant = offersGrantByAccountID[item.account.id] == true
+            ? Design.AccountUsageFleet.estimatedActionHeight
+            : 0
         return Design.AccountUsageFleet.estimatedBaseRowHeight
             + CGFloat(windows) * Design.AccountUsageFleet.estimatedWindowRowHeight
             + action
+            + grant
     }
 
     func tableView(
@@ -604,9 +645,13 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
         let card = AccountUsageFleetCardView(
             item: item,
             now: now,
-            limits: limitsByAccountID[item.account.id] ?? []
+            limits: limitsByAccountID[item.account.id] ?? [],
+            offersKeychainGrant: offersGrantByAccountID[item.account.id] == true
         )
         card.onHandoff = { [weak self] account in self?.onHandoff?(account) }
+        card.onAllowKeychainAccess = { [weak self] account in
+            self?.keychainAccess.requestAccess(for: [account])
+        }
         host.install(
             card,
             columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width,
@@ -624,12 +669,20 @@ private final class AccountUsageFleetCardView: NSView {
     private let item: AccountUsageFleetItem
     private let now: Date
     private let limits: [CustomLimit]
+    let offersKeychainGrant: Bool
     var onHandoff: ((AgentAccount) -> Void)?
+    var onAllowKeychainAccess: ((AgentAccount) -> Void)?
 
-    init(item: AccountUsageFleetItem, now: Date, limits: [CustomLimit]) {
+    init(
+        item: AccountUsageFleetItem,
+        now: Date,
+        limits: [CustomLimit],
+        offersKeychainGrant: Bool
+    ) {
         self.item = item
         self.now = now
         self.limits = limits
+        self.offersKeychainGrant = offersKeychainGrant
         super.init(frame: .zero)
         setupViews()
     }
@@ -701,6 +754,10 @@ private final class AccountUsageFleetCardView: NSView {
 
         content.append(caption(footerText))
 
+        if offersKeychainGrant {
+            content.append(keychainGrantRow())
+        }
+
         if item.allowsHandoff {
             let button = ThemedButton(
                 title: L10n.string("Move to Account"),
@@ -752,8 +809,8 @@ private final class AccountUsageFleetCardView: NSView {
     private var footerText: String {
         if let usage = item.reading.usage {
             var parts = [L10n.format("Updated %@", UsageFormat.age(of: usage.observedAt))]
-            if usage.source == .localCache {
-                parts.append(L10n.string("via Claude's status-line feed"))
+            if let note = UsageFormat.sourceNote(usage.source) {
+                parts.append(note)
             }
             if case .stale = item.reading { parts.append(L10n.string("stale")) }
             return parts.joined(separator: " · ")
@@ -770,8 +827,37 @@ private final class AccountUsageFleetCardView: NSView {
         return label
     }
 
+    /// The notice and its answer on one line, so the card keeps the fixed height the fleet's
+    /// virtual table states for it.
+    private func keychainGrantRow() -> NSView {
+        let notice = NSTextField(labelWithString: UsageFormat.keychainGrantNotice)
+        notice.applyFont(.caption)
+        notice.textColor = Design.Text.secondary
+        notice.lineBreakMode = .byTruncatingTail
+        notice.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let button = ThemedButton(
+            title: UsageFormat.keychainGrantAction,
+            target: self,
+            action: #selector(allowKeychainClicked)
+        )
+        button.emphasis = .secondary
+        button.setAccessibilityIdentifier("usage.keychainGrant.\(item.account.id.rawValue)")
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let row = NSStackView(views: [notice, button])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Design.Spacing.small
+        return row
+    }
+
     @objc private func handoffClicked() {
         onHandoff?(item.account)
+    }
+
+    @objc private func allowKeychainClicked() {
+        onAllowKeychainAccess?(item.account)
     }
 
     override func viewDidChangeEffectiveAppearance() {

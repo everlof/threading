@@ -46,7 +46,8 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
         public let glow: Glow?
 
         /// The broad-ground gradient, resolved in the same appearance as the palette. Optional
-        /// for older hosts/clients. Pictures remain Mac-local; this recipe needs no asset fetch.
+        /// for older hosts/clients. Pictures use the separate digest manifest; this recipe
+        /// needs no asset fetch.
         public let backdropGradient: RemoteThemeGradient?
 
         /// The theme's multiplier for semantic app text. Optional for wire compatibility;
@@ -65,6 +66,8 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
         /// on the wire**: it names a font installed on the *Mac*, and a phone that does not have
         /// it should fall back to `typeface` rather than substituting something close.
         public let fontFamily: String?
+        public let identityMarks: String?
+        public let particles: RemoteThemeParticles?
 
         public init(
             panelRadius: Double,
@@ -74,7 +77,9 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
             textScale: Double? = nil,
             typeface: RemoteThemeTypeface? = nil,
             fontFamily: String? = nil,
-            backdropGradient: RemoteThemeGradient? = nil
+            backdropGradient: RemoteThemeGradient? = nil,
+            identityMarks: String? = nil,
+            particles: RemoteThemeParticles? = nil
         ) {
             self.panelRadius = panelRadius
             self.controlRadius = controlRadius
@@ -84,6 +89,65 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
             self.typeface = typeface
             self.fontFamily = fontFamily
             self.backdropGradient = backdropGradient
+            self.identityMarks = identityMarks
+            self.particles = particles
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case panelRadius, controlRadius, borderWidth, glow, textScale, typeface, fontFamily
+            case backdropGradient, identityMarks, particles
+        }
+
+        public init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            panelRadius = try values.decode(Double.self, forKey: .panelRadius)
+            controlRadius = try values.decode(Double.self, forKey: .controlRadius)
+            borderWidth = try values.decode(Double.self, forKey: .borderWidth)
+            glow = try? values.decode(Glow.self, forKey: .glow)
+            textScale = try? values.decode(Double.self, forKey: .textScale)
+            typeface = try? values.decode(RemoteThemeTypeface.self, forKey: .typeface)
+            fontFamily = try? values.decode(String.self, forKey: .fontFamily)
+            backdropGradient = try? values.decode(RemoteThemeGradient.self, forKey: .backdropGradient)
+            identityMarks = try? values.decode(String.self, forKey: .identityMarks)
+            let stated = try? values.decode(RemoteThemeParticles.self, forKey: .particles)
+            particles = stated?.isValid == true ? stated : nil
+        }
+    }
+
+    public struct TitleMorph: Codable, Equatable, Sendable {
+        public static let maximumScrambleCharacters = 96
+        /// Bounds the scan of a wire alphabet, not the alphabet: the Mac's validator ignores
+        /// whitespace, so a valid alphabet may be spaced or wrapped. Room for every glyph to be
+        /// a long grapheme cluster with as much whitespace again.
+        public static let maximumScrambleSourceBytes = 64 * maximumScrambleCharacters
+        public let style: String
+        public let characters: String?
+
+        public init(style: String, characters: String? = nil) {
+            self.style = style
+            self.characters = characters
+        }
+
+        public var isValid: Bool {
+            ["shapeMorph", "crossfade", "slideUp", "slideDown", "scale", "bounce", "drop",
+             "flip", "blur", "scramble", "typewriter"].contains(style)
+                && (characters.map(Self.admitsAlphabet) ?? true)
+        }
+
+        public var scrambleCharacters: [Character]? {
+            guard isValid, style == "scramble", let characters else { return nil }
+            let pool = Self.glyphs(in: characters)
+            return pool.isEmpty ? nil : pool
+        }
+
+        /// The same rule as the Mac's validator: whitespace never counts against the limit.
+        private static func admitsAlphabet(_ characters: String) -> Bool {
+            characters.utf8.count <= maximumScrambleSourceBytes
+                && glyphs(in: characters).count <= maximumScrambleCharacters
+        }
+
+        private static func glyphs(in characters: String) -> [Character] {
+            Array(characters.filter { !$0.isWhitespace && !$0.isNewline })
         }
     }
 
@@ -115,6 +179,9 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
     public let colors: [String: String]
     public let material: Material
     public let words: Words?
+    public let titleMorph: TitleMorph?
+    public let assets: [RemoteThemeAsset]?
+    public let surface: RemoteThemeSurface?
 
     public init(
         id: String,
@@ -122,7 +189,10 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
         mode: RemoteThemeMode,
         colors: [String: String],
         material: Material,
-        words: Words? = nil
+        words: Words? = nil,
+        titleMorph: TitleMorph? = nil,
+        assets: [RemoteThemeAsset]? = nil,
+        surface: RemoteThemeSurface? = nil
     ) {
         self.id = id
         self.name = name
@@ -130,6 +200,30 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
         self.colors = colors
         self.material = material
         self.words = words
+        self.titleMorph = titleMorph?.isValid == true ? titleMorph : nil
+        self.assets = RemoteThemeAsset.admitted(assets)
+        self.surface = surface?.isValid == true ? surface : nil
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, mode, colors, material, words, titleMorph, assets, surface
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        mode = try values.decode(RemoteThemeMode.self, forKey: .mode)
+        colors = try values.decode([String: String].self, forKey: .colors)
+        material = try values.decode(Material.self, forKey: .material)
+        words = try? values.decode(Words.self, forKey: .words)
+        let morph = try? values.decode(TitleMorph.self, forKey: .titleMorph)
+        titleMorph = morph?.isValid == true ? morph : nil
+        // Element by element: one entry a newer Mac shaped differently costs that entry only.
+        assets = RemoteThemeAsset.admitted(
+            (try? values.decode(RemoteThemeAssetList.self, forKey: .assets))?.assets)
+        let projected = try? values.decode(RemoteThemeSurface.self, forKey: .surface)
+        surface = projected?.isValid == true ? projected : nil
     }
 }
 
@@ -137,6 +231,12 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
 /// terminal themes can be assigned at session/project scope even when the rest of the app uses
 /// one global style.
 public struct RemoteTerminalThemeDTO: Codable, Equatable, Sendable {
+    public struct Glow: Codable, Equatable, Sendable {
+        public let radius: Double
+        public let opacity: Double
+        public init(radius: Double, opacity: Double) { self.radius = radius; self.opacity = opacity }
+        public var isValid: Bool { radius.isFinite && opacity.isFinite && (0...16).contains(radius) && (0...1).contains(opacity) }
+    }
     public let id: String
     public let name: String
     public let foreground: String
@@ -149,6 +249,7 @@ public struct RemoteTerminalThemeDTO: Codable, Equatable, Sendable {
     public let selection: String
     /// ANSI indices 0...15, in terminal order.
     public let ansi: [String]
+    public let glow: Glow?
 
     public init(
         id: String,
@@ -158,7 +259,8 @@ public struct RemoteTerminalThemeDTO: Codable, Equatable, Sendable {
         background: String,
         cursor: String,
         selection: String,
-        ansi: [String]
+        ansi: [String],
+        glow: Glow? = nil
     ) {
         self.id = id
         self.name = name
@@ -168,6 +270,22 @@ public struct RemoteTerminalThemeDTO: Codable, Equatable, Sendable {
         self.cursor = cursor
         self.selection = selection
         self.ansi = ansi
+        self.glow = glow?.isValid == true ? glow : nil
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, foreground, boldForeground, background, cursor, selection, ansi, glow }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        foreground = try values.decode(String.self, forKey: .foreground)
+        boldForeground = try values.decodeIfPresent(String.self, forKey: .boldForeground)
+        background = try values.decode(String.self, forKey: .background)
+        cursor = try values.decode(String.self, forKey: .cursor)
+        selection = try values.decode(String.self, forKey: .selection)
+        ansi = try values.decode([String].self, forKey: .ansi)
+        let candidate = try? values.decode(Glow.self, forKey: .glow)
+        glow = candidate?.isValid == true ? candidate : nil
     }
 }
 
@@ -3973,6 +4091,9 @@ public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
     public let capabilities: [RemoteNotificationCapability]?
     /// Per-device consent. Missing is always false, including for a capability-aware device.
     public let includesResponsePreviews: Bool?
+    /// Only files verified and installed in this phone's Library/Sounds. The host rechecks
+    /// current theme admission and consent before using a receipt.
+    public let themeSoundNames: [String: String]?
 
     public init(
         deviceToken: String,
@@ -3982,7 +4103,8 @@ public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
         enabledKinds: [RemoteNotificationKind],
         soundEnabledKinds: [RemoteNotificationKind]? = nil,
         capabilities: [RemoteNotificationCapability]? = nil,
-        includesResponsePreviews: Bool? = nil
+        includesResponsePreviews: Bool? = nil,
+        themeSoundNames: [String: String]? = nil
     ) {
         self.deviceToken = deviceToken
         self.hostedRegistrationID = hostedRegistrationID
@@ -3992,6 +4114,7 @@ public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
         self.soundEnabledKinds = soundEnabledKinds
         self.capabilities = capabilities
         self.includesResponsePreviews = includesResponsePreviews
+        self.themeSoundNames = themeSoundNames
     }
 }
 

@@ -936,6 +936,18 @@ final class TerminalRenderOwner: Sendable {
     func resetMetalCounters () {
         withRenderState { $0.renderer?.resetRenderCounter() }
     }
+
+    /// Releases what only a glowing frame needs — the halo textures and blur kernels — while
+    /// keeping the renderer, so a terminal kept off screen holds no halo and one coming back
+    /// pays a single allocation. Inside the render domain, so it cannot race a frame.
+    func releaseMetalTransientResources () {
+        withRenderState { $0.renderer?.releaseGlowResources() }
+    }
+
+    /// Bytes the Metal renderer's halo textures hold now; zero without a renderer.
+    var metalGlowTextureBytes: Int {
+        withRenderState { $0.renderer?.glowTextureBytes ?? 0 }
+    }
 #endif
 }
 #endif

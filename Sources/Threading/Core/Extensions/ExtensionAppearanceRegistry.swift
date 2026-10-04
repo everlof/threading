@@ -67,6 +67,17 @@ final class ExtensionAppearanceRegistry {
 
     private(set) var contributions: [Contribution] = []
     private(set) var activeFontURLs: Set<URL> = []
+
+    /// Cached inspection metadata only; the remote rendition worker reads the selected files.
+    func phoneFontURLs(families: [String]) -> [URL] {
+        let wanted = Set(families)
+        return Array(Set(contributions.flatMap { contribution in
+            contribution.fontURLs.filter { url in
+                activeFontURLs.contains(url)
+                    && contribution.fontFamilies[url]?.contains(where: wanted.contains) == true
+            }
+        }).sorted { $0.path < $1.path }.prefix(ThemeFontStore.maximumFonts))
+    }
     private var decodedMarks: [AppThemeID: NSImage] = [:]
     private var decodedSidebarAssets: [AppThemeID: [String: NSImage]] = [:]
     private var decodedThemeOrder: [AppThemeID] = []

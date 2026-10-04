@@ -1,4 +1,5 @@
 import AppKit
+import SwiftTerm
 
 /// Captures the window as an image, draws the inspector's marker onto it, and lands it in
 /// the temporary directory as a PNG.
@@ -8,6 +9,10 @@ import AppKit
 /// shot. The cost is honesty about out-of-process content — a `WKWebView`'s page may render
 /// blank. The overlay is a child window, so it is never in this tree; the marker is drawn
 /// onto the bitmap instead.
+///
+/// A terminal whose palette glows draws through Metal, whose layer `cacheDisplay` cannot read,
+/// so every caching pass here runs inside `TerminalView.drawingForBitmapCapture`, which has
+/// such a terminal draw the same frame through Core Graphics for the capture.
 @MainActor
 enum WindowSnapshot {
 
@@ -23,7 +28,9 @@ enum WindowSnapshot {
         guard bounds.width > 0, bounds.height > 0,
               let rep = frameView.bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
 
-        frameView.cacheDisplay(in: bounds, to: rep)
+        TerminalView.drawingForBitmapCapture {
+            frameView.cacheDisplay(in: bounds, to: rep)
+        }
 
         // Points, not pixels: this is what keeps the PNG tagged with its real scale and what
         // sizes the `NSImage` the sheet previews.
@@ -114,7 +121,9 @@ enum WindowSnapshot {
 
     private static func draw(_ view: NSView, at rect: NSRect) {
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
-        view.cacheDisplay(in: view.bounds, to: rep)
+        TerminalView.drawingForBitmapCapture {
+            view.cacheDisplay(in: view.bounds, to: rep)
+        }
 
         let image = NSImage(size: view.bounds.size)
         image.addRepresentation(rep)

@@ -160,6 +160,7 @@
 		B20000010000000000000003 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
 		B3428F33752A23B8DF9DA8F8 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
 		B70000010000000000000002 /* Sources/Threading/Resources/Fonts in Resources */ = {isa = PBXBuildFile; fileRef = B70000010000000000000001 /* Sources/Threading/Resources/Fonts */; };
+		B70000010000000000000003 /* Theme font fixtures and licenses in Mobile Resources */ = {isa = PBXBuildFile; fileRef = B70000010000000000000001 /* Sources/Threading/Resources/Fonts */; };
 		B81F7A1E07A694FFB193A1BD /* threading-extension-helper in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = C20CE9CA503B8DC639CAB992 /* threading-extension-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		D0A100010000000000000001 /* ThreadingDomain in Frameworks */ = {isa = PBXBuildFile; productRef = D0A100010000000000000003 /* ThreadingDomain */; };
 		7C000004000000000000000A /* ThreadingPTYHostKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000004000000000000000C /* ThreadingPTYHostKit */; };
@@ -559,6 +560,7 @@
 				ThreadingMobile/MobileThemeCacheStore.swift,
 				ThreadingMobile/MobileThemeEnvironment.swift,
 				ThreadingMobile/MobileThemeBackdrop.swift,
+				ThreadingMobile/MobileThemeAssets.swift,
 				ThreadingMobile/ThemeGradientAnimator.swift,
 				ThreadingMobile/MobileThemedPopoverChrome.swift,
 				ThreadingMobile/MobileUniversalSearchView.swift,
@@ -1519,6 +1521,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B70000010000000000000003 /* Theme font fixtures and licenses in Mobile Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

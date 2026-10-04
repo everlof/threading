@@ -60,7 +60,7 @@ class Entry:
     source_path: str | None
     selectors: tuple[str, ...]
     source_command: str | None
-    capture: dict[str, str] | None
+    capture: dict[str, str | tuple[str, ...]] | None
 
 
 @dataclass
@@ -182,7 +182,7 @@ def load_manifest(path: Path) -> tuple[str, str, list[Entry]]:
             else:
                 source_command = command.strip()
 
-        capture: dict[str, str] | None = None
+        capture: dict[str, str | tuple[str, ...]] | None = None
         raw_capture = raw.get("capture")
         if raw_capture is not None:
             if not isinstance(raw_capture, dict):
@@ -194,9 +194,11 @@ def load_manifest(path: Path) -> tuple[str, str, list[Entry]]:
                 and isinstance(value, str)
                 and value.strip()
             }
+            if "globs" in raw_capture:
+                supported["globs"] = require_text_list(raw_capture["globs"], f"{identifier}.capture.globs")
             if len(supported) != 1 or len(raw_capture) != 1:
                 raise ValueError(
-                    f"{identifier}: capture must contain exactly one of metadata, glob, or journey"
+                    f"{identifier}: capture must contain exactly one of metadata, glob, globs, or journey"
                 )
             capture = supported
 
@@ -502,14 +504,15 @@ def load_glob_artifacts(
     allow_empty: bool = False,
 ) -> list[Artifact]:
     assert entry.capture is not None
-    pattern = entry.capture["glob"]
-    if Path(pattern).is_absolute() or ".." in Path(pattern).parts:
-        raise ValueError(f"{entry.identifier}: unsafe capture glob {pattern!r}")
-    images = sorted(path for path in current.glob(pattern) if path.is_file())
+    patterns = entry.capture.get("globs") or (entry.capture["glob"],)
+    for pattern in patterns:
+        if Path(pattern).is_absolute() or ".." in Path(pattern).parts:
+            raise ValueError(f"{entry.identifier}: unsafe capture glob {pattern!r}")
+    images = sorted({path for pattern in patterns for path in current.glob(pattern) if path.is_file()})
     if not images:
         if allow_empty:
             return []
-        raise ValueError(f"{entry.identifier}: capture glob matched no images: {pattern}")
+        raise ValueError(f"{entry.identifier}: capture glob matched no images: {patterns}")
     artifacts: list[Artifact] = []
     for image in images:
         relative = image.relative_to(current)
@@ -1215,7 +1218,7 @@ def main() -> int:
             if entry.status == "implemented" and entry.capture:
                 if "metadata" in entry.capture:
                     artifacts = load_component_artifacts(entry, current)
-                elif "glob" in entry.capture:
+                elif "glob" in entry.capture or "globs" in entry.capture:
                     artifacts = load_glob_artifacts(
                         entry,
                         current,

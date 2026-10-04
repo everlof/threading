@@ -6,9 +6,9 @@ import XCTest
 /// Draws one line of agent-shaped output on every stock palette and writes the sheet out.
 ///
 /// This is the review surface for the whole change. A heading's job is to be *seen*, which is
-/// the one property no assertion in this suite can state: the palettes that shipped with body
-/// and bold at the same value passed every contrast and legibility check there was. So the sheet
-/// exists to be looked at, and the numbers it is chosen by live in `TerminalBoldTextSweepTests`.
+/// reason the sheet is inspected as well as asserted. Each strip must contain foreground ink,
+/// including bold-coloured pixels in the heading cells; a blank ground cannot pass. The palette
+/// selection constraints live in `TerminalBoldTextSweepTests`.
 ///
 /// The rows are real `TerminalView`s fed real escape sequences rather than attributed strings,
 /// because the rule under review lives in the fork's `mapColor` and an attributed string would
@@ -19,6 +19,13 @@ final class TerminalBoldTextRenderTests: XCTestCase {
         static let sample = "Body text  \u{1B}[1mBold heading\u{1B}[0m  "
             + "\u{1B}[2mdim\u{1B}[0m  \u{1B}[31mred\u{1B}[0m  \u{1B}[1;31mbold red\u{1B}[0m"
 
+        /// DECTCEM off, so the caret cannot stand in for text in an ink count.
+        static let hideCursor = "\u{1B}[?25l"
+        static let bodyColumns = 11
+        static let headingColumns = 12
+        static let minimumInkPixels = 20
+        static let backgroundDistance: CGFloat = 0.08
+        static let inkDistance: CGFloat = 0.18
         static let labelWidth: CGFloat = 190
         static let terminalWidth: CGFloat = 460
         static let rowHeight: CGFloat = 44
@@ -78,7 +85,16 @@ final class TerminalBoldTextRenderTests: XCTestCase {
         )
         sheet.size = NSSize(width: Sheet.width, height: height)
 
-        let strips = rows.map { (name: $0.name, image: strip(of: $0.palette)) }
+        var hosts: [NSWindow] = []
+        var strips: [(name: String, image: NSBitmapImageRep)] = []
+        for row in rows {
+            let image = try XCTUnwrap(strip(of: row.palette, hosts: &hosts), "\(row.name) drew no strip")
+            XCTAssertGreaterThan(inkPixels(in: image, palette: row.palette),
+                                 Sheet.minimumInkPixels, "\(row.name): no foreground ink")
+            XCTAssertGreaterThan(inkPixels(in: image, palette: row.palette, headingOnly: true),
+                                 Sheet.minimumInkPixels, "\(row.name): no bold heading ink")
+            strips.append((name: row.name, image: image))
+        }
 
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: sheet)
@@ -96,13 +112,18 @@ final class TerminalBoldTextRenderTests: XCTestCase {
                     .foregroundColor: NSColor(hex: "#DDDDDD")!
                 ]
             )
-            row.image?.draw(
+            rows[index].palette.background.setFill()
+            NSRect(x: Sheet.margin * 2 + Sheet.labelWidth, y: top + 2,
+                   width: Sheet.terminalWidth, height: Sheet.rowHeight - 4).fill()
+            let composite = NSImage(size: row.image.size)
+            composite.addRepresentation(row.image)
+            composite.draw(
                 in: NSRect(
                     x: Sheet.margin * 2 + Sheet.labelWidth,
                     y: top + 2,
                     width: Sheet.terminalWidth,
                     height: Sheet.rowHeight - 4
-                )
+                ), from: .zero, operation: .sourceOver, fraction: 1
             )
         }
         NSGraphicsContext.restoreGraphicsState()
@@ -115,8 +136,47 @@ final class TerminalBoldTextRenderTests: XCTestCase {
         try data.write(to: url)
 
         print("Rendered \(rows.count) palettes to \(url.path)")
-        XCTAssertEqual(strips.filter { $0.image == nil }.count, 0, "a palette drew no strip")
         XCTAssertGreaterThan(data.count, 10_000, "the sheet came out blank")
+    }
+
+    /// A negative control through the same renderer: without the sample, neither the
+    /// background nor anything else on the strip may be mistaken for text — the whole strip
+    /// included, which is what proves the caret is not what the ink checks are counting.
+    @MainActor
+    func testUnfedTerminalHasNoInk() throws {
+        let palette = TerminalTheme.basic
+        var hosts: [NSWindow] = []
+        let image = try XCTUnwrap(strip(of: palette, hosts: &hosts, feedSample: false))
+        XCTAssertEqual(inkPixels(in: image, palette: palette), 0)
+        XCTAssertEqual(inkPixels(in: image, palette: palette, headingOnly: true), 0)
+    }
+
+    @MainActor
+    private func inkPixels(in image: NSBitmapImageRep, palette: TerminalTheme,
+                           headingOnly: Bool = false) -> Int {
+        guard let background = palette.background.usingColorSpace(.deviceRGB),
+              let bold = palette.boldForeground.usingColorSpace(.deviceRGB) else { return 0 }
+        let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let cellWidth = ("W" as NSString).size(withAttributes: [.font: font]).width
+        let scale = CGFloat(image.pixelsWide) / Sheet.terminalWidth
+        let start = headingOnly ? Int(CGFloat(Sheet.bodyColumns) * cellWidth * scale) : 0
+        let end = headingOnly
+            ? min(image.pixelsWide, Int(CGFloat(Sheet.bodyColumns + Sheet.headingColumns) * cellWidth * scale))
+            : image.pixelsWide
+        func distance(_ a: NSColor, _ b: NSColor) -> CGFloat {
+            max(abs(a.redComponent - b.redComponent), abs(a.greenComponent - b.greenComponent),
+                abs(a.blueComponent - b.blueComponent))
+        }
+        var count = 0
+        for y in 0..<image.pixelsHigh {
+            for x in start..<end {
+                guard let pixel = image.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                      pixel.alphaComponent > 0.75,
+                      distance(pixel, background) > Sheet.backgroundDistance else { continue }
+                if !headingOnly || distance(pixel, bold) < Sheet.inkDistance { count += 1 }
+            }
+        }
+        return count
     }
 
     /// One palette's line, drawn by a real terminal into its own bitmap.
@@ -124,10 +184,12 @@ final class TerminalBoldTextRenderTests: XCTestCase {
     /// The view is captured on its own rather than as a subview of the sheet: SwiftTerm builds
     /// each row's attributed string inside its own `draw`, and a `cacheDisplay` taken over an
     /// enclosing host photographed thirty-seven correctly coloured grounds with no text on them.
-    /// The pass is taken twice for the same reason `BrowserOffScreenCaptureTests` and
-    /// `TerminalColorQueryTests` do: the first one settles the terminal's own update range.
+    /// Frame ticks prepare the renderer's immutable snapshot in an unshown window, as in
+    /// `TerminalGlowRenderTests`; feeding and caching alone never prepares any text.
+    /// The cursor is hidden first: a caret is a block of foreground ink a third of a cell wide,
+    /// enough on its own to satisfy a whole-strip ink count with no text drawn at all.
     @MainActor
-    private func strip(of palette: TerminalTheme) -> NSBitmapImageRep? {
+    private func strip(of palette: TerminalTheme, hosts: inout [NSWindow], feedSample: Bool = true) -> NSBitmapImageRep? {
         let view = TerminalView(
             frame: NSRect(
                 x: 0, y: 0,
@@ -135,12 +197,19 @@ final class TerminalBoldTextRenderTests: XCTestCase {
                 height: Sheet.rowHeight - 4
             )
         )
+        let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: true)
+        window.contentView = view
+        hosts.append(window)
+        view.suspendsRenderingWhenNotVisible = false
+        view.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         view.appearance = NSAppearance(named: .darkAqua)
         view.installColors(palette.asSwiftTermColors())
         view.nativeForegroundColor = palette.foreground
         view.nativeBoldForegroundColor = palette.boldForeground
         view.nativeBackgroundColor = palette.background
-        view.feed(text: Sheet.sample)
+        view.feed(text: Sheet.hideCursor)
+        if feedSample { view.feed(text: Sheet.sample) }
+        view.prepareFrameForSnapshot()
 
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: rep)

@@ -161,6 +161,9 @@ struct MobileDashboardCatalogue: Equatable, Sendable {
     /// belongs to is one lookup rather than a second pass over the project list per section.
     private let repositoriesByProjectKey: [String: RemoteRepositoryDTO]
     let source: Source
+    let mascotMood: String
+    let workingCount: Int
+    let attentionCount: Int
     let sessions: [RemoteSessionSummaryDTO]
     let terminals: [RemoteProjectTerminalSummaryDTO]
     let archivedSessions: [RemoteSessionSummaryDTO]
@@ -184,6 +187,18 @@ struct MobileDashboardCatalogue: Equatable, Sendable {
     ) -> Self? {
         if let live {
             let projects = live.newSessionCatalog?.projects ?? []
+            var workingCount = 0
+            var attentionCount = 0
+            var hasAttention = false
+            var hasLiveSession = false
+            for session in live.sessions where session.isAvailable && !session.isArchived {
+                hasLiveSession = true
+                workingCount += session.state == .working ? 1 : 0
+                hasAttention = hasAttention || session.state == .needsAttention || session.state == .limitReached
+                attentionCount += session.state == .needsAttention || session.state == .limitReached ? 1 : 0
+            }
+            let mood = hasAttention ? "attention" : workingCount > 0 ? "working"
+                : hasLiveSession ? "idle" : "resting"
             return Self(
                 hiddenProjectIDs: Set(live.newSessionCatalog?.projects.filter { $0.isHidden == true }.map(\.id) ?? []),
                 projectsByID: projects.reduce(into: [:]) { $0[$1.id] = $1 },
@@ -191,6 +206,9 @@ struct MobileDashboardCatalogue: Equatable, Sendable {
                     .compactMapValues { $0.count == 1 ? $0.first : nil },
                 repositoriesByProjectKey: repositoriesByProjectKey(projects),
                 source: .live,
+                mascotMood: mood,
+                workingCount: workingCount,
+                attentionCount: attentionCount,
                 sessions: live.sessions,
                 terminals: live.terminals ?? [],
                 archivedSessions: live.archivedSessions ?? [],
@@ -210,6 +228,9 @@ struct MobileDashboardCatalogue: Equatable, Sendable {
                 )
             },
             source: .cached(capturedAt: Date(timeIntervalSince1970: cached.capturedAt)),
+            mascotMood: "resting",
+            workingCount: 0,
+            attentionCount: 0,
             sessions: cached.sessions.map(\.presentation),
             terminals: cached.terminals.map(\.presentation),
             archivedSessions: cached.archivedSessions.map(\.presentation),

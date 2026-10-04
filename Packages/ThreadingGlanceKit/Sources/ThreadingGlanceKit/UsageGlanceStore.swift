@@ -61,7 +61,8 @@ public actor UsageGlanceStore {
         let url = try location()
         let previous = try read(at: url) // Preserve newer/corrupt archives until explicit recovery.
         if let previous, previous.pairingID == snapshot.pairingID,
-           previous.hostName == snapshot.hostName, previous.capacity == snapshot.capacity { return false }
+           previous.hostName == snapshot.hostName, previous.capacity == snapshot.capacity,
+           previous.accentHex == snapshot.accentHex { return false }
         let bytes = try JSONEncoder().encode(snapshot)
         guard bytes.count <= Self.maximumBytes else { throw RemoteUsageCapacityError.oversized }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -71,6 +72,19 @@ public actor UsageGlanceStore {
 #endif
         try bytes.write(to: url, options: options)
         return true
+    }
+
+    /// A theme change never renews a usage observation or changes the pinned account source.
+    @discardableResult
+    public func updateAccent(_ accentHex: String?, pairingID: String, sequence: UInt64) throws -> Bool {
+        guard sequence > lastSequence else { throw UsageGlanceStoreError.superseded }
+        guard let previous = try read(), previous.pairingID == pairingID else {
+            lastSequence = sequence
+            return false
+        }
+        return try publish(UsageGlanceSnapshot(pairingID: previous.pairingID,
+            hostName: previous.hostName, capacity: previous.capacity, receivedAt: previous.receivedAt,
+            accentHex: accentHex), sequence: sequence)
     }
 
     /// Explicit cache reset preserves corrupt bytes for inspection. A newer format remains

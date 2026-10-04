@@ -516,9 +516,64 @@ enum AppThemeLibrary {
     }
 
     /// Paint an already committed choice or refreshed document without changing its owner.
-    static func installResolved(_ theme: AppTheme) {
-        ExtensionAppearanceRegistry.shared.prepareResources(for: theme)
+    ///
+    /// When it lands on the document a live preview already put on screen — the release of a
+    /// Tune drag, whose `update` re-installs exactly the last tick — nothing is repainted, but
+    /// observers still hear one non-preview `AppThemeDidChange`. That is the settle: an observer
+    /// that skips ticks (`AppThemeDidChange.isLivePreview`) is told the durable value once.
+    static func installResolved(_ theme: AppTheme, preparingResources: Bool = true) {
+        install(theme, preparingResources: preparingResources, livePreview: false)
+    }
+
+    /// Paints one pointer-cadence preview of a document nobody has saved yet.
+    ///
+    /// Asset and font inventories are not prepared — a preview can only move values the stored
+    /// document already references — and the posted `AppThemeDidChange` says `isLivePreview`,
+    /// so an observer whose work is not frame-cheap (the paired-phone broadcast) can wait for the
+    /// settle instead of running once per tick. The drag's owner must end every preview with an
+    /// `installResolved` of the saved or restored document.
+    static func installLivePreview(_ theme: AppTheme, scope: LivePreviewScope = .everything) {
+        isPublishingLivePreview = true
+        defer { isPublishingLivePreview = false }
+        install(theme, preparingResources: false, livePreview: true, scope: scope)
+    }
+
+    /// What a preview tick changed, which decides what it has to repaint.
+    enum LivePreviewScope {
+        /// Anything a recorded surface re-states — corner radii, the backdrop's gradient,
+        /// picture and particles. The whole-window repaint is the only path that reaches them.
+        case everything
+        /// Only the paired terminal palette (its glow). Terminals re-read their profile from
+        /// their own `AppThemeDidChange` observers, so the tick skips the window walk — about
+        /// 17 of a Debug tick's 20 ms in the measured fixture — and the settle runs it once.
+        case terminalPalette
+    }
+
+    /// True only while `installLivePreview` repaints and posts — synchronously, inside the
+    /// observers it notifies. Prefer `AppThemeDidChange.isLivePreview`, which survives a hop.
+    private(set) static var isPublishingLivePreview = false
+
+    /// A preview tick is on screen and no durable install has settled it yet.
+    private(set) static var hasUnsettledLivePreview = false
+
+    /// A narrow-scope tick skipped the whole-window repaint; the settle owes one.
+    private static var livePreviewOwesRepaint = false
+
+    private static func install(_ theme: AppTheme, preparingResources: Bool, livePreview: Bool,
+                                scope: LivePreviewScope = .everything) {
+        if preparingResources { ExtensionAppearanceRegistry.shared.prepareResources(for: theme) }
         guard theme != current else {
+            if !livePreview, hasUnsettledLivePreview {
+                // Already on screen from the last tick; the observers that waited need telling,
+                // and a tick that skipped the window walk is caught up here, once.
+                hasUnsettledLivePreview = false
+                if livePreviewOwesRepaint {
+                    livePreviewOwesRepaint = false
+                    AppThemeRefresh.repaintEverything()
+                }
+                NotificationCenter.default.post(AppThemeDidChange(themeID: theme.id))
+                return
+            }
             ThreadingLogger.theme.debug(
                 "App theme selection persisted without visual change theme=\(theme.id.rawValue, privacy: .private(mask: .hash))"
             )
@@ -526,6 +581,7 @@ enum AppThemeLibrary {
         }
 
         current = theme
+        hasUnsettledLivePreview = livePreview
         AppThemePalette.set(theme)
 
         // A dark theme under the light system appearance gets light scrollers, menus and text
@@ -533,11 +589,18 @@ enum AppThemeLibrary {
         // the app's appearance is what makes the system-drawn parts follow.
         applyAppearance(for: theme)
 
-        AppThemeRefresh.repaintEverything()
-        NotificationCenter.default.post(AppThemeDidChange(themeID: theme.id))
-        ThreadingLogger.theme.info(
-            "App theme applied theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) mode=\(theme.mode.rawValue, privacy: .public)"
-        )
+        if livePreview, scope == .terminalPalette {
+            livePreviewOwesRepaint = true
+        } else {
+            livePreviewOwesRepaint = false
+            AppThemeRefresh.repaintEverything()
+        }
+        NotificationCenter.default.post(AppThemeDidChange(themeID: theme.id, isLivePreview: livePreview))
+        if !livePreview {
+            ThreadingLogger.theme.info(
+                "App theme applied theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) mode=\(theme.mode.rawValue, privacy: .public)"
+            )
+        }
     }
 }
 
@@ -546,6 +609,9 @@ enum AppThemeLibrary {
 struct AppThemeDidChange: AppEvent {
     static let name = Notification.Name("appThemeDidChange")
     let themeID: AppThemeID
+    /// True for a pointer-cadence Tune tick whose document is not saved. A settle (a plain
+    /// `installResolved`) always follows the last tick of a drag with this false.
+    var isLivePreview = false
 }
 
 struct AppThemeLibraryDidChange: AppEvent {

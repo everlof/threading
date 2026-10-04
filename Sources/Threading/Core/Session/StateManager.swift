@@ -411,32 +411,55 @@ final class StateManager {
         }
     }
 
+    /// How a project removal ended. A refused cascade is told apart from a failure because
+    /// nothing was written and the store is intact, so the caller's later edits stay allowed.
+    enum ProjectRemovalCommit {
+        case committed
+        case refusedUnaccountedSessions
+        case failed
+    }
+
     /// Commits one project removal without walking the surviving graph.
-    @discardableResult
+    ///
+    /// `sessionIDs` is what the caller's graph says the project holds; a store holding more is
+    /// refused rather than cascaded (see `ProjectDatabase.removeProject`). That refusal is a
+    /// graph behind the store, not a damaged store, so it is journalled and quarantines nothing.
     func removeProject(
         id projectID: ProjectID,
+        holding sessionIDs: Set<SessionID>,
         at position: Int,
         selectedSessionID: SessionID?
-    ) -> Bool {
-        guard writesAreAllowed(for: "project removal") else { return false }
+    ) -> ProjectRemovalCommit {
+        guard writesAreAllowed(for: "project removal") else { return .failed }
         do {
             try database().removeProject(
                 id: projectID,
+                holding: sessionIDs,
                 at: position,
                 selectedSessionID: selectedSessionID
             )
-            return true
+            return .committed
         } catch ProjectDatabaseWriteError.staleGeneration(let observed, let found) {
             ThreadingLogger.agent.error(
                 "Refused a stale project removal: store moved from \(observed, privacy: .public) to \(found, privacy: .public)"
             )
-            return false
+            return .failed
+        } catch ProjectDatabaseWriteError.unaccountedSessions(let project, let unaccounted) {
+            ThreadingLogger.agent.error(
+                "Refused a project removal that would have deleted \(unaccounted.count, privacy: .public) unlisted chats"
+            )
+            EventLog.shared.record(.session, "Refused a project removal that would delete unlisted chats", [
+                "project": project,
+                "count": String(unaccounted.count),
+                "sessions": DeletionJournal.listed(unaccounted),
+            ])
+            return .refusedUnaccountedSessions
         } catch {
             ThreadingLogger.agent.error(
                 "Failed to remove project: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             recordPersistenceFailure(error)
-            return false
+            return .failed
         }
     }
 
@@ -1057,8 +1080,8 @@ final class StateManager {
         }
     }
 
-    /// Forgets rows already removed by a project foreign-key cascade without issuing redundant
-    /// per-session delete transactions.
+    /// Forgets rows a project removal already deleted in its own transaction, without issuing
+    /// redundant per-session delete transactions.
     func forgetCascadeDeletedPanelLayouts(for sessionIDs: Set<SessionID>) {
         readablePanelRows.subtract(sessionIDs)
         unreadableAuxiliaryRows.panelLayouts.sessions.subtract(sessionIDs)

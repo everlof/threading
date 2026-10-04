@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingRemoteKit
 import CoreText
 
 /// The app's design tokens.
@@ -2770,12 +2771,6 @@ public final class ThemeBackdropDressingLayer: CALayer {
             gradient.isHidden = false
             gradient.colors = stated.colors.map(\.cgColor)
             gradient.locations = stated.locations.map { NSNumber(value: Double($0)) }
-            // CSS angles: 0° flows toward the top, 90° toward the right. The layer's unit
-            // space has its origin at the bottom-left here, so "toward the top" is +y.
-            let radians = stated.angleDegrees * .pi / 180
-            let direction = CGPoint(x: sin(radians) / 2, y: cos(radians) / 2)
-            gradient.startPoint = CGPoint(x: 0.5 - direction.x, y: 0.5 - direction.y)
-            gradient.endPoint = CGPoint(x: 0.5 + direction.x, y: 0.5 + direction.y)
             if let drift = stated.drift, drift.isValid {
                 let observer = motionView ?? ThemeBackdropMotionView(gradient: gradient)
                 if observer.superview !== owner { owner.addSubview(observer) }
@@ -2783,6 +2778,12 @@ public final class ThemeBackdropDressingLayer: CALayer {
                 observer.configure(angleDegrees: Double(stated.angleDegrees), drift: drift)
             } else {
                 stopMotion()
+                // A drifting gradient's animator owns its model endpoints too. Restating
+                // the base points on every repaint erased an unchanged frozen preview phase.
+                let points = ThemeGradientGeometry.endpoints(angleDegrees: Double(stated.angleDegrees),
+                    flipped: false, drift: nil, phase: 0)
+                gradient.startPoint = points.start
+                gradient.endPoint = points.end
             }
         } else {
             stopMotion()

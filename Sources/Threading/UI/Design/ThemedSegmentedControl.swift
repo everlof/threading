@@ -96,8 +96,29 @@ final class ThemedSegmentedControl: NSView, TextBaselineProviding {
     /// What this run is actually drawn at — its height, and the pill radius derived from it.
     private var controlHeight: CGFloat { rowHeight ?? Design.Size.chipHeight }
 
+    /// Whether the run states its own width: every segment as wide as the widest title needs,
+    /// so none truncates under any theme's typeface or the reader's text size, and the run does
+    /// not stretch across a wide host. Off by default, because a control row hands the run a
+    /// measure and expects it filled.
+    ///
+    /// A host that has to give a run a number cannot know that number: Automations measured its
+    /// four pages against a three-choice constant, and under a monospaced theme "Activity" came
+    /// out as "Activi…" while "Automations" took the room its floor demanded.
+    var sizesToTitles = false {
+        didSet {
+            guard sizesToTitles != oldValue else { return }
+            invalidateIntrinsicContentSize()
+        }
+    }
+
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: controlHeight)
+        NSSize(width: sizesToTitles ? titleFittingWidth : NSView.noIntrinsicMetric, height: controlHeight)
+    }
+
+    /// Equal segments, so the run is as many widest segments as it has choices.
+    private var titleFittingWidth: CGFloat {
+        let widest = segmentViews.map(\.fittingWidth).max() ?? 0
+        return CGFloat(segmentViews.count) * widest
     }
 
     /// Where the segment titles' shared baseline sits. The run's children centre one control-
@@ -180,12 +201,19 @@ final class ThemedSegmentedControl: NSView, TextBaselineProviding {
             segment.onMove = { [weak self] offset, event in
                 self?.move(from: index, by: offset, focusEvent: event)
             }
+            // A theme's typeface or the text size changes a title's measure after the run is
+            // built; a run sized to its titles has to hear it.
+            segment.onFittingWidthChange = { [weak self] in
+                guard let self, self.sizesToTitles else { return }
+                self.invalidateIntrinsicContentSize()
+            }
             stack.addArrangedSubview(segment)
             return segment
         }
 
         self.selectedIndex = titles.indices.contains(selectedIndex) ? selectedIndex : 0
         updateSelection()
+        if sizesToTitles { invalidateIntrinsicContentSize() }
     }
 
     /// Repaints the state marks without rebuilding the run.
@@ -250,6 +278,18 @@ private final class SegmentView: ThemedControl {
 
     var onActivate: (() -> Void)?
     var onMove: ((Int, NSEvent?) -> Void)?
+    /// Called when the title's measure changes, so a run sized to its titles can re-measure.
+    var onFittingWidthChange: (() -> Void)?
+
+    /// The narrowest this segment shows its title (and mark) whole: the content between the two
+    /// required margins the content stack keeps.
+    var fittingWidth: CGFloat {
+        var content = ceil(titleLabel.intrinsicContentSize.width)
+        if !markLabel.isHidden {
+            content += Design.Spacing.small + ceil(markLabel.intrinsicContentSize.width)
+        }
+        return content + Design.Spacing.medium * 2
+    }
 
     var isSelected = false {
         didSet {
@@ -265,6 +305,7 @@ private final class SegmentView: ThemedControl {
             guard mark != oldValue else { return }
             applyMark()
             needsDisplay = true
+            onFittingWidthChange?()
         }
     }
 
@@ -359,6 +400,7 @@ private final class SegmentView: ThemedControl {
         let ceiledWidth = ceil(titleLabel.intrinsicContentSize.width)
         if titleWidthFloor?.constant != ceiledWidth {
             titleWidthFloor?.constant = ceiledWidth
+            onFittingWidthChange?()
         }
         super.layout()
     }

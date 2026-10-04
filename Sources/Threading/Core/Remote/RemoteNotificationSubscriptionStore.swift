@@ -25,6 +25,7 @@ struct RemoteNotificationSubscriptionRecord: Codable, Equatable, Sendable {
     let soundEnabledKinds: [RemoteNotificationKind]
     let capabilities: [RemoteNotificationCapability]
     let includesResponsePreviews: Bool
+    let themeSoundNames: [String: String]
 
     init(
         shareID: String,
@@ -36,7 +37,8 @@ struct RemoteNotificationSubscriptionRecord: Codable, Equatable, Sendable {
         enabledKinds: [RemoteNotificationKind],
         soundEnabledKinds: [RemoteNotificationKind],
         capabilities: [RemoteNotificationCapability] = [],
-        includesResponsePreviews: Bool = false
+        includesResponsePreviews: Bool = false,
+        themeSoundNames: [String: String] = [:]
     ) {
         self.shareID = shareID
         self.deviceID = deviceID
@@ -48,12 +50,13 @@ struct RemoteNotificationSubscriptionRecord: Codable, Equatable, Sendable {
         self.soundEnabledKinds = soundEnabledKinds
         self.capabilities = capabilities
         self.includesResponsePreviews = includesResponsePreviews
+        self.themeSoundNames = themeSoundNames
     }
 
     private enum CodingKeys: String, CodingKey {
         case shareID, deviceID, deviceToken, hostedRegistrationID, hostedServiceURL
         case environment, enabledKinds, soundEnabledKinds, capabilities
-        case includesResponsePreviews
+        case includesResponsePreviews, themeSoundNames
     }
 
     init(from decoder: Decoder) throws {
@@ -80,6 +83,7 @@ struct RemoteNotificationSubscriptionRecord: Codable, Equatable, Sendable {
             Bool.self,
             forKey: .includesResponsePreviews
         ) ?? false
+        themeSoundNames = try container.decodeIfPresent([String: String].self, forKey: .themeSoundNames) ?? [:]
     }
 
     var key: RemoteNotificationSubscriptionKey {
@@ -275,6 +279,7 @@ enum RemoteNotificationSubscriptionDefaults {
                 && enabledKinds.count == subscription.enabledKinds.count
                 && soundKinds.count == subscription.soundEnabledKinds.count
                 && soundKinds.isSubset(of: enabledKinds)
+                && RemoteThemeSound.acceptsReceipts(subscription.themeSoundNames)
                 && subscription.capabilities.count <= maximumCapabilities
                 && capabilities.count == subscription.capabilities.count
                 && (!subscription.includesResponsePreviews

@@ -36,6 +36,21 @@ afterEach(() => {
 });
 
 describe("hosted APNs broker", () => {
+  it("delivers a confirmed theme filename, honors silence, and rejects paths", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    const soundName = `threading-theme-${"c".repeat(64)}.caf`;
+    const body = { ...pushBody(hostID, crypto.randomUUID().toLowerCase(), registrationID), soundName };
+    expect((await sendPush(hostCredential, body)).status).toBe(200);
+    let payload = JSON.parse(new TextDecoder().decode(upstream.mock.calls[0]?.[1]?.body as Uint8Array));
+    expect(payload.aps.sound).toBe(soundName);
+    expect((await sendPush(hostCredential, { ...body, playsSound: false })).status).toBe(200);
+    payload = JSON.parse(new TextDecoder().decode(upstream.mock.calls[1]?.[1]?.body as Uint8Array));
+    expect(payload.aps.sound).toBeUndefined();
+    expect((await sendPush(hostCredential, { ...body, soundName: "../private.caf" })).status).toBe(400);
+    expect(upstream).toHaveBeenCalledTimes(2);
+  });
   it("binds an encrypted recipient to a device credential and forwards by opaque ID", async () => {
     const hostID = `host-${crypto.randomUUID()}`;
     const { hostCredential, registrationID } = await enrollPushRecipient(hostID);

@@ -1247,7 +1247,12 @@ final class SessionComposerViewController: NSViewController {
             projectDefaults.warm(projectID)
             return
         }
-        selectedAgent = appSettings.defaultAgentKind
+        // The app-wide choice stands unless the login shell proved it is not installed while
+        // another runtime is — a fresh Mac with only Codex must not open every draft on a
+        // Claude Code that cannot start.
+        selectedAgent = AgentCLIAvailability.shared.preferredRuntime(
+            given: appSettings.defaultAgentKind
+        )
         // Follow the most recently used enabled login for this runtime. Besides matching the
         // user's last deliberate account choice, this carries a limit escape forward: moving a
         // session after its model runs out updates that same latest session record. The resolver
@@ -2062,7 +2067,11 @@ final class SessionComposerViewController: NSViewController {
             if accounts.isEmpty {
                 bare.append(.item(runtimeItem(for: kind)))
             } else {
-                grouped.append(.header(kind.displayName))
+                grouped.append(.header(
+                    AgentCLIAvailability.shared.isKnownMissing(kind)
+                        ? L10n.format("%@ · Not installed", kind.displayName)
+                        : kind.displayName
+                ))
                 grouped += accountItems(for: kind, accounts: accounts, projectOrder: projectOrder)
             }
         }
@@ -2082,6 +2091,11 @@ final class SessionComposerViewController: NSViewController {
     private func runtimeItem(for kind: AgentKind) -> ThemedMenuItem {
         ThemedMenuItem(
             title: kind.displayName,
+            // Still choosable: the send is where a missing CLI is refused, with an install
+            // offer, so picking it here is the first step of installing rather than a dead end.
+            subtitle: AgentCLIAvailability.shared.isKnownMissing(kind)
+                ? L10n.string("Not installed")
+                : nil,
             image: AccountMarkImage.make(for: kind),
             representedValue: ComposerIdentity(agent: kind, account: nil),
             isSelected: kind == selectedAgent

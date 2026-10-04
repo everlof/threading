@@ -1339,6 +1339,12 @@ pasted image path from identical typed characters, so an accepted attachment ins
 paste semantic reached the PTY, not merely that some path bytes did.
 
 The iOS conversation is a UIKit route, not a SwiftUI composition around a UIKit timeline.
+Its one backdrop belongs to the collection's stationary background. User bubbles composite their
+authored control wash onto an opaque ground, and assistant/streaming message stacks retain an
+opaque reading ground, so particles and photographs show between messages rather than through
+text. Decorated themes give assistant and streaming plates the shared message insets and panel
+radius; plain themes keep the existing flowing-text geometry. The virtual layout measures these
+mounted rows through its ordinary path, without adding transcript-sized work.
 `RemoteConversationViewController` owns the virtual collection, composer, command/skill results,
 presence, input authority, submission receipts and keyboard constraint. It subscribes to the
 connection, notification preferences and active host directly, coalescing changes onto one main

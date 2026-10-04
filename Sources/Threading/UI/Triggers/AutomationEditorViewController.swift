@@ -52,36 +52,97 @@ final class AutomationEditorViewController: NSViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// The tallest the sheet may be, from the window that presents it. Unset, the sheet keeps
+    /// `Layout.preferredHeight`.
+    var availableHeight: CGFloat?
+
+    /// The sheet's measures. A field is as wide as what it holds: a name and instructions take
+    /// the readable measure, a choice the width of its longest choice, and a number or a model
+    /// name a short field, so the form reads down one label column instead of one ragged edge.
+    enum Layout {
+        static let controlWidth = Design.Size.readableWidth
+        /// "Assess, then fix if straightforward", the longest choice, whole at the control size.
+        static let choiceWidth: CGFloat = 320
+        /// An account, a model or an effort name.
+        static let fieldWidth = SettingsUIDefaults.controlWidth
+        /// A time, a count of minutes.
+        static let numberWidth: CGFloat = 96
+        /// Room for a brief of a few paragraphs without the field scrolling.
+        static let instructionsHeight: CGFloat = 220
+        static let rulesHeight: CGFloat = 110
+        static let preferredHeight: CGFloat = 860
+        static let minimumHeight: CGFloat = 480
+    }
+
+    /// The rows a choice shows or hides, kept so a change of choice can say which apply.
+    private var timeRow: NSView?
+    private var zoneRow: NSView?
+    private var daysRow: NSView?
+    private var intervalRow: NSView?
+    private var missedRow: NSView?
+    private var sourceRow: NSView?
+    private var eventKindRow: NSView?
+    private var rulesRow: NSView?
+    private var grammarRow: NSView?
+    private var fullPermissionRow: NSView?
+    /// Every row's label, so the column can be as wide as the widest of them.
+    private var rowLabels: [NSTextField] = []
+
     override func loadView() {
         let surface = ThemedSurfaceView()
         surface.applySurface(fill: Design.Surface.background, radius: .fixed(0))
-        surface.frame = NSRect(x: 0, y: 0, width: Design.Size.readableWidth + Design.Spacing.pane * 2, height: 720)
         view = surface
+
         let form = NSStackView()
-        form.orientation = .vertical; form.alignment = .leading; form.spacing = Design.Spacing.medium
+        form.orientation = .vertical
+        form.alignment = .leading
+        form.spacing = Design.Spacing.small
+        // A field's border and a theme's glow reach a hair past its frame; the form keeps that
+        // hair inside the scroll view's clip rather than shaving the trailing corners off.
+        form.edgeInsets = NSEdgeInsets(
+            top: 0, left: Design.Spacing.tight, bottom: Design.Spacing.large, right: Design.Spacing.tight)
         form.translatesAutoresizingMaskIntoConstraints = false
         let scroll = ThemedScrollView()
         scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
         let clip = FlippedClipView(); clip.drawsBackground = false
         scroll.contentView = clip
         scroll.documentView = form
         scroll.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scroll)
-        let heading = NSTextField(labelWithString: L10n.string("Automation"))
-        heading.applyFont(.heading); form.addArrangedSubview(heading)
+
+        let isNew = configuration == nil && remoteSpec == nil
+        let heading = NSTextField(labelWithString: isNew ? L10n.string("New Automation") : L10n.string("Edit Automation"))
+        heading.applyFont(.heading)
+        heading.textColor = Design.Text.label
+        let lede = NSTextField(wrappingLabelWithString: L10n.string(
+            "Saving pauses the automation. Enable it when you are ready. Results remain in Activity after a successful run is archived."))
+        lede.applyFont(.subheading)
+        lede.textColor = Design.Text.secondary
+        form.addArrangedSubview(heading)
+        form.addArrangedSubview(lede)
+        form.setCustomSpacing(Design.Spacing.tight, after: heading)
+
         name.setAccessibilityIdentifier("automation.name")
         instructions.textView.setAccessibilityIdentifier("automation.instructions")
         save.setAccessibilityIdentifier("automation.save")
-        addRow("Name", name, to: form)
         name.stringValue = configuration?.name ?? remoteSpec?.name ?? ""
+        instructions.textView.string = configuration?.instructions ?? remoteSpec?.instruction ?? ""
+        instructions.heightAnchor.constraint(equalToConstant: Layout.instructionsHeight).isActive = true
+        Self.applyFieldSurface(to: instructions, font: .body)
+
+        // Task: what it is called, where it runs, and what it is asked to do.
+        addSection("Task", to: form)
+        addRow("Name", name, width: Layout.controlWidth, to: form)
         if remoteMode {
             for entry in workers { workerChoice.addItem(withTitle: entry.name); workerIDs.append(entry.id) }
             if let id = remoteSpec?.workerID {
                 if !workerIDs.contains(id) { workerChoice.addItem(withTitle: id.description); workerIDs.append(id) }
                 workerChoice.selectItem(at: workerIDs.firstIndex(of: id)!)
             }
-            if workerIDs.isEmpty { addRow("Worker ID", worker, to: form) }
-            else { addRow("Worker", workerChoice, to: form) }
+            if workerIDs.isEmpty { addRow("Worker ID", worker, width: Layout.fieldWidth, to: form) }
+            else { addRow("Worker", workerChoice, width: Layout.choiceWidth, to: form) }
             worker.stringValue = remoteSpec?.workerID.description ?? ""
         } else {
             for project in projects { target.addItem(withTitle: project.name) }
@@ -91,46 +152,20 @@ final class AutomationEditorViewController: NSViewController {
                 if let index = projects.firstIndex(where: { $0.id == id }) { target.selectItem(at: index) }
                 else { target.addItem(withTitle: L10n.string("Unavailable project")); target.selectItem(at: projects.count) }
             }
-            addRow("Project", target, to: form)
-            for value in agents { agent.addItem(withTitle: value.displayName) }
-            agent.selectItem(at: agents.firstIndex(of: configuration?.agent ?? .codex) ?? 0)
-            addRow("Agent", agent, to: form)
-            for title in ["Assess only", "Assess, then fix if straightforward", "Read-only task", "Task with local edits"] { mode.addItem(withTitle: L10n.string(title)) }
-            mode.selectItem(at: modes.firstIndex(of: configuration?.executionMode ?? .taskReadOnly) ?? 0)
-            addRow("Permissions", mode, to: form)
-            checkout.addItem(withTitle: L10n.string("Existing project checkout"))
-            checkout.addItem(withTitle: L10n.string("Isolated managed worktree"))
-            checkout.selectItem(at: configuration?.checkoutPolicy == .managedWorktree ? 1 : 0)
-            addRow("Checkout", checkout, to: form)
-            account.stringValue = configuration?.account ?? ""
-            model.stringValue = configuration?.model ?? ""
-            effort.stringValue = configuration?.reasoningEffort ?? ""
-            addRow("Account", account, to: form); addRow("Model", model, to: form); addRow("Reasoning effort", effort, to: form)
-            runtime.stringValue = String(configuration?.maximumRuntimeMinutes ?? 60)
-            addRow("Maximum runtime (minutes)", runtime, to: form)
-            // Unattended runs never ask, so what they may do is decided here and approved with
-            // the revision. Remote workers own their permissions and are not offered this.
-            unattended.addItem(withTitle: L10n.string("Allow-list"))
-            unattended.addItem(withTitle: L10n.string("Full permission"))
-            let policy = configuration?.permissions ?? .readOnly
-            unattended.selectItem(at: policy.isFull ? 1 : 0)
-            unattended.target = self; unattended.action = #selector(unattendedChanged)
-            addRow("Without asking", unattended, to: form)
-            rules.textView.string = policy.rules.map(\.text).joined(separator: "\n")
-            rules.textView.setAccessibilityIdentifier("automation.rules")
-            rules.heightAnchor.constraint(equalToConstant: 90).isActive = true
-            addRow("Rules (one per line)", rules, to: form)
-            let grammar = NSTextField(wrappingLabelWithString: L10n.string(
-                "Unattended runs never ask. Bash(command) or Bash(command *), Write(/folder/**), WebFetch(domain:example.com), mcp__server__tool. Reads and read-only commands are always allowed; anything else is refused."))
-            grammar.applyFont(.detail()); grammar.textColor = Design.Text.secondary
-            form.addArrangedSubview(grammar)
+            addRow("Project", target, width: Layout.choiceWidth, to: form)
         }
-        instructions.textView.string = configuration?.instructions ?? remoteSpec?.instruction ?? ""
-        instructions.heightAnchor.constraint(equalToConstant: 100).isActive = true
-        addRow("Instructions", instructions, to: form)
+        addRow("Instructions", instructions, width: Layout.controlWidth, to: form)
+
+        // When: the schedule, or the event it waits for. Only the controls the choice reads
+        // are on the sheet; the rest leave it rather than standing there disabled.
+        addSection("When", to: form)
         let fields = scheduleFields
         fields.onChange = { [weak self] in self?.cadenceChanged() }
-        addRow("Repeat", fields.cadence, to: form)
+        addRow("Repeat", fields.cadence, width: Layout.choiceWidth, to: form)
+        timeRow = addRow("Time (HH:mm)", fields.time, width: Layout.numberWidth, to: form)
+        zoneRow = addRow("Time zone", fields.zone, width: Layout.fieldWidth, to: form)
+        daysRow = addRow("Days", fields.days, to: form)
+        intervalRow = addRow("Interval (minutes)", fields.interval, width: Layout.numberWidth, to: form)
         if !remoteMode {
             for entry in sources { source.addItem(withTitle: entry.displayName) }
             if let id = configuration?.sourceID {
@@ -138,60 +173,188 @@ final class AutomationEditorViewController: NSViewController {
                 else { source.addItem(withTitle: L10n.string("Unavailable source")); source.selectItem(at: sources.count) }
             }
             eventKind.stringValue = configuration?.eventKind ?? ""
-            addRow("Event source", source, to: form)
-            addRow("Event kind", eventKind, to: form)
+            sourceRow = addRow("Event source", source, width: Layout.choiceWidth, to: form)
+            eventKindRow = addRow("Event kind", eventKind, width: Layout.fieldWidth, to: form)
         }
-        addRow("Time (HH:mm)", fields.time, to: form)
-        addRow("Time zone", fields.zone, to: form)
-        addRow("Days", fields.days, to: form)
-        addRow("Interval (minutes)", fields.interval, to: form)
         missed.addItem(withTitle: L10n.string("Skip missed runs"))
         missed.addItem(withTitle: L10n.string("Run once on return"))
         missed.selectItem(at: configuration?.options.missedRunPolicy == .latest || remoteSpec?.missedPolicy == .latest ? 1 : 0)
-        addRow("When offline", missed, to: form)
+        missedRow = addRow("When offline", missed, width: Layout.choiceWidth, to: form)
+
+        if !remoteMode {
+            // Agent: who runs it, as which login, on which model.
+            addSection("Agent", to: form)
+            for value in agents { agent.addItem(withTitle: value.displayName) }
+            agent.selectItem(at: agents.firstIndex(of: configuration?.agent ?? .codex) ?? 0)
+            addRow("Agent", agent, width: Layout.choiceWidth, to: form)
+            account.stringValue = configuration?.account ?? ""
+            model.stringValue = configuration?.model ?? ""
+            effort.stringValue = configuration?.reasoningEffort ?? ""
+            account.placeholderString = L10n.string("Default login")
+            model.placeholderString = L10n.string("Default model")
+            effort.placeholderString = L10n.string("Default effort")
+            addRow("Account", account, width: Layout.fieldWidth, to: form)
+            addRow("Model", model, width: Layout.fieldWidth, to: form)
+            addRow("Reasoning effort", effort, width: Layout.fieldWidth, to: form)
+
+            // Permissions: what a run may do with nobody there to ask.
+            addSection("Permissions", to: form)
+            for title in ["Assess only", "Assess, then fix if straightforward", "Read-only task", "Task with local edits"] { mode.addItem(withTitle: L10n.string(title)) }
+            mode.selectItem(at: modes.firstIndex(of: configuration?.executionMode ?? .taskReadOnly) ?? 0)
+            addRow("Permissions", mode, width: Layout.choiceWidth, to: form)
+            checkout.addItem(withTitle: L10n.string("Existing project checkout"))
+            checkout.addItem(withTitle: L10n.string("Isolated managed worktree"))
+            checkout.selectItem(at: configuration?.checkoutPolicy == .managedWorktree ? 1 : 0)
+            addRow("Checkout", checkout, width: Layout.choiceWidth, to: form)
+            // Unattended runs never ask, so what they may do is decided here and approved with
+            // the revision. Remote workers own their permissions and are not offered this.
+            unattended.addItem(withTitle: L10n.string("Allow-list"))
+            unattended.addItem(withTitle: L10n.string("Full permission"))
+            let policy = configuration?.permissions ?? .readOnly
+            unattended.selectItem(at: policy.isFull ? 1 : 0)
+            unattended.target = self; unattended.action = #selector(unattendedChanged)
+            addRow("Without asking", unattended, width: Layout.choiceWidth, to: form)
+            rules.textView.string = policy.rules.map(\.text).joined(separator: "\n")
+            rules.textView.setAccessibilityIdentifier("automation.rules")
+            rules.heightAnchor.constraint(equalToConstant: Layout.rulesHeight).isActive = true
+            Self.applyFieldSurface(to: rules, font: .code())
+            rulesRow = addRow("Rules (one per line)", rules, width: Layout.controlWidth, to: form)
+            grammarRow = addRow(nil, note(
+                "Unattended runs never ask. Bash(command) or Bash(command *), Write(/folder/**), WebFetch(domain:example.com), mcp__server__tool. Reads and read-only commands are always allowed; anything else is refused.",
+                color: Design.Text.secondary), width: Layout.controlWidth, to: form)
+            fullPermissionRow = addRow(nil, note(
+                "Every command runs without asking. A call that would raise a macOS permission prompt is still refused.",
+                color: Design.Status.warning), width: Layout.controlWidth, to: form)
+        }
+
+        // After: how long a run may take and what happens to its chat.
+        addSection("After a run", to: form)
+        if !remoteMode {
+            runtime.stringValue = String(configuration?.maximumRuntimeMinutes ?? 60)
+            addRow("Maximum runtime (minutes)", runtime, width: Layout.numberWidth, to: form)
+        }
         archive.state = (configuration?.options.archiveOnSuccess ?? remoteSpec?.archiveOnSuccess ?? true) ? .on : .off
         addRow("Archive successful runs", archive, to: form)
-        let note = NSTextField(wrappingLabelWithString: L10n.string("Saving pauses the automation. Enable it when you are ready. Results remain in Activity after a successful run is archived."))
-        note.applyFont(.detail()); note.textColor = Design.Text.secondary
-        form.addArrangedSubview(note)
-        errorLabel.applyFont(.detail()); form.addArrangedSubview(errorLabel)
+
+        // Every label takes the widest one's measure, so the controls start on one line.
+        let labelWidth = ceil(rowLabels.map(\.fittingSize.width).max() ?? 0)
+        for label in rowLabels { label.widthAnchor.constraint(equalToConstant: labelWidth).isActive = true }
+        let formWidth = labelWidth + Design.Spacing.medium + Layout.controlWidth + Design.Spacing.tight * 2
+        lede.preferredMaxLayoutWidth = formWidth
+
+        errorLabel.applyFont(.detail())
+        errorLabel.textColor = Design.Status.negative
+        errorLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let cancel = ThemedButton(); cancel.title = L10n.string("Cancel"); cancel.target = self; cancel.action = #selector(cancelPressed)
         cancel.keyEquivalent = "\u{1b}"
         save.title = L10n.string("Save automation"); save.emphasis = .primary; save.target = self; save.action = #selector(savePressed)
-        let buttons = NSStackView(views: [NSView(), cancel, save]); buttons.orientation = .horizontal
-        buttons.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(buttons)
+        // A refusal stands beside the button that was refused, not at the end of a form that
+        // may be scrolled away from it.
+        let buttons = NSStackView(views: [errorLabel, NSView(), cancel, save])
+        buttons.orientation = .horizontal
+        buttons.alignment = .centerY
+        buttons.spacing = Design.Spacing.medium
+        buttons.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(buttons)
+        let separator = SeparatorView()
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(separator)
+
+        let height = max(Layout.minimumHeight, min(Layout.preferredHeight, availableHeight ?? Layout.preferredHeight))
+        view.frame = NSRect(x: 0, y: 0, width: formWidth + (Design.Spacing.pane - Design.Spacing.tight) * 2, height: height)
         NSLayoutConstraint.activate([
             scroll.topAnchor.constraint(equalTo: view.topAnchor, constant: Design.Spacing.pane),
-            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Design.Spacing.pane),
-            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Design.Spacing.pane),
-            scroll.bottomAnchor.constraint(equalTo: buttons.topAnchor, constant: -Design.Spacing.medium),
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Design.Spacing.pane - Design.Spacing.tight),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -(Design.Spacing.pane - Design.Spacing.tight)),
+            scroll.bottomAnchor.constraint(equalTo: separator.topAnchor),
             form.widthAnchor.constraint(equalTo: scroll.widthAnchor),
-            buttons.leadingAnchor.constraint(equalTo: scroll.leadingAnchor), buttons.trailingAnchor.constraint(equalTo: scroll.trailingAnchor),
-            buttons.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -Design.Spacing.pane)
+            separator.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            separator.bottomAnchor.constraint(equalTo: buttons.topAnchor, constant: -Design.Spacing.medium),
+            buttons.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Design.Spacing.pane),
+            buttons.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Design.Spacing.pane),
+            buttons.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -Design.Spacing.inset),
         ])
-        for child in form.arrangedSubviews { child.widthAnchor.constraint(equalTo: form.widthAnchor).isActive = true }
+        for child in form.arrangedSubviews {
+            child.widthAnchor.constraint(equalTo: form.widthAnchor, constant: -Design.Spacing.tight * 2).isActive = true
+        }
         cadenceChanged()
         unattendedChanged()
     }
     override func viewDidAppear() { super.viewDidAppear(); view.window?.makeFirstResponder(name) }
-    private func addRow(_ title: String, _ control: NSView, to form: NSStackView) {
-        let label = NSTextField(labelWithString: L10n.string(title)); label.applyFont(.detail()); label.textColor = Design.Text.secondary
-        control.setAccessibilityLabel(L10n.string(title))
-        let row = NSStackView(views: [label, control]); row.orientation = .vertical; row.alignment = .leading; row.spacing = Design.Spacing.tight
-        if !(control is ThemedToggle) { control.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true }
-        form.addArrangedSubview(row)
+
+    /// A quiet caption over a group of rows, a section's breath above it.
+    private func addSection(_ title: String, to form: NSStackView) {
+        if let last = form.arrangedSubviews.last { form.setCustomSpacing(Design.Spacing.large, after: last) }
+        form.addArrangedSubview(SettingsUI.caption(title))
     }
+
+    /// One labelled row: the label in the shared column, trailing so it sits against its
+    /// control, and the control at the width of what it holds. A nil title is a row of the
+    /// control alone on the control column, for a note that belongs to the row above it.
+    @discardableResult
+    private func addRow(_ title: String?, _ control: NSView, width: CGFloat? = nil, to form: NSStackView) -> NSView {
+        let label = NSTextField(labelWithString: title.map { L10n.string($0) } ?? "")
+        label.applyFont(.detail())
+        label.textColor = Design.Text.secondary
+        label.alignment = .right
+        label.translatesAutoresizingMaskIntoConstraints = false
+        if let title { control.setAccessibilityLabel(L10n.string(title)) }
+        rowLabels.append(label)
+        control.translatesAutoresizingMaskIntoConstraints = false
+        if let width { control.widthAnchor.constraint(equalToConstant: width).isActive = true }
+        // A one-line control stands level with its label. Its drawn text reports no baseline a
+        // stack can align on, and a baseline row put every label half a line above its field.
+        // A block — the instructions, the weekday run — starts level with the top of its label.
+        let isBlock = control is NSScrollView || control is NSStackView
+        let row = NSStackView(views: [label, control])
+        row.orientation = .horizontal
+        row.alignment = isBlock ? .top : .centerY
+        row.spacing = Design.Spacing.medium
+        form.addArrangedSubview(row)
+        return row
+    }
+
+    /// A multi-line field drawn as a field — the same plate and hairline as a one-line one, with
+    /// its text inset from the edge — rather than text loose on the sheet.
+    private static func applyFieldSurface(to field: ThemedTextScrollView, font: Design.FontRole) {
+        field.applySurface(fill: Design.Surface.controlResting, radius: .control, border: Design.Surface.border)
+        field.textView.textContainerInset = NSSize(width: Design.Spacing.small, height: Design.Spacing.small)
+        field.textView.applyFont(font)
+    }
+
+    private func note(_ text: String, color: NSColor) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: L10n.string(text))
+        label.applyFont(.detail())
+        label.textColor = color
+        label.preferredMaxLayoutWidth = Layout.controlWidth
+        return label
+    }
+
     private func cadenceChanged() {
         scheduleFields.updateEnabled()
-        let isEvent = scheduleFields.isAlternativeSelected
+        let fields = scheduleFields
+        let isEvent = fields.isAlternativeSelected
+        timeRow?.isHidden = !fields.readsTime
+        zoneRow?.isHidden = !fields.readsZone
+        daysRow?.isHidden = !fields.readsDays
+        intervalRow?.isHidden = !fields.readsInterval
+        // A missed time is a schedule's question; an event is delivered when it arrives.
+        missedRow?.isHidden = isEvent && !remoteMode
+        sourceRow?.isHidden = !isEvent
+        eventKindRow?.isHidden = !isEvent
         source.isEnabled = isEvent; eventKind.isEnabled = isEvent
     }
     @objc private func unattendedChanged() {
-        rules.textView.isEditable = unattended.indexOfSelectedItem == 0
-        rules.alphaValue = unattended.indexOfSelectedItem == 0 ? 1 : 0.5
+        let isAllowList = unattended.indexOfSelectedItem == 0
+        rules.textView.isEditable = isAllowList
+        rulesRow?.isHidden = !isAllowList
+        grammarRow?.isHidden = !isAllowList
+        fullPermissionRow?.isHidden = isAllowList
     }
     @objc private func cancelPressed() { presentingViewController?.dismiss(self) }
     @objc private func savePressed() {
+        errorLabel.stringValue = ""
         do {
             let (configuration, remoteSpec) = try submission()
             save.isEnabled = false

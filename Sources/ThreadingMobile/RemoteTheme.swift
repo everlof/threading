@@ -803,6 +803,8 @@ struct MobileConnectionNavigationTitle: View {
 /// custom, inherited, or dynamic System theme.
 struct RemoteThemePalette: Equatable {
     let source: RemoteThemeDTO?
+    // Prepared process font identity makes an asynchronous registration a new environment value.
+    var registeredFontName: String?
 
     init(_ source: RemoteThemeDTO?) {
         self.source = source
@@ -858,6 +860,18 @@ struct RemoteThemePalette: Equatable {
         return authored.remoteComposited(over: uiGround)
     }
     var uiControlResting: UIColor { uiColor("control_resting", fallback: "#FFFFFF12") }
+    /// Transcript reading surfaces keep their resolved colour when pictures or particles pass
+    /// behind them. Opacity belongs to the plate, never to the text-bearing subtree.
+    var uiConversationGround: UIColor { uiGround.withAlphaComponent(1) }
+    var uiUserMessageSurface: UIColor { uiControlResting.remoteComposited(over: uiConversationGround) }
+    /// A transcript card (a tool call, a permission request) in the panel role, made opaque.
+    /// System sends `panel` as a faint wash, which let the backdrop's decoration through.
+    var uiConversationPanel: UIColor { uiPanel.remoteComposited(over: uiConversationGround) }
+    var hasBackdropDecoration: Bool {
+        source?.material.backdropGradient?.hasValidGeometry == true
+            || source?.material.particles?.isValid == true
+            || asset("backdrop") != nil || asset("sidebarImage") != nil
+    }
     /// Ink for a monochrome mark on a control plate. The plate may be light even in a dark theme.
     var controlForeground: Color {
         let surface = uiSurface.remoteComposited(over: uiGround)

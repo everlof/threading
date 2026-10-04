@@ -5818,7 +5818,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     let icon = try XCTUnwrap(
       descendants(in: row).first {
         $0.accessibilityIdentifier() == "sidebar.session.identity"
-      } as? NSImageView
+      } as? GlyphView
     )
     XCTAssertEqual(icon.image?.accessibilityDescription, "hammer.fill")
 
@@ -6867,7 +6867,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     XCTAssertFalse(native.isHidden)
   }
 
-  func testUsageRainShaderCompilesAgainstTheHostSurfaceABI() throws {
+  func testUsageRainShaderCompilesAgainstTheHostSurfaceABI() async throws {
     guard MTLCreateSystemDefaultDevice() != nil else {
       throw XCTSkip("Metal is unavailable on this test host.")
     }
@@ -6893,11 +6893,12 @@ final class ExtensionRendererTests: HostedStoreTestCase {
       source: source,
       signalProvider: { _, _ in nil }
     )
+    try await surface.waitForPreparation()
     XCTAssertNil(surface.hitTest(.zero))
     XCTAssertEqual(surface.preferredFramesPerSecond, 60)
   }
 
-  func testRendersUsageRainAcrossTheRealMainWindow() throws {
+  func testRendersUsageRainAcrossTheRealMainWindow() async throws {
     guard MTLCreateSystemDefaultDevice() != nil else {
       throw XCTSkip("Metal is unavailable on this test host.")
     }
@@ -6925,6 +6926,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
       source: source,
       signalProvider: { _, _ in nil }
     )
+    try await surface.waitForPreparation()
 
     let controller = makeMainWindowController()
     let window = try XCTUnwrap(controller.window)
@@ -7080,7 +7082,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     let icon = try XCTUnwrap(
       descendants(in: row).first {
         $0.accessibilityIdentifier() == "sidebar.session.identity"
-      } as? NSImageView
+      } as? GlyphView
     )
     let nativeImage = icon.image
 
@@ -8536,7 +8538,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     let icon = try XCTUnwrap(
       descendants(in: row).first {
         $0.accessibilityIdentifier() == "sidebar.project.identity"
-      } as? NSImageView
+      } as? GlyphView
     )
     let nativeImage = icon.image
 

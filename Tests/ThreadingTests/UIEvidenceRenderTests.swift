@@ -78,6 +78,7 @@ final class UIEvidenceRenderTests: XCTestCase {
     private struct CoverageCapture: Decodable {
         let metadata: String?
         let glob: String?
+        let globs: [String]?
         let journey: String?
     }
 
@@ -119,7 +120,8 @@ final class UIEvidenceRenderTests: XCTestCase {
                 guard entry.status == "implemented" else { continue }
                 let source = try XCTUnwrap(entry.source, context)
                 let capture = try XCTUnwrap(entry.capture, context)
-                let captureContracts = [capture.metadata, capture.glob, capture.journey]
+                let captureContracts = [capture.metadata, capture.glob, capture.journey,
+                                        capture.globs == nil ? nil : "globs"]
                     .compactMap { $0 }
                 XCTAssertEqual(captureContracts.count, 1, context)
                 XCTAssertEqual(source.contractKindCount, 1, context)

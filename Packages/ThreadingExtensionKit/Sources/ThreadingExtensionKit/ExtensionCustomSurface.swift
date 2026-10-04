@@ -130,6 +130,8 @@ public struct ExtensionMetalSurface: Equatable, Sendable {
         self.texture = texture
     }
 
+    public var isValid: Bool { validationIssues(path: "surface").isEmpty }
+
     func validationIssues(path: String) -> [ExtensionValidationIssue] {
         var issues: [ExtensionValidationIssue] = []
         if !ExtensionIdentifierRules.isSafeRelativePath(shaderResource)

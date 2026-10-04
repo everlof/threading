@@ -211,122 +211,171 @@ enum SessionNaming {
 
     // MARK: - Refresh
 
-    /// Re-reads the provider's durable conversation title, called when a session stops working
-    /// — the same edge that re-reads the branch, and for the same reason: the turn that just
-    /// ended is when the name is most likely to have moved.
-    ///
-    /// Claude stores the title in its transcript. Codex keeps it in the account's session
-    /// index; that value is canonical provider metadata, so it must outrank the TUI's stale OSC
-    /// caption while remaining below a name deliberately chosen through Threading.
-    @MainActor
-    static func refreshAgentTitle(forSessionID sessionID: SessionID) {
-        guard let session = ProjectStore.shared.session(withID: sessionID),
-              let transcriptID = session.resumeState.transcriptID else { return }
+    enum TitleReading: Sendable {
+        case claude(SessionTranscript.ReadRequest)
+        case codex(TranscriptID, AgentAccount)
+    }
 
-        enum Reading: Sendable {
-            case claude(URL)
-            case codex(TranscriptID, AgentAccount)
+    struct ProviderTitle: Sendable {
+        let title: String?
+        let source: AgentTitleSource
+    }
+
+    private actor TitleWorker {
+        static let shared = TitleWorker()
+
+        func read(
+            _ reading: TitleReading,
+            using reader: @Sendable (TitleReading) -> ProviderTitle
+        ) -> ProviderTitle {
+            reader(reading)
         }
 
-        let reading: Reading
-        switch session.kind {
-        case .claude:
-            guard session.kind.supports(.transcriptTitles),
-                  let project = ProjectStore.shared.executionProject(forSessionID: sessionID),
-                  let url = ClaudeTranscript.url(
-                      sessionID: transcriptID,
-                      for: session,
-                      in: project
-                  ) else { return }
-            reading = .claude(url)
-        case .codex:
-            guard session.kind.supports(.providerTitleMetadata),
-                  let account = AgentAccountDiscovery.account(
-                      for: session.kind,
-                      handle: session.accountHandle
-                  ) else { return }
-            reading = .codex(transcriptID, account)
-        case .grok, .openCode, .cursor:
+        func codexTitles(account: AgentAccount) -> [TranscriptID: String] {
+            CodexTranscript.titles(account: account)
+        }
+    }
+
+    @MainActor private static var activeTitleRefreshes: Set<SessionID> = []
+    @MainActor private static var pendingTitleRefreshes: Set<SessionID> = []
+
+    @MainActor
+    static func isRefreshingAgentTitle(for sessionID: SessionID) -> Bool {
+        activeTitleRefreshes.contains(sessionID)
+    }
+
+    /// Re-reads the provider's durable title after a turn or a quiet edge in terminal output.
+    /// Discovery and source resolution stay on workers, with one active and one pending request
+    /// per session. Claude's transcript title and Codex's canonical index retain their distinct
+    /// authority below a name deliberately chosen through Threading.
+    @MainActor
+    static func refreshAgentTitle(
+        forSessionID sessionID: SessionID,
+        accountProvider: @escaping @MainActor (AgentKind, AccountHandle) async -> AgentAccount? = {
+            await AgentAccountDiscovery.discoverAccount(for: $0, handle: $1)
+        },
+        titleReader: @escaping @Sendable (TitleReading) -> ProviderTitle = { readProviderTitle($0) }
+    ) {
+        guard let session = ProjectStore.shared.session(withID: sessionID),
+              let transcriptID = session.resumeState.transcriptID,
+              session.kind.supports(.transcriptTitles)
+                || session.kind.supports(.providerTitleMetadata) else { return }
+        guard activeTitleRefreshes.insert(sessionID).inserted else {
+            pendingTitleRefreshes.insert(sessionID)
             return
         }
-
-        DispatchQueue.global(qos: .utility).async {
-            let result: (title: String?, source: AgentTitleSource)
-            switch reading {
-            case .claude(let url):
-                result = (claudeTranscriptTitle(at: url), .reported)
-            case .codex(let transcriptID, let account):
-                result = (CodexTranscript.title(sessionID: transcriptID, account: account), .provider)
+        let kind = session.kind
+        let handle = session.accountHandle
+        Task(priority: .utility) { @MainActor in
+            defer {
+                activeTitleRefreshes.remove(sessionID)
+                if pendingTitleRefreshes.remove(sessionID) != nil {
+                    refreshAgentTitle(
+                        forSessionID: sessionID,
+                        accountProvider: accountProvider,
+                        titleReader: titleReader
+                    )
+                }
             }
-            guard let title = result.title else { return }
+            guard let account = await accountProvider(kind, handle),
+                  let current = ProjectStore.shared.session(withID: sessionID),
+                  current.accountHandle == handle,
+                  current.resumeState.transcriptID == transcriptID else { return }
 
-            DispatchQueue.main.async {
-                ProjectStore.shared.updateAgentTitle(
-                    title,
-                    for: sessionID,
-                    source: result.source
-                )
+            let reading: TitleReading
+            switch kind {
+            case .claude:
+                guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID),
+                      let request = SessionTranscript.readRequest(
+                          sessionID: transcriptID, for: current, in: project, account: account
+                      ) else { return }
+                reading = .claude(request)
+            case .codex:
+                reading = .codex(transcriptID, account)
+            case .grok, .openCode, .cursor:
+                return
             }
+            let directory = ProjectStore.shared.workingDirectory(forSessionID: sessionID)
+            let result = await TitleWorker.shared.read(reading, using: titleReader)
+            guard let title = result.title,
+                  let current = ProjectStore.shared.session(withID: sessionID),
+                  current.accountHandle == handle,
+                  current.resumeState.transcriptID == transcriptID,
+                  ProjectStore.shared.workingDirectory(forSessionID: sessionID) == directory
+            else { return }
+            ProjectStore.shared.updateAgentTitle(title, for: sessionID, source: result.source)
+        }
+    }
+
+    private static func readProviderTitle(_ reading: TitleReading) -> ProviderTitle {
+        switch reading {
+        case .claude(let request):
+            return ProviderTitle(
+                title: request.resolve().flatMap(claudeTranscriptTitle), source: .reported
+            )
+        case .codex(let transcriptID, let account):
+            return ProviderTitle(
+                title: CodexTranscript.title(sessionID: transcriptID, account: account),
+                source: .provider
+            )
         }
     }
 
     /// Reconciles retained Codex rows with the provider's own title index once per app launch.
-    ///
-    /// A rename can happen in Codex while Threading is closed. Reading one index per account
-    /// makes that name visible before the session is resumed, and keeps dormant rows honest.
+    /// Account discovery and one index read per account run on bounded workers. The catalogue
+    /// pass groups immutable identities by handle without consulting the filesystem per row.
     @MainActor
-    static func refreshProviderTitlesAtLaunch() {
+    static func refreshProviderTitlesAtLaunch(
+        accountsProvider: @escaping @MainActor () async -> [AgentAccount] = {
+            await AgentAccountDiscovery.allAccountsAfterDiscovery(for: .codex)
+        }
+    ) {
+        struct RetainedSession: Sendable {
+            let sessionID: SessionID
+            let transcriptID: TranscriptID
+            let accountHandle: AccountHandle
+        }
         struct Batch: Sendable {
             let account: AgentAccount
-            var sessions: [(SessionID, TranscriptID)]
+            var sessions: [RetainedSession] = []
         }
-
-        var batches: [String: Batch] = [:]
+        var sessionsByHandle: [AccountHandle: [RetainedSession]] = [:]
         for project in ProjectStore.shared.projects {
             for session in project.sessions where session.kind.supports(.providerTitleMetadata) {
                 switch session.kind {
-                case .codex:
-                    break
-                case .claude, .grok, .openCode, .cursor:
-                    continue
+                case .codex: break
+                case .claude, .grok, .openCode, .cursor: continue
                 }
-                guard let transcriptID = session.resumeState.transcriptID,
-                      let account = AgentAccountDiscovery.account(
-                          for: session.kind,
-                          handle: session.accountHandle
-                      ) else { continue }
-
-                if var batch = batches[account.configPath] {
-                    batch.sessions.append((session.id, transcriptID))
-                    batches[account.configPath] = batch
-                } else {
-                    batches[account.configPath] = Batch(
-                        account: account,
-                        sessions: [(session.id, transcriptID)]
+                guard let transcriptID = session.resumeState.transcriptID else { continue }
+                sessionsByHandle[session.accountHandle, default: []].append(
+                    RetainedSession(
+                        sessionID: session.id, transcriptID: transcriptID,
+                        accountHandle: session.accountHandle
                     )
-                }
+                )
             }
         }
-
-        let providerBatches = Array(batches.values)
-        guard !providerBatches.isEmpty else { return }
-
-        DispatchQueue.global(qos: .utility).async {
-            for batch in providerBatches {
-                let titles = CodexTranscript.titles(account: batch.account)
-                let updates = batch.sessions.compactMap { sessionID, transcriptID in
-                    titles[transcriptID].map { (sessionID, $0) }
+        guard !sessionsByHandle.isEmpty else { return }
+        Task(priority: .utility) { @MainActor in
+            let accounts = await accountsProvider()
+            var batches: [String: Batch] = [:]
+            for (handle, sessions) in sessionsByHandle {
+                guard let account = AgentAccountDiscovery.account(
+                    for: .codex, handle: handle, among: accounts
+                ) else { continue }
+                if batches[account.configPath] == nil {
+                    batches[account.configPath] = Batch(account: account)
                 }
-                guard !updates.isEmpty else { continue }
-
-                DispatchQueue.main.async {
-                    for (sessionID, title) in updates {
-                        ProjectStore.shared.updateAgentTitle(
-                            title,
-                            for: sessionID,
-                            source: .provider
-                        )
-                    }
+                batches[account.configPath]?.sessions.append(contentsOf: sessions)
+            }
+            for batch in batches.values {
+                let titles = await TitleWorker.shared.codexTitles(account: batch.account)
+                for session in batch.sessions {
+                    guard let title = titles[session.transcriptID],
+                          let current = ProjectStore.shared.session(withID: session.sessionID),
+                          current.accountHandle == session.accountHandle,
+                          current.resumeState.transcriptID == session.transcriptID else { continue }
+                    ProjectStore.shared.updateAgentTitle(title, for: session.sessionID, source: .provider)
                 }
             }
         }

@@ -38,6 +38,8 @@ idea that comes back every six months.
 
 | Record | Recommendation |
 |---|---|
+| [Phone theme rendering](phone-theme-rendering.md) — carry fonts, glow, reviewed shaders, sounds and widget accent to paired devices | **Implement** bounded presentation with host-owned consent, lifecycle, rendering and transfer budgets |
+| [Render-only Embedded Swift SDK](render-only-embedded-swift.md) — avoid Foundation's module cost for extensions that only publish a patch | **Prototype** a bounded protocol-only target; the 21 KB compile probe is not yet a compatible SDK |
 | [Revert to this message](revert-to-message.md) — put the files back to where a turn started, and the separate question of rewinding the provider conversation | **Prototype** the workspace-only half; **reject** the conversation-revert claim |
 | [Automatic settling](automatic-settling.md) — an inbox that files a finished chat away by itself | **No-go** on a new lifecycle state; **experiment** with a presentation-only Needs Attention view |
 | [Editable file previews](editable-file-previews.md) — edit a file in Threading instead of leaving for an editor | **Reject** on the Mac; **wait for demand** on a narrow remote-only slice |

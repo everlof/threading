@@ -24,6 +24,76 @@ import Testing
 struct TextGlowTests {
     private static let scale: CGFloat = 2
 
+    /// The underlay cache reuses what did not change, rebuilds what did, and what it serves
+    /// after a change is what a view that never cached anything draws.
+    @Test func unchangedUnderlaysAreReusedAndDirtyRowsHaveABoundedCache() throws {
+        let view = makeView(cols: 80, rows: 32)
+        view.textGlow = TerminalTextGlow(radius: 3, opacity: 0.5)
+        let content = (0..<32).map { "\u{1B}[\($0 + 1);1Hphosphor row \($0)" }.joined()
+        view.feed(text: content)
+        _ = prepare(view)
+        let canvas = Canvas(size: view.bounds.size, scale: Self.scale)
+        draw(view, view.bounds, into: canvas)
+        let built = view.textGlowUnderlayCache.builds
+        draw(view, view.bounds, into: canvas)
+        #expect(view.textGlowUnderlayCache.builds == built)
+        #expect(view.textGlowUnderlayCache.hits > 0)
+
+        let change = "\u{1B}[16;1Hchanged ink"
+        view.feed(text: change)
+        let region = try #require(prepare(view))
+        draw(view, region, into: canvas)
+        #expect(view.textGlowUnderlayCache.builds > built, "a content change was served from the cache")
+        #expect(view.textGlowUnderlayCache.builds - built <= 3)
+        #expect(view.textGlowUnderlayCache.byteCount <= 16 * 1_024 * 1_024)
+
+        let fresh = makeView(cols: 80, rows: 32)
+        fresh.textGlow = view.textGlow
+        fresh.feed(text: content + change)
+        _ = prepare(fresh)
+        try expectSamePixels(view, fresh, "after a content change")
+    }
+
+    /// Block glyphs are drawn by the renderer itself and `customBlockGlyphs` is not part of a
+    /// row's revision, so the underlay key has to carry it: flipping it must not serve the halo
+    /// of the glyphs as they were drawn before. (`antiAliasCustomBlockGlyphs` is keyed for the
+    /// same reason, but on whole-pixel cells it changes no pixel, so it has no fixture here.)
+    @Test func theBlockGlyphSwitchRebuildsTheUnderlay() throws {
+        let setting = "customBlockGlyphs"
+        func apply(_ view: TerminalView) { view.customBlockGlyphs.toggle() }
+        let content = "\u{1B}[2;1H\u{1B}[38;2;255;160;0m▁▂▃▅▆▇▀▄ ▓▒░█▌▐ ─┼─\u{1B}[0m"
+        let view = makeView(cols: 20, rows: 4)
+        view.textGlow = TerminalTextGlow(radius: 4, opacity: 0.7)
+        view.feed(text: content)
+        _ = prepare(view)
+        let before = Canvas(size: view.bounds.size, scale: Self.scale)
+        draw(view, view.bounds, into: before)
+        let built = view.textGlowUnderlayCache.builds
+
+        apply(view)
+        _ = prepare(view)
+        let fresh = makeView(cols: 20, rows: 4)
+        fresh.textGlow = view.textGlow
+        apply(fresh)
+        fresh.feed(text: content)
+        _ = prepare(fresh)
+        let after = Canvas(size: fresh.bounds.size, scale: Self.scale)
+        draw(fresh, fresh.bounds, into: after)
+        #expect(before.bytes != after.bytes, "\(setting) changed nothing, so this fixture proves nothing")
+        try expectSamePixels(view, fresh, "after toggling \(setting)")
+        #expect(view.textGlowUnderlayCache.builds > built)
+    }
+
+    /// Draws both views whole into fresh canvases and requires every byte to match.
+    private func expectSamePixels(_ cached: TerminalView, _ reference: TerminalView, _ label: String) throws {
+        let left = Canvas(size: cached.bounds.size, scale: Self.scale)
+        draw(cached, cached.bounds, into: left)
+        let right = Canvas(size: reference.bounds.size, scale: Self.scale)
+        draw(reference, reference.bounds, into: right)
+        let differing = zip(left.bytes, right.bytes).filter { $0 != $1 }.count
+        #expect(differing == 0, "\(label): \(differing) bytes differ from a view that never cached")
+    }
+
     private func makeView(cols: Int = 20, rows: Int = 8) -> TerminalView {
         let view = TerminalView(
             frame: CGRect(x: 0, y: 0, width: 480, height: 200),

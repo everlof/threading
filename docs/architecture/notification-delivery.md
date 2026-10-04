@@ -275,3 +275,16 @@ costs a recipient nothing; the alternative cost the entire notification. An unre
 minutes so a push costs one request rather than two. **Adding a field to the wire event means
 bumping this version in the same change**, teaching the compatibility rule which version
 introduced it, and deploying every service before a client that can send it.
+
+## 2026-10-04 — Confirmed theme notification sounds
+
+The phone confirms at most the attention and turn-finished digest-named CAF files it has
+successfully verified and installed. Registration persists those receipts, scoped to the
+paired host. The delivery service selects a custom name only for a currently admitted matching
+sound while owner usage access, that notification kind's sound preference and per-device
+preview consent all hold. A theme never grants consent or changes notification authorization.
+Missing, malformed, retired and unconfirmed names retain default sound or silence.
+Broker protocol 4 adds the optional validated basename; protocol 3 omits it. APNs payload
+trimming retains the validated sound, while `playsSound: false` always wins. Host and broker
+tests cover these gates and basename/path refusals. Hosted deployment and audible device APNs
+delivery are separate from local implementation validation.

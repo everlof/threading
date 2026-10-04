@@ -11,9 +11,32 @@ favicon — Claude's coral starburst, OpenAI's knot — instead of an SF Symbol.
 image sets in the asset catalogue, loaded with `NSImage(named:)` (`AgentBrandIcons`;
 `AccountMarkTests` pins it). The OpenAI knot is monochrome by design, so it
 ships as a **template image** and tints with its context like the symbols beside it — which
-is what makes it work in dark mode and dim for dormancy. Claude's mark keeps its brand
-colour; tinting cannot dim a non-template image, so dormancy dims it through the view's
-alpha instead (`SessionRowView.applyAgentIcon`).
+is what makes it work in dark mode and dim for dormancy. Native sidebar template marks use
+`GlyphView`, including the terminal, pin, conduct and remote-host symbols. AppKit's
+`NSImageCell.backgroundStyle = .emphasized` paints templates white even when
+`NSImageView.contentTintColor` is black; checking that property never proved the selected
+mark's pixels. `GlyphView` draws through `TemplateImageDrawing`, so AppKit cannot replace its ink.
+
+`GlyphView.contrastGround` opts these dynamic marks into measured contrast protection. The
+sidebar row supplies its actual selected, inactive or hovered face through
+`SidebarHoverRowView.contentGround(for:)`. The renderer composites tint alpha before checking
+3:1 (4.5:1 under Increase Contrast), keeps a passing tint unchanged, and repairs only failing
+ink with `LabelLegibility.held`. One cached color pair per glyph bounds repeated draw work;
+there is no image sampling, file access or work proportional to session count. The request stays
+separate from the correction, so a live theme switch or selection change measures afresh.
+The scaling contract is the same for a typical few dozen sessions and a 10,000-session stress
+case: only viewport rows draw, each with a fixed number of marks. Activity refreshes retain the
+image, ordinary redraws reuse the measured pair, and selection or theme changes invalidate only
+the affected pair; the contrast check never enumerates the outline's data.
+The existing public sidebar identity/property seams still choose artwork; Threading owns the
+legibility of template ink in its native slots, alongside selection, actions and accessibility.
+
+Claude's unselected mark keeps its brand colour; tinting cannot dim a non-template image, so
+dormancy dims it through the view's alpha instead (`SessionRowView.applyAgentIcon`). Once selection
+or a tinted theme turns that mark into a template, dormancy uses ink alone, with no second alpha
+reduction after the contrast check. Finished artwork and account photos retain their pixels.
+`SidebarIconContrastTests` checks rendered marks inside the shipping main window; the property-only
+test in `SidebarRowRenderTests` remains a refresh contract, not visual contrast evidence.
 
 **A theme may ink every generated mark in its accent** (`Material.identityMarks = .tinted`,
 owned by `IdentityMarkInk`): the project tile becomes an accent-outlined, accent-lettered tile

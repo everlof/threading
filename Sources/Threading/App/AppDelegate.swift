@@ -690,6 +690,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             // Registered before attention alerts so an important activity edge wakes a snoozed
             // session before the alert centre decides whether that same edge may notify.
             SessionSnoozeCenter.shared.start()
+            // Which agent CLIs the login shell can find: the composer's default, its refusal of
+            // an uninstalled runtime, and the install offers all read this one answer.
+            AgentCLIAvailability.shared.startMonitoring()
             // Beside Snooze because it is the same kind of thing — one process timer over
             // persisted deadlines, materializing what was missed while the app was shut. It
             // refuses to start under a hosted test bundle for its own reason: it types.
@@ -3391,6 +3394,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             guard !CodexModelRefreshService.shared.state.isRunning else {
                 return .unavailable(L10n.string("A model refresh is already running."))
             }
+        case AppCommands.ID.allowClaudeKeychainAccess:
+            guard ClaudeKeychainAccess.shared.isEnabled else {
+                return .unavailable(L10n.string(
+                    "Turn on Live usage from your Claude login in Settings ▸ Privacy first."
+                ))
+            }
         case AppCommands.ID.newManager:
             guard mainWindowController?.currentProjectID != nil else {
                 return .unavailable(L10n.string("Select a project first."))
@@ -3674,6 +3683,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 let alert = ThemedAlert()
                 alert.messageText = L10n.string("Refresh Models")
                 alert.informativeText = state.message
+                if let window = self?.mainWindowController?.window {
+                    alert.beginSheetModal(for: window) { _ in }
+                } else {
+                    alert.runModal()
+                }
+            }
+        case AppCommands.ID.allowClaudeKeychainAccess:
+            ClaudeKeychainAccess.shared.requestAccessForAllLogins { [weak self] outcome in
+                // A prompt is its own feedback. Only a run that had nobody to ask says so, or
+                // the command would look like it did nothing.
+                guard outcome.granted.isEmpty, outcome.stillWaiting.isEmpty else { return }
+                let alert = ThemedAlert()
+                alert.messageText = L10n.string("Allow Keychain Access for Claude Logins")
+                alert.informativeText = L10n.string(
+                    "Threading can already read every Claude login in your keychain."
+                )
                 if let window = self?.mainWindowController?.window {
                     alert.beginSheetModal(for: window) { _ in }
                 } else {

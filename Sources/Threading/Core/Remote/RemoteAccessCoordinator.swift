@@ -2266,10 +2266,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     private func bindHostedService(_ service: RemoteHostedServiceController) {
-        notifications.configureHostedPushSender(
+        notifications.configureHostedThemePushSender(
             serviceURL: { [weak service] in service?.serviceURL },
             isAvailable: { [weak service] in service?.canSendHostedPush == true },
-            send: { [weak service] event, registrationID, playsSound in
+            send: { [weak service] event, registrationID, playsSound, soundName in
                 guard let service else {
                     return RemoteAPNSDeliveryResult(
                         statusCode: nil,
@@ -2280,7 +2280,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 return await service.sendHostedPush(
                     event: event,
                     registrationID: registrationID,
-                    playsSound: playsSound
+                    playsSound: playsSound,
+                    soundName: soundName
                 )
             }
         )

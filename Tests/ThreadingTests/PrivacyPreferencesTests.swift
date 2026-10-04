@@ -1,6 +1,7 @@
 import AppKit
 import UserNotifications
 import XCTest
+import os
 @testable import Threading
 
 /// The Privacy page is an inventory of what the OS lets Threading do, so the thing under test is
@@ -589,7 +590,8 @@ final class PrivacyPreferencesTests: XCTestCase {
             claudeAccounts: { accounts },
             keychainAvailability: availability,
             keychainGrant: grant,
-            prefetchUsage: prefetch
+            prefetchUsage: prefetch,
+            refreshGrantedUsage: { _ in }
         )
         controller.view.frame = NSRect(
             x: 0, y: 0, width: 640, height: Self.fixtureHeight
@@ -685,24 +687,72 @@ final class PrivacyPreferencesTests: XCTestCase {
         XCTAssertFalse(settings.readsClaudeLoginFromKeychain)
     }
 
-    /// The status sentence, at each of its three truths.
+    /// The status sentence, at each of its three truths — and when a login is waiting, it is
+    /// named, because "1 of 2" does not say which one the button beside it will ask for.
     func testKeychainStatusNamesWhatIsActuallyReadable() {
         XCTAssertEqual(
             PrivacyPreferencesViewController.keychainStatus(for: []),
             "On — no Claude sign-in found in the keychain."
         )
         XCTAssertEqual(
-            PrivacyPreferencesViewController.keychainStatus(for: [.missing, .missing]),
+            PrivacyPreferencesViewController.keychainStatus(for: [
+                (name: "a", availability: .missing), (name: "b", availability: .missing)
+            ]),
             "On — no Claude sign-in found in the keychain."
         )
         XCTAssertEqual(
-            PrivacyPreferencesViewController.keychainStatus(for: [.granted, .granted, .missing]),
+            PrivacyPreferencesViewController.keychainStatus(for: [
+                (name: "a", availability: .granted),
+                (name: "b", availability: .granted),
+                (name: "c", availability: .missing)
+            ]),
             "On — reading 2 of 2 logins."
         )
         XCTAssertEqual(
-            PrivacyPreferencesViewController.keychainStatus(for: [.granted, .needsGrant]),
-            "On — reading 1 of 2 logins. Toggle off and on to be asked again for the rest."
+            PrivacyPreferencesViewController.keychainStatus(for: [
+                (name: "work", availability: .granted),
+                (name: "rinda01", availability: .needsGrant),
+                (name: "rinda02", availability: .needsGrant)
+            ]),
+            "On — reading 1 of 3 logins. Waiting for access: rinda01 and rinda02."
         )
+    }
+
+    /// A login added after the switch went on used to have one remedy: switch it off and on.
+    /// The row now carries **Allow…** while anything waits, and it asks for exactly those.
+    func testAllowButtonAppearsForWaitingLoginsAndAsksOnlyForThem() throws {
+        let granted = account(handle: "claude", path: "/fixtures/claude")
+        let waiting = account(handle: "claude-new", path: "/fixtures/claude-new")
+        let requested = OSAllocatedUnfairLock(initialState: [String]())
+        let asked = expectation(description: "grant flow ran")
+
+        let (page, _, cleanup) = try keychainPage(
+            enabled: true,
+            accounts: [granted, waiting],
+            availability: { $0 == waiting.configPath ? .needsGrant : .granted },
+            grant: { path in
+                requested.withLock { $0.append(path) }
+                return false
+            },
+            prefetch: { asked.fulfill() }
+        )
+        defer { cleanup() }
+
+        let allow = try XCTUnwrap(
+            descendants(of: page.view).compactMap { $0 as? ThemedButton }
+                .first { $0.accessibilityIdentifier() == "privacy.keychainAllow" }
+        )
+        let shown = expectation(description: "status probed")
+        func poll() {
+            if !allow.isHidden { shown.fulfill(); return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { poll() }
+        }
+        poll()
+        wait(for: [shown], timeout: 5)
+
+        allow.sendAction(allow.action, to: allow.target)
+        wait(for: [asked], timeout: 5)
+        XCTAssertEqual(requested.withLock { $0 }, [waiting.configPath])
     }
 
     private func account(handle: String, path: String) -> AgentAccount {

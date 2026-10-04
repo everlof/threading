@@ -63,6 +63,14 @@ enum ClaudeKeychainCredentials {
     /// strict-concurrency checker rather than described by an `NSLock` beside a global `var`.
     private static let cache = OSAllocatedUnfairLock(initialState: [String: Token]())
 
+    /// The last answer each account's item gave, keyed by config path — learnt as a side effect
+    /// of reads that were happening anyway, never by a read of its own. This is what lets a usage
+    /// surface say "this login is waiting for access" from the main actor without a `securityd`
+    /// round trip, and it is the fact the silent read used to drop: a login whose item refused
+    /// Threading looked exactly like one with no item at all, so its usage froze on whatever
+    /// the CLI last cached and nothing said why.
+    private static let observed = OSAllocatedUnfairLock(initialState: [String: Availability]())
+
     /// All keychain traffic is serialised here because the no-prompt guarantee rests on a
     /// process-global switch (`SecKeychainSetUserInteractionAllowed`); two concurrent reads
     /// toggling it independently could re-enable interaction under the other's feet.
@@ -82,6 +90,7 @@ enum ClaudeKeychainCredentials {
             service: serviceName(forConfigPath: configPath),
             allowingPrompt: false
         )
+        record(availability(for: status), forConfigPath: configPath)
         guard status == errSecSuccess, let data, let token = parse(data),
               isUsable(token, at: Date())
         else { return nil }
@@ -101,6 +110,7 @@ enum ClaudeKeychainCredentials {
             service: serviceName(forConfigPath: configPath),
             allowingPrompt: true
         )
+        record(availability(for: status), forConfigPath: configPath)
         guard status == errSecSuccess, let data, let token = parse(data) else { return false }
 
         cache.withLock { $0[configPath] = token }
@@ -119,11 +129,24 @@ enum ClaudeKeychainCredentials {
 
         if status == errSecSuccess, let data, let token = parse(data) {
             cache.withLock { $0[configPath] = token }
+            record(.granted, forConfigPath: configPath)
             return .granted
         }
-        if status == errSecItemNotFound { return .missing }
+        if status == errSecItemNotFound {
+            record(.missing, forConfigPath: configPath)
+            return .missing
+        }
 
-        return itemExists(service: service) ? .needsGrant : .missing
+        let answer: Availability = itemExists(service: service) ? .needsGrant : .missing
+        record(answer, forConfigPath: configPath)
+        return answer
+    }
+
+    /// The answer the most recent read of this account's item gave, or nil when nothing has
+    /// read it this launch. Free to call from the main actor: it is a dictionary lookup, not a
+    /// keychain query.
+    static func observedAvailability(forConfigPath configPath: String) -> Availability? {
+        observed.withLock { $0[configPath] }
     }
 
     /// Drops a cached token the API just refused — the CLI rotates the item in place, so the
@@ -135,6 +158,12 @@ enum ClaudeKeychainCredentials {
     /// For tests.
     static func forgetAll() {
         cache.withLock { $0.removeAll() }
+        observed.withLock { $0.removeAll() }
+    }
+
+    /// For tests: states what a read of this account's item answered, without a keychain.
+    static func recordForTesting(_ availability: Availability, forConfigPath configPath: String) {
+        record(availability, forConfigPath: configPath)
     }
 
     // MARK: - Internal Methods (pure, testable)
@@ -190,6 +219,18 @@ enum ClaudeKeychainCredentials {
         return Token(accessToken: accessToken, expiresAt: expiresAt, plan: plan)
     }
 
+    /// What one read's status says about the item. Anything but "found" and "not found" is the
+    /// item answering without letting Threading in — the fail-closed `errSecAuthFailed` or
+    /// `errSecInteractionNotAllowed` of an ACL that does not list this app, or of a locked
+    /// keychain — and both are answered by the same interactive read.
+    static func availability(for status: OSStatus) -> Availability {
+        switch status {
+        case errSecSuccess: return .granted
+        case errSecItemNotFound: return .missing
+        default: return .needsGrant
+        }
+    }
+
     /// A token about to expire is already expired, so the API call is not wasted — the same
     /// skew rule the credentials file gets.
     static func isUsable(_ token: Token, at now: Date) -> Bool {
@@ -198,6 +239,20 @@ enum ClaudeKeychainCredentials {
     }
 
     // MARK: - Private Methods
+
+    /// Keeps the answer and announces it only when it changed, so a refresh tick that learns
+    /// nothing new wakes nobody.
+    private static func record(_ availability: Availability, forConfigPath configPath: String) {
+        let changed = observed.withLock { values in
+            guard values[configPath] != availability else { return false }
+            values[configPath] = availability
+            return true
+        }
+        guard changed else { return }
+        NotificationCenter.default.post(
+            ClaudeKeychainAccessDidChange(configPath: configPath)
+        )
+    }
 
     private static func cachedToken(forConfigPath configPath: String) -> Token? {
         cache.withLock { values in

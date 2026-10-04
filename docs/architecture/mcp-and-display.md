@@ -1498,6 +1498,14 @@ are absent, the fallback session-tree lookup runs off-main rather than putting e
 filesystem work on the activity callback. Grok, OpenCode and ordinary shell output keep the
 logical-buffer path until they expose an equally authoritative transcript reader.
 
+Live observers share one serial preparation worker across the terminal fleet. Each keeps one
+active scan and one latest-buffer request; cancelling synchronous regex or file work does not
+free its slot until it actually returns. Buffer reading, fingerprinting and path resolution all
+run on that worker, and cancelled queued work stops before reading. Generation checks still fence
+admission after custody preparation. Plain paths match only from the start of a token: retrying
+every suffix made a path-free 16 KiB line consume seconds and multiplied that cost across cancelled
+scans. See [the measurement and regression boundary](performance.md#attachment-scan-contention-and-title-discovery--2026-10-04).
+
 **The scanned rule is a default, and the user may answer it — `includesAttachmentsOutsideProject`,
 off.** It is the safety measure that has to survive being configurable, so widening it does not
 relax what the endpoint stands on: an outside path admitted under the wide scope is *copied in*

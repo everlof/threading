@@ -258,6 +258,19 @@ final class AccountSetupRenderTests: XCTestCase {
         )
     }
 
+    /// Every runtime found, so the account stories render without a probe of the developer's
+    /// own shell.
+    private func allInstalled() -> AgentCLIAvailability {
+        let availability = AgentCLIAvailability(probe: { _ in nil })
+        var snapshot = AgentCLIAvailability.Snapshot()
+        for kind in AgentKind.allCases {
+            snapshot.paths[kind] = "/usr/local/bin/\(kind.executableName)"
+        }
+        snapshot.hasNodePackageManager = true
+        availability.setSnapshotForTesting(snapshot)
+        return availability
+    }
+
     private func onboardingImage(
         _ story: OnboardingStory,
         appearance name: NSAppearance.Name
@@ -268,13 +281,7 @@ final class AccountSetupRenderTests: XCTestCase {
             let coordinator = AgentAccountSetupCoordinator(initialState: story.state)
             let page = OnboardingDiscoveryPageViewController(
                 accountsProvider: { story.accounts },
-                cliResults: [
-                    AgentCLIProbe.Result(executable: "claude", resolvedPath: "/usr/local/bin/claude"),
-                    AgentCLIProbe.Result(executable: "codex", resolvedPath: "/usr/local/bin/codex"),
-                    AgentCLIProbe.Result(executable: "grok", resolvedPath: "/usr/local/bin/grok"),
-                    AgentCLIProbe.Result(executable: "opencode", resolvedPath: "/usr/local/bin/opencode"),
-                    AgentCLIProbe.Result(executable: "agent", resolvedPath: "/usr/local/bin/agent")
-                ],
+                availability: allInstalled(),
                 setupCoordinator: coordinator
             )
             let flow = OnboardingFlowViewController(pages: [page], onFinish: {})

@@ -31,6 +31,24 @@ final class MotionPreferencesViewController: NSViewController {
         static var alternateName: String { AppInfo.name }
     }
 
+    /// A theme's own motion, on or off — the user's switch beside Reduce Motion rather than
+    /// instead of it.
+    private lazy var themeMotionToggle: ThemedToggle = {
+        let toggle = SettingsUI.toggle(
+            isOn: AppSettings.shared.playsThemeMotion,
+            target: self,
+            action: #selector(themeMotionChanged)
+        )
+        toggle.setAccessibilityIdentifier("settings.motion.theme-motion")
+        return toggle
+    }()
+
+    /// The write posts `AppSettingsDidChange`, which `ThemeParticleHold` answers by stilling or
+    /// restarting every field and logo — nothing here has to name them.
+    @objc private func themeMotionChanged() {
+        AppSettings.shared.playsThemeMotion = themeMotionToggle.state == .on
+    }
+
     private let orbStylePopUp = ThemedPopUp()
     private let orbPreview = WorkingOrbView()
     private let nameStylePopUp = ThemedPopUp()
@@ -242,11 +260,21 @@ final class MotionPreferencesViewController: NSViewController {
             SettingsUI.fullRow(namePreviewRow())
         ])
 
+        let animationCard = SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Theme animations",
+                subtitle: "Moving backgrounds, logo effects and the transition a theme plays "
+                    + "when you switch to it. Off keeps a theme's look but holds it still; "
+                    + "Reduce Motion always turns them off.",
+                control: themeMotionToggle
+            )
+        ])
         let page = SettingsUI.page(title: "Motion", sections: [
-            SettingsUI.section("Working", indicatorCard),
-            SettingsUI.section("Chat names", transitionCard),
+            SettingsUI.section("Theme animations", animationCard),
             audioPreferences.section(),
-            reactionPreferences.section()
+            reactionPreferences.section(),
+            SettingsUI.section("Working", indicatorCard),
+            SettingsUI.section("Chat names", transitionCard)
         ], hostPage: .motion)
 
         page.translatesAutoresizingMaskIntoConstraints = false

@@ -2,6 +2,8 @@
 
 Terminal themes, app themes, and the three scopes both resolve through.
 
+For fields, limits, renderers and tests, see the [theme reference](theme-reference.md).
+
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
 Theme selection and extension enablement now share the
@@ -909,9 +911,9 @@ Four rules that were decisions rather than defaults:
 - **The gradient faces the terminal palette's gate.** The sidebar is where every session is
   *found*, so a wash that swallows its labels locks the user out of the app as surely as an
   unreadable terminal. Each stop is composited over the variant's surface and must keep the
-  label at the same 3:1 floor. An image is not gated — its pixels are arbitrary, so its gates
-  are bounds (bytes, opacity) and legibility stays the author's to check by looking; the tool
-  description says a photograph usually wants opacity well below 0.4.
+  label at the same 3:1 floor. Images retain byte/opacity gates; the off-main advisory added
+  on 2026-10-04 also samples their label contrast and suggests an opacity, without rejecting the
+  author's picture.
 - **The navigator well is regional, not another surface role.** Explorer's white, sunken tree
   sits inside silver chrome; making `surface` white would also repaint every panel. An absent
   well preserves the historical transparent list. A stated fill must be opaque and keep the
@@ -1985,9 +1987,10 @@ deletion removing the folder. The read-side `maximumStoredBytes` grew to match, 
 **Gates.** `AppThemeEditing` holds the material's backdrop to the sidebar's rules through one
 shared `validate(_:prefix:subject:kind:label:ground:)`: two to eight stops, positions in 0…1,
 every stop composited over the ground and then the label over that at the 3:1 floor; an image's
-opacity in 0…1 and a non-empty asset name. An image is still not measured — its pixels are
-arbitrary — so its legibility stays the author's to check by looking, and the tool description
-says photographs want opacity well below 0.4. The sidebar's messages are byte-identical to
+opacity in 0…1 and a non-empty asset name. Since 2026-10-04, create/update also report sampled
+image legibility and suggest a lower opacity when needed; the advisory is described below.
+It replaced the fixed "photographs want opacity well below 0.4" rule the tool descriptions used
+to carry, which no description states any more. The sidebar's messages are byte-identical to
 before; only the prefix and the ground differ.
 
 **Tools.** `material.backdrop` rides `create_app_theme`/`update_app_theme` with the sidebar's
@@ -2001,9 +2004,11 @@ the coordinator's authority ratchet (`check_architecture_boundaries.sh`) is a ce
 allowance: the sidebar's helpers had been counted against it since they were written, and moving
 them out left the coordinator fifteen lines *lighter* than before this work.
 
-The image remains Mac-local. The gradient is now projected by `RemoteThemeBridge` to the phone's
-dashboard through `RemoteThemeDTO.Material.backdropGradient`, including the optional drift recipe
-described below. The sidebar's separately authored gradient remains scoped to the Mac sidebar.
+The gradient is projected by `RemoteThemeBridge` through
+`RemoteThemeDTO.Material.backdropGradient`, including optional drift. Since 2026-10-04, bounded
+image renditions travel through the authenticated asset route and both draw on the phone's
+themed screens, as described below. The sidebar's separately authored gradient remains scoped
+to the Mac sidebar.
 
 ### `sidebar.backdrop@1` — content beneath the host's, as a contract
 
@@ -2174,8 +2179,9 @@ animation when its recipe is unchanged. There is no display link, SwiftUI timeli
 network request or session traversal per frame.
 
 The bridge resolves the material gradient in the same appearance as the semantic palette and
-sends at most eight stops, an angle and optional drift. Images and the Mac-only sidebar override
-are not projected. The new wire field is optional: old clients ignore it, old hosts send no
+sends at most eight stops, an angle and optional drift. The Mac-only sidebar gradient override
+is not projected. Image transfer was added on 2026-10-04, described below. The wire field is
+optional: old clients ignore it, old hosts send no
 backdrop, and the existing per-Mac theme cache retains the complete new recipe through reconnect.
 The mobile cache checks its geometry and aggregate color-string budget. Renderers bound the
 stop count before sorting or decoding; invalid optional decoration falls back to the plain ground
@@ -2190,8 +2196,8 @@ and animation owners.
 
 This deliberately expands theme decoration, not interaction policy. The host retains layout,
 scrolling, keyboard/navigation transitions, input, accessibility and power policy. No new
-extension component or arbitrary shader delivery is introduced. Workload-driven effects, image
-transfer and themed interaction presets remain separate future work.
+extension component or arbitrary shader delivery is introduced. Workload-driven effects and image
+transfer were added on 2026-10-04; themed interaction presets remain separate work.
 
 `RemoteThemeGradientTests`, `ThemeGradientMotionTests`, `ThemeBackdropTests`, `ThemeToolTests`,
 `MobileThemeBackdropTests` and the dashboard's 20/1,000-row mount contract cover the shipping
@@ -2671,7 +2677,8 @@ the phone's catalogue revision already moves on every theme change.
 ignores it, an older Mac sends none, an absent slot means the phone's own copy. The bridge sends
 words cleaned the way `ThemeWording` uses them and none for a silent theme or System. The phone
 uses the invitation in place of its rotating task suggestion (never for a manager, who is briefed)
-and the untitled name as the draft's title; it has no working-word line to dress. Theme words
+and the untitled name as the draft's title. Since 2026-10-04, the conversation status also rotates
+working words beside its orb at turn boundaries. Theme words
 never pass through `MobileL10n.string` — the localization lint would rightly flag a dynamic key —
 and the theme cache counts them against its byte budget and caps the list.
 
@@ -2785,10 +2792,12 @@ the variant's palette whole) and the profile's embedded default all carry it.
 standalone terminals included — sets `terminalView.textGlow` on every refresh, so a session moving
 to a palette without one stops glowing.
 
-**The iPhone does not glow, and its wire is unchanged.** `RemoteThemeBridge` builds
-`RemoteTerminalThemeDTO` field by field and does not send the glow; SwiftTerm's UIKit view has no
-renderer for it. `testTheRemotePaletteIsUnchangedByAGlow` holds the DTO a glowing palette produces
-equal to the plain palette's, so no phone, old or new, sees a new key.
+**The iPhone glows too, and a plain palette's wire is unchanged.** `RemoteThemeBridge` sends the
+glow as an optional `glow {radius, opacity}` on `RemoteTerminalThemeDTO`, written only when the
+palette states one, so every palette without a glow encodes as it did and an older phone ignores
+the key. `testTheRemotePaletteProjectsOptionalGlowWithoutChangingColors` holds both halves. The
+phone draws it with SwiftTerm's Metal halo and drops it in Low Power Mode (`performance.md`,
+"Phone glow and portable theme bounds").
 
 ### The tools
 
@@ -2812,8 +2821,9 @@ palette merge there left the coordinator files twenty lines shorter with the glo
 
 ### The renderer: an underlay, not a shadow per run
 
-SwiftTerm's `TerminalView.textGlow` is drawn by the Core Graphics renderer, the one Threading uses;
-Metal ignores it. The first implementation was the obvious one, a zero-offset `setShadow` in the
+SwiftTerm's `TerminalView.textGlow` is drawn by both renderers. This section is the Core Graphics
+one, which every terminal outside a window (previews, contact sheets) uses; a Mac terminal that
+glows in a window switches itself to Metal (below). The first implementation was the obvious one, a zero-offset `setShadow` in the
 run's colour on every glyph run, cleared before decorations. It was correct and measured 7.4–10×
 the frame-draw cost of the same frame without a glow (`docs/architecture/performance.md`, "Terminal
 text glow"): Core Graphics blurs every shadowed operation separately, so a full Retina frame paid
@@ -2867,5 +2877,130 @@ to draw text and each glowing strip to differ from it, and keeps
 neighbouring row gains the run's colour and only with a glow, each run glows in its own colour,
 decorations do not glow, the dirty-region padding, and the exactness rule above.
 
-**Not built:** a Bold Text–style control in the Settings theme editor and in `ThemePreviewView`, a
-glow in `preview_app_theme`'s sample terminal, and an iOS renderer.
+**On the Mac, a glowing terminal in a window draws through Metal.** `EmojiFixedTerminalView`
+selects SwiftTerm's Metal renderer when its palette glows and it is in a window, and returns to
+Core Graphics when the glow is cleared; a terminal outside a window keeps Core Graphics, the
+renderer whose exactness rules are above. Metal blurs one halo per frame on the GPU
+(`MetalGlowHaloLayout`: half resolution once the support reaches four device pixels, coarser
+whenever a texture would pass 2,048 × 2,048, so a pane of any size glows and the pair of halo
+textures stays within 32 MiB; allocated in 128-pixel buckets so a live resize reuses them). A
+terminal that leaves its window releases the halo textures and keeps its renderer, so coming back
+costs one allocation rather than a rebuild. A Metal layer is invisible to `cacheDisplay`, and AppKit
+reports a `cacheDisplay` as drawing to the screen exactly as it does the layer update in which the
+terminal must draw nothing, so a capture says so: `WindowSnapshot` (the inspector and Report a
+Problem) wraps its caching in `TerminalView.drawingForBitmapCapture`, inside which a Metal
+terminal draws the same frame through Core Graphics. Printing and PDF output need no scope. A
+capture taken any other way (the UI-scenario evidence capture among them) still shows a glowing
+terminal empty. `TerminalGlowRendererTests` covers the switch and the snapshot; SwiftTerm's
+`MetalTextGlowTests` the layout bounds, the release and both surfaces' captures, and
+`MetalSurfaceParityTests` that the halo lands only within its reach of the text that cast it, on
+both buffering modes.
+
+**Not built:** a Bold Text–style control in the terminal Settings editor and in `ThemePreviewView`.
+Current Theme tuning and `preview_app_theme` gained glow on 2026-10-04.
+
+## 2026-10-04 — Theme authoring, tuning and phone presentation
+
+`get_app_theme(section:)` provides the complete documentation for one dotted schema block;
+`section: "schema"` lists them. Create/update list only compact top-level variants. The generated
+[field reference](theme-reference.md) covers every schema path, checked by
+`AppThemeSchemaReferenceTests`; validators remain the authority for ranges.
+
+Current Theme's Tune controls validate in-memory preview variants on every change, repaint
+without resource preparation (`AppThemeLibrary.installLivePreview`), and persist through
+`AppThemeLibrary.update` once at release. A drag records the stored document it started from;
+it keeps its preview through unrelated library or activation events, and it ends — writing
+nothing, for the rest of that pointer drag — when another owner applies a theme or replaces the
+stored document. Each tick posts `AppThemeDidChange` with `isLivePreview` true; the release's
+install posts one with it false even when the saved document is the one already on screen, so
+an observer whose work is not frame-cheap (the page's own pickers, the paired-phone broadcast)
+skips ticks and acts on that settle. A glow tick (`LivePreviewScope.terminalPalette`) skips the
+whole-window repaint, because terminals re-read their profile from their own observers, and the
+settle runs it once; every other tick still runs it, because corner radii and the backdrop's
+gradient, picture and particles are re-stated only through `reapplyRecordedSurface` and no
+narrower registry of backdrop surfaces exists to aim at — measured in performance.md. Tracks span what the validator accepts and the
+renderer draws (particle opacity stops at the ambient ceiling; radius tracks share
+`AppThemeMaterialLimits` and lock under a hard bevel), readings carry their unit in the
+person's locale, the title-morph menu sets a scramble alphabet aside rather than stating it on
+another style, and releasing a picture or particle opacity samples legibility off-main and shows
+the advisory under the colours. Built-ins require duplication. The shared
+app-theme picker offers explicit appearance packs; choosing a plain theme releases pack-owned
+enablement without touching manual extension choices. A pack saved for the selected theme is
+listed once, as "Use with … pack" under a "Packs for …" head, not again among the other packs,
+and a refused activation puts the picker back on the theme in force. Theme animations now leads Motion,
+followed by music, reactions and strength. Sounds stays on Themes, beside a link to Motion.
+
+The preview uses the real terminal frame preparation and glow renderer, `ThemeWording`,
+`IdentityMarkInk` and `WindowTitleBandView`. It executes no extension. An optional `frames: 3` stacks the gradient drift at 0, ⅓ and ⅔ of its authored cycle — fractions
+rather than seconds, which moved a default 24-second drift by 4% across three identical frames.
+Terminal contact sheets now require foreground ink in every normal and bold region, with an
+unfed negative control. The gallery includes a frozen spectrum, facts, and pack-member cells;
+the non-drawing spectrum viewport observer has an explicit test-backed exemption.
+
+The phone receives optional, tolerant title morph, identity ink, particles and asset metadata.
+Unknown decoration drops without discarding the palette. The shared particle motion recipe is
+in RemoteKit; UIKit supplies the renderer. Ground between opaque cards and conversation bubbles
+uses the same backdrop on dashboard, draft, conversation, workspace, settings and usage. Root
+fallback decoration is frozen. A per-window weak ownership stack grants motion only to the
+visible page; scene, visibility, Reduce Motion, Low Power and the phone-local toggle gate it.
+Workload reaction is computed from the published catalogue once, clamped to 0…1 and scaled by
+the local 0–200% preference. Drift still respects its eight-second minimum cycle.
+
+System typeface hints reach navigation and chrome through native font designs. Conversation
+bodies retain default typography; text-scale mapping remains absent. Named-font transfer is added by the decision below.
+Chat titles use the theme morph and bounded alphabet, with a crossfade for Reduce Motion.
+Working words rotate at turn boundaries. Untitled wording remains presentation, including
+notification titles; it is never persisted as a chat name. Generated marks/chips take theme ink,
+while chosen account colours, emoji and pictures retain their meaning.
+
+`RemoteThemeAssets` immediately invalidates admission on theme change, debounces preparation
+and publishes a generation-fenced manifest. The serial worker hashes sources and caches at
+most 24 renditions, bounded to 1 MB each and 6 MB per theme. The authenticated immutable route
+serves only current manifest digests. The phone verifies bytes before its 32 MB / 128-file disk
+LRU, downloads at most two at once and decodes off the main actor. Backdrops aspect-fill at no
+more than 0.25 opacity. Sprite cells preserve authored tint policy. The dashboard's one fixed
+character slot draws the logo and aggregate mascot mood, with a brief completion pose.
+
+Off-main image legibility sampling warns in create/update results rather than rejecting the
+author's picture. It composites a 64×64 coarse sample against the ground and gradient stops,
+reports the least-legible tenth against the 3:1 label floor and suggests a lower opacity.
+Full-colour ambient sprites are included; tinted sprite ink follows semantic colours, and a
+mascot's reserved slot does not overlap labels. This is advisory sampling, not a proof about
+every pixel or crop.
+
+Window chrome, bevel and period controls remain Mac-only. The decision below carries fonts,
+notification sounds, one reviewed backdrop shader, terminal glow and a widget accent across.
+See the performance note for physical-device glow measurements and the outstanding particle
+energy measurement.
+
+## 2026-10-04 — Completing the optional phone theme paths
+
+The [decision record](../decisions/phone-theme-rendering.md) defines the font-copy scope, reviewed
+shader trust, GPU budget, sound receipts/consent and accent-only widget boundary. Fonts are
+registered with `CTFontManagerRegisterFontsForURL(.process)` so a TTF, OTF or collection uses
+CoreText's file parser without a system installation. A prepared font identity advances the
+SwiftUI theme environment after registration; UIKit titles also observe asset publication.
+
+The host projects the current enabled sidebar Metal overlay, using the same host wrapper and
+scalar ABI as macOS. The shader compiler cache has two active jobs, 32 pending sources and 16
+pipelines. Textures and source stay on workers. One phone backdrop owns the surface, with local
+workload/moment signals, static Reduce Motion presentation, and complete Low Power/hidden stops.
+The Mac still owns pack membership and activation. The picker additionally offers “Use with
+… pack” only for a saved pack whose explicit theme id matches the selected plain theme.
+
+SwiftTerm's Metal renderer keeps the foreground sharp and blurs a separate halo beneath ANSI
+cell backgrounds. Halos with at least four device pixels of support use half resolution;
+smaller radii retain full resolution. Turning glow off releases the extra textures and passes.
+Attached Mac and phone terminals select this renderer when glow is requested; the phone's Low
+Power gate restores its previous renderer. Core Graphics previews retain a bounded dirty-span
+underlay cache. Physical iPhone measurements and cache bounds are recorded in performance.md.
+
+The preview's three-frame option uncovered a geometry ownership bug: repainting restated the
+base gradient endpoints before an unchanged animator configuration returned. The animator now
+owns drifting endpoints, so repainting preserves a frozen phase as well as a live animation.
+
+Notification sound names are content-addressed CAF basenames. Only a verified phone installation
+can create a receipt, and only the current theme's matching receipt can reach APNs, subject to
+owner access, preview consent and sound preference. Protocol 4 adds the optional field without
+changing older broker behavior. The pinned usage widget carries one contrast-adjusted accent;
+its semantic content and system rendering modes remain host-owned.

@@ -921,9 +921,11 @@ struct CreateThemeArguments: Codable, Sendable {
 
 struct AppThemeReferenceArguments: Codable, Sendable {
   let themeID: String?
+  var section: String? = nil
 
   private enum CodingKeys: String, CodingKey {
     case themeID = "theme_id"
+    case section
   }
 }
 
@@ -1964,10 +1966,11 @@ struct DuplicateAppThemeArguments: Codable, Sendable {
 struct PreviewAppThemeArguments: Codable, Sendable {
   let themeID: String?
   let appearance: String?
+  var frames: Int? = nil
 
   private enum CodingKeys: String, CodingKey {
     case themeID = "theme_id"
-    case appearance
+    case appearance, frames
   }
 }
 
@@ -8081,7 +8084,10 @@ enum MCPTools {
         completion(handler.getAppTheme(arguments))
       },
       description: """
-        Read one complete app-chrome theme document in the same snake-case vocabulary \
+        With section, read authoring documentation instead of a theme: "schema" lists blocks;
+        a path such as "material.backdrop", "sidebar.mascot", "title_morph" or
+        "terminal_colors.glow" returns that block's complete fields, limits and guidance.
+        No theme_id is needed for documentation. Without section, read one complete app-chrome theme document in the same snake-case vocabulary \
         accepted by create_app_theme and update_app_theme. Each available light/dark \
         variant includes its authored and resolved roles, material (including any \
         `backdrop` gradient and picture under the app's broad grounds), complete paired \
@@ -8093,9 +8099,13 @@ enum MCPTools {
           "theme_id": MCPPropertySchema(
             type: .string,
             description: "Stable ID from list_app_themes."
+          ),
+          "section": MCPPropertySchema(
+            type: .string,
+            description: "Authoring documentation path, or schema for the block index; omit to inspect a theme."
           )
         ],
-        required: ["theme_id"]
+        required: []
       )
     ),
     MCPToolDefinition(
@@ -8170,48 +8180,14 @@ enum MCPTools {
         Task { @MainActor in completion(await handler.createAppTheme(arguments)) }
       },
       description: """
-        Decide how far the theme goes before calling this. A theme has four layers: \
-        palette (`roles`, `terminal_colors`), material (shape, type and control anatomy), \
-        chrome (the theme's own window frame) and character (sounds, a transition, words, \
-        a mascot). A request that names a world — an operating system, a game, a film, an \
-        era, a mood — wants all four, because colours alone read as the same app \
-        recoloured. A request about colours wants the palette. When the request says no \
-        more than "a theme", ask the person how far to go before creating anything, and \
-        recommend all four. The result reports which layers the theme states. \
-        The palette is two halves: `roles` colour the chrome, and `terminal_colors` colour \
-        the terminal, which is the largest surface in the window and the one agents' TUIs \
-        draw in — Claude draws its whole interface in those sixteen colours by default. \
-        State both halves in every variant; a theme that recolours the chrome and inherits \
-        its base's terminal reads as two themes side by side. \
-        Create a custom app-chrome theme from partial light and/or dark variant patches. \
-        One variant makes a fixed light or dark theme; both variants with appearance \
-        "adaptive" follow macOS automatically. A second variant is optional and can be \
-        added later with update_app_theme. Each variant inherits omitted roles, material, \
-        and terminal colours from the matching base variant (or the base's available \
-        variant when no match exists). The base defaults to the active app theme. The new \
-        theme is applied by default. A variant's optional `sidebar` block dresses the \
-        project sidebar: a gradient or image behind the list, a custom logo, and the \
-        wordmark's text and face — supplied images arrive as a file path or base64 and \
-        are stored with the theme. The material's optional `backdrop` dresses the app's \
-        broad grounds the same way — a gradient and/or picture under the display panel, \
-        the browser, the audit and the settings subpages, beneath any backdrop_pattern — \
-        while cards, controls, the terminal and the sidebar keep their own grounds. A \
-        variant's optional `chrome` block goes further: a \
-        theme stating chrome draws the entire window frame itself — an app-drawn title \
-        band, window buttons and border replace the native macOS titlebar, traffic \
-        lights and rounded corners while the theme is worn. The material's optional \
-        `bevel` turns flat borders into raised/sunken two-tone edges — hard for square \
-        period chrome, soft for rounded clay relief — using the bevel_highlight and \
-        bevel_shadow roles. A theme can also have a character: `sprites` gives its particle \
-        blocks pictures of their own (paw prints, hearts), `sidebar.mascot` stands a \
-        figure at the sidebar's foot that changes pose as agents rest, work, wait and \
-        finish, `moments` answers a finished turn with a sound and a waiting session with \
-        a shower and a sound, `words` gives the status line and composer its voice, and \
-        `sidebar.logo_in_dock` puts the logo on the Dock tile. A variant's \
-        `terminal_colors.glow` gives its paired terminal palette an optional phosphor glow \
-        — a soft halo beneath the text in each run's own colour (radius 0.5–6 points, \
-        opacity 0.05–0.8). Check the result with preview_app_theme, which shows every \
-        mascot mood.
+        Decide how far the theme goes: palette, material, chrome, character. For an unspecified
+        theme, ask the person how far to go. State both halves in every variant: roles and terminal_colors.
+        Create an editable theme from a base (default: current); omitted fields inherit.
+        Set roles AND terminal_colors in each variant for a coherent palette. Use material
+        for shapes/backdrops, chrome for a window frame, sidebar for a mascot/logo, and
+        words/title_morph/moments for character. One variant is fixed; adaptive needs both.
+        For every block's fields, limits and examples call get_app_theme(section: path),
+        starting with section: "schema" (e.g. terminal_colors.glow). Applied by default; inspect with preview_app_theme.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -8246,12 +8222,12 @@ enum MCPTools {
               "light": MCPPropertySchema(
                 type: .object,
                 description: "The light appearance patch.",
-                properties: appVariantSchema
+                properties: appVariantListingSchema
               ),
               "dark": MCPPropertySchema(
                 type: .object,
                 description: "The dark appearance patch.",
-                properties: appVariantSchema
+                properties: appVariantListingSchema
               ),
             ]
           ),
@@ -8342,17 +8318,11 @@ enum MCPTools {
         Task { @MainActor in completion(await handler.updateAppTheme(arguments)) }
       },
       description: """
-        Patch an existing custom app-chrome theme in place while keeping its stable ID. \
-        Built-in themes are immutable. Only supplied variants and fields change; this can \
-        add a missing light or dark variant without replacing the existing one. Set \
-        appearance to "adaptive" once both exist to follow macOS. An active theme repaints \
-        live; an inactive theme stays inactive unless `apply` is true. A patch that says \
-        nothing about a variant's `sidebar` or `chrome` block, or its material's \
-        `backdrop`, leaves it exactly as it was; `chrome.remove` is how a theme hands the \
-        window frame back to macOS, `material.remove_backdrop` how it returns the panes \
-        to plain grounds, and either exchange happens live when the theme is the active \
-        one. The result reports which of the four layers — palette, material, chrome, \
-        character — the theme now states.
+        Patch a custom theme, preserving its stable ID and omitted fields. Built-in themes are immutable; they require
+        duplicate_app_theme first. An active theme repaints live; apply opts in an inactive
+        theme. Adaptive requires both variants. Read block fields, removal flags and limits
+        with get_app_theme(section: path), e.g. material.backdrop or terminal_colors.glow.
+        The result reports all four layers. Use preview_app_theme to inspect the result.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -8382,12 +8352,12 @@ enum MCPTools {
               "light": MCPPropertySchema(
                 type: .object,
                 description: "Patch or add the light appearance.",
-                properties: appVariantSchema
+                properties: appVariantListingSchema
               ),
               "dark": MCPPropertySchema(
                 type: .object,
                 description: "Patch or add the dark appearance.",
-                properties: appVariantSchema
+                properties: appVariantListingSchema
               ),
             ]
           ),
@@ -8443,6 +8413,10 @@ enum MCPTools {
             type: .string,
             description: "\"light\", \"dark\", or \"both\" (side by side). Defaults to every "
               + "variant the theme has."
+          ),
+          "frames": MCPPropertySchema(
+            type: .integer,
+            description: "1 or 3. Three shows gradient drift at 0, ⅓ and ⅔ of its cycle; particles stay stamped."
           ),
         ],
         required: []
@@ -9357,7 +9331,7 @@ enum MCPTools {
     )
   }
 
-  private static var appVariantSchema: [String: MCPPropertySchema] {
+  static var appVariantSchema: [String: MCPPropertySchema] {
     [
       "roles": MCPPropertySchema(
         type: .object,
@@ -9468,7 +9442,7 @@ enum MCPTools {
           properties: [
             "name": MCPPropertySchema(
               type: .string,
-              description: "1–24 lowercase letters, digits, - or _."
+              description: "1–\(ThemeSpriteLimits.maximumNameLength) lowercase letters, digits, - or _."
             ),
             "source": MCPPropertySchema(
               type: .object,
@@ -9578,7 +9552,8 @@ enum MCPTools {
           ),
           "characters": MCPPropertySchema(
             type: .string,
-            description: "With style \"scramble\": 1–96 characters the decoder cycles through, "
+            description: "With style \"scramble\": 1–\(ThemeTitleMorphLimits.maximumScrambleCharacters) "
+              + "characters the decoder cycles through, "
               + "as one string, e.g. \"ｱｲｳｴｵｶｷｸ0123456789\". Half-width forms fit a Latin "
               + "name's letter spacing; whitespace is ignored."
           ),
@@ -9766,9 +9741,8 @@ enum MCPTools {
         description: """
           An image over the gradient (or the plain surface): mode "tile" repeats it \
           at its own size (patterns), "fill" covers the column cropping overflow, \
-          "fit" letterboxes. Legibility is yours to keep here — a photograph under \
-          the list usually wants opacity well below 0.4, while a drawn pattern can \
-          carry 1.
+          "fit" letterboxes. The tools sample the picture under the label and report \
+          an opacity that keeps it legible; inspect real text in both variants too.
           """,
         properties: [
           "source": MCPPropertySchema(
@@ -10027,11 +10001,12 @@ enum MCPTools {
     [
       "panel_radius": MCPPropertySchema(
         type: .number,
-        description: "Panel corner radius, 0–40 points."
+        description: "Panel corner radius, \(ThemeLimitText.span(AppThemeMaterialLimits.panelRadiusRange)) points."
       ),
       "control_radius": MCPPropertySchema(
         type: .number,
-        description: "Nested-control corner radius, 0–24 points."
+        description: "Nested-control corner radius, "
+          + "\(ThemeLimitText.span(AppThemeMaterialLimits.controlRadiusRange)) points."
       ),
       "border_width": MCPPropertySchema(
         type: .number,
@@ -10083,10 +10058,10 @@ enum MCPTools {
           + "backdrop_pattern reaches, drawn beneath the pattern. Cards, controls, the "
           + "terminal and the sidebar do not inherit it; the sidebar states its own "
           + "background in the variant's `sidebar` block, in the same vocabulary. Each "
-          + "gradient stop must keep the theme's label at 3:1 against the ground. A picture "
-          + "is not gated — check it against real text in both variants, and wash "
-          + "photographs well below 0.4 opacity. The gradient, including optional drift, also "
-          + "reaches the iPhone dashboard; pictures remain on the Mac.",
+          + "gradient stop must keep the theme's label at 3:1 against the ground. Pictures "
+          + "receive sampled legibility warnings; inspect real text in both variants. The "
+          + "gradient, drift, picture and particles reach themed iPhone screens; phone "
+          + "pictures aspect-fill at no more than 0.25 opacity.",
         properties: [
           "gradient": MCPPropertySchema(
             type: .object,
@@ -10657,17 +10632,20 @@ enum MCPTools {
   private static var appThemeGradientDriftSchema: MCPPropertySchema {
     MCPPropertySchema(
       type: .object,
-      description: "Optional slow decorative drift, rendered locally on Mac and iPhone. "
+      description: "Optional slow decorative drift, rendered locally on Mac; material.backdrop "
+        + "drift also reaches the iPhone. "
         + "Omit it when replacing a gradient to restore a still wash. Reduce Motion, Low "
         + "Power Mode and hidden surfaces stop the animation. Layout and controls never move.",
       properties: [
         "duration": MCPPropertySchema(
           type: .number,
-          description: "Full cycle in seconds, 8–120; default 24."
+          description: "Full cycle in seconds, \(ThemeLimitText.driftDuration); "
+            + "default \(ThemeLimitText.defaultDriftDuration)."
         ),
         "distance": MCPPropertySchema(
           type: .number,
-          description: "Travel as a fraction of the gradient, 0.02–0.25; default 0.12."
+          description: "Travel as a fraction of the gradient, \(ThemeLimitText.driftDistance); "
+            + "default \(ThemeLimitText.defaultDriftDistance)."
         ),
       ]
     )

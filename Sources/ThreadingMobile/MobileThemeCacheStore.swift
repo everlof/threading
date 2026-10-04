@@ -189,7 +189,15 @@ final class MobileThemeCacheStore {
                 try count(words.untitledSession)
             }
 
+            for asset in record.theme.assets ?? [] {
+                try count(asset.slot); try count(asset.digest); try count(asset.mediaType)
+            }
             let material = record.theme.material
+            try count(material.identityMarks)
+            for color in material.particles?.colors ?? [] { try count(color) }
+            for sprite in material.particles?.sprites ?? [] { try count(sprite) }
+            try count(record.theme.titleMorph?.style)
+            try count(record.theme.titleMorph?.characters)
             // A backdrop is optional decoration the renderer checks for itself
             // (`hasValidGeometry`, `ThemeGradientDrift.isValid`) and simply does not draw when it
             // cannot. A Mac on a newer build may state a range this one does not know, and that

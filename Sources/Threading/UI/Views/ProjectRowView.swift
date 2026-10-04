@@ -17,7 +17,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
     /// The project's icon — discovered, chosen, or the folder fallback. Shown only for
     /// project rows; headings and grouped checkouts keep their text-only shape.
-    private let iconView = NSImageView()
+    private let iconView = GlyphView()
     private let nameLabel = MorphingTitleLabel()
     private var worktreePathLabel: MorphingTitleLabel?
     private var worktreePathMinimumWidth: NSLayoutConstraint?
@@ -34,9 +34,9 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     private let badgeThemeEvents = AppEventObservations()
     /// Says this checkout's chats behave differently unless they answered for themselves.
     /// Materialized only when one does; see `setConductMark`.
-    private var conductIndicator: NSImageView?
-    private var executionHostIndicator: NSImageView?
-    private var unavailableCheckoutIndicator: NSImageView?
+    private var conductIndicator: GlyphView?
+    private var executionHostIndicator: GlyphView?
+    private var unavailableCheckoutIndicator: GlyphView?
     private let nativeContent = NSView()
     private let afterTitleSlot = NSStackView()
     private let trailingSlot = NSView()
@@ -438,11 +438,8 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             guard let self else { return }
             self.setCount(self.displayedCount)
         }
-        iconView.imageScaling = .scaleProportionallyDown
-        iconView.symbolConfiguration = NSImage.SymbolConfiguration(
-            pointSize: SidebarRowDefaults.iconSize,
-            weight: .regular
-        )
+        iconView.slot = NSSize(width: SidebarRowDefaults.iconSlotWidth, height: SidebarRowDefaults.iconSlotWidth)
+        iconView.contrastGround = { [weak self] in self?.rowGround() ?? Design.Surface.background }
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.setAccessibilityIdentifier("sidebar.project.identity")
 
@@ -614,17 +611,14 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     }
 
     /// What the tile is actually drawn on: the sidebar's surface, with the selection fill
-    /// composited onto it where there is one. The same rule, and the same reason for asking only
-    /// about the emphasized fill, that `SessionRowView.rowGround` states.
+    /// composited onto it where there is one, shared with session and terminal marks.
     ///
     /// This used to be `isDarkAppearance` — a `Bool` that `ProjectIconStore` turned into the tone
     /// of the *system* sidebar. Under Windows 98 the sidebar is `#C0C0C0`, tone 0.75, and the
     /// constant claimed 0.97; every favicon whose own tone fell between them kept a plate it did
     /// not need or lost one it did. See `IconBackplate.Ground`.
     private func rowGround() -> NSColor {
-        let base = Design.Surface.background
-        guard backgroundStyle == .emphasized else { return base }
-        return base.composited(under: Design.Surface.accent)
+        SidebarHoverRowView.contentGround(for: self)
     }
 
     /// The backplate decision depends on the ground, so an appearance flip re-composes the icon —
@@ -647,6 +641,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     }
 
     func rederiveThemedContent() {
+        applyTextColors()
         // A stored icon re-plates against the new ground; a generated tile re-inks, because a
         // tinted theme draws it in its accent.
         guard !iconView.isHidden else { return }
@@ -663,7 +658,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         hasConfiguredSinceReuse = true
         toolTip = nativeToolTip
         nativeIcon = iconView.image
-        nativeIconTint = iconView.contentTintColor
+        nativeIconTint = iconView.tint
         nativeIconAlpha = iconView.alphaValue
         nativeIconIsHidden = iconView.isHidden
     }
@@ -675,7 +670,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     ) {
         toolTip = nativeToolTip
         iconView.image = nativeIcon
-        iconView.contentTintColor = nativeIconTint
+        iconView.tint = nativeIconTint
         iconView.alphaValue = nativeIconAlpha
         iconView.isHidden = nativeIconIsHidden
 
@@ -701,7 +696,9 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     ) -> NSImage? {
         switch reference {
         case .systemSymbol(let name):
-            return NSImage(systemSymbolName: name, accessibilityDescription: nil)
+            return NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(
+                Design.Symbol.configuration(SidebarRowDefaults.iconSize, weight: .regular)
+            )
         case .hostAsset(let identifier):
             guard identifier == "project.image" else { return nil }
             return nativeIcon
@@ -1041,12 +1038,12 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             return
         }
 
-        let indicator = NSImageView()
-        indicator.holdSymbol(
+        let indicator = GlyphView()
+        indicator.contrastGround = { [weak self] in self?.rowGround() ?? Design.Surface.background }
+        indicator.setSymbol(
             RowConductDefaults.symbol,
             slot: Design.Size.inlineButtonGlyph
         )
-        indicator.imageScaling = .scaleProportionallyDown
         indicator.translatesAutoresizingMaskIntoConstraints = false
         indicator.setContentHuggingPriority(.required, for: .horizontal)
         indicator.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -1054,7 +1051,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         indicator.setAccessibilityRole(.image)
         indicator.setAccessibilityLabel(RowConductStrings.markLabel)
         indicator.setAccessibilityIdentifier(RowConductDefaults.projectIdentifier)
-        indicator.contentTintColor = backgroundStyle == .emphasized
+        indicator.tint = backgroundStyle == .emphasized
             ? Design.Ink.selection.secondary
             : Design.Text.secondary
 
@@ -1085,9 +1082,9 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             return
         }
 
-        let indicator = NSImageView()
-        indicator.holdSymbol(RemoteExecutionHostMark.symbol, slot: Design.Size.inlineButtonGlyph)
-        indicator.imageScaling = .scaleProportionallyDown
+        let indicator = GlyphView()
+        indicator.contrastGround = { [weak self] in self?.rowGround() ?? Design.Surface.background }
+        indicator.setSymbol(RemoteExecutionHostMark.symbol, slot: Design.Size.inlineButtonGlyph)
         indicator.translatesAutoresizingMaskIntoConstraints = false
         indicator.setContentHuggingPriority(.required, for: .horizontal)
         indicator.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -1095,7 +1092,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         indicator.setAccessibilityRole(.image)
         indicator.setAccessibilityLabel(label)
         indicator.setAccessibilityIdentifier(RemoteExecutionHostMark.projectMarkIdentifier)
-        indicator.contentTintColor = backgroundStyle == .emphasized
+        indicator.tint = backgroundStyle == .emphasized
             ? Design.Ink.selection.secondary
             : Design.Text.secondary
 
@@ -1120,9 +1117,9 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             return
         }
 
-        let indicator = NSImageView()
-        indicator.holdSymbol("exclamationmark.triangle", slot: Design.Size.inlineButtonGlyph)
-        indicator.imageScaling = .scaleProportionallyDown
+        let indicator = GlyphView()
+        indicator.contrastGround = { [weak self] in self?.rowGround() ?? Design.Surface.background }
+        indicator.setSymbol("exclamationmark.triangle", slot: Design.Size.inlineButtonGlyph)
         indicator.translatesAutoresizingMaskIntoConstraints = false
         indicator.setContentHuggingPriority(.required, for: .horizontal)
         indicator.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -1130,7 +1127,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         indicator.setAccessibilityRole(.image)
         indicator.setAccessibilityLabel(L10n.string("Checkout unavailable at this path"))
         indicator.setAccessibilityIdentifier("sidebar.project.checkout-unavailable")
-        indicator.contentTintColor = backgroundStyle == .emphasized
+        indicator.tint = backgroundStyle == .emphasized
             ? Design.Ink.selection.secondary
             : Design.Text.secondary
 
@@ -1167,20 +1164,20 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             countLabel?.textColor = Design.Text.selected.withAlphaComponent(
                 SidebarRowDefaults.secondaryTextAlpha
             )
-            conductIndicator?.contentTintColor = Design.Ink.selection.secondary
-            executionHostIndicator?.contentTintColor = Design.Ink.selection.secondary
-            unavailableCheckoutIndicator?.contentTintColor = Design.Ink.selection.secondary
-            iconView.contentTintColor = Design.Text.selected
-            nativeIconTint = iconView.contentTintColor
+            conductIndicator?.tint = Design.Ink.selection.secondary
+            executionHostIndicator?.tint = Design.Ink.selection.secondary
+            unavailableCheckoutIndicator?.tint = Design.Ink.selection.secondary
+            iconView.tint = Design.Text.selected
+            nativeIconTint = iconView.tint
             return
         }
 
         countLabel?.textColor = Design.Text.secondary
-        conductIndicator?.contentTintColor = Design.Text.secondary
-        executionHostIndicator?.contentTintColor = Design.Text.secondary
-        unavailableCheckoutIndicator?.contentTintColor = Design.Text.secondary
-        iconView.contentTintColor = Design.Text.secondary
-        nativeIconTint = iconView.contentTintColor
+        conductIndicator?.tint = Design.Text.secondary
+        executionHostIndicator?.tint = Design.Text.secondary
+        unavailableCheckoutIndicator?.tint = Design.Text.secondary
+        iconView.tint = Design.Text.secondary
+        nativeIconTint = iconView.tint
     }
 }
 

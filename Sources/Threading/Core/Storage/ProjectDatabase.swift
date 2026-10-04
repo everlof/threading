@@ -29,14 +29,21 @@ enum ProjectDatabaseLoadError: LocalizedError {
 /// The redirect in `StateManager` removes that writer. This is the backstop for the next one:
 /// reconciliation now proves it is working from the generation it last read, and refuses rather
 /// than prunes when it is not. Refusing costs one unsaved edit; pruning costs projects.
+///
+/// `unaccountedSessions` is the same backstop for the project cascade, which deletes every
+/// session row naming the project whatever the caller's graph says it holds.
 enum ProjectDatabaseWriteError: LocalizedError {
     case staleGeneration(observed: Int, found: Int)
+    case unaccountedSessions(projectID: String, sessionIDs: [String])
 
     var errorDescription: String? {
         switch self {
         case .staleGeneration(let observed, let found):
             return "Refused a whole-graph write: the store moved from generation "
                 + "\(observed) to \(found) beneath this writer"
+        case .unaccountedSessions(let projectID, let sessionIDs):
+            return "Refused a project removal: \(projectID) still holds \(sessionIDs.count) "
+                + "chats its caller did not name"
         }
     }
 }
@@ -539,9 +546,16 @@ final class ProjectDatabase {
     }
 
     /// Deletes one project and shifts only the project positions that followed it. Session rows
-    /// and their normalized dependants leave through the foreign-key cascade.
+    /// and their normalized dependants leave through the foreign-key cascade; the panel and
+    /// attachment rows, which are deliberately not foreign-keyed, are deleted here beside it.
+    ///
+    /// `expectedSessionIDs` is every session the caller believes the project holds — what its
+    /// confirmation counted, or nothing for an adopted row reclaimed as empty. The cascade takes
+    /// whatever rows name the project, so a caller whose graph has drifted from the store would
+    /// otherwise delete conversations nobody was shown; that is refused instead.
     func removeProject(
         id projectID: ProjectID,
+        holding expectedSessionIDs: Set<SessionID>,
         at position: Int,
         selectedSessionID: SessionID?
     ) throws {
@@ -552,6 +566,22 @@ final class ProjectDatabase {
                     observed: observedGeneration,
                     found: found
                 )
+            }
+            let unaccounted = try storedSessionIDs(in: projectID)
+                .subtracting(expectedSessionIDs.map(\.uuidString))
+            guard unaccounted.isEmpty else {
+                throw ProjectDatabaseWriteError.unaccountedSessions(
+                    projectID: projectID.uuidString,
+                    sessionIDs: unaccounted.sorted()
+                )
+            }
+            for table in ProjectDatabaseSchema.auxiliaryTables {
+                try database.prepare(
+                    "DELETE FROM \(table) WHERE session_id IN "
+                        + "(SELECT id FROM session WHERE project_id = ?)"
+                )
+                    .bind(1, projectID.uuidString)
+                    .run()
             }
             try database.prepare("DELETE FROM project WHERE id = ?")
                 .bind(1, projectID.uuidString)
@@ -989,6 +1019,20 @@ final class ProjectDatabase {
         return unreadable
     }
 
+    /// The ids of every session row that names `projectID`, as stored — which is what the
+    /// project's cascade would delete, whatever any writer's graph believes.
+    private func storedSessionIDs(in projectID: ProjectID) throws -> Set<String> {
+        let statement = try database.prepare("SELECT id FROM session WHERE project_id = ?")
+        defer { statement.finalize() }
+        statement.bind(1, projectID.uuidString)
+
+        var ids: Set<String> = []
+        while try statement.step() {
+            if let id = statement.text(0) { ids.insert(id) }
+        }
+        return ids
+    }
+
     /// The store's current generation, or 0 for a database written before it had one.
     ///
     /// Absent and unparsable are the same answer on purpose: this counter authorises nothing on
@@ -1343,6 +1387,11 @@ enum ProjectDatabaseSchema {
     static let panelTable = "panel_layout"
 
     static let attachmentsTable = "session_attachments"
+
+    /// The per-session tables no foreign key reaches, so a project removal deletes their rows
+    /// itself rather than stranding them beside a cascade that never touches them.
+    static let auxiliaryTables = [panelTable, attachmentsTable]
+
     static let controlGrantTable = "control_grant"
     static let supervisionTable = "supervision"
     static let supervisionEventTable = "supervision_event"

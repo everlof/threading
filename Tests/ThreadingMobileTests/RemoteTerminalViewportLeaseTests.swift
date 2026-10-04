@@ -345,6 +345,80 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
         XCTAssertEqual(replacementOutput.suffix(repaint.count), repaint)
     }
 
+    @MainActor
+    func testDismantlingCapturesTheViewportButDefersItsPersistenceCallback() async {
+        let connection = RemoteSessionConnection.demoTerminal()
+        let terminal = RemoteTerminalView(frame: CGRect(x: 0, y: 0, width: 300, height: 200),
+            font: UIFont.monospacedSystemFont(ofSize: 13, weight: .regular))
+        let layout = RemoteTerminalLayoutView(frame: terminal.frame, terminalView: terminal,
+            contentInset: 0, theme: RemoteThemePalette(nil))
+        var isDismantling = true
+        var positions: [Double] = []
+        let coordinator = TerminalViewRepresentable.Coordinator(connection: connection,
+            allowsInput: true, keyBridge: TerminalKeyBridge(), initialScrollProgress: nil,
+            onScrollProgress: { progress in
+                XCTAssertFalse(isDismantling, "Persistence must not publish during SwiftUI graph destruction")
+                positions.append(progress)
+            })
+        coordinator.attach(to: terminal, in: layout)
+        coordinator.bindRenderer(to: connection)
+        XCTAssertTrue(connection.hasPresentedTerminalOutput)
+        terminal.contentSize = CGSize(width: 300, height: 1_000)
+        terminal.setContentOffset(CGPoint(x: 0, y: 400), animated: false)
+        var teardownPublications = 0
+        let observation = connection.objectWillChange.sink { teardownPublications += 1 }
+
+        TerminalViewRepresentable.dismantleUIView(layout, coordinator: coordinator)
+
+        XCTAssertTrue(positions.isEmpty)
+        XCTAssertEqual(teardownPublications, 0,
+            "Removing the output callback must not publish into the graph being destroyed")
+        isDismantling = false
+        let delivered = await Self.eventually {
+            positions.count == 1 && !connection.hasPresentedTerminalOutput
+        }
+        XCTAssertTrue(delivered, "The final position must survive detaching the terminal")
+        XCTAssertEqual(positions, [0.5])
+        withExtendedLifetime(observation) {}
+    }
+
+    @MainActor
+    func testDeferredRendererRemovalCannotClearAReplacementScreen() async throws {
+        let connection = RemoteSessionConnection.demoTerminal()
+        let outgoing = NSObject()
+        let replacement = NSObject()
+        var replacementOutput = Data()
+        connection.mountTerminalRenderer(outgoing, output: { _ in }, gridChange: { _, _ in })
+        XCTAssertTrue(connection.hasPresentedTerminalOutput)
+
+        XCTAssertTrue(connection.unmountTerminalRenderer(outgoing))
+        connection.mountTerminalRenderer(replacement,
+            output: { replacementOutput.append($0) }, gridChange: { _, _ in })
+        let bytes = Data("replacement".utf8)
+        connection.receiveServerTerminalOutputForTesting(bytes)
+        try await Task.sleep(for: .milliseconds(20))
+
+        XCTAssertEqual(replacementOutput, bytes)
+        XCTAssertTrue(connection.isTerminalRendererOwner(replacement))
+        XCTAssertTrue(connection.hasPresentedTerminalOutput)
+    }
+
+    @MainActor
+    func testReplacementWithoutOutputDoesNotInheritTheDetachedScreen() async {
+        let connection = RemoteSessionConnection.demoTerminal()
+        let outgoing = NSObject()
+        let replacement = NSObject()
+        connection.mountTerminalRenderer(outgoing, output: { _ in }, gridChange: { _, _ in })
+        XCTAssertTrue(connection.hasPresentedTerminalOutput)
+
+        XCTAssertTrue(connection.unmountTerminalRenderer(outgoing))
+        connection.mountTerminalRenderer(replacement, output: { _ in }, gridChange: { _, _ in })
+        let cleared = await Self.eventually { !connection.hasPresentedTerminalOutput }
+
+        XCTAssertTrue(cleared, "A new renderer has no previous screen until it receives bytes")
+        XCTAssertTrue(connection.isTerminalRendererOwner(replacement))
+    }
+
     /// `updateUIView` runs for every published change on the connection, and reinstalling an
     /// identical palette clears SwiftTerm's attribute caches and marks the whole screen dirty —
     /// a cold whole-grid repaint per presence or status tick, growing with cell count as the

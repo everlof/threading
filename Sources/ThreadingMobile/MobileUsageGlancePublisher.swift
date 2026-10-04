@@ -28,6 +28,8 @@ final class MobileUsageGlancePublisher {
     private let defaults: UserDefaults
     private let store: UsageGlanceStore
     private var task: Task<Void, Never>?
+    private var accentTask: Task<Void, Never>?
+    private var accentHex: String?
     private var pending: Request?
     private var generation: UInt64 = 0
     private var sequence: UInt64 = 0
@@ -50,6 +52,7 @@ final class MobileUsageGlancePublisher {
         guard pairingID != id else { return }
         suspend()
         pairingID = id
+        accentHex = nil
         defaults.set(id, forKey: Self.preferenceKey)
         clear()
     }
@@ -58,11 +61,33 @@ final class MobileUsageGlancePublisher {
         generation &+= 1
         task?.cancel()
         task = nil
+        accentTask?.cancel()
+        accentTask = nil
         pending = nil
     }
 
-    func refresh(pairingID: String, hostName: String, client: RemoteClient) {
+    func updateAccent(_ value: String?, for pairingID: String) {
         guard self.pairingID == pairingID else { return }
+        let resolved = UsageGlanceSnapshot.normalizedAccent(value)
+        guard accentHex != resolved else { return }
+        accentHex = resolved
+        accentTask?.cancel()
+        sequence += 1
+        let admitted = sequence
+        accentTask = Task { [store] in
+            do {
+                try await Task.sleep(for: .milliseconds(150))
+                let changed = try await store.updateAccent(resolved, pairingID: pairingID, sequence: admitted)
+                if changed { WidgetCenter.shared.reloadTimelines(ofKind: UsageGlanceStore.widgetKind) }
+            } catch is CancellationError { }
+            catch UsageGlanceStoreError.superseded { }
+            catch { self.reportIssue?(.storageFailed) }
+        }
+    }
+
+    func refresh(pairingID: String, hostName: String, client: RemoteClient, accentHex: String? = nil) {
+        guard self.pairingID == pairingID else { return }
+        updateAccent(accentHex, for: pairingID)
         pending = Request(pairingID: pairingID, hostName: hostName, client: client)
         guard task == nil else { return }
         let admitted = generation
@@ -80,7 +105,8 @@ final class MobileUsageGlancePublisher {
                               pairingID == request.pairingID else { return }
                         sequence += 1
                         let value = UsageGlanceSnapshot(pairingID: request.pairingID,
-                            hostName: request.hostName, capacity: capacity, receivedAt: Date())
+                            hostName: request.hostName, capacity: capacity, receivedAt: Date(),
+                            accentHex: self.accentHex)
                         let changed = try await store.publish(value, sequence: sequence)
                         if changed { WidgetCenter.shared.reloadTimelines(ofKind: UsageGlanceStore.widgetKind) }
                         reportIssue?(nil)

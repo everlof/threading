@@ -214,7 +214,7 @@ final class ExtensionHostSignalsTests: XCTestCase {
 
     /// The surface hands its own effective appearance to every read and follows it when it
     /// changes — the widening that lets an adaptive theme answer each window for itself.
-    func testASurfaceReadsSignalsForItsOwnAppearance() throws {
+    func testASurfaceReadsSignalsForItsOwnAppearance() async throws {
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw XCTSkip("Metal is unavailable on this test host.")
         }
@@ -227,6 +227,7 @@ final class ExtensionHostSignalsTests: XCTestCase {
             source: Self.redFromFirstInput,
             signalProvider: { ExtensionHostSignals.value($0, in: $1) }
         )
+        try await surface.waitForPreparation()
         let size = NSSize(width: 4, height: 4)
 
         surface.appearance = try appearance(.darkAqua)
@@ -310,7 +311,7 @@ final class ExtensionHostSignalsTests: XCTestCase {
 
     /// A surface binding a moment holds the shared reader's interest exactly while it is
     /// mounted in a window; a surface binding none never asks.
-    func testOnlyAMountedMomentSurfaceKeepsTheReaderListening() throws {
+    func testOnlyAMountedMomentSurfaceKeepsTheReaderListening() async throws {
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw XCTSkip("Metal is unavailable on this test host.")
         }
@@ -326,6 +327,7 @@ final class ExtensionHostSignalsTests: XCTestCase {
             source: Self.redFromFirstInput,
             signalProvider: { _, _ in nil }
         )
+        try await pulse.waitForPreparation()
         let still = try ExtensionMetalSurfaceView(
             specification: ExtensionMetalSurface(
                 shaderResource: "Resources/still.metal",
@@ -334,6 +336,7 @@ final class ExtensionHostSignalsTests: XCTestCase {
             source: Self.redFromFirstInput,
             signalProvider: { _, _ in nil }
         )
+        try await still.waitForPreparation()
         XCTAssertFalse(reader.isListening, "built is not mounted")
 
         let window = NSWindow(
@@ -353,7 +356,7 @@ final class ExtensionHostSignalsTests: XCTestCase {
     }
 
     /// With motion held, a moment reads its binding's fallback — the rule audio follows.
-    func testAMomentReadsItsFallbackWhileMotionIsHeld() throws {
+    func testAMomentReadsItsFallbackWhileMotionIsHeld() async throws {
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw XCTSkip("Metal is unavailable on this test host.")
         }
@@ -377,6 +380,7 @@ final class ExtensionHostSignalsTests: XCTestCase {
             source: Self.redFromFirstInput,
             signalProvider: { ExtensionHostSignals.value($0, in: $1) }
         )
+        try await surface.waitForPreparation()
         let size = NSSize(width: 4, height: 4)
         XCTAssertEqual(
             try redComponent(of: XCTUnwrap(surface.snapshotImage(size: size, time: 0))),

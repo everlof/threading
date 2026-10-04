@@ -1,6 +1,22 @@
 #include <metal_stdlib>
 using namespace metal;
 
+struct GlowOut { float4 position [[position]]; float2 uv; };
+vertex GlowOut terminal_glow_vertex(uint id [[vertex_id]]) {
+    const float2 points[3] = { float2(-1, -1), float2(3, -1), float2(-1, 3) };
+    GlowOut out;
+    out.position = float4(points[id], 0, 1);
+    out.uv = points[id] * float2(0.5, -0.5) + 0.5;
+    return out;
+}
+// parameters.x is the glow's opacity; parameters.yz the share of the (bucketed) halo
+// texture the frame's halo occupies, which maps the drawable's uv onto it.
+fragment float4 terminal_glow_fragment(GlowOut in [[stage_in]],
+    texture2d<float> ink [[texture(0)]], sampler sampling [[sampler(0)]],
+    constant float4 &parameters [[buffer(0)]]) {
+    return ink.sample(sampling, in.uv * parameters.yz) * parameters.x;
+}
+
 struct GlyphVertex {
     float2 position;
     float2 texCoord;

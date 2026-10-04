@@ -827,6 +827,14 @@ private enum MobileUIEvidenceCapture {
                 evidenceChecks["hostInteractionPrepared"] = true
             }
 
+            if request.identifier == "theme-system-shader-dashboard" {
+                let ready = await waitUntil({
+                    themeSurfaces(in: window).contains {
+                        $0.hasPreparedPipeline && !$0.isHidden && $0.completedFrameCount > 0
+                    }
+                }, attempts: 400)
+                guard ready else { throw EvidenceError.themeSurfaceDidNotDraw }
+            }
             let last: Data
             let sampleCount: Int
             let stabilized: Bool
@@ -883,6 +891,15 @@ private enum MobileUIEvidenceCapture {
                 }
             }
 
+            if request.identifier == "theme-system-shader-dashboard" {
+                let surfaces = themeSurfaces(in: window)
+                evidenceChecks["shaderSourceLoaded"] = MobileThemeAssets.shared.surfaceSource != nil
+                evidenceChecks["shaderMounted"] = !surfaces.isEmpty
+                evidenceChecks["shaderPrepared"] = surfaces.contains { $0.hasPreparedPipeline }
+                evidenceChecks["shaderVisible"] = surfaces.contains { !$0.isHidden && !$0.bounds.isEmpty }
+                evidenceChecks["shaderDrew"] = surfaces.contains { $0.completedFrameCount > 0 }
+                evidenceChecks["shaderWithinBudget"] = surfaces.allSatisfy { !$0.exceedsFrameBudget }
+            }
             try last.write(to: imageURL, options: .atomic)
             let scale = window.screen.scale
             let marker = Marker(
@@ -916,6 +933,18 @@ private enum MobileUIEvidenceCapture {
             )
             return
         }
+    }
+
+    private static func themeSurfaces(in window: UIWindow) -> [MobileThemeMetalSurface] {
+        var pending: [UIView] = [window]
+        var surfaces: [MobileThemeMetalSurface] = []
+        var visited = 0
+        while let view = pending.popLast(), visited < 4_096 {
+            visited += 1
+            if let surface = view as? MobileThemeMetalSurface { surfaces.append(surface) }
+            pending.append(contentsOf: view.subviews)
+        }
+        return surfaces
     }
 
     private static func hasPresentedController(_ controller: UIViewController?) -> Bool {
@@ -1238,6 +1267,7 @@ private enum MobileUIEvidenceCapture {
         case keyboardDidNotHide
         case editorKeptFocus
         case hostInteractionTimedOut
+        case themeSurfaceDidNotDraw
     }
 
     private static func png(of window: UIWindow) throws -> Data {
@@ -1295,6 +1325,25 @@ extension View {
 #else
         self
 #endif
+    }
+}
+
+/// The registration each paired Mac (by connection id) last accepted this launch. One entry per
+/// host, replaced rather than accumulated: the Mac holds only the latest registration, so a theme
+/// edit and back (sound receipts are part of the signature) must register again.
+struct RemoteNotificationRegistrationLedger {
+    private var signatures: [String: String] = [:]
+
+    func needsRegistration(_ signature: String, for hostID: String) -> Bool {
+        signatures[hostID] != signature
+    }
+
+    mutating func record(_ signature: String, for hostID: String) {
+        signatures[hostID] = signature
+    }
+
+    mutating func reset() {
+        signatures.removeAll()
     }
 }
 
@@ -1411,7 +1460,7 @@ final class RemoteNotificationManager: ObservableObject {
     private let center = UNUserNotificationCenter.current()
     private let defaults: UserDefaults
     private var observers: [NSObjectProtocol] = []
-    private var registeredSignatures: Set<String> = []
+    private var registrations = RemoteNotificationRegistrationLedger()
     private var deliveredEventIDs: [String] = []
     private var retractionTombstones = RemoteNotificationRetractionTombstones()
     private lazy var syncGate = RemoteNotificationSyncGate<[PairedRemoteHost]> {
@@ -1492,7 +1541,7 @@ final class RemoteNotificationManager: ObservableObject {
             )
             Task { @MainActor in
                 self?.deviceToken = token?.isEmpty == false ? token : nil
-                self?.registeredSignatures.removeAll()
+                self?.registrations.reset()
             }
         })
         observers.append(NotificationCenter.default.addObserver(
@@ -1611,7 +1660,12 @@ final class RemoteNotificationManager: ObservableObject {
         }
         let kinds = enabledKinds
         let soundKinds = soundEnabledKinds
+        // An empty list is a launch still loading its pairings, not an unpairing.
+        if !hosts.isEmpty {
+            MobileThemeAssets.shared.retainSoundReceipts(forHostIDs: Set(hosts.map { $0.hostID ?? $0.id }))
+        }
         for host in hosts {
+            let themeSoundNames = MobileThemeAssets.shared.confirmedSounds(for: host.hostID ?? host.id)
 #if DEBUG
             let pushEnvironment = RemoteNotificationEnvironment.sandbox
 #else
@@ -1623,11 +1677,12 @@ final class RemoteNotificationManager: ObservableObject {
                 kinds.map(\.rawValue).sorted().joined(separator: ","),
                 soundKinds.map(\.rawValue).sorted().joined(separator: ","),
                 includesResponsePreviews.description,
+                themeSoundNames.sorted { $0.key < $1.key }.map { $0.key + "=" + $0.value }.joined(separator: ","),
                 host.link.token,
                 host.hostedServiceURL?.absoluteString ?? "",
                 host.hostedCredential?.expiresAt.timeIntervalSince1970.description ?? "",
             ].joined(separator: ":")
-            guard !registeredSignatures.contains(signature) else { continue }
+            guard registrations.needsRegistration(signature, for: host.id) else { continue }
             let peer = MobileDiagnostics.pseudonym(host.id, prefix: "peer")
             MobileDiagnostics.record(.notificationRegistrationStarted, fields: [
                 .peer: peer,
@@ -1680,7 +1735,7 @@ final class RemoteNotificationManager: ObservableObject {
                     baselineRegistration,
                     with: host
                 )
-                if !optionalKinds.isDisjoint(with: kinds) {
+                if !optionalKinds.isDisjoint(with: kinds) || !themeSoundNames.isEmpty || includesResponsePreviews {
                     let extendedRegistration = RemoteNotificationRegistrationDTO(
                         deviceToken: deviceToken,
                         hostedRegistrationID: hostedRegistrationID,
@@ -1689,7 +1744,8 @@ final class RemoteNotificationManager: ObservableObject {
                         enabledKinds: kinds,
                         soundEnabledKinds: soundKinds,
                         capabilities: [.turnCompletionPreview, .notificationRetraction],
-                        includesResponsePreviews: includesResponsePreviews
+                        includesResponsePreviews: includesResponsePreviews,
+                        themeSoundNames: themeSoundNames.isEmpty ? nil : themeSoundNames
                     )
                     do {
                         result = try await registerNotifications(
@@ -1716,7 +1772,7 @@ final class RemoteNotificationManager: ObservableObject {
                 }
                 deliveryByConnection[host.id] = result.delivery
                 if hostedRegistrationSucceeded {
-                    registeredSignatures.insert(signature)
+                    registrations.record(signature, for: host.id)
                 }
                 MobileDiagnostics.record(.notificationRegistrationSucceeded, fields: [
                     .peer: peer,
@@ -1851,7 +1907,7 @@ final class RemoteNotificationManager: ObservableObject {
     }
 
     func settingsChanged(hosts: [PairedRemoteHost]) {
-        registeredSignatures.removeAll()
+        registrations.reset()
         Task { await sync(hosts: hosts) }
     }
 
@@ -2053,7 +2109,11 @@ final class RemoteNotificationManager: ObservableObject {
         let content = UNMutableNotificationContent()
         content.title = localizedText(event.titleLocalization, fallback: event.title)
         content.body = localizedText(event.bodyLocalization, fallback: event.body)
-        content.sound = playsSound(for: event.kind) ? .default : nil
+        if playsSound(for: event.kind) {
+            let names = MobileThemeAssets.shared.confirmedSounds(for: event.hostID)
+            let name = includesResponsePreviews ? RemoteThemeSound.slot(for: event.kind).flatMap { names[$0] } : nil
+            content.sound = name.map { UNNotificationSound(named: UNNotificationSoundName(rawValue: $0)) } ?? .default
+        }
         content.threadIdentifier = event.sessionID
         content.categoryIdentifier = event.kind == .permissionRequest
             ? "THREADING_PERMISSION"

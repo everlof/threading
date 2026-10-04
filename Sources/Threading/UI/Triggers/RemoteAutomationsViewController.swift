@@ -160,6 +160,7 @@ final class RemoteAutomationsViewController: NSViewController {
             try JSONDecoder().decode(ControllerPage<ControllerWorker>.self, from: Data(response.utf8))
         }.value
         let editor = AutomationEditorViewController(remoteSpec: automation?.spec, remote: true, workers: page.items)
+        editor.availableHeight = view.window.map { $0.contentLayoutRect.height - Design.Spacing.pane * 2 }
         editor.onSave = { [weak self] _, spec in
             _ = try await AutomationCommands.remote(.init(operation: "configure",
                 id: automationID,

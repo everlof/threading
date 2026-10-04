@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import SwiftTerm
 
 // MARK: - App Theme Preview Service
 
@@ -32,6 +33,9 @@ enum AppThemePreviewService {
         static let scale: CGFloat = 1.5
         /// The mascot's moods drawn small along the pane, above the terminal sample.
         static let moodFigureHeight: CGFloat = 48
+        /// `frames: 3` draws the drift at evenly spaced phases of one authored cycle.
+        static let driftFrameCount = 3
+        static let driftPhases: [Double] = (0..<driftFrameCount).map { Double($0) / Double(driftFrameCount) }
     }
 
     // MARK: - Public Methods
@@ -70,9 +74,13 @@ enum AppThemePreviewService {
             completion(.failure("\(theme.name) has no \(arguments.appearance ?? "") variant."))
             return
         }
+        let count = arguments.frames ?? 1
+        guard count == 1 || count == Layout.driftFrameCount else {
+            completion(.failure("frames must be 1 or \(Layout.driftFrameCount).")); return
+        }
 
         // Drawn here, where the views live; encoded on a worker, where PNG compression belongs.
-        guard let image = render(theme, kinds: kinds) else {
+        guard let image = render(theme, kinds: kinds, frameCount: count) else {
             completion(.failure("The preview could not be drawn."))
             return
         }
@@ -80,6 +88,7 @@ enum AppThemePreviewService {
             + kinds.map(\.rawValue).joined(separator: " and ")
             + ", drawn on a sample window — top to bottom in that order. Particles are shown "
             + "as a still frame."
+            + (count == Layout.driftFrameCount ? " Each appearance shows its gradient drift at 0, ⅓ and ⅔ of one cycle." : "")
         Task {
             let png = await Task.detached(priority: .userInitiated) { pngData(image) }.value
             guard let png else {
@@ -91,15 +100,22 @@ enum AppThemePreviewService {
     }
 
     /// The sample, one band per appearance stacked top to bottom.
-    static func render(_ theme: AppTheme, kinds: [AppTheme.VariantKind]) -> CGImage? {
+    static func render(_ theme: AppTheme, kinds: [AppTheme.VariantKind], frameCount: Int = 1) -> CGImage? {
+        guard frameCount == 1 || frameCount == Layout.driftFrameCount else { return nil }
         let previous = AppThemePalette.current
         AppThemePalette.set(theme)
         defer { AppThemePalette.set(previous) }
 
-        let frames: [CGImage] = ThemeParticleHold.withStillFrames {
-            kinds.compactMap { kind in
-                guard let appearance = kind.appearance else { return nil }
-                return renderFrame(theme: theme, kind: kind, appearance: appearance)
+        // Phases are fractions of the authored cycle, whatever its length: fixed seconds moved
+        // a default 24-second drift by 4% of a cycle, which reads as three identical frames.
+        // Phase 1 is phase 0 again, so the samples stop a third short of it.
+        let phases = frameCount == Layout.driftFrameCount ? Layout.driftPhases : [0]
+        let frames: [CGImage] = kinds.flatMap { kind -> [CGImage] in
+            guard let appearance = kind.appearance else { return [] }
+            return phases.compactMap { phase in
+                ThemeParticleHold.withStillFrames(phase: phase) {
+                    renderFrame(theme: theme, kind: kind, appearance: appearance)
+                }
             }
         }
         guard !frames.isEmpty else { return nil }
@@ -164,6 +180,19 @@ enum AppThemePreviewService {
                 content.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
                 content.trailingAnchor.constraint(equalTo: host.trailingAnchor)
             ])
+            if let style = WindowChromeAppearance.resolve(for: appearance) {
+                let band = WindowTitleBandView()
+                band.fixtureStyle = style
+                band.fixtureIsKey = true
+                band.setTitle(theme.name)
+                host.addSubview(band)
+                NSLayoutConstraint.activate([
+                    band.topAnchor.constraint(equalTo: host.topAnchor),
+                    band.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                    band.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+                    band.heightAnchor.constraint(equalToConstant: style.bandHeight)
+                ])
+            }
             host.layoutSubtreeIfNeeded()
             repaintTree(host)
             host.layoutSubtreeIfNeeded()
@@ -338,7 +367,7 @@ enum AppThemePreviewService {
             ("Sample Project", true, false),
             ("Design the landing page", false, false),
             ("Fix the login redirect", false, true),
-            ("Write release notes", false, false),
+            (ThemeWording.untitledSessionName(for: NSAppearance.current) ?? L10n.string("New Session"), false, false),
             ("Another Project", true, false),
             ("Profile the importer", false, false)
         ]
@@ -355,13 +384,32 @@ enum AppThemePreviewService {
             label.textColor = isSelected
                 ? Design.Ink.selection.label
                 : (isProject ? Design.Text.secondary : Design.Text.label)
+            let mark = GlyphView()
+            let tinted = IdentityMarkInk.isTinted(for: NSAppearance.current)
+            mark.slot = NSSize(width: AgentIconDefaults.pointSize, height: AgentIconDefaults.pointSize)
+            if isProject {
+                mark.image = GeneratedProjectIcon.image(for: title, tint: tinted ? IdentityMarkInk.ink : nil)
+            } else {
+                let image = AgentKind.claude.icon?.copy() as? NSImage
+                if tinted { image?.isTemplate = true }
+                mark.image = image
+            }
+            mark.tint = tinted
+                ? (isSelected ? Design.Ink.selection.label : IdentityMarkInk.ink)
+                : Design.Text.secondary
+            row.addSubview(mark)
             row.addSubview(label)
             NSLayoutConstraint.activate([
+                mark.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: Design.Spacing.small),
+                mark.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+                mark.widthAnchor.constraint(equalToConstant: AgentIconDefaults.pointSize),
+                mark.heightAnchor.constraint(equalToConstant: AgentIconDefaults.pointSize),
+                label.trailingAnchor.constraint(lessThanOrEqualTo: row.trailingAnchor, constant: -Design.Spacing.small),
                 row.heightAnchor.constraint(equalToConstant: Layout.rowHeight),
                 row.widthAnchor.constraint(equalToConstant: Layout.sidebarWidth - Design.Spacing.medium * 2),
                 label.leadingAnchor.constraint(
-                    equalTo: row.leadingAnchor,
-                    constant: isProject ? Design.Spacing.small : Design.Spacing.large
+                    equalTo: mark.trailingAnchor,
+                    constant: Design.Spacing.small
                 ),
                 label.centerYAnchor.constraint(equalTo: row.centerYAnchor)
             ])
@@ -412,7 +460,10 @@ enum AppThemePreviewService {
         actions.orientation = .horizontal
         actions.spacing = Design.Spacing.small
 
-        let cardStack = NSStackView(views: [heading, body, detail, actions])
+        let composer = ThemedTextField()
+        composer.placeholderString = ThemeWording.composerPlaceholder(for: NSAppearance.current)
+            ?? L10n.string("Write a message…")
+        let cardStack = NSStackView(views: [heading, body, detail, composer, actions])
         cardStack.orientation = .vertical
         cardStack.alignment = .leading
         cardStack.spacing = Design.Spacing.small
@@ -432,6 +483,7 @@ enum AppThemePreviewService {
             cardStack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Design.Spacing.inset),
             cardStack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Design.Spacing.inset),
             body.widthAnchor.constraint(equalTo: cardStack.widthAnchor),
+            composer.widthAnchor.constraint(equalTo: cardStack.widthAnchor),
             card.widthAnchor.constraint(equalTo: column.widthAnchor),
             column.topAnchor.constraint(
                 equalTo: pane.topAnchor,
@@ -495,44 +547,32 @@ enum AppThemePreviewService {
             width: Layout.size.width - Layout.sidebarWidth - Design.Spacing.large * 2,
             height: Layout.terminalHeight
         )
-        let path = CGPath(
-            roundedRect: frame,
-            cornerWidth: Design.Spacing.small,
-            cornerHeight: Design.Spacing.small,
-            transform: nil
+        // Capture the terminal itself: caching its parent can produce coloured grounds with
+        // no text. This is the shipping SwiftTerm glow underlay, including ANSI run colours.
+        let terminal = TerminalView(
+            frame: CGRect(origin: .zero, size: frame.size),
+            font: Design.Typography.code()
         )
-        context.saveGState()
-        context.addPath(path)
+        let window = NSWindow(contentRect: terminal.frame, styleMask: [.borderless], backing: .buffered, defer: true)
+        window.contentView = terminal
+        terminal.suspendsRenderingWhenNotVisible = false
+        terminal.installColors(palette.asSwiftTermColors())
+        terminal.nativeForegroundColor = palette.foreground
+        terminal.nativeBoldForegroundColor = palette.boldForeground
+        terminal.nativeBackgroundColor = palette.background
+        terminal.textGlow = palette.glow?.textGlow
+        terminal.feed(text: "\u{1B}[?25l\u{1B}[34m~/sample \u{1B}[32m❯ \u{1B}[0mgit status\r\n"
+            + "\u{1B}[31mmodified: \u{1B}[0mSources/App.swift\r\n"
+            + "\u{1B}[33mwarning: \u{1B}[0m2 files unstaged\r\n"
+            + "\u{1B}[1mBuild succeeded\u{1B}[0m  \u{1B}[90m0 errors\u{1B}[0m")
+        terminal.prepareFrameForSnapshot()
+        guard let bitmap = terminal.bitmapImageRepForCachingDisplay(in: terminal.bounds) else { return }
+        terminal.cacheDisplay(in: terminal.bounds, to: bitmap)
+        terminal.cacheDisplay(in: terminal.bounds, to: bitmap)
         context.setFillColor(palette.background.cgColor)
-        context.fillPath()
-        context.restoreGState()
-
-        let font = Design.Typography.code()
-        let bold = Design.Typography.code(weight: .bold)
-        func run(_ text: String, _ color: NSColor, _ face: NSFont = font) -> NSAttributedString {
-            NSAttributedString(string: text, attributes: [.font: face, .foregroundColor: color])
-        }
-        func line(_ runs: [NSAttributedString]) -> NSAttributedString {
-            let joined = NSMutableAttributedString()
-            runs.forEach { joined.append($0) }
-            return joined
-        }
-        let lines = [
-            line([run("~/sample ", palette.blue), run("❯ ", palette.green), run("git status", palette.foreground)]),
-            line([run("modified: ", palette.red), run("Sources/App.swift", palette.foreground)]),
-            line([run("warning: ", palette.yellow), run("2 files unstaged ", palette.foreground), run("(cyan)", palette.cyan), run(" ", palette.foreground), run("(magenta)", palette.magenta)]),
-            line([run("Build succeeded", palette.boldForeground, bold), run("  0 errors", palette.brightBlack)])
-        ]
-
-        let graphics = NSGraphicsContext(cgContext: context, flipped: false)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = graphics
-        var baseline = frame.maxY - Design.Spacing.inset - 12
-        for text in lines {
-            text.draw(at: CGPoint(x: frame.minX + Design.Spacing.inset, y: baseline))
-            baseline -= 20
-        }
-        NSGraphicsContext.restoreGraphicsState()
+        context.fill(frame)
+        if let image = bitmap.cgImage { context.draw(image, in: frame) }
+        withExtendedLifetime(window) {}
     }
 
     /// Every recorded surface, layer colour and font in the sample restated under the swapped

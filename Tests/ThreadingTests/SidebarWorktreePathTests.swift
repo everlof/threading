@@ -74,7 +74,7 @@ final class SidebarWorktreePathTests: HostedStoreTestCase {
             content.appearance = NSAppearance(named: appearance)
             AppThemeRefresh.repaint(content)
             content.layoutSubtreeIfNeeded()
-            let unavailableMark = try XCTUnwrap(descendants(content).compactMap { $0 as? NSImageView }
+            let unavailableMark = try XCTUnwrap(descendants(content).compactMap { $0 as? GlyphView }
                 .first {
                     $0.accessibilityIdentifier() == "sidebar.project.checkout-unavailable"
                         && !$0.isHidden

@@ -1249,8 +1249,9 @@ final class SessionAttachmentStore {
     }
 
     /// Drops a removed project's in-memory references and owned copies as one batch. The project
-    /// transaction has already cascade-deleted the normalized attachment rows, so issuing one
-    /// redundant SQLite delete per session here would only put commit latency back on AppKit.
+    /// removal deleted its sessions' attachment rows in its own transaction (the table has no
+    /// foreign key for a cascade to follow), so issuing one redundant SQLite delete per session
+    /// here would only put commit latency back on AppKit.
     func removeSessionsAfterProjectDeletion(_ sessionIDs: Set<SessionID>) {
         guard !sessionIDs.isEmpty else { return }
         var directories: [URL] = []
@@ -1797,7 +1798,10 @@ enum AttachmentReferenceDetector {
         expression(#"\]\(([^)\r\n]+\.(?:"# + extensionAlternation + #")(?::\d+(?::\d+)?)?)\)"#),
         expression(#"[`"]([^`"\r\n]+\.(?:"# + extensionAlternation + #")(?::\d+(?::\d+)?)?)[`"]"#),
         expression(#"'([^'\r\n]+\.(?:"# + extensionAlternation + #")(?::\d+(?::\d+)?)?)'"#),
-        expression(#"((?:file://)?[^\s<>"'`()\[\]{}]+\.(?:"# + extensionAlternation + #")(?::\d+(?::\d+)?)?)"#)
+        // Try a plain path only at the start of its token. Without this boundary, a token
+        // with no supported suffix retries the entire remainder at every character: a 16 KiB
+        // line took seconds even though it produced no candidates and performed no file I/O.
+        expression(#"(?<![^\s<>"'`()\[\]{}])((?:file://)?[^\s<>"'`()\[\]{}]+\.(?:"# + extensionAlternation + #")(?::\d+(?::\d+)?)?)"#)
     ].compactMap { $0 }
 
     /// Every real supported file the text names, sorted by whether it lives in the project.
@@ -1937,7 +1941,7 @@ enum AttachmentReferenceDetector {
     /// paths built a thousand `NSTextCheckingResult`s and a thousand bridged `String`s to keep
     /// the first few hundred — on the main thread, on a debounce, in a window that is drawing.
     /// Enumerating and stopping is the same answer for a fraction of the work.
-    private static func candidates(in text: String) -> [String] {
+    static func candidates(in text: String) -> [String] {
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         var seen: Set<String> = []
         var candidates: [String] = []
@@ -2062,6 +2066,80 @@ final class TerminalAttachmentObserver {
         let projectRoot: String
     }
 
+    private struct PreparedScan: Sendable {
+        let fingerprint: ScanFingerprint
+        let readThrough: Int
+        let bytes: Int
+        /// Nil means the last applied buffer is unchanged.
+        let resolution: AttachmentReferenceDetector.Resolution?
+        let workerNanoseconds: UInt64
+        let span: PerformanceSpan?
+    }
+
+    /// A fleet of live terminals shares one preparation lane. Cancellation retires queued
+    /// work before it reads a buffer; a scan already in a synchronous file API finishes before
+    /// the next starts, rather than adding another thread competing with the event loop.
+    private actor ScanWorker {
+        static let shared = ScanWorker()
+
+        func prepare(
+            since: Int,
+            readText: @Sendable (Int) -> TerminalScanRead,
+            projectRoot: URL,
+            currentDirectory: URL?,
+            previousFingerprint: ScanFingerprint?
+        ) -> PreparedScan? {
+            guard !Task.isCancelled else { return nil }
+            let readSpan = PerformanceRecorder.shared.begin(
+                "attachments.read",
+                category: "attachments",
+                metadata: ["since": String(since)]
+            )
+            let read = readText(since)
+            let scannedBytes = read.text.utf8.count
+            readSpan.end(metadata: [
+                "bytes": String(scannedBytes),
+                "new_rows": String(max(0, read.nextAbsoluteRow - since))
+            ])
+            guard !Task.isCancelled else { return nil }
+            let fingerprint = ScanFingerprint(
+                textHash: read.text.hashValue,
+                byteCount: scannedBytes,
+                readThrough: read.nextAbsoluteRow,
+                currentDirectory: currentDirectory?.path,
+                projectRoot: projectRoot.path
+            )
+            guard fingerprint != previousFingerprint else {
+                return PreparedScan(
+                    fingerprint: fingerprint, readThrough: read.nextAbsoluteRow,
+                    bytes: scannedBytes, resolution: nil, workerNanoseconds: 0, span: nil
+                )
+            }
+            let span = PerformanceRecorder.shared.begin(
+                "attachments.scan",
+                category: "attachments",
+                crossesQueues: true,
+                metadata: ["bytes": String(scannedBytes)]
+            )
+            let started = DispatchTime.now().uptimeNanoseconds
+            let resolution = AttachmentReferenceDetector.resolve(
+                text: read.text,
+                projectRoot: projectRoot,
+                currentDirectory: currentDirectory
+            )
+            let elapsed = DispatchTime.now().uptimeNanoseconds - started
+            guard !Task.isCancelled else {
+                span.end(metadata: ["cancelled": "1"])
+                return nil
+            }
+            return PreparedScan(
+                fingerprint: fingerprint, readThrough: read.nextAbsoluteRow,
+                bytes: scannedBytes, resolution: resolution, workerNanoseconds: elapsed,
+                span: span
+            )
+        }
+    }
+
     typealias Recorder = @MainActor (
         AttachmentReferenceDetector.Resolution,
         SessionID,
@@ -2078,6 +2156,7 @@ final class TerminalAttachmentObserver {
     private let record: Recorder
     private var pendingScan: Task<Void, Never>?
     private var resolutionTask: Task<Void, Never>?
+    private var scanRequestedWhileRunning = false
     private var lastScan: Date?
     /// Paths already offered, newest last. Bounded, and deliberately not tied to what is still
     /// on screen: the point is not to re-announce a hint the user has already read, and the read
@@ -2161,96 +2240,66 @@ final class TerminalAttachmentObserver {
         scanGeneration += 1
         let generation = scanGeneration
         resolutionTask?.cancel()
-        resolutionTask = nil
-        isScanInFlight = false
         lastScanMetrics = nil
         guard isEnabled() else {
+            scanRequestedWhileRunning = false
             forgetScanHistory()
             return
         }
-        guard let root = projectRoot() else { return }
+        guard let root = projectRoot() else {
+            scanRequestedWhileRunning = false
+            return
+        }
+        // Cancelling a task does not interrupt regex or filesystem calls already running.
+        // Keep its slot until it really exits, and retain only one request for the latest
+        // buffer. The generation fence still prevents the retired scan from publishing.
+        guard resolutionTask == nil else {
+            scanRequestedWhileRunning = true
+            return
+        }
 
         let since = lastScannedAbsoluteRow
         let current = currentDirectory()
+        let previousFingerprint = lastScanFingerprint
         isScanInFlight = true
         let readText = text
-        resolutionTask = Task.detached(priority: .userInitiated) { [weak self] in
-            // SwiftTerm owns the mutable terminal behind a lock. Translating its bounded text
-            // here keeps even a wide, unchanged screen out of the main queue's output callback.
-            let readSpan = PerformanceRecorder.shared.begin(
-                "attachments.read",
-                category: "attachments",
-                metadata: ["since": String(since)]
+        resolutionTask = Task(priority: .utility) { @MainActor [weak self] in
+            defer { self?.resolutionDidFinish() }
+            let prepared = await ScanWorker.shared.prepare(
+                since: since, readText: readText, projectRoot: root,
+                currentDirectory: current, previousFingerprint: previousFingerprint
             )
-            let read = readText(since)
-            let scanned = read.text
-            let scannedBytes = scanned.utf8.count
-            readSpan.end(metadata: [
-                "bytes": String(scannedBytes),
-                "new_rows": String(max(0, read.nextAbsoluteRow - since))
-            ])
-            guard !Task.isCancelled else { return }
-            let fingerprint = ScanFingerprint(
-                textHash: scanned.hashValue,
-                byteCount: scannedBytes,
-                readThrough: read.nextAbsoluteRow,
-                currentDirectory: current?.path,
-                projectRoot: root.path
-            )
-            guard await self?.shouldResolve(
-                fingerprint, scannedBytes: scannedBytes, generation: generation
-            ) == true else { return }
-            let span = PerformanceRecorder.shared.begin(
-                "attachments.scan",
-                category: "attachments",
-                crossesQueues: true,
-                metadata: ["bytes": String(scannedBytes)]
-            )
-            let started = DispatchTime.now().uptimeNanoseconds
-            let resolution = AttachmentReferenceDetector.resolve(
-                text: scanned,
-                projectRoot: root,
-                currentDirectory: current
-            )
-            let ended = DispatchTime.now().uptimeNanoseconds
-            guard !Task.isCancelled else {
-                span.end(metadata: ["cancelled": "1"])
+            guard let prepared else { return }
+            guard let self, generation == self.scanGeneration, !Task.isCancelled else {
+                prepared.span?.end(metadata: ["superseded": "1"])
                 return
             }
-            await self?.finishScan(
+            guard let resolution = prepared.resolution, let span = prepared.span else {
+                self.lastScanMetrics = ScanMetrics(
+                    bytes: prepared.bytes, workerNanoseconds: 0, custodyWorkerNanoseconds: 0,
+                    applyNanoseconds: 0, found: 0, recorded: 0, wasUnchanged: true
+                )
+                return
+            }
+            await self.finishScan(
                 resolution,
-                scannedBytes: scannedBytes,
-                workerNanoseconds: ended - started,
+                scannedBytes: prepared.bytes,
+                workerNanoseconds: prepared.workerNanoseconds,
                 generation: generation,
-                readThrough: read.nextAbsoluteRow,
-                fingerprint: fingerprint,
+                readThrough: prepared.readThrough,
+                fingerprint: prepared.fingerprint,
                 projectRoot: root,
                 span: span
             )
         }
     }
 
-    private func shouldResolve(
-        _ fingerprint: ScanFingerprint,
-        scannedBytes: Int,
-        generation: Int
-    ) -> Bool {
-        guard generation == scanGeneration else { return false }
-        guard fingerprint != lastScanFingerprint else {
-            resolutionTask = nil
-            isScanInFlight = false
-            lastScanMetrics = ScanMetrics(
-                bytes: scannedBytes,
-                workerNanoseconds: 0,
-                custodyWorkerNanoseconds: 0,
-                applyNanoseconds: 0,
-                found: 0,
-                recorded: 0,
-                wasUnchanged: true
-            )
-            return false
-        }
-        return true
+    private func resolutionDidFinish() {
+        resolutionTask = nil
+        isScanInFlight = false
+        guard scanRequestedWhileRunning else { return }
+        scanRequestedWhileRunning = false
+        scanNow()
     }
 
     /// Remembers offered paths, newest wins, bounded.
@@ -2292,8 +2341,6 @@ final class TerminalAttachmentObserver {
             return
         }
         guard isEnabled() else {
-            resolutionTask = nil
-            isScanInFlight = false
             forgetScanHistory()
             span.end(metadata: ["disabled": "1"])
             return
@@ -2327,8 +2374,6 @@ final class TerminalAttachmentObserver {
         noteSeen((resolution.insideProject + resolution.outsideProject).map(\.path))
         lastScannedAbsoluteRow = max(lastScannedAbsoluteRow, readThrough)
         lastScanFingerprint = fingerprint
-        resolutionTask = nil
-        isScanInFlight = false
         let found = newly.insideProject.count + newly.outsideProject.count
         lastScanMetrics = ScanMetrics(
             bytes: scannedBytes,

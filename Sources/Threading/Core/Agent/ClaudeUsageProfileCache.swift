@@ -97,7 +97,7 @@ enum ClaudeUsageProfileCache {
             windows: windows,
             planLabel: nil,
             observedAt: observedAt,
-            source: .localCache
+            source: .profileSnapshot
         )
         usage.modelWindows = modelWindows
         return usage

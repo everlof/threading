@@ -4,6 +4,43 @@
   "platform": "macOS",
   "entries": [
     {
+      "id": "app-theme-preview",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Theme authoring preview",
+      "description": "The shipping preview tool renders authored words, generated identity ink, terminal glow and title-band chrome.",
+      "states": [
+        "Words",
+        "Tinted identities",
+        "Terminal glow",
+        "Authored title band"
+      ],
+      "matrix": {
+        "themes": [
+          "Cyberpunk derivative",
+          "Stock chrome theme"
+        ],
+        "appearances": [
+          "Authored"
+        ],
+        "sizes": [
+          "760×470 preview"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ThemeSystemWorkflowTests.swift",
+        "tests": [
+          "ThreadingTests/AppThemePreviewCoverageTests/testPreviewShowsWordsIdentityInkAndTerminalGlow",
+          "ThreadingTests/AppThemePreviewCoverageTests/testPreviewDrawsTheAuthoredTitleBand",
+          "ThreadingTests/AppThemePreviewCoverageTests/testThreePreviewFramesShowTheAuthoredDriftAndRestoreThePalette"
+        ]
+      },
+      "capture": {
+        "glob": "theme-preview-*.png"
+      }
+    },
+    {
       "id": "theme-audio-spectrum",
       "kind": "surface",
       "status": "implemented",
@@ -232,16 +269,19 @@
       "status": "implemented",
       "priority": "important",
       "title": "Sidebar activity rows",
-      "description": "Session rows at rest, working, blocked, hovered, selected, pinned, scheduled and under title truncation pressure, plus a selected standalone terminal running a foreground command. Each image is one named row state in light or dark appearance.",
-      "states": ["Idle", "Working", "Blocked", "Hovered", "Selected", "Pinned", "Scheduled", "Long title", "Terminal command running"],
+      "description": "Session rows at rest, working, blocked, hovered, selected, pinned, scheduled and under title truncation pressure, plus a selected standalone terminal running a foreground command. Dynamic identity and pin contrast is also captured in the shipping window under custom bright-green and navy themes.",
+      "states": ["Idle", "Working", "Blocked", "Hovered", "Selected", "Pinned", "Scheduled", "Long title", "Terminal command running", "Custom-theme icon contrast"],
       "matrix": {
-        "themes": ["System"],
+        "themes": ["System", "Custom bright green", "Custom navy", "Custom tinted identities"],
         "appearances": ["Light", "Dark"],
-        "sizes": ["240×28 points"]
+        "sizes": ["240×28 points", "1120×720-point shipping window"]
       },
       "source": {
         "path": "Tests/ThreadingTests/SidebarRowRenderTests.swift",
-        "test": "ThreadingTests/SidebarRowRenderTests/testRendersTheStorybook"
+        "tests": [
+          "ThreadingTests/SidebarRowRenderTests/testRendersTheStorybook",
+          "ThreadingTests/SidebarIconContrastTests/testSelectedMarkPixelsReadOnCustomGroundsInShippingSidebar"
+        ]
       },
       "capture": {
         "glob": "sidebar-row-*.png"
@@ -633,7 +673,7 @@
         ]
       },
       "capture": {
-        "glob": "sidebar-*.png"
+        "globs": ["sidebar-[0-9]*.png", "sidebar-auto-hide-*.png"]
       }
     },
     {
@@ -934,16 +974,19 @@
       "status": "implemented",
       "priority": "important",
       "title": "Current theme editor",
-      "description": "The full theme-role editor at its top and lower scroll positions, in both locked stock-theme and editable custom-theme states.",
-      "states": ["Locked stock theme", "Editable custom theme", "Top roles", "Lower roles"],
+      "description": "The theme-role editor in locked and editable states, plus Tune inside the shipping main-window display pane.",
+      "states": ["Locked stock theme", "Editable custom theme", "Top roles", "Lower roles", "Tune", "Main-window display pane"],
       "matrix": {
-        "themes": ["System", "Cyberpunk", "Custom Swiss derivative"],
+        "themes": ["System", "Cyberpunk", "Custom Swiss derivative", "Custom adaptive System derivative"],
         "appearances": ["Light", "Dark", "Theme-authored"],
-        "sizes": ["Settings page"]
+        "sizes": ["Settings page", "Main-window display pane"]
       },
       "source": {
         "path": "Tests/ThreadingTests/ThemeSettingsRenderTests.swift",
-        "test": "ThreadingTests/ThemeSettingsRenderTests/testRendersCurrentThemePageInLockedAndEditableStates"
+        "tests": [
+          "ThreadingTests/ThemeSettingsRenderTests/testRendersCurrentThemePageInLockedAndEditableStates",
+          "ThreadingTests/CurrentThemeShellRenderTests/testRendersTuneInTheMainWindowDisplayPane"
+        ]
       },
       "capture": {
         "glob": "current-theme-*.png"

@@ -144,6 +144,15 @@ final class AgentCLISettingsViewController: NSViewController {
         guide.identifier = NSUserInterfaceItemIdentifier(kind.rawValue)
         guide.setAccessibilityIdentifier("settings.general.agent-tools.\(kind.rawValue).guide")
         var controls: [NSView] = [guide]
+        if installed == nil, failure == nil {
+            // The same sheet onboarding and the launch-failure screen open: the official
+            // installer, run on this click in a terminal the person can watch.
+            let install = SettingsUI.button("Install…", target: self, action: #selector(installTool(_:)))
+            install.identifier = NSUserInterfaceItemIdentifier(kind.rawValue)
+            install.setAccessibilityIdentifier("settings.general.agent-tools.\(kind.rawValue).install")
+            install.isEnabled = !isWorking
+            controls.append(install)
+        }
         if update != nil {
             let button = SettingsUI.button("Update", target: self, action: #selector(updateTool(_:)))
             button.identifier = NSUserInterfaceItemIdentifier(kind.rawValue)
@@ -164,6 +173,14 @@ final class AgentCLISettingsViewController: NSViewController {
     @objc private func openGuide(_ sender: ThemedButton) {
         guard let identifier = sender.identifier, let kind = AgentKind(rawValue: identifier.rawValue) else { return }
         openURL(kind.cliInstallationGuide)
+    }
+
+    @objc private func installTool(_ sender: ThemedButton) {
+        guard let identifier = sender.identifier, let kind = AgentKind(rawValue: identifier.rawValue) else { return }
+        AgentCLIInstallViewController.present(kind, from: self) { [weak self] installed in
+            guard installed else { return }
+            self?.checkNow()
+        }
     }
 
     @objc private func openModelRequirements() {

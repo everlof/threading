@@ -19,8 +19,9 @@ extension AgentSession {
   /// theme's own stand-in (`ThemeWords.untitledSession`) instead of "New Session".
   ///
   /// Presentation only. Anything that treats the name as a fact — a migrated session's stored
-  /// title, notifications, search, control-plane output — keeps reading `displayTitle`, so a
-  /// theme's word is never written down as a title nor survives a theme switch.
+  /// title, search, control-plane output — keeps reading `displayTitle`, so a
+  /// theme's word is never written down as a session title nor survives a theme switch.
+  /// Remote notification copy also uses this presentation; it never mutates the session name.
   @MainActor
   var presentedTitle: String {
     AgentSessionRowPresentation(

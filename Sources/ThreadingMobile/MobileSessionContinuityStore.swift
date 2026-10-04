@@ -3,7 +3,7 @@ import Foundation
 /// Private working state for remote sessions on this phone or tablet.
 ///
 /// The Mac owns the transcript and session lifecycle. This store owns only what is meaningful
-/// on one client: drafts, viewport positions, terminal input preference, and the last route. Host
+/// on one client: drafts, viewport positions, and the last route. Host
 /// identity is part of every key because two Macs may use the same provider session identifier.
 @MainActor
 final class MobileSessionContinuityStore: ObservableObject {
@@ -24,7 +24,6 @@ final class MobileSessionContinuityStore: ObservableObject {
         var conversationViewportProgress: Double?
         var conversationFollowsBottom = true
         var terminalViewportProgress: Double?
-        var terminalInputPreference: MobileTerminalInputPreference?
         /// Whether the terminal's keyboard was wanted up when the chat was last left, so it
         /// comes back the same way. Position-like: disposable, and never a user choice in
         /// itself.
@@ -35,13 +34,11 @@ final class MobileSessionContinuityStore: ObservableObject {
         var updatedAt = Date()
 
         var hasDraft: Bool { !conversationDraft.isEmpty || !terminalDraft.isEmpty }
-        var hasUserChoice: Bool { hasDraft || terminalInputPreference != nil }
         var isEmpty: Bool {
             !hasDraft
                 && conversationViewportProgress == nil
                 && conversationFollowsBottom
                 && terminalViewportProgress == nil
-                && terminalInputPreference == nil
                 && terminalKeyboardWasUp == nil
                 && terminalKeyboardLeftAt == nil
         }
@@ -157,16 +154,6 @@ final class MobileSessionContinuityStore: ObservableObject {
         }
     }
 
-    func setTerminalInputPreference(
-        _ preference: MobileTerminalInputPreference,
-        hostID: String,
-        sessionID: String
-    ) {
-        update(hostID: hostID, sessionID: sessionID) { state in
-            state.terminalInputPreference = preference
-        }
-    }
-
     func setTerminalKeyboardUp(_ isUp: Bool, at now: Date, hostID: String, sessionID: String) {
         update(hostID: hostID, sessionID: sessionID) { state in
             state.terminalKeyboardWasUp = isUp
@@ -217,10 +204,9 @@ final class MobileSessionContinuityStore: ObservableObject {
         save(candidate)
     }
 
-    /// Position-only records are disposable history; records containing unsent words or an
-    /// explicit input choice are not.
+    /// Position-only records are disposable history; records containing unsent words are not.
     private func prunePositions(in candidate: inout Archive) {
-        let positionOnly = candidate.states.filter { !$0.value.hasUserChoice }
+        let positionOnly = candidate.states.filter { !$0.value.hasDraft }
             .sorted { $0.value.updatedAt > $1.value.updatedAt }
         guard positionOnly.count > Defaults.retainedPositionCount else { return }
         for entry in positionOnly.dropFirst(Defaults.retainedPositionCount) {

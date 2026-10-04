@@ -644,3 +644,13 @@ The host owns visibility, scene activation, Reduce Motion, Low Power Mode, touch
 accessibility silence. The shared `ThemeGradientAnimator` installs compositor tracks only while
 the dashboard is presented and its scene is active. A static fallback retains the same authored
 colors. Navigation, keyboard movement and scrolling remain platform behavior.
+
+One window has one moving backdrop, so a screen installs one: a sheet whose list already stands
+on `themedSettingsPage` puts a plain ground, not a second backdrop, behind its navigation stack.
+Workload quickens the drift through the gradient layer's clock rather than a new animation, which
+would restart at phase zero. Reduce Transparency and Increase Contrast keep the gradient and drop
+the picture, particles and extension surface. Every transcript row — prose, thinking, notice,
+tool and permission — stands on an opaque plate, because the conversation's backdrop moves
+behind it and a System panel is a translucent wash. Preference changes reach a backdrop through
+`MobileThemeMotionPreferences.didChange`, on main and only when a decoration value changed;
+`UserDefaults.didChangeNotification` arrives on the writer's thread for every key.

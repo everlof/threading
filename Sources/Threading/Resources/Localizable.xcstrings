@@ -155,17 +155,6 @@
         }
       }
     },
-    " · via Claude's status-line feed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : " · via Claudes statusrad-flöde"
-          }
-        }
-      }
-    },
     "#%lld · %@ · %@ · SHA-256 linked" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -771,6 +760,17 @@
         }
       }
     },
+    "%@ installs with npm, which comes with Node.js — and your login shell has no npm. Install Node.js first, then check again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ installeras med npm, som följer med Node.js — och ditt inloggningsskal har ingen npm. Installera Node.js först och kontrollera sedan igen."
+          }
+        }
+      }
+    },
     "%@ is at %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -856,6 +856,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ styr · alla andra kan titta och behålla ett utkast."
+          }
+        }
+      }
+    },
+    "%@ is installed at %@. You can start chats with it now." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ är installerat i %@. Du kan starta chattar med det nu."
           }
         }
       }
@@ -956,6 +967,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ körs · %lld kommandon, %lld paneler."
+          }
+        }
+      }
+    },
+    "%@ isn’t installed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ är inte installerat"
           }
         }
       }
@@ -1103,6 +1125,17 @@
         }
       }
     },
+    "%@ points" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ punkter"
+          }
+        }
+      }
+    },
     "%@ pressed · %lld total." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1143,6 +1176,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ ger skrivskyddad status för ändringsbegäranden."
+          }
+        }
+      }
+    },
+    "%@ pt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ pt"
           }
         }
       }
@@ -1296,6 +1340,17 @@
         }
       }
     },
+    "%@ times" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ gånger"
+          }
+        }
+      }
+    },
     "%@ title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1358,6 +1413,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ verifierade inloggningen. Den är nu tillgänglig för nya sessioner."
+          }
+        }
+      }
+    },
+    "%@ was installed into ~/.local/bin, but your login shell's PATH does not include that folder, so chats cannot start it yet. Add this line to ~/.zprofile, then check again: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ installerades i ~/.local/bin, men ditt inloggningsskals PATH innehåller inte den mappen, så chattar kan inte starta det än. Lägg till den här raden i ~/.zprofile och kontrollera sedan igen: %@"
           }
         }
       }
@@ -1490,6 +1556,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ · %lld×%lld · %@ · zoom %lld%%"
+          }
+        }
+      }
+    },
+    "%@ · Not installed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Inte installerat"
           }
         }
       }
@@ -1793,6 +1870,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@: %lld fönster använda, %@ arbetar, %@ väntar."
+          }
+        }
+      }
+    },
+    "%@×" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@×"
           }
         }
       }
@@ -2882,6 +2970,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld granskare begärda"
+          }
+        }
+      }
+    },
+    "%lld running chats or terminals will be terminated. Its chats are deleted from Threading, and so are this project's visual baselines. Each agent's transcript stays on disk, so a chat can be imported again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld chattar eller terminaler som körs avslutas. Dess chattar raderas från Threading, liksom projektets visuella baslinjer. Varje agents transkript ligger kvar på disken, så en chatt kan importeras igen."
           }
         }
       }
@@ -6640,6 +6739,17 @@
         }
       }
     },
+    "After a run" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Efter en körning"
+          }
+        }
+      }
+    },
     "After success" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7212,6 +7322,17 @@
         }
       }
     },
+    "Aligned facts with wrapped detail and a caution reading; text remains selectable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Justerade fakta med radbruten detalj och en varning; texten går att markera."
+          }
+        }
+      }
+    },
     "All" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7252,6 +7373,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Alla inställningar…"
+          }
+        }
+      }
+    },
+    "All automations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alla automatiseringar"
           }
         }
       }
@@ -7416,6 +7548,28 @@
         }
       }
     },
+    "Allow Keychain Access for Claude Logins" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt åtkomst till nyckelringen för Claude-inloggningar"
+          }
+        }
+      }
+    },
+    "Allow Keychain Access for Claude Logins…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt åtkomst till nyckelringen för Claude-inloggningar…"
+          }
+        }
+      }
+    },
     "Allow Once" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7515,6 +7669,17 @@
         }
       }
     },
+    "Allow keychain access for waiting logins" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt åtkomst till nyckelringen för väntande inloggningar"
+          }
+        }
+      }
+    },
     "Allow paired-iPhone checkups" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7610,6 +7775,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tillåtelselista de skrivskyddade anropen som ständigt frågar dig"
+          }
+        }
+      }
+    },
+    "Allow…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt…"
           }
         }
       }
@@ -7985,6 +8161,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Animation, bestämd framsteg och temaviktade regler."
+          }
+        }
+      }
+    },
+    "Animations, music and activity reactions are in Motion." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Animationer, musik och aktivitetsreaktioner finns under Rörelse."
           }
         }
       }
@@ -8448,6 +8635,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Utseendepaket är inte tillgängliga när tilläggen är pausade för den här starten."
+          }
+        }
+      }
+    },
+    "AppearancePackMemberCell" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AppearancePackMemberCell"
           }
         }
       }
@@ -9196,6 +9394,17 @@
         }
       }
     },
+    "Asks macOS, once per waiting Claude login, to let Threading read live usage." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ber macOS, en gång per väntande Claude-inloggning, att låta Threading läsa liveanvändning."
+          }
+        }
+      }
+    },
     "Asks the release feed whether a newer Threading exists." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9541,6 +9750,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ljud är inte tillgängligt"
+          }
+        }
+      }
+    },
+    "AudioSpectrumView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AudioSpectrumView"
           }
         }
       }
@@ -12349,6 +12569,17 @@
         }
       }
     },
+    "Check Again" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollera igen"
+          }
+        }
+      }
+    },
     "Check for Updates…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12521,6 +12752,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kontrollerar när den här Mac-datorn går i viloläge…"
+          }
+        }
+      }
+    },
+    "Checking your login shell's PATH…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollerar ditt inloggningsskals PATH…"
           }
         }
       }
@@ -16315,6 +16557,17 @@
         }
       }
     },
+    "Control corner radius" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reglagets hörnradie"
+          }
+        }
+      }
+    },
     "Control denied" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16876,6 +17129,17 @@
         }
       }
     },
+    "Copy Line" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera rad"
+          }
+        }
+      }
+    },
     "Copy Link" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17379,6 +17643,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte flytta konversationen"
+          }
+        }
+      }
+    },
+    "Couldn't read your login shell's PATH. Agents are checked again when you start a chat." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte läsa ditt inloggningsskals PATH. Agenterna kontrolleras igen när du startar en chatt."
           }
         }
       }
@@ -19058,6 +19333,17 @@
         }
       }
     },
+    "Default account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standardkonto"
+          }
+        }
+      }
+    },
     "Default account %lld for this project" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19093,6 +19379,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Standardinsats"
+          }
+        }
+      }
+    },
+    "Default login" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standardinloggning"
           }
         }
       }
@@ -20303,6 +20600,17 @@
         }
       }
     },
+    "Draft — not active" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utkast – inte aktiv"
+          }
+        }
+      }
+    },
     "Draft — not listening" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20710,6 +21018,17 @@
         }
       }
     },
+    "Edit Automation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redigera automatisering"
+          }
+        }
+      }
+    },
     "Edit Note…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20860,6 +21179,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Redigera…"
+          }
+        }
+      }
+    },
+    "Eight bounded bands: a held reading beside unavailable audio. No capture is started." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Åtta begränsade band: en fryst avläsning bredvid otillgängligt ljud. Ingen inspelning startas."
           }
         }
       }
@@ -21760,6 +22090,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Alla kommandon körs utan att fråga"
+          }
+        }
+      }
+    },
+    "Every command runs without asking. A call that would raise a macOS permission prompt is still refused." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alla kommandon körs utan att fråga. Ett anrop som skulle visa en behörighetsfråga från macOS nekas ändå."
           }
         }
       }
@@ -22938,6 +23279,17 @@
         }
       }
     },
+    "FactSheetView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "FactSheetView"
+          }
+        }
+      }
+    },
     "Fade" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23639,6 +23991,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Avslut: Slå ihop och städa"
+          }
+        }
+      }
+    },
+    "Finished" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Klar"
           }
         }
       }
@@ -24508,6 +24871,17 @@
         }
       }
     },
+    "Get Node.js" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hämta Node.js"
+          }
+        }
+      }
+    },
     "Git Review" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25116,6 +25490,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Google Chrome är inte installerat"
+          }
+        }
+      }
+    },
+    "Gradient cycle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gradientcykel"
+          }
+        }
+      }
+    },
+    "Gradient drift" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gradientrörelse"
           }
         }
       }
@@ -26828,6 +27224,17 @@
         }
       }
     },
+    "Included, available and unavailable members in their real table host. Toggle the available rows." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inkluderade, tillgängliga och otillgängliga medlemmar i sin vanliga tabell. Växla de tillgängliga raderna."
+          }
+        }
+      }
+    },
     "Incomplete" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27164,6 +27571,28 @@
         }
       }
     },
+    "Install %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera %@"
+          }
+        }
+      }
+    },
+    "Install %@…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera %@…"
+          }
+        }
+      }
+    },
     "Install Latest" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27285,6 +27714,17 @@
         }
       }
     },
+    "Install command: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installationskommando: %@"
+          }
+        }
+      }
+    },
     "Install iPhone Tooling…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27402,6 +27842,17 @@
         }
       }
     },
+    "Installed in ~/.local/bin, which your login shell's PATH doesn't include." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installerat i ~/.local/bin, som ditt inloggningsskals PATH inte innehåller."
+          }
+        }
+      }
+    },
     "Installed versions, updates and installation guides." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27437,6 +27888,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Installerar uppdatering…"
+          }
+        }
+      }
+    },
+    "Installing… Answer any question the installer asks in the terminal above." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installerar… Svara på eventuella frågor från installationsprogrammet i terminalen ovan."
+          }
+        }
+      }
+    },
+    "Install…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera…"
           }
         }
       }
@@ -27766,6 +28239,17 @@
         }
       }
     },
+    "It stops running and leaves this page. Its past runs and their results stay in Activity." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den slutar köras och försvinner från den här sidan. Tidigare körningar och deras resultat finns kvar under Aktivitet."
+          }
+        }
+      }
+    },
     "It then prefers a direct encrypted connection. TURN is used only when direct network traversal cannot connect." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27894,6 +28378,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dess chattar och terminaler tas bort från sidofältet. Sparade konversationer raderas inte."
+          }
+        }
+      }
+    },
+    "Its chats are deleted from Threading, and so are this project's visual baselines. Each agent's transcript stays on disk, so a chat can be imported again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dess chattar raderas från Threading, liksom projektets visuella baslinjer. Varje agents transkript ligger kvar på disken, så en chatt kan importeras igen."
           }
         }
       }
@@ -28604,6 +29099,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Senaste versionen har delats"
+          }
+        }
+      }
+    },
+    "Last run: %@, %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senaste körning: %1$@, %2$@"
           }
         }
       }
@@ -29787,6 +30293,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Liveanvändning från din Claude-inloggning"
+          }
+        }
+      }
+    },
+    "Live usage needs keychain access." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Liveanvändning behöver åtkomst till nyckelringen."
           }
         }
       }
@@ -31058,6 +31575,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Mellan"
+          }
+        }
+      }
+    },
+    "Member" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Medlem"
           }
         }
       }
@@ -32374,6 +32902,17 @@
         }
       }
     },
+    "New Automation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ny automatisering"
+          }
+        }
+      }
+    },
     "New Browser" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33049,6 +33588,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inget konto krävs"
+          }
+        }
+      }
+    },
+    "No account was chosen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget konto valdes."
           }
         }
       }
@@ -33857,6 +34407,17 @@
         }
       }
     },
+    "No runs yet. Each scheduled time, matching event or manual run adds one here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga körningar än. Varje schemalagd tid, matchande händelse eller manuell körning hamnar här."
+          }
+        }
+      }
+    },
     "No saved conversation was found, so this will start fresh." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34529,6 +35090,39 @@
         }
       }
     },
+    "Not installed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte installerat"
+          }
+        }
+      }
+    },
+    "Not installed — %@ isn't on your login shell's PATH." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte installerat — %@ finns inte i ditt inloggningsskals PATH."
+          }
+        }
+      }
+    },
+    "Not installed. Installs with npm, which comes with Node.js." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte installerat. Installeras med npm, som följer med Node.js."
+          }
+        }
+      }
+    },
     "Not measured yet" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34536,17 +35130,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inte mätt ännu"
-          }
-        }
-      }
-    },
-    "Not on your shell's PATH, so sessions cannot launch. Install: %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Finns inte på ditt skals PATH, så sessioner kan inte starta. Installera: %@"
           }
         }
       }
@@ -34569,6 +35152,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Går inte att nå"
+          }
+        }
+      }
+    },
+    "Not run yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Har inte körts än"
           }
         }
       }
@@ -35322,6 +35916,17 @@
         }
       }
     },
+    "Older runs are listed under Activity." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Äldre körningar finns under Aktivitet."
+          }
+        }
+      }
+    },
     "Oldest First" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35444,13 +36049,13 @@
         }
       }
     },
-    "On — reading %lld of %lld logins. Toggle off and on to be asked again for the rest." : {
+    "On — reading %lld of %lld logins. Waiting for access: %@." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "På — läser %lld av %lld inloggningar. Stäng av och slå på igen för att bli tillfrågad om resten."
+            "value" : "På — läser %lld av %lld inloggningar. Väntar på åtkomst: %@."
           }
         }
       }
@@ -35534,6 +36139,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ett Face ID-godkännande tillåter en GET till https://api.github.com/user. Endast ditt användarnamn skickas tillbaka till telefonen. Omdirigeringar och automatiska återförsök tillåts inte."
+          }
+        }
+      }
+    },
+    "One agent is enough to start chatting. Install the others whenever you like." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det räcker med en agent för att börja chatta. Installera de andra när du vill."
           }
         }
       }
@@ -36189,6 +36805,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppna Markdown-filer i Threading"
+          }
+        }
+      }
+    },
+    "Open Motion" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna Rörelse"
           }
         }
       }
@@ -37361,6 +37988,17 @@
         }
       }
     },
+    "Packs for “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paket för ”%@”"
+          }
+        }
+      }
+    },
     "Page %lld of %lld" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37537,6 +38175,17 @@
         }
       }
     },
+    "Panel corner radius" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Panelens hörnradie"
+          }
+        }
+      }
+    },
     "Panel extension" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37603,6 +38252,17 @@
         }
       }
     },
+    "Particle density" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Partikeltäthet"
+          }
+        }
+      }
+    },
     "Particle marks previewed." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37610,6 +38270,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Partikelmärken förhandsvisade."
+          }
+        }
+      }
+    },
+    "Particle opacity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Partikelopacitet"
+          }
+        }
+      }
+    },
+    "Particle speed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Partikelhastighet"
           }
         }
       }
@@ -37957,6 +38639,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Att välja ett spelar upp det. Lägg till ljud kopierar en ljudfil till din Sounds-mapp, där macOS letar efter den."
+          }
+        }
+      }
+    },
+    "Picture opacity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bildopacitet"
           }
         }
       }
@@ -40169,6 +40862,17 @@
         }
       }
     },
+    "Quiet stars" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stilla stjärnor"
+          }
+        }
+      }
+    },
     "Quit" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40539,6 +41243,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Läs varje publikt, versionerat UI-komponentkontrakt."
+          }
+        }
+      }
+    },
+    "Read files and propose changes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs filer och föreslå ändringar"
           }
         }
       }
@@ -41194,6 +41909,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Senaste puffarna"
+          }
+        }
+      }
+    },
+    "Recent runs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senaste körningar"
           }
         }
       }
@@ -42197,6 +42923,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ta bort den här katalogen och återta %@?"
+          }
+        }
+      }
+    },
+    "Remove “%@” and its chats?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta bort “%@” och dess chattar?"
           }
         }
       }
@@ -43528,6 +44265,17 @@
         }
       }
     },
+    "Result" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resultat"
+          }
+        }
+      }
+    },
     "Resume" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44029,6 +44777,17 @@
         }
       }
     },
+    "Reviewed decoration" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Granskad dekoration"
+          }
+        }
+      }
+    },
     "Revision" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44332,6 +45091,17 @@
         }
       }
     },
+    "Run Again" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör igen"
+          }
+        }
+      }
+    },
     "Run Command" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44453,6 +45223,17 @@
         }
       }
     },
+    "Run once" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör en gång"
+          }
+        }
+      }
+    },
     "Run once in Terminal, so keyvault seals its Touch ID key for this iPhone:" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44477,6 +45258,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kör en gång vid återkomst"
+          }
+        }
+      }
+    },
+    "Run once…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör en gång…"
           }
         }
       }
@@ -44587,6 +45379,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kör ”%@” på en fjärrvärd"
+          }
+        }
+      }
+    },
+    "Run “%@” once?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Köra “%@” en gång?"
           }
         }
       }
@@ -44719,6 +45522,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Körs på dagarna nedan, för de konton du tillåter."
+          }
+        }
+      }
+    },
+    "Runs the official installer below in a terminal, using npm from your login shell. Threading checks for %@ again when it finishes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör det officiella installationsprogrammet nedan i en terminal, med npm från ditt inloggningsskal. Threading letar efter %@ igen när det är klart."
+          }
+        }
+      }
+    },
+    "Runs the official installer below in a terminal. It downloads %@ from its publisher. Threading checks for it again when it finishes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör det officiella installationsprogrammet nedan i en terminal. Det hämtar %@ från utgivaren. Threading letar efter det igen när det är klart."
           }
         }
       }
@@ -50677,6 +51502,17 @@
         }
       }
     },
+    "Started" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startad"
+          }
+        }
+      }
+    },
     "Started %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50695,6 +51531,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Startade en chatt i ”%@”."
+          }
+        }
+      }
+    },
+    "Started by hand" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startad manuellt"
           }
         }
       }
@@ -51652,6 +52499,17 @@
         }
       }
     },
+    "Summary" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sammanfattning"
+          }
+        }
+      }
+    },
     "Supervision" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -52329,6 +53187,39 @@
         }
       }
     },
+    "Terminal glow" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminalglöd"
+          }
+        }
+      }
+    },
+    "Terminal glow opacity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminalglödens opacitet"
+          }
+        }
+      }
+    },
+    "Terminal glow radius" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminalglödens radie"
+          }
+        }
+      }
+    },
     "Terminal in %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -52468,6 +53359,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Testa responsiva layouter vid exakt CSS-pixelbredd och -höjd."
+          }
+        }
+      }
+    },
+    "Tests" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tester"
           }
         }
       }
@@ -53733,6 +54635,17 @@
         }
       }
     },
+    "The automation did not start" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatiseringen startade inte"
+          }
+        }
+      }
+    },
     "The automation ended without reporting a result." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -53740,6 +54653,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Automatiseringen avslutades utan att rapportera ett resultat."
+          }
+        }
+      }
+    },
+    "The automation was not deleted" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatiseringen raderades inte"
+          }
+        }
+      }
+    },
+    "The backdrop picture leaves text at %@:1 contrast in places. Try %@ opacity or less." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bakgrundsbilden lämnar text med kontrasten %@:1 på sina ställen. Prova %@ opacitet eller lägre."
           }
         }
       }
@@ -55274,6 +56209,39 @@
         }
       }
     },
+    "The installer finished, but your login shell still can't find %@. Its output above says where it went; that folder needs to be on your PATH. Then check again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installationen blev klar, men ditt inloggningsskal hittar fortfarande inte %@. Utdata ovan visar var det hamnade; den mappen måste finnas i din PATH. Kontrollera sedan igen."
+          }
+        }
+      }
+    },
+    "The installer stopped before finishing. Its output above says why." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installationsprogrammet avbröts innan det blev klart. Utdata ovan visar varför."
+          }
+        }
+      }
+    },
+    "The installer stopped with exit code %lld. Its output above says why." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installationsprogrammet avslutades med kod %lld. Utdata ovan visar varför."
+          }
+        }
+      }
+    },
     "The last action taken anywhere in the gallery." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56420,6 +57388,17 @@
         }
       }
     },
+    "The run has not reported a result." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körningen har inte rapporterat något resultat."
+          }
+        }
+      }
+    },
     "The same connection works over a VPN into this network, including UniFi Teleport and WireGuard. Connect the VPN on your phone first." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -57438,6 +58417,17 @@
         }
       }
     },
+    "The “%@” particles leave text at %@:1 contrast in places. Try %@ opacity or less." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Partiklarna ”%@” lämnar text med kontrasten %@:1 på sina ställen. Prova %@ opacitet eller lägre."
+          }
+        }
+      }
+    },
     "Their own workspace, kept for review" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -57500,6 +58490,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Temagranskning"
+          }
+        }
+      }
+    },
+    "Theme gallery" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Temagalleri"
           }
         }
       }
@@ -59007,6 +60008,17 @@
         }
       }
     },
+    "This draft has not been activated. Running it once uses exactly these settings and leaves it a draft." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det här utkastet har inte aktiverats. En enstaka körning använder exakt de här inställningarna och lämnar det som utkast."
+          }
+        }
+      }
+    },
     "This entire panel is a value tree. Threading owns every view below it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59822,6 +60834,17 @@
         }
       }
     },
+    "Threading can already read every Claude login in your keychain." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kan redan läsa alla Claude-inloggningar i din nyckelring."
+          }
+        }
+      }
+    },
     "Threading cannot read %@ right now, so it is not spending this account on its own." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60192,6 +61215,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading kunde inte skriva till din nyckelring."
+          }
+        }
+      }
+    },
+    "Threading couldn’t find %@ on your login shell’s PATH." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading hittade inte %@ i ditt inloggningsskals PATH."
           }
         }
       }
@@ -60594,6 +61628,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading läser vilka konton som finns under ~/.claude och ~/.codex för att kunna koppla en session till ett av dem. En inloggningsuppgift läses bara för liveanvändnings-reglaget nedan, och först efter att du tillåtit det i nyckelringsfrågan."
+          }
+        }
+      }
+    },
+    "Threading runs each agent's own command-line tool. Install at least one to start a chat — Install runs its official installer in a terminal you can watch." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kör varje agents eget kommandoradsverktyg. Installera minst ett för att starta en chatt — Installera kör det officiella installationsprogrammet i en terminal du kan följa."
           }
         }
       }
@@ -61159,6 +62204,17 @@
         }
       }
     },
+    "Tint identity marks" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Färga identitetsmärken"
+          }
+        }
+      }
+    },
     "Tinted template glyphs drawn on the device pixel grid; a slot caps foreign artwork." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -61177,6 +62233,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rubrik"
+          }
+        }
+      }
+    },
+    "Title morph" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Titelövergång"
           }
         }
       }
@@ -61781,6 +62848,17 @@
         }
       }
     },
+    "Tune" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Justera"
+          }
+        }
+      }
+    },
     "Turbo cache" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -61931,6 +63009,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktivera Gruppera sessioner efter gren först."
+          }
+        }
+      }
+    },
+    "Turn on Live usage from your Claude login in Settings ▸ Privacy first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slå först på Liveanvändning från din Claude-inloggning under Inställningar ▸ Integritet."
           }
         }
       }
@@ -62284,6 +63373,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ogiltig"
+          }
+        }
+      }
+    },
+    "Unavailable extension" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Otillgängligt tillägg"
           }
         }
       }
@@ -63591,6 +64691,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använda den reparerade “%@”?"
+          }
+        }
+      }
+    },
+    "Use with “%@” pack" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd med paketet ”%@”"
           }
         }
       }
@@ -66034,6 +67145,17 @@
         }
       }
     },
+    "Write a message…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv ett meddelande…"
+          }
+        }
+      }
+    },
     "Write a multi-line prompt; Return submits" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -66351,6 +67473,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ditt svar"
+          }
+        }
+      }
+    },
+    "Your brief is still here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Din brief finns kvar här."
           }
         }
       }
@@ -68023,6 +69156,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "från Alla konton"
+          }
+        }
+      }
+    },
+    "from the Claude CLI's last saved reading" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "från Claude-CLI:ts senast sparade avläsning"
           }
         }
       }

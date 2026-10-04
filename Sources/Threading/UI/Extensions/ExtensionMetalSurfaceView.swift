@@ -44,7 +44,16 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
     private let specification: ExtensionMetalSurface
     private let signalProvider: SignalProvider
     private let commandQueue: MTLCommandQueue
-    private let pipeline: MTLRenderPipelineState
+    private var pipeline: MTLRenderPipelineState?
+    private var preparation: Task<Void, Never>?
+    private var preparationFailure: Error?
+
+    /// Authoring/render fixtures await readiness; ordinary hosts keep the transparent slot
+    /// until compilation finishes and never block their mount on the compiler.
+    func waitForPreparation() async throws {
+        await preparation?.value
+        if let preparationFailure { throw preparationFailure }
+    }
     private let beganAt = ProcessInfo.processInfo.systemUptime
     private let audioDemand: AudioSpectrumDemand?
     private var audioViewportObserver: AudioSpectrumViewportObserver?
@@ -105,32 +114,6 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
             imageTexture = nil
         }
 
-        let library = try device.makeLibrary(
-            source: Self.completeSource(
-                extensionSource: source,
-                fragmentFunction: specification.fragmentFunction,
-                isTextured: specification.texture != nil
-            ),
-            options: nil
-        )
-        guard let vertex = library.makeFunction(name: Self.hostVertexFunction),
-              let fragment = library.makeFunction(name: Self.hostFragmentFunction) else {
-            throw ExtensionMetalSurfaceError.missingFunction(
-                specification.fragmentFunction
-            )
-        }
-
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.vertexFunction = vertex
-        descriptor.fragmentFunction = fragment
-        descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        descriptor.colorAttachments[0].isBlendingEnabled = true
-        descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-        descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-        descriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
-        descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
-        pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
-
         super.init(frame: .zero, device: device)
         delegate = self
         colorPixelFormat = .bgra8Unorm
@@ -147,8 +130,39 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         setAccessibilityElement(false)
         signalContext = ExtensionHostSignalContext(appearance: effectiveAppearance)
         if audioDemand != nil { ThemeParticleHold.shared.register(self) }
+        let completeSource = Self.completeSource(extensionSource: source,
+            fragmentFunction: specification.fragmentFunction, isTextured: specification.texture != nil)
+        preparation = Task { [weak self] in
+            do {
+                let compiled = try await ExtensionMetalPipelineCache.shared.prepare(source: completeSource)
+                guard let self else { return }
+                self.pipeline = compiled.state
+                self.updateVisibilityHold()
+                self.needsDisplay = true
+            } catch {
+                ThreadingLogger.extensions.error(
+                    "Could not compile Metal surface: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+                self?.withdraw(after: error)
+            }
+        }
         updateVisibilityHold()
     }
+
+    /// A shader that will not compile leaves nothing to draw. Before compilation moved off the
+    /// main actor the initializer threw and the host skipped the hook; now the mounted surface
+    /// withdraws itself to the same effect — hidden, paused, and holding no audio-capture or
+    /// moment demand, so a dead surface can never keep the system-audio tap running.
+    private func withdraw(after error: Error) {
+        preparationFailure = error
+        isHidden = true
+        isPaused = true
+        audioDemand?.setActive(false)
+        momentDemand?.setActive(false)
+    }
+
+    /// Whether compilation failed and the surface withdrew itself.
+    var hasWithdrawn: Bool { preparationFailure != nil }
 
     @available(*, unavailable)
     required init(coder: NSCoder) {
@@ -177,8 +191,9 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
             }
         }
         NotificationCenter.default.removeObserver(self)
-        // Moments are wanted only while somebody has mounted this surface in a window.
-        momentDemand?.setActive(window != nil)
+        // Moments are wanted only while somebody has mounted this surface in a window, and only
+        // from a surface that can draw them.
+        momentDemand?.setActive(window != nil && preparationFailure == nil)
         signalContext = ExtensionHostSignalContext(appearance: effectiveAppearance)
         if let window {
             for name in [
@@ -227,9 +242,11 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         isHeldForVisibility = !windowVisible || isHiddenOrHasHiddenAncestor
         let holdsAudioMotion = audioDemand != nil && !ThemeParticleHold.motionAllowed
         let wasPaused = isPaused
-        isPaused = isHeldForVisibility || holdsAudioMotion
+        isPaused = pipeline == nil || isHeldForVisibility || holdsAudioMotion
             || (audioDemand != nil && !AudioSpectrumViewportObserver.intersectsViewport(self))
-        audioDemand?.setActive(!isHeldForVisibility && ThemeParticleHold.motionAllowed
+        // No capture before the pipeline exists: a surface still compiling, or one that failed,
+        // has nothing to draw the reading into.
+        audioDemand?.setActive(pipeline != nil && !isHeldForVisibility && ThemeParticleHold.motionAllowed
                                && ThemeParticleHold.isSeen(self)
                                && AudioSpectrumViewportObserver.intersectsViewport(self))
         if holdsAudioMotion, !isHeldForVisibility, !wasPaused { draw() }
@@ -366,7 +383,7 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         size: CGSize,
         time: Float
     ) -> Bool {
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
+        guard let pipeline, let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
             return false
         }
         var uniforms = uniformFloats(size: size, time: time)
@@ -462,61 +479,9 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
     /// A textured surface's wrapper takes the picture and its sampler at index 0 and passes them
     /// on as the author's third and fourth arguments; an untextured one keeps the two-argument
     /// call every surface written before textures existed was compiled against.
-    private static func completeSource(
-        extensionSource: String,
-        fragmentFunction: String,
-        isTextured: Bool
-    ) -> String {
-        let fragmentWrapper = isTextured
-            ? """
-            fragment float4 \(hostFragmentFunction)(
-                ThreadingSurfaceVertexOut in [[stage_in]],
-                constant ThreadingSurfaceUniforms &uniforms [[buffer(0)]],
-                texture2d<float> image [[texture(\(imageTextureIndex))]],
-                sampler imageSampler [[sampler(\(imageSamplerIndex))]]
-            ) {
-                return \(fragmentFunction)(in.uv, uniforms, image, imageSampler);
-            }
-            """
-            : """
-            fragment float4 \(hostFragmentFunction)(
-                ThreadingSurfaceVertexOut in [[stage_in]],
-                constant ThreadingSurfaceUniforms &uniforms [[buffer(0)]]
-            ) {
-                return \(fragmentFunction)(in.uv, uniforms);
-            }
-            """
-        return """
-        #include <metal_stdlib>
-        using namespace metal;
-
-        struct ThreadingSurfaceUniforms {
-            float2 size;
-            float time;
-            float _padding;
-            float values[\(maximumInputs)];
-        };
-
-        struct ThreadingSurfaceVertexOut {
-            float4 position [[position]];
-            float2 uv;
-        };
-
-        vertex ThreadingSurfaceVertexOut \(hostVertexFunction)(uint vertexID [[vertex_id]]) {
-            const float2 positions[3] = {
-                float2(-1.0, -1.0),
-                float2( 3.0, -1.0),
-                float2(-1.0,  3.0)
-            };
-            ThreadingSurfaceVertexOut out;
-            out.position = float4(positions[vertexID], 0.0, 1.0);
-            out.uv = positions[vertexID] * float2(0.5, -0.5) + 0.5;
-            return out;
-        }
-
-        \(extensionSource)
-
-        \(fragmentWrapper)
-        """
+    static func completeSource(extensionSource: String, fragmentFunction: String, isTextured: Bool) -> String {
+        ExtensionMetalSource.completeSource(extensionSource: extensionSource,
+            fragmentFunction: fragmentFunction, isTextured: isTextured)
     }
+
 }

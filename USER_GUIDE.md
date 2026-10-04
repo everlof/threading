@@ -15,8 +15,13 @@ optional beyond the first click:
    and OpenCode. Claude Code and Codex can add and switch isolated logins here. Grok uses its
    terminal login, Cursor uses the Mac login created by `agent login`, and OpenCode owns provider
    sign-in through `/connect`. Existing managed logins each have the same enable switch as
-   **Settings ▸ Agents & Accounts**. The page also checks whether all five agent commands are
-   reachable from your shell; a missing one shows the install command instead of failing later.
+   **Settings ▸ Agents & Accounts**. The page also checks which agent commands your login shell
+   can find. One is enough to start chatting; any that are missing have an **Install…** button
+   that shows the provider's official install command and, when you press **Install**, runs it in
+   a terminal inside the sheet so you can watch it and answer its questions. Codex, Grok and
+   OpenCode install with npm, so on a Mac without Node.js the sheet says so first. If an install
+   lands in `~/.local/bin` but your shell's `PATH` doesn't include it, the sheet gives you the
+   line to add to `~/.zprofile`.
 3. **Conversations** — chats you already have on disk, one list newest first, with the last
    two days pre-checked. Importing creates a project for each checked conversation's folder
    implicitly and adopts the conversations so they resume in place; **Skip for now** leaves
@@ -100,7 +105,15 @@ when creating a session. See [Accounts](#accounts).
 Choose **New automation**, give the task a name and instructions, select its project, agent and
 permissions, and choose daily, selected weekdays, weekly or an interval. The named time zone
 stays with the schedule across daylight-saving changes. Saving leaves it paused; review and
-activate it when ready. **Manage…** provides editing, run now and deletion.
+activate it when ready.
+
+Each automation's row shows whether it is **Active**, **Paused** or a draft, when it runs, when it
+runs next and how its last run went. **Details** opens the automation's own page: **Pause** or
+**Resume** (or **Review & Activate** for a draft), **Run now**, **Edit…** and **Delete…**, the exact
+settings a run uses, the full instructions, and its ten most recent runs. A run's **Details** shows
+its result, timing, changed files and tests; **Open chat** goes to the conversation it ran in.
+**All automations** returns to the list. The editor groups its fields into Task, When, Agent,
+Permissions and After a run, and shows only the fields the chosen schedule uses.
 
 Choose **Skip missed runs** or **Run once on return** for offline periods. A schedule never replays
 a backlog, and another occurrence is skipped while its previous run is active. A run that cannot
@@ -525,7 +538,8 @@ opens the project's actions, also available on **right-click**:
 - Project Icon — see [Project icons](#project-icons)
 - Group Sessions by Branch (checked when on)
 - Headings for Lone Branches (shown while grouping is on)
-- Remove Project — removes it from the sidebar only; saved conversations are never deleted
+- Remove Project — deletes the project and every chat in it from Threading, after asking. Each
+  agent's own transcript stays on disk, so a chat can be imported again
 
 Click the disclosure triangle to collapse a project. Expansion state is remembered, and a
 collapsed project shows how many chats and terminals it is hiding as a count at its trailing edge.
@@ -1159,6 +1173,12 @@ Four things you can do with it:
   conversation file, and the output.
 - **Report a Problem…** opens the usual report sheet with all of that already written in, for you
   to read, edit and send — or not.
+- **Install <agent>…** replaces **Report a Problem…** when the agent's command isn't on this Mac.
+  It opens the install sheet; when the install finishes and the command is found, the chat starts
+  on its own. You'll rarely see this from the composer: a send to an agent that isn't installed is
+  stopped before a chat is created, your brief stays where it was, and the notice offers
+  **Install…**. On a Mac without the agent you usually use, new drafts open on one that is
+  installed, and the agent menu marks the missing ones **Not installed**.
 - **Try Recovering with an Agent** appears when the fault is in the conversation's own saved file.
   Threading copies that file somewhere safe, opens a chat, and briefs an agent to repair the copy.
   The agent never touches your real conversation: when it is done, Threading checks its work,
@@ -2246,7 +2266,13 @@ moment it leaves.
 
 For Claude accounts the freshest numbers come from **Settings ▸ Privacy ▸ Live usage from
 your Claude login**; without it the pill reads the CLI's local caches, which can lag by
-hours. Refreshes are polite by design: they run when a turn finishes — the only moment the
+hours. The freshness line says which one you are looking at: "via Claude's status-line feed"
+is current to the last turn, while "from the Claude CLI's last saved reading" is a copy the CLI
+updates on its own schedule and can be days old. If live usage is on but a login has not yet
+let Threading read its keychain sign-in — typically one added after you turned the switch on —
+the popover and the all-accounts view say **Live usage needs keychain access** with an
+**Allow…** button; click it, answer **Always Allow** in the macOS prompt, and the reading
+refreshes at once. Refreshes are polite by design: they run when a turn finishes — the only moment the
 number moves — and back off whenever the usage service asks for a pause, so watching the
 pill never eats into the limits it reports.
 
@@ -2302,9 +2328,11 @@ Where the numbers come from, per agent:
 - **Codex** — fetched from the account's own API login (`auth.json`), refreshed every few
   minutes and after the session finishes working.
 - **Claude** — fetched with the account's `.credentials.json` when one exists. On most Macs
-  Claude Code keeps its token in the Keychain instead; there Threading reads the usage feed
+  Claude Code keeps its token in the Keychain instead; with **Live usage from your Claude
+  login** on and the login allowed, Threading reads it there. Otherwise it reads the usage feed
   Claude Code itself publishes through its status line when [Claudex](~/repo/claudex) manages
-  it. No usage source means no pill.
+  it, and failing that the CLI's own last saved reading in `.claude.json`. No usage source
+  means no pill.
 
 Threading never stores or refreshes a login itself — it reads what the official CLI keeps, and
 if a token has expired the tooltip says so and the CLI is the place to sign in again.
@@ -3180,7 +3208,7 @@ text. If another composer wins the current turn, the session changes, or reconne
 retry, your draft stays in place with an explanation.
 
 Unsent Native drafts are saved as you type on macOS, iPhone, and the browser. iPhone terminal
-Compose drafts and each terminal's Direct/Compose choice are saved the same way. On iPhone,
+Compose drafts are saved the same way; the Direct/Compose choice is saved once for all TUIs on this device. On iPhone,
 immediately going Back or switching to Direct keeps your Compose text for the next visit.
 iPhone and browser also reopen the last session and restore the reading position for Native
 conversations and agent-UI terminals; the Mac restores each Native conversation's draft and reading position. This
@@ -3202,9 +3230,9 @@ theme from the Mac. Changing Mac appearance from the iPhone updates the same rem
 
 On iPhone, a solo agent-UI terminal starts in **Direct** input: each key goes straight to the real
 TUI. Use the Direct/Compose control on the terminal key bar's action row — the row above the
-keys — when you prefer to write in the iOS text area and send the finished line at once. The choice is remembered for
-that terminal on this device. **Settings → On this iPhone → Terminal keys** can make Compose the
-default for terminal sessions this phone has not seen before, without changing existing choices.
+keys — when you prefer to write in the iOS text area and send the finished line at once. The choice is remembered across
+all TUIs on this device, including after restarting the app. **Settings → On this iPhone → Terminal keys**
+changes the same shared preference.
 
 When another reply-capable participant joins, the terminal temporarily uses **Compose**. The
 entire line and Return reach Claude Code or Codex as one PTY write, so another person cannot mix
@@ -5019,6 +5047,25 @@ colour roles the app actually reads. Built-in and extension themes are shown at 
 locked; **Duplicate to Edit** creates and applies a custom copy in one step. A custom theme's
 colour changes repaint the open window immediately.
 
+Sidebar symbols and agent marks automatically adjust low-contrast template colors against their
+background, including custom-theme selections. Photos and other full-color artwork keep their colors.
+
+The **Tune** section offers particle density, speed and opacity; gradient drift and its cycle;
+picture opacity; terminal glow radius and opacity; title morph style; natural or tinted identity
+marks; and panel/control corner radii. Controls are enabled for the blocks the theme states;
+corner radii stay locked on a hard-bevelled theme, whose corners must be square, and particle
+opacity stops at 60%, the most an ambient field ever draws. Each reading shows its unit — percent,
+×, seconds or points — with your decimal separator. A drag previews immediately and saves one
+validated change on release; if an agent or another window changes the theme mid-drag, their
+change wins and the rest of the drag does nothing. Releasing a picture or particle opacity checks
+the picture under your text and, if labels would be hard to read, suggests a lower opacity below
+the colours. Choosing another title morph style keeps a scramble's alphabet for when you come back
+to Scramble. Duplicate a built-in theme to make these changes. Saved appearance packs appear in
+their own group in both app-theme pickers: choosing a pack activates its theme and extensions
+together, and choosing an ordinary theme releases the pack's extensions. A pack saved for the
+selected theme is offered once, as **Use with “…” pack** under **Packs for “…”**; if it cannot be
+activated, the picker goes back to your theme.
+
 A theme can also put a wash or a picture under the app's panes — the display panel beside a
 conversation, the browser, Git Review, the audit, the settings subpages — the same surfaces a
 theme's dot or grid pattern already reaches, with the pattern drawn over it. Cards, controls,
@@ -5029,11 +5076,21 @@ theme cannot wallpaper you out of the app.
 
 A custom gradient can also drift slowly. Ask your agent to add
 `gradient.drift: {"duration": 24, "distance": 0.12}` to the theme's `material.backdrop`;
-the same gradient and movement reach the iPhone dashboard. The Mac sidebar can use its own
+the same gradient and movement reach the iPhone's themed screens. The Mac sidebar can use its own
 `sidebar.gradient.drift`. Duration is a full cycle in seconds (8–120), and distance is the
 fraction of the gradient it travels (0.02–0.25). Replacing the gradient without `drift` makes it
 still. Reduce Motion and Low Power Mode keep the colors but stop the movement, and hidden
-screens stop animating. Background pictures remain on the Mac.
+screens stop animating. The paired iPhone can show bounded copies of background pictures,
+particle sprites, the logo and mascot. Downloaded pictures remain available offline; missing
+pictures leave the theme usable, and photograph opacity is capped on the phone for readability.
+
+On iPhone, **Settings ▸ Theme motion** controls movement locally. **Workload reactions** and
+**Reaction strength** (0–200%) let dashboard activity quicken the drift and particles. These do
+not change the Mac's settings. Reduce Motion and Low Power Mode still apply; with either, or
+with Theme motion off, a renamed chat crossfades instead of morphing. Navigation chrome
+can follow the theme's system typeface (including rounded, serif and monospaced), while message
+bodies keep their readable default. Themes can also supply working words, decoding chat names
+and tinted agent marks. Account pictures and colours you chose keep their appearance.
 
 A theme can have a **character**, too — ask your agent for one and it can give a theme any of:
 
@@ -5055,7 +5112,7 @@ A theme can have a **character**, too — ask your agent for one and it can give
 - **Pictures pinned to an edge.** A sidebar or pane picture can stand on the bottom edge (or
   any edge or corner) at any window size, rather than always being centred.
 
-**Settings ▸ Themes ▸ Theme animations** stills all of it, and Reduce Motion always does; the
+**Settings ▸ Motion ▸ Theme animations** stills all of it, and Reduce Motion always does; the
 mascot still changes pose, since that tells you something. **Theme sounds** turns a theme's
 sounds off. They only play while Threading is in front and never while every sound is
 silenced; outside the app, your notification sounds answer as before.
@@ -5088,11 +5145,11 @@ Configure terminal palettes in **Settings > Themes**:
   same setting Terminal.app calls Bold Text. Bold text that picks an ANSI color keeps that
   color's bright variant instead, so a bold red stays red
 - An optional **glow**, a soft halo beneath the text in each color's own ink, like an old CRT.
-  No built-in theme has one and Settings has no control for it yet; ask an agent to add or remove
-  it (see [Letting an agent change the theme](#letting-an-agent-change-the-theme)). Underlines,
-  backgrounds and images do not glow, and a cell with its own background covers the glow around
-  it. A glowing terminal takes about four times as long to redraw a full screen, so it is best
-  kept for themes you mean it on; the iPhone shows the same colors without the glow
+  No built-in palette has one. **Current Theme → Tune** adjusts the app theme's glow radius and
+  opacity separately for light and dark appearances; an agent can also edit a terminal palette.
+  Underlines, backgrounds and images do not glow, and a cell with its own background covers the
+  halo around it. Live terminals blur the halo on the GPU. The paired iPhone draws the same
+  glow and turns it off in Low Power Mode
 - Import themes from Terminal.app (.terminal files)
 - Export themes as JSON
 - Duplicate and customize built-in themes (built-in themes are read-only)
@@ -5265,7 +5322,7 @@ A theme can also **move**, and every part of it is optional:
   Theme page, or when an agent applies one — not when the app opens, and not when macOS switches
   between light and dark.
 
-**Settings ▸ Themes ▸ Theme animations** turns all of it off. The theme keeps its look — the
+**Settings ▸ Motion ▸ Theme animations** turns all of it off. The theme keeps its look — the
 particles become a still scatter, the logo stays put, and switching themes is instant again.
 **Reduce Motion** (System Settings ▸ Accessibility ▸ Display) and **Low Power Mode** do the same
 whatever the setting says, and moving particles freeze whenever their window is minimised,
@@ -5540,7 +5597,7 @@ How Threading plugs into each agent CLI's own configuration. Under **Agents** in
 - **React to agent activity** lets themes and extensions move with what agents are doing —
   streams that quicken, rain that thickens, a pulse when a turn comes back. Turn it off to keep
   that decoration still while everything else stays as it is; music reactions keep their own
-  switch, **Music-reactive themes**, and **Theme animations** in Themes still stops all theme
+  switch, **Music-reactive themes**, and **Theme animations** in Motion still stops all theme
   motion.
 - **Reaction strength** scales how strongly every theme and extension reacts to agent activity
   and to music, from 0% to 200% (100% is as each theme designed it). Themes decide *how* they
@@ -5656,8 +5713,12 @@ happen to say — numbers that can be hours old. Switched on, Threading reads th
 Anthropic's usage endpoint directly: the token goes there and nowhere else, is never stored on
 disk, never refreshed, and never logged. macOS asks once per login when you flip the switch —
 answer **Always Allow** and it stays silent — and the row reports where things stand
-(`On — reading 2 of 3 logins`). Background refreshes never trigger a keychain prompt: if a grant
-is missing, the pill quietly falls back to the caches instead. Switching it off stops the reads
+(`On — reading 2 of 3 logins`). A login that is still waiting is named
+(`Waiting for access: rinda01`), and an **Allow…** button beside the switch asks for exactly
+those — no need to switch it off and on. **Add Login** asks for a new Claude login right after
+you sign in, and the command palette's **Allow Keychain Access for Claude Logins…** does the same
+for every waiting login. Background refreshes never trigger a keychain prompt: if a grant is
+missing, the pill falls back to the caches and its popover offers **Allow…** instead. Switching it off stops the reads
 immediately; the keychain approval itself persists until you revoke it in Keychain Access.
 
 **The part worth knowing: agents inherit what you grant Threading.** macOS attributes a directly
@@ -5702,7 +5763,8 @@ traffic never means losing the ability to look for a new app release.
 
 **Settings ▸ General ▸ Software Updates ▸ Agent tools ▸ Check Now** checks installed agent
 versions and their official release sources, even when automatic checking is off. Results stay
-on the page: each tool has an **Installation Guide**, and an available update has an **Update**
+on the page: each tool has an **Installation Guide**, a tool that isn't installed has
+**Install…** (the same install sheet as onboarding), and an available update has an **Update**
 button that opens the visible update terminal. After updating, restart the agent in your chat
 and choose **Check Now** again to refresh the installed version. Package-manager installations
 may need their package manager's update command; the installation guide explains those paths.
@@ -6550,3 +6612,28 @@ configuration, allowing a trusted application to provision named workers remotel
 its agent mailboxes and one-off email-task UI; mailbox credentials never become controller tools.
 These additions do not create a native Threading controller
 dashboard. See [autonomous-controller.md](docs/architecture/autonomous-controller.md).
+
+### Theme details on your paired iPhone
+
+Fonts you supply with a theme can appear in your own paired iPhone's titles and labels. The
+font is registered only inside Threading; conversation text and terminal fonts keep their own
+settings. While a font loads, the phone uses its native typeface fallback.
+
+An enabled appearance pack can also bring its reviewed sidebar shader backdrop to the phone.
+The Mac chooses the pack; **Theme motion**, **Workload reactions** and **Reaction strength** on
+the phone control its local behavior. Reduce Motion stills it, and Low Power Mode turns the
+shader off. A shader that repeatedly exceeds the phone's frame budget is withdrawn on every
+screen until the Mac sends a different one. Turn off **Settings ▸ Extension backdrops** on the
+phone to keep the Mac's shader off it entirely: the phone then neither downloads nor runs it.
+Reduce Transparency and Increase Contrast keep the theme's gradient but drop its picture,
+particles and shader behind the screen.
+
+A theme's attention or turn-finished sound can accompany iPhone notifications after the phone
+has downloaded it. This follows your notification sound settings and **Include response
+previews** consent. Until the sound is installed, or when the hosted service has not been
+updated, notifications retain their ordinary sound choice. Your usage widget takes its accent
+from the Mac pinned for widgets; tinted Home Screens and vibrant Lock Screens use system colors.
+
+Agents can request `preview_app_theme` with `frames: 3` to compare motion at 0, 0.5 and 1 second.
+The app-theme picker offers a matching saved appearance pack beneath its theme when that pack
+explicitly includes the theme.

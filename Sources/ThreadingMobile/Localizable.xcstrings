@@ -4494,13 +4494,13 @@
         }
       }
     },
-    "Direct sends each key to the TUI. Compose writes in an iOS text area and sends the finished line at once. Each terminal remembers its own choice." : {
+    "Direct sends each key to the TUI. Compose writes in an iOS text area and sends the finished line at once. This choice is shared by all terminals on this device." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Direkt skickar varje tangenttryckning till TUI:n. Skrivfält skriver i ett textområde i iOS och skickar hela raden på en gång. Varje terminal kommer ihåg sitt eget val."
+            "value" : "Direkt skickar varje tangenttryckning till TUI:n. Skrivfält skriver i ett textområde i iOS och skickar hela raden på en gång. Valet gäller alla terminaler på den här enheten."
           }
         }
       }
@@ -4956,6 +4956,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tillägg"
+          }
+        }
+      }
+    },
+    "Extension backdrops" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tilläggsbakgrunder"
           }
         }
       }
@@ -9113,6 +9124,17 @@
         }
       }
     },
+    "Reaction strength" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reaktionsstyrka"
+          }
+        }
+      }
+    },
     "Reading changes…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10957,6 +10979,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa resten (%lld)"
+          }
+        }
+      }
+    },
+    "Show the Mac’s extension backdrop on this iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa Macens tilläggsbakgrund på den här iPhonen"
           }
         }
       }
@@ -12826,6 +12859,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Widgetcachen kunde inte återställas. Uppdatera Threading eller försök igen."
+          }
+        }
+      }
+    },
+    "Theme motion" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Temarörelse"
           }
         }
       }
@@ -14879,6 +14923,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arbetar…"
+          }
+        }
+      }
+    },
+    "Workload reactions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reaktioner på arbetsbelastning"
           }
         }
       }

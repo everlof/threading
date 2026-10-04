@@ -824,6 +824,14 @@ final class ExtensionManager:
         return String(data: data, encoding: .utf8)
     }
 
+    /// A cached generation/root snapshot. Remote preparation validates containment and reads
+    /// on its bounded worker, then checks that this exact enabled process still owns the hook.
+    func remoteSurfaceResourceRoot(for identifier: String) -> (root: URL, generation: String)? {
+        guard let generation = sessionGenerations[identifier],
+              let root = packages[identifier]?.bundle?.rootURL else { return nil }
+        return (root, generation)
+    }
+
     /// Reads a custom surface's package picture and prepares it, without filesystem or image
     /// work on the main actor.
     ///

@@ -115,4 +115,102 @@ final class TerminalAttachmentScanReuseTests: XCTestCase {
         observer.scanNow()
         XCTAssertTrue(didResolve(observer), "an advanced buffer is scanned even if the text matches")
     }
+
+    func testBusyOutputRetiresOneScanAndReadsTheLatestBufferOnce() async throws {
+        let first = checkout.appendingPathComponent("first.png")
+        let latest = checkout.appendingPathComponent("latest.png")
+        try Data([1]).write(to: first)
+        try Data([2]).write(to: latest)
+        let gate = ScanReadGate(first: first.path, latest: latest.path)
+        var admitted: [URL] = []
+        let observer = TerminalAttachmentObserver(
+            sessionID: SessionID(),
+            projectRoot: { [checkout] in checkout },
+            currentDirectory: { [checkout] in checkout },
+            text: { _ in gate.read() },
+            record: { resolution, _, _, _ in
+                admitted.append(contentsOf: resolution.insideProject)
+                return .empty
+            }
+        )
+        observer.scanNow()
+        await gate.waitUntilStarted()
+        defer { gate.proceed() }
+
+        for _ in 0..<1_000 { observer.scanNow() }
+        XCTAssertEqual(gate.readCount, 1, "cancelled synchronous work still owns its slot")
+        gate.proceed()
+        let deadline = Date().addingTimeInterval(5)
+        while observer.isScanInFlight, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertFalse(observer.isScanInFlight)
+        XCTAssertEqual(gate.readCount, 2, "a burst retains only the latest request")
+        XCTAssertEqual(admitted.map(\.lastPathComponent), ["latest.png"])
+    }
+
+    func testTerminalFleetSharesOneWorkerAndLeavesMainResponsive() async throws {
+        let gate = ScanReadGate(first: "old", latest: "new")
+        let observers = (0..<8).map { _ in
+            TerminalAttachmentObserver(
+                sessionID: SessionID(),
+                projectRoot: { [checkout] in checkout },
+                currentDirectory: { [checkout] in checkout },
+                text: { _ in gate.read() },
+                record: { _, _, _, _ in .empty }
+            )
+        }
+        observers[0].scanNow()
+        await gate.waitUntilStarted()
+        defer { gate.proceed() }
+        for observer in observers.dropFirst() { observer.scanNow() }
+
+        // Yield to both actor executors with the first read still blocked. Main must service
+        // this continuation, and no other terminal may enter preparation on another thread.
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(gate.readCount, 1)
+        gate.proceed()
+        let deadline = Date().addingTimeInterval(5)
+        while observers.contains(where: \.isScanInFlight), Date() < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertFalse(observers.contains(where: \.isScanInFlight))
+        XCTAssertEqual(gate.readCount, observers.count)
+    }
+
+    private final class ScanReadGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private let started = DispatchSemaphore(value: 0)
+        private let release = DispatchSemaphore(value: 0)
+        private let first: String
+        private let latest: String
+        private var reads = 0
+
+        init(first: String, latest: String) {
+            self.first = first
+            self.latest = latest
+        }
+
+        var readCount: Int { lock.withLock { reads } }
+
+        func read() -> TerminalScanRead {
+            let count = lock.withLock { reads += 1; return reads }
+            if count == 1 {
+                started.signal()
+                _ = release.wait(timeout: .now() + 10)
+            }
+            return TerminalScanRead(text: count == 1 ? first : latest, nextAbsoluteRow: count)
+        }
+
+        func waitUntilStarted() async {
+            let didStart = await Task.detached { self.waitForStart() }.value
+            XCTAssertTrue(didStart, "attachment worker did not start")
+        }
+
+        private func waitForStart() -> Bool {
+            started.wait(timeout: .now() + 5) == .success
+        }
+
+        func proceed() { release.signal() }
+    }
 }

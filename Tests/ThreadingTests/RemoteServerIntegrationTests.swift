@@ -1,3 +1,4 @@
+import AppKit
 import CryptoKit
 import XCTest
 import ThreadingPeerTransport
@@ -24,6 +25,112 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
     private var identityStore: RemoteAccessIdentityStore!
     private var identityDirectory: URL!
     private var port: UInt16!
+
+    func testThemeAssetsRequireAuthenticationAndCurrentThemeMembership() throws {
+        let path = RemoteThemeAsset.routePrefix + String(repeating: "a", count: 64)
+        XCTAssertEqual(try XCTUnwrap(get(path)).status, 401)
+        XCTAssertEqual(try XCTUnwrap(get(path, bearer: "goodtoken")).status, 404)
+        XCTAssertEqual(try XCTUnwrap(get(RemoteThemeAsset.routePrefix + "invalid", bearer: "goodtoken")).status, 404)
+    }
+
+    func testThemeFontRangesRequireThePairedOwnerAndRetireOnThemeChange() async throws {
+        let previous = AppThemeLibrary.current
+        let custom = try AppThemeLibrary.duplicate(AppThemeStyles.cyberpunk, name: "Remote font \(UUID())")
+        defer {
+            AppThemeLibrary.installResolved(previous)
+            _ = AppThemeLibrary.delete(custom)
+        }
+        let fontURL = try XCTUnwrap(Bundle.main.url(forResource: "W95FA", withExtension: "otf"))
+        let fontFolder = try XCTUnwrap(ThemeFontStore.folder(for: custom.id))
+        try await Task.detached {
+            try FileManager.default.createDirectory(at: fontFolder, withIntermediateDirectories: true)
+            try Data(contentsOf: fontURL).write(to: fontFolder.appendingPathComponent("font-fixture.otf"))
+        }.value
+        let variant = try XCTUnwrap(custom.variant(.dark))
+        var material = variant.material
+        material.fontFamily = "W95FA"
+        let theme = AppTheme(id: custom.id, name: custom.name, mode: .dark, summary: nil,
+            variants: [.dark: variant.replacing(material: material)])
+        AppThemeLibrary.installResolved(theme)
+        let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        _ = RemoteThemeAssets.shared.manifest(for: theme, appearance: appearance)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while RemoteThemeAssets.shared.manifest(for: theme, appearance: appearance) == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let asset = try XCTUnwrap(RemoteThemeAssets.shared.manifest(for: theme, appearance: appearance)?.first { $0.kind == .font })
+        authority.set(.init(shareID: "guest", capability: .view, scope: .session(SessionID())), forToken: "guestfonttoken")
+        func fetch(_ token: String, range: String = "bytes=0-31") async throws -> (Data, HTTPURLResponse) {
+            var request = URLRequest(url: try XCTUnwrap(URL(string: "http://127.0.0.1:\(port!)\(RemoteThemeAsset.routePrefix)\(asset.digest)")), cachePolicy: .reloadIgnoringLocalCacheData)
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue(range, forHTTPHeaderField: "Range")
+            let (bytes, response) = try await URLSession.shared.data(for: request)
+            return (bytes, try XCTUnwrap(response as? HTTPURLResponse))
+        }
+        let denied = try await fetch("guestfonttoken")
+        XCTAssertEqual(denied.1.statusCode, 403)
+        let served = try await fetch("goodtoken")
+        XCTAssertEqual(served.1.statusCode, 206)
+        XCTAssertEqual(served.0.count, 32)
+        XCTAssertEqual(served.1.value(forHTTPHeaderField: "Content-Range"), "bytes 0-31/\(asset.byteCount)")
+        let invalid = try await fetch("goodtoken", range: "bytes=0-")
+        XCTAssertEqual(invalid.1.statusCode, 416)
+        AppThemeLibrary.installResolved(previous)
+        let retired = try await fetch("goodtoken")
+        XCTAssertEqual(retired.1.statusCode, 404)
+    }
+
+    func testThemeAssetRouteServesVerifiedBytesAndRetiresThePreviousTheme() async throws {
+        let previous = AppThemeLibrary.current
+        let theme = try AppThemeLibrary.duplicate(AppThemeStyles.cyberpunk, name: "Remote picture \(UUID())")
+        defer {
+            AppThemeLibrary.installResolved(previous)
+            _ = AppThemeLibrary.delete(theme)
+        }
+        let image = NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in
+            NSColor.blue.setFill(); rect.fill(); return true
+        }
+        let cg = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let data = try XCTUnwrap(AppThemePreviewService.pngData(cg))
+        let name = try XCTUnwrap(ThemeAssetStore.store(imageData: data, for: theme.id,
+            slot: .backdrop, variant: .dark))
+        let variant = try XCTUnwrap(theme.variant(.dark))
+        var material = variant.material
+        material.backdrop = ThemeBackdrop(image: .init(asset: name, opacity: 0.2))
+        let pictured = AppTheme(id: theme.id, name: theme.name, mode: .dark, summary: nil,
+            variants: [.dark: variant.replacing(material: material)])
+        AppThemeLibrary.installResolved(pictured)
+        let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        _ = RemoteThemeAssets.shared.manifest(for: pictured, appearance: appearance)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while RemoteThemeAssets.shared.manifest(for: pictured, appearance: appearance) == nil,
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let asset = try XCTUnwrap(RemoteThemeAssets.shared.manifest(for: pictured, appearance: appearance)?.first)
+        let path = RemoteThemeAsset.routePrefix + asset.digest
+        // This case awaits rendition preparation, so its HTTP probes must also yield the
+        // main actor to the route's current-theme admission check.
+        func fetch(bearer: String? = nil) async throws -> (Data, HTTPURLResponse) {
+            let url = try XCTUnwrap(URL(string: "http://127.0.0.1:\(port!)\(path)"))
+            // Asset responses are deliberately immutable. Bypass URLSession's cache so
+            // the retirement assertion reaches the server's current-theme allow-list.
+            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+            request.setValue("test-device", forHTTPHeaderField: "X-Threading-Device")
+            if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization") }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            return (data, try XCTUnwrap(response as? HTTPURLResponse))
+        }
+        let denied = try await fetch()
+        XCTAssertEqual(denied.1.statusCode, 401)
+        let response = try await fetch(bearer: "goodtoken")
+        XCTAssertEqual(response.1.statusCode, 200)
+        XCTAssertEqual(response.0.count, asset.byteCount)
+        XCTAssertEqual(SHA256.hash(data: response.0).map { String(format: "%02x", $0) }.joined(), asset.digest)
+        AppThemeLibrary.installResolved(previous)
+        let retired = try await fetch(bearer: "goodtoken")
+        XCTAssertEqual(retired.1.statusCode, 404)
+    }
 
     override func setUp() async throws {
         try await super.setUp()
@@ -109,17 +216,17 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             )
         }
 
-        // A port the kernel just handed out and gave back, rather than the shipped default: the
-        // listener's port is sticky now, so a test that took the real one would fight the app
-        // the developer is running.
+        // Keep listeners outside the outbound ephemeral range: URLSession can claim a port
+        // between a BSD availability probe and Network.framework's actual bind.
+        let requestedPort = try XCTUnwrap(FreeLocalPort.quiet(), "No free fixture listener port")
         let ready = expectation(description: "listening")
-        server.start(configuration: RemoteListenerConfiguration(preferredPort: FreeLocalPort.take())) {
+        server.start(configuration: RemoteListenerConfiguration(preferredPort: requestedPort)) {
             outcome in
             self.port = outcome.port
             ready.fulfill()
         }
         await fulfillment(of: [ready], timeout: 5)
-        XCTAssertNotNil(port, "the server should bind a loopback port")
+        port = try XCTUnwrap(port, "the server should bind a loopback port")
     }
 
     func testFocusedInputControlAllowsOnlyControllerAndOwnerCanAlwaysReclaim() {

@@ -369,6 +369,8 @@ enum MobileDemoFixture: String, CaseIterable {
 
 struct RootView: View {
     @EnvironmentObject private var model: RemoteAppModel
+    @Environment(\.displayScale) private var displayScale
+    @AppStorage(MobileThemeMotionPreferences.extensionBackdropsKey) private var extensionBackdrops = true
     @State private var issueReportRequest: MobileIssueReportRequest?
     @State private var showsSettings = false
 #if DEBUG
@@ -393,7 +395,7 @@ struct RootView: View {
 #endif
 
     var body: some View {
-        MobileRootBackdrop(ground: theme.ground) {
+        MobileRootBackdrop {
 #if DEBUG
             demoRoot
 #else
@@ -401,6 +403,15 @@ struct RootView: View {
 #endif
         }
         .mobileTheme(theme)
+        .environment(\.mobileThemeWorkload, MobileThemeWorkload(
+            working: model.dashboardCatalogue?.workingCount ?? 0,
+            attention: model.dashboardCatalogue?.attentionCount ?? 0))
+        .task(id: (theme.source?.assets ?? []).map { $0.slot + $0.digest + ($0.fontFamily ?? "") }.joined(separator: ":") + (model.activeHostID ?? "") + (model.me == nil ? "offline" : "live") + (extensionBackdrops ? "" : ":no-surface")) {
+            // With extension backdrops off the shader is never requested from the Mac.
+            await MobileThemeAssets.shared.receive(MobileThemeMotionPreferences.assetRequest(for: theme.source),
+                client: model.client, displayScale: displayScale,
+                hostID: model.activeHost?.hostID ?? model.activeHostID, isOnline: model.me != nil)
+        }
         .background {
             ShakeGestureDetector {
                 guard issueReportRequest == nil else { return }
@@ -758,6 +769,9 @@ struct RootView: View {
         }
         if requestedTheme == "system-remote" {
             return RemoteThemePalette(RemoteAppModel.demoSystemRemoteTheme)
+        }
+        if let requestedTheme, ["theme-font", "theme-shader", "theme-glow"].contains(requestedTheme) {
+            return RemoteThemePalette(RemoteAppModel.demoOptionalTheme(requestedTheme))
         }
         if let requestedTheme,
            let catalogTheme = RemoteAppModel.demoCatalogThemes.first(where: {
@@ -1138,17 +1152,16 @@ struct RootView: View {
 /// to that destination therefore leaves the hosting window visible below it while the screen is
 /// sliding away. The sibling layer stays window-sized while navigation and the keyboard animate.
 struct MobileRootBackdrop<Content: View>: View {
-    let ground: Color
+    @Environment(\.remoteTheme) private var theme
     let content: Content
 
-    init(ground: Color, @ViewBuilder content: () -> Content) {
-        self.ground = ground
+    init(@ViewBuilder content: () -> Content) {
         self.content = content()
     }
 
     var body: some View {
         ZStack {
-            ground.ignoresSafeArea()
+            MobileThemeBackdrop(theme: theme, frozen: true).ignoresSafeArea()
             content
         }
     }

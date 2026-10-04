@@ -100,6 +100,23 @@ enum AgentAccountSetupProvider: String, CaseIterable, Sendable {
             break
         }
     }
+
+    /// What a just-verified login needs from the host before its usage can be live. A Claude
+    /// login's token lands in a keychain item whose ACL lists only the `security` tool, so
+    /// with live usage on, this is when Threading asks for it — the user has just finished a
+    /// sign-in they started, which is the one moment the macOS prompt is expected without a
+    /// button. Asking nowhere else is how a login added after the Privacy switch went on froze
+    /// on the CLI's days-old snapshot.
+    @MainActor
+    func didVerifyLogin(_ account: AgentAccount) {
+        switch self {
+        case .claude:
+            ClaudeKeychainAccess.shared.requestAccessAfterSignIn(account)
+        case .codex:
+            // Codex usage reads `auth.json` directly; there is nothing to grant.
+            break
+        }
+    }
 }
 
 struct AgentAccountSetupContext: Equatable, Sendable {
@@ -580,6 +597,7 @@ final class AgentAccountSetupCoordinator {
         state = .succeeded(account)
         onAccountReady?(account)
         NotificationCenter.default.post(ProjectsDidChange())
+        context.provider.didVerifyLogin(account)
     }
 
     private func fail(

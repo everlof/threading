@@ -2,8 +2,9 @@
 //  TerminalTextGlow.swift
 //  SwiftTerm
 //
-//  An opt-in phosphor glow for the Core Graphics renderer: a soft halo in each
-//  run's own colour, painted beneath the text.
+//  An opt-in phosphor glow: a soft halo in each run's own colour, painted
+//  beneath the text. This file holds the model and the Core Graphics underlay;
+//  the Metal renderer blurs its own on the GPU.
 //
 
 #if os(macOS) || os(iOS) || os(visionOS)
@@ -18,7 +19,8 @@ import Foundation
 /// and coloured text each glow in their own ink, while backgrounds,
 /// underlines, strikethrough, images and the caret do not glow at all. The
 /// halo lies beneath the text: a cell with an explicit background covers the
-/// halo its neighbours cast into it. The Metal renderer ignores the glow.
+/// halo its neighbours cast into it. The Metal renderer draws the same halo on
+/// the GPU (`MetalTerminalRenderer.encodeGlow`, sized by `MetalGlowHaloLayout`).
 ///
 /// A glow whose radius or opacity is zero (or not finite) is off, and an off
 /// glow costs nothing: the renderer neither paints an underlay nor widens a
@@ -142,6 +144,39 @@ struct TextGlowUnderlayPlan: Equatable {
 #if os(macOS)
 import Accelerate
 
+/// Dirty row spans retain the combined ink of neighboring rows before blur, so overlapping
+/// glyphs composite exactly once. Retaining snapshot rows prevents identity reuse in a key.
+final class TextGlowUnderlayCache {
+    struct Entry { let image: CGImage; let rect: CGRect; let rows: [TerminalSnapshot.Row] }
+    private var entries: [UInt64: Entry] = [:]
+    private var order: [UInt64] = []
+    private(set) var byteCount = 0
+    private(set) var builds = 0
+    private(set) var hits = 0
+    private let maximumBytes = 16 * 1_024 * 1_024
+
+    func value(_ key: UInt64) -> Entry? {
+        guard let entry = entries[key] else { return nil }
+        hits += 1
+        order.removeAll { $0 == key }; order.append(key)
+        return entry
+    }
+
+    func insert(_ entry: Entry, key: UInt64) {
+        let cost = entry.image.bytesPerRow * entry.image.height
+        builds += 1
+        guard cost <= maximumBytes else { return }
+        entries[key] = entry; order.append(key); byteCount += cost
+        while byteCount > maximumBytes || order.count > 64 {
+            if let removed = entries.removeValue(forKey: order.removeFirst()) {
+                byteCount -= removed.image.bytesPerRow * removed.image.height
+            }
+        }
+    }
+
+    func removeAll() { entries = [:]; order = []; byteCount = 0 }
+}
+
 extension TerminalView {
     /// Paints the text glow for `rows` beneath the frame, clipped to
     /// `dirtyRect`.
@@ -169,18 +204,60 @@ extension TerminalView {
     ) {
         let device = context.convertToDeviceSpace(CGSize(width: 1, height: 1))
         let deviceScale = max(abs(device.width), abs(device.height))
-        guard let plan = TextGlowUnderlayPlan(
-                glow: glow, dirtyRect: dirtyRect, bounds: bounds, deviceScale: deviceScale),
-              let underlay = Self.makeGlowBitmap(plan: plan, matching: context)
-        else { return }
+        guard cellDimension.height > 0, deviceScale.isFinite else { return }
+        let scale = max(1, deviceScale)
+        guard let plan = TextGlowUnderlayPlan(glow: glow, dirtyRect: dirtyRect,
+            bounds: bounds, deviceScale: scale) else { return }
+        // Everything the underlay's pixels depend on beyond the rows themselves: the render
+        // context (fonts, palette), the inputs the prepared rows are validated against
+        // (`customBlockGlyphs`), and what the draw reads from the view (block-glyph
+        // antialiasing and pixel snapping, cell geometry, the row width a render mode spans).
+        var hasher = Hasher()
+        hasher.combine(renderContext.identity)
+        hasher.combine(renderContext.customBlockGlyphs)
+        hasher.combine(antiAliasCustomBlockGlyphs)
+        hasher.combine(backingScaleFactor())
+        hasher.combine(cellDimension.width); hasher.combine(cellDimension.height)
+        hasher.combine(bounds.width)
+        hasher.combine(plan.originX); hasher.combine(plan.originY)
+        hasher.combine(plan.pixelWidth); hasher.combine(plan.pixelHeight); hasher.combine(scale)
+        hasher.combine(glow.radius); hasher.combine(glow.opacity)
+        hasher.combine(yOffset); hasher.combine(bufferOffset); hasher.combine(frame.height)
+        hasher.combine(context.colorSpace?.name as String?)
+        var contributing: [TerminalSnapshot.Row] = []
+        for row in glowRows(in: plan.rect, snapshot: snapshot, bufferOffset: bufferOffset) {
+            guard let value = snapshot.row(atAbsolute: row) else { continue }
+            contributing.append(value)
+            hasher.combine(ObjectIdentifier(value)); hasher.combine(value.sourceIdentity)
+            hasher.combine(value.sourceGeneration); hasher.combine(value.revision)
+        }
+        let key = UInt64(bitPattern: Int64(hasher.finalize()))
+        let entry: TextGlowUnderlayCache.Entry
+        if let cached = textGlowUnderlayCache.value(key) { entry = cached }
+        else {
+            guard let image = makeTextGlowUnderlay(glow, plan: plan, snapshot: snapshot,
+                renderContext: renderContext, yOffset: yOffset, bufferOffset: bufferOffset, matching: context) else { return }
+            entry = .init(image: image, rect: plan.rect, rows: contributing)
+            textGlowUnderlayCache.insert(entry, key: key)
+        }
+        context.saveGState()
+        context.clip(to: dirtyRect)
+        context.draw(entry.image, in: entry.rect)
+        context.restoreGState()
+    }
+
+    private func makeTextGlowUnderlay(_ glow: TerminalTextGlow, plan: TextGlowUnderlayPlan,
+        snapshot: TerminalSnapshot, renderContext: SnapshotRenderContext, yOffset: CGFloat,
+        bufferOffset: Int, matching context: CGContext) -> CGImage? {
+        guard let underlay = Self.makeGlowBitmap(plan: plan, matching: context)
+        else { return nil }
         underlay.translateBy(x: -CGFloat(plan.originX), y: -CGFloat(plan.originY))
         underlay.scaleBy(x: plan.pixelsPerPoint, y: plan.pixelsPerPoint)
 
         let cellHeight = cellDimension.height
-        let reach = glow.reachInRows(cellHeight: cellHeight)
         let area = plan.rect
         var drewRows = false
-        for row in (rows.lowerBound - reach)...(rows.upperBound + reach) {
+        for row in glowRows(in: area, snapshot: snapshot, bufferOffset: bufferOffset) {
             guard row >= 0, let snapshotRow = snapshot.row(atAbsolute: row) else {
                 continue
             }
@@ -211,11 +288,16 @@ extension TerminalView {
 
         guard drewRows,
               Self.blur(underlay, halfWidths: plan.boxHalfWidths, opacity: glow.opacity),
-              let image = underlay.makeImage() else { return }
-        context.saveGState()
-        context.clip(to: dirtyRect)
-        context.draw(image, in: plan.rect)
-        context.restoreGState()
+              let image = underlay.makeImage() else { return nil }
+        return image
+    }
+
+    private func glowRows(in area: CGRect, snapshot: TerminalSnapshot, bufferOffset: Int) -> Range<Int> {
+        let lower = max(snapshot.firstRow,
+            bufferOffset + Int(floor((frame.height - area.maxY) / cellDimension.height)))
+        let upper = min(snapshot.firstRow + snapshot.rowCount,
+            bufferOffset + Int(ceil((frame.height - area.minY) / cellDimension.height)))
+        return lower..<max(lower, upper)
     }
 
     /// An 8-bit premultiplied bitmap for the underlay, in the destination's

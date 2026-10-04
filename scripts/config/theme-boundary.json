@@ -435,6 +435,12 @@
       "kind": "frozenLayerColor",
       "symbol": "backgroundColor",
       "reason": "The still field is a tiled pattern image, which Core Animation only takes as a CGColor; refresh() restates it on every theme change, appearance flip and motion-setting change through ThemeParticleHold."
+    },
+    {
+      "path": "Sources/ThreadingMobile/MobileThemeBackdrop.swift",
+      "kind": "frozenLayerColor",
+      "symbol": "backgroundColor",
+      "reason": "The still particle field is a tiled pattern image, which Core Animation takes as a CGColor. The shared mobile backdrop restates it on every theme, viewport, scale and workload change, and gates it with its presentation lifecycle."
     }
   ]
 }

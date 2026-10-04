@@ -578,14 +578,32 @@ final class ThemeSettingsRenderTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let previous = AppThemeLibrary.current
-        let custom = try AppThemeLibrary.duplicate(
+        var custom = try AppThemeLibrary.duplicate(
             AppThemeStyles.swissMinimalist,
-            name: "Editable Render \(UUID().uuidString)"
+            name: "Editable Render"
         )
         defer {
             AppThemeLibrary.apply(previous)
             _ = AppThemeLibrary.delete(custom)
         }
+
+        var variants = custom.variants
+        for kind in custom.availableVariants {
+            let base = try XCTUnwrap(custom.variant(kind))
+            var material = base.material
+            let ground = custom.resolved(.ground, appearance: try XCTUnwrap(kind.appearance))
+            material.backdrop = ThemeBackdrop(gradient: .init(stops: [
+                .init(color: ground, position: 0), .init(color: ground, position: 1)
+            ], drift: .init()), image: .init(asset: "backdrop-\(kind.rawValue).png", opacity: 0.1),
+                particles: .init(style: .snow))
+            var terminal = base.terminalPalette
+            terminal.glow = .standard
+            variants[kind] = base.replacing(terminalPalette: terminal, material: material)
+                .replacingTitleMorph(.init(style: .shapeMorph))
+        }
+        custom = AppTheme(id: custom.id, name: custom.name, mode: custom.mode,
+            summary: custom.summary, variants: variants)
+        try AppThemeLibrary.update(custom)
 
         let fixtures: [(String, AppTheme, NSAppearance.Name)] = [
             ("system-light-locked", .system, .aqua),
@@ -624,6 +642,27 @@ final class ThemeSettingsRenderTests: XCTestCase {
                 controller.view.subviews.first { $0 is NSScrollView } as? NSScrollView
             )
             let document = try XCTUnwrap(scroll.documentView)
+            let tuningSlider = try XCTUnwrap(descendants(in: document).first {
+                $0.accessibilityIdentifier() == "current-theme.tune.density"
+            })
+            let tuningSliders = descendants(in: document).compactMap { $0 as? ThemedScrubber }.filter {
+                $0.accessibilityIdentifier().hasPrefix("current-theme.tune.")
+            }
+            let tracks = tuningSliders.map { $0.convert($0.bounds, to: document) }
+            XCTAssertEqual(tracks.count, CurrentThemeTuningControls.Knob.allCases.count)
+            for track in tracks {
+                XCTAssertGreaterThan(track.minX, document.bounds.midX,
+                    "Tuning controls must stay in the trailing column")
+                XCTAssertEqual(track.maxX, tracks.first?.maxX ?? 0, accuracy: 1,
+                    "Numeric readings must not move each slider to a different column")
+            }
+            let tuningY = tuningSlider.convert(tuningSlider.bounds, to: document).minY - 300
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, tuningY)))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            host.layoutSubtreeIfNeeded()
+            var tuningData: Data?
+            appearance.performAsCurrentDrawingAppearance { tuningData = png(of: host) }
+            try XCTUnwrap(tuningData).write(to: directory.appendingPathComponent("current-theme-\(name)-tune.png"))
             XCTAssertGreaterThan(
                 document.bounds.height,
                 scroll.contentView.bounds.height,

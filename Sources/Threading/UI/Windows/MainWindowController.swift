@@ -848,6 +848,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         containerViewController.runAgentCLIUpdates = { [weak self] plan in
             self?.runAgentCLIUpdates(plan) != nil
         }
+        containerViewController.onOpenTriggerSession = { [weak self] sessionID in
+            self?.sidebarViewController.select(sessionID: sessionID)
+        }
 
         containerViewController.composerDelegate = sessionCoordinator
         let contentItem = NSSplitViewItem(viewController: containerViewController)

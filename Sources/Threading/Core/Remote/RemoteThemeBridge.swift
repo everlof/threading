@@ -13,18 +13,33 @@ enum RemoteThemeBridge {
         appTheme(AppThemeLibrary.current)
     }
 
-    static func catalog() -> RemoteThemeCatalogDTO {
-        RemoteThemeCatalogDTO(
-            appThemes: AppThemeLibrary.all.map(appTheme),
+    /// The current theme as `authorization` may use it. Fonts and the extension surface's
+    /// shader are owner-only on the asset route, so a collaborator is not told their digests,
+    /// family names or the surface recipe either.
+    static func appTheme(for authorization: RemoteAuthorization?) -> RemoteThemeDTO {
+        appTheme(AppThemeLibrary.current, includesOwnerAssets: receivesOwnerAssets(authorization))
+    }
+
+    static func receivesOwnerAssets(_ authorization: RemoteAuthorization?) -> Bool {
+        authorization?.canReadHostUsage == true
+    }
+
+    static func catalog(for authorization: RemoteAuthorization? = nil) -> RemoteThemeCatalogDTO {
+        let ownerAssets = authorization.map(receivesOwnerAssets) ?? true
+        return RemoteThemeCatalogDTO(
+            appThemes: AppThemeLibrary.all.map { appTheme($0, includesOwnerAssets: ownerAssets) },
             terminalThemes: ThemeAssignments.selectableThemes.map(terminalTheme)
         )
     }
 
     /// The chrome block and the material's bevel are deliberately not projected: the remote
     /// client has no window frame to dress and no bevel interpreter, and a DTO field nothing
-    /// renders is churn. The two bevel roles ride along in the resolved colour map like every
+    /// renders is churn. Extension executables stay on the Mac; one reviewed Metal backdrop
+    /// recipe, process-scoped theme fonts, notification cues and terminal glow now have phone
+    /// consumers, alongside typeface hints, title morphs, identity ink, particles and images.
+    /// The two bevel roles ride along in the resolved colour map like every
     /// role — harmless, and a future client that learns to bevel finds its colours waiting.
-    static func appTheme(_ theme: AppTheme) -> RemoteThemeDTO {
+    static func appTheme(_ theme: AppTheme, includesOwnerAssets: Bool = true) -> RemoteThemeDTO {
         var colors: [String: String] = [:]
         var mode = RemoteThemeMode(rawValue: theme.mode.rawValue)
         var glowColor: String?
@@ -101,9 +116,27 @@ enum RemoteThemeBridge {
                 fontFamily: material.fontFamilies.first {
                     Design.Typography.availableFamilies.contains($0)
                 },
-                backdropGradient: backdropGradient
+                backdropGradient: backdropGradient,
+                identityMarks: material.identityMarks.rawValue,
+                particles: material.backdrop?.particles.map {
+                    .init(style: $0.style, shape: $0.shape, colors: $0.colors.map(\.wireValue),
+                          density: $0.density, size: $0.size, speed: $0.speed, opacity: $0.opacity,
+                          sprites: $0.sprites.compactMap { name in
+                              theme.variant(for: appearance)?.sprites.firstIndex { $0.name == name }
+                                  .map { "sprite.\($0)" }
+                          })
+                }
             ),
-            words: words
+            words: words,
+            titleMorph: theme.variant(for: appearance)?.titleMorph.map {
+                .init(style: $0.style.rawValue, characters: $0.characters)
+            },
+            assets: RemoteThemeAssets.shared.manifest(for: theme, appearance: appearance).flatMap { manifest in
+                let visible = manifest.filter { includesOwnerAssets || !$0.requiresOwner }
+                return visible.isEmpty ? nil : visible
+            },
+            surface: includesOwnerAssets && theme.id == AppThemeLibrary.current.id
+                ? RemoteThemeAssets.shared.surface : nil
         )
     }
 
@@ -145,23 +178,24 @@ enum RemoteThemeBridge {
                 theme.blue, theme.magenta, theme.cyan, theme.white,
                 theme.brightBlack, theme.brightRed, theme.brightGreen, theme.brightYellow,
                 theme.brightBlue, theme.brightMagenta, theme.brightCyan, theme.brightWhite,
-            ].map(\.hexString)
+            ].map(\.hexString),
+            glow: theme.glow.map { .init(radius: Double($0.radius), opacity: Double($0.opacity)) }
         )
     }
 
     /// A fixed app theme pins `NSApp.appearance`; using that pinned appearance to preview an
     /// inactive adaptive choice would resolve the wrong variant. Read the user's global mode
     /// for adaptive catalogue entries unless one is already active.
-    private static func drawingAppearance(for theme: AppTheme) -> NSAppearance {
+    static func drawingAppearance(for theme: AppTheme) -> NSAppearance {
         guard theme.isAdaptive else { return theme.mode.appearance ?? NSApp.effectiveAppearance }
         if AppThemeLibrary.current.isAdaptive { return NSApp.effectiveAppearance }
         let isDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
         return NSAppearance(named: isDark ? .darkAqua : .aqua) ?? NSApp.effectiveAppearance
     }
 
-    static func update(for sessionID: SessionID) -> RemoteThemeUpdateDTO {
+    static func update(for sessionID: SessionID, authorization: RemoteAuthorization? = nil) -> RemoteThemeUpdateDTO {
         RemoteThemeUpdateDTO(
-            theme: appTheme(),
+            theme: authorization.map { appTheme(for: $0) } ?? appTheme(),
             terminalTheme: terminalTheme(for: sessionID)
         )
     }

@@ -163,7 +163,9 @@ struct ExtensionInstallProposal: Equatable {
             paragraphs.append(
                 "It includes Metal shader source that Threading will compile and run in a "
                     + "host-owned visual surface. Shaders cannot access AppKit or host objects, "
-                    + "but they can consume GPU resources; review the included source."
+                    + "but they can consume GPU resources; review the included source. A sidebar "
+                    + "backdrop is also drawn on your paired iPhone, which compiles the same "
+                    + "source; Extension backdrops in the iPhone's Settings turns that off."
             )
         }
         if !themeNames.isEmpty {

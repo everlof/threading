@@ -40,6 +40,9 @@ extension AgentToolCoordinator {
     }
 
     func getAppTheme(_ arguments: AppThemeReferenceArguments) -> MCPToolResult {
+        if let section = arguments.section {
+            return MCPTools.appThemeDocumentation(section: section)
+        }
         guard let theme = appTheme(referencedBy: arguments.themeID) else {
             return missingAppTheme(arguments.themeID)
         }
@@ -148,14 +151,15 @@ extension AgentToolCoordinator {
                 startingFrom: base,
                 origin: .base(name: base.name)
             ).text
+            let warnings = await ThemeImageLegibility.warnings(for: theme)
             if arguments.apply ?? true {
                 try await applyAppThemeChoice(theme)
                 return .success(
-                    "Created and applied \(theme.name) (\(theme.id.rawValue)).\n\n\(layers)"
+                    "Created and applied \(theme.name) (\(theme.id.rawValue)).\n\n\(layers)\(warnings)"
                 )
             }
             return .success(
-                "Created \(theme.name) (\(theme.id.rawValue)) without applying it.\n\n\(layers)"
+                "Created \(theme.name) (\(theme.id.rawValue)) without applying it.\n\n\(layers)\(warnings)"
             )
         } catch {
             if !didCreate { ThemeAssetStore.removeAll(for: newID) }
@@ -350,8 +354,9 @@ extension AgentToolCoordinator {
                 startingFrom: source,
                 origin: .previous
             ).text
+            let warnings = await ThemeImageLegibility.warnings(for: updated)
             return .success(
-                "Updated \(updated.name) (\(updated.id.rawValue)).\(state)\n\n\(layers)"
+                "Updated \(updated.name) (\(updated.id.rawValue)).\(state)\n\n\(layers)\(warnings)"
             )
         } catch {
             var rollbackFailure: Error?

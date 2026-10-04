@@ -84,6 +84,15 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     `main` at `58224a7`. The vendored source tree matches that revision; Git metadata, build
     output and ignored generated cache artifacts are not copied into the application repository.
   - **This is our fork** - feel free to modify SwiftTerm source code directly to implement features or fix bugs. The iOS folder is excluded on macOS builds.
+  - **Shared-memory calls cross a fixed C seam.** Darwin declares `shm_open` variadically, so
+    a Swift `@_silgen_name` declaration with a fixed mode argument does not follow its C varargs
+    ABI. That created Kitty test images with incorrect permissions and refused the subsequent
+    read. `SwiftTermPOSIX` owns the fixed C wrapper on every platform; the shared-memory fixture
+    checks the exact owner-only permissions as well as image delivery and unlinking.
+  - **A forced Metal frame waits for the previous GPU frame.** `drawMetalFrameNow` suspends the
+    CPU render loop and uses the renderer's bounded idle wait before submitting its snapshot.
+    Suspending the loop alone leaves the GPU's frame permit occupied, so a terminal remounted
+    immediately after releasing its glow could silently skip the requested reallocation.
   - **Use upstream's implementation when it has one.** This reconciliation removes our former
     copies of colour-scheme reporting, hidden-normal-buffer reflow, output-stable selection and
     local-process lifecycle/draining. Those are now upstream code, not downstream seams. The

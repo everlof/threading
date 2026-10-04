@@ -174,6 +174,12 @@ records why it cannot be removed.
    `interiorBackgroundStyle` to those and to nothing else — and an ink baked from a ground is
    `ThemeDerivedContent`, since the theme sweep re-resolves recorded surfaces, layer colours and
    fonts, and a baked foreground is none of those.
+
+   **A tint property is not proof of template pixels.** AppKit paints an emphasized image cell
+   white regardless of `contentTintColor`. Use `GlyphView` for dynamic sidebar marks and give
+   `contrastGround` the row's actual face. It measures composited ink and repairs failing contrast
+   at draw time, while finished artwork keeps its colors. Cover the selected mark with a pixel
+   assertion in its shipping list, not only a tint-property assertion.
 19. Add behavior tests and render the component under at least System plus two deliberately
    different app themes. Include focus, selection and disabled states when applicable. A claim
    about balance, alignment or legibility is checked by looking at a render, not by asserting

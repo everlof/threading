@@ -68,6 +68,7 @@ final class RemoteNotificationService {
         let soundEnabledKinds: Set<RemoteNotificationKind>
         let capabilities: Set<RemoteNotificationCapability>
         let includesResponsePreviews: Bool
+        let themeSoundNames: [String: String]
     }
 
     private struct DeliverySummary {
@@ -108,6 +109,9 @@ final class RemoteNotificationService {
         String,
         Bool
     ) async -> RemoteAPNSDeliveryResult
+    typealias HostedThemePushSender = @MainActor (
+        RemoteNotificationEventDTO, String, Bool, String?
+    ) async -> RemoteAPNSDeliveryResult
     typealias HostedRetractionSender = @MainActor (
         RemoteNotificationRetractionDTO,
         String
@@ -116,7 +120,7 @@ final class RemoteNotificationService {
     private let subscriptionStore: RemoteNotificationSubscriptionPersisting
     private let localPushSender: RemoteAPNSPushSender?
     private let recordsPersistenceDiagnostics: Bool
-    private var hostedPushSender: HostedPushSender?
+    private var hostedPushSender: HostedThemePushSender?
     private var hostedRetractionSender: HostedRetractionSender?
     private var hostedPushAvailability: (@MainActor () -> Bool)?
     private var hostedPushServiceURL: (@MainActor () -> URL?)?
@@ -299,6 +303,17 @@ final class RemoteNotificationService {
     ) {
         hostedPushServiceURL = serviceURL
         hostedPushAvailability = isAvailable
+        hostedPushSender = { event, registration, sound, _ in await send(event, registration, sound) }
+        responseDeliveryCoordinator.transportChanged()
+    }
+
+    func configureHostedThemePushSender(
+        serviceURL: @escaping @MainActor () -> URL?,
+        isAvailable: @escaping @MainActor () -> Bool,
+        send: @escaping HostedThemePushSender
+    ) {
+        hostedPushServiceURL = serviceURL
+        hostedPushAvailability = isAvailable
         hostedPushSender = send
         responseDeliveryCoordinator.transportChanged()
     }
@@ -471,6 +486,7 @@ final class RemoteNotificationService {
         )
         let capabilities = Set(registration.capabilities ?? [])
         let includesResponsePreviews = registration.includesResponsePreviews ?? false
+        let themeSoundNames = registration.themeSoundNames ?? [:]
         let activeHostedServiceURL = RemoteNotificationSubscriptionDefaults
             .normalizedHostedServiceURL(hostedPushServiceURL?())
         let previous = persistedSubscriptions[RemoteNotificationSubscriptionKey(
@@ -505,7 +521,8 @@ final class RemoteNotificationService {
            enabledKinds.count == registration.enabledKinds.count,
            capabilities.count == (registration.capabilities ?? []).count,
            !includesResponsePreviews || capabilities.contains(.turnCompletionPreview),
-           soundEnabledKinds.isSubset(of: enabledKinds) else {
+           soundEnabledKinds.isSubset(of: enabledKinds),
+           RemoteThemeSound.acceptsReceipts(themeSoundNames) else {
             return .invalid
         }
 
@@ -521,7 +538,8 @@ final class RemoteNotificationService {
             enabledKinds: enabledKinds.sorted { $0.rawValue < $1.rawValue },
             soundEnabledKinds: soundEnabledKinds.sorted { $0.rawValue < $1.rawValue },
             capabilities: capabilities.sorted { $0.rawValue < $1.rawValue },
-            includesResponsePreviews: includesResponsePreviews
+            includesResponsePreviews: includesResponsePreviews,
+            themeSoundNames: themeSoundNames
         )
         guard RemoteNotificationSubscriptionDefaults.isValid([record]),
               !persistenceWritesBlocked else {
@@ -554,7 +572,8 @@ final class RemoteNotificationService {
             enabledKinds: enabledKinds,
             soundEnabledKinds: soundEnabledKinds,
             capabilities: capabilities,
-            includesResponsePreviews: includesResponsePreviews
+            includesResponsePreviews: includesResponsePreviews,
+            themeSoundNames: themeSoundNames
         )
         subscriptions[record.key] = activeSubscription
         if !wasRegistered, let foreground = foregroundConnections[record.key] {
@@ -580,7 +599,7 @@ final class RemoteNotificationService {
                 sessionID: sessionID.uuidString,
                 title: "Chat shared with you",
                 body: Self.safeText(
-                    session.displayTitle,
+                    session.presentedTitle,
                     bytes: RemoteAccessDefaults.maximumNotificationBodyBytes
                 ),
                 titleLocalization: .init(key: "Chat shared with you")
@@ -612,7 +631,7 @@ final class RemoteNotificationService {
             hostID: RemoteHostIdentity.current.id,
             sessionID: sessionID.uuidString,
             title: Self.safeText(
-                "\(session.displayTitle) needs permission",
+                "\(session.presentedTitle) needs permission",
                 bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
             ),
             // Tool arguments, paths and diffs belong behind authentication, not on a lock screen.
@@ -621,7 +640,7 @@ final class RemoteNotificationService {
             titleLocalization: .init(
                 key: "%@ needs permission",
                 arguments: [Self.safeText(
-                    session.displayTitle,
+                    session.presentedTitle,
                     bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
                 )]
             ),
@@ -640,13 +659,13 @@ final class RemoteNotificationService {
             hostID: RemoteHostIdentity.current.id,
             sessionID: sessionID.uuidString,
             title: Self.safeText(
-                "\(session.displayTitle) needs permission",
+                "\(session.presentedTitle) needs permission",
                 bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
             ),
             body: "Browser is waiting. Open the chat to review the request.",
             titleLocalization: .init(
                 key: "%@ needs permission",
-                arguments: [Self.safeText(session.displayTitle, bytes: RemoteAccessDefaults.maximumNotificationTitleBytes)]
+                arguments: [Self.safeText(session.presentedTitle, bytes: RemoteAccessDefaults.maximumNotificationTitleBytes)]
             ),
             bodyLocalization: .init(
                 key: "Browser is waiting. Open the chat to review the request."
@@ -705,7 +724,7 @@ final class RemoteNotificationService {
                 participantID: participantID,
                 generation: generation,
                 title: Self.safeText(
-                    session.displayTitle,
+                    session.presentedTitle,
                     bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
                 ),
                 snapshot: CompletedTurnSnapshotStore.shared.snapshot(
@@ -728,11 +747,11 @@ final class RemoteNotificationService {
         }
 
         let title = Self.safeText(
-            "\(session.displayTitle) needs your response",
+            "\(session.presentedTitle) needs your response",
             bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
         )
         let safeTitle = Self.safeText(
-            session.displayTitle,
+            session.presentedTitle,
             bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
         )
         let event = RemoteNotificationEventDTO(
@@ -866,7 +885,8 @@ final class RemoteNotificationService {
                     event,
                     deviceToken: subscription.deviceToken,
                     environment: subscription.environment,
-                    playsSound: subscription.soundEnabledKinds.contains(event.kind)
+                    playsSound: subscription.soundEnabledKinds.contains(event.kind),
+                    soundName: self.themeSoundName(for: event.kind, subscription: subscription)
                 )
             } else if let hostedPushSender = self.hostedPushSender,
                       let registrationID = subscription.hostedRegistrationID,
@@ -877,7 +897,8 @@ final class RemoteNotificationService {
                 result = await hostedPushSender(
                     event,
                     registrationID,
-                    subscription.soundEnabledKinds.contains(event.kind)
+                    subscription.soundEnabledKinds.contains(event.kind),
+                    self.themeSoundName(for: event.kind, subscription: subscription)
                 )
             } else {
                 // Named rather than reported as a transport failure: no request was made, and
@@ -1110,7 +1131,7 @@ final class RemoteNotificationService {
 
         let resolvedTitle = Self.safeText(
             title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-                ?? session.displayTitle,
+                ?? session.presentedTitle,
             bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
         )
         let event = RemoteNotificationEventDTO(
@@ -1159,7 +1180,7 @@ final class RemoteNotificationService {
             bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
         )
         let safeSessionTitle = Self.safeText(
-            session.displayTitle,
+            session.presentedTitle,
             bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
         )
         let event = RemoteNotificationEventDTO(
@@ -1366,14 +1387,16 @@ final class RemoteNotificationService {
                         event,
                         deviceToken: target.deviceToken,
                         environment: target.environment,
-                        playsSound: target.soundEnabledKinds.contains(event.kind)
+                        playsSound: target.soundEnabledKinds.contains(event.kind),
+                        soundName: self.themeSoundName(for: event.kind, subscription: target)
                     )
                 } else if let hostedPushSender,
                           let hostedRegistrationID = target.hostedRegistrationID {
                     result = await hostedPushSender(
                         event,
                         hostedRegistrationID,
-                        target.soundEnabledKinds.contains(event.kind)
+                        target.soundEnabledKinds.contains(event.kind),
+                        self.themeSoundName(for: event.kind, subscription: target)
                     )
                 } else {
                     return
@@ -1475,7 +1498,8 @@ final class RemoteNotificationService {
             enabledKinds: Set(record.enabledKinds),
             soundEnabledKinds: Set(record.soundEnabledKinds),
             capabilities: Set(record.capabilities),
-            includesResponsePreviews: record.includesResponsePreviews
+            includesResponsePreviews: record.includesResponsePreviews,
+            themeSoundNames: record.themeSoundNames
         )
     }
 
@@ -1487,6 +1511,13 @@ final class RemoteNotificationService {
             if $0.shareID != $1.shareID { return $0.shareID < $1.shareID }
             return $0.deviceID < $1.deviceID
         }
+    }
+
+    private func themeSoundName(for kind: RemoteNotificationKind, subscription: Subscription) -> String? {
+        guard RemoteThemeSoundDelivery.permits(kind, includesResponsePreviews: subscription.includesResponsePreviews,
+                  authorization: subscription.authorization, soundEnabledKinds: subscription.soundEnabledKinds)
+        else { return nil }
+        return RemoteThemeAssets.shared.soundName(for: kind, confirmed: subscription.themeSoundNames)
     }
 
     private static func announcementKey(_ key: RemoteNotificationSubscriptionKey) -> String {
@@ -1700,7 +1731,8 @@ actor RemoteAPNSPushSender {
         _ event: RemoteNotificationEventDTO,
         deviceToken: String,
         environment: Environment,
-        playsSound: Bool = true
+        playsSound: Bool = true,
+        soundName: String? = nil
     ) async -> RemoteAPNSDeliveryResult {
         guard let url = URL(
             string: "https://\(environment.host)/3/device/\(deviceToken)"
@@ -1715,7 +1747,8 @@ actor RemoteAPNSPushSender {
         var deliveredEvent = event
         var body = try? JSONEncoder().encode(envelope(
             for: deliveredEvent,
-            playsSound: playsSound
+            playsSound: playsSound,
+            soundName: soundName
         ))
         if let count = body?.count, count > 4_096 {
             // APNs rejects an alert payload above 4 KB. Keep the same event id/deep link and a
@@ -1735,7 +1768,8 @@ actor RemoteAPNSPushSender {
             )
             body = try? JSONEncoder().encode(envelope(
                 for: deliveredEvent,
-                playsSound: playsSound
+                playsSound: playsSound,
+                soundName: soundName
             ))
         }
         guard let body, body.count <= 4_096 else {
@@ -1897,7 +1931,8 @@ actor RemoteAPNSPushSender {
 
     private func envelope(
         for event: RemoteNotificationEventDTO,
-        playsSound: Bool
+        playsSound: Bool,
+        soundName: String? = nil
     ) -> Envelope {
         Envelope(
             aps: .init(
@@ -1909,7 +1944,7 @@ actor RemoteAPNSPushSender {
                     bodyLocalizationKey: event.bodyLocalization?.key,
                     bodyLocalizationArguments: event.bodyLocalization?.arguments
                 ),
-                sound: playsSound ? "default" : nil,
+                sound: RemoteThemeSoundDelivery.apsSound(playsSound: playsSound, themeSoundName: soundName),
                 threadID: event.sessionID,
                 category: event.kind == .permissionRequest
                     ? "THREADING_PERMISSION"
@@ -1951,5 +1986,25 @@ actor RemoteAPNSPushSender {
             return nil
         }
         return object["reason"] as? String
+    }
+}
+
+/// When a push may name the paired phone's installed theme sound instead of the default.
+enum RemoteThemeSoundDelivery {
+    /// The theme's sound is a preview of the host's appearance, so only an owner device that
+    /// consented to previews, and still wants this kind's sound at all, may be sent its name.
+    static func permits(
+        _ kind: RemoteNotificationKind,
+        includesResponsePreviews: Bool,
+        authorization: RemoteAuthorization,
+        soundEnabledKinds: Set<RemoteNotificationKind>
+    ) -> Bool {
+        includesResponsePreviews && authorization.canReadHostUsage && soundEnabledKinds.contains(kind)
+    }
+
+    /// The `aps.sound` value: silence wins, an accepted theme sound name next, then "default".
+    static func apsSound(playsSound: Bool, themeSoundName: String?) -> String? {
+        guard playsSound else { return nil }
+        return themeSoundName.flatMap { RemoteThemeSound.acceptsName($0) ? $0 : nil } ?? "default"
     }
 }

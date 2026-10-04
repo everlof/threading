@@ -100,6 +100,55 @@ final class SessionImportBelongingTests: XCTestCase {
         )
     }
 
+    // MARK: - A conversation carried into another checkout
+
+    /// A chat resumed in a sibling worktree is filed under that worktree's slug, but its file
+    /// opens with the records it continued from, which name the main checkout. Judged by the
+    /// first `cwd` alone it belonged nowhere: the sibling's project rejected it, and the main
+    /// checkout's slug no longer held the live file. The newest record says where it is now.
+    func testAChatResumedInASiblingWorktreeBelongsToThatWorktree() throws {
+        let layout = try buildLayout()
+        let sibling = layout.sibling.path
+        let siblingWorktree = GitInfo.worktreeIdentity(for: sibling)
+        let subdirectory = layout.sibling.appendingPathComponent("web")
+        try FileManager.default.createDirectory(at: subdirectory, withIntermediateDirectories: true)
+
+        let transcript = root.appendingPathComponent("carried.jsonl")
+        try transcriptLines(cwds: [layout.main.path, sibling, subdirectory.path])
+            .write(to: transcript, atomically: true, encoding: .utf8)
+
+        XCTAssertFalse(
+            SessionImporter.belongs(cwd: layout.main.path, folder: sibling, worktree: siblingWorktree),
+            "the first cwd alone rejects it, which is the failure this covers"
+        )
+        XCTAssertTrue(SessionImporter.latestCwdBelongs(
+            at: transcript,
+            folder: sibling,
+            worktree: siblingWorktree
+        ))
+        XCTAssertFalse(
+            SessionImporter.latestCwdBelongs(
+                at: transcript,
+                folder: layout.main.path,
+                worktree: layout.worktree
+            ),
+            "the checkout it left does not get it back through the tail"
+        )
+    }
+
+    /// One user record per directory, oldest first, shaped like Claude's transcript lines.
+    private func transcriptLines(cwds: [String]) throws -> String {
+        try cwds.enumerated().map { index, cwd in
+            let record: [String: Any] = [
+                "type": "user",
+                "cwd": cwd,
+                "message": ["role": "user", "content": "turn \(index)"],
+            ]
+            let data = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
+            return String(decoding: data, as: UTF8.self)
+        }.joined(separator: "\n") + "\n"
+    }
+
     // MARK: - Fixture
 
     private struct Layout {

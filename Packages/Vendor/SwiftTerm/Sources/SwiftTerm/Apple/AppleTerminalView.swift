@@ -780,11 +780,7 @@ struct FrameViewState: Sendable {
 #endif
         bidiHostPolicy = view.bidiHostPolicy
         glyphFallbackProvider = view.glyphFallbackProvider
-#if os(macOS)
         textGlow = view.textGlow
-#else
-        textGlow = nil
-#endif
     }
 }
 
@@ -827,6 +823,7 @@ struct SnapshotNativeColors {
 }
 
 struct SnapshotRenderContext {
+    let textGlow: TerminalTextGlow?
     let fonts: FrameFontSet
     let cellDimension: TerminalView.CellDimension
     let viewBounds: CGRect
@@ -890,6 +887,7 @@ struct SnapshotRenderContext {
     private init (viewState: FrameViewState, style: SnapshotStyle,
                   nativeColors: SnapshotNativeColors, cols: Int) {
         fonts = viewState.fonts
+        textGlow = viewState.textGlow
         cellDimension = viewState.cellDimension
         viewBounds = viewState.viewBounds
         renderingScale = viewState.renderingScale
@@ -1232,6 +1230,7 @@ struct GlyphMetrics {
 }
 
 private let terminalFramePresentedHandler = LockedVoidCallback()
+private let terminalGPUFrameHandler = Locked<(@Sendable (Double) -> Void)?>(nil)
 
 /// The current terminal grid size.
 public struct TerminalDimensions: Sendable, Equatable {
@@ -1502,6 +1501,13 @@ extension TerminalView {
     public nonisolated static var onFramePresented: (@Sendable () -> Void)? {
         get { terminalFramePresentedHandler.current }
         set { terminalFramePresentedHandler.replace(with: newValue) }
+    }
+
+    /// Optional profiling hook. Reports elapsed GPU seconds for a completed Metal frame;
+    /// no per-frame main-actor hop or retained sample is added when the hook is absent.
+    public nonisolated static var onFrameGPUCompleted: (@Sendable (Double) -> Void)? {
+        get { terminalGPUFrameHandler.withLock { $0 } }
+        set { terminalGPUFrameHandler.withLock { $0 = newValue } }
     }
 
     @MainActor

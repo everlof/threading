@@ -206,7 +206,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | The typed session control plane: actor/scope/refusal contract, cross-session messaging (`list_sessions`/`send_to_session`), delivery per surface, provenance | [`control-plane.md`](docs/architecture/control-plane.md) |
 | Autonomous host work, durable questions/continuations, delivery receipts, worker memory and the portable owner CLI | [`autonomous-controller.md`](docs/architecture/autonomous-controller.md) |
 | The first-launch walkthrough: window deferral and the terminate trap, the completed flag, the global conversation scan, the notifications opt-in | [`onboarding.md`](docs/architecture/onboarding.md) |
-| Terminal themes, app themes, the three assignment scopes, the MCP theme tools, glow and clipping | [`themes.md`](docs/architecture/themes.md) |
+| Terminal themes, app themes, the three assignment scopes, the MCP theme tools, glow and clipping | [`themes.md`](docs/architecture/themes.md), [field reference](docs/architecture/theme-reference.md) |
 | Theme commands and appearance packs: reviewed membership, manual/runtime ownership, migration, recovery and installed appearance resources | [`appearance-activation.md`](docs/architecture/appearance-activation.md) |
 | Music-reactive themes, system-audio consent, process taps, FFT bounds and shared spectrum signals | [`audio-spectrum.md`](docs/architecture/audio-spectrum.md) |
 | Agent marks, account chips, project icons, icon discovery and research | [`icons.md`](docs/architecture/icons.md) |

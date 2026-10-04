@@ -211,6 +211,9 @@ nonzero when any generated image is changed, new or unbaselined.
 ### Complete and targeted visual passes
 
 The coverage manifest, not a hand-maintained test command, selects the canonical feature states.
+An entry may use `capture.globs` for several precise filename families. Sidebar settings uses
+its numbered-width and auto-hide families; a broad `sidebar-*` also claimed row and edge-reveal
+captures from other entries and made a complete report fail ownership validation.
 Run the full macOS catalogue before merging a broad design-system or layout change. For an isolated
 iteration, select a coverage entry without making partial output look like a complete run:
 

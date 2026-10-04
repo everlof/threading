@@ -148,22 +148,31 @@ final class TerminalGlowTests: XCTestCase {
 
     // MARK: - The Wire to the Phone
 
-    /// The iPhone's renderer has no glow, so the palette it is sent is exactly what it was:
-    /// no new key, and nothing a phone built before the glow could fail to decode.
+    /// Glow is optional on the wire and leaves every existing palette color unchanged.
     @MainActor
-    func testTheRemotePaletteIsUnchangedByAGlow() throws {
+    func testTheRemotePaletteProjectsOptionalGlowWithoutChangingColors() throws {
         var glowing = TerminalTheme.homebrew
         glowing.glow = glow
 
         let plain = RemoteThemeBridge.terminalTheme(TerminalTheme.homebrew)
         let sent = RemoteThemeBridge.terminalTheme(glowing)
-        XCTAssertEqual(sent, plain)
+        let expected = RemoteTerminalThemeDTO(id: plain.id, name: plain.name,
+            foreground: plain.foreground, boldForeground: plain.boldForeground,
+            background: plain.background, cursor: plain.cursor, selection: plain.selection,
+            ansi: plain.ansi, glow: .init(radius: Double(glow.radius), opacity: Double(glow.opacity)))
+        XCTAssertEqual(sent, expected)
 
         let data = try JSONEncoder().encode(sent)
         let document = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        XCTAssertNil(document["glow"])
-        XCTAssertEqual(try JSONDecoder().decode(RemoteTerminalThemeDTO.self, from: data), plain)
+        let values = try XCTUnwrap(document["glow"] as? [String: Double])
+        XCTAssertEqual(values["radius"], Double(glow.radius))
+        XCTAssertEqual(values["opacity"], Double(glow.opacity))
+        XCTAssertEqual(try JSONDecoder().decode(RemoteTerminalThemeDTO.self, from: data), sent)
+        let plainData = try JSONEncoder().encode(plain)
+        let plainDocument = try XCTUnwrap(JSONSerialization.jsonObject(with: plainData) as? [String: Any])
+        XCTAssertNil(plainDocument["glow"], "ordinary palettes retain their old wire shape")
     }
+
 }
 
 // MARK: - Applying It to a Terminal

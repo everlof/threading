@@ -231,22 +231,9 @@ final class ThemePreferencesViewController: NSViewController {
         ])
     }
 
-    /// A theme's own motion, on or off — the user's switch beside Reduce Motion rather than
-    /// instead of it.
-    private lazy var themeMotionToggle: ThemedToggle = {
-        let toggle = SettingsUI.toggle(
-            isOn: AppSettings.shared.playsThemeMotion,
-            target: self,
-            action: #selector(themeMotionChanged)
-        )
-        toggle.setAccessibilityIdentifier("settings.themes.theme-motion")
-        return toggle
-    }()
-
-    /// The write posts `AppSettingsDidChange`, which `ThemeParticleHold` answers by stilling or
-    /// restarting every field and logo — nothing here has to name them.
-    @objc private func themeMotionChanged() {
-        AppSettings.shared.playsThemeMotion = themeMotionToggle.state == .on
+    @objc private func openMotionSettings() {
+        (view.window?.windowController as? MainWindowController)?
+            .showSettingsPage(id: SettingsPages.motionID)
     }
 
     /// A theme's own sounds for its moments, on or off — read at the moment one would play,
@@ -323,11 +310,9 @@ final class ThemePreferencesViewController: NSViewController {
                 control: importButton
             ),
             SettingsUI.row(
-                title: "Theme animations",
-                subtitle: "Moving backgrounds, logo effects and the transition a theme plays "
-                    + "when you switch to it. Off keeps a theme's look but holds it still; "
-                    + "Reduce Motion always turns them off.",
-                control: themeMotionToggle
+                title: "Motion",
+                subtitle: "Animations, music and activity reactions are in Motion.",
+                control: SettingsUI.button("Open Motion", target: self, action: #selector(openMotionSettings))
             ),
             SettingsUI.row(
                 title: "Theme sounds",
@@ -558,6 +543,7 @@ final class ThemePreferencesViewController: NSViewController {
     }
 
     @objc private func appThemeChanged(_ sender: ThemedPopUp) {
+        if AppThemePicker.activatePackIfSelected(sender) { return }
         guard let raw = sender.selectedItem?.representedValue as? String else { return }
         applyAppTheme(id: AppThemeID(raw))
     }
@@ -587,29 +573,8 @@ final class ThemePreferencesViewController: NSViewController {
     private func reloadAppThemeControls() {
         guard let popUp = appThemePopUp else { return }
         popUp.isEnabled = !AppearanceActivationHost.shared.isChanging
-        popUp.removeAllItems()
-        // Twenty-nine names in one flat column, with the tier written into each row's own title
-        // (`— Custom`, `— <extension>`) because there was nowhere else to put it. The heads say
-        // it once over the rows it applies to, and the rows go back to being just names.
-        for section in AppThemeLibrary.sections {
-            if let title = section.title { popUp.addHeader(title) }
-            for theme in section.themes {
-                popUp.addItem(
-                    ThemedMenuItem(title: theme.name, representedValue: theme.id.rawValue)
-                )
-            }
-        }
-        // **The selection names the user's choice, not what is on screen.** The two are the same
-        // every launch but one: recovery wears System while the stored choice is something else,
-        // and a ring sitting on what is in force would put it on System — so clicking the entry
-        // that already looks selected would record System over their theme. Selecting the stored
-        // one instead makes that click write back the value that was already there.
-        let selectedID = Self.selectedAppThemeID
-        popUp.selectItem(
-            at: popUp.indexOfItem { $0.representedValue as? String == selectedID.rawValue }
-                ?? popUp.indexOfFirstItem
-                ?? -1
-        )
+        // Recovery names the stored choice; an active pack names its saved recipe.
+        AppThemePicker.populate(popUp, selectedThemeID: Self.selectedAppThemeID)
         let selected = Self.selectedAppTheme
         appThemeSubtitle?.stringValue = selected.summary ?? ""
         reloadAppThemeActions(for: selected)

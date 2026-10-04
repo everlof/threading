@@ -24,7 +24,7 @@ test("rejects a liveness response that does not prove dependency readiness", asy
     verifyProduction({
       attempts: 1,
       fetchImplementation: async () => Response.json(
-        { status: "ok", rendezvousProtocol: 1, notificationProtocol: 3 },
+        { status: "ok", rendezvousProtocol: 1, notificationProtocol: 4 },
         {
           headers: {
             "Cache-Control": "no-store",
@@ -103,7 +103,7 @@ function hardeningHeaders() {
 
 function readyResponse() {
   return Response.json(
-    { status: "ready", rendezvousProtocol: 1, notificationProtocol: 3 },
+    { status: "ready", rendezvousProtocol: 1, notificationProtocol: 4 },
     { headers: hardeningHeaders() },
   );
 }

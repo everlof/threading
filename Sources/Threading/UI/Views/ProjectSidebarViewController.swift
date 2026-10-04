@@ -2389,6 +2389,51 @@ extension ProjectSidebarViewController {
         )
     }
 
+    /// Removing a project deletes every chat in it from Threading, and this is where that is
+    /// said. It used to say the chats were "removed from the sidebar", which reads as filing
+    /// them away — on a row Threading adopted for a worktree, which looks like clutter, that
+    /// sentence cost chats nobody meant to delete. A project with no chats keeps the old wording,
+    /// which is true for it. Built separately from being asked, like `deleteConfirmation`.
+    static func removeProjectConfirmation(
+        for project: Project,
+        runningCount: Int
+    ) -> ConfirmationRequest {
+        let deletesChats = !project.sessions.isEmpty
+        let message: String
+        switch (deletesChats, runningCount > 0) {
+        case (true, true):
+            message = L10n.format(
+                "%lld running chats or terminals will be terminated. Its chats are deleted from "
+                    + "Threading, and so are this project's visual baselines. Each agent's "
+                    + "transcript stays on disk, so a chat can be imported again.",
+                Int64(runningCount)
+            )
+        case (true, false):
+            message = L10n.string(
+                "Its chats are deleted from Threading, and so are this project's visual "
+                    + "baselines. Each agent's transcript stays on disk, so a chat can be "
+                    + "imported again."
+            )
+        case (false, true):
+            message = L10n.format(
+                "%lld running chats or terminals will be terminated. Saved conversations are not deleted, but this project's visual baselines are.",
+                Int64(runningCount)
+            )
+        case (false, false):
+            message = L10n.string(
+                "Its chats and terminals are removed from the sidebar. Saved conversations are not deleted, but this project's visual baselines are."
+            )
+        }
+        return ConfirmationRequest(
+            prompt: .removeProject,
+            title: deletesChats
+                ? L10n.format("Remove “%@” and its chats?", project.name)
+                : L10n.format("Remove “%@”?", project.name),
+            message: message,
+            confirmTitle: L10n.string("Remove")
+        )
+    }
+
     /// Prompts for a new name.
     ///
     /// When `allowsEmpty` is set, clearing the field is meaningful — it drops a custom name
@@ -3251,19 +3296,7 @@ private extension ProjectSidebarViewController {
         }.count
         let runningCount = runningSessionCount + runningTerminalCount
 
-        let request = ConfirmationRequest(
-            prompt: .removeProject,
-            title: L10n.format("Remove “%@”?", project.name),
-            message: runningCount > 0
-                ? L10n.format(
-                    "%lld running chats or terminals will be terminated. Saved conversations are not deleted, but this project's visual baselines are.",
-                    Int64(runningCount)
-                )
-                : L10n.string(
-                    "Its chats and terminals are removed from the sidebar. Saved conversations are not deleted, but this project's visual baselines are."
-                ),
-            confirmTitle: L10n.string("Remove")
-        )
+        let request = Self.removeProjectConfirmation(for: project, runningCount: runningCount)
 
         guard ConfirmationAlert.ask(request) else { return }
 

@@ -72,6 +72,14 @@ final class PanelListView: NSView {
 
     // MARK: - Public Methods
 
+    /// Back to the first row. A host that replaces the whole list with a different page — a
+    /// list with one of its items, or the way back — starts the reader at the top of it rather
+    /// than at the offset the previous page was scrolled to.
+    func scrollToTop() {
+        scrollView.contentView.scroll(to: .zero)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
     func clear() {
         stack.arrangedSubviews.forEach {
             stack.removeArrangedSubview($0)

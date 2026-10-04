@@ -1,6 +1,7 @@
 #if DEBUG
 import AppKit
 import Foundation
+import SwiftTerm
 
 /// Captures UI-scenario evidence from inside Threading's own window.
 ///
@@ -169,7 +170,11 @@ final class UIScenarioEvidenceCapture {
               let representation = captureView.bitmapImageRepForCachingDisplay(in: bounds) else {
             throw CaptureError.bitmapUnavailable
         }
-        captureView.cacheDisplay(in: bounds, to: representation)
+        // A glowing terminal draws through Metal, which `cacheDisplay` cannot read; inside this
+        // scope it draws its frame through Core Graphics so the evidence shows its text.
+        TerminalView.drawingForBitmapCapture {
+            captureView.cacheDisplay(in: bounds, to: representation)
+        }
         guard let data = representation.representation(using: .png, properties: [:]) else {
             throw CaptureError.pngEncodingFailed
         }

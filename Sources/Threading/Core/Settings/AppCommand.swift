@@ -255,6 +255,7 @@ enum AppCommands {
 
         static let checkForUpdates = "app.checkForUpdates"
         static let refreshModels = "app.refreshModels"
+        static let allowClaudeKeychainAccess = "app.allowClaudeKeychainAccess"
 
         static let silenceSounds = "app.silenceSounds"
     }
@@ -276,6 +277,10 @@ enum AppCommands {
         AppCommand(id: ID.refreshModels, group: .system, title: "Refresh Models",
                    detail: "Reload available models for all enabled Codex accounts.",
                    defaultShortcut: nil, isEditable: true, iconName: "arrow.clockwise"),
+        AppCommand(id: ID.allowClaudeKeychainAccess, group: .system,
+                   title: "Allow Keychain Access for Claude Logins…",
+                   detail: "Asks macOS, once per waiting Claude login, to let Threading read live usage.",
+                   defaultShortcut: nil, isEditable: true, iconName: "key"),
         AppCommand(id: ID.newSession, group: .session, title: "New Session",
                    defaultShortcut: KeyboardShortcut(key: "n", modifiers: .command), isEditable: true,
                    scope: .project),

@@ -220,6 +220,16 @@ final class AccountUsageService {
         refresh(account, force: force, settled: nil)
     }
 
+    /// A refresh for the moment a login's credential has just become readable — the user
+    /// answered the keychain prompt. The per-account floor exists so an eager UI cannot ask
+    /// twice for the same number; a newly readable source is a different question, and the
+    /// reading on screen is the stale one the user just acted on. So the floor is waived for
+    /// this one call. A server's own `notBefore` is not: a 429 pause is never the UI's to waive.
+    func refreshAfterCredentialChange(_ account: AgentAccount) {
+        entries[account.id]?.lastAttemptAt = nil
+        refresh(account, force: true)
+    }
+
     /// The same refresh, with a receipt: `settled` runs once the cached reading is as current as
     /// this account's pacing allows it to be.
     ///
@@ -306,7 +316,7 @@ final class AccountUsageService {
     private func spacing(for accountID: AccountID, force: Bool) -> TimeInterval {
         if force { return UsageDefaults.minimumRefreshSpacing }
 
-        return entries[accountID]?.reading.usage?.source == .localCache
+        return entries[accountID]?.reading.usage?.source.isLocalFile == true
             ? UsageDefaults.localCacheRefreshInterval
             : UsageDefaults.refreshInterval
     }

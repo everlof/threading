@@ -69,6 +69,8 @@ enum MobileGlyphPresentation {
 final class MobileMorphingTitleLabel: UIView {
     private enum Defaults {
         static let intensity = 0.72
+        /// A chat name under Reduce Motion (or held theme motion) crossfades, briefly, in place.
+        static let reducedMotionDuration = 0.18
     }
 
     private let label = MorphingLabel()
@@ -76,6 +78,9 @@ final class MobileMorphingTitleLabel: UIView {
     private var weight = UIFont.Weight.regular
     private var role = MobileMorphingTextRole.chatName
     private var presentedTitle = ""
+
+    var theme = RemoteThemePalette(nil)
+    private var reducesMotion = false
 
     var stringValue: String { presentedTitle }
 
@@ -159,9 +164,14 @@ final class MobileMorphingTitleLabel: UIView {
     ) {
         let fontChanged = self.textStyle != textStyle || self.weight != weight
         let roleChanged = self.role != role
+        // A chat name's morph is the theme's motion, so the phone's Theme motion switch and Low
+        // Power Mode hold it to the same quiet crossfade Reduce Motion asks for.
+        let reducesMotion = reducesMotion
+            || (role == .chatName && !MobileThemeMotionPreferences.decorativeMotionEnabled)
         self.textStyle = textStyle
         self.weight = weight
         self.role = role
+        self.reducesMotion = reducesMotion
         if fontChanged || label.font != resolvedFont() {
             applyFont()
         }
@@ -173,9 +183,9 @@ final class MobileMorphingTitleLabel: UIView {
         // `animated` is the host's say: a status line whose bar is mid-transition lands its
         // phrase rather than morphing it in flight. The rest is this view's.
         let animates = animated
+            && (!reducesMotion || role == .chatName)
             && !presentedTitle.isEmpty
             && title != presentedTitle
-            && !reducesMotion
             && window != nil
         // The label is given the presentation; everything this view answers with — the title it
         // reports, what VoiceOver reads, what counts as a rename — stays the title it was told.
@@ -197,20 +207,30 @@ final class MobileMorphingTitleLabel: UIView {
     }
 
     private func resolvedFont() -> UIFont {
+        if let name = MobileThemeAssets.shared.fontName(for: theme.source?.material.fontFamily) {
+            let native = UIFont.preferredFont(forTextStyle: textStyle, compatibleWith: traitCollection)
+            if let font = UIFont(name: name, size: native.pointSize) { return font }
+        }
         let descriptor = UIFontDescriptor.preferredFontDescriptor(
             withTextStyle: textStyle,
             compatibleWith: traitCollection
         ).addingAttributes([
             .traits: [UIFontDescriptor.TraitKey.weight: weight],
         ])
-        return UIFont(descriptor: descriptor, size: 0)
+        return UIFont(descriptor: descriptor.withDesign(theme.systemFontDesign) ?? descriptor, size: 0)
     }
 
     private func applyEffect(morphingTo title: String, role: MobileMorphingTextRole) {
         switch role {
         case .chatName:
-            let preset = MorphPreset.shapeMorph
-            label.effect = preset.makeEffect(intensity: Defaults.intensity)
+            let stated = theme.source?.titleMorph
+            let preset = reducesMotion ? MorphPreset.crossfade
+                : (stated.flatMap { MorphPreset(rawValue: $0.style) } ?? .shapeMorph)
+            if !reducesMotion, let characters = stated?.scrambleCharacters {
+                label.effect = ScrambleEffect(characters: characters)
+            } else {
+                label.effect = preset.makeEffect(intensity: Defaults.intensity)
+            }
             var timing = preset.recommendedTiming
             timing.duration *= MobileDesign.Motion.nameMorphTempo
             let steps = Double(max(1, max(presentedTitle.count, title.count) - 1))
@@ -218,6 +238,10 @@ final class MobileMorphingTitleLabel: UIView {
                 timing.stagger * MobileDesign.Motion.nameMorphTempo,
                 MobileDesign.Motion.nameMorphCascade / steps
             )
+            if reducesMotion {
+                timing.duration = Defaults.reducedMotionDuration
+                timing.stagger = 0
+            }
             label.timing = timing
             label.fadeStyle = .none
 
@@ -270,6 +294,9 @@ final class MobileMorphingTitleLabel: UIView {
         invalidateIntrinsicContentSize()
     }
 
+    /// The alphabet a scramble decodes from, or nil when the label is not scrambling.
+    var scrambleAlphabetForTesting: [Character]? { (label.effect as? ScrambleEffect)?.characters }
+
     var isAnimatingTitleForTesting: Bool {
         layer.sublayers?.contains(where: Self.hasAnimations) == true
     }
@@ -304,6 +331,7 @@ struct MobileMorphingTitle: UIViewRepresentable {
     let groundColor: UIColor
     let alignment: NSTextAlignment
     let role: MobileMorphingTextRole
+    @Environment(\.remoteTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reducesMotion
 
     init(
@@ -355,6 +383,7 @@ struct MobileMorphingTitle: UIViewRepresentable {
     }
 
     func updateUIView(_ view: MobileMorphingTitleLabel, context: Context) {
+        view.theme = theme
         view.configure(
             title: title,
             textStyle: textStyle,

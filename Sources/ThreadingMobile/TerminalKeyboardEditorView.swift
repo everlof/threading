@@ -32,8 +32,8 @@ struct TerminalKeyboardEditorView: View {
 struct TerminalKeyboardAgentList: View {
     @EnvironmentObject private var keyboards: MobileTerminalKeyboardStore
     @Environment(\.remoteTheme) private var theme
-    @AppStorage(MobileTerminalInputPreference.defaultPreferenceKey)
-    private var defaultInputPreference = MobileTerminalInputPreference.direct
+    @AppStorage(MobileTerminalInputPreference.preferenceKey)
+    private var inputPreference = MobileTerminalInputPreference.direct
 
     private let agentKinds = ["claude", "codex", "grok", "opencode"]
 
@@ -41,10 +41,10 @@ struct TerminalKeyboardAgentList: View {
         List {
             ThemedSettingsSection {
                 Toggle(
-                    "Compose terminal input by default",
+                    "Compose terminal input",
                     isOn: Binding(
-                        get: { defaultInputPreference == .compose },
-                        set: { defaultInputPreference = $0 ? .compose : .direct }
+                        get: { inputPreference == .compose },
+                        set: { inputPreference = $0 ? .compose : .direct }
                     )
                 )
             } header: {
@@ -53,7 +53,7 @@ struct TerminalKeyboardAgentList: View {
                 Text(MobileL10n.string(
                     """
                     Direct sends each key to the TUI. Compose writes in an iOS text area and \
-                    sends the finished line at once. Each terminal remembers its own choice.
+                    sends the finished line at once. This choice is shared by all terminals on this device.
                     """
                 ))
             }

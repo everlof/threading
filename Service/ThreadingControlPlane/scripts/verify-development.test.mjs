@@ -13,7 +13,7 @@ test("verifies isolated routes, credential enforcement, and the Access redirect"
       requests.push({ path: url.pathname, redirect: init.redirect });
       switch (url.pathname) {
         case "/ready":
-          return json({ status: "ready", rendezvousProtocol: 1, notificationProtocol: 3 }, 200);
+          return json({ status: "ready", rendezvousProtocol: 1, notificationProtocol: 4 }, 200);
         case "/v1/auth/apple":
         case "/v1/reports":
           return json({ error: { code: "notFound", message: "Endpoint was not found" } }, 404);
@@ -61,7 +61,7 @@ test("rejects an authorization callback that bypasses Access", async () => {
         const url = new URL(input);
         switch (url.pathname) {
           case "/ready":
-            return json({ status: "ready", rendezvousProtocol: 1, notificationProtocol: 3 }, 200);
+            return json({ status: "ready", rendezvousProtocol: 1, notificationProtocol: 4 }, 200);
           case "/v1/auth/apple":
           case "/v1/reports":
             return json({}, 404);
@@ -112,7 +112,7 @@ test("rejects a deployment without the notification protocol or retraction route
         const url = new URL(input);
         switch (url.pathname) {
           case "/ready":
-            return json({ status: "ready", rendezvousProtocol: 1, notificationProtocol: 3 }, 200);
+            return json({ status: "ready", rendezvousProtocol: 1, notificationProtocol: 4 }, 200);
           case "/v1/auth/apple":
           case "/v1/reports":
             return json({}, 404);

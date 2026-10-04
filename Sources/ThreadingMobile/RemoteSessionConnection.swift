@@ -242,14 +242,15 @@ enum MobileCollaborationPresentation {
     }
 }
 
-/// How this iPhone prefers to type into one real terminal UI while no collaboration policy has
+/// How this iPhone prefers to type across all real terminal UIs while no collaboration policy has
 /// to override it. It is device-local presentation state: changing it neither mutates nor
 /// restarts the Mac session.
 enum MobileTerminalInputPreference: String, Codable, Equatable, Sendable {
     case direct
     case compose
 
-    static let defaultPreferenceKey = "threading.mobile.terminal-input.default"
+    // Keep the existing Settings key so an explicitly chosen default survives the scope change.
+    static let preferenceKey = "threading.mobile.terminal-input.default"
 }
 
 /// What a terminal session offers this phone for typing.
@@ -505,6 +506,7 @@ final class RemoteSessionConnection: ObservableObject {
     /// is tearing down: an older view must not clear the replacement's callbacks or release the
     /// viewport it just acquired.
     private var terminalRendererOwner: ObjectIdentifier?
+    private var terminalPresentationRevision: UInt64 = 0
     private let terminalHydrationQuietDelay: Duration
     private let terminalHydrationMaximumDelay: Duration
     private var terminalHydrationQuietTask: Task<Void, Never>?
@@ -534,7 +536,17 @@ final class RemoteSessionConnection: ObservableObject {
         didSet {
             // A detached renderer takes its screen with it: a chat reopened from the list on a
             // parked connection has nothing to keep, and gets the opening loader as before.
-            if onTerminalOutput == nil { hasPresentedTerminalOutput = false }
+            if onTerminalOutput == nil, hasPresentedTerminalOutput {
+                // SwiftUI can remove the renderer while destroying its observation graph.
+                // Withdraw callbacks now, but publish after teardown; a replacement renderer
+                // that has drawn in the meantime owns its screen and keeps its presentation.
+                let revision = terminalPresentationRevision
+                Task { @MainActor [weak self] in
+                    guard let self, self.terminalPresentationRevision == revision,
+                          self.hasPresentedTerminalOutput else { return }
+                    self.hasPresentedTerminalOutput = false
+                }
+            }
             guard let onTerminalOutput, !pendingTerminalOutput.isEmpty else { return }
             let buffered = pendingTerminalOutput
             pendingTerminalOutput.removeAll(keepingCapacity: true)
@@ -1073,7 +1085,8 @@ final class RemoteSessionConnection: ObservableObject {
     }
 
     private func presentTerminalOutput(_ data: Data, through output: (Data) -> Void) {
-        hasPresentedTerminalOutput = true
+        terminalPresentationRevision &+= 1
+        if !hasPresentedTerminalOutput { hasPresentedTerminalOutput = true }
         output(data)
     }
 

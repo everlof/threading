@@ -4,6 +4,22 @@ import ThreadingRemoteKit
 @testable import ThreadingMobile
 
 final class RemoteNotificationPresentationPolicyTests: XCTestCase {
+    func testARegistrationReturningToAnEarlierSignatureRegistersAgain() {
+        var ledger = RemoteNotificationRegistrationLedger()
+        XCTAssertTrue(ledger.needsRegistration("chime", for: "mac-a"))
+        ledger.record("chime", for: "mac-a")
+        XCTAssertFalse(ledger.needsRegistration("chime", for: "mac-a"))
+        XCTAssertTrue(ledger.needsRegistration("chime", for: "mac-b"), "each Mac registers for itself")
+
+        // Theme edited to no sounds, then back: the Mac now holds the empty receipts.
+        ledger.record("silent", for: "mac-a")
+        XCTAssertTrue(ledger.needsRegistration("chime", for: "mac-a"))
+
+        ledger.record("chime", for: "mac-a")
+        ledger.reset()
+        XCTAssertTrue(ledger.needsRegistration("chime", for: "mac-a"))
+    }
+
     @MainActor
     func testResponsePreviewConsentIsDeviceLocalAndDefaultsOff() throws {
         let firstSuite = "RemoteNotificationPresentationPolicyTests.first.\(UUID().uuidString)"

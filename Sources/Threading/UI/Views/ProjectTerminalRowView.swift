@@ -1,8 +1,8 @@
 import AppKit
 
 /// Sidebar row for a standalone terminal.
-final class ProjectTerminalRowView: NSTableCellView {
-    private let iconView = NSImageView()
+final class ProjectTerminalRowView: NSTableCellView, ThemeDerivedContent {
+    private let iconView = GlyphView()
     private let titleLabel = MorphingTitleLabel()
     private let actionButton = ThemedIconButton(
         symbolName: SidebarRowDefaults.actionSymbol,
@@ -42,6 +42,15 @@ final class ProjectTerminalRowView: NSTableCellView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func rederiveThemedContent() {
+        applyColors()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
     /// `projectRoot` is the folder of the project this row sits under, which the name is stated
     /// relative to: at the project's own folder the row above already says the folder's name.
     func configure(
@@ -77,16 +86,18 @@ final class ProjectTerminalRowView: NSTableCellView {
     }
 
     private func setupViews() {
-        iconView.image = NSImage(
-            systemSymbolName: "terminal",
-            accessibilityDescription: L10n.string("Terminal")
+        iconView.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)?.withSymbolConfiguration(
+            Design.Symbol.configuration(SidebarRowDefaults.iconSize, weight: .regular)
         )
-        iconView.symbolConfiguration = NSImage.SymbolConfiguration(
-            pointSize: SidebarRowDefaults.iconSize,
-            weight: .regular
-        )
-        iconView.imageScaling = .scaleProportionallyDown
+        iconView.slot = NSSize(width: SidebarRowDefaults.iconSlotWidth, height: SidebarRowDefaults.iconSlotWidth)
+        iconView.contrastGround = { [weak self] in
+            guard let self else { return Design.Surface.background }
+            return SidebarHoverRowView.contentGround(for: self)
+        }
         iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.setAccessibilityElement(true)
+        iconView.setAccessibilityRole(.image)
+        iconView.setAccessibilityLabel(L10n.string("Terminal"))
         iconView.setAccessibilityIdentifier("sidebar.terminal.identity")
 
         titleLabel.applyFont(.controlRegular)
@@ -244,7 +255,7 @@ final class ProjectTerminalRowView: NSTableCellView {
 
     private func applyColors() {
         titleLabel.refreshTextColor()
-        iconView.contentTintColor = backgroundStyle == .emphasized
+        iconView.tint = backgroundStyle == .emphasized
             ? Design.Text.selected
             : (isRunning ? Design.Text.label : Design.Text.secondary)
         statusSpinner?.hostGround = backgroundStyle == .emphasized ? .selection : nil
