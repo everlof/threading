@@ -387,6 +387,7 @@ final class AppSettingDefinitionTests: XCTestCase {
             .workingOrbStyle: .init(key: "workingOrbStyle", valueType: .string),
             .sharesThemeAudio: .init(key: "sharesThemeAudio", valueType: .boolean),
             .themeAudioSource: .init(key: "themeAudioSource", valueType: .string),
+            .themeReactsToActivity: .init(key: "themeReactsToActivity", valueType: .boolean),
             .themeReactionStrength: .init(key: "themeReactionStrength", valueType: .integer),
             .chatNameMorphStyle: .init(key: "chatNameMorphStyle", valueType: .string),
             .chromeFontFamily: .init(key: "chromeFontFamily", valueType: .string),
@@ -544,9 +545,9 @@ final class AppSettingDefinitionTests: XCTestCase {
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
 #if DEBUG || THREADING_INTERNAL
-        XCTAssertEqual(authoredRows.count, 101)
+        XCTAssertEqual(authoredRows.count, 102)
 #else
-        XCTAssertEqual(authoredRows.count, 100)
+        XCTAssertEqual(authoredRows.count, 101)
 #endif
         XCTAssertEqual(
             // Markdown associations are OS-owned actions, not persisted AppSettings.
@@ -619,7 +620,7 @@ final class AppSettingDefinitionTests: XCTestCase {
         ])
         XCTAssertEqual(actual["motion"], ["Working indicator", "Chat name transition",
                                          "Music-reactive themes", "Audio source",
-                                         "Reaction strength"])
+                                         "React to agent activity", "Reaction strength"])
         XCTAssertEqual(actual["tools"], ["Agents may move chats between checkouts"])
         XCTAssertEqual(actual["usage-windows"], [
             "Open a window before I start", "I start at", "I stop at", "Days",

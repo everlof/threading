@@ -111,7 +111,7 @@ final class IdentityMarkInkTests: XCTestCase {
 
     // MARK: - Tools
 
-    func testAnAgentCanTintATheme() throws {
+    func testAnAgentCanTintATheme() async throws {
         let name = "Ink \(UUID().uuidString)"
         let coordinator = AgentToolCoordinator(
             displayPaneController: DisplayPaneController(),
@@ -123,7 +123,7 @@ final class IdentityMarkInkTests: XCTestCase {
             {"name": "\(name)", "base_id": "threading", "appearance": "dark", "apply": false,
              "variants": {"dark": {"material": {"identity_marks": "tinted"}}}}
             """.utf8))
-        let created = coordinator.createAppTheme(arguments)
+        let created = await coordinator.createAppTheme(arguments)
         XCTAssertFalse(created.isError, created.text)
         let stored = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
         defer {
@@ -137,7 +137,8 @@ final class IdentityMarkInkTests: XCTestCase {
             {"name": "\(name) 2", "base_id": "threading", "appearance": "dark", "apply": false,
              "variants": {"dark": {"material": {"identity_marks": "rainbow"}}}}
             """.utf8))
-        XCTAssertTrue(coordinator.createAppTheme(refused).isError)
+        let refusal = await coordinator.createAppTheme(refused)
+        XCTAssertTrue(refusal.isError)
     }
 
     // MARK: - Helpers

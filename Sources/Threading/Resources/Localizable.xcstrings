@@ -29136,6 +29136,17 @@
         }
       }
     },
+    "Let themes and extensions move with what agents are doing — streams, rain, pulses. Music reactions follow Music-reactive themes above." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Låt teman och tillägg röra sig med det agenterna gör – strömmar, regn, pulser. Musikreaktioner följer Musikreaktiva teman ovan."
+          }
+        }
+      }
+    },
     "Let this limit colour the usage pill in the toolbar" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40440,6 +40451,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Går att nå på %@"
+          }
+        }
+      }
+    },
+    "React to agent activity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reagera på agentaktivitet"
           }
         }
       }

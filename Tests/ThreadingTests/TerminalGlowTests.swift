@@ -228,7 +228,7 @@ final class TerminalGlowFollowsAppThemeTests: XCTestCase {
         super.tearDown()
     }
 
-    func testFollowingTheAppThemeDrawsItsVariantsGlow() throws {
+    func testFollowingTheAppThemeDrawsItsVariantsGlow() async throws {
         let glow = TerminalGlow(radius: 2, opacity: 0.3)
         let base = AppThemeStyles.cyberpunk
         let kind = try XCTUnwrap(base.availableVariants.first)
@@ -278,8 +278,8 @@ final class TerminalGlowToolTests: XCTestCase {
     private func createDarkTheme(
         named name: String,
         terminalColors: TerminalColorsArguments?
-    ) -> MCPToolResult {
-        coordinator().createAppTheme(
+    ) async -> MCPToolResult {
+        await coordinator().createAppTheme(
             CreateAppThemeArguments(
                 name: name,
                 baseID: AppThemeStyles.cyberpunk.id.rawValue,
@@ -300,8 +300,8 @@ final class TerminalGlowToolTests: XCTestCase {
     private func update(
         _ theme: AppTheme,
         terminalColors: TerminalColorsArguments
-    ) -> MCPToolResult {
-        coordinator().updateAppTheme(
+    ) async -> MCPToolResult {
+        await coordinator().updateAppTheme(
             UpdateAppThemeArguments(
                 themeID: theme.id.rawValue,
                 name: nil,
@@ -394,9 +394,9 @@ final class TerminalGlowToolTests: XCTestCase {
 
     /// Create, read back, merge one half, remove — the whole loop through the tools, with the
     /// document `get_app_theme` returns sendable straight back as a patch.
-    func testAnAppThemeGlowRoundTripsThroughCreateGetAndUpdate() throws {
+    func testAnAppThemeGlowRoundTripsThroughCreateGetAndUpdate() async throws {
         let name = "Glowing Tool Theme \(UUID().uuidString)"
-        let created = createDarkTheme(
+        let created = await createDarkTheme(
             named: name,
             terminalColors: TerminalColorsArguments(
                 ["bright_green": "#33FF66"],
@@ -427,7 +427,7 @@ final class TerminalGlowToolTests: XCTestCase {
         XCTAssertEqual(resent.colors.count, ThemeColorKey.allCases.count)
 
         // One half stated: the other is the variant's own, not the standard default.
-        let merged = update(
+        let merged = await update(
             theme,
             terminalColors: TerminalColorsArguments(
                 glow: TerminalGlowArguments(radius: nil, opacity: 0.6)
@@ -440,22 +440,22 @@ final class TerminalGlowToolTests: XCTestCase {
         )
 
         // A patch that says nothing about the glow leaves it alone.
-        let recoloured = update(theme, terminalColors: ["cursor": "#33FF66"])
+        let recoloured = await update(theme, terminalColors: ["cursor": "#33FF66"])
         XCTAssertFalse(recoloured.isError, recoloured.text)
         XCTAssertEqual(
             AppThemeLibrary.theme(withID: theme.id)?.variant(.dark)?.terminalPalette.glow,
             TerminalGlow(radius: 3, opacity: 0.6)
         )
 
-        let removed = update(theme, terminalColors: TerminalColorsArguments(removeGlow: true))
+        let removed = await update(theme, terminalColors: TerminalColorsArguments(removeGlow: true))
         XCTAssertFalse(removed.isError, removed.text)
         let stored = try XCTUnwrap(AppThemeLibrary.theme(withID: theme.id))
         XCTAssertNil(stored.variant(.dark)?.terminalPalette.glow)
         XCTAssertNil(try terminalDocument(of: stored)["glow"])
     }
 
-    func testAnAppThemeGlowOutOfBoundsIsRefusedByName() {
-        let wide = createDarkTheme(
+    func testAnAppThemeGlowOutOfBoundsIsRefusedByName() async {
+        let wide = await createDarkTheme(
             named: "Too Wide \(UUID().uuidString)",
             terminalColors: TerminalColorsArguments(glow: TerminalGlowArguments(radius: 9, opacity: 0.4))
         )
@@ -463,7 +463,7 @@ final class TerminalGlowToolTests: XCTestCase {
         XCTAssertTrue(wide.text.contains("terminal_colors.glow.radius"), wide.text)
         XCTAssertTrue(wide.text.contains("0.5 and 6"), wide.text)
 
-        let both = createDarkTheme(
+        let both = await createDarkTheme(
             named: "Both \(UUID().uuidString)",
             terminalColors: TerminalColorsArguments(
                 glow: TerminalGlowArguments(radius: 2, opacity: 0.3),

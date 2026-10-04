@@ -119,9 +119,9 @@ final class ThemeTitleMorphTests: XCTestCase {
 
     // MARK: - Tools
 
-    func testAnAgentCanGiveNamesAMorphAndTakeItBack() throws {
+    func testAnAgentCanGiveNamesAMorphAndTakeItBack() async throws {
         let name = "Morph \(UUID().uuidString)"
-        let created = coordinator().createAppTheme(CreateAppThemeArguments(
+        let created = await coordinator().createAppTheme(CreateAppThemeArguments(
             name: name,
             baseID: AppThemeStyles.threading.id.rawValue,
             appearance: "dark",
@@ -147,7 +147,7 @@ final class ThemeTitleMorphTests: XCTestCase {
         let get = coordinator().getAppTheme(AppThemeReferenceArguments(themeID: stored.id.rawValue))
         XCTAssertTrue(get.text.contains("\"title_morph\""), get.text)
 
-        let switched = coordinator().updateAppTheme(update(stored, AppThemeVariantArguments(
+        let switched = await coordinator().updateAppTheme(update(stored, AppThemeVariantArguments(
             titleMorph: AppThemeTitleMorphArguments(style: "flip")
         )))
         XCTAssertFalse(switched.isError, switched.text)
@@ -157,12 +157,12 @@ final class ThemeTitleMorphTests: XCTestCase {
             "a style away from scramble drops the alphabet it no longer uses"
         )
 
-        let refused = coordinator().updateAppTheme(update(stored, AppThemeVariantArguments(
+        let refused = await coordinator().updateAppTheme(update(stored, AppThemeVariantArguments(
             titleMorph: AppThemeTitleMorphArguments(style: "automatic")
         )))
         XCTAssertTrue(refused.isError)
 
-        let removed = coordinator().updateAppTheme(update(stored, AppThemeVariantArguments(
+        let removed = await coordinator().updateAppTheme(update(stored, AppThemeVariantArguments(
             removeTitleMorph: true
         )))
         XCTAssertFalse(removed.isError, removed.text)

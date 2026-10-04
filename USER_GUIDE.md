@@ -5537,6 +5537,11 @@ How Threading plugs into each agent CLI's own configuration. Under **Agents** in
   nine named choices are Working, Searching, Solving, Listening, Connecting, Weaving, Composing,
   Breathing, and Shaping. The list shows every orb running side by side, so they can be compared
   without being selected one at a time; Random's row re-rolls each time you point at it.
+- **React to agent activity** lets themes and extensions move with what agents are doing —
+  streams that quicken, rain that thickens, a pulse when a turn comes back. Turn it off to keep
+  that decoration still while everything else stays as it is; music reactions keep their own
+  switch, **Music-reactive themes**, and **Theme animations** in Themes still stops all theme
+  motion.
 - **Reaction strength** scales how strongly every theme and extension reacts to agent activity
   and to music, from 0% to 200% (100% is as each theme designed it). Themes decide *how* they
   react — a logo that fizzes harder while agents work, a mascot's stream, rain that thickens, a

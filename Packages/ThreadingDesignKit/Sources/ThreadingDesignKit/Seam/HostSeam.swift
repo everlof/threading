@@ -72,6 +72,8 @@ public struct AppSettings {
     /// Percent, as the application stores it; the host states the person's choice.
     public var themeReactionStrength: Int { AppSettings.reactionStrength }
     public nonisolated(unsafe) static var reactionStrength = 100
+    public var themeReactsToActivity: Bool { AppSettings.reactsToActivity }
+    public nonisolated(unsafe) static var reactsToActivity = true
 }
 
 /// The application's four text sizes. The scale is the load-bearing half — a plugin that read a

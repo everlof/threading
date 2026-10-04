@@ -404,13 +404,16 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         return result
     }
 
-    /// `measured` as decoration should answer it (`ThemeReactions`). Counts scale as counts;
-    /// facts — `audio.available`, the theme, the clock, the account — pass through.
-    static func reacted(_ signal: ExtensionHostSignal, _ measured: Double) -> Double {
+    /// `measured` as decoration should answer it (`ThemeReactions`), or nil when the person has
+    /// turned activity reactions off and the signal is one. Music scales by strength (its on/off
+    /// is capture consent, upstream); counts scale as counts; facts — `audio.available`, the
+    /// theme, the clock, the account — pass through.
+    static func reacted(_ signal: ExtensionHostSignal, _ measured: Double) -> Double? {
         guard signal.isReactive else { return measured }
+        if signal.requiresAudioCapture { return ThemeReactions.scaledMusic(measured) }
         return signal == .workloadWorkingCount
-            ? ThemeReactions.scaledCount(measured)
-            : ThemeReactions.scaled(measured)
+            ? ThemeReactions.activityCount(measured)
+            : ThemeReactions.activity(measured)
     }
 
     private func resolve(_ scalar: ExtensionSurfaceScalar) -> Double {
@@ -424,10 +427,11 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
                !ThemeParticleHold.motionAllowed {
                 return mapping.fallback
             }
-            guard let measured = signalProvider(signal, signalContext) else { return mapping.fallback }
             // A reactive reading — agent work, music, a moment — answers through the person's
-            // Reaction strength before the extension's own mapping sees it.
-            let raw = Self.reacted(signal, measured)
+            // reaction settings before the extension's own mapping sees it; activity reactions
+            // turned off read as no reading, the binding's idle fallback.
+            guard let measured = signalProvider(signal, signalContext),
+                  let raw = Self.reacted(signal, measured) else { return mapping.fallback }
             let position = min(max(
                 (raw - mapping.inputMinimum)
                     / (mapping.inputMaximum - mapping.inputMinimum),

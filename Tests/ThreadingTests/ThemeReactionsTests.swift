@@ -29,25 +29,40 @@ final class ThemeReactionsTests: XCTestCase {
         super.tearDown()
     }
 
-    private func strength(_ value: Double) {
-        DesignSettings.current = StubDesignSettings(themeReactionStrength: value)
+    private func strength(_ value: Double, activity: Bool = true) {
+        DesignSettings.current = StubDesignSettings(
+            themeReactionStrength: value,
+            themeReactsToActivity: activity
+        )
     }
 
     // MARK: - Arithmetic
 
     func testTheScaleHoldsDoublesAndClamps() {
         strength(1)
-        XCTAssertEqual(ThemeReactions.scaled(0.4), 0.4, accuracy: 1e-9, "as authored")
+        XCTAssertEqual(ThemeReactions.scaledActivity(0.4), 0.4, accuracy: 1e-9, "as authored")
+        XCTAssertEqual(ThemeReactions.scaledMusic(0.4), 0.4, accuracy: 1e-9)
         strength(0)
-        XCTAssertEqual(ThemeReactions.scaled(0.9), 0, "0% holds decoration at rest")
-        XCTAssertEqual(ThemeReactions.scaledFloor(0.35), 0)
+        XCTAssertEqual(ThemeReactions.scaledActivity(0.9), 0, "0% holds decoration at rest")
+        XCTAssertEqual(ThemeReactions.scaledMusic(0.9), 0)
+        XCTAssertEqual(ThemeReactions.activityFloor(0.35), 0)
         strength(2)
-        XCTAssertEqual(ThemeReactions.scaled(0.3), 0.6, accuracy: 1e-9)
-        XCTAssertEqual(ThemeReactions.scaled(0.8), 1, "a reading never exceeds full")
-        XCTAssertEqual(ThemeReactions.scaledCount(3), 6, "counts scale as counts")
-        XCTAssertEqual(ThemeReactions.scaledFloor(0.35), 0.35, accuracy: 1e-9, "the floor never rises")
+        XCTAssertEqual(ThemeReactions.scaledActivity(0.3), 0.6, accuracy: 1e-9)
+        XCTAssertEqual(ThemeReactions.scaledMusic(0.8), 1, "a reading never exceeds full")
+        XCTAssertEqual(ThemeReactions.activityCount(3), 6, "counts scale as counts")
+        XCTAssertEqual(ThemeReactions.activityFloor(0.35), 0.35, accuracy: 1e-9, "the floor never rises")
         strength(5)
         XCTAssertEqual(ThemeReactions.strength, ThemeReactions.maximumStrength)
+    }
+
+    func testTurningActivityOffHoldsActivityButNotMusic() {
+        strength(2, activity: false)
+        XCTAssertNil(ThemeReactions.activity(0.5), "activity off reads as no reading")
+        XCTAssertNil(ThemeReactions.activityCount(3))
+        XCTAssertEqual(ThemeReactions.scaledActivity(0.5), 0)
+        XCTAssertEqual(ThemeReactions.activityFloor(0.35), 0, "a working pose's stream stops")
+        XCTAssertEqual(ThemeReactions.scaledMusic(0.3), 0.6, accuracy: 1e-9,
+                       "music keeps its own switch, which is capture consent")
     }
 
     // MARK: - Setting
@@ -69,9 +84,9 @@ final class ThemeReactionsTests: XCTestCase {
 
     // MARK: - Where reactions enter decoration
 
-    func testAnExtensionsReactiveInputsScaleButItsFactsDoNot() {
+    func testAnExtensionsReactiveInputsScaleButItsFactsDoNot() throws {
         strength(2)
-        XCTAssertEqual(ExtensionMetalSurfaceView.reacted(.workloadIntensity, 0.3), 0.6, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(ExtensionMetalSurfaceView.reacted(.workloadIntensity, 0.3)), 0.6, accuracy: 1e-9)
         XCTAssertEqual(ExtensionMetalSurfaceView.reacted(.audioBass, 0.7), 1)
         XCTAssertEqual(ExtensionMetalSurfaceView.reacted(.workloadWorkingCount, 2), 4)
         XCTAssertEqual(ExtensionMetalSurfaceView.reacted(.audioAvailable, 1), 1, "a fact passes through")
@@ -79,6 +94,14 @@ final class ThemeReactionsTests: XCTestCase {
         strength(0)
         XCTAssertEqual(ExtensionMetalSurfaceView.reacted(.workloadIntensity, 1), 0)
         XCTAssertEqual(ExtensionMetalSurfaceView.reacted(.audioAvailable, 1), 1)
+
+        strength(1, activity: false)
+        XCTAssertNil(ExtensionMetalSurfaceView.reacted(.workloadIntensity, 1),
+                     "activity off: the binding reads its idle fallback")
+        XCTAssertNil(ExtensionMetalSurfaceView.reacted(.momentTurnFinished, 1))
+        XCTAssertNil(ExtensionMetalSurfaceView.reacted(.workloadWorkingCount, 3))
+        XCTAssertEqual(ExtensionMetalSurfaceView.reacted(.audioBass, 0.4), 0.4)
+        XCTAssertEqual(ExtensionMetalSurfaceView.reacted(.themeDark, 1), 1)
     }
 
     func testALogosWorkingStreamFollowsTheScale() throws {
@@ -107,6 +130,10 @@ final class ThemeReactionsTests: XCTestCase {
         strength(0)
         logo.refreshParticleMotion()
         XCTAssertEqual(logo.streamRate, 0, "0% holds the stream still")
+
+        strength(2, activity: false)
+        logo.refreshParticleMotion()
+        XCTAssertEqual(logo.streamRate, 0, "activity off holds it still at any strength")
     }
 
     func testTheMotionPageCarriesTheScaleInWholeTens() throws {
@@ -126,6 +153,18 @@ final class ThemeReactionsTests: XCTestCase {
         XCTAssertEqual(settings.themeReactionStrength, 140, "lands on a whole ten")
         scrubber.onChange?(0)
         XCTAssertEqual(settings.themeReactionStrength, 0)
+
+        let toggle = try XCTUnwrap(
+            section.firstDescendant(identifier: "motion.theme-reacts-to-activity") as? ThemedToggle
+        )
+        XCTAssertEqual(toggle.state, .on, "activity reactions default on")
+        toggle.state = .off
+        _ = toggle.target?.perform(toggle.action, with: toggle)
+        XCTAssertFalse(settings.themeReactsToActivity)
+        settings.sharesThemeAudio = false
+        XCTAssertFalse(scrubber.isEnabled, "with no reaction on there is nothing to scale")
+        settings.themeReactsToActivity = true
+        XCTAssertTrue(scrubber.isEnabled)
     }
 }
 

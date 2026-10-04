@@ -24,6 +24,8 @@ public protocol DesignSettingsReading {
     /// How strongly decoration answers agent activity and music, as a multiple of what the theme
     /// or extension authored — `0…2`, 1 meaning as authored. See `ThemeReactions`.
     var themeReactionStrength: Double { get }
+    /// Whether decoration answers agent activity at all. See `ThemeReactions`.
+    var themeReactsToActivity: Bool { get }
 }
 
 /// Where `UI/Design/` reads its preferences from.
@@ -64,4 +66,5 @@ public struct ApplicationDesignSettings: DesignSettingsReading {
     public var themeReactionStrength: Double {
         Double(AppSettings.shared.themeReactionStrength) / 100
     }
+    public var themeReactsToActivity: Bool { AppSettings.shared.themeReactsToActivity }
 }

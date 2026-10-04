@@ -103,4 +103,5 @@ struct StubDesignSettings: DesignSettingsReading {
     var chatNameMorphStyle: ChatNameMorphStyle = MotionPreferencesDefaults.chatNameMorphStyle
     var playsThemeMotion = true
     var themeReactionStrength = 1.0
+    var themeReactsToActivity = true
 }

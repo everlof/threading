@@ -2704,10 +2704,20 @@ tile's key carries the resolved ink. `ProjectRowView.rederiveThemedContent` used
 for a generated tile because nothing about it depended on the theme; now it re-inks. An account
 chip already on screen follows at the row's next refresh, which while agents work is constant.
 
-### The person's scale on reactions
+### The person's say over reactions
 
-`ThemeReactions` is the one owner of how strongly decoration answers what it reacts to. Settings ▸
-Motion ▸ Reactions stores a whole-ten percentage (`clampingRange(0...200)`, because 0% is a
+`ThemeReactions` is the one owner of whether and how strongly decoration answers what it reacts
+to, and Settings ▸ Motion ▸ Reactions holds both halves:
+
+- **React to agent activity** (`themeReactsToActivity`, default on) — off, every activity
+  reading is absent at the decorative boundary: a logo's or mascot's working stream stops (the
+  mascot's pose still changes; that is information), and an extension input bound to
+  `workload.*` or `moment.*` reads its binding's idle fallback, as if nothing were working. The
+  music half's switch is the existing **Music-reactive themes** opt-in, which already governs
+  capture, so audio needs no second switch. **Theme animations** still overrides both.
+- **Reaction strength** scales whichever half is on, and is disabled when neither is.
+
+The strength stores a whole-ten percentage (`clampingRange(0...200)`, because 0% is a
 decision, not "unset" — `range(_:)` would have folded it to the default), and `DesignSettings`
 carries it into `UI/Design` as a multiple. It is applied where reactive readings enter
 decoration: a logo's and a mascot's working streams (the mascot's floor scales down with it and
@@ -2716,9 +2726,9 @@ never rises), the live audio spectrum's bars, and every extension input whose si
 sees it; counts scale as counts, facts (`audio.available`, theme colours, the clock, the account)
 pass through. It never scales a fact the app reports, never starts capture, and leaves ambient
 time-driven motion alone. A slider move reaches mounted logos and mascots at once through the
-motion hold's existing settings fan-out. The on/off switches for activity and music reactions
-proposed in [`customization-packs.md`](../feature-drafts/customization-packs.md) belong in the
-same owner.
+motion hold's existing settings fan-out. This is the activity/music half of the effects policy
+proposed in [`customization-packs.md`](../feature-drafts/customization-packs.md); decorative
+motion as a whole remains `playsThemeMotion`.
 
 ### Tests
 
@@ -2730,7 +2740,7 @@ same owner.
 | The morph's wire form and unknown-style drop, its gates, Theme's Choice playing the theme's scramble, an explicit style winning, the layer report, the tool loop and schema | `ThemeTitleMorphTests` |
 | A scrambling glyph draws the pool then settles; one ticker drives every glyph and stops | `ScrambleEffectTests` (LabelMorph) |
 | Marks default natural on every stock theme; a tinted tile and chip; a person's colour kept; the tool loop | `IdentityMarkInkTests` |
-| The scale's arithmetic, the setting's default and clamp, extension inputs scaled and facts not, a logo's stream at 0/100/200 %, the Motion row landing on tens | `ThemeReactionsTests` |
+| The scale's arithmetic, activity off holding activity but not music, the setting's default and clamp, extension inputs scaled (activity off reading the fallback) and facts not, a logo's stream at 0/100/200 % and with activity off, the Motion rows: the switch, the slider landing on tens and disabling with no reaction on | `ThemeReactionsTests` |
 
 ## Opt-in music spectrum
 

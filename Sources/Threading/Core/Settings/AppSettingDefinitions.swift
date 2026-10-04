@@ -38,6 +38,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case playsThemeSounds
     case sharesThemeAudio
     case themeAudioSource
+    case themeReactsToActivity
     case themeReactionStrength
     case convertsDroppedImages
     case copiesTerminalSelection
@@ -1530,6 +1531,16 @@ enum AppSettingDefinitions {
         presentations: [row("motion", 3, "Music", "Audio source",
                             ["music", "audio", "source", "player", "Spotify"])]
     )
+    /// Whether decoration answers agent activity at all — streams, rain, pulses, comets. The
+    /// music half's switch is `sharesThemeAudio`; whether anything moves is `playsThemeMotion`.
+    static let themeReactsToActivity = AppSettingDescriptor<Bool>(
+        identity: .themeReactsToActivity,
+        persistenceKey: "themeReactsToActivity",
+        absence: .registered(true),
+        presentations: [row("motion", 4, "Reactions", "React to agent activity",
+                            ["reaction", "activity", "agents", "working", "particles",
+                             "decoration", "motion"])]
+    )
     /// How strongly decoration answers agent activity and music, as a percentage of what each
     /// theme or extension authored. A user choice, so it lives beside the audio opt-in.
     static let themeReactionStrength = AppSettingDescriptor<Int>(
@@ -1538,7 +1549,7 @@ enum AppSettingDefinitions {
         absence: .registered(ThemeReactionDefaults.strengthPercent),
         // 0% is a decision — reactions held at rest — not "unset", so the floor is honoured.
         validation: .clampingRange(ThemeReactionDefaults.strengthPercentRange),
-        presentations: [row("motion", 4, "Reactions", "Reaction strength",
+        presentations: [row("motion", 5, "Reactions", "Reaction strength",
                             ["reaction", "strength", "intensity", "music", "activity",
                              "agents", "scale", "equalizer", "particles"])]
     )
@@ -1639,7 +1650,7 @@ enum AppSettingDefinitions {
         .init(updateChannelSubscription),
         .init(automaticUpdateChecksEnabled), .init(preventsIdleSystemSleepWhileAgentsWork),
         .init(workingOrbStyle), .init(sharesThemeAudio), .init(themeAudioSource),
-        .init(themeReactionStrength),
+        .init(themeReactsToActivity), .init(themeReactionStrength),
         .init(chatNameMorphStyle), .init(chromeFontFamily), .init(conversationFontFamily),
         .init(appTextSize)
     ]
