@@ -221,6 +221,16 @@ every connected phone. The other direction — a declared turn with no timer who
 is closed by `task_complete` through the same reader, which is otherwise inert because Codex
 raises `Stop` about three milliseconds *before* it writes that record.
 
+**Invalidating a timer does not revoke its queued actor task.** A quiet timer can fire and
+enqueue its main-actor callback just before a hook or rollout declares the turn. Invalidating
+the timer at that boundary cannot cancel the already-enqueued task. The callback must still own
+the current quiet-timer generation and an inferred turn before it changes any state. A new
+output burst replaces that generation too, so an old expiry cannot clear the replacement timer
+or finish its work early. This is O(1) per timer replacement and expiry, with one generation per
+tracker and no transcript scanning or additional timer. `SessionActivityQuietTimerTests` fires
+the production timer before declaring a turn or replacing it, then drains its queued callback;
+the current inferred timer alone may publish completion or raise attention.
+
 That reader cannot depend on another terminal repaint. Measured on 5 September 2026 in session
 `TAPPING`: the rollout appended `task_complete` and the matching durable turn checkpoint reached
 `complete` at 04:59:41, but the row still showed `working` when reopened twenty-one minutes later.
