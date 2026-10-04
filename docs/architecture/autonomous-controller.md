@@ -347,8 +347,10 @@ protocol. Worker/session adoption remains separate; autonomous work is not silen
 as ordinary Mac chat sessions.
 
 Validation adds migration/inbox/outbox checks and shared knowledge grant/revocation/provenance
-checks, plus real owner-RPC text transport, invalid request/cleanup and denied MCP access. The suite comprises 23 core, eight CLI and ten PTY/MCP tests. The final macOS/Linux rerun
-status is recorded with the consumer validation.
+checks, plus real owner-RPC text transport, invalid request/cleanup and denied MCP access. On 2026-10-04 `scripts/test-controller.sh` ran 63 core and 4 runtime Swift Testing cases, 9
+real-CLI checks, the automation CLI script, 11 real-ptyd/MCP/supervisor checks, and 5 mail, 2
+source, 1 usage and 3 host-state process checks, all passing on macOS arm64; the run's own output
+is the current count. The final macOS/Linux rerun status is recorded with the consumer validation.
 
 
 The opt-in sparse-history fixture is `scripts/tests/profile_controller_operations.py BINARY`.
@@ -669,9 +671,13 @@ schema and capabilities without opening or migrating a database. Before an upgra
 online SQLite backup; older binaries refuse schema 10. Restore into an isolated private directory
 with workers/sources disarmed before testing, never alongside active copies of the same work.
 
-A reusable Ubuntu/glibc distribution path is `scripts/build-controller-host.sh OUTPUT` inside a
-Linux Swift toolchain. It runs all controller/ptyd process checks and emits controller, ptyd,
-SHA-256 manifest, `install-host.py`, and `host-state.py`. Installation verifies architecture,
+A reusable Linux distribution path is `scripts/build-controller-host.sh OUTPUT` inside a
+Linux Swift toolchain. It runs all controller/ptyd process checks and emits controller (glibc,
+static Swift runtime, stripped at link), ptyd (the static musl, generation-stamped build of
+`scripts/linux/build-ptyd-static.sh`, with the daemon suite run against that exact file), a
+SHA-256 manifest of those final bytes, `install-host.py`, and `host-state.py`, then runs
+`install-host.py` against a throwaway home. Consumers must not strip or rewrite bundle files after
+the manifest: the installer refuses any digest mismatch. Installation verifies architecture,
 content and protocol before writing private per-user files. It does not start services unless
 `--start` is supplied and refuses an implicit replacement of an existing unit. Existing-host
 upgrades remain an explicit stop, online snapshot, verified artifact/unit switch, restart and
@@ -691,6 +697,12 @@ The owner protocol provides memory-list/get/put/history for trusted administrati
 
 Notes and revision history live in controller SQLite and travel with its backup; provider
 transcripts and credentials do not. A regression reopens the store, starts a new execution and
-checks recall, pagination and isolation from a second worker. This is the hosted memory core;
+checks recall and pagination; `runningAgentCannotReachAnotherWorkersMemory` has a running agent
+ask for a second worker's known key, list, overwrite it and present its own credential for the
+other worker's execution, and asserts each is refused or lands in its own namespace. That is the
+whole guarantee: the agent **tool path** never names another worker. Workers on one host share
+one Unix account, one controller database and the provider files under it, so a shell or file
+read from an agent's process can reach another worker's notes; mutual isolation needs a separate
+OS account or container per worker. This is the hosted memory core;
 attaching persistent identities to native chats, promotion/profile UI and authenticated remote
 chat attachment remain separate consumer work.
