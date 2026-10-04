@@ -436,13 +436,32 @@ enum TerminalBidi {
 
     // MARK: - Full paragraph layout
 
+    /// A cache identity keeps its small identity object alive so an allocator cannot reuse
+    /// its address while the key exists. Buffers use their back-reference box, which does
+    /// not retain the buffer or its scrollback; font objects are immutable and bounded here.
+    fileprivate struct RetainedIdentity: Hashable {
+        let object: AnyObject
+
+        init(_ object: AnyObject) {
+            self.object = object
+        }
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.object === rhs.object
+        }
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(ObjectIdentifier(object))
+        }
+    }
+
     fileprivate struct ParagraphKey: Hashable {
-        let buffer: ObjectIdentifier
+        let buffer: RetainedIdentity
         let firstRow: Int
         let lastRow: Int
         let revision: Int
         let cols: Int
-        let font: ObjectIdentifier
+        let font: RetainedIdentity
         let state: BidiPresentationState
     }
 
@@ -459,7 +478,7 @@ enum TerminalBidi {
         let contentHash: Int
         let rowCount: Int
         let cols: Int
-        let font: ObjectIdentifier
+        let font: RetainedIdentity
         let state: BidiPresentationState
     }
 
@@ -530,7 +549,7 @@ enum TerminalBidi {
         return ParagraphContentKey(contentHash: hasher.finalize(),
                                    rowCount: rowCount,
                                    cols: cols,
-                                   font: ObjectIdentifier(font),
+                                   font: RetainedIdentity(font),
                                    state: state)
     }
 
@@ -869,12 +888,12 @@ enum TerminalBidi {
         }
         let state = buffer.lines[bounds.lowerBound].bidiState
         let revision = paragraphRevision(bounds, buffer: buffer)
-        let key = ParagraphKey(buffer: ObjectIdentifier(buffer),
+        let key = ParagraphKey(buffer: RetainedIdentity(buffer.selfRef),
                                firstRow: bounds.lowerBound,
                                lastRow: bounds.upperBound,
                                revision: revision,
                                cols: cols,
-                               font: ObjectIdentifier(font),
+                               font: RetainedIdentity(font),
                                state: state)
         if let cached = cacheState.withLock({ $0.paragraphCache[key] }) {
             return .ready(cached)

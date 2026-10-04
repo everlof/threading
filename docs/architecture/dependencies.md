@@ -93,6 +93,12 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     CPU render loop and uses the renderer's bounded idle wait before submitting its snapshot.
     Suspending the loop alone leaves the GPU's frame permit occupied, so a terminal remounted
     immediately after releasing its glow could silently skip the requested reallocation.
+  - **BiDi cache identities outlive their keys.** A bare buffer address can be reused after a
+    terminal is released, letting a new Arabic row inherit an old Hebrew row's unshaped layout.
+    Paragraph keys retain `BufferRef`, which retains no scrollback, and both cache levels retain
+    their immutable font identity. The existing 256-entry ceilings still bound them. Alternating
+    short-lived Hebrew/Arabic terminals reproduces the old failure; a separate assertion proves
+    the cache does not retain the buffer itself.
   - **Use upstream's implementation when it has one.** This reconciliation removes our former
     copies of colour-scheme reporting, hidden-normal-buffer reflow, output-stable selection and
     local-process lifecycle/draining. Those are now upstream code, not downstream seams. The
@@ -600,7 +606,9 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     elements — and whose `rendersStatically` pins the internal frozen-time environment. That
     pin now also *pauses* the driving `TimelineView` (t and fade are both constants there),
     so the Reduce Motion mode is a genuinely static picture rather than 60 identical frames
-    a second. AppKit's recursive `cacheDisplay` does not preserve a transparent
+    a second. `BorderBeam` preserves an inherited frozen time rather than overriding it with
+    nil; otherwise the package's 40-frame Metal matrix captures the hidden pre-appearance fade
+    and paints no beam. AppKit's recursive `cacheDisplay` does not preserve a transparent
     `NSHostingView` root: it rasterizes the centre white even though the live compositor is
     correct. `BorderBeamHostView.withCachedDisplayFallback` is therefore the explicit
     offscreen-render contract. It hides only the live shader host for the synchronous draw and

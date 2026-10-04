@@ -102,6 +102,31 @@ final class BidiCacheTests: TerminalDelegate {
         }
     }
 
+    /// Releasing a terminal must not let an allocator-reused buffer address inherit
+    /// another terminal's layout. Both strings have the same cell and revision counts.
+    @Test func shortLivedBuffersKeepTheirOwnArabicShaping() throws {
+        for _ in 0..<200 {
+            do {
+                let hebrew = makeTerminal(feed: "שלוםא")
+                _ = layout(hebrew)
+            }
+            let arabic = makeTerminal(feed: "مرحبا")
+            let result = try #require(layout(arabic))
+            let initialMeem = try #require(result.visualCells.first { $0.logicalCol == 0 })
+            #expect(initialMeem.display == "\u{FEE3}")
+        }
+    }
+
+    @Test func cachedLayoutDoesNotRetainItsBuffer() {
+        func cachedBufferReference() -> BufferRef {
+            let terminal = makeTerminal(feed: "مرحبا")
+            _ = layout(terminal)
+            return terminal.buffer.selfRef
+        }
+        let reference = cachedBufferReference()
+        #expect(reference.buffer == nil)
+    }
+
     /// Overwriting one cell must change the served layout: the neighbors'
     /// contextual Arabic forms depend on it, and an entry keyed on the old
     /// content must not survive the edit.
