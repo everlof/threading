@@ -85,7 +85,7 @@ public enum ControllerBrokerLimits {
 /// launched agent never needs the owner store's path or file permissions.
 ///
 /// It runs on its own threads — one accept thread and at most `concurrentConnections` handler
-/// threads — and its own `ControllerStore` connection, so a slow or hostile client can hold a
+/// threads, never Dispatch workers — and its own `ControllerStore` connection, so a slow or hostile client can hold a
 /// handler for at most `connectionSeconds` and can never delay a supervisor tick. A connection
 /// past the bound is answered `busy` and closed. The socket is `0660`: who may connect is decided
 /// by the directory it is in and its group (see autonomous-controller.md, "Agent tool broker").
@@ -97,7 +97,6 @@ public final class ControllerAgentBroker: @unchecked Sendable {
     private let store: ControllerStore
     private let listener: Int32
     private let slots = DispatchSemaphore(value: ControllerBrokerLimits.concurrentConnections)
-    private let handlers = DispatchQueue(label: "threading.controller.agent-broker", attributes: .concurrent)
     private let running = DispatchGroup()
     private let lock = NSLock()
     private var stopping = false
@@ -174,12 +173,17 @@ public final class ControllerAgentBroker: @unchecked Sendable {
                 continue
             }
             running.enter()
-            handlers.async { [self] in
+            // A thread of its own, not a Dispatch worker: a handler may sit in `poll` for its whole
+            // budget, and on Linux the shared Dispatch pool is small enough that 32 of them would
+            // starve the ptyd client's queues the supervisor depends on.
+            let handler = Thread { [self] in
                 serve(descriptor)
                 ControllerUnixSocket.close(descriptor)
                 slots.signal()
                 running.leave()
             }
+            handler.name = "threading.controller.agent-broker.connection"
+            handler.start()
         }
     }
 

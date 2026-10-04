@@ -88,9 +88,10 @@ trigger sources) when it dispatches. Secrets are read before the spawn right is 
 missing one fails the dispatch and leaves the intent `prepared` for an explicit retry once the
 owner stores it. No status, policy or launch projection prints environment values or secrets.
 
-`launch-prepare WORKER_UUID RECIPE_JSON_FILE` claims work and saves launch intent and a private
-execution credential in one transaction. `launch-dispatch EXECUTION_UUID` connects, commits
-`prepared -> dispatching`, then sends exactly one spawn. The PTY identity is the execution UUID;
+`launch-prepare WORKER_UUID RECIPE_JSON_FILE` claims work and saves launch intent in one
+transaction. `launch-dispatch EXECUTION_UUID` connects, commits `prepared -> dispatching`, issues
+the execution's private credential (only its SHA-256 digest is stored; see
+[Agent tool broker](#agent-tool-broker)), then sends exactly one spawn. The PTY identity is the execution UUID;
 replacement authority is never set. `spawned` records pid and kernel start time and changes the
 launch to `running`. `launch WORKER_UUID RECIPE_JSON_FILE` composes these operations. Its process
 can exit: ptyd owns the child, and tools use the host-local work store with no Mac dependency.
@@ -114,7 +115,8 @@ orphaned process group. A loss is recorded as `failure {stage: host, reason: los
 interrupts the work; like an exit, it is never an automatic retry. Exit alone interrupts
 unfinished work, even for exit zero, and never invents a result. A non-zero, signalled or early
 exit records `failure {stage: exit}` and a 2 KiB output tail with control sequences removed and
-every recipe argument/environment value and the execution credential (8+ characters) redacted —
+every recipe argument/environment value (8+ characters) and every credential-shaped token (the
+store no longer holds the credential's value, so it is recognised by form) redacted —
 best effort, not a secret scanner, so it stays an owner-only diagnostic. After recording, the
 controller acknowledges only receipts whose launch exists in its own store and is stopped.
 
@@ -143,8 +145,10 @@ each request has a bounded wait. Prefer noninteractive provider turns for unatte
 
 ## Execution-scoped tools
 
-The launched child receives the controller executable, database path, execution ID and private
-credential in environment variables. `threading-controller agent REQUEST_JSON_FILE` exposes a
+The launched child receives the controller executable, the broker socket
+(`THREADING_CONTROLLER_AGENT_SOCKET`), execution ID and private credential in environment
+variables — never the store path (see [Agent tool broker](#agent-tool-broker)).
+`threading-controller agent REQUEST_JSON_FILE` exposes a
 single typed operation; `agent-mcp` exposes the same operations over newline-delimited stdio MCP:
 `work_context`, `work_questions`, `work_messages`, `work_history`, `work_message_consumed`,
 `work_checkpoint`, `work_ask`, `work_finish`, `memory_list`, `memory_get`, `memory_put`, `memory_delete`,
@@ -156,8 +160,100 @@ Admission, active-execution checks and mutation run inside one write transaction
 savepoints to compose existing core operations. Terminal writes allow identical receipt retries
 until the process is confirmed stopped; later memory writes and context reads require a current
 running execution. A stopped launch revokes all tool calls. The credential never appears in
-status/events; private recipe/database files are still sensitive. This is scoped tool routing,
-not isolation from a malicious shell sharing the owner's Unix account.
+status/events and is stored only as a digest; private recipe/database files are still sensitive.
+What this isolates depends on the Unix accounts: an agent running as the controller's own
+account can still open the store with its shell, so the broker is then scoped routing only. Run
+agents as their own Unix user ([below](#running-agents-as-another-unix-user)) when a shell agent
+must not hold owner authority.
+
+## Agent tool broker
+
+The resident `supervise` serves agent tools on a Unix socket: `--agent-socket PATH` (absolute;
+default `agent.sock` beside the store), created `0660` under the service's `0077` umask and then
+widened, never the reverse. A leftover *socket* there is replaced (the supervisor lock makes this
+the only listener); any other file there is refused, never deleted. While it listens, the store
+holds an `agentBroker` record naming it (withdrawn on shutdown, only if it still names this
+socket); `host` reports it as `agentSocket` only while a connect succeeds, and `--version` lists
+`agent-broker`.
+
+- **Wire.** One connection carries one request: a JSON line `{execution | mailbox, credential,
+  request | transcript}` and one JSON line back, `{response}` or `{error}` with the store's own
+  token (`forbidden`, `conflict`, `invalid_input: …`). The request decodes only as
+  `ControllerAgentRequest` (the agent tools) or a provider transcript report; there is no owner
+  vocabulary to reach, and an envelope naming both or neither caller is `forbidden`. Unknown keys
+  are ignored, never interpreted.
+- **Authority.** Exactly the operations the agent could perform with its credential before the
+  broker existed: `agentRequest`, `mailboxRequest` (mail tools only) and `bindProviderTranscript`,
+  each authenticated by the credential against the stored digest (constant-time). The peer's uid
+  (`getpeereid`/`SO_PEERCRED`) is recorded, never trusted: the first request per execution and uid
+  adds `launch.agent_peer` (text `peer uid N`, so it is in the work's history), a mailbox's adds
+  `mail.agent_peer`, and refusals add `agent.broker_refused` (at most 30 a minute).
+- **Bounds.** Requests 320 KiB, responses 4 MiB (larger answers `response_too_large`), 10 s per
+  connection for read, operation and write together, at most 32 concurrent connections; a
+  connection past that is answered `busy` at once and closed. The broker runs on its own accept
+  thread and handler threads with its own store connection, so a silent, slow or oversized
+  client holds one slot and never a supervisor tick (`test_controller_broker.py` holds 40 silent
+  connections while the supervisor records an exit).
+- **Clients.** With `THREADING_CONTROLLER_AGENT_SOCKET` set, `agent`, `agent-mcp` and
+  `agent-notice` make one bounded connection per call and open no store, even if a store path is
+  also present; without it they need `THREADING_CONTROLLER_DATABASE` (below), and with neither
+  they refuse. The dispatcher drops a store path from the child environment when it uses the
+  broker.
+- **Without a resident supervisor.** A manual `launch`/`launch-dispatch` or a one-shot
+  `supervisor-tick` uses the advertised broker when it answers. Otherwise it refuses
+  (`agent_broker_unavailable`) before anything is claimed or consumed, unless the owner sets
+  `THREADING_CONTROLLER_LEGACY_AGENT_DATABASE=1`: the child then receives the store path and opens
+  it itself, recorded as `launch.legacy_agent_database`. That compatibility mode is honest only
+  when agent and controller are one account that already trust each other; tests and stores
+  without a supervisor use it.
+- **Credentials at rest.** Execution and session-mailbox credentials are 244 random bits stored
+  as `sha256:` digests. An execution's is issued at dispatch, after the spawn right is consumed;
+  a session's when the owner asks for one at launch (`mail-credential`, which therefore issues
+  rather than reads back). Opening an older store digests every plaintext credential once, in one
+  transaction, recorded by a `storeMigration/credential-digest` record (no DDL); an agent holding
+  the plaintext keeps working.
+
+## Running agents as another Unix user
+
+The broker is what lets agents run without the controller's file permissions. On Linux, with
+`install-host.py` from the controller host bundle (it creates no users or groups):
+
+1. Accounts: a controller user (say `threading`) and an agent user (`agent`), both members of a
+   group shared for the two rendezvous (`threading-agents`). The agent user is in no other group
+   of the controller's.
+2. Store: the controller's state directory stays `0700` owned by the controller user — the CLI
+   refuses any other. Secrets, the supervisor lock and the store live there. Nothing in it is
+   group-readable.
+3. Broker: a directory like `/srv/threading/broker`, owned `threading:threading-agents`, mode
+   `2750` (setgid, so the socket takes the group). Install the controller half with
+   `install-host.py BUNDLE --role controller --agent-socket /srv/threading/broker/agent.sock
+   --agent-binary /opt/threading/threading-controller`, where the agent binary is a copy of the
+   same controller every agent can execute (the service's own copy under its `0700` home is not).
+4. ptyd: a directory like `/srv/threading/pty`, owned `agent:threading-agents`, mode `2750`.
+   Install the daemon half as the agent user with `install-host.py BUNDLE --role ptyd
+   --ptyd-socket /srv/threading/pty/ptyd.sock`: the unit runs `threading-ptyd --group-socket`
+   (socket `0660`) under `UMask=0027`. Recipes name that socket as `socketPath`; their
+   `directory` must be the agent user's.
+5. Provider homes (`usage.accounts`) belong to the agent user. The usage collector reads
+   transcripts under them as the controller user, so they must be group-readable: the unit's
+   `0027` umask covers files the provider creates with default modes; add a default ACL
+   (`setfacl -d -m g:threading-agents:rX`) where it does not. A provider that writes its
+   transcripts `0600` explicitly cannot be collected this way and shows as a coverage gap, never
+   a silent zero.
+
+What this gives: an agent's shell cannot open, copy or replace the store, the secrets or the
+lock; its tools still work through the broker with its own credential, and a credential taken
+from another agent's environment is the only way to act as that execution (the agent user can
+read its own processes' environments, so agents of one Unix user are not isolated from each
+other). What it does not: the controller user can still connect to ptyd and run anything as the
+agent user, by design. `test_controller_agent_user.py` (Linux, as root, run by
+`scripts/test-controller.sh` in the controller-linux container) builds exactly this layout and
+asserts the agent's `open` of the store fails while its tools, memory write and finish succeed
+and the broker records its uid.
+
+Mac remote chats with a host-local mailbox follow the same rule: when the host's `host` answer
+lists `agent-broker` with an `agentSocket`, the session gets the socket instead of the store path
+(`MailboxEnvironment`); an older host, or one with no supervisor answering, keeps the store path.
 
 MCP supports initialization, ping and tools only, with no network listener. It negotiates the
 2024-11-05 through 2025-11-25 versions, advertises no optional sampling/tasks capabilities, retains
@@ -351,6 +447,9 @@ future service must derive actor identity, scopes and destination grants from au
 credentials and reuse/extract the existing [control-plane](control-plane.md) policy vocabulary.
 No session grant is widened by adding this independent work store. Agents sharing one Unix
 account are not isolated from one another; strong isolation requires separate OS boundaries.
+Agents never need this CLI's authority: their tools go through the supervisor's broker, and on a
+host that runs them as another Unix user they cannot open the store at all
+([Running agents as another Unix user](#running-agents-as-another-unix-user)).
 
 No UI or public extension component is added in this slice. Future presentation may customize
 work/result content, but claim ownership, status truth, routing, identity, answer admission and
@@ -578,10 +677,10 @@ what the controller implements. `ControllerMail.swift` holds the model and store
 - **Identity.** Each store mints a stable `HostID` once (`host`, renamed with `host-set-name`).
   An address is `<host>/worker/<uuid>` or `<host>/session/<uuid>`; the host part is where the
   agent's process runs. Session mailboxes are registered (`mail-register`); workers need none.
-  A session mailbox's tool credential is read by the owner for each launch (`mail-credential`)
-  and replaced with `mail-credential-rotate`, which stops the old one in the same transaction.
-  It is stored readable, like an execution credential, because the owner hands it to every
-  launch; rotation is the revocation.
+  A session mailbox's tool credential is issued by the owner for each launch (`mail-credential`)
+  and stored only as a digest, so each issue (and `mail-credential-rotate`) replaces the previous
+  one in the same transaction; issuing is the revocation. The Mac provisions once per session per
+  app run, so a still-running process of that session keeps its credential until it is relaunched.
 - **Sending is storing.** `mail_send` succeeds once the message is in a store: the recipient's
   inbox on this host, or the outbound queue (`mail_outbound`, one row per message per peer host)
   for another. Busy, idle and not-running recipients differ only in when they read it. Refusals are

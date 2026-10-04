@@ -4581,7 +4581,9 @@ controller is set up on the **Remote automations** page.
 A session that runs on a remote host keeps its mail **on that host** when the host's controller
 is set up there: it keeps receiving mail and being told about it while your Mac is asleep, and
 the Info panel shows the last reading with its age while the host can't be reached. Without a
-controller its mail stays on this Mac, and the panel says so. Mail sent to such a session right
+controller its mail stays on this Mac, and the panel says so. When the host's controller has a
+supervisor serving agent tools, the session's mail tools go through it and the session is not
+given the controller's database path; each launch gets a fresh mail credential. Mail sent to such a session right
 after Threading starts, or while its host can't be reached, waits on this Mac and moves to the host
 — with the session's grants, exactly — as soon as the host answers. Moving a project to another
 host takes every grant along, including the ones you revoked.
@@ -6542,8 +6544,17 @@ owner then uses `launch-confirm-stopped EXECUTION_UUID EXPECTED_STATE`.
 
 Launched agents can use the scoped `agent` command or `agent-mcp` stdio tools to read their work,
 save progress and worker memory, leave a question or submit a result. They cannot answer their
-own questions or choose new destination grants through these tools. Agents sharing one Unix
-account still share its filesystem authority; these tools do not create an OS sandbox.
+own questions or choose new destination grants through these tools. The tools reach the
+controller through the running supervisor's agent socket (`supervise --agent-socket PATH`,
+default `agent.sock` beside the database); a launched agent is never told where the database is,
+and its credential is stored only as a digest. Without a running supervisor a manual `launch`
+refuses with `agent_broker_unavailable` unless you set
+`THREADING_CONTROLLER_LEGACY_AGENT_DATABASE=1`, which hands the agent the database path — only
+appropriate when the agent and the controller are the same trusted account. Agents sharing the
+controller's Unix account can still reach the database through their shell; to keep a shell
+agent out of it, run agents as a separate Unix user (`install-host.py --role controller|ptyd`,
+described in [Autonomous host controller](docs/architecture/autonomous-controller.md#running-agents-as-another-unix-user)).
+These tools do not create an OS sandbox.
 
 To run eligible work automatically, save a worker recipe with `worker-configure WORKER_UUID
 EXPECTED_REVISION MAX_CONCURRENT RECIPE_JSON_FILE` (revision `0` for a new configuration), then

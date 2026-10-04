@@ -379,10 +379,13 @@ recreated when it cannot be opened — and registers each session lazily as
   from another host needs a grant on the Mac's store, except a reply to mail the Mac sent.
 - **Remote-host sessions keep their mailbox on the host** (`RemoteSessionMailboxes`, the draft's
   "Mailbox location"). When the session's host has a controller set up, the remote launch first
-  registers `<host>/session/<uuid>` there over owner-rpc (`mail-register`, `mail-credential`,
-  and a `<macHost>/*` `notify` grant that stands for this plane's same-project admission), then
+  registers `<host>/session/<uuid>` there over owner-rpc (`mail-register`, `mail-credential`
+  — which issues a fresh credential, since the host stores only its digest — `host`, and a
+  `<macHost>/*` `notify` grant that stands for this plane's same-project admission), then
   carries a `threading-mail` stdio server (`<controller> agent-mcp`, with
-  `THREADING_CONTROLLER_DATABASE`/`THREADING_MAILBOX_ADDRESS`/`THREADING_MAILBOX_CREDENTIAL`) in
+  `THREADING_CONTROLLER_AGENT_SOCKET` when `host` lists `agent-broker` and reports a live
+  `agentSocket`, else `THREADING_CONTROLLER_DATABASE` for an older host, plus
+  `THREADING_MAILBOX_ADDRESS`/`THREADING_MAILBOX_CREDENTIAL`) in
   the owner-only `.mcp.json`, the same three variables in the agent's environment, and
   `<controller> agent-notice …` hook entries in its `.settings.json`. The Mac then drops the
   `mail_*` tools from that session's catalogue and answers its `/mail-notice` silently. A Mac

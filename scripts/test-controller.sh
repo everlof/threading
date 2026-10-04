@@ -23,6 +23,14 @@ python3 "$repo_root/scripts/tests/test_controller_recovery.py" \
     "$controller_scratch/cli/debug/threading-controller" "$controller_scratch/ptyd/debug/threading-ptyd"
 python3 "$repo_root/scripts/tests/test_controller_broker.py" \
     "$controller_scratch/cli/debug/threading-controller" "$controller_scratch/ptyd/debug/threading-ptyd"
+# Agents under their own Unix user: needs root to create the two accounts, so it runs in the
+# Linux container (CI's controller-linux job) and is skipped, saying so, anywhere else.
+if [[ "$(uname -s)" == Linux && "$(id -u)" == 0 ]]; then
+    python3 "$repo_root/scripts/tests/test_controller_agent_user.py" \
+        "$controller_scratch/cli/debug/threading-controller" "$controller_scratch/ptyd/debug/threading-ptyd"
+else
+    echo 'test_controller_agent_user.py: skipped (needs Linux as root, e.g. the controller-linux container)'
+fi
 python3 "$repo_root/scripts/tests/test_controller_mail.py" \
     "$controller_scratch/cli/debug/threading-controller" "$controller_scratch/ptyd/debug/threading-ptyd"
 python3 "$repo_root/scripts/tests/test_controller_sources.py" "$controller_scratch/cli/debug/threading-controller"

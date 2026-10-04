@@ -671,6 +671,16 @@ daemon through `scripts/linux/build-ptyd-static.sh` and run the daemon suite aga
   leak it, on the one serial queue that forks.
 - **`SIGPIPE`**: no `SO_NOSIGPIPE`, so the process-wide ignore is the only guard.
 - **No registration.** `status` says so on Linux instead of asking `launchctl`.
+- **Another Unix user's daemon.** `--group-socket` makes the rendezvous `0660` instead of `0600`
+  (it needs `--socket`/`--state`; `--default-locations` refuses it). It exists for a controller
+  host that runs agents as their own user: ptyd runs as the agent user, its socket sits in a
+  setgid `2750` directory owned by that user and a group the controller's account is in, and the
+  controller spawns there without the agents being able to read its store — see
+  [autonomous-controller.md](autonomous-controller.md#running-agents-as-another-unix-user) for
+  the whole layout, including the broker socket in the other direction. Anyone who can connect can
+  spawn as the daemon's user, so the directory and its group are the authorization boundary, as
+  the `0700` directory is for the default form. The daemon's unit then uses `UMask=0027` so
+  transcripts the agent writes stay readable to the controller's usage collector.
 - **The generation is compiled in.** Darwin reads it from the embedded `Info.plist`; a Linux
   binary has none, so `PTYHostBuildIdentity` reads three strings the build defines for the C shim
   (`-Xcc -DTHREADING_PTYD_SHORT_VERSION="…"` and its `BUNDLE_VERSION`/`SOURCE_REVISION`
