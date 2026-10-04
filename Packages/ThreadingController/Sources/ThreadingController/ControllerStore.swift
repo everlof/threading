@@ -6,7 +6,11 @@ public actor ControllerStore {
     let db: ControllerDatabase
     /// The schema this build reads and writes; see `ControllerDatabase.schemaVersion`.
     public static var schemaVersion: Int64 { ControllerDatabase.schemaVersion }
-    public init(path: String) throws { db = try ControllerDatabase(path: path) }
+    public init(path: String) throws {
+        let db = try ControllerDatabase(path: path)
+        try ControllerCredential.migrate(db)
+        self.db = db
+    }
 
     public func addWorker(id: WorkerID, name: String) throws -> ControllerWorker {
         try Limits.text(name, field: "name", maximum: 256)

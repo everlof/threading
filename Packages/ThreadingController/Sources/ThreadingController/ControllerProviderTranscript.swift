@@ -38,8 +38,8 @@ extension ControllerStore {
         var refusal: ControllerError?
         try db.transaction {
             var value = try launch(executionID)
-            let expected: String = try required("executionCredential", executionID.description)
-            guard credential == expected, value.state == .dispatching || value.state == .running,
+            guard try credentialMatches(ControllerCredential.executionKind, executionID.description, presented: credential),
+                  value.state == .dispatching || value.state == .running,
                   let source = value.spec.usage else { throw ControllerError.forbidden }
             try Limits.text(transcript.sessionID, field: "provider_session", maximum: 256)
             try Limits.text(transcript.path, field: "provider_transcript", maximum: 4096)

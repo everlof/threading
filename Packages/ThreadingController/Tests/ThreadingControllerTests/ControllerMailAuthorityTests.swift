@@ -285,14 +285,20 @@ struct ControllerMailAuthorityTests {
         let host = try await store.host()
         let session = MailAddress(host: host.id, kind: .session, id: UUID())
         _ = try await store.registerMailbox(session, name: "Console")
+        // Only a digest is stored, so the owner's launch-time read issues a fresh credential and
+        // every issue revokes the one before it.
         let old = try await store.mailboxCredential(session)
         let new = try await store.rotateMailboxCredential(session)
-        let current = try await store.mailboxCredential(session)
-        #expect(new != old && current == new)
+        #expect(new != old)
         await #expect(throws: ControllerError.forbidden) {
             try await store.mailboxRequest(address: session, credential: old, request: .mailInbox(after: 0))
         }
         #expect(try await store.mailboxRequest(address: session, credential: new, request: .mailInbox(after: 0)).inbox?.items.isEmpty == true)
+        let issued = try await store.mailboxCredential(session)
+        #expect(issued != new)
+        await #expect(throws: ControllerError.forbidden) {
+            try await store.mailboxRequest(address: session, credential: new, request: .mailInbox(after: 0))
+        }
         await #expect(throws: ControllerError.notFound) {
             try await store.rotateMailboxCredential(MailAddress(host: host.id, kind: .session, id: UUID()))
         }

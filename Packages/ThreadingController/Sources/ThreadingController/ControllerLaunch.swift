@@ -175,9 +175,6 @@ extension ControllerStore {
             try insert("launch", launch.executionID.description, parent: claim.work.id.description,
                        state: launch.state.rawValue, scope: workerID.description, value: launch)
             try db.run("INSERT INTO usage_unsettled(execution,worker) VALUES(?,?)", [.text(launch.executionID.description), .text(workerID.description)])
-            // Private bearer routing credential, never included in launch/status/event output.
-            let credential = UUID().uuidString + UUID().uuidString
-            try insert("executionCredential", launch.executionID.description, value: credential)
             try event("launch.prepared", launch.executionID.description)
             return launch
         }
@@ -208,10 +205,16 @@ extension ControllerStore {
             return value
         }
     }
+    /// Issues the execution's private bearer credential for its spawn environment. Only its
+    /// digest is stored (`ControllerCredential`), and it never appears in launch, status or event
+    /// output. Each call replaces the previous credential, so dispatch calls it once, after
+    /// `beginLaunch` consumed the spawn right and before the spawn is sent.
     public func launchCredential(_ id: ExecutionID) throws -> String {
-        let value = try launch(id)
-        guard value.state == .dispatching else { throw ControllerError.conflict }
-        return try required("executionCredential", id.description)
+        try db.transaction {
+            let value = try launch(id)
+            guard value.state == .dispatching else { throw ControllerError.conflict }
+            return try issueCredential(ControllerCredential.executionKind, id.description)
+        }
     }
     public func recordSpawn(_ id: ExecutionID, pid: Int32, seconds: UInt64, microseconds: UInt64) throws -> ControllerLaunch {
         try db.transaction {
@@ -259,9 +262,9 @@ extension ControllerStore {
                     let reason = signalled ? "signalled" : (status != 0 ? "nonzero_exit" : "exited_before_finish")
                     value.failure = ControllerLaunchFailure(stage: "exit", reason: reason)
                     if let tail {
-                        let credential: String? = try optional("executionCredential", id.description)
+                        // The credential itself is not stored; credential-shaped tokens are redacted by form.
                         value.outputTail = ControllerOutputTail.redact(tail, secrets: value.spec.arguments
-                            + Array(value.spec.environment.values) + [credential, id.description].compactMap { $0 })
+                            + Array(value.spec.environment.values) + [id.description])
                     }
                 }
             case .hostLost(let incident):
@@ -335,6 +338,7 @@ public enum ControllerOutputTail {
         var text = strip(String(decoding: data, as: UTF8.self))
         let candidates = Set(secrets.filter { $0.count >= minimumRedactedLength }).sorted { $0.count > $1.count }
         for secret in candidates { text = text.replacingOccurrences(of: secret, with: redaction) }
+        text = redactCredentialShapedTokens(text)
         var bytes = 0
         var start = text.endIndex
         for index in text.indices.reversed() {
@@ -344,6 +348,15 @@ public enum ControllerOutputTail {
             start = index
         }
         return String(text[start...])
+    }
+
+    /// Execution and mailbox credentials are two concatenated UUIDs (`ControllerCredential.mint`)
+    /// and only their digest is stored, so they are recognised by that form instead of by value.
+    static func redactCredentialShapedTokens(_ text: String) -> String {
+        let uuid = "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
+        guard let expression = try? NSRegularExpression(pattern: "(?:\(uuid)){2}") else { return text }
+        return expression.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text),
+                                                   withTemplate: NSRegularExpression.escapedTemplate(for: redaction))
     }
 
     /// Removes CSI, OSC/DCS-style strings and other escapes, and C0 controls but newline/tab.

@@ -49,8 +49,8 @@ extension ControllerStore {
                              request: ControllerAgentRequest) throws -> ControllerAgentResponse {
         try db.transaction {
             let launch = try launch(executionID)
-            let expected: String = try required("executionCredential", executionID.description)
-            guard credential == expected, launch.state == .dispatching || launch.state == .running else {
+            guard try credentialMatches(ControllerCredential.executionKind, executionID.description, presented: credential),
+                  launch.state == .dispatching || launch.state == .running else {
                 throw ControllerError.forbidden
             }
             var response = ControllerAgentResponse()

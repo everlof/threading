@@ -314,26 +314,26 @@ extension ControllerStore {
             if (try optional("mailbox", address.description) as MailMailbox?) == nil {
                 try insert("mailbox", address.description, value: value)
                 // A private routing credential for a session's own mail tools, like an
-                // execution credential. Never part of any listing or event.
-                try insert("mailboxCredential", address.description, value: UUID().uuidString + UUID().uuidString)
+                // execution credential. Only its digest is kept; nobody holds this first one, so
+                // the owner issues a usable credential with `mailboxCredential` at launch.
+                _ = try issueCredential(ControllerCredential.mailboxKind, address.description)
             } else { try update("mailbox", address.description, value: value) }
             return value
         }
     }
-    /// Owner read: handed to the session's launch environment, never to a listing. Kept readable
-    /// rather than hashed because the owner hands it to every launch of that session.
+    /// Owner call at a session's launch: issues the session's mail-tool credential for its launch
+    /// environment and returns it. Only the digest is stored, so this cannot read an earlier one
+    /// back; it replaces it, exactly like `rotateMailboxCredential` (which it is). The launch that
+    /// asks is the one that will use it — a previous process of the same session has ended.
     public func mailboxCredential(_ address: MailAddress) throws -> String {
-        try required("mailboxCredential", address.description)
+        try rotateMailboxCredential(address)
     }
     /// Replaces a session mailbox's credential; the old one stops working in the same
     /// transaction. The owner hands the new one to the session's next launch.
     public func rotateMailboxCredential(_ address: MailAddress) throws -> String {
         try db.transaction {
             let _: MailMailbox = try required("mailbox", address.description)
-            let credential = UUID().uuidString + UUID().uuidString
-            if (try optional("mailboxCredential", address.description) as String?) == nil {
-                try insert("mailboxCredential", address.description, value: credential)
-            } else { try update("mailboxCredential", address.description, value: credential) }
+            let credential = try issueCredential(ControllerCredential.mailboxKind, address.description)
             try event("mail.credential_rotated", address.description)
             return credential
         }
@@ -344,8 +344,9 @@ extension ControllerStore {
     public func mailboxRequest(address: MailAddress, credential: String,
                                request: ControllerAgentRequest) throws -> ControllerAgentResponse {
         try db.transaction {
-            let expected: String = try required("mailboxCredential", address.description)
-            guard credential == expected else { throw ControllerError.forbidden }
+            guard try credentialMatches(ControllerCredential.mailboxKind, address.description, presented: credential) else {
+                throw ControllerError.forbidden
+            }
             var response = ControllerAgentResponse()
             switch request {
             case .mailSend(let recipient, let id, let text, let replyTo, let priority):
