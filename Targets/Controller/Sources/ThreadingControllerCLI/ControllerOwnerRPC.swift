@@ -25,7 +25,8 @@ enum ControllerOwnerRPC {
         "source-events", "source-poll", "trigger-configure", "trigger-enable", "trigger-pause", "trigger-delete",
         "triggers", "trigger", "secret-set",
         // Usage receipts and budgets: reads for dashboards, budgets as owner policy.
-        "usage-collect", "usage-receipt", "usage-receipts", "usage-summary", "worker-capacity", "worker-budget", "worker-budget-set"
+        "usage-collect", "usage-receipt", "usage-receipts", "usage-summary", "worker-capacity", "worker-budget", "worker-budget-set",
+        "usage-waive", "capacity-hold-set", "capacity-hold-list", "capacity-hold-clear"
     ]
     static func run(store: ControllerStore, database: String) async throws {
         let maximumBytes = 262_144
