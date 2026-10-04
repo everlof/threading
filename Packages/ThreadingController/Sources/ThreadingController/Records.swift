@@ -61,6 +61,10 @@ public struct WorkItem: Codable, Equatable, Sendable {
     public internal(set) var state: WorkState
     public internal(set) var checkpoint: String
     public internal(set) var executionID: ExecutionID?
+    /// Work that must complete before this item may be claimed. Nil for legacy and ordinary work.
+    public internal(set) var dependsOn: [WorkID]? = nil
+    /// Why the host cancelled this item itself (a cancelled dependency); nil for owner cancels.
+    public internal(set) var cancelReason: String? = nil
 }
 public enum ExecutionState: String, Codable, Sendable { case running, yielded, completed, interrupted }
 public struct ControllerExecution: Codable, Equatable, Sendable {
@@ -109,11 +113,29 @@ public struct WorkDelivery: Codable, Equatable, Sendable {
     public internal(set) var attemptID: DeliveryAttemptID?
     public internal(set) var receipt: String?
 }
+/// Who committed one revision, attested by the host from the authenticated route, never from
+/// model input. Revisions written before provenance existed decode with none.
+public struct ControllerProvenance: Codable, Equatable, Sendable {
+    public enum Actor: String, Codable, Sendable { case owner, agent }
+    public let actor: Actor
+    public let executionID: ExecutionID?
+    public let at: String
+    static func owner() -> ControllerProvenance { ControllerProvenance(actor: .owner, executionID: nil, at: ControllerStore.now()) }
+    static func agent(_ executionID: ExecutionID) -> ControllerProvenance {
+        ControllerProvenance(actor: .agent, executionID: executionID, at: ControllerStore.now())
+    }
+}
+/// `deleted` is a revisioned tombstone with history kept; `forgotten` also erased every stored
+/// body of the entry. Both keep the revision so a delayed write at zero cannot recreate it.
+public enum MemoryEntryState: String, Codable, Sendable { case active, deleted, forgotten }
 public struct WorkerMemory: Codable, Equatable, Sendable {
     public let workerID: WorkerID
     public let key: String
     public let revision: Int
     public let content: String
+    /// Nil on legacy rows, which are active.
+    public var state: MemoryEntryState? = nil
+    public var provenance: ControllerProvenance? = nil
 }
 public struct ControllerEvent: Codable, Equatable, Sendable {
     public let sequence: Int64
@@ -123,7 +145,8 @@ public struct ControllerEvent: Codable, Equatable, Sendable {
 }
 public struct ControllerPage<T: Codable & Sendable>: Codable, Sendable {
     public let items: [T]
-    /// Pass this cursor back even when this page is empty. Rows are never deleted in this slice.
+    /// Pass this cursor back even when this page is empty. Only the owner's `prune` deletes rows,
+    /// and never ones a cursor-holding consumer still needs to resolve state.
     public let next: Int64
 }
 

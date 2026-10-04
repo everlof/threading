@@ -95,6 +95,7 @@ extension ControllerStore {
             try saveWork(work)
             try db.run("UPDATE record SET state='cancelled' WHERE kind='question' AND parent=? AND state='open'", [.text(workID.description)])
             try event("work.cancelled", workID.description)
+            try cancelDependents(of: workID)
             return work
         }
     }
@@ -107,9 +108,35 @@ extension ControllerStore {
                   try db.rows("SELECT id FROM record WHERE kind='launch' AND scope=? AND state IN ('prepared','dispatching','running') LIMIT 1", [.text(id.description)]).isEmpty else { throw ControllerError.conflict }
             guard try db.rows("SELECT id FROM record WHERE kind='automation' AND json_extract(payload,'$.enabled')=1 AND json_extract(payload,'$.spec.workerID')=? LIMIT 1", [.text(id.description)]).isEmpty else { throw ControllerError.conflict }
             if let policy = try workerPolicy(id) { _ = try setWorkerEnabled(id, expectedRevision: policy.revision, enabled: false) }
+            try pauseTriggers(for: id)
+            // New mail to an archived worker is refused at acceptance; open mail it already holds
+            // stays readable but can no longer start a task. The open inbox is bounded.
+            try db.run("""
+                UPDATE record SET payload=json_set(payload,'$.wake',json('false')) WHERE kind='mail' AND parent=?
+                AND state IN ('inbox','noticed') AND json_extract(payload,'$.wake')=1
+                """, [.text(try mailAddress(worker: id).description)])
             try insert("workerArchived", id.description, value: true)
             try event("worker.archived", id.description)
             return worker
+        }
+    }
+    /// Archiving pauses (never deletes) every enabled trigger that admits work for the worker,
+    /// in the archiving transaction, so no source keeps producing refused receipts for it.
+    /// Bounded: each source holds at most 100 active triggers; pages shrink as rows pause.
+    private func pauseTriggers(for id: WorkerID) throws {
+        while true {
+            let rows = try db.rows("""
+                SELECT payload FROM record INDEXED BY trigger_active_source WHERE kind='trigger'
+                AND json_extract(payload,'$.enabled')=1 AND json_extract(payload,'$.deleted')=0
+                AND json_extract(payload,'$.spec.workerID')=? LIMIT 100
+                """, [.text(id.description)])
+            if rows.isEmpty { return }
+            for row in rows {
+                let trigger: ControllerTrigger = try decode(row.text(0))
+                let paused = ControllerTrigger(id: trigger.id, revision: trigger.revision + 1, spec: trigger.spec, enabled: false, deleted: false)
+                try update("trigger", trigger.id.description, value: paused)
+                try event("trigger.paused", trigger.id.description)
+            }
         }
     }
     func requireActiveWorker(_ id: WorkerID) throws {

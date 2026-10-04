@@ -5,7 +5,12 @@ public struct ControllerLaunchSpec: Codable, Equatable, Sendable {
     public let socketPath: String
     public let executable: String
     public let arguments: [String]
+    /// Plain values, stored in every policy and launch row (and so in backups). Never put a
+    /// credential here: name it in `secrets` instead.
     public let environment: [String: String]
+    /// Environment name -> secret name (written by `secret-set`), resolved by the runtime at
+    /// dispatch. Only the name is stored; the value never enters the database.
+    public let secrets: [String: String]
     public let directory: String
     public let recipients: [String]
     public let destination: String
@@ -13,10 +18,24 @@ public struct ControllerLaunchSpec: Codable, Equatable, Sendable {
     public let usage: ControllerUsageSource?
 
     public init(socketPath: String, executable: String, arguments: [String], environment: [String: String],
-                directory: String, recipients: [String], destination: String, usage: ControllerUsageSource? = nil) {
+                directory: String, recipients: [String], destination: String, usage: ControllerUsageSource? = nil,
+                secrets: [String: String] = [:]) {
         self.socketPath = socketPath; self.executable = executable; self.arguments = arguments
-        self.environment = environment; self.directory = directory
+        self.environment = environment; self.secrets = secrets; self.directory = directory
         self.recipients = recipients; self.destination = destination; self.usage = usage
+    }
+    public init(from decoder: any Decoder) throws {
+        enum Keys: String, CodingKey { case socketPath, executable, arguments, environment, secrets, directory, recipients, destination, usage }
+        let c = try decoder.container(keyedBy: Keys.self)
+        socketPath = try c.decode(String.self, forKey: .socketPath)
+        executable = try c.decode(String.self, forKey: .executable)
+        arguments = try c.decode([String].self, forKey: .arguments)
+        environment = try c.decode([String: String].self, forKey: .environment)
+        secrets = try c.decodeIfPresent([String: String].self, forKey: .secrets) ?? [:]
+        directory = try c.decode(String.self, forKey: .directory)
+        recipients = try c.decode([String].self, forKey: .recipients)
+        destination = try c.decode(String.self, forKey: .destination)
+        usage = try c.decodeIfPresent(ControllerUsageSource.self, forKey: .usage)
     }
 
     func validate() throws {
@@ -29,11 +48,13 @@ public struct ControllerLaunchSpec: Codable, Equatable, Sendable {
         for value in arguments + Array(environment.values) {
             guard !value.contains("\0") else { throw ControllerError.invalidInput("launch_value") }
         }
-        for key in environment.keys {
+        for key in Array(environment.keys) + Array(secrets.keys) {
             guard !key.isEmpty, !key.contains("="), !key.contains("\0"), !key.hasPrefix("THREADING_") else {
                 throw ControllerError.invalidInput("environment_key")
             }
         }
+        guard secrets.count <= Self.maximumSecrets, Set(secrets.keys).isDisjoint(with: environment.keys),
+              secrets.values.allSatisfy(SecretName.isValid) else { throw ControllerError.invalidInput("launch_secrets") }
         guard (1...32).contains(recipients.count), Set(recipients).count == recipients.count else {
             throw ControllerError.invalidInput("recipients")
         }
@@ -41,6 +62,7 @@ public struct ControllerLaunchSpec: Codable, Equatable, Sendable {
         try Limits.text(destination, field: "destination", maximum: 256)
         try usage?.validate()
     }
+    static let maximumSecrets = 16
 }
 
 public enum LaunchState: String, Codable, Sendable { case prepared, dispatching, running, stopped }

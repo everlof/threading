@@ -13,6 +13,7 @@ public enum ControllerAgentRequest: Codable, Sendable {
     case memoryList(after: Int64)
     case memoryGet(key: String)
     case memoryPut(key: String, expectedRevision: Int, content: String)
+    case memoryDelete(key: String, expectedRevision: Int)
     case knowledgeGet(spaceID: KnowledgeSpaceID, key: String)
     case knowledgePut(spaceID: KnowledgeSpaceID, key: String, expectedRevision: Int, content: String)
     case mailSend(to: MailAddress, id: UUID, text: String, replyTo: UUID?, priority: MailPriority)
@@ -79,7 +80,11 @@ extension ControllerStore {
                 case .checkpoint(let text): response.work = try checkpoint(executionID: executionID, text: text)
                 case .memoryGet(let key): response.memory = try memory(workerID: work.workerID, key: key)
                 case .memoryPut(let key, let revision, let content):
-                    response.memory = try putMemory(workerID: work.workerID, key: key, expectedRevision: revision, content: content)
+                    response.memory = try putMemory(workerID: work.workerID, key: key, expectedRevision: revision, content: content,
+                                                    provenance: .agent(executionID))
+                case .memoryDelete(let key, let revision):
+                    response.memory = try deleteMemory(workerID: work.workerID, key: key, expectedRevision: revision,
+                                                       provenance: .agent(executionID))
                 case .knowledgeGet(let space, let key):
                     try requireKnowledgeAccess(spaceID: space, workerID: work.workerID, writing: false)
                     response.knowledge = try knowledge(spaceID: space, key: key)

@@ -15,6 +15,9 @@ public struct KnowledgeEntry: Codable, Equatable, Sendable {
     public let revision: Int
     public let content: String
     public let executionID: ExecutionID?
+    /// Nil on legacy rows, which are active. Shares memory's tombstone states.
+    public var state: MemoryEntryState? = nil
+    public var provenance: ControllerProvenance? = nil
 }
 
 extension ControllerStore {
@@ -60,12 +63,42 @@ extension ControllerStore {
             let id = "\(spaceID)/\(key)"
             let prior = try knowledge(spaceID: spaceID, key: key)
             guard (prior?.revision ?? 0) == expectedRevision else { throw ControllerError.conflict }
-            let value = KnowledgeEntry(spaceID: spaceID, key: key, revision: expectedRevision + 1, content: content, executionID: executionID)
+            let active = prior.map { ($0.state ?? .active) == .active } ?? false
+            try spendContent(knowledgeUsageScope(spaceID), keys: active ? 0 : 1,
+                             bytes: content.utf8.count - (active ? prior?.content.utf8.count ?? 0 : 0))
+            let value = KnowledgeEntry(spaceID: spaceID, key: key, revision: expectedRevision + 1, content: content,
+                                       executionID: executionID, state: .active,
+                                       provenance: executionID.map(ControllerProvenance.agent) ?? .owner())
             if prior == nil { try insert("knowledge", id, parent: spaceID.description, key: key, value: value) }
             else { try update("knowledge", id, value: value) }
             try insert("knowledgeRevision", "\(id)/\(value.revision)", parent: id, value: value)
             try event("knowledge.updated", id)
             return value
         }
+    }
+    /// Owner erasure of shared context, with the same contract as `forgetMemory`.
+    public func forgetKnowledge(spaceID: KnowledgeSpaceID, key: String) throws -> KnowledgeEntry {
+        try Limits.text(key, field: "key", maximum: 256)
+        let id = "\(spaceID)/\(key)"
+        return try erasing {
+            try db.transaction {
+                guard let prior = try knowledge(spaceID: spaceID, key: key) else { throw ControllerError.notFound }
+                if prior.state == .forgotten { return prior }
+                if (prior.state ?? .active) == .active {
+                    try spendContent(knowledgeUsageScope(spaceID), keys: -1, bytes: -prior.content.utf8.count)
+                }
+                try eraseRevisionBodies(kind: "knowledgeRevision", parent: id)
+                let tombstone = KnowledgeEntry(spaceID: spaceID, key: key, revision: prior.revision + 1, content: "",
+                                               executionID: nil, state: .forgotten, provenance: .owner())
+                try update("knowledge", id, state: MemoryEntryState.forgotten.rawValue, value: tombstone)
+                try insert("knowledgeRevision", "\(id)/\(tombstone.revision)", parent: id, value: tombstone)
+                try event("knowledge.forgotten", id)
+                return tombstone
+            }
+        }
+    }
+    func knowledgeUsageScope(_ spaceID: KnowledgeSpaceID) -> ContentScope {
+        ContentScope(usageKind: "knowledgeUsage", id: spaceID.description, entryKind: "knowledge",
+                     maximumKeys: ContentQuota.knowledgeKeysPerSpace, maximumBytes: ContentQuota.knowledgeBytesPerSpace)
     }
 }
