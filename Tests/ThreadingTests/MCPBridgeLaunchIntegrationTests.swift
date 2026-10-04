@@ -188,14 +188,17 @@ final class MCPBridgeLaunchIntegrationTests: XCTestCase {
         // All three flags, in the order the helper's usage line states them. It exits 64 without
         // any one of them, because every path on that line is the app's decision.
         let arguments = try XCTUnwrap(server["args"] as? [String])
-        XCTAssertEqual(arguments.count, 6, "unexpected bridge command line: \(arguments)")
+        XCTAssertEqual(arguments.count, 4, "unexpected bridge command line: \(arguments)")
         XCTAssertEqual(arguments.first, MCPBridgeDefaults.socketArgument)
         XCTAssertEqual(
             Self.value(after: MCPBridgeDefaults.socketArgument, in: arguments),
             rendezvousPath
         )
+        // The token is never an argument: it rides in the server's `env`, inside the config file.
+        XCTAssertFalse(arguments.contains(MCPBridgeDefaults.tokenArgument))
+        XCTAssertFalse(arguments.contains(MCPSessionRegistry.token(for: sessionID)))
         XCTAssertEqual(
-            Self.value(after: MCPBridgeDefaults.tokenArgument, in: arguments),
+            (server["env"] as? [String: String])?[MCPDefaults.sessionTokenEnvironmentKey],
             MCPSessionRegistry.token(for: sessionID)
         )
         XCTAssertEqual(
@@ -323,6 +326,7 @@ final class MCPBridgeLaunchIntegrationTests: XCTestCase {
         XCTAssertEqual(stdio["type"] as? String, "stdio")
         XCTAssertEqual(stdio["command"] as? String, Self.sampleInvocation.command)
         XCTAssertEqual(stdio["args"] as? [String], Self.sampleInvocation.arguments)
+        XCTAssertEqual(stdio["env"] as? [String: String], [MCPDefaults.sessionTokenEnvironmentKey: "t0"])
         XCTAssertNil(stdio["url"])
     }
 
@@ -343,7 +347,9 @@ final class MCPBridgeLaunchIntegrationTests: XCTestCase {
         XCTAssertEqual(stdio["name"] as? String, name)
         XCTAssertEqual(stdio["command"] as? String, Self.sampleInvocation.command)
         XCTAssertEqual(stdio["args"] as? [String], Self.sampleInvocation.arguments)
-        XCTAssertEqual((stdio["env"] as? [Any])?.isEmpty, true)
+        XCTAssertEqual(stdio["env"] as? [[String: String]],
+                       [["name": MCPDefaults.sessionTokenEnvironmentKey, "value": "t0"]],
+                       "the token reaches the bridge in its environment, not its arguments")
     }
 
     // MARK: - The second hop
@@ -446,7 +452,8 @@ final class MCPBridgeLaunchIntegrationTests: XCTestCase {
 
     private static let sampleInvocation = MCPBridgeInvocation(
         command: "/Applications/Threading.app/Contents/Helpers/threading-mcp-bridge",
-        arguments: ["--socket", "/tmp/b/mcp.sock", "--token", "t0", "--cache", "/tmp/c.json"]
+        arguments: ["--socket", "/tmp/b/mcp.sock", "--cache", "/tmp/c.json"],
+        environment: [MCPDefaults.sessionTokenEnvironmentKey: "t0"]
     )
 
     /// The real helper, found the way the app finds it.
@@ -536,7 +543,8 @@ final class MCPBridgeLaunchIntegrationTests: XCTestCase {
 
         let bridge = try SpawnedBridge(
             executable: URL(fileURLWithPath: try XCTUnwrap(server["command"] as? String)),
-            arguments: try XCTUnwrap(server["args"] as? [String])
+            arguments: try XCTUnwrap(server["args"] as? [String]),
+            environment: server["env"] as? [String: String] ?? [:]
         )
         spawned.append(bridge)
         return bridge
@@ -863,9 +871,12 @@ private final class SpawnedBridge: @unchecked Sendable {
 
     // MARK: - Initialization
 
-    init(executable: URL, arguments: [String]) throws {
+    /// `environment` is the config's `env`, layered on the parent's exactly as a CLI spawns a
+    /// stdio server: the session token arrives there, never in `arguments`.
+    init(executable: URL, arguments: [String], environment: [String: String] = [:]) throws {
         process.executableURL = executable
         process.arguments = arguments
+        process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, configured in configured }
         process.standardInput = standardInput
         process.standardOutput = standardOutput
         process.standardError = standardError

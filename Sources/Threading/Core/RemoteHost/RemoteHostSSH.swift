@@ -84,6 +84,17 @@ enum RemoteHostDefaults {
     /// Per-session `--settings` and `--mcp-config` files, written by the launch itself, `0600`.
     static let remoteSessionFilesDirectory = ".local/state/threading/sessions"
 
+    // MARK: - Installer provenance (inside each install directory)
+
+    /// Who installed an install directory: `threading-mac` when this Mac did, `external:<name>`
+    /// when another installer did (Rindabox's Ansible writes `external:rindabox-ansible`). A
+    /// directory without one is read as external — see `RemoteHostProvenance`.
+    static let provenanceMarkerFileName = ".threading-managed-by"
+    static let provenanceThreadingMac = "threading-mac"
+    static let provenanceExternalPrefix = "external:"
+    /// Bounds an external installer's name as read off the host, which goes into a status line.
+    static let provenanceNameMaximumLength = 64
+
     // MARK: - Local layout
 
     /// The `0700` directory under `Application Support/Threading` holding one forwarded socket per

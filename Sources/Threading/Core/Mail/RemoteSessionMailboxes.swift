@@ -28,6 +28,18 @@ final class RemoteSessionMailboxes {
         let credential: String
     }
 
+    /// Where a session's mail is delivered *now*, asked before routing anything to it.
+    enum Resolution: Equatable {
+        /// The project runs on this Mac, or on a host with no controller: this Mac's mailbox.
+        case thisMac
+        /// On the host, through its controller.
+        case host(Binding)
+        /// The project runs on a host with a controller that could not be asked. Nothing may be
+        /// addressed to the host mailbox on a guess; a caller either keeps the mail on this Mac
+        /// (it moves to the host at the next bind) or refuses.
+        case unknown(RemoteControllerEndpoint)
+    }
+
     /// Where a session's mail is kept, for the Info panel's note.
     enum Location: Equatable {
         case thisMac
@@ -48,12 +60,26 @@ final class RemoteSessionMailboxes {
     /// The last mailbox read for each host-backed session, kept so an unreachable host still
     /// shows what was last seen, with its age.
     private var lastRead: [SessionID: (presentation: SessionMailPresentation, at: Date)] = [:]
+    /// When provisioning last failed for a session, so routing to a host that is down asks it
+    /// once per interval rather than once per message.
+    private var failedAt: [SessionID: Date] = [:]
 
     /// The owner-SSH runner. Injected for tests.
     var runner: any RemoteHostCommandRunning = SystemSSHCommandRunner(maximumOutputBytes: MailTransportLimits.responseBytes)
     /// Ensures the peering the session's mail will travel over. Injected for tests.
     var ensurePeered: (RemoteControllerEndpoint) async throws -> HostID = { try await MacMailSync.shared.ensurePeered($0) }
     var mailbox: MacMailbox = .shared
+    /// The controller of the host the session's project runs on now. Injected for tests.
+    var endpointForSession: @MainActor (SessionID) -> RemoteControllerEndpoint? = { RemoteSessionMailboxes.endpoint(for: $0) }
+    /// The session's title for a mailbox registered while routing. Injected for tests.
+    var titleForSession: @MainActor (SessionID) -> String = {
+        ProjectStore.shared.session(withID: $0)?.displayTitle ?? MacMailDefaults.unnamedSession
+    }
+    /// Whether a session id is one of this Mac's sessions. Injected for tests.
+    var isOwnSession: @MainActor (SessionID) -> Bool = { ProjectStore.shared.session(withID: $0) != nil }
+    /// Called once a session's host mailbox is bound in this run, to move whatever mail this
+    /// Mac's mailbox still holds for it to the host (`MailboxHandover` wires it at start).
+    var onBound: (@MainActor (SessionID, String, RemoteControllerEndpoint) -> Void)?
 
     // MARK: - Queries
 
@@ -65,6 +91,37 @@ final class RemoteSessionMailboxes {
     /// The Mac session a host-local mailbox address belongs to.
     func session(forAddress address: MailAddress) -> SessionID? {
         bindings.first { $0.value.address == address }?.key
+    }
+
+    /// Where the session's mail goes now. Bindings live only in memory — the credential they hold
+    /// is not written down — so after a relaunch the first message to a hosted session finds
+    /// none and provisions it here, from the project's execution host, before anything is
+    /// routed. Before this, such a message went to this Mac's mailbox for the session, which the
+    /// agent on its host never reads.
+    func resolve(_ sessionID: SessionID) async -> Resolution {
+        if let binding = bindings[sessionID] {
+            if endpointForSession(sessionID)?.hostID == binding.endpoint.hostID { return .host(binding) }
+        }
+        guard let endpoint = endpointForSession(sessionID) else { return .thisMac }
+        if let failed = failedAt[sessionID],
+           Date().timeIntervalSince(failed) < RemoteSessionMailboxDefaults.resolutionRetryInterval {
+            return .unknown(endpoint)
+        }
+        guard let binding = await provision(sessionID, name: titleForSession(sessionID), endpoint: endpoint) else {
+            failedAt[sessionID] = Date()
+            return .unknown(endpoint)
+        }
+        return .host(binding)
+    }
+
+    /// The Mac session a host address names, when it names one: a session-kind address on
+    /// another host whose id is one of this Mac's sessions. Answered from the id, not from the
+    /// bindings, so the same-project rule applies to such an address whether or not this run has
+    /// bound that session yet.
+    func ownSession(spelledAs address: MailAddress) -> SessionID? {
+        guard address.kind == .session else { return nil }
+        let candidate = SessionID(address.id)
+        return isOwnSession(candidate) ? candidate : nil
     }
 
     /// The controller of the host a session's project runs on, when it is set up.
@@ -91,10 +148,13 @@ final class RemoteSessionMailboxes {
     /// sessions `notify` on it (`<macHost>/*`). That grant is the host-side half of the
     /// same-project rule: this Mac's control plane admits a sender before anything is queued for
     /// a host mailbox, so the host need not know the project.
+    ///
+    /// `movesMacMail` is false only for `MailboxHandover`, which is itself the move.
     func provision(
         _ sessionID: SessionID,
         name: String,
-        endpoint: RemoteControllerEndpoint
+        endpoint: RemoteControllerEndpoint,
+        movesMacMail: Bool = true
     ) async -> Binding? {
         if let binding = bindings[sessionID], binding.endpoint == endpoint { return binding }
         // Wait out whatever is in flight. The same host: its answer is ours. Another host: look
@@ -105,14 +165,19 @@ final class RemoteSessionMailboxes {
             if provisioning[sessionID]?.task == running.task { provisioning[sessionID] = nil }
         }
         if let binding = bindings[sessionID], binding.endpoint == endpoint { return binding }
-        let task = Task { await self.register(sessionID, name: name, endpoint: endpoint) }
+        let task = Task { await self.register(sessionID, name: name, endpoint: endpoint, movesMacMail: movesMacMail) }
         provisioning[sessionID] = (endpoint, task)
         let binding = await task.value
         if provisioning[sessionID]?.task == task { provisioning[sessionID] = nil }
         return binding
     }
 
-    private func register(_ sessionID: SessionID, name: String, endpoint: RemoteControllerEndpoint) async -> Binding? {
+    private func register(
+        _ sessionID: SessionID,
+        name: String,
+        endpoint: RemoteControllerEndpoint,
+        movesMacMail: Bool
+    ) async -> Binding? {
         let rpc = RemoteControllerRPC(endpoint: endpoint, runner: runner, timeout: RemoteControllerRPCDefaults.launchTimeout)
         do {
             let host = try await ensurePeered(endpoint)
@@ -134,6 +199,10 @@ final class RemoteSessionMailboxes {
             }
             let binding = Binding(endpoint: endpoint, address: address, credential: credential)
             bindings[sessionID] = binding
+            failedAt[sessionID] = nil
+            // Mail this Mac kept for the session while its host mailbox was unknown — the host was
+            // down at launch, or the app had just started — goes to the host now, ids unchanged.
+            if movesMacMail { onBound?(sessionID, name, endpoint) }
             return binding
         } catch {
             EventLog.shared.record(.mcp, "Remote session mailbox not provisioned; keeping it on this Mac", [
@@ -222,6 +291,7 @@ final class RemoteSessionMailboxes {
     func reset() {
         bindings.removeAll()
         lastRead.removeAll()
+        failedAt.removeAll()
     }
 
     func install(_ binding: Binding, for sessionID: SessionID) { bindings[sessionID] = binding }
@@ -230,5 +300,11 @@ final class RemoteSessionMailboxes {
     func forget(_ sessionID: SessionID) {
         bindings[sessionID] = nil
         lastRead[sessionID] = nil
+        failedAt[sessionID] = nil
     }
+}
+
+enum RemoteSessionMailboxDefaults {
+    /// How long a failed provisioning answers `.unknown` before routing asks the host again.
+    static let resolutionRetryInterval: TimeInterval = 30
 }

@@ -75,6 +75,9 @@ actor MacMailSync {
                 for endpoint in batch {
                     _ = await self.sync(endpoint)
                 }
+                // Every pass, connected or not: mail queued for a host that never comes back
+                // bounces to its sender instead of waiting forever, as hosts do each supervisor pass.
+                await self.expireStaleOutbound()
             }
         }
     }
@@ -136,7 +139,13 @@ actor MacMailSync {
                     local: local.id, expecting: remote
                 )
                 let messages = response.messages ?? []
-                try await store.acceptPulled(messages, from: remote, next: response.next ?? current.pullCursor)
+                let complete = try await store.acceptPulled(messages, from: remote, next: response.next ?? current.pullCursor)
+                // A page this store could not write stays unacknowledged and the cursor stays put;
+                // pulling again now would fetch the same page, so the next pass retries it.
+                guard complete else {
+                    report.issues.append("\(remote): \(MailRefusalReason.unavailable)")
+                    break
+                }
                 report.pulled += messages.count
                 for message in messages where message.recipient.host == local.id && message.recipient.kind == .session {
                     report.recipients.insert(SessionID(message.recipient.id))
@@ -165,6 +174,26 @@ actor MacMailSync {
             ])
         }
         return report
+    }
+
+    // MARK: - Expiry
+
+    /// Bounces this Mac's outbound mail that has outlived `MailLimits.outboundLifetime`, one
+    /// bounded page per pass. Returns the expired ids.
+    @discardableResult
+    func expireStaleOutbound(now: Date = Date()) async -> [UUID] {
+        do {
+            let store = try await mailbox.controllerStore()
+            let expired = try await store.expireOutboundMail(limit: MacMailSyncDefaults.expiryPage, now: now)
+            if !expired.isEmpty {
+                EventLog.shared.record(.mcp, "Undelivered mail to a remote host expired and bounced", [
+                    "count": String(expired.count)
+                ])
+            }
+            return expired
+        } catch {
+            return []
+        }
     }
 
     // MARK: - Peering
@@ -238,4 +267,6 @@ enum MacMailSyncDefaults {
     /// Hosts per periodic pass, as the controller's own sync bounds its peers per tick.
     static let hostsPerPass = 8
     static let timeout: TimeInterval = 30
+    /// Outbound messages expired per pass; the store's scan stops at the first one still live.
+    static let expiryPage = 8
 }

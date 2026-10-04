@@ -30501,6 +30501,17 @@
         }
       }
     },
+    "Managed elsewhere" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hanteras på annat håll"
+          }
+        }
+      }
+    },
     "Managed workspace needs attention" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59146,6 +59157,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Värdens anslutning är ofullständig. Anslut först till dess styrprogram under Automatiseringar ▸ Fjärranslutning."
+          }
+        }
+      }
+    },
+    "This host’s background session host is managed by %@; upgrade it there." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens bakgrundsvärd för sessioner hanteras av %@; uppgradera den där."
+          }
+        }
+      }
+    },
+    "This host’s background session host was not installed by this Mac; upgrade it with whatever installed it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens bakgrundsvärd för sessioner installerades inte av den här Macen; uppgradera den med det som installerade den."
           }
         }
       }

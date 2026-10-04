@@ -8,6 +8,82 @@ import ThreadingPTYHostKit
 struct RemoteHostFailure: Error, Equatable, Sendable {
     let token: String
     let detail: String
+
+    static let managedExternallyToken = "daemonManagedExternally"
+
+    /// The host's daemon belongs to another installer and does not speak this build's protocol.
+    /// This Mac never replaces it, so the only useful sentence names where to upgrade it.
+    static func managedExternally(manager: String?) -> RemoteHostFailure {
+        let detail: String
+        if let manager {
+            detail = L10n.format(
+                "This host’s background session host is managed by %@; upgrade it there.", manager
+            )
+        } else {
+            detail = L10n.string(
+                "This host’s background session host was not installed by this Mac; upgrade it with whatever installed it."
+            )
+        }
+        return RemoteHostFailure(token: managedExternallyToken, detail: detail)
+    }
+}
+
+// MARK: - Rendezvous ownership
+
+/// What preparation does about whatever answers at a host's rendezvous before this build's own
+/// instance runs. Pure, so every holder is a unit test rather than a machine.
+///
+/// The rule it encodes: this Mac retires, disables at boot and prunes only generations it can
+/// prove it installed (`RemoteHostProvenance.threadingMac`). A daemon answering at the rendezvous
+/// while any other active instance is unproven — or while no instance this Mac knows of is active
+/// at all, which is a daemon some other unit started — is another installer's: used as it is when
+/// compatible, and reported as theirs to upgrade when not.
+enum RemoteHostRendezvousAction: Equatable, Sendable {
+    /// Nothing answers: start this build's instance.
+    case startOwn
+    /// This Mac's own other generations hold it; retire the idle ones as an upgrade always has.
+    case upgradeOwnGenerations
+    /// This Mac's own generation is too old to speak to; retire it with the retiring hello.
+    case retireOwnTooOld
+    /// This Mac's own generation is newer than this build; leave it and refuse.
+    case refuseIncompatible(PTYHostCompatibility)
+    /// Another installer's compatible daemon: use it, start nothing beside it.
+    case useExternal
+    /// Another installer's daemon this build cannot speak to: name the installer.
+    case refuseExternal(manager: String?)
+
+    /// - Parameter foreignUnit: the shared unit template is another installer's, so this Mac
+    ///   can start nothing of its own through it.
+    static func decide(
+        probe: PTYHostProbeOutcome,
+        plan: RemoteHostInstallPlan,
+        foreignUnit: Bool = false
+    ) -> RemoteHostRendezvousAction {
+        let external = foreignUnit || !plan.externalActiveInstances.isEmpty || plan.otherActiveInstances.isEmpty
+        switch probe {
+        case .notRunning:
+            return foreignUnit ? .refuseExternal(manager: plan.externalManagerName) : .startOwn
+        case .ready:
+            return external ? .useExternal : .upgradeOwnGenerations
+        case .mismatched(let compatibility):
+            if external { return .refuseExternal(manager: plan.externalManagerName) }
+            return compatibility == .peerTooOld ? .retireOwnTooOld : .refuseIncompatible(compatibility)
+        }
+    }
+}
+
+/// The forwarded sockets this Mac holds for remote hosts' daemons.
+enum RemoteHostSockets {
+    static var forwardedSocketDirectory: URL {
+        PTYHostLocation.supportRoot.appendingPathComponent(RemoteHostDefaults.localDirectoryName, isDirectory: true)
+    }
+
+    /// Whether `path` is one of those forwarded sockets — a daemon this Mac may not own, and so
+    /// one no client of this app sends `retire` on a version mismatch.
+    static func isForwardedDaemonSocket(_ path: String) -> Bool {
+        let directory = forwardedSocketDirectory.standardizedFileURL.path + "/"
+        return URL(fileURLWithPath: path).standardizedFileURL.path.hasPrefix(directory)
+    }
 }
 
 /// Everything a launch needs from a prepared host.
@@ -400,8 +476,20 @@ final class RemoteExecutionHosts: @unchecked Sendable {
         if let bridge, !facts.installedBridges.contains(bridge.installIdentifier) {
             try upload(bridge, to: destination)
         }
-        try run(destination, RemoteHostInstallScripts.unitCommand,
-                input: .data(Data(RemoteHostInstallScripts.unitTemplate.utf8)), token: "unitWriteFailed")
+        // The unit template is shared by every instance, so writing it is an act on every
+        // generation. Another installer's template is left alone, and with it the whole host:
+        // this Mac then only uses a compatible daemon it finds, never starts one of its own.
+        let ownership = try runCommand(destination, "sh -s",
+                                       input: .data(Data(RemoteHostInstallScripts.unitOwnershipScript.utf8)),
+                                       timeout: RemoteHostDefaults.commandTimeout)
+        let foreignUnit = ownership.termination == .exited(RemoteHostInstallScripts.foreignUnitExitStatus)
+        if !foreignUnit {
+            guard ownership.succeeded else {
+                throw RemoteHostFailure(token: "unitOwnershipUnknown", detail: ownership.output)
+            }
+            try run(destination, RemoteHostInstallScripts.unitCommand,
+                    input: .data(Data(RemoteHostInstallScripts.unitTemplate.utf8)), token: "unitWriteFailed")
+        }
         if plan.enablesLinger {
             try runScript(destination, RemoteHostInstallScripts.enableLingerScript, token: "lingerRefused")
         }
@@ -431,18 +519,45 @@ final class RemoteExecutionHosts: @unchecked Sendable {
             // this rendezvous", which once left an old daemon serving while this build's instance
             // restarted against its lock every ten seconds (measured on the spike's VM).
             try waitForTunnel(localSocketPath: localSocketPath, tunnel: tunnel)
-            // Another build may own the state directory. It is retired only when it holds nothing;
-            // otherwise it keeps serving — a compatible older host is still a durable one — and the
-            // upgrade waits for a later preparation. An instance that does not answer at this
-            // rendezvous was started with other paths, shares no state directory with ours, and is
-            // left exactly as it is: it may hold somebody's agents.
+            // Who holds the rendezvous decides what this Mac may do about it. Asked without
+            // retiring: only a generation this Mac installed is ever retired.
+            let holder = PTYHostClient.probe(socketPath: localSocketPath, build: build,
+                                             retiresOlderDaemon: false)
             var otherStillServing = false
-            for instance in plan.otherActiveInstances {
-                switch try retireIfIdle(instance, on: destination, localSocketPath: localSocketPath) {
-                case .retired, .elsewhere:
-                    continue
-                case .stillServing:
-                    otherStillServing = true
+            switch RemoteHostRendezvousAction.decide(probe: holder, plan: plan, foreignUnit: foreignUnit) {
+            case .startOwn:
+                break
+            case .useExternal:
+                // Another installer's compatible daemon: it is the host's durable one, used exactly
+                // as it is. Starting this build's instance beside it would only restart against
+                // its state-directory lock every ten seconds.
+                otherStillServing = true
+                EventLog.shared.record(.session, "Using a remote host daemon another installer manages", [
+                    "host": destination.identifier
+                ])
+            case .refuseExternal(let manager):
+                throw RemoteHostFailure.managedExternally(manager: manager)
+            case .refuseIncompatible(let compatibility):
+                throw RemoteHostFailure(token: "daemonIncompatible", detail: "\(compatibility)")
+            case .retireOwnTooOld:
+                // This Mac's own older generation: the retiring hello is the upgrade it always was —
+                // the daemon unlinks the socket, keeps serving what is attached, and exits when its
+                // last session ends. This preparation cannot start beside it until then.
+                _ = PTYHostClient.probe(socketPath: localSocketPath, build: build, retiresOlderDaemon: true)
+                throw RemoteHostFailure(token: "daemonIncompatible", detail: "\(PTYHostCompatibility.peerTooOld)")
+            case .upgradeOwnGenerations:
+                // Another build of this Mac's may own the state directory. It is retired only when
+                // it holds nothing; otherwise it keeps serving — a compatible older host is still a
+                // durable one — and the upgrade waits for a later preparation. An instance that does
+                // not answer at this rendezvous was started with other paths, shares no state
+                // directory with ours, and is left exactly as it is: it may hold somebody's agents.
+                for instance in plan.otherActiveInstances {
+                    switch try retireIfIdle(instance, on: destination, localSocketPath: localSocketPath) {
+                    case .retired, .elsewhere:
+                        continue
+                    case .stillServing:
+                        otherStillServing = true
+                    }
                 }
             }
             if !otherStillServing {
@@ -466,7 +581,7 @@ final class RemoteExecutionHosts: @unchecked Sendable {
             prune(on: destination, keeping: [binary.installIdentifier] + (bridge.map { [$0.installIdentifier] } ?? []))
         }
 
-        try waitUntilAnswering(localSocketPath: localSocketPath, tunnel: tunnel)
+        try waitUntilAnswering(localSocketPath: localSocketPath, tunnel: tunnel, plan: plan)
         ThreadingLogger.ptyHost.info(
             "Remote host \(destination.identifier, privacy: .private(mask: .hash)) ready (own instance: \(runsOwnInstance, privacy: .public), tools: \(toolRoute?.bridgePath != nil, privacy: .public))"
         )
@@ -575,7 +690,7 @@ final class RemoteExecutionHosts: @unchecked Sendable {
         on destination: RemoteHostDestination,
         localSocketPath: String
     ) throws -> OtherInstanceDisposition {
-        switch PTYHostClient.probe(socketPath: localSocketPath, build: build) {
+        switch PTYHostClient.probe(socketPath: localSocketPath, build: build, retiresOlderDaemon: false) {
         case .notRunning:
             ThreadingLogger.ptyHost.info(
                 "Remote host instance \(instance, privacy: .private(mask: .hash)) is not at this rendezvous; left running"
@@ -668,7 +783,11 @@ final class RemoteExecutionHosts: @unchecked Sendable {
         throw RemoteHostFailure(token: "tunnelNotReady", detail: tunnel.diagnosticText)
     }
 
-    private func waitUntilAnswering(localSocketPath: String, tunnel: RemoteHostTunnel) throws {
+    private func waitUntilAnswering(
+        localSocketPath: String,
+        tunnel: RemoteHostTunnel,
+        plan: RemoteHostInstallPlan
+    ) throws {
         let deadline = Date().addingTimeInterval(RemoteHostDefaults.tunnelReadyTimeout)
         var lastOutcome = PTYHostProbeOutcome.notRunning
         while Date() < deadline {
@@ -676,9 +795,13 @@ final class RemoteExecutionHosts: @unchecked Sendable {
                 throw RemoteHostFailure(token: "tunnelExited", detail: tunnel.diagnosticText)
             }
             if FileManager.default.fileExists(atPath: localSocketPath) {
-                lastOutcome = PTYHostClient.probe(socketPath: localSocketPath, build: build)
+                lastOutcome = PTYHostClient.probe(socketPath: localSocketPath, build: build,
+                                                  retiresOlderDaemon: false)
                 if lastOutcome == .ready { return }
                 if case .mismatched = lastOutcome {
+                    if !plan.externalActiveInstances.isEmpty {
+                        throw RemoteHostFailure.managedExternally(manager: plan.externalManagerName)
+                    }
                     throw RemoteHostFailure(token: "daemonIncompatible", detail: "\(lastOutcome)")
                 }
             }
@@ -752,7 +875,8 @@ final class RemoteExecutionHosts: @unchecked Sendable {
 // MARK: - Daemon administration
 
 /// The two questions preparation asks a remote daemon through its tunnel, synchronously and
-/// bounded: how many sessions it holds, and — only when that is zero — retire.
+/// bounded: how many sessions it holds, and — only when that is zero, and only for a generation
+/// this Mac installed — retire. Neither client retires on a version mismatch.
 enum RemoteHostDaemonAdmin {
 
     static func activeSessionCount(socketPath: String, build: String) -> Int? {
@@ -772,7 +896,10 @@ enum RemoteHostDaemonAdmin {
                     answer.complete(sessions)
                 },
                 closed: { _ in answer.abandon() }
-            )
+            ),
+            // Asking what a remote daemon holds is never an upgrade: it may be another
+            // installer's, and only a generation this Mac installed is retired, explicitly.
+            retiresOlderDaemon: false
         )
         defer { client.close() }
         guard (try? client.connect()) != nil, (try? client.list()) != nil else { return nil }
@@ -780,7 +907,8 @@ enum RemoteHostDaemonAdmin {
     }
 
     static func retire(socketPath: String, build: String) -> Bool {
-        let client = PTYHostClient(socketPath: socketPath, build: build, events: .ignored)
+        let client = PTYHostClient(socketPath: socketPath, build: build, events: .ignored,
+                                   retiresOlderDaemon: false)
         defer { client.close() }
         guard (try? client.connect()) != nil, (try? client.retire()) != nil else { return false }
         return client.drainWrites(until: Date().addingTimeInterval(PTYHostDefaults.helloTimeout))

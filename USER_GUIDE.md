@@ -4581,7 +4581,15 @@ controller is set up on the **Remote automations** page.
 A session that runs on a remote host keeps its mail **on that host** when the host's controller
 is set up there: it keeps receiving mail and being told about it while your Mac is asleep, and
 the Info panel shows the last reading with its age while the host can't be reached. Without a
-controller its mail stays on this Mac, and the panel says so.
+controller its mail stays on this Mac, and the panel says so. Mail sent to such a session right
+after Threading starts, or while its host can't be reached, waits on this Mac and moves to the host
+— with the session's grants, exactly — as soon as the host answers. Moving a project to another
+host takes every grant along, including the ones you revoked.
+
+A host whose background session host was installed by something else — Rindabox's Ansible, say,
+or by hand — is never upgraded, disabled or cleaned up from this Mac. When it is compatible
+Threading simply uses it; when it is not, **Settings ▸ Remote Hosts** shows **Managed elsewhere**
+and names the installer to upgrade it with.
 
 Only you decide who may write. **Grant access…** in the Mail section lets an agent on another
 host — one address, or a whole host as `<host>/*` — leave mail for this chat (**Can write**) or

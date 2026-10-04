@@ -21,6 +21,28 @@ enum MCPDefaults {
     /// Path prefix for session endpoints, completed by the session's token.
     static let pathPrefix = "/mcp/"
 
+    /// The shared endpoint a client addresses when it carries the session token in an
+    /// `Authorization: Bearer` header instead of the path. Codex's streamable-HTTP client reads
+    /// that header's value from the environment variable `bearer_token_env_var` names, which is
+    /// what keeps the token out of the `-c mcp_servers.…url=` argument every user can read in `ps`.
+    static let bearerEndpointPath = "/mcp"
+    static let authorizationHeader = "authorization"
+    static let bearerScheme = "bearer "
+
+    /// The session token a request to a session endpoint names: from the path when the path
+    /// carries one, otherwise — only at the shared endpoint — from its bearer header.
+    static func sessionToken(path: String, authorization: String?) -> String? {
+        if path.hasPrefix(pathPrefix) {
+            let token = String(path.dropFirst(pathPrefix.count))
+            if !token.isEmpty { return token }
+        } else if path != bearerEndpointPath {
+            return nil
+        }
+        guard let authorization, authorization.lowercased().hasPrefix(bearerScheme) else { return nil }
+        let token = authorization.dropFirst(bearerScheme.count).trimmingCharacters(in: .whitespaces)
+        return token.isEmpty ? nil : token
+    }
+
     /// Path prefix for `PreToolUse` permission requests, completed by the same token.
     static let permissionPathPrefix = "/permission/"
 

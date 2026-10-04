@@ -19,8 +19,7 @@ final class MailAgentCommandService {
     private let mailbox: MacMailbox
     private let arrived: @MainActor (SessionID, MailPriority) -> Void
     private let queuedForHost: @MainActor (HostID) -> Void
-    private let hostMailbox: @MainActor (SessionID) -> MailAddress?
-    private let sessionForHostAddress: @MainActor (MailAddress) -> SessionID?
+    private let mailboxes: RemoteSessionMailboxes
 
     init(
         control: WorkspaceControlPlane,
@@ -30,15 +29,9 @@ final class MailAgentCommandService {
             MacMailDelivery.shared.arrived(for: $0, priority: $1)
         },
         queuedForHost: @escaping @MainActor (HostID) -> Void = { MacMailSync.shared.kick(host: $0) },
-        hostMailbox: @escaping @MainActor (SessionID) -> MailAddress? = {
-            RemoteSessionMailboxes.shared.binding(for: $0)?.address
-        },
-        sessionForHostAddress: @escaping @MainActor (MailAddress) -> SessionID? = {
-            RemoteSessionMailboxes.shared.session(forAddress: $0)
-        }
+        mailboxes: RemoteSessionMailboxes = .shared
     ) {
-        self.hostMailbox = hostMailbox
-        self.sessionForHostAddress = sessionForHostAddress
+        self.mailboxes = mailboxes
         self.control = control
         self.projects = projects
         self.mailbox = mailbox
@@ -104,26 +97,44 @@ final class MailAgentCommandService {
                     case .failure(let refusal):
                         return completion(.failure(refusal.toolWords))
                     case .success(let row):
-                        if let hosted = self.hostMailbox(targetID) {
+                        switch await self.mailboxes.resolve(targetID) {
+                        case .host(let binding):
                             // The sibling's mailbox lives on its host: queue for that host, whose
                             // `<macHost>/*` grant stands for this plane's admission just made.
-                            recipient = hosted
-                        } else {
+                            recipient = binding.address
+                        case .thisMac, .unknown:
+                            // `.unknown`: its host could not be asked. The mail waits in this Mac's
+                            // mailbox for it and moves to the host when the mailbox is bound there.
                             recipient = try await mailbox.register(targetID, name: row.title)
                             localTarget = targetID
                         }
                     }
                 case .remote(let address):
                     // An address that is one of this Mac's own sessions on its host is still
-                    // that session: the same scope rule applies, whatever spelling was used.
-                    if let hostedSession = self.sessionForHostAddress(address) {
+                    // that session: the same scope rule applies, whatever spelling was used —
+                    // decided from the address's id, so it holds before this run has bound it.
+                    if let hostedSession = self.mailboxes.ownSession(spelledAs: address) {
+                        let row: ControlSessionOverview
                         switch control.admitMail(to: hostedSession, from: .agentSession(sessionID)) {
                         case .failure(.targetUnknown): return completion(.failure(Self.unknownRecipientWords))
                         case .failure(let refusal): return completion(.failure(refusal.toolWords))
-                        case .success: break
+                        case .success(let admitted): row = admitted
                         }
+                        switch await self.mailboxes.resolve(hostedSession) {
+                        case .host(let binding):
+                            recipient = binding.address
+                        case .thisMac:
+                            // It runs on this Mac now; an old host spelling still reaches it here.
+                            recipient = try await mailbox.register(hostedSession, name: row.title)
+                            localTarget = hostedSession
+                        case .unknown:
+                            // Its host mailbox cannot be confirmed, and an address on a guess is
+                            // mail that may never be read.
+                            return completion(.failure(Self.hostUnconfirmedWords))
+                        }
+                    } else {
+                        recipient = address
                     }
-                    recipient = address
                 }
                 let message = try await mailbox.send(
                     from: sessionID, senderName: senderName, to: recipient, id: id, text: text,
@@ -208,7 +219,7 @@ final class MailAgentCommandService {
                 let own = try await mailbox.register(sessionID, name: name)
                 let contacts = try await mailbox.storeDirectory(for: sessionID, name: name)
                 let hosted = Dictionary(uniqueKeysWithValues: siblings.compactMap { row in
-                    self.hostMailbox(row.id).map { (row.id, $0) }
+                    self.mailboxes.binding(for: row.id).map { (row.id, $0.address) }
                 })
                 completion(.success(Self.directoryWords(own: own, siblings: siblings, contacts: contacts, hosted: hosted)))
             } catch let failure as MacMailbox.Failure {
@@ -240,6 +251,12 @@ final class MailAgentCommandService {
         No mailbox with that address is reachable from here. mail_directory lists every address \
         this session can write to: this project's sessions, and any agent the user has granted \
         or named.
+        """
+
+    nonisolated static let hostUnconfirmedWords = """
+        That session's mailbox is on its host, which can't be reached to confirm it right now, so \
+        nothing was sent. Send to its Threading id instead (mail_directory lists it), or try again \
+        shortly.
         """
 
     nonisolated static func mailWords(for failure: MacMailbox.Failure) -> String {

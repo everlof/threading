@@ -213,7 +213,9 @@ final class OwnerRPCFake: RemoteHostCommandRunning, @unchecked Sendable {
         case "host": return try encode(try await store.host())
         case "mail-register": return try encode(try await store.registerMailbox(MailAddress(args[0]), name: args[1]))
         case "mail-credential": return try encode(try await store.mailboxCredential(MailAddress(args[0])))
-        case "mail-grants": return try encode(try await store.mailGrants(recipient: MailAddress(args[0])))
+        case "mail-grants":
+            return try encode(try await store.mailGrants(recipient: MailAddress(args[0]),
+                                                         after: args.count > 1 ? Int64(args[1]) ?? 0 : 0))
         case "mail-grant-set":
             return try encode(try await store.setMailGrant(
                 recipient: MailAddress(args[0]), sender: args[1], expectedRevision: Int(args[2])!,
@@ -453,6 +455,10 @@ final class MailboxHandoverTests: XCTestCase {
         handover.mailboxes = mailboxes
         handover.ensurePeered = { _ in remoteHost }
         handover.kick = { _ in }
+        // No project store in these fixtures: every session runs on this Mac unless a test says.
+        mailboxes.endpointForSession = { _ in nil }
+        mailboxes.isOwnSession = { _ in false }
+        mailboxes.titleForSession = { _ in "Deploy" }
         return (mac, macStore, remote, remoteHost, mailboxes, handover, hostEndpoint())
     }
 
@@ -627,6 +633,143 @@ final class MailboxHandoverTests: XCTestCase {
         try await w.macStore.acceptPulled(page.messages ?? [], from: w.remoteHost, next: page.next ?? 0)
         let peer = try await w.macStore.mailPeer(w.remoteHost)
         XCTAssertNil(peer?.pendingRefusals, "not refused on this Mac")
+    }
+
+    // MARK: M3 — a move copies every grant, revocations included, and leaves the set exact
+
+    /// Moves once read one page of grants (50) and skipped revocations, so a mailbox opened to
+    /// many senders lost the rest, and a sender the owner had revoked under a broader `*` grant
+    /// could write again once the mailbox moved.
+    func testAMoveCopiesEveryGrantPageAndRevocationsAndRewritesStaleRows() async throws {
+        let w = try await world()
+        let session = SessionID()
+        let onMac = try await w.mac.register(session, name: "Deploy")
+        let senders = (0..<60).map { _ in MailAddress(host: w.remoteHost, kind: .worker, id: UUID()) }
+        for sender in senders {
+            try await w.mac.ensureGrant(recipient: onMac, sender: sender.description, mode: .wake)
+        }
+        try await w.mac.ensureGrant(recipient: onMac, sender: "*", mode: .notify)
+        let revoked = MailAddress(host: w.remoteHost, kind: .worker, id: UUID())
+        try await w.mac.ensureGrant(recipient: onMac, sender: revoked.description, mode: nil)
+
+        // A row the host mailbox kept from an earlier stay there, which the Mac side never had.
+        let onHost = MailAddress(host: w.remoteHost, kind: .session, id: session.rawValue)
+        _ = try await w.remote.registerMailbox(onHost, name: "Deploy")
+        let stale = MailAddress(host: w.remoteHost, kind: .worker, id: UUID())
+        _ = try await w.remote.setMailGrant(recipient: onHost, sender: stale.description, expectedRevision: 0,
+                                            mode: .wake, allowsInterrupt: true)
+
+        let outcome = await w.handover.move(session, title: "Deploy", from: .thisMac, to: .host(w.endpoint))
+        XCTAssertEqual(outcome.issues, [])
+
+        for sender in senders {
+            let effective = try await w.remote.effectiveMailGrant(recipient: onHost, sender: sender)
+            XCTAssertEqual(effective?.mode, .wake, "every page moves, not only the first")
+        }
+        let revokedThere = try await w.remote.effectiveMailGrant(recipient: onHost, sender: revoked)
+        XCTAssertNotNil(revokedThere)
+        XCTAssertNil(revokedThere?.mode, "a revocation under a broader grant moves with the mailbox")
+        let staleThere = try await w.remote.effectiveMailGrant(recipient: onHost, sender: stale)
+        XCTAssertEqual(staleThere?.mode, .notify, "a stale row now answers what the source answers (its `*`)")
+        XCTAssertEqual(staleThere?.allowsInterrupt, false)
+        let macHost = try await w.mac.host().id
+        let anyMacSession = MailAddress(host: macHost, kind: .session, id: UUID())
+        let provisioning = try await w.remote.effectiveMailGrant(recipient: onHost, sender: anyMacSession)
+        XCTAssertEqual(provisioning?.sender, "\(macHost)/*", "the provisioning grant is not the owner's and stays")
+        XCTAssertEqual(provisioning?.mode, .notify)
+    }
+
+    func testTheMirrorWritesOnlyDifferencesAndFallsThroughForStaleRows() throws {
+        let recipient = MailAddress(host: HostID(), kind: .session, id: UUID())
+        let peerHost = HostID()
+        let exact = MailAddress(host: peerHost, kind: .worker, id: UUID()).description
+        // The store's own wire shape; its memberwise initializer is not public.
+        func grant(_ sender: String, _ mode: MailMode?, revision: Int = 1) -> MailGrant {
+            var object: [String: Any] = ["recipient": recipient.description, "sender": sender,
+                                         "allowsInterrupt": false, "revision": revision]
+            if let mode { object["mode"] = mode.rawValue }
+            // swiftlint:disable:next force_try
+            return try! JSONDecoder().decode(MailGrant.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+        let source = [grant("\(peerHost)/*", .wake), grant("*", .notify)]
+        let destination = [grant("\(peerHost)/*", .wake, revision: 4), grant(exact, .notify, revision: 2)]
+        let changes = MailGrantMirror.changes(source: source, destination: destination)
+        XCTAssertEqual(changes.map(\.setting.sender), ["*", exact])
+        XCTAssertEqual(changes.first { $0.setting.sender == exact }?.setting.mode, .wake,
+                       "a stale exact row takes its host wildcard's answer")
+        XCTAssertEqual(changes.first { $0.setting.sender == exact }?.priorRevision, 2)
+        XCTAssertEqual(MailGrantMirror.changes(source: [], destination: [grant("*", .wake)]).first?.setting.mode, nil,
+                       "with nothing on the source a stale row is revoked")
+        XCTAssertTrue(MailGrantMirror.changes(source: [], destination: [grant("*", .wake)], excluding: ["*"]).isEmpty)
+    }
+
+    // MARK: M5 — hosted mailboxes are resolved before routing
+
+    /// After a relaunch no session has a binding until something provisions it. The fallback
+    /// once stored such mail in this Mac's mailbox for the target, which its agent on the host
+    /// never reads; it now asks the project's execution host first.
+    func testUndeliverableMailToAnUnboundHostedSessionIsResolvedToItsHost() async throws {
+        let w = try await world()
+        let caller = SessionID(), target = SessionID()
+        w.mailboxes.endpointForSession = { $0 == target ? w.endpoint : nil }
+        XCTAssertNil(w.mailboxes.binding(for: target), "nothing bound yet, as after a relaunch")
+
+        let delivery = MacMailDelivery(mailbox: w.mac)
+        delivery.mailboxes = w.mailboxes
+        let stored = expectation(description: "stored")
+        delivery.storeUndeliverable("read this on the host", to: target, from: caller) { ok in
+            XCTAssertTrue(ok); stored.fulfill()
+        }
+        await fulfillment(of: [stored], timeout: 10)
+
+        let onHost = MailAddress(host: w.remoteHost, kind: .session, id: target.rawValue)
+        XCTAssertEqual(w.mailboxes.binding(for: target)?.address, onHost)
+        let queued = try await w.macStore.outboundBatch(for: w.remoteHost).envelopes
+        XCTAssertEqual(queued.map(\.recipient), [onHost], "queued for the host mailbox the agent reads")
+        let macInbox = try await w.mac.inbox(for: target, name: "Deploy", after: 0, limit: 5).items
+        XCTAssertTrue(macInbox.isEmpty, "nothing left in a Mac mailbox nobody reads")
+    }
+
+    /// Mail this Mac kept for a session while its host mailbox was unknown moves to the host
+    /// when the mailbox is bound, ids unchanged.
+    func testBindingAHostMailboxMovesTheMailThisMacKept() async throws {
+        let w = try await world()
+        let session = SessionID()
+        w.mailboxes.endpointForSession = { $0 == session ? w.endpoint : nil }
+        w.handover.start()
+        let onMac = try await w.mac.register(session, name: "Deploy")
+        let kept = UUID()
+        _ = try await w.mac.send(from: SessionID(), senderName: "Review", to: onMac, id: kept, text: "kept here",
+                                 replyTo: nil, priority: .normal, ownerAdmitted: true)
+
+        guard case .host(let binding) = await w.mailboxes.resolve(session) else { return XCTFail("expected the host") }
+        let deadline = Date().addingTimeInterval(10)
+        var queued: [MailEnvelope] = []
+        while Date() < deadline {
+            queued = try await w.macStore.outboundBatch(for: w.remoteHost).envelopes
+            if !queued.isEmpty { break }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertEqual(queued.map(\.id), [kept])
+        XCTAssertEqual(queued.first?.recipient, binding.address)
+    }
+
+    /// A host address spelling one of this Mac's own sessions is still that session — but with
+    /// its host mailbox unconfirmed, nothing is sent to it on a guess.
+    func testAResolutionThatCannotReachTheHostIsUnknownAndRemembered() async throws {
+        let w = try await world()
+        let session = SessionID()
+        w.mailboxes.endpointForSession = { _ in w.endpoint }
+        w.mailboxes.ensurePeered = { _ in throw RemoteControllerRPC.Failure.transport("down") }
+        w.mailboxes.isOwnSession = { $0 == session }
+        guard case .unknown = await w.mailboxes.resolve(session) else { return XCTFail("expected unknown") }
+        var asked = false
+        w.mailboxes.ensurePeered = { _ in asked = true; return w.remoteHost }
+        guard case .unknown = await w.mailboxes.resolve(session) else { return XCTFail("expected unknown") }
+        XCTAssertFalse(asked, "a host that just failed is not asked again for every message")
+        let spelled = MailAddress(host: w.remoteHost, kind: .session, id: session.rawValue)
+        XCTAssertEqual(w.mailboxes.ownSession(spelledAs: spelled), session)
+        XCTAssertNil(w.mailboxes.ownSession(spelledAs: MailAddress(host: w.remoteHost, kind: .worker, id: session.rawValue)))
     }
 
 }

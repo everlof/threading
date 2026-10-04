@@ -246,6 +246,38 @@ runs every other enabled instance is `systemctl --user disable`d — without `--
 running is stopped. Instance names read off the host are held to `[A-Za-z0-9._-]`, because they go
 back into a command run there.
 
+## Installer provenance, 2026-10-04
+
+A host can have two installers: this Mac's Remote Hosts setup and another one — Rindabox's Ansible
+installs `threading-ptyd` on its VPS. Preparation used to treat every generation on the host as its
+own: the probe's handshake retired any older daemon at the rendezvous, every other enabled instance
+was disabled at boot, and the prune removed every hex install directory it was not keeping. Each of
+those takes another installer's daemon away from under it, and that installer puts it straight
+back.
+
+**The marker.** Each install directory says who put it there in `<install dir>/.threading-managed-by`:
+`threading-mac` (written by the Mac's upload, unless a marker is already there) or
+`external:<name>` (Rindabox writes `external:rindabox-ansible`). A directory with no marker — a
+hand install, or a generation an older build of this app set up — reads as external: failing safe
+costs a manual upgrade, failing open costs running agents. To hand an unmarked generation back to
+this Mac, write `threading-mac` into its marker. The probe reports each marker beside its directory
+(`managed=` / `bridgemanaged=`), and the unit template carries `X-Threading-Managed-By=threading-mac`.
+
+**The rules** (`RemoteHostProvenance`, `RemoteHostRendezvousAction`):
+
+- Every client of a remote daemon sets `retiresOlderDaemon: false`; only a generation this Mac
+  installed is retired, explicitly.
+- Only this Mac's generations are disabled at boot or pruned; the prune re-reads the marker on the
+  host at removal time.
+- A daemon answering at the rendezvous while any other active instance is unproven, or while no
+  instance this Mac knows of is active, is another installer's: used as it is when compatible, and
+  otherwise the host shows **Managed elsewhere** — "managed by <name>; upgrade it there".
+- A unit template without this Mac's line, on a host where a directory names another installer, is
+  not overwritten, and this Mac then starts nothing of its own through it.
+
+`RemoteHostProvenanceTests` runs the shipping probe, upload, ownership and prune scripts in a real
+`sh` against a scratch home, and the shipping admin client against a fake older daemon.
+
 **No standing openings.** The new-chat opening text from Settings asks for Threading's tools
 (`set_session_name`), which a remote session does not have until slice 4, so
 `NewChatOpeningMessage.compose(prompt:for:settings:)` sends only the chat's own task to a project on

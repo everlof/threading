@@ -435,6 +435,14 @@ enum RemoteHostPresentation {
                 detail: nil,
                 allowsChecking: true
             )
+        case .failed(let failure) where failure.token == RemoteHostFailure.managedExternallyToken:
+            // Reachable and serving — just not this Mac's to upgrade.
+            return State(
+                label: RemoteHostsSettingsStrings.managedElsewhere,
+                color: Design.Status.warning,
+                detail: failure.detail,
+                allowsChecking: true
+            )
         case .failed(let failure):
             return State(
                 label: RemoteHostsSettingsStrings.unreachable,
@@ -504,6 +512,7 @@ enum RemoteHostsSettingsStrings {
     static var unusable: String { L10n.string("Not usable") }
     static var needsAgent: String { L10n.string("Claude missing") }
     static var needsSignIn: String { L10n.string("Not signed in") }
+    static var managedElsewhere: String { L10n.string("Managed elsewhere") }
 
     static func installAgent(_ destination: String) -> String {
         L10n.format(
