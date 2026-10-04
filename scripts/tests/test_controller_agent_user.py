@@ -129,7 +129,8 @@ class AgentUserTests(unittest.TestCase):
             "environment": {"PATH": "/usr/bin:/bin"}, "recipients": ["group:ops"], "destination": "fixture.drafts"}))
         os.chmod(recipe, 0o644)
         launch = self.call("launch", worker, str(recipe))
-        self.wait(lambda: (self.work / "result.json").exists())
+        # Three tool calls, each allowed the broker's 10 s connection bound on a loaded runner.
+        self.wait(lambda: (self.work / "result.json").exists(), seconds=90)
         result = json.loads((self.work / "result.json").read_text())
         self.assertEqual(result["uid"], self.agent.pw_uid)
         self.assertEqual(result["store"], "permission_denied")
