@@ -20,12 +20,15 @@ claude --version
 codex --version
 grok --version
 opencode --version
+cursor-agent --version
 ```
 
 Authentication remains with the provider CLI. If a command asks you to sign
 in, complete that flow before returning to the app. You only need one
-supported provider to begin, and the available native controls can differ by
-runtime.
+supported provider to begin, and the available native controls differ by
+runtime. On first launch, the welcome tour checks which of the five commands
+your login shell can reach and shows the install command for any that are
+missing.
 
 ## 2. Open a project folder
 
@@ -47,9 +50,9 @@ Create a session, choose a provider, and describe a concrete task. The session
 appears immediately in the project sidebar and moves through a small set of
 states as the agent works.
 
-You can keep several sessions active at once. The sidebar is designed to make
-quiet progress recede and bring questions, permissions, and completed work
-forward.
+You can keep several sessions active at once. A working session shows only a
+spinner, while questions, permission requests, and finished work get their own
+marks in the sidebar.
 
 ## 4. Respond where the request happened
 
@@ -59,9 +62,10 @@ answer without searching for the correct terminal window.
 
 ## 5. Review the result
 
-When work reaches a reviewable boundary, open Git review from the same
-project. Choose the comparison that matches your intent: unstaged, staged,
-last turn, branch, or commit. Then inspect and stage only the work you want.
+When the agent finishes a piece of work, open Git Review (Cmd+Shift+R) from
+the same session. Choose the comparison that matches your intent:
+uncommitted, unstaged, staged, last turn, branch, or commits. Then inspect and
+stage only the work you want.
 
 ## Next
 

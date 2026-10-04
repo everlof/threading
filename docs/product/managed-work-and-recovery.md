@@ -8,8 +8,8 @@ order: 55
 # Managed work and recovery
 
 Long-running agent work should survive interruptions without gaining hidden
-authority. Managed workspaces, scheduled messages, and recovery policies make
-that durability explicit.
+authority. Managed workspaces, scheduled messages, curfews, automations, and
+recovery policies each state what they will do before they do it.
 
 ## Managed workspaces
 
@@ -22,11 +22,12 @@ When the task finishes, you can:
 
 - merge the result with a strict fast-forward check and clean up the worktree;
 - keep the workspace for local review; or
-- use a separately enabled GitHub pull-request workflow.
+- open a GitHub pull request or GitLab.com merge request, if you enabled
+  that for the repository.
 
 If validation or delivery cannot complete safely, the app refuses the finish,
-keeps the workspace, and marks the session **Needs you**. It does not discard
-the work to make the interface look complete.
+keeps the workspace, and marks the session **Needs you**. The work stays in
+the workspace.
 
 ## Scheduled and finish-triggered work
 
@@ -41,12 +42,33 @@ at the next launch. A dormant native session may be restored when its contract
 allows it; the app will not type into a dormant terminal session whose restore
 state is ambiguous.
 
+## Curfews
+
+A curfew is a scheduled end for a session. Set it when you write the session
+or later from the row's menu: a time, the next 5-hour or 7-day window reset, or
+a usage percentage from 1 to 100 for the account's window. At the curfew,
+Threading holds the session and stops spending its usage. A percentage curfew
+stays held across resets and restarts until you choose **Lift Curfew**.
+
+## Automations
+
+**Automations** in the sidebar runs a saved task on a schedule (daily,
+selected weekdays, weekly, or an interval) or when a connected source reports
+an event. A new automation starts paused, and only you can activate it. Tasks
+can be read-only or allowed local edits and tests in a clean checkout or an
+isolated worktree. No automation can push, deploy, or write back to its
+source. A schedule never replays a backlog: choose **Skip missed runs** or
+**Run once on return** for time the Mac was asleep or offline. Agents can draft
+and manage automations through a tool, but enabling or running one always
+shows you the exact settings first.
+
 ## Limits and startup recovery
 
-When a provider reports a structured rate limit, the default behavior is to
-flag the session for attention. You can opt into waiting for the reset and
-sending a continuation afterward. The app never upgrades a plan, spends money,
-or switches accounts on its own.
+When Claude Code refuses a turn over a usage limit, the app reads the refusal
+from the transcript and marks the row with a red triangle and the reset time.
+You can opt into **Continue at Reset**, which waits for the reset and sends a
+continuation. The app never upgrades a plan, spends money, or switches
+accounts on its own.
 
 After a normal quit, configured sessions can restore normally. After an
 unclean exit, the app holds automatic work until the previous state has been

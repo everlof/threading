@@ -1,7 +1,7 @@
 # Product documentation
 
 These Markdown files are the public source of truth for the product website.
-They are intentionally useful in two places:
+GitHub and the website both read them:
 
 - GitHub renders them as normal repository documentation.
 - `web/scripts/sync-public-docs.mjs` turns the same files into the website docs.

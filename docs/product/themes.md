@@ -7,8 +7,8 @@ order: 90
 
 # Themes
 
-Themes can change the atmosphere of the app without changing how features
-work. They own semantic visual tokens; feature views own layout, hierarchy,
+Themes change how the app looks and leave how features work alone. A theme
+owns semantic visual tokens, and feature views own layout, hierarchy,
 interaction, and behavior.
 
 ## What a theme can define
@@ -21,41 +21,71 @@ A theme can provide:
 - panel and control geometry;
 - border treatment and restrained glow or shadow;
 - an optional app-drawn window frame and command band;
-- a supported typeface category;
+- its own fonts;
 - a complete terminal palette;
+- a gradient or picture under the panes and the sidebar;
+- drifting particles, a transition when you switch to it, sounds, and a
+  sidebar mascot that changes pose with what your agents are doing;
 - optional app and Dock artwork where supported.
 
-Semantic roles let every surface respond coherently. A permission warning,
-selected session, terminal cursor, and Git review panel should belong to the
-same visual identity without each feature knowing the theme’s literal colors.
+Because every surface reads semantic roles, a permission warning, a selected
+session, the terminal cursor, and the Git Review panel all take the theme's
+colors without any feature knowing them.
 
 ## What a theme cannot define
 
 A theme does not move the sidebar, replace native controls with arbitrary
 subclasses, change approval behavior, or own feature-specific layout. Those
-boundaries keep themes compatible with accessibility, keyboard navigation,
-new features, and the iOS companion.
+limits keep every theme working with accessibility, keyboard navigation, new
+features, and the iOS companion.
 
 ## System and stock themes
 
-System follows the platform appearance and remains the safe application
-default. Stock themes provide more directed identities, including Threading,
-Editorial, Cyberpunk, Swiss Minimalist, Bauhaus, Art Deco, Neo Brutalism,
-Claymorphism, Vaporwave, Newsprint, Botanical, Industrial, and Christmas.
+New installs start with **Threading**. **System** is the unstyled option that
+uses plain macOS colors. The picker groups 28 built-in themes:
+
+- **Threading**, the house theme;
+- **Design styles:** Editorial, Cyberpunk, Swiss Minimalist, Bauhaus, Art
+  Deco, Neo Brutalism, Claymorphism, Vaporwave, Newsprint, Botanical, and
+  Industrial;
+- **Palettes:** Pure, Cappuccino, Solarized, Nord, and Dracula;
+- **Classic desktops:** Mac OS 9 Platinum, Mac OS X Aqua, Mac OS X 10.4
+  Tiger, BeOS R5, OPENSTEP 4.2, IRIX Indigo Magic, Amiga Workbench 3.1, and
+  Windows 98;
+- **Classic software:** Classic Player and TUI;
+- **Seasonal:** Christmas.
+
+You can set a theme for the whole app, a project, or a single session.
+**Duplicate to Edit** makes an editable copy of any built-in theme.
 
 ## Threading
 
-Threading is a dark stock theme with navy surfaces, warm text, and orange
-accents. It also draws the Mac window frame, title band, window controls, and
-command band with the same palette. Selected rows use a deeper navy so orange
-can stay reserved for actions, focus, and the active window seam. Its terminal
-palette and iPhone projection use the same colors, so native controls and a
-provider TUI sit in one consistent frame.
+Threading is the default theme. It follows the Mac's appearance: warm paper
+in light mode and navy in dark mode, with orange accents and the native macOS
+title bar in both. Its terminal palette and iPhone projection use the same
+colors, so native controls and a provider TUI share one frame.
 
 ## Editorial
 
 Editorial is a dark theme built from warm ink, cognac orange, powder blue,
 deep teal, and cream, with warm serif typography and restrained glow.
+
+## Motion and music
+
+Theme particles, transitions, and drifting gradients stop under **Theme
+animations** in Themes settings, Reduce Motion, or Low Power Mode.
+**Music-reactive themes**, off by default, let a theme react to audio from the
+whole system or one app. It needs macOS 14.2 or later and the System Audio
+Recording permission. Threading analyzes the audio on the Mac and passes only
+levels to the theme.
+
+## Themes from agents
+
+Agents can list, set, and create themes through Threading's theme tools. Ask
+the session to "make my theme warmer" or "make it look like a submarine
+control room" and it edits a custom copy while you watch. An agent never
+overwrites an existing theme, and Threading refuses a palette whose text is
+unreadable against its background.
 
 ## Extension themes
 
