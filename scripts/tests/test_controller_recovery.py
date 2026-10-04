@@ -67,23 +67,13 @@ class RecoveryTests(unittest.TestCase):
     # MARK: - Fixture
 
     def start_daemon(self, nproc=None):
-        # Linux counts threads against RLIMIT_NPROC, and every task the user already runs: a daemon
-        # started under the limit cannot create the threads that answer a greeting, so the
-        # controller never reaches a spawn. There the limit is applied once the daemon is serving
-        # (prlimit on its pid), which leaves its threads and fails only the fork. macOS counts
-        # processes, so the limit applies from exec.
-        linux = sys.platform.startswith("linux")
         def limit():
-            if nproc is not None and not linux:
+            if nproc is not None:
                 resource.setrlimit(resource.RLIMIT_NPROC, (nproc, nproc))
         self.socket.unlink(missing_ok=True)
         self.daemon = subprocess.Popen([PTYD, "--socket", str(self.socket), "--state", str(self.root / "pty")],
                                        stdout=self.log, stderr=self.log, preexec_fn=limit)
         self.wait(lambda: self.socket.exists())
-        if nproc is not None and linux:
-            self.wait(lambda: subprocess.run([PTYD, "status", "--socket", str(self.socket)],
-                                             capture_output=True, text=True).stdout.find("protocol") >= 0)
-            resource.prlimit(self.daemon.pid, resource.RLIMIT_NPROC, (nproc, nproc))
 
     def crash_daemon(self):
         self.daemon.send_signal(signal.SIGKILL)
@@ -176,6 +166,12 @@ class RecoveryTests(unittest.TestCase):
 
     def test_a_fork_failure_is_definite_and_requeues_without_pausing(self):
         if os.geteuid() == 0: self.skipTest("RLIMIT_NPROC does not bind root")
+        # Linux counts threads, and every task the user already runs, against RLIMIT_NPROC: the
+        # limit starves the daemon's own connection threads too, so a launch ends `prepared`
+        # (refused before the spawn right) or `dispatching` (uncertain) as often as at the fork —
+        # both honest, neither this test's subject. Measured flaky on Ubuntu 24.04 either way the
+        # limit was applied. macOS counts processes only, so the fork alone fails there.
+        if sys.platform.startswith("linux"): self.skipTest("RLIMIT_NPROC cannot fail only the fork on Linux")
         self.start_daemon(nproc=1)
         work = self.seed()
         result = self.call("launch", self.worker, self.recipe("hold"), ok=False)
