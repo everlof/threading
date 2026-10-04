@@ -327,6 +327,15 @@ queue and history, independently of the Mac. The controller must already be inst
 supervisor running; connecting does not install, configure a worker recipe, or start a service.
 See [autonomous-controller.md](autonomous-controller.md) for that separate execution boundary.
 
+Two controller behaviours show through the Remote page. Remote run history can list a `refused`
+occurrence with its reason (for example `forbidden` once the worker stops accepting scheduled
+work): the controller records the occurrence it could not admit and moves to the next one, rather
+than retrying it late and reporting it `missed`. And a controller-hosted probe source admits work
+under explicit bounds — chunked commits, at most 100 tasks per poll with the rest redelivered from
+an unmoved cursor, and a 50-task queued backlog per trigger beyond which receipts read `refused:
+backlog`. The Mac's local triggers keep their own run queue and limits described above; see
+[autonomous-controller.md](autonomous-controller.md#trigger-sources-schema-v8) for the controller's.
+
 Scaling contract: typical 5–20 definitions, stress 500 local definitions; the local catalogue has
 that explicit creation limit. The UI constructs at most 25 local rows per page, coalesces store-change bursts, and reads
 activity through a 25-row keyset cursor. Agent reads return bounded pages. Remote controller queries use

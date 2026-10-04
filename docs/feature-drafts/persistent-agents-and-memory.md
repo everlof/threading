@@ -35,7 +35,7 @@ evidence, not a live production audit. Rindabox paths below are relative to `~/r
 | The portable controller owns stable workers and memory independent of provider transcripts. | [Records.swift](../../Packages/ThreadingController/Sources/ThreadingController/Records.swift), [ControllerStore+Memory.swift](../../Packages/ThreadingController/Sources/ThreadingController/ControllerStore+Memory.swift) | Reuse this store and its revision checks. Memory does not need to be moved out of Rindabox: it is already implemented here. |
 | Private memory reads and writes derive the worker from an authenticated, current execution. | [ControllerAgentTools.swift](../../Packages/ThreadingController/Sources/ThreadingController/ControllerAgentTools.swift) | Generalize authenticated access for chats without letting a model choose another agent's identity. |
 | Shared knowledge has explicit per-worker space grants and revisioned content. | [ControllerKnowledge.swift](../../Packages/ThreadingController/Sources/ThreadingController/ControllerKnowledge.swift) | Preserve separate shared knowledge; selecting a tool must not grant a space. |
-| The current controller database supports schema versions through 6. | [Database.swift](../../Packages/ThreadingController/Sources/ThreadingController/Database.swift) | Introduce a versioned migration and capability negotiation; old binaries must refuse a future schema. |
+| The controller database migrates through schema 10 and refuses a future one; `threading-controller --version` reports the schema and a capability list (including `memory-forget`). | [Database.swift](../../Packages/ThreadingController/Sources/ThreadingController/Database.swift) | Add the next migration as one more step and negotiate through the capability list; old binaries must refuse a future schema. |
 | Rindabox uses its agent UUID for the controller worker UUID. | `src/server/autonomous-service.ts`, `src/server/agent-schedules.ts` | Adopt that UUID unchanged; do not replace existing identities or rekey their memory. |
 | Rindabox instructions and schedules are owner-authored, and each task captures an instruction snapshot. | `src/server/agent-schedules.ts`, `src/server/agent-task-store.ts` | Definition changes affect new work, not the immutable instructions of an admitted task. |
 | Rindabox exact tools, projects, mailbox grants and current membership are checked by the application. | `docs/agent-mcp-policy.md`, `src/server/agent-access-planning.ts`, `src/server/mcp-registry.ts` | A Threading association adds no application permission. |
@@ -43,11 +43,12 @@ evidence, not a live production audit. Rindabox paths below are relative to `~/r
 | Controller state is included in encrypted recovery captures; fresh-schema portable import of the agent domains is not yet supported. | `infra/backup-recovery.md` | Same-release recovery and portable migration are separate deliverables, with separate tests. |
 
 Important gaps today: there is no persistent agent association for ordinary Threading chats;
-private memory has get/put/history core operations but no complete discovery, correction and
-forgetting product; owner RPC currently exposes memory reads/history, not the complete mutation
-surface; private memory lacks the richer provenance proposed below. Existing shared knowledge
-is implemented even though an earlier paragraph of the controller architecture still describes
-it as a future slice. Update that stale paragraph when the owning architecture is next changed.
+the controller core now has list/get/put/history, a revisioned delete tombstone (agent
+`memory_delete` and owner `memory-delete`), owner `memory-forget` that erases every stored body,
+per-worker key/byte quotas and per-revision provenance (`actor`, `executionID`, `at`), and owner
+RPC carries all of these, but there is no discovery, correction and forgetting *product* on top
+of them; private memory still lacks the richer metadata proposed below (title, source reference,
+protection). Shared knowledge is implemented, with the same provenance and an owner forget.
 
 ## Rindabox requirements
 
@@ -428,8 +429,9 @@ These byte limits are safety bounds, not claims about a model's exact token coun
 Start with indexed key/prefix/title discovery and active-state filtering. Do not expose an
 unindexed arbitrary substring scan as "search". Add full-text retrieval only with a measured
 index, bounded candidate work and freshness/forgetting tests. Limits on new writes must not
-prevent reading/exporting an oversized legacy working set; provide a visible capacity error
-and a migration path if measured storage growth later justifies an aggregate quota.
+prevent reading/exporting an oversized legacy working set. The controller enforces an aggregate
+quota (1,000 active keys and 4 MiB of body text per worker and per knowledge space) with a visible
+`memory_key_quota`/`memory_byte_quota` error; reads and shrinking writes are never refused.
 
 Measure background query/context preparation separately from main-thread mount and scrolling.
 Capture matched before/after median and tail/max timings and visible-view/footprint counts.

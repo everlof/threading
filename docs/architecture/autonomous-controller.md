@@ -80,6 +80,14 @@ one destination. Work text never becomes executable configuration. A recipe is b
 32 KiB, 64 arguments and 128 environment entries. No parent environment is inherited. Reserved
 `THREADING_` entries are supplied by the runtime, not the recipe.
 
+Recipe `environment` values are plain text in every worker-policy and launch row, and so in
+backups. A credential belongs in the recipe's `secrets` map instead (environment name → secret
+name, at most 16, disjoint from `environment`): the name is stored, and the runtime resolves the
+value from the owner-only `secret-set` file beside the database (the same mechanism and checks as
+trigger sources) when it dispatches. Secrets are read before the spawn right is consumed, so a
+missing one fails the dispatch and leaves the intent `prepared` for an explicit retry once the
+owner stores it. No status, policy or launch projection prints environment values or secrets.
+
 `launch-prepare WORKER_UUID RECIPE_JSON_FILE` claims work and saves launch intent and a private
 execution credential in one transaction. `launch-dispatch EXECUTION_UUID` connects, commits
 `prepared -> dispatching`, then sends exactly one spawn. The PTY identity is the execution UUID;
@@ -120,8 +128,8 @@ The launched child receives the controller executable, database path, execution 
 credential in environment variables. `threading-controller agent REQUEST_JSON_FILE` exposes a
 single typed operation; `agent-mcp` exposes the same operations over newline-delimited stdio MCP:
 `work_context`, `work_questions`, `work_messages`, `work_history`, `work_message_consumed`,
-`work_checkpoint`, `work_ask`, `work_finish`, `memory_list`, `memory_get`, `memory_put`, `knowledge_get`,
-`knowledge_put`. These adapters have no claim, answer, retry, stop, delivery acknowledgement, arbitrary
+`work_checkpoint`, `work_ask`, `work_finish`, `memory_list`, `memory_get`, `memory_put`, `memory_delete`,
+`knowledge_get`, `knowledge_put`. These adapters have no claim, answer, retry, stop, delivery acknowledgement, arbitrary
 SQL or destination-selection tool. Question recipients and output destination come from the
 immutable owner recipe. Memory derives its worker from the execution's work.
 
@@ -193,7 +201,8 @@ Embedded MCP environment placeholders remain the provider configuration's respon
 
 The supervisor also admits the host-owned recurring automations described below. It is not a self-healing service. Exit receipts
 are still bounded by ptyd's retention window. An outage or sufficiently delayed observation can
-leave a launch unresolved for operator reconciliation. Backup/retention, provider authentication,
+leave a launch unresolved for operator reconciliation. History retention is the owner's
+`prune` (below); backup scheduling, provider authentication,
 remote identities and destination delivery are consumer adapters; Rindabox now implements an
 owner/admin inbox and draft consumers. Production activation remains opt-in.
 
@@ -213,9 +222,15 @@ for explicit recovery, rather than automatically moving files under another runn
 Schema v6 stores small typed payload rows with indexes for kind, identity, parent, source key,
 state and cursor. State indexes and payloads have one write owner. Reads decode only the requested
 page; claims query the indexed queue. No partial read is written back as a complete catalogue.
-Rows are retained in this slice, so source keys and receipts remain durable; retention/quota and
-backup policy must be implemented before unattended production operation. Do not prune dedupe
-keys or unresolved external effects as ordinary log cleanup.
+Rows are retained until the owner runs `prune --before DATE [--after CURSOR]` (also over owner
+RPC). It deletes `event` journal rows and task activity of completed or cancelled work older than
+the cutoff, and drops the fields and evidence of older trigger source events while keeping each
+one's row, (id, revision) dedupe key and admission receipts, so a redelivery still admits nothing
+twice. Work, questions, deliveries, launches, usage receipts, automation runs, mail and memory are
+never pruned, and the most recent day is refused (`prune_too_recent`). Journal sequences are
+AUTOINCREMENT, so a consumer's event cursor stays valid across a prune. Each 100-row batch commits
+on its own and one call examines at most 10,000 rows, returning `more` and a `next` cursor to
+continue from. Backup scheduling remains a consumer adapter's policy.
 Opening a v1/v2 store transactionally adds indexed launch ownership (`scope`) and the partial
 active-launch index, backfilling ownership from the work record without rewriting payloads. An
 orphaned launch fails migration; it is never treated as available capacity. Older binaries refuse
@@ -255,9 +270,28 @@ This measures history independence, not model latency or an unhealthy host's tim
 
 Worker memory is explicit text with revision history. Updates require the current revision,
 including zero for initial creation. It is scoped by stable worker identity, independent of a
-provider transcript. Shared project knowledge, semantic search, memory provenance beyond the
-revision journal, and provider context injection are not implemented. These records are context,
-never a source of permission grants or system instructions.
+provider transcript. Every revision records host-attested provenance — `actor` (`owner` or
+`agent`), the agent's `executionID`, and `at` — taken from the authenticated route, never from
+model input; revisions written before provenance existed carry none. Shared knowledge (below)
+records the same. Semantic search and provider context injection are not implemented. These
+records are context, never a source of permission grants or system instructions.
+
+Removing and forgetting are separate. `memory_delete` (agent, its own worker) and owner
+`memory-delete` write a compare-and-swap **tombstone** revision: the entry leaves `memory_list`
+and returns an empty body with state `deleted`, and its history stays reviewable. Owner
+`memory-forget` (and `knowledge-forget`) additionally blanks the body of every stored revision
+and leaves a `forgotten` tombstone. Both keep the revision, so a delayed write at revision zero
+cannot recreate the entry; relearning is a new authorized write at the tombstone's revision. The
+connection runs with `secure_delete=FAST` (replaced cells are zeroed inside pages already being
+written), forgetting runs with full secure delete and then truncates the WAL, so the text leaves
+the live database files. Earlier backups and provider transcripts are outside this store.
+
+Quotas bound what a write may add: 1,000 active keys and 4 MiB of active body text per worker's
+memory and per knowledge space. Usage is kept in one row updated in the writing transaction (a
+store from before quotas is counted once, on its first write); a write that grows usage past a
+limit fails with `memory_key_quota`/`memory_byte_quota` (or the `knowledge_` equivalents),
+while reads and writes that shrink usage always succeed. Tombstones do not count, and the key
+listing reads active rows through the state index, so deleted keys never make a page sparse.
 
 ## Authority and customization boundary
 
@@ -323,7 +357,7 @@ authorize worker visibility before returning those records; this CLI is not a mu
 Shared knowledge uses opaque space UUIDs and owner-managed per-worker grants (`none`, `read`,
 `write`). Grants and content use compare-and-swap revisions. Scoped tools derive the worker from
 the authenticated execution, recheck the current grant in the same transaction as use, preserve
-immutable content history and record the actual execution ID. A running worker loses access on
+immutable content history and record the actual execution ID and provenance. A running worker loses access on
 its next call after revocation. No work text or shared content can issue grants. Existing
 worker-local memory remains private to that worker's scoped tools. Shared knowledge is untrusted
 context and may contain mistaken or malicious instructions; it is not host policy.
@@ -395,7 +429,11 @@ Threading agent uses the owner's SSH administration path, and its enable or run 
 Mac's approval sheet.
 
 The supervisor admits each due automation in its own savepoint. One that cannot be admitted (an
-unreadable time zone, an enqueue conflict) rolls back alone, is retried after five minutes and
+enqueue refusal, an archived worker) rolls back alone; the supervisor then
+records that occurrence as a `refused` run with the reason (for example `forbidden`, when the
+worker no longer accepts scheduled work) and moves the rule to its next occurrence. A refused
+occurrence is never retried later and relabelled `missed` by the lateness rule. Only a rule
+whose next occurrence cannot be computed is retried after five minutes. Each failure also
 leaves an `automation.admission_failed` event; a failure of the whole admission pass is reported
 in the cycle's `automationIssues` and never stops launch supervision. A `latest` catch-up is
 labelled with the most recent occurrence it replaces. `automation-runs` pages are bounded by
@@ -454,8 +492,25 @@ checkpoint text overwritten by older releases cannot be reconstructed.
 `work-cancel` retains the request and activity, closes an unanswered question, and rejects
 running work or unresolved launches. Stop/reconcile a process before cancelling it.
 `worker-archive` pauses the worker and retains a tombstone; outstanding tasks, unresolved
-launches and enabled schedules block archival. All future claims, configuration, enabling and
-admission reject archived workers. Schema v6 adds an index to bound the active-schedule check.
+launches and enabled schedules block archival. In the same transaction it pauses (revision-bumps,
+never deletes) every enabled trigger that admits work for the worker, and clears the wake flag on
+mail already open in its inbox; new mail to an archived worker is refused at acceptance. All
+future claims, configuration, enabling and admission reject archived workers, so a trigger
+re-enabled afterwards records `refused` receipts rather than work. Schema v6 adds an index to
+bound the active-schedule check; the trigger pause reads the active-trigger partial index.
+
+### Work dependencies
+
+`enqueue`/`enqueue-request` take an optional trailing comma-separated list of up to 16 work UUIDs
+that must complete first (`dependsOn` on the work record). Each must already exist and must not
+be cancelled, so the graph is acyclic by construction, and each item may be named by at most 64
+dependents. A retry with the same key must name the same dependencies. Claims skip queued work
+with an incomplete dependency in the same indexed query that skips launch-held work; an
+interrupted dependency keeps its dependents waiting until it is retried and completes. Cancelling
+work cancels its queued dependents, transitively and in the same transaction, recording
+`cancelReason: "dependency_cancelled: <id>"` on each and in its activity. Dependents are found
+through `workDependency` rows (dependency → dependent) on the parent index, and a cascade visits
+only queued work, so its cost is bounded by the active queue rather than by completed history.
 
 These remain host-owned operations. Consumer UI may present requests, forms, history and
 permissions; consumer authentication determines the caller. Neither a message nor a form
@@ -569,6 +624,17 @@ proposal is [`portable-trigger-sources.md`](../feature-drafts/portable-trigger-s
   immutable request, never as configuration. Enabling a trigger needs the worker to accept `event`
   admission. Events are stored once per (id, revision), so redelivery admits nothing twice, and
   each event keeps a receipt per trigger (`queued`, `notMatched`, `refused` with the reason).
+- **Admission is bounded** (`TriggerAdmissionLimits`). Events commit in chunks of at most 25
+  events or 20 admissions, so the write lock is held briefly and a crash between chunks only
+  leaves the cursor unmoved for a deduplicated redelivery. A trigger already holding 50 queued,
+  unclaimed tasks records `refused` with reason `backlog` (counted through the scope/state index,
+  O(ceiling)); claiming frees room. One poll admits at most 100 tasks across all triggers: once
+  reached, later events are not recorded, the cursor stays put and the next poll runs within a
+  minute, so the probe redelivers them. Before this, a 500-event × 20-trigger burst admitted
+  10,000 tasks in one transaction (11.5 s on a loaded macOS Debug host, load average about 210);
+  with the bounds the same burst admits 1,000 over eleven polls and 96 commits, and the longest
+  write transaction measured 0.16-0.42 s under the same load (`ControllerSchedulingMemoryTests`
+  asserts the ceilings and a 1 s bound).
 - **When it polls.** An interval (60 s – 1 day) or a calendar `AutomationSchedule` — so "every
   ten minutes, check the mailbox" spends nothing until mail arrives. Failures back off
   exponentially to an hour without moving the cursor. The deadline is claimed before a poll runs,
@@ -578,7 +644,10 @@ proposal is [`portable-trigger-sources.md`](../feature-drafts/portable-trigger-s
   source with a fixed trigger (one coalesced inbox task per idle worker), described under Agent
   mail above; it needs no probe.
 
-Validation: `ControllerSourcesTests` (SHA-256 vectors, output parsing, a real probe's environment,
+Validation: `ControllerSchedulingMemoryTests` (burst bounds and backlog ceiling, refused
+automation occurrences, archive pausing triggers and wake, dependency ordering and cascade, memory
+delete/forget/quotas/provenance including erasure from the live files, knowledge provenance and
+forget, retention keeping dedupe), `ControllerSourcesTests` (SHA-256 vectors, output parsing, a real probe's environment,
 exit codes, the timeout killing a probe's child, output flood, approval/enable/match/dedupe/
 backoff/changed) and `scripts/tests/test_controller_sources.py` (a resident supervisor polls the
 shipped `file_drop.py`, admits one `event` task for a matching file, ignores a redelivery, refuses
@@ -687,7 +756,8 @@ existing worker UUID. An execution or provider-session change does not mint anot
 pages further keys through the worker/sequence index without loading note bodies. Agents read
 relevant notes with `memory_get` and update them with compare-and-swap `memory_put`. All agent
 routes derive the worker from the authenticated execution; none accepts another worker ID.
-The owner protocol provides memory-list/get/put/history for trusted administration.
+The owner protocol provides memory-list/get/put/history/delete/forget (and knowledge-forget) for
+trusted administration; see memory lifecycle and quotas under Persistence and scaling.
 
 Notes and revision history live in controller SQLite and travel with its backup; provider
 transcripts and credentials do not. A regression reopens the store, starts a new execution and
