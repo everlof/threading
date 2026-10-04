@@ -4662,7 +4662,7 @@ brief cannot launch in the wrong directory.
 
 The native AT-SPI panel publishes a text node with a stable identity, bounded value, caret,
 selection, focus and layout bounds. It accepts keyboard editing through the window; AT-SPI
-programmatic text mutation is still open. The host publishes at most 64 KiB of editor text to
+programmatic mutation was added in section 155. The host publishes at most 64 KiB of editor text to
 the accessibility bridge. The pane rerenders after an editor change without rerasterizing the
 unchanged sidebar; the earlier full-pane redraw cost was about 350 ms per key under arm64 Docker
 emulation. Text layout caches lines and paints the visible viewport; large first pastes and
@@ -4681,4 +4681,50 @@ inspected at 1120×480: the action is fully visible, both brief lines and emoji 
 selected text remains readable. After the final forward-delete, clipboard-cut and Escape fixes,
 the Release `.deb` was rebuilt and its installed composer journey passed again in a Swift-free
 Ubuntu container; the final screenshot is `out/composer-installed-final/composer.png`. The
-theme-boundary and main-actor-latency checks are clean. Wayland composer input remains unverified.
+theme-boundary and main-actor-latency checks are clean. Wayland composer input is verified in
+section 155.
+
+## 155. The Linux composer accepts accessibility edits through the production editor
+
+The composer's AT-SPI node now implements `EditableText` set, insert, delete, copy, cut and
+paste, plus `Text` selection and caret changes. Each callback queues a bounded edit instead of
+changing its text projection during an accessibility call. The queue holds at most 16 edits,
+each with at most 64 KiB of UTF-8. An SDL event wakes the Swift host, which checks a fresh
+composer identity and applies the edit to the same production `ThemedTextView` used by native
+keyboard input. The host converts AT-SPI Unicode scalar offsets to TextKit UTF-16 ranges;
+the shim retains selection, undo and drawing ownership. The queue rejects offsets beyond its
+predicted text length, and unmount or a new composer identity invalidates pending events.
+
+The X11 composer journey now enters a brief with keyboard and clipboard input, replaces and
+edits it through AT-SPI, cuts and pastes it through the native clipboard, selects an emoji, and
+launches one agent with the final exact Unicode prompt in the selected project. The emoji
+offset check crosses the UTF-16/single-scalar boundary. It also captures the installed window
+after the accessibility edits. These are Linux bridge and shim changes; the production Design
+view is unchanged. Threading still owns project identity, prompt admission, process launch and
+persistence, while the theme owns editor appearance. The text and queue bounds keep each
+mutation finite and prevent callback reentrancy into the rendering path.
+
+The separate Weston composer journey now types Swedish `å` and a newline through real seat
+events, verifies the AT-SPI value and rendered pixels, and launches one exact-project agent
+without leaking prelaunch keys into its PTY. Weston needs an explicit `[keyboard]` layout in its
+test config; `XKB_DEFAULT_LAYOUT` alone left the compositor on the US map. The capture shows
+both lines and the caret in the actual SDL window. Physical keyboard and IME behavior on
+Wayland remain unverified.
+
+The full production `PromptView` is a larger integration boundary than its text box: it eagerly
+creates completion and context-rail presenters and compiles attachment, pasteboard, drag, image
+and QuickLook paths even when those features are hidden. Several of those AppKit services and
+Objective-C selectors have no Linux shim yet. This slice reuses its unchanged production
+`ThemedTextView` instead of copying `PromptView` into a Linux fork. A later shared extraction
+can expose the prompt's text/focus/submit core while leaving optional media and platform
+services behind the production Design boundary.
+
+Verification on 2026-10-04: strict Ubuntu arm64 C compilation, the focused native X11 composer
+smoke, the theme-boundary and main-actor-latency checks, and the full non-root installed
+`bundle-smoke.sh` suite passed. The package evidence is `out/bundle-smoke/run.7p7WxUag`; I
+inspected its `restart-out/composer/composer-accessibility-edited.png` at 1120×480 after the
+programmatic edits. The installed `.deb` SHA-256 is
+`5f10b4caf91eb8e8430ee83a8985a58c895e5e8e9cf6b126bf0343df7f535259`.
+The rebuilt package also passed `tests/wayland_smoke.sh --actions`, including real compositor
+input for the multiline Swedish composer. Its evidence is `out/wayland-smoke.DbZITLu6`; I
+inspected `composer/capture/open.bmp` after conversion to PNG at its native 1120×480 size.

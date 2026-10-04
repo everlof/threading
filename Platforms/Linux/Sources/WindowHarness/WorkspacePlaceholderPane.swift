@@ -18,6 +18,7 @@ final class WorkspacePlaceholderPane {
     private let composerHero = SessionPlaceholderView(frame: .zero)
     private let composerEditor = ThemedTextView.scrolling()
     private var showsComposer = false
+    private(set) var composerIdentity: String?
     private var root: NSView { showsComposer ? composerRoot : placeholderRoot }
     private var actionAnchor: ThemedButton {
         showsComposer ? composerHero.actionAnchor : placeholderRoot.actionAnchor
@@ -50,6 +51,7 @@ final class WorkspacePlaceholderPane {
 
     func configure(hasProjects: Bool) {
         showsComposer = false
+        composerIdentity = nil
         window.contentView = placeholderRoot
         title = hasProjects ? "No Session Selected" : "No Projects Yet"
         detail = hasProjects ? "Select a session in the sidebar, or start one here."
@@ -62,6 +64,7 @@ final class WorkspacePlaceholderPane {
 
     func showComposer(projectName: String, providerName: String) {
         showsComposer = true
+        composerIdentity = UUID().uuidString
         title = "Start a \(providerName) session"
         detail = "In \(projectName). Write a brief below."
         actionTitle = "Start Session"
@@ -115,6 +118,55 @@ final class WorkspacePlaceholderPane {
         composerEditor.textView.insertText(text,
             replacementRange: NSRange(location: NSNotFound, length: 0))
         needsPresentation = true
+    }
+
+    /// Apply a bounded AT-SPI edit to the same TextKit view that handles keyboard input.
+    /// AT-SPI offsets count Unicode scalars; TextKit replacement ranges count UTF-16 units.
+    @discardableResult
+    func applyAccessibilityEdit(operation: Int32, start: Int32, end: Int32,
+                                text: String) -> Bool {
+        guard showsComposer, let range = textRange(forScalarStart: Int(start),
+                                                   end: Int(end)) else { return false }
+        let view = composerEditor.textView
+        let source = view.string as NSString
+        switch operation {
+        case 1:
+            let remaining = source.replacingCharacters(in: range, with: text)
+            guard remaining.utf8.count <= 65_536 else { return false }
+            view.insertText(text, replacementRange: range)
+        case 2:
+            view.setSelectedRange(range)
+        case 3, 4:
+            guard range.length > 0 else { return true }
+            let bytes = Array(source.substring(with: range).utf8)
+            let wrote = bytes.withUnsafeBufferPointer {
+                tw_clipboard_write($0.baseAddress, Int32($0.count))
+            }
+            guard wrote == 0 else { return false }
+            if operation == 4 { view.insertText("", replacementRange: range) }
+        case 5:
+            var bytes = [UInt8](repeating: 0, count: 65_536)
+            let count = bytes.withUnsafeMutableBufferPointer {
+                tw_clipboard_read($0.baseAddress, Int32($0.count))
+            }
+            guard count >= 0,
+                  let pasted = String(bytes: bytes.prefix(Int(count)), encoding: .utf8),
+                  source.replacingCharacters(in: range, with: pasted).utf8.count <= 65_536
+            else { return false }
+            view.insertText(pasted, replacementRange: range)
+        default: return false
+        }
+        needsPresentation = true
+        return true
+    }
+
+    private func textRange(forScalarStart start: Int, end: Int) -> NSRange? {
+        guard start >= 0, end >= start else { return nil }
+        let scalars = Array(composerEditor.textView.string.unicodeScalars)
+        guard end <= scalars.count else { return nil }
+        let lower = scalars[..<start].reduce(0) { $0 + String($1).utf16.count }
+        let upper = scalars[start..<end].reduce(lower) { $0 + String($1).utf16.count }
+        return NSRange(location: lower, length: upper - lower)
     }
 
     func updatePreedit(_ text: String, selectedRange: NSRange) {
@@ -221,23 +273,25 @@ final class WorkspacePlaceholderPane {
                     Int32(max(1, (caret.width * scale).rounded())),
                     Int32(max(1, (caret.height * scale).rounded())))
             }
-            if byteCount <= 65_536 {
+            if byteCount <= 65_536, let identity = composerIdentity {
                 let source = value as NSString
                 let selection = view.selectedRange()
                 let start = source.substring(to: selection.location).unicodeScalars.count
                 let end = source.substring(to: NSMaxRange(selection)).unicodeScalars.count
-                value.withCString { text in
-                    tw_accessibility_composer_editor(nativeWindow, text, Int32(byteCount),
-                        Int32(start), Int32(end), editorHasFocus ? 1 : 0,
-                        Int32(editorX), Int32(editorY),
-                        Int32((frame.width * scale).rounded()),
-                        Int32((frame.height * scale).rounded()))
+                identity.withCString { editorID in
+                    value.withCString { text in
+                        tw_accessibility_composer_editor(nativeWindow, editorID, text,
+                            Int32(byteCount), Int32(start), Int32(end), editorHasFocus ? 1 : 0,
+                            Int32(editorX), Int32(editorY),
+                            Int32((frame.width * scale).rounded()),
+                            Int32((frame.height * scale).rounded()))
+                    }
                 }
             } else {
-                tw_accessibility_composer_editor(nativeWindow, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+                tw_accessibility_composer_editor(nativeWindow, nil, nil, 0, 0, 0, 0, 0, 0, 0, 0)
             }
         } else {
-            tw_accessibility_composer_editor(nativeWindow, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+            tw_accessibility_composer_editor(nativeWindow, nil, nil, 0, 0, 0, 0, 0, 0, 0, 0)
         }
         presentedSize = size
         needsPresentation = false
