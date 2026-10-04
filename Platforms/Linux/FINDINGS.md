@@ -4760,5 +4760,10 @@ SHA-256 `9bfee3bb46215d605ea4b04331e99e89ec20b219dc5b4aa5f10175960686fbc5`.
 Installed Weston `tests/wayland_smoke.sh --actions` passed rendering, AT-SPI, seat input,
 and the multiline Swedish composer. Its evidence is `out/wayland-smoke.YaFoq797`; I
 inspected `composer/capture/open.bmp` at its native 1120×480 resolution. Live composer
-IME cancellation with Escape has not been driven through IBus; the marked-text behavior
-is covered by the focused editor fixture.
+IME cancellation and candidate commit also passed under X11/IBus with
+`THREADING_LINUX_COMPOSER_IME_ONLY=1 ./window-smoke.sh`. I inspected
+`out/composer-ime/composer-preedit.png` and `composer-committed.png`: the provisional `你`
+is underlined and Escape removes it without closing the pane; `你好` renders after commit.
+The IBus journey verifies that no session starts during either preedit, then Return adds a
+line and Command-Return launches one exact-project session without leaking the brief into
+the PTY. The app and IBus daemon must share `HOME` for SDL to find the input context.

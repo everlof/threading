@@ -483,6 +483,8 @@ launch. `tests/text_editor/run.sh` exercises the editor itself;
 `THREADING_LINUX_COMPOSER_ONLY=1 ./window-smoke.sh` exercises the native X11 window,
 AT-SPI text, screenshot, and agent launch. The shared editor draws the empty placeholder and
 handles Return and Command-Return; the Linux host still owns project selection and launch.
+`THREADING_LINUX_COMPOSER_IME_ONLY=1 ./window-smoke.sh` checks real IBus Pinyin preedit,
+Escape cancellation, `你好` commit, and exact session launch in the same X11 composer.
 The installed `bundle-smoke.sh` repeats that journey from the packaged binary. AT-SPI publishes
 up to 64 KiB of composer text and queues programmatic text, selection and clipboard edits through
 the same TextKit editor as keyboard input. Each queued edit carries a fresh composer identity so
