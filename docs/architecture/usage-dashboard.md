@@ -323,7 +323,7 @@ Adapters make provider wire differences explicit:
 
 | Source | Contract |
 |---|---|
-| Claude Code | One ledger record per assistant response in supported JSONL transcripts. Cache read and creation remain distinct. A JSONL below `<parent>/subagents/` is durably attributed to that parent independently of whether a hook or native renderer observed it. Message/request identity deduplicates resumes, compactions, forks and copied responses after all files have joined. Repeated streaming partials merge the component-wise maximum of every token counter, so file order cannot retain a smaller output total. |
+| Claude Code | One ledger record per assistant response in supported JSONL transcripts. Cache read and creation remain distinct. A JSONL below `<parent>/subagents/` is durably attributed to that parent independently of whether a hook or native renderer observed it. Message/request identity deduplicates resumes, compactions, forks and copied responses after all files have joined. Repeated streaming partials merge the component-wise maximum of every token counter, so file order cannot retain a smaller output total. Attribution of a merged response (account, session, directory, time) comes from its earliest observation, with a total order on account, session and directory breaking a tie, so a conversation moved to another account keeps its prior spend on the account that made it whatever order the scan read the copies in. |
 | Codex | Stateful rollout parsing carries session metadata, working directory and active model into each `token_count`. A current child rollout retains its exact `parent_thread_id`; older child rollouts are recognised by the first `inter_agent_communication_metadata` boundary, and copied parent usage before it is excluded. Codex input includes cached input on the wire, so the adapter subtracts it once. An immediately repeated `last_token_usage` is suppressed without collapsing two later responses that happen to have equal counts. |
 | OpenCode | Supported CLI exports provide assistant token counts, model, provider route and reported cost. Settled exports use the session's work revision. Active and forced scans bypass both cache layers, even when timestamps match; provisional and settled export keys cannot satisfy each other. Warm settled scans do not launch OpenCode, while repeated scans inside one turn can observe new usage. |
 | OpenRouter | It is a billing route reported by an OpenCode export, not a fake fifth runtime. It gets its own coverage row and chart series so routed spend remains visible. |
@@ -348,6 +348,16 @@ read failure refuses the whole transcript. `OpenCodeUsageAdapter` likewise throw
 line. The failed source is not marked used in `UsageLedgerIndex`, so end-of-scan cleanup also
 removes its prior complete revision; retaining stale rows while declaring partial coverage would
 still mix old and current facts. The spend is visibly missing rather than invisibly short.
+
+A controller's **per-execution receipt** is the one reader that keeps what it could read. It
+uses the adapters' recovering entry points (`ClaudeUsageAdapter.reading(transcriptAt:…)`,
+`CodexUsageAdapter.reading(rolloutAt:…)`), which run the same parser over the same lines and
+return a `UsageTranscriptReading`: every readable record, a count of unreadable usage lines, and
+whether the final line ended without a newline. A receipt has a named place for the gap — its
+coverage is `partial` with the reason beside the cells — so discarding the readable records too
+would only turn a small visible gap into a large invisible undercount. An unterminated final line
+is a gap even when its bytes parse, because the writer may have stopped mid-record. See
+[`autonomous-controller.md`](autonomous-controller.md#usage-receipts-and-budgets-schema-v9).
 
 ### Remote hosts are sources of their own
 
@@ -422,7 +432,11 @@ this Mac's owner connections, which a paired device's authorization does not des
 (exact), and by task, trigger and mail chain from receipts read 10 pages (500) per *Read more*,
 retaining at most 5,000. Receipts page oldest first on the controller, so the sheet says how
 many it has read and whether more exist; each receipt shows its coverage, and partial, failed or
-unavailable ones are counted and drawn in the warning role with their reason spoken.
+unavailable ones are counted and drawn in the warning role with their reason spoken. A host
+that declares several accounts per recipe writes daily cells under each cell's own account, so the
+host's account breakdown already splits a failover; the receipts' per-account `accounts` totals and
+the daily cells' estimate labels (`costIsEstimate`, `unpricedTokens`, `pricingVersion`, `coverage`)
+decode on this Mac but are not yet drawn here.
 `RemoteWorkerUsageProjection` folds both in one pass. The daily budget is shown against today's
 budget tokens; *Edit budget…* asks through `ConfirmationPrompt.changeWorkerBudget` (always asked,
 a security grant: it is spend authority for a machine that runs without this Mac) with the new

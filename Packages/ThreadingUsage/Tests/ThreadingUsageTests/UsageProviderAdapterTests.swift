@@ -158,6 +158,61 @@ final class UsageProviderAdapterTests: XCTestCase {
     }
 
     @discardableResult
+    /// A receipt keeps every readable record around an unreadable line and names the gap; the
+    /// Mac's strict entry point still refuses the same file.
+    func testRecoveringReadingKeepsRecordsAroundAnUnreadableLine() throws {
+        let good = { (id: String) in
+            #"{"requestId":"r-\#(id)","message":{"id":"m-\#(id)","model":"claude-test","usage":{"input_tokens":10,"output_tokens":4}}}"#
+        }
+        let bad = #"{"message":{"id":"broken","usage":"not an object"}}"#
+        let url = try write("claude.jsonl", lines: [good("1"), bad, good("2"), ""])
+
+        XCTAssertThrowsError(try ClaudeUsageAdapter.records(inTranscriptAt: url, accountID: "a", accountName: "a"))
+        let reading = try ClaudeUsageAdapter.reading(transcriptAt: url, accountID: "a", accountName: "a")
+        XCTAssertEqual(reading.records.map(\.identity), ["claude|m-1|r-1", "claude|m-2|r-2"])
+        XCTAssertEqual(reading.unreadableRecordCount, 1)
+        XCTAssertEqual(reading.firstUnreadableLine, 2)
+        XCTAssertFalse(reading.endsUnterminated)
+        XCTAssertFalse(reading.isComplete)
+    }
+
+    /// A process stopped mid-write leaves a final line with no newline. Earlier records stay,
+    /// and the reading says it cannot be complete, even when the cut bytes happen to parse.
+    func testUnterminatedFinalLineIsAnExplicitGap() throws {
+        let first = #"{"requestId":"r1","message":{"id":"m1","model":"claude-test","usage":{"input_tokens":10,"output_tokens":4}}}"#
+        let cut = #"{"requestId":"r2","message":{"id":"m2","model":"claude-test","usage":{"input_tok"#
+        let url = try write("claude.jsonl", lines: [first, cut])
+
+        let reading = try ClaudeUsageAdapter.reading(transcriptAt: url, accountID: "a", accountName: "a")
+        XCTAssertEqual(reading.records.map(\.identity), ["claude|m1|r1"])
+        XCTAssertTrue(reading.endsUnterminated)
+        XCTAssertFalse(reading.isComplete)
+
+        let whole = try write("whole.jsonl", lines: [first])
+        let parsed = try ClaudeUsageAdapter.reading(transcriptAt: whole, accountID: "a", accountName: "a")
+        XCTAssertEqual(parsed.records.count, 1)
+        XCTAssertTrue(parsed.endsUnterminated, "an unterminated tail is a gap even when it parses")
+
+        let terminated = try write("terminated.jsonl", lines: [first, ""])
+        XCTAssertTrue(try ClaudeUsageAdapter.reading(transcriptAt: terminated, accountID: "a", accountName: "a").isComplete)
+    }
+
+    func testCodexRecoveringReadingKeepsLaterResponses() throws {
+        let usage = { (stamp: String, output: Int) in
+            #"{"type":"event_msg","timestamp":"\#(stamp)","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":\#(output),"reasoning_output_tokens":0}}}}"#
+        }
+        let broken = #"{"type":"event_msg","payload":{"type":"token_count","info":{"total_tokens":5}}}"#
+        let url = try write("rollout.jsonl", lines: [
+            #"{"type":"session_meta","payload":{"id":"s","cwd":"/w"}}"#,
+            usage("2026-08-08T10:00:00Z", 1), broken, usage("2026-08-08T10:01:00Z", 2), ""
+        ])
+        XCTAssertThrowsError(try CodexUsageAdapter.records(inRolloutAt: url, accountID: "a", accountName: "a"))
+        let reading = try CodexUsageAdapter.reading(rolloutAt: url, accountID: "a", accountName: "a")
+        XCTAssertEqual(reading.records.map(\.tokens.output), [1, 2])
+        XCTAssertEqual(reading.unreadableRecordCount, 1)
+        XCTAssertEqual(reading.firstUnreadableLine, 3)
+    }
+
     private func write(_ name: String, lines: [String]) throws -> URL {
         let url = directory.appendingPathComponent(name)
         try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)

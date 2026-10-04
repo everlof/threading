@@ -57,8 +57,8 @@ struct ControllerMain {
     knowledge-put SPACE_UUID KEY EXPECTED_REVISION TEXT_FILE
     knowledge-history SPACE_UUID KEY [CURSOR]
     events [CURSOR]
-    launch WORKER_UUID RECIPE_JSON_FILE
-    launch-prepare WORKER_UUID RECIPE_JSON_FILE
+    launch WORKER_UUID RECIPE_JSON_FILE [--override-budget]
+    launch-prepare WORKER_UUID RECIPE_JSON_FILE [--override-budget]
     launch-dispatch EXECUTION_UUID
     launch-status EXECUTION_UUID
     launch-record EXECUTION_UUID
@@ -131,7 +131,13 @@ struct ControllerMain {
     worker-capacity WORKER_UUID
     worker-budget WORKER_UUID
     worker-budget-set WORKER_UUID EXPECTED_REVISION TOKENS_PER_DAY|none
-    A recipe names its transcript with "usage": {"runtime":"claude|codex","home":"/abs","account":"name"}.
+    usage-waive EXECUTION_UUID REASON   (release a stopped execution's unsettled-usage hold; audited)
+    capacity-hold-set ACCOUNT UNTIL_ISO8601 REASON   (defer workers whose declared accounts are all held)
+    capacity-hold-list [CURSOR]
+    capacity-hold-clear ACCOUNT
+    A recipe names its transcripts with "usage": {"runtime":"claude|codex","accounts":[{"account":"name","home":"/abs"}]}
+    (attempt order; the legacy {"runtime":...,"home":"/abs","account":"name"} is one attempt).
+    A manual launch passes the worker's budget like supervised work; --override-budget is recorded.
     Budget tokens are uncached input + cache writes + output; cached reads are excluded.
     A source is any executable on the probe contract (docs/feature-drafts/portable-trigger-sources.md).
     It runs with this account's authority, unsandboxed; approval pins its content hash.
@@ -161,7 +167,7 @@ struct ControllerMain {
         do {
             var arguments = Array(CommandLine.arguments.dropFirst())
             if arguments == ["--version"] {
-                try output(["protocol": "1", "schema": "10", "capabilities": "work,mail,triggers,memory,usage,capacity,transcript-binding"])
+                try output(["protocol": "1", "schema": "10", "capabilities": "work,mail,triggers,memory,usage,capacity,transcript-binding,usage-accounts,usage-waive,capacity-hold"])
                 return
             }
             if arguments == ["--help"] { print(help); return }
@@ -396,6 +402,14 @@ struct ControllerMain {
             try count(1); try output(await store.workerCapacity(WorkerID(args[0])))
         case "worker-budget":
             try count(1); try output(await store.workerBudget(WorkerID(args[0])))
+        case "usage-waive":
+            try count(2); try output(await store.waiveUsage(ExecutionID(args[0]), reason: args[1]))
+        case "capacity-hold-set":
+            try count(3); try output(await store.setCapacityHold(account: args[0], until: args[1], reason: args[2]))
+        case "capacity-hold-list":
+            let after = try cursor(0); try output(await store.capacityHolds(after: after))
+        case "capacity-hold-clear":
+            try count(1); try output(await store.clearCapacityHold(account: args[0]))
         case "worker-budget-set":
             try count(3)
             guard let revision = Int(args[1]) else { throw ControllerError.invalidInput("revision") }
@@ -529,9 +543,11 @@ struct ControllerMain {
         case "events":
             let after = try cursor(0); try output(await store.events(after: after))
         case "launch", "launch-prepare":
-            try count(2)
+            guard args.count == 2 || (args.count == 3 && args[2] == "--override-budget") else {
+                throw ControllerError.invalidInput("arguments")
+            }
             let spec = try JSONDecoder().decode(ControllerLaunchSpec.self, from: Data(file(args[1]).utf8))
-            let launch = try await store.prepareLaunch(workerID: WorkerID(args[0]), spec: spec)
+            let launch = try await store.prepareLaunch(workerID: WorkerID(args[0]), spec: spec, overrideBudget: args.count == 3)
             if command == "launch", let launch {
                 try output(ControllerLaunchStatus(await dispatch(store, launch.executionID, database)))
             } else { try output(launch.map(ControllerLaunchStatus.init)) }

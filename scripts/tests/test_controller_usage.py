@@ -37,6 +37,34 @@ tool({"context": {}})
 tool({"finish": {"payload": "Spent some tokens"}})
 '''
 
+# A runner that fails over: it works under the first declared login, then resumes under the
+# second, which copies the conversation into that home. Each attempt reports its transcript
+# through the real agent-notice hook, as Claude Code's SessionStart hook would.
+FAILOVER = r'''
+import json, os, pathlib, subprocess, sys, tempfile
+def tool(request):
+    with tempfile.NamedTemporaryFile(mode="w", dir=os.getcwd()) as f:
+        json.dump(request, f); f.flush()
+        result = subprocess.run([os.environ["THREADING_CONTROLLER_BIN"], "agent", f.name], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+session = os.environ["THREADING_EXECUTION_ID"]
+def line(n, inp, out):
+    return json.dumps({"requestId": f"r{n}", "timestamp": "2026-10-03T10:00:00.000Z", "cwd": "/work", "sessionId": session,
+                       "message": {"id": f"m{n}", "model": "claude-sonnet-4-5", "usage": {"input_tokens": inp,
+                                   "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0, "output_tokens": out}}})
+def attempt(home, lines):
+    transcript = pathlib.Path(home) / "projects" / "-work" / (session + ".jsonl")
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+    transcript.write_text("\n".join(lines) + "\n")
+    hook = json.dumps({"session_id": session, "transcript_path": str(transcript)})
+    subprocess.run([os.environ["THREADING_CONTROLLER_BIN"], "agent-notice", "session-start"], input=hook, text=True, timeout=10, check=True)
+history = [line(0, 1000, 100), line(1, 500, 50)]
+attempt(sys.argv[1], history)
+attempt(sys.argv[2], history + [line(2, 2000, 200)])
+tool({"finish": {"payload": "Done after failover"}})
+'''
+
 
 class UsageTests(unittest.TestCase):
     def setUp(self):
@@ -49,6 +77,7 @@ class UsageTests(unittest.TestCase):
         self.state = self.root / "state"; self.state.mkdir(mode=0o700)
         self.db = self.state / "controller.db"
         (self.root / "provider.py").write_text(PROVIDER)
+        (self.root / "failover.py").write_text(FAILOVER)
         self.supervisor = None
 
     def tearDown(self):
@@ -105,6 +134,82 @@ class UsageTests(unittest.TestCase):
         self.call("enqueue", worker, "task:2", str(self.write("task2", "More")))
         time.sleep(1.5)
         self.assertEqual(self.call("work", self.call("works", worker)["items"][1]["id"])["state"], "queued")
+
+    def rpc(self, command, *values):
+        request = {"command": command, "arguments": [{"value": v} for v in values]}
+        result = subprocess.run([CONTROLLER, "--database", str(self.db), "owner-rpc"], input=json.dumps(request),
+                                capture_output=True, text=True, timeout=30)
+        return result.returncode, result.stdout, result.stderr
+
+    def test_failover_across_declared_homes_counts_each_response_once_per_account(self):
+        worker = str(uuid.uuid4())
+        work_home, spare_home = self.root / "claude-work", self.root / "claude-spare"
+        self.call("worker-add", worker, "Researcher")
+        self.call("enqueue", worker, "task:1", str(self.write("task", "Research")))
+        recipe = self.write("recipe.json", json.dumps({
+            "socketPath": str(self.socket), "executable": sys.executable,
+            "arguments": [str(self.root / "failover.py"), str(work_home), str(spare_home)], "directory": str(self.root),
+            "environment": {"PATH": "/usr/bin:/bin"}, "recipients": ["group:ops"], "destination": "drafts",
+            "usage": {"runtime": "claude", "accounts": [{"account": "work", "home": str(work_home)},
+                                                        {"account": "spare", "home": str(spare_home)}]}}))
+        policy = self.call("worker-configure", worker, "0", "1", str(recipe))
+        self.call("worker-enable", worker, str(policy["revision"]))
+        self.supervisor = subprocess.Popen([CONTROLLER, "--database", str(self.db), "supervise", "200"],
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        receipt = self.wait(lambda: self.call("usage-receipts", worker)["items"])[0]
+        self.assertEqual(receipt["coverage"], "complete", receipt.get("reason"))
+        self.assertEqual(receipt["account"], "work")
+        totals = {t["account"]: t for t in receipt["accounts"]}
+        self.assertEqual([t["account"] for t in receipt["accounts"]], ["work", "spare"])
+        self.assertEqual(totals["work"]["budgetTokens"], 1650)   # the copied history counts once, here
+        self.assertEqual(totals["spare"]["budgetTokens"], 2200)
+        self.assertEqual({c["account"] for c in receipt["cells"]}, {"work", "spare"})
+        day = receipt["endedAt"][:10]
+        summary = self.call("usage-summary", day, day)["items"]
+        self.assertEqual({c["account"]: c["output"] for c in summary}, {"work": 150, "spare": 200})
+        self.assertTrue(all(c["costIsEstimate"] and c["coverage"]["complete"] == 1 for c in summary))
+
+    def test_owner_rpc_waives_usage_holds_capacity_and_manual_launch_respects_budget(self):
+        worker = str(uuid.uuid4())
+        home = self.root / "claude-home"
+        self.call("worker-add", worker, "Researcher")
+        for n in range(3):
+            self.call("enqueue", worker, f"task:{n}", str(self.write(f"task{n}", "Research")))
+        recipe = self.write("recipe.json", json.dumps({
+            "socketPath": str(self.socket), "executable": "/bin/true", "arguments": [], "directory": str(self.root),
+            "environment": {}, "recipients": ["group:ops"], "destination": "drafts",
+            "usage": {"runtime": "claude", "home": str(home), "account": "ops-login"}}))
+        self.call("worker-budget-set", worker, "0", "1000")
+        # Prepared, never dispatched, and stopped: the execution holds the budget until settled.
+        launch = self.call("launch-prepare", worker, str(recipe))
+        self.call("launch-confirm-stopped", launch["executionID"])
+        refused = subprocess.run([CONTROLLER, "--database", str(self.db), "launch-prepare", worker, str(recipe)],
+                                 capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("worker_capacity_usageUnsettled", refused.stderr)
+        overridden = self.call("launch-prepare", worker, str(recipe), "--override-budget")
+        self.call("launch-confirm-stopped", overridden["executionID"])
+        for execution in (launch["executionID"], overridden["executionID"]):
+            code, out, err = self.rpc("usage-waive", execution, "operator settled by hand")
+            self.assertEqual(code, 0, err)
+            self.assertEqual(json.loads(out)["reason"], "operator settled by hand")
+        kinds = [e["kind"] for e in self.call("events")["items"]]
+        self.assertIn("launch.budget_overridden", kinds)
+        self.assertIn("launch.usage_waived", kinds)
+        self.assertTrue(self.call("launch-prepare", worker, str(recipe))["executionID"])   # admitted again
+        # Capacity holds through owner-rpc.
+        until = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 3600))
+        code, out, err = self.rpc("capacity-hold-set", "ops-login", until, "provider cooldown")
+        self.assertEqual(code, 0, err)
+        code, out, err = self.rpc("capacity-hold-list")
+        self.assertEqual([h["account"] for h in json.loads(out)["items"]], ["ops-login"])
+        policy = self.call("worker-configure", worker, "0", "1", str(recipe))
+        self.call("worker-enable", worker, str(policy["revision"]))
+        capacity = self.call("worker-capacity", worker)
+        self.assertEqual((capacity["reason"], capacity["heldUntil"]), ("capacityHeld", until))
+        code, out, err = self.rpc("capacity-hold-clear", "ops-login")
+        self.assertEqual(code, 0, err)
+        self.assertNotEqual(self.call("worker-capacity", worker)["reason"], "capacityHeld")
 
     def write(self, name, text):
         path = self.root / name

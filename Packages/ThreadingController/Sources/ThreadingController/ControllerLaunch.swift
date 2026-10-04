@@ -56,7 +56,10 @@ public struct ControllerLaunch: Codable, Equatable, Sendable {
     public internal(set) var exitStatus: Int32?
     public internal(set) var startedAt: String?
     public internal(set) var stoppedAt: String?
+    /// The first bound transcript; kept for older readers. See `transcriptBindings`.
     public internal(set) var providerTranscript: ProviderTranscript?
+    /// One binding per declared account home an attempt ran under, in report order.
+    public internal(set) var providerTranscripts: [ProviderTranscriptBinding]?
     public internal(set) var providerTranscriptChanged: Bool?
 }
 
@@ -83,8 +86,22 @@ public struct ControllerLaunchStatus: Codable, Equatable, Sendable {
 
 extension ControllerStore {
     /// Claim and launch intent commit together; a crash cannot leave a claim without its intent.
-    public func prepareLaunch(workerID: WorkerID, spec: ControllerLaunchSpec) throws -> ControllerLaunch? {
-        try prepareLaunch(workerID: workerID, spec: spec, supervisorRevision: nil)
+    ///
+    /// An owner's manual launch passes the same budget admission as supervised work, judged on
+    /// the recipe it will actually run. `overrideBudget` admits it anyway and records
+    /// `launch.budget_overridden` with the refused reason. Capacity holds and the paused flag
+    /// are supervisor policy and do not apply to a manual launch.
+    public func prepareLaunch(workerID: WorkerID, spec: ControllerLaunchSpec, overrideBudget: Bool = false) throws -> ControllerLaunch? {
+        try spec.validate()
+        return try db.transaction {
+            let budget = try budgetDecision(workerID, usage: spec.usage).reason
+            guard budget == .ready || overrideBudget else { throw ControllerError.invalidInput("worker_capacity_\(budget.rawValue)") }
+            guard let launch = try prepareLaunch(workerID: workerID, spec: spec, supervisorRevision: nil) else { return nil }
+            if budget != .ready {
+                try event("launch.budget_overridden", launch.executionID.description, text: budget.rawValue, source: "owner")
+            }
+            return launch
+        }
     }
     func prepareLaunch(workerID: WorkerID, spec: ControllerLaunchSpec, supervisorRevision: Int?) throws -> ControllerLaunch? {
         try spec.validate()
