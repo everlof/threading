@@ -199,11 +199,14 @@ socket); `host` reports it as `agentSocket` only while a connect succeeds, and `
   also present; without it they need `THREADING_CONTROLLER_DATABASE` (below), and with neither
   they refuse. The dispatcher drops a store path from the child environment when it uses the
   broker.
-- **Without a resident supervisor.** A manual `launch`/`launch-dispatch` or a one-shot
-  `supervisor-tick` uses the advertised broker when it answers. Otherwise it refuses
-  (`agent_broker_unavailable`) before anything is claimed or consumed, unless the owner sets
-  `THREADING_CONTROLLER_LEGACY_AGENT_DATABASE=1`: the child then receives the store path and opens
-  it itself, recorded as `launch.legacy_agent_database`. That compatibility mode is honest only
+- **Without a resident supervisor.** A manual `launch`/`launch-dispatch` uses the advertised
+  broker when it answers. Otherwise it refuses (`agent_broker_unavailable`) before anything is
+  claimed or consumed, unless the owner sets `THREADING_CONTROLLER_LEGACY_AGENT_DATABASE=1`: the
+  child then receives the store path and opens it itself, recorded as
+  `launch.legacy_agent_database`. A one-shot `supervisor-tick` never reaches a running
+  supervisor's broker: it takes the same exclusive lock as `supervise`, so it answers `conflict`
+  while one runs. On its own it has no broker, so it dispatches only under the same opt-in and
+  otherwise leaves the intent prepared with `agent_broker_unavailable`. That compatibility mode is honest only
   when agent and controller are one account that already trust each other; tests and stores
   without a supervisor use it.
 - **Credentials at rest.** Execution and session-mailbox credentials are 244 random bits stored
@@ -286,7 +289,8 @@ A non-expiring OS file lock beside the database permits one resident supervisor.
 time lease and its file is not unlinked on exit. SIGINT/SIGTERM stop future sweeps, allow the
 bounded current operation to settle, and release the lock without killing ptyd-owned children.
 Systemd deployment, resource budgets and which workers to enable belong to the deployment repo.
-`supervisor-tick` runs one bounded pass for diagnosis; repeatedly invoking it is not a substitute
+`supervisor-tick` runs one bounded pass for diagnosis, under the same lock, so it answers
+`conflict` while `supervise` runs (stop the unit first); repeatedly invoking it is not a substitute
 for the resident loop, which retains fairness cursors.
 
 Each tick reads at most eight unresolved launches and eight worker policies, wraps its cursors,

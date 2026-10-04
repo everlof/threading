@@ -9,8 +9,10 @@ import Glibc
 
 enum ControllerSupervisorCommand {
     /// `agentSocket`: the resident loop always serves agent tools there (default beside the
-    /// store). A one-shot pass serves none; it dispatches through a resident supervisor's broker
-    /// when one answers, or with the legacy store path only when the owner opted in.
+    /// store). A one-shot pass serves none, and it takes the same exclusive lock, so it answers
+    /// `conflict` while a resident supervisor runs and never reaches that supervisor's broker. On
+    /// its own it dispatches with the legacy store path only when the owner opted in; otherwise
+    /// a prepared intent stays prepared with `agent_broker_unavailable`.
     static func run(store: ControllerStore, database: String, intervalMilliseconds: Int, once: Bool,
                     agentSocket: String?, agentBinary: String?) async throws {
         guard (100...60_000).contains(intervalMilliseconds), let binary = Bundle.main.executableURL?.path else {

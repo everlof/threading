@@ -79,11 +79,13 @@ struct ControllerMain {
     worker-pause WORKER_UUID EXPECTED_REVISION
     supervise [POLL_MILLISECONDS] [--agent-socket ABSOLUTE_PATH] [--agent-binary ABSOLUTE_PATH]
       (serves agent tools there, mode 0660, default DATABASE_DIR/agent.sock; children get the
-       socket, never the store path. One-shot supervisor-tick and manual launch use a running
-       supervisor's socket, or refuse unless THREADING_CONTROLLER_LEGACY_AGENT_DATABASE=1, which
+       socket, never the store path. A manual launch or launch-dispatch uses a running
+       supervisor's socket, or refuses unless THREADING_CONTROLLER_LEGACY_AGENT_DATABASE=1, which
        hands children the store path: same-account only. --agent-binary names the controller
        executable agents run when they are another Unix user and cannot execute this one)
-    supervisor-tick
+    supervisor-tick   (one diagnostic pass. It takes supervise's exclusive lock, so it answers
+       conflict while supervise runs; without one there is no broker, so it dispatches only with
+       THREADING_CONTROLLER_LEGACY_AGENT_DATABASE=1 and otherwise reports agent_broker_unavailable)
     automations [CURSOR]
     automation AUTOMATION_UUID
     automation-configure AUTOMATION_UUID EXPECTED_REVISION SPEC_JSON_FILE
@@ -255,7 +257,8 @@ struct ControllerMain {
         }
     }
     /// The owner's opt-in to hand a child the store path when no broker answers (a manual
-    /// `launch` or one-shot `supervisor-tick` without a resident supervisor). Same-account only.
+    /// `launch` without a resident supervisor, or a one-shot `supervisor-tick`, which can only run
+    /// when none holds the lock). Same-account only.
     static var legacyAgentDatabaseAllowed: Bool {
         ProcessInfo.processInfo.environment[ControllerAgentAccess.legacyOptInEnvironment] == "1"
     }

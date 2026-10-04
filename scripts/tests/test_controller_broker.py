@@ -272,6 +272,17 @@ class BrokerTests(unittest.TestCase):
         self.assertIn("agent_broker_unavailable", self.call("launch", self.worker, self.recipe("exit"), ok=False).stderr)
 
 
+    def test_a_one_shot_tick_cannot_run_beside_a_resident_supervisor(self):
+        # supervisor-tick takes the resident supervisor's exclusive lock; it never borrows its broker.
+        self.supervise()
+        tick = self.call("supervisor-tick", ok=False)
+        self.assertNotEqual(tick.returncode, 0)
+        self.assertIn("conflict", tick.stderr)
+        self.assertIsNone(self.supervisor.poll())
+        usage = subprocess.run([CONTROLLER, "--help"], capture_output=True, text=True, timeout=20).stdout
+        self.assertIn("answers conflict while supervise runs", " ".join(usage.split()))
+        self.assertNotIn("supervisor-tick and manual launch use a running supervisor", " ".join(usage.split()))
+
     def test_ptyd_group_socket_is_group_writable_and_default_stays_owner_only(self):
         self.assertEqual(stat.S_IMODE(os.stat(self.socket).st_mode), 0o600)
         shared = self.root / "g.sock"

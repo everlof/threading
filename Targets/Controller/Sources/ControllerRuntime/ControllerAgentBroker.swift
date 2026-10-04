@@ -43,8 +43,8 @@ public enum ControllerAgentAccess: Sendable, Equatable {
     /// The resident supervisor's broker. The child gets this socket and no store path, and
     /// `agentBinary` (when set) as the controller executable it runs its tools with.
     case broker(socket: String, agentBinary: String?)
-    /// Compatibility for a store with no resident supervisor (a manual `launch`, a one-shot
-    /// `supervisor-tick`): the child opens the owner store itself, so this is honest only when
+    /// Compatibility for a store with no resident supervisor (a manual `launch`, or a one-shot
+    /// `supervisor-tick`, which cannot run beside one): the child opens the owner store itself, so this is honest only when
     /// the agent and the controller are one account that already trust each other.
     case legacyDatabase(String)
 
