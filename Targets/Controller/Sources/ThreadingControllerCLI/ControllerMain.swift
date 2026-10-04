@@ -38,7 +38,7 @@ struct ControllerMain {
     open-questions WORKER_UUID [CURSOR]
     answer QUESTION_UUID PERSON GROUPS_CSV_OR_DASH ANSWER_FILE
     finish EXECUTION_UUID DESTINATION PAYLOAD_FILE
-    interrupt EXECUTION_UUID
+    interrupt EXECUTION_UUID   (refused while the execution's launch is unresolved)
     retry WORK_UUID
     deliveries [CURSOR]
     pending-deliveries [CURSOR]
@@ -64,7 +64,8 @@ struct ControllerMain {
     launch-record EXECUTION_UUID
     launch-stop EXECUTION_UUID
     launches WORK_UUID [CURSOR]
-    launch-confirm-stopped EXECUTION_UUID
+    launch-confirm-stopped EXECUTION_UUID [EXPECTED_STATE]   (owner-rpc requires EXPECTED_STATE: prepared|dispatching|running)
+    launch-occupancy   (unresolved launches by host, with the global and per-host admission limits)
     worker-policy WORKER_UUID
     active-launches [CURSOR]
     worker-configure WORKER_UUID EXPECTED_REVISION MAX_CONCURRENT RECIPE_JSON_FILE
@@ -82,7 +83,8 @@ struct ControllerMain {
     automation-runs AUTOMATION_UUID [CURSOR]
     owner-rpc  (one bounded JSON request on stdin; trusted SSH/OS owner only)
 
-    host
+    host   (also reports the owner protocol, schema and features, like --version)
+    version
     host-set-name NAME
     mail-address WORKER_UUID
     mail-peer-set HOST_UUID EXPECTED_REVISION NAME PEER_JSON_FILE   ({"transport":[argv]|null,"push":bool,"pull":bool})
@@ -158,7 +160,7 @@ struct ControllerMain {
         do {
             var arguments = Array(CommandLine.arguments.dropFirst())
             if arguments == ["--version"] {
-                try output(["protocol": "1", "schema": "10", "capabilities": "work,mail,triggers,memory,usage,capacity,transcript-binding"])
+                try output(ControllerVersion.current)
                 return
             }
             if arguments == ["--help"] { print(help); return }
@@ -251,7 +253,11 @@ struct ControllerMain {
         case "owner-rpc":
             try count(0); try await ControllerOwnerRPC.run(store: store, database: database)
         case "host":
-            try count(0); try output(await store.host())
+            try count(0); try output(HostDescription(host: await store.host(), version: .current))
+        case "version":
+            try count(0); try output(ControllerVersion.current)
+        case "launch-occupancy":
+            try count(0); try output(await store.launchOccupancy())
         case "host-set-name":
             try count(1); try output(await store.setHostName(args[0]))
         case "mail-address":
@@ -492,7 +498,7 @@ struct ControllerMain {
         case "finish":
             try count(3); try output(await store.finish(executionID: ExecutionID(args[0]), destination: args[1], payload: file(args[2])))
         case "interrupt":
-            try count(1); try output(await store.interrupt(executionID: ExecutionID(args[0])))
+            try count(1); try output(await store.interruptStoppedExecution(ExecutionID(args[0])))
         case "retry":
             try count(1); try output(await store.retry(workID: WorkID(args[0])))
         case "deliveries":
@@ -537,10 +543,51 @@ struct ControllerMain {
         case "launches":
             let after = try cursor(1); try output(await store.launchStatuses(workID: WorkID(args[0]), after: after))
         case "launch-confirm-stopped":
-            try count(1); try output(ControllerLaunchStatus(await store.confirmLaunchStopped(ExecutionID(args[0]), exitStatus: nil)))
+            guard args.count == 1 || args.count == 2 else { throw ControllerError.invalidInput("arguments") }
+            var expected: LaunchState?
+            if args.count == 2 {
+                guard let state = LaunchState(rawValue: args[1]), state != .stopped else { throw ControllerError.invalidInput("expected_state") }
+                expected = state
+            }
+            try output(ControllerLaunchStatus(await store.recordLaunchStopped(ExecutionID(args[0]), evidence: .ownerConfirmed,
+                                                                              expectedState: expected)))
         default: throw ControllerError.invalidInput("unknown_command")
         }
     }
+    /// What a client can check before relying on a command: the owner protocol, the store
+    /// schema this binary writes, and the features it serves. `capabilities` keeps its original
+    /// spelling for installers that pinned it; `features` is the full list.
+    struct ControllerVersion: Encodable {
+        let `protocol`: String
+        let schema: String
+        let capabilities: String
+        let features: [String]
+        static let ownerProtocol = "1"
+        static let originalCapabilities = ["work", "mail", "triggers", "memory", "usage", "capacity", "transcript-binding"]
+        /// `launch-repair`: fenced owner-rpc recovery (launch-confirm-stopped with expected state,
+        /// interrupt, launch-dispatch, delivery-confirm-absent). `host-receipts`: ptyd exit/loss
+        /// receipts are consumed and acknowledged. `launch-failure`: launch records carry a
+        /// bounded failure and redacted output tail. `launch-occupancy`: per-host capacity.
+        /// `schema-fence`: every write re-checks the schema.
+        static let addedFeatures = ["launch-repair", "host-receipts", "launch-failure", "launch-occupancy", "schema-fence"]
+        static let current = ControllerVersion(protocol: ownerProtocol, schema: String(ControllerStore.schemaVersion),
+            capabilities: originalCapabilities.joined(separator: ","), features: originalCapabilities + addedFeatures)
+    }
+    struct HostDescription: Encodable {
+        let host: ControllerHost
+        let version: ControllerVersion
+        enum CodingKeys: String, CodingKey { case id, name, revision, `protocol`, schema, features }
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(host.id, forKey: .id)
+            try container.encode(host.name, forKey: .name)
+            try container.encode(host.revision, forKey: .revision)
+            try container.encode(version.protocol, forKey: .protocol)
+            try container.encode(version.schema, forKey: .schema)
+            try container.encode(version.features, forKey: .features)
+        }
+    }
+
     static func dispatch(_ store: ControllerStore, _ id: ExecutionID, _ database: String) async throws -> ControllerLaunch {
         guard let binary = Bundle.main.executableURL?.path else { throw ControllerError.invalidInput("controller_executable") }
         return try await ControllerPTYRuntime.dispatch(store: store, executionID: id, database: database, controllerBinary: binary)

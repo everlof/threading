@@ -64,6 +64,27 @@ struct ControllerHardeningTests {
         #expect(next.exitCode == 0 && next.output == Data("ok".utf8))
     }
 
+    /// A descendant that leaves the process group keeps the output pipe open after the command
+    /// exits 0. That run is a failure, never a success, and on Linux the escapee is killed.
+    @Test func anEscapedDescendantFailsTheRunEvenAfterExitZero() async throws {
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/perl") else { return }
+        let script = "perl -e 'use POSIX qw(setsid); setsid(); sleep 30' & printf '%s' $!; sleep 1; exit 0"
+        let result = await BoundedCommand.run(executable: "/bin/sh", arguments: ["-c", script],
+            environment: ["PATH": "/usr/bin:/bin"], directory: "/tmp", input: Data(), timeout: 5, outputLimit: 1024)
+        #expect(result.exitCode == 0)
+        let escapee = Int32(String(decoding: result.output, as: UTF8.self)) ?? 0
+        defer { if escapee > 0 { kill(escapee, SIGKILL) } }
+        #if os(Linux)
+        #expect(result.failure == "escaped_descendant_killed")
+        #expect(kill(escapee, 0) != 0)
+        #else
+        #expect(result.failure == "cleanup_incomplete")
+        #endif
+        let probe = await TriggerProbe.run(ProbeInvocation(executable: "/bin/sh", arguments: ["-c", #"printf '{"cursor":"c"}\n'; "# + script],
+            environment: ["PATH": "/usr/bin:/bin"], directory: "/tmp", cursor: nil, limit: 10, timeout: 5))
+        #expect(probe.outcome == .failed, "a probe that leaves a process behind failed its poll")
+    }
+
     @Test func transcriptBindingIsAuthenticatedImmutableAndFencedAtStop() async throws {
         let (directory, store) = try fixture.fixture()
         defer { try? FileManager.default.removeItem(at: directory) }

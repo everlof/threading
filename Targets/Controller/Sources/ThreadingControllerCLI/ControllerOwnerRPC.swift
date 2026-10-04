@@ -25,8 +25,15 @@ enum ControllerOwnerRPC {
         "source-events", "source-poll", "trigger-configure", "trigger-enable", "trigger-pause", "trigger-delete",
         "triggers", "trigger", "secret-set",
         // Usage receipts and budgets: reads for dashboards, budgets as owner policy.
-        "usage-collect", "usage-receipt", "usage-receipts", "usage-summary", "worker-capacity", "worker-budget", "worker-budget-set"
+        "usage-collect", "usage-receipt", "usage-receipts", "usage-summary", "worker-capacity", "worker-budget", "worker-budget-set",
+        // Recovery, each fenced by the state the owner inspected: a confirmation names the launch
+        // state it saw, interrupt is refused while a launch is unresolved, dispatch requires a
+        // still-prepared intent and absence names the delivery attempt it reconciled.
+        "launch-confirm-stopped", "interrupt", "launch-dispatch", "delivery-confirm-absent",
+        "launch-occupancy", "version"
     ]
+    /// Commands whose owner-rpc form must carry a fence the local CLI may omit, by argument count.
+    static let fencedArgumentCounts: [String: Int] = ["launch-confirm-stopped": 2]
     static func run(store: ControllerStore, database: String) async throws {
         let maximumBytes = 262_144
         guard let input = try FileHandle.standardInput.read(upToCount: maximumBytes + 1), input.count <= maximumBytes else {
@@ -34,6 +41,9 @@ enum ControllerOwnerRPC {
         }
         let request = try JSONDecoder().decode(Request.self, from: input)
         guard allowed.contains(request.command), request.arguments.count <= 16 else { throw ControllerError.invalidInput("rpc_command") }
+        if let fenced = fencedArgumentCounts[request.command], request.arguments.count != fenced {
+            throw ControllerError.invalidInput("rpc_fence_required")
+        }
         let directory = URL(fileURLWithPath: database).deletingLastPathComponent().appendingPathComponent("rpc-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: directory) }

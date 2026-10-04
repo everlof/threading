@@ -83,7 +83,7 @@ public enum ControllerMailSync {
             case .timedOut: return "timed_out"
             case .overflow: return "response_too_large"
             case .protocolFailure: return "protocol_failure"
-            case .spawnRefused: return "refused"
+            case .spawnRefused, .spawnFailed, .processIdentityMismatch: return "refused"
             }
         }
         return "invalid_response"

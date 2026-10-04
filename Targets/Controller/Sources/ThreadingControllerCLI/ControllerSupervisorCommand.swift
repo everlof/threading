@@ -17,10 +17,16 @@ enum ControllerSupervisorCommand {
         let supervisor = ControllerSupervisor(store: store, database: database, controllerBinary: binary)
         repeat {
             if lifetime.shouldStop { break }
-            let cycle = try await supervisor.tick()
+            let cycle: SupervisorCycle
+            do { cycle = try await supervisor.tick(reportAllHolds: once) } catch {
+                // Only a store this process can no longer trust or write ends the loop. A busy
+                // store or any other whole-pass failure is reported and retried next interval,
+                // so one lock held past the busy timeout cannot exhaust a service restart budget.
+                if let error = error as? ControllerError, error.isFatalStorage { throw error }
+                cycle = SupervisorCycle.failedPass(error)
+            }
             // Always return one-shot results; a resident idle loop produces no log flood.
-            if once || cycle.scheduled > 0 || !cycle.started.isEmpty || !cycle.stopped.isEmpty || !cycle.issues.isEmpty
-                || !cycle.automationIssues.isEmpty || !cycle.woken.isEmpty || cycle.mail != nil || cycle.sourceEvents > 0 || !cycle.sourceIssues.isEmpty || !cycle.receipts.isEmpty {
+            if once || !cycle.isQuiet {
                 try ControllerMain.output(cycle)
             }
             if once || lifetime.shouldStop { break }

@@ -4,6 +4,8 @@ import Foundation
 /// application database, email address, or deployment policy here.
 public actor ControllerStore {
     let db: ControllerDatabase
+    /// The schema this build reads and writes; see `ControllerDatabase.schemaVersion`.
+    public static var schemaVersion: Int64 { ControllerDatabase.schemaVersion }
     public init(path: String) throws { db = try ControllerDatabase(path: path) }
 
     public func addWorker(id: WorkerID, name: String) throws -> ControllerWorker {
