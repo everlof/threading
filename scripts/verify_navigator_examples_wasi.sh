@@ -175,6 +175,7 @@ expected_registration = {
     "panels": [],
     "previewableFileTypes": [],
     "services": [],
+    "sourceControlProviders": manifest.get("sourceControlProviders", []),
     "workspaceNavigators": manifest.get("workspaceNavigators", []),
 }
 
