@@ -428,7 +428,7 @@ void tw_workspace_placeholder_mode(TWWindow *w, int enabled) {
     tw_accessibility_page_title(w, NULL, NULL, 0, 0, 0, 0);
     tw_accessibility_terminal_text(w, NULL, 0, -1, NULL, 0);
     tw_accessibility_placeholder(w, w->placeholderMode ? "" : NULL,
-                                 w->placeholderMode ? "" : NULL, NULL, 0, 0, 0, 0);
+                                 w->placeholderMode ? "" : NULL, NULL, 0, 0, 0, 0, 0);
     tw_accessibility_workspace_changed(w);
 }
 void tw_workspace_terminal_top_inset(TWWindow *w, int pixels) {
@@ -456,7 +456,7 @@ void tw_workspace_mode(TWWindow *w, int sidebarWidth, int sidebarFocused) {
     w->placeholderTracking = w->placeholderHovered = 0;
     w->placeholderMode = 0;
     w->editorFocused = 0;
-    tw_accessibility_placeholder(w, NULL, NULL, NULL, 0, 0, 0, 0);
+    tw_accessibility_placeholder(w, NULL, NULL, NULL, 0, 0, 0, 0, 0);
     w->terminalTopInset = 0;
     if (w->navigatorTracking) {
         SDL_CaptureMouse(SDL_FALSE);

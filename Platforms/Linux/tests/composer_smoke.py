@@ -135,9 +135,19 @@ try:
         composer = open_composer(app, process)
         editor = eventually(lambda: child_by_id(composer, 'linux.composer.editor'),
                             'AT-SPI composer editor', process)
+        action = eventually(lambda: child_by_id(composer, 'linux.placeholder.action'),
+                            'AT-SPI composer action', process)
+        editor_bounds = editor.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        action_bounds = action.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        assert action.get_name() == 'Start Session'
+        assert action_bounds.y >= editor_bounds.y + editor_bounds.height, (
+            'composer action should sit below its prompt', editor_bounds, action_bounds)
+        assert not action.get_state_set().contains(Atspi.StateType.ENABLED)
         xdo('type', '--clearmodifiers', '--delay', '20', 'Draft stays')
         eventually(lambda: Atspi.Text.get_text(editor.get_text_iface(), 0, -1) == 'Draft stays',
                    'draft before choice change', process)
+        eventually(lambda: action.get_state_set().contains(Atspi.StateType.ENABLED),
+                   'composer action enabled for draft', process)
         project_chip = eventually(lambda: child_by_id(composer, 'linux.composer.project'),
                                   'AT-SPI project chip', process)
         assert project_chip.get_role_name() == 'combo box'
@@ -202,7 +212,10 @@ try:
                    'composer action focus', process)
         subprocess.run(['import', '-window', window,
                         str(output / 'composer-empty-placeholder.png')], check=True, timeout=5)
-        xdo('mousemove', '--window', window, '700', '400')
+        editor_bounds = editor.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        xdo('mousemove', '--window', window,
+            str(editor_bounds.x + editor_bounds.width // 2),
+            str(editor_bounds.y + editor_bounds.height // 2))
         xdo('click', '1')
         eventually(lambda: editor.get_state_set().contains(Atspi.StateType.FOCUSED),
                    'composer editor refocus', process)
@@ -223,8 +236,11 @@ try:
         screenshot = output / 'composer.png'
         def rendered_text():
             subprocess.run(['import', '-window', window, str(screenshot)], check=True, timeout=5)
+            editor_bounds = editor.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+            sample_x = editor_bounds.x + 20
+            sample_y = editor_bounds.y + editor_bounds.height // 2
             pixels = subprocess.check_output(['convert', str(screenshot), '-crop',
-                                              '420x35+390+390', '+repage', '-colorspace',
+                                              f'420x35+{sample_x}+{sample_y}', '+repage', '-colorspace',
                                               'Gray', '-depth', '8', 'gray:-'], timeout=5)
             return sum(pixel < 120 for pixel in pixels) > 100
         eventually(rendered_text, 'second line painted in the real window', process)
@@ -274,7 +290,11 @@ try:
         subprocess.run(['import', '-window', window,
                         str(output / 'composer-accessibility-edited.png')],
                        check=True, timeout=5)
-        xdo('key', 'super+Return')
+        action_bounds = action.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        xdo('mousemove', '--window', window,
+            str(action_bounds.x + action_bounds.width // 2),
+            str(action_bounds.y + action_bounds.height // 2))
+        xdo('click', '1')
         marker = other_project / 'composer-agent.json'
         report = eventually(lambda: json.loads(marker.read_text()) if marker.exists() else None,
                             'agent with opening brief', process)

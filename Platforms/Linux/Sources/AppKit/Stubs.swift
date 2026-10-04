@@ -12,6 +12,7 @@ public final class NSAnimationContext {
 
     public var duration: TimeInterval = 0.25
     public var allowsImplicitAnimation = false
+    public var timingFunction: CAMediaTimingFunction?
 
     public static func runAnimationGroup(
         _ changes: (NSAnimationContext) -> Void,
@@ -27,6 +28,31 @@ public final class NSAnimationContext {
     public static func beginGrouping() {}
     public static func endGrouping() {}
     public static var current = NSAnimationContext()
+}
+
+public enum NSUserInterfaceLayoutDirection: Sendable {
+    case leftToRight, rightToLeft
+}
+
+public struct NSUnderlineStyle: RawRepresentable, Sendable {
+    public let rawValue: Int
+    public init(rawValue: Int) { self.rawValue = rawValue }
+    public static let single = NSUnderlineStyle(rawValue: 1)
+}
+
+/// No system screen is owned by this raster tree. Views use their attached window's scale;
+/// callers of the optional screen fallback choose their own default when detached.
+public final class NSScreen {
+    public static var main: NSScreen? { nil }
+    public let backingScaleFactor: CGFloat
+    public init(backingScaleFactor: CGFloat) { self.backingScaleFactor = backingScaleFactor }
+}
+
+extension NSLayoutManager {
+    /// Pango's measured ascent gives the same baseline convention as the shim's text renderer.
+    public func defaultBaselineOffset(for font: NSFont) -> CGFloat {
+        font.ascender
+    }
 }
 
 /// Field-editor identity for focus scoping. Editing, selection and IME are separate services.

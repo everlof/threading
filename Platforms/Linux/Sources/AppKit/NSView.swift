@@ -77,6 +77,7 @@ open class NSView: NSResponder, NSLayoutItem {
 
     open var frame: NSRect {
         didSet {
+            layer?.frame = NSRect(origin: .zero, size: frame.size)
             let widthDelta = frame.width - oldValue.width
             let heightDelta = frame.height - oldValue.height
             if widthDelta != 0 || heightDelta != 0 {
@@ -149,7 +150,18 @@ open class NSView: NSResponder, NSLayoutItem {
     open var needsDisplay: Bool = true
     open var needsLayout: Bool = true
     open var needsUpdateConstraints: Bool = true
-    open var wantsLayer: Bool = false
+    open var wantsLayer: Bool = false {
+        didSet {
+            if wantsLayer, layer == nil {
+                let backing = CALayer()
+                backing.frame = NSRect(origin: .zero, size: bounds.size)
+                layer = backing
+            } else if !wantsLayer {
+                layer = nil
+            }
+        }
+    }
+    open var layer: CALayer?
     open var wantsUpdateLayer: Bool { false }
     private var appliedSurface: (fill: NSColor, radius: CGFloat, border: NSColor?)?
 
@@ -177,6 +189,11 @@ open class NSView: NSResponder, NSLayoutItem {
 
     open var effectiveAppearance: NSAppearance {
         appearance ?? superview?.effectiveAppearance ?? NSAppearance.applicationDefault
+    }
+
+    /// This retained host currently uses left-to-right layout throughout its native shell.
+    open var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection {
+        superview?.userInterfaceLayoutDirection ?? .leftToRight
     }
 
     open func viewDidChangeEffectiveAppearance() {}
@@ -390,8 +407,14 @@ open class NSView: NSResponder, NSLayoutItem {
 
     /// Plain views have no text baseline; their first and last anchors remain their top and
     /// bottom edges. Text views override these with measured font metrics from their renderer.
-    open var firstBaselineMetric: NSBaselineMetric { NSBaselineMetric(heightFraction: 0, offset: 0) }
-    open var lastBaselineMetric: NSBaselineMetric { NSBaselineMetric(heightFraction: 1, offset: 0) }
+    open var firstBaselineOffsetFromTop: CGFloat { 0 }
+    open var lastBaselineOffsetFromBottom: CGFloat { 0 }
+    open var firstBaselineMetric: NSBaselineMetric {
+        NSBaselineMetric(heightFraction: 0, offset: firstBaselineOffsetFromTop)
+    }
+    open var lastBaselineMetric: NSBaselineMetric {
+        NSBaselineMetric(heightFraction: 1, offset: -lastBaselineOffsetFromBottom)
+    }
 
     open func invalidateIntrinsicContentSize() { setNeedsLayout() }
 

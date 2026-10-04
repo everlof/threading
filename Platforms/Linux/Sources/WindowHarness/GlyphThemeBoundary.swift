@@ -19,7 +19,7 @@ public enum Design {
         public let surfaceHover: NSColor
         public let border: NSColor
 
-        public init(on ground: NSColor) {
+        public init(on ground: NSColor, surface customSurface: NSColor? = nil) {
             let light = LinuxTheme.neutralInk(on: ground, dark: false)
             let dark = LinuxTheme.neutralInk(on: ground, dark: true)
             let lightLabel = light.label
@@ -42,7 +42,7 @@ public enum Design {
             quaternary = NSColor(name: NSColor.Name("threading.linux.ink.quaternary")) { appearance in
                 appearance.name == .darkAqua ? darkQuaternary : lightQuaternary
             }
-            surface = LinuxTheme.color("controlResting")
+            surface = customSurface ?? LinuxTheme.color("controlResting")
             surfaceHover = LinuxTheme.color("controlHover")
             border = LinuxTheme.color("border")
         }

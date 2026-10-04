@@ -475,8 +475,10 @@ journeys, text shaping, and an accessibility tree. Visible project, agent and te
 shared production content, the idle pane mounts the production placeholder, and command menus use
 production rows. Account rows remain diagnostic;
 a complete production screen is not mounted.
-The right-pane New Session path now mounts the production `PromptTextView` and `ChipView` from
-shared Design sources. The Linux host presents project and provider choices in bounded, visible
+The right-pane New Session path now mounts the production `PromptTextView`, `ChipView`, and
+`ThemedButton` from shared Design sources. The primary action sits below the editor, uses the
+production shortcut cue, and is disabled for an empty or provisional IME draft. The Linux host
+presents project and provider choices in bounded, visible
 production menu rows; project and provider identities, availability, and launch remain host-owned.
 The Linux TextKit shim shapes and edits Unicode text,
 wraps and scrolls, tracks selection and undo, and accepts SDL committed text and IME preedit without sending it

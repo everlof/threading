@@ -12,3 +12,24 @@ import CoreFoundation
 public func CTFontManagerCopyAvailableFontFamilyNames() -> NSArray {
     ["SF Mono", "Menlo", "Monaco", "Helvetica Neue", "DejaVu Sans Mono"] as NSArray
 }
+
+public struct CTLine {
+    public let attributedString: NSAttributedString
+}
+
+public struct CTLineBoundsOptions: OptionSet, Sendable {
+    public let rawValue: UInt
+    public init(rawValue: UInt) { self.rawValue = rawValue }
+    public static let useGlyphPathBounds = CTLineBoundsOptions(rawValue: 1)
+}
+
+public func CTLineCreateWithAttributedString(_ string: NSAttributedString) -> CTLine {
+    CTLine(attributedString: string)
+}
+
+/// CoreText's per-glyph path bounds are not exposed by this package's fontconfig inventory
+/// adapter. A null ink band makes the shared button use its measured baseline fallback.
+public func CTLineGetBoundsWithOptions(_ line: CTLine,
+                                       _ options: CTLineBoundsOptions) -> CGRect {
+    .null
+}

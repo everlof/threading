@@ -439,7 +439,8 @@ static gboolean action_do(AtkAction *action, gint index) {
         return pushed == 1;
     }
     if (node == placeholderAction) {
-        if (index != 0 || !action_count(action) || eventType == UINT32_MAX) return FALSE;
+        if (index != 0 || !action_count(action) || !node->enabled ||
+            eventType == UINT32_MAX) return FALSE;
         SDL_Event event = {0};
         event.type = eventType; event.user.code = 8;
         event.user.data2 = (void *)(uintptr_t)generation;
@@ -1526,7 +1527,8 @@ static void clear_composer_choice_projection(void) {
                                        ATK_STATE_EXPANDED, FALSE);
 }
 void tw_accessibility_placeholder(TWWindow *window, const char *title, const char *detail,
-                                   const char *actionLabel, int x, int y, int width, int height) {
+                                   const char *actionLabel, int actionEnabled,
+                                   int x, int y, int width, int height) {
     if (!bridgeReady || window != hostWindow) return;
     int originX, originY, windowWidth, windowHeight;
     tw_window_geometry(window, &originX, &originY, &windowWidth, &windowHeight);
@@ -1559,6 +1561,11 @@ void tw_accessibility_placeholder(TWWindow *window, const char *title, const cha
         if (actionVisible) {
             set_name_if_changed(placeholderAction, actionLabel);
             placeholderAction->bounds = (AtkRectangle){x, y, width, height};
+            if (placeholderAction->enabled != (actionEnabled != 0)) {
+                placeholderAction->enabled = actionEnabled != 0;
+                atk_object_notify_state_change(ATK_OBJECT(placeholderAction),
+                                               ATK_STATE_ENABLED, placeholderAction->enabled);
+            }
         }
     }
     rebuild_placeholder_children();
