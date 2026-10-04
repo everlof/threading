@@ -139,8 +139,40 @@ final class PTYHostFrameTests: XCTestCase {
             .journalTail(PTYHostJournalTail(maxBytes: 32 * 1024)),
             .journal(PTYHostJournal(lines: ["spawned", "exited"])),
             .error(PTYHostErrorFrame(code: .unknownSession, detail: "attach")),
-            .error(PTYHostErrorFrame(code: .internalFailure))
+            .error(PTYHostErrorFrame(code: .internalFailure)),
+            .error(PTYHostErrorFrame(code: .spawnFailed, detail: "fork", id: identity, errorNumber: 35)),
+            .hello(PTYHostHello(build: "2026.10.4", pid: 4322, features: [PTYHostFeature.retainedReceipts])),
+            .spawn(PTYHostSpawnRequest(id: identity, channel: .pty(grid: grid), executable: "/bin/sh",
+                                       arguments: [], environment: [], retainReceipt: true)),
+            .receiptList,
+            .receipts(PTYHostReceipts(receipts: [
+                PTYHostReceipt(id: identity, pid: 4711,
+                               startTime: PTYHostProcessStartTime(seconds: 1_770_000_000, microseconds: 5),
+                               ending: .exited, status: 3, signalled: false,
+                               at: Date(timeIntervalSince1970: 1_770_000_600), tail: Data("last".utf8)),
+                PTYHostReceipt(id: identity, pid: 4712, startTime: nil, ending: .lost,
+                               incidentID: UUID(uuidString: "0F5B1D0E-2C4A-4F1B-9A77-1D3C5E7F9B11"),
+                               at: Date(timeIntervalSince1970: 1_770_000_700))
+            ])),
+            .acknowledge(PTYHostAcknowledge(ids: [identity]))
         ]
+    }
+
+    /// The receipt fields ride on existing frames as optional keys, so a peer that predates them
+    /// reads the same frame and an absent field stays absent on the wire.
+    func testReceiptFieldsAreAdditiveOnExistingFrames() throws {
+        let legacySpawn = PTYHostSpawnRequest(id: identity, channel: .pipes, executable: "/bin/sh",
+                                              arguments: [], environment: [])
+        let spawnFields = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(legacySpawn)) as? [String: Any])
+        XCTAssertNil(spawnFields["retainReceipt"])
+        let hello = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(PTYHostHello(build: "b", pid: 1))) as? [String: Any])
+        XCTAssertNil(hello["features"])
+        XCTAssertFalse(PTYHostHello(build: "b", pid: 1).serves(PTYHostFeature.retainedReceipts))
+        let error = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(PTYHostErrorFrame(code: .spawnFailed))) as? [String: Any])
+        XCTAssertNil(error["id"])
+        XCTAssertNil(error["errorNumber"])
+        let legacyError = try decoder.decode(PTYHostErrorFrame.self, from: Data(#"{"code":"spawnFailed"}"#.utf8))
+        XCTAssertNil(legacyError.id)
     }
 
     func testEveryFrameRoundTripsThroughJSON() throws {
@@ -177,7 +209,7 @@ final class PTYHostFrameTests: XCTestCase {
             let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
             seen.insert(try XCTUnwrap(object["type"] as? String))
         }
-        XCTAssertEqual(seen.count, 21, "every frame in the protocol table needs a fixture")
+        XCTAssertEqual(seen.count, 24, "every frame in the protocol table needs a fixture")
     }
 
     // MARK: - The discriminator

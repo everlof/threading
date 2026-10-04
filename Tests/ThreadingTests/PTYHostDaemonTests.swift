@@ -881,6 +881,88 @@ final class PTYHostDaemonTests: XCTestCase {
         }
     }
 
+    // MARK: - Retained receipts
+
+    /// An unattended owner that looks after the five-second observed-exit window, or after a
+    /// restart, still learns how its child ended — until it says it recorded it.
+    func testARetainedExitOutlivesReleaseAndARestartUntilAcknowledged() throws {
+        let daemon = try startDaemon()
+        let client = try connect(to: daemon)
+        let id = Self.newIdentity()
+        _ = try spawn(on: client, id: id, script: "printf 'last words'; exit 3", retainReceipt: true)
+        XCTAssertEqual(try nextExit(on: client).status, 3, "a watcher saw the ending")
+
+        let observer = try connect(to: daemon)
+        try waitUntil(timeout: Fixture.exitTimeout, "the observed exit is released") {
+            observer.send(.list)
+            return try nextSessions(on: observer).isEmpty
+        }
+        let held = try receipts(on: observer)
+        XCTAssertEqual(held.map(\.id), [id])
+        XCTAssertEqual(held.first?.ending, .exited)
+        XCTAssertEqual(held.first?.status, 3)
+        XCTAssertTrue(String(decoding: held.first?.tail ?? Data(), as: UTF8.self).contains("last words"))
+
+        daemon.crash()
+        client.hangUp()
+        observer.hangUp()
+        try waitUntil(timeout: Fixture.exitTimeout, "the first daemon is gone") { !daemon.isRunning }
+        let restarted = try startDaemon(reusing: daemon)
+        let rejoined = try connect(to: restarted)
+        let recovered = try receipts(on: rejoined)
+        XCTAssertEqual(recovered.map(\.id), [id], "the receipt survived the restart")
+        XCTAssertEqual(recovered.first?.status, 3)
+        XCTAssertNil(recovered.first?.tail, "output never reaches the disk")
+
+        rejoined.send(.acknowledge(PTYHostAcknowledge(ids: [id])))
+        rejoined.send(.list)
+        _ = try nextSessions(on: rejoined)
+        XCTAssertTrue(try receipts(on: rejoined).isEmpty)
+
+        restarted.crash()
+        rejoined.hangUp()
+        try waitUntil(timeout: Fixture.exitTimeout, "the second daemon is gone") { !restarted.isRunning }
+        let third = try startDaemon(reusing: restarted)
+        XCTAssertTrue(try receipts(on: try connect(to: third)).isEmpty, "an acknowledgement is durable")
+    }
+
+    /// A loss is reported in the `lost` frame for one daemon lifetime; a retained loss is owed
+    /// across a second restart too, because the owner may not have connected in between.
+    func testARetainedLossSurvivesASecondRestart() throws {
+        let daemon = try startDaemon()
+        let client = try connect(to: daemon)
+        let id = Self.newIdentity()
+        let ordinary = Self.newIdentity()
+        _ = try spawn(on: client, id: id, script: "sleep 60", retainReceipt: true)
+        let second = try connect(to: daemon)
+        _ = try spawn(on: second, id: ordinary, script: "sleep 60")
+
+        daemon.crash()
+        client.hangUp()
+        second.hangUp()
+        try waitUntil(timeout: Fixture.exitTimeout, "the first daemon is gone") { !daemon.isRunning }
+        let restarted = try startDaemon(reusing: daemon)
+        let rejoined = try connect(to: restarted, greeting: false)
+        rejoined.send(.hello(PTYHostHello(build: "test", pid: getpid())))
+        XCTAssertTrue(try nextHello(on: rejoined).serves(PTYHostFeature.retainedReceipts))
+        let lost = try nextLost(on: rejoined)
+        let first = try receipts(on: rejoined)
+        XCTAssertEqual(first.map(\.id), [id], "only the retained session keeps a receipt")
+        XCTAssertEqual(first.first?.ending, .lost)
+        XCTAssertEqual(first.first?.incidentID, lost.incidentID)
+
+        restarted.crash()
+        rejoined.hangUp()
+        try waitUntil(timeout: Fixture.exitTimeout, "the second daemon is gone") { !restarted.isRunning }
+        let third = try startDaemon(reusing: restarted)
+        let again = try connect(to: third)
+        let carried = try receipts(on: again)
+        XCTAssertEqual(carried.map(\.id), [id])
+        XCTAssertEqual(carried.first?.incidentID, lost.incidentID, "the original incident, not a new one")
+        again.send(.acknowledge(PTYHostAcknowledge(ids: [id])))
+        XCTAssertTrue(try receipts(on: again).isEmpty)
+    }
+
     // MARK: - The aggregate ring bound
 
     /// A per-session cap is not an aggregate one, and the session nobody is watching is the one
@@ -1002,7 +1084,8 @@ final class PTYHostDaemonTests: XCTestCase {
         id: PTYHostSessionIdentity,
         script: String,
         grid: PTYHostGrid = PTYHostGrid(cols: 80, rows: 24),
-        replaceExisting: Bool = false
+        replaceExisting: Bool = false,
+        retainReceipt: Bool = false
     ) throws -> PTYHostSpawned {
         client.send(.spawn(PTYHostSpawnRequest(
             id: id,
@@ -1011,7 +1094,8 @@ final class PTYHostDaemonTests: XCTestCase {
             arguments: ["-c", script],
             environment: Self.childEnvironment,
             cwd: NSTemporaryDirectory(),
-            replaceExisting: replaceExisting
+            replaceExisting: replaceExisting,
+            retainReceipt: retainReceipt
         )))
         let frame = try client.nextControl(timeout: Fixture.replyTimeout) {
             if case .spawned = $0 { return true }
@@ -1135,6 +1219,16 @@ final class PTYHostDaemonTests: XCTestCase {
         }
         guard case .lost(let body) = frame else { throw PTYHostTestFailure("\(frame)") }
         return body
+    }
+
+    private func receipts(on client: PTYHostTestClient) throws -> [PTYHostReceipt] {
+        client.send(.receiptList)
+        let frame = try client.nextControl(timeout: Fixture.replyTimeout) {
+            if case .receipts = $0 { return true }
+            return false
+        }
+        guard case .receipts(let body) = frame else { throw PTYHostTestFailure("\(frame)") }
+        return body.receipts
     }
 
     private func nextSessions(on client: PTYHostTestClient) throws -> [PTYHostSessionSummary] {

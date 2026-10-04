@@ -49,6 +49,10 @@ enum PTYHostJournalEvent: String {
     case ringBudgetOverridden
     case retiring
     case retired
+    /// A retained ending was evicted by the receipt bound before its owner acknowledged it.
+    case receiptEvicted
+    /// The owner of a retained ending recorded it.
+    case receiptAcknowledged
 }
 
 // MARK: - Journal

@@ -15,7 +15,8 @@ import ThreadingPTYHostKit
 /// Three edges, and no state in between: `spawned` when the child exists, `exited` when it has
 /// been reaped, `lost` when a *later* daemon could not account for it. Everything else about a
 /// session is in memory, because everything else is only interesting while the daemon that owns
-/// it is alive.
+/// it is alive — with one exception: a `retain` session's ending is owed to an unattended owner
+/// until it says it has recorded it, which is the fourth edge, `acknowledged`.
 ///
 /// Per-record `version`, the shape the app's launch ledger already uses, so a later field is
 /// additive and an older line stays readable.
@@ -25,6 +26,10 @@ struct PTYHostStateRecord: Codable, Equatable {
         case spawned
         case exited
         case lost
+        /// The owner of a `retain` session recorded its ending; the receipt may be forgotten.
+        /// An older daemon cannot read this edge and skips the line, which only means it keeps
+        /// a receipt longer than it had to.
+        case acknowledged
     }
 
     let version: Int
@@ -48,6 +53,11 @@ struct PTYHostStateRecord: Codable, Equatable {
     let status: Int32?
     let signalled: Bool?
     let at: Date
+    /// Present, and true, on the `spawned` edge of a session whose ending must be kept until
+    /// acknowledged (`PTYHostSpawnRequest.retainReceipt`). Absent everywhere else.
+    let retain: Bool?
+    /// Present on a `lost` edge: the recovery event that found it.
+    let incidentID: UUID?
 
     init(
         edge: Edge,
@@ -58,7 +68,9 @@ struct PTYHostStateRecord: Codable, Equatable {
         channel: PTYHostChannelKind? = nil,
         status: Int32? = nil,
         signalled: Bool? = nil,
-        at: Date = Date()
+        at: Date = Date(),
+        retain: Bool = false,
+        incidentID: UUID? = nil
     ) {
         self.version = PTYHostDefaults.stateRecordVersion
         self.edge = edge
@@ -70,6 +82,8 @@ struct PTYHostStateRecord: Codable, Equatable {
         self.status = status
         self.signalled = signalled
         self.at = at
+        self.retain = retain ? true : nil
+        self.incidentID = incidentID
     }
 }
 
@@ -85,6 +99,17 @@ struct PTYHostUnaccountedSession: Equatable {
     /// The last moment the previous daemon can be said to have vouched for it: the timestamp on
     /// its own `spawned` line.
     let since: Date
+    /// Its owner asked for its ending to be kept until acknowledged.
+    var retain = false
+}
+
+/// What a restarted daemon reads back: the sessions nobody wrote an ending for, and the
+/// retained endings nobody has acknowledged yet.
+struct PTYHostRecoveredState {
+    let unaccounted: [PTYHostUnaccountedSession]
+    /// Oldest first, at most `PTYHostReceiptLimits.retained`.
+    let receipts: [PTYHostReceipt]
+    let skippedLines: Int
 }
 
 // MARK: - The store
@@ -156,9 +181,21 @@ final class PTYHostState: @unchecked Sendable {
     /// refusing it whole would throw away every session before the damaged line — which is
     /// exactly the set the answer is about.
     func unaccountedSessions() -> (sessions: [PTYHostUnaccountedSession], skippedLines: Int) {
-        guard let data = try? Data(contentsOf: url) else { return ([], 0) }
+        let recovered = recover()
+        return (recovered.unaccounted, recovered.skippedLines)
+    }
+
+    /// One pass over the ledger: what is unaccounted for, and which retained endings are still
+    /// owed. A receipt is a `retain` session's latest incarnation whose last edge is an ending
+    /// with no `acknowledged` after it.
+    func recover() -> PTYHostRecoveredState {
+        guard let data = try? Data(contentsOf: url) else {
+            return PTYHostRecoveredState(unaccounted: [], receipts: [], skippedLines: 0)
+        }
 
         var open: [PTYHostSessionIdentity: PTYHostUnaccountedSession] = [:]
+        var retained: [PTYHostSessionIdentity: PTYHostStateRecord] = [:]
+        var endings: [PTYHostSessionIdentity: PTYHostStateRecord] = [:]
         var skipped = 0
 
         for line in data.split(separator: 0x0A, omittingEmptySubsequences: true) {
@@ -176,12 +213,35 @@ final class PTYHostState: @unchecked Sendable {
                     pid: record.pid,
                     startTime: record.startTime,
                     channel: record.channel ?? .pty,
-                    since: record.at
+                    since: record.at,
+                    retain: record.retain == true
                 )
+                endings.removeValue(forKey: record.id)
+                if record.retain == true { retained[record.id] = record }
+                else { retained.removeValue(forKey: record.id) }
             case .exited, .lost:
                 open.removeValue(forKey: record.id)
+                if retained[record.id] != nil { endings[record.id] = record }
+            case .acknowledged:
+                retained.removeValue(forKey: record.id)
+                endings.removeValue(forKey: record.id)
             }
         }
+        let receipts = endings.compactMap { id, ending -> PTYHostReceipt? in
+            guard let spawned = retained[id] else { return nil }
+            return PTYHostReceipt(
+                id: id,
+                pid: spawned.pid,
+                startTime: spawned.startTime,
+                ending: ending.edge == .lost ? .lost : .exited,
+                status: ending.status,
+                signalled: ending.signalled,
+                incidentID: ending.incidentID,
+                at: ending.at
+            )
+        }
+        .sorted { $0.at < $1.at }
+        .suffix(PTYHostReceiptLimits.retained)
 
         // A logical session may have several process incarnations in this append-only file.
         // Ordering every historical `.spawned` edge used to return the final open incarnation
@@ -192,6 +252,6 @@ final class PTYHostState: @unchecked Sendable {
             if lhs.since != rhs.since { return lhs.since < rhs.since }
             return lhs.id.description < rhs.id.description
         }
-        return (sessions, skipped)
+        return PTYHostRecoveredState(unaccounted: sessions, receipts: Array(receipts), skippedLines: skipped)
     }
 }
