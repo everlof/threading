@@ -14,6 +14,8 @@ public enum ControllerUsageCollector {
     static let codexIdentityLineBytes = 1_048_576
     static let maximumProjectDirectories = 5_000
     static let maximumSubagentTranscripts = 200
+    /// `<CODEX_HOME>/threading-subagents/<execution>/`: child Codex runs an execution started.
+    static let codexSubagentDirectory = "threading-subagents"
 
     /// What one declared account home contributed for this execution.
     struct AccountRead {
@@ -50,7 +52,7 @@ public enum ControllerUsageCollector {
             case .claude:
                 return claude(home: attempt.home, session: executionID.description, bound: binding?.path, account: attempt.account)
             case .codex:
-                return codex(home: attempt.home, transcript: binding.map { ProviderTranscript(sessionID: $0.sessionID, path: $0.path) },
+                return codex(home: attempt.home, execution: executionID.description, transcript: binding.map { ProviderTranscript(sessionID: $0.sessionID, path: $0.path) },
                              account: attempt.account)
             }
         }
@@ -112,25 +114,41 @@ public enum ControllerUsageCollector {
             main = match
         }
         read.found = true
-        var files = [main]
-        let subagents = main.deletingPathExtension().appendingPathComponent("subagents")
-        if let children = try? FileManager.default.contentsOfDirectory(at: subagents, includingPropertiesForKeys: nil) {
-            let transcripts = children.filter { $0.pathExtension == "jsonl" }
-            files += transcripts.prefix(maximumSubagentTranscripts)
-            if transcripts.count > maximumSubagentTranscripts { read.gaps.append("subagent_transcripts_incomplete") }
-        } else if FileManager.default.fileExists(atPath: subagents.path) {
-            read.gaps.append("subagent_transcripts_incomplete")
-        }
+        let files = [main] + subagentTranscripts(in: main.deletingPathExtension().appendingPathComponent("subagents"), read: &read)
         read.add(files) { try ClaudeUsageAdapter.reading(transcriptAt: $0, accountID: account, accountName: account) }
         return read
     }
 
+    /// Up to `maximumSubagentTranscripts` `.jsonl` files directly in `directory`; more, or a
+    /// directory that cannot be listed, is a recorded gap rather than a silent undercount.
+    static func subagentTranscripts(in directory: URL, read: inout AccountRead) -> [URL] {
+        guard let children = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
+            if FileManager.default.fileExists(atPath: directory.path) { read.gaps.append("subagent_transcripts_incomplete") }
+            return []
+        }
+        let transcripts = children.filter { $0.pathExtension == "jsonl" }
+        if transcripts.count > maximumSubagentTranscripts { read.gaps.append("subagent_transcripts_incomplete") }
+        return Array(transcripts.prefix(maximumSubagentTranscripts))
+    }
+
     /// A host hook binds the exact path/session while the execution credential is live.
     /// Check the resolved path again at read time, including symlinks, and verify file identity.
-    static func codex(home: String, transcript: ProviderTranscript?, account: String) -> AccountRead {
+    ///
+    /// Codex has no per-session folder, so child runs an execution started itself (a research
+    /// helper's own `codex exec`) are filed under `<home>/threading-subagents/<execution>/`, which
+    /// is read beside the bound rollout and must resolve inside the home.
+    static func codex(home: String, execution: String, transcript: ProviderTranscript?, account: String) -> AccountRead {
         var read = AccountRead()
-        guard let transcript else { return read }
         let root = URL(fileURLWithPath: home).resolvingSymlinksInPath().path + "/"
+        let children = URL(fileURLWithPath: home).appendingPathComponent(codexSubagentDirectory)
+            .appendingPathComponent(execution).resolvingSymlinksInPath()
+        let subagents = children.path.hasPrefix(root) ? subagentTranscripts(in: children, read: &read) : []
+        let readSubagents = { (read: inout AccountRead) in
+            guard !subagents.isEmpty else { return }
+            read.found = true
+            read.add(subagents) { try CodexUsageAdapter.reading(rolloutAt: $0, accountID: account, accountName: account) }
+        }
+        guard let transcript else { readSubagents(&read); return read }
         let file = URL(fileURLWithPath: transcript.path).resolvingSymlinksInPath()
         guard file.path.hasPrefix(root), file.pathExtension == "jsonl", FileManager.default.isReadableFile(atPath: file.path) else {
             read.gaps.append("provider_transcript_unreadable")
@@ -146,6 +164,7 @@ public enum ControllerUsageCollector {
         }
         read.found = true
         read.add([file]) { try CodexUsageAdapter.reading(rolloutAt: $0, accountID: account, accountName: account) }
+        readSubagents(&read)
         return read
     }
 

@@ -206,10 +206,10 @@ struct UsageCollectorTests {
             let id = UUID().uuidString
             let path = root.appendingPathComponent("rollout-\(index).jsonl")
             try Data("{\"type\":\"session_meta\",\"payload\":{\"id\":\"\(id)\",\"cwd\":\"/same\"}}\n".utf8).write(to: path)
-            let result = ControllerUsageCollector.codex(home: root.path,
+            let result = ControllerUsageCollector.codex(home: root.path, execution: UUID().uuidString,
                 transcript: ProviderTranscript(sessionID: id, path: path.path), account: "fixture")
             #expect(result.found && result.gaps.isEmpty)
-            let wrong = ControllerUsageCollector.codex(home: root.path,
+            let wrong = ControllerUsageCollector.codex(home: root.path, execution: UUID().uuidString,
                 transcript: ProviderTranscript(sessionID: "wrong", path: path.path), account: "fixture")
             #expect(!wrong.found && wrong.gaps == ["provider_transcript_identity"])
         }
@@ -225,9 +225,35 @@ struct UsageCollectorTests {
         let usage = #"{"type":"event_msg","timestamp":"2026-10-03T10:00:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":7,"reasoning_output_tokens":0}}}}"#
         let path = root.appendingPathComponent("rollout.jsonl")
         try Data((#"{"type":"session_meta","payload":{"instructions":"\#(instructions)","id":"\#(id)","cwd":"/w"}}"# + "\n" + usage + "\n").utf8).write(to: path)
-        let result = ControllerUsageCollector.codex(home: root.path, transcript: ProviderTranscript(sessionID: id, path: path.path), account: "a")
+        let result = ControllerUsageCollector.codex(home: root.path, execution: UUID().uuidString, transcript: ProviderTranscript(sessionID: id, path: path.path), account: "a")
         #expect(result.found && result.gaps.isEmpty)
         #expect(result.records.map(\.tokens.output) == [7])
+    }
+
+    /// A Codex execution's own child runs (the research helper's `codex exec`) are filed under
+    /// `<home>/threading-subagents/<execution>/` and counted beside the bound rollout; another
+    /// execution's children are not.
+    @Test func codexChildRunsFiledUnderTheExecutionAreCounted() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func rollout(_ session: String, output: Int, at stamp: String) -> String {
+            #"{"type":"session_meta","payload":{"id":"\#(session)","cwd":"/w"}}"# + "\n"
+                + #"{"type":"event_msg","timestamp":"\#(stamp)","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":\#(output),"reasoning_output_tokens":0}}}}"# + "\n"
+        }
+        let execution = UUID().uuidString, other = UUID().uuidString, parent = UUID().uuidString
+        let main = root.appendingPathComponent("rollout.jsonl")
+        try Data(rollout(parent, output: 7, at: "2026-10-03T10:00:00Z").utf8).write(to: main)
+        for (owner, output) in [(execution, 11), (other, 999)] {
+            let directory = root.appendingPathComponent("\(ControllerUsageCollector.codexSubagentDirectory)/\(owner)")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try Data(rollout(UUID().uuidString, output: output, at: "2026-10-03T10:01:00Z").utf8)
+                .write(to: directory.appendingPathComponent("research-1.jsonl"))
+        }
+        let result = ControllerUsageCollector.codex(home: root.path, execution: execution,
+            transcript: ProviderTranscript(sessionID: parent, path: main.path), account: "a")
+        #expect(result.found && result.gaps.isEmpty)
+        #expect(result.records.map(\.tokens.output).sorted() == [7, 11])
     }
 
     @Test func tooManyClaudeChildrenCannotReportCompleteCoverage() throws {

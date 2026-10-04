@@ -892,9 +892,12 @@ receipts, daily cells and budgets, `ControllerUsageCollector` (runtime) reads tr
   marks the launch `providerTranscriptChanged`, and its receipt is `partial`.
 - **Finding transcripts.** Every declared home is read. Claude: the bound path when there is one —
   it must resolve, symlinks included, inside `<home>/projects/` and be named `<execution>.jsonl` —
-  otherwise `<home>/projects/*/<execution>.jsonl`, plus `subagents/` (at most 200). Codex: only the
+  otherwise `<home>/projects/*/<execution>.jsonl`, plus `subagents/` (at most 200). Codex: the
   bound rollout, whose first line (read through its own 1 MiB bound) must be `session_meta` with
-  the bound session ID. A home with no transcript and no binding was simply not used.
+  the bound session ID, plus `<home>/threading-subagents/<execution>/*.jsonl` (at most 200,
+  resolving inside the home) — Codex has no per-session folder, so a child run the execution
+  started itself, such as a research helper's own `codex exec`, is filed there by whoever started
+  it. A home with no transcript and no binding was simply not used.
 - **Counted once, on the earliest account.** Records from all homes merge by response identity
   through ThreadingUsage's `mergingUsageMaximums` (component-wise maxima, the Mac's one merge), with
   attribution to the earliest declared account the identity appears in. A copied history therefore
