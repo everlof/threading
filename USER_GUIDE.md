@@ -6522,7 +6522,12 @@ held for reconciliation instead of being automatically sent again.
 environment, directory, question recipients and result destination. `launch-status EXECUTION_UUID`
 observes it; `launch-stop EXECUTION_UUID` stops it and records the exit receipt. `launches WORK_UUID`
 finds its executions after reconnecting. A continuation waits until the previous launch is
-confirmed stopped. Missing process inventory remains unresolved and never starts a duplicate.
+confirmed stopped. ptyd keeps each controller launch's exit or loss until the controller has
+recorded it, so an exit seen while the supervisor was down, or a ptyd crash or restart, still
+resolves the launch and interrupts its work (never an automatic retry). A launch that stopped
+abnormally records why (`failure`) and, for a failed exit, a short redacted output tail. Missing
+process inventory with no such evidence remains unresolved and never starts a duplicate; an
+owner then uses `launch-confirm-stopped EXECUTION_UUID EXPECTED_STATE`.
 
 Launched agents can use the scoped `agent` command or `agent-mcp` stdio tools to read their work,
 save progress and worker memory, leave a question or submit a result. They cannot answer their
@@ -6533,8 +6538,12 @@ To run eligible work automatically, save a worker recipe with `worker-configure 
 EXPECTED_REVISION MAX_CONCURRENT RECIPE_JSON_FILE` (revision `0` for a new configuration), then
 `worker-enable WORKER_UUID REVISION`. Run `supervise` against that database. It observes exits
 and starts queued assignments and answered continuations. `worker-pause` stops future starts
-while current processes can finish. A definite spawn refusal pauses that worker for inspection.
-`worker-policy` and `active-launches` show configuration status and occupied process slots.
+while current processes can finish. A spawn refusal that blames the recipe pauses that worker for
+inspection; a host that is retiring, full or cannot fork requeues the work and is retried later.
+One failing item or a briefly busy database is reported and skipped, never a reason for the
+supervisor to exit. Its output names queued work it is holding back and why (`held`).
+`worker-policy`, `active-launches` and `launch-occupancy` show configuration status and occupied
+process slots (at most 32 per store and 16 per ptyd host for automatic starts).
 Stopping the supervisor leaves ptyd-owned agents running; restarting it does not duplicate them.
 
 Time/event scheduling, remote login/recipient authentication, operational UI and external
