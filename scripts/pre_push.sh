@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# The push gate: run the full test level before anything leaves this machine.
+# The push gate: run every local test lane before anything leaves this machine — the local
+# packages (scripts/test-packages.sh), the portable controller with the real CLI and ptyd it
+# drives (scripts/test-controller.sh), then the full app level (scripts/test.sh all).
 # See "Test levels" in CLAUDE.md.
 #
 # Installed by scripts/install_git_hooks.sh, which links .git/hooks/pre-push.local
@@ -11,7 +13,7 @@
 #   <local ref> <local sha> <remote ref> <remote sha>
 #
 # Escape hatches, in order of preference:
-#   THREADING_SKIP_TESTS=1 git push   # skips the test level; secrets are still scanned
+#   THREADING_SKIP_TESTS=1 git push   # skips every test lane; secrets are still scanned
 #   git push --no-verify              # skips every hook, including Git LFS
 #
 set -euo pipefail
@@ -64,19 +66,34 @@ if [[ "${THREADING_SKIP_TESTS:-}" == "1" ]]; then
   exit 0
 fi
 
-echo "pre-push: running the full test level (scripts/test.sh all)…" >&2
-echo "pre-push: this opens windows and takes a few minutes." >&2
+repository_directory="$(cd "${script_directory}/.." && pwd)"
 
-if ! "${script_directory}/test.sh" all; then
-  cat >&2 <<'MESSAGE'
+refuse() {
+  cat >&2 <<MESSAGE
 
-pre-push: the full test level failed, so nothing was pushed.
+pre-push: $1 failed, so nothing was pushed.
 
 Fix the failures, or bypass deliberately:
   THREADING_SKIP_TESTS=1 git push
 
 MESSAGE
   exit 1
-fi
+}
 
-echo "pre-push: full test level passed." >&2
+# Packages and the controller first: they open no windows and, with their build caches warm, cost
+# a fraction of the app level's minutes, so a failure there is reported before the long run starts.
+echo "pre-push: testing the local packages (scripts/test-packages.sh)…" >&2
+"${script_directory}/test-packages.sh" || refuse "the local package tests"
+
+# A persistent scratch under the ignored .build/, so a push compiles only what changed since the
+# last one. This is the controller's only lane on this machine besides scripts/ci.sh.
+echo "pre-push: testing the portable controller (scripts/test-controller.sh)…" >&2
+"${script_directory}/test-controller.sh" "${repository_directory}/.build/pre-push/controller" \
+  || refuse "the controller tests"
+
+echo "pre-push: running the full test level (scripts/test.sh all)…" >&2
+echo "pre-push: this opens windows and takes a few minutes." >&2
+
+"${script_directory}/test.sh" all || refuse "the full test level"
+
+echo "pre-push: every test lane passed." >&2
