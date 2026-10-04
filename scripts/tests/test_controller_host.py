@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Actual SQLite backup/restore and host bundle install contract, with synthetic state only."""
+import contextlib
 import hashlib
 import importlib.util
 import json
@@ -10,6 +11,7 @@ import subprocess
 import sqlite3
 import sys
 import socket
+import stat
 import tempfile
 import time
 import unittest
@@ -43,26 +45,107 @@ class HostTests(unittest.TestCase):
             host = call('host')
             note = root / 'note'; note.write_text('Synthetic memory')
             call('memory-put', worker, 'profile', '0', str(note))
-            backup = root / 'backup.sqlite'; restored = root / 'restored.sqlite'
-            self.assertEqual(state.snapshot(db, backup)['integrity'], 'ok')
-            self.assertTrue(state.snapshot(backup, restored, True)['disarmed'])
-            db = restored
+            backup = root / 'backup'
+            restored = root / 'restored'; restored.mkdir(mode=0o700)
+            self.assertEqual(state.capture(db, backup, CONTROLLER)['integrity'], 'ok')
+            self.assertTrue(state.restore(backup, restored / 'controller.db', CONTROLLER)['disarmed'])
+            db = restored / 'controller.db'
             self.assertEqual(call('host'), host)
             self.assertEqual(call('memory-get', worker, 'profile')['content'], 'Synthetic memory')
             with self.assertRaisesRegex(ValueError, 'new_destination'):
-                state.snapshot(backup, restored, True)
+                state.restore(backup, db, CONTROLLER)
+            with self.assertRaisesRegex(ValueError, 'new_destination'):
+                state.capture(db, backup, CONTROLLER)
+
+    def test_snapshot_carries_the_secrets_directory_owner_only(self):
+        with tempfile.TemporaryDirectory(prefix='host-') as temp:
+            root = Path(temp)
+            live = root / 'live'; live.mkdir(mode=0o700)
+            db = live / 'controller.db'
+            value = root / 'value'
+            for name, text in (('api-token', 'synthetic-one'), ('second_token', 'synthetic-two')):
+                value.write_text(text)
+                subprocess.check_output([CONTROLLER, '--database', str(db), 'secret-set', name, str(value)])
+            (live / 'secrets' / 'second_token').chmod(0o400)
+
+            backup = root / 'backup'
+            self.assertEqual(state.capture(db, backup, CONTROLLER)['secrets'], 2)
+            self.assertEqual(stat.S_IMODE((backup / 'secrets').stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE((backup / 'secrets/api-token').stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE((backup / 'secrets/second_token').stat().st_mode), 0o400)
+
+            target = root / 'target'; target.mkdir(mode=0o700)
+            self.assertEqual(state.restore(backup, target / 'controller.db', CONTROLLER)['secrets'], 2)
+            self.assertEqual((target / 'secrets/api-token').read_text(), 'synthetic-one')
+            self.assertEqual((target / 'secrets/second_token').read_text(), 'synthetic-two')
+            self.assertEqual(stat.S_IMODE((target / 'secrets').stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE((target / 'secrets/second_token').stat().st_mode), 0o400)
+
+            # The live store's secrets/ is in the way: refuse before writing the database.
+            again = root / 'again'; again.mkdir(mode=0o700); (again / 'secrets').mkdir(mode=0o700)
+            with self.assertRaisesRegex(ValueError, 'secrets_destination_exists'):
+                state.restore(backup, again / 'controller.db', CONTROLLER)
+            self.assertFalse((again / 'controller.db').exists())
+
+            # Refused, with nothing left behind: a symlink, a group-readable secret, an oversize one.
+            secrets = live / 'secrets'
+            (root / 'elsewhere').write_text('not a secret')
+            for name, prepare, reason in [
+                ('link', lambda p: p.symlink_to(root / 'elsewhere'), 'secrets_symlink_refused'),
+                ('shared', lambda p: (p.write_text('x'), p.chmod(0o640)), 'secrets_not_owner_only'),
+                ('huge', lambda p: (p.write_bytes(b'x' * 16_385), p.chmod(0o600)), 'secret_too_large'),
+            ]:
+                path = secrets / name
+                prepare(path)
+                refused = root / f'refused-{name}'
+                with self.assertRaisesRegex(ValueError, reason):
+                    state.capture(db, refused, CONTROLLER)
+                self.assertFalse(refused.exists())
+                path.unlink()
+            secrets.chmod(0o750)
+            with self.assertRaisesRegex(ValueError, 'secrets_not_owner_only'):
+                state.capture(db, root / 'refused-dir', CONTROLLER)
+            secrets.chmod(0o700)
+
+            # The command line, as the guide shows it.
+            completed = subprocess.run([sys.executable, str(SUPPORT / 'host-state.py'), 'capture', str(db),
+                                        str(root / 'cli'), '--controller', CONTROLLER], capture_output=True, text=True)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(json.loads(completed.stdout)['secrets'], 2)
+
+    def test_schemas_come_from_the_controller_binary(self):
+        with tempfile.TemporaryDirectory(prefix='host-') as temp:
+            root = Path(temp)
+            current = int(json.loads(subprocess.check_output([CONTROLLER, '--version']))['schema'])
+            future = root / 'future.db'
+            with contextlib.closing(sqlite3.connect(future)) as db:
+                db.execute(f'PRAGMA user_version={current + 1}')
+                db.execute('CREATE TABLE record(sequence INTEGER,kind TEXT,payload TEXT)')
+                db.commit()
+            with self.assertRaisesRegex(ValueError, 'unsupported_schema'):
+                state.capture(future, root / 'refused', CONTROLLER)
+            self.assertFalse((root / 'refused').exists())
+            # A controller that reads one schema more accepts it: the list is the binary's, not ours.
+            newer = root / 'newer-controller'
+            newer.write_text(f'#!/bin/sh\necho \'{{"schema":"{current + 1}"}}\'\n'); newer.chmod(0o700)
+            self.assertEqual(state.capture(future, root / 'accepted', newer)['schema'], current + 1)
+            with self.assertRaisesRegex(ValueError, 'controller_version_unavailable'):
+                state.capture(future, root / 'unknown', root / 'missing-controller')
 
     def test_legacy_snapshot_disarms_before_migration(self):
         with tempfile.TemporaryDirectory(prefix='host-') as temp:
             root = Path(temp)
             source = root / 'legacy.db'
-            with sqlite3.connect(source) as db:
+            with contextlib.closing(sqlite3.connect(source)) as db:
                 db.execute('PRAGMA user_version=6')
                 db.execute('CREATE TABLE record(sequence INTEGER,kind TEXT,payload TEXT)')
                 db.execute("INSERT INTO record VALUES(1,'workerPolicy',?)", (json.dumps({'enabled': True, 'revision': 1}),))
+                db.commit()
             restored = root / 'restored.db'
-            self.assertEqual(state.snapshot(source, restored, True)['schema'], 6)
-            with sqlite3.connect(restored) as db:
+            # A single-file snapshot from an older host-state.py restores, with no secrets.
+            result = state.restore(source, restored, CONTROLLER)
+            self.assertEqual((result['schema'], result['secrets']), (6, 0))
+            with contextlib.closing(sqlite3.connect(restored)) as db:
                 self.assertEqual(json.loads(db.execute('SELECT payload FROM record').fetchone()[0]), {'enabled': False, 'revision': 2})
 
     def test_install_checks_integrity_and_refuses_implicit_upgrade(self):

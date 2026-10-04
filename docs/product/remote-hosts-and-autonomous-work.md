@@ -828,39 +828,53 @@ evicted, journalled).
 
 ### Backup
 
-`host-state.py` (in the bundle) takes an online, read-only SQLite backup, checks its integrity and
-schema (it accepts schemas 6–10), and refuses to overwrite an existing file. The destination's
-parent must be an owner-only directory:
+`host-state.py capture DATABASE SNAPSHOT_DIR` (in the bundle) writes a new owner-only (`0700`)
+directory holding:
+
+- `controller.db`: an online, read-only SQLite backup, integrity-checked;
+- `secrets/`: a copy of the store's `secrets/` directory, each file keeping its owner-only mode;
+- `snapshot.json`: the snapshot format, the store's schema and the number of secrets.
+
+It accepts every schema the bundle's `threading-controller` reports it can open (its `--version`),
+so it never needs editing for a new schema; pass `--controller PATH` to use another binary. It
+refuses to overwrite anything, and refuses (leaving nothing behind) a `secrets/` that is a symlink,
+contains a symlink, is not owner-only, holds a file another user owns or a file group- or
+world-readable, or holds more than 4096 secrets or one over 16 KiB. The destination's parent must be
+an owner-only directory:
 
 ```bash
 install -d -m 700 ~/backups
-python3 $G/host-state.py capture ~/.local/state/threading/controller/controller.db ~/backups/controller-$(date +%F).db
+python3 $G/host-state.py capture ~/.local/state/threading/controller/controller.db ~/backups/controller-$(date +%F)
 ```
 
-It is safe while the supervisor runs. Back up, separately and as sensitive material:
+It is safe while the supervisor runs. Back up, as sensitive material:
 
-- the snapshot (it contains recipes, including plain `environment` values, memory, mail and history);
-- `controller/secrets/` if you cannot recreate the secrets (the snapshot does not include it);
-- the bundle you installed (its `manifest.json` identifies the generation) and any drop-ins,
-  `authorized_keys` forced commands and ACLs you added.
+- the snapshot directory (it contains recipes, including plain `environment` values, memory, mail,
+  history and every secret in clear text);
+- the bundle you installed (its `manifest.json` identifies the generation), the `/opt` agent-binary
+  copy if you use one, and any `authorized_keys` forced commands and ACLs you added.
 
 ptyd's state is not worth backing up: it describes processes that a restore cannot bring back.
 
 ### Restore
 
-`host-state.py restore SNAPSHOT DESTINATION` writes a **disarmed** copy: every worker policy,
-automation, source and trigger is disabled (revision bumped), mail peers stop pushing and pulling,
-and due schedules are cleared. Identity and records are preserved; it never launches a restored
-execution, clears uncertainty, or starts a service.
+`host-state.py restore SNAPSHOT DATABASE` writes a **disarmed** copy of the store at `DATABASE`
+(a new file): every worker policy, automation, source and trigger is disabled (revision bumped), mail
+peers stop pushing and pulling, and due schedules are cleared. Identity and records are preserved;
+it never launches a restored execution, clears uncertainty, or starts a service. It restores the
+snapshot's secrets as `secrets/` beside `DATABASE`, with their modes, and refuses
+(`secrets_destination_exists`) before writing anything when a `secrets/` is already there. A
+single-file snapshot from an older `host-state.py` still restores; it carries no secrets.
 
 To test a backup, restore into an isolated private directory and inspect it with the CLI. Never
 run a restored copy alongside the original: it has the same host ID and the same work.
 
 To recover a host:
 
-1. `systemctl --user stop threading-controller`; keep the damaged store and its `-wal`/`-shm` aside.
-2. Restore the snapshot to `controller.db` in the `0700` controller directory, recreate secrets with
-   `secret-set` if needed, and start the controller.
+1. `systemctl --user stop threading-controller`; move the damaged store, its `-wal`/`-shm` and
+   `secrets/` aside.
+2. Restore the snapshot to `controller.db` in the `0700` controller directory (this also restores
+   `secrets/`), and start the controller.
 3. Reconcile launches: `active-launches`, then `launch-status`. Executions from before the incident
    that no ptyd knows are confirmed with `launch-confirm-stopped E STATE` once you know they are
    gone, then retried as appropriate.

@@ -1030,8 +1030,8 @@ downtime, a 12 s write lock against the resident loop, an old supervisor after m
 fenced owner-RPC repair; each fails against the 0708ee200 binaries). It uses the existing
 XCTest harness watchdog on Linux; Swift Testing failures are not retried. The standard Mac CI
 and a separate Ubuntu lane both invoke it. `threading-controller --version` reports protocol,
-schema and capabilities without opening or migrating a database. Before an upgrade, preserve an
-online SQLite backup; older binaries refuse schema 10. Restore into an isolated private directory
+schema and capabilities without opening or migrating a database. Before an upgrade, take a
+`host-state.py capture` (store and secrets); older binaries refuse schema 10. Restore into an isolated private directory
 with workers/sources disarmed before testing, never alongside active copies of the same work.
 
 A reusable Linux distribution path is `scripts/build-controller-host.sh OUTPUT` inside a
@@ -1049,8 +1049,15 @@ Remote Hosts setup never retires or prunes it. It does not start services unless
 `--start` is supplied and refuses an implicit replacement of an existing unit. Existing-host
 upgrades remain an explicit stop, online snapshot, verified artifact/unit switch, restart and
 health-check operation. Rindabox's Ansible adapter retains its own destinations and credentials.
-`host-state.py restore` preserves identity and records but disarms workers, schedules, sources,
-triggers and peer transport. It never launches a restored execution or clears uncertainty.
+`host-state.py capture` writes a snapshot directory: the integrity-checked online database backup,
+a copy of the store's `secrets/` (owner-only modes kept; symlinks, shared modes, more than 4096
+entries or a file over the controller's own 16 KiB bound are refused, leaving nothing behind), and
+a small manifest. The schemas it accepts are `1…N` where `N` is the bundled controller's
+`--version` schema, so a schema bump needs no edit there. `host-state.py restore` preserves
+identity and records but disarms workers, schedules, sources, triggers and peer transport, and puts
+the secrets back beside the restored database, refusing an existing `secrets/`. It never launches a
+restored execution or clears uncertainty. An older single-file snapshot still restores, without
+secrets.
 
 ## Discoverable hosted memory
 
