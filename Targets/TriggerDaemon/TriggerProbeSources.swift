@@ -153,6 +153,68 @@ struct TriggerProbeInboxEvent: Encodable, Equatable, Sendable {
     let evidence: String?
 }
 
+/// Which probes the daemon starts this tick. Pure, so the app's tests hold the daemon's rule.
+enum TriggerProbeClaimPolicy {
+    /// Requested manual polls first, then the oldest scheduled deadlines; never a source already
+    /// polling, and never more than `capacity` minus what is in flight.
+    static func claim(
+        _ probes: [TriggerProbeDaemonSource],
+        manual: Set<UUID>,
+        inFlight: Set<UUID>,
+        due: (UUID) -> Date,
+        now: Date,
+        capacity: Int = TriggerProbeDefaults.concurrentPolls,
+        duePerTick: Int = TriggerProbeDefaults.duePerTick
+    ) -> [(probe: TriggerProbeDaemonSource, manual: Bool)] {
+        let free = capacity - inFlight.count
+        guard free > 0 else { return [] }
+        let candidates = probes.filter { !inFlight.contains($0.id) }
+        let requested = candidates.filter { manual.contains($0.id) }.map { (probe: $0, manual: true) }
+        let scheduled = candidates
+            .filter { $0.enabled && !manual.contains($0.id) && due($0.id) <= now }
+            .sorted { due($0.id) < due($1.id) }
+            .prefix(duePerTick)
+            .map { (probe: $0, manual: false) }
+        return Array((requested + scheduled).prefix(free))
+    }
+}
+
+/// Manual-poll requests: one empty file per probe, named by its id, written by the app.
+///
+/// A request is removed only once its poll has been claimed, or once it can never be — its
+/// probe is not in the configuration, so a request for a deleted or unapproved probe cannot
+/// wait to run under a later approval. A request that arrives while every poll slot is busy,
+/// or while that probe is already polling, stays for a later tick instead of being dropped.
+enum TriggerProbePollRequests {
+    /// Requests read per tick; a larger backlog is read on later ticks.
+    static let maximumPerTick = 256
+
+    /// Pending requests by probe, without consuming them. A file whose name is not a probe id
+    /// is left alone: it may be the app's atomic write still in flight.
+    static func pending(in directory: URL, fileManager: FileManager = .default) -> [UUID: URL] {
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return [:] }
+        var requests: [UUID: URL] = [:]
+        for file in files {
+            guard requests.count < maximumPerTick else { break }
+            if let id = UUID(uuidString: file.lastPathComponent) { requests[id] = file }
+        }
+        return requests
+    }
+
+    /// Removes the requests that were claimed and those whose probe is not configured.
+    static func settle(
+        _ pending: [UUID: URL],
+        claimed: Set<UUID>,
+        configured: Set<UUID>,
+        fileManager: FileManager = .default
+    ) {
+        for (id, file) in pending where claimed.contains(id) || !configured.contains(id) {
+            try? fileManager.removeItem(at: file)
+        }
+    }
+}
+
 enum TriggerProbeSourceRunner {
     // MARK: - Envelope
 

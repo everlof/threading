@@ -277,34 +277,102 @@ struct TriggerDaemonInboxItem: Sendable {
     let event: TriggerEvent
 }
 
+/// One bounded read of the inbox: the decodable items, and how many files were examined, so a
+/// drain knows whether more may be waiting.
+struct TriggerDaemonInboxPage: Sendable {
+    let items: [TriggerDaemonInboxItem]
+    let examined: Int
+}
+
 enum TriggerDaemonInbox {
-    static func load(limit: Int = 100) throws -> [TriggerDaemonInboxItem] {
+    /// Files examined per read; a drain reads again while a page comes back full.
+    static let pageLimit = 100
+    /// Files kept aside for inspection. The oldest is evicted beyond this, so a source that
+    /// writes nothing but malformed files cannot fill the disk.
+    static let quarantineLimit = 64
+    static let quarantineDirectoryName = "Quarantine"
+
+    /// Why a file was set aside. Recorded in the journal; the file's content never is.
+    enum QuarantineReason: String, Sendable {
+        /// Not a `TriggerEvent` envelope at all.
+        case undecodable
+        /// A well-formed envelope the store refuses on its bounds.
+        case invalid
+    }
+
+    /// Reads at most `limit` files, oldest name first. A file that does not decode is moved
+    /// to the quarantine and the read continues: one bad file used to fail the whole read, so
+    /// every later event waited behind it for good.
+    static func load(
+        limit: Int = pageLimit,
+        directory: URL = TriggerDaemonLocations.inbox,
+        journal: EventLog = .shared
+    ) throws -> TriggerDaemonInboxPage {
         let manager = FileManager.default
         try manager.createDirectory(
-            at: TriggerDaemonLocations.inbox,
+            at: directory,
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
         let files = try manager.contentsOfDirectory(
-            at: TriggerDaemonLocations.inbox,
+            at: directory,
             includingPropertiesForKeys: [.creationDateKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
         ).filter { $0.pathExtension == "json" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-            .prefix(max(1, min(limit, 100)))
+            .prefix(max(1, min(limit, pageLimit)))
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try files.map { file in
-            TriggerDaemonInboxItem(
-                file: file,
-                event: try decoder.decode(TriggerEvent.self, from: Data(contentsOf: file))
-            )
+        var items: [TriggerDaemonInboxItem] = []
+        for file in files {
+            do {
+                items.append(TriggerDaemonInboxItem(
+                    file: file,
+                    event: try decoder.decode(TriggerEvent.self, from: Data(contentsOf: file))
+                ))
+            } catch is DecodingError {
+                try quarantine(file, reason: .undecodable, journal: journal)
+            }
         }
+        return TriggerDaemonInboxPage(items: items, examined: files.count)
     }
 
     static func acknowledge(_ item: TriggerDaemonInboxItem) throws {
         try FileManager.default.removeItem(at: item.file)
+    }
+
+    /// Moves `file` into the inbox's quarantine, evicting the oldest beyond `quarantineLimit`.
+    static func quarantine(_ file: URL, reason: QuarantineReason, journal: EventLog = .shared) throws {
+        let manager = FileManager.default
+        let directory = file.deletingLastPathComponent()
+            .appendingPathComponent(quarantineDirectoryName, isDirectory: true)
+        try manager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        let bytes = (try? manager.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0
+        // The moment leads the name so eviction by name is eviction by age.
+        let stamp = String(format: "%020.0f", (Date().timeIntervalSince1970 * 1_000).rounded())
+        let destination = directory.appendingPathComponent(
+            "\(stamp)-\(file.lastPathComponent)",
+            isDirectory: false
+        )
+        try manager.moveItem(at: file, to: destination)
+        let kept = try manager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ).sorted { $0.lastPathComponent < $1.lastPathComponent }
+        let evicted = kept.dropLast(quarantineLimit)
+        for old in evicted { try? manager.removeItem(at: old) }
+        journal.record(.triggers, "Quarantined a trigger inbox file", [
+            "reason": reason.rawValue,
+            "bytes": String(bytes),
+            "evicted": String(evicted.count),
+        ])
+        ThreadingLogger.app.error("Trigger inbox file quarantined: \(reason.rawValue, privacy: .public)")
     }
 }
 

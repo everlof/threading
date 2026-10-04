@@ -103,11 +103,39 @@ time may return through the opening dispatch. The assessment-to-fix handoff has 
 a restart. A stage interrupted while its prompt may already have been delivered settles for
 attention instead of guessing, duplicating work, or accidentally restarting assessment.
 
+**Release is per trigger, never a global window.** The queue used to read the 100 oldest held runs
+and skip the ones still held, so a burst behind one trigger's concurrency limit (or a run of a
+superseded revision) filled the window and stopped every other trigger's run behind it.
+`TriggerStore.queueReleaseCandidates()` now returns one row per trigger that can take work: enabled
+at its held runs' revision with no pending draft, source enabled, and its active count below the
+revision's `maximumConcurrentRuns`, which SQL compares against the revision's own JSON limit. The
+engine drops candidates inside quiet hours, then takes at most each trigger's free slots, oldest
+first through `trigger_run_trigger_state`, up to 100 per release. The cost is one indexed row per
+live definition (the catalogue's 500 bound) plus the runs actually released; a trigger at its limit
+costs one row however deep its queue. `TriggerQueueFairnessTests` holds a 150-run burst on one
+trigger with `maximumConcurrentRuns = 1` and requires another trigger's run to release on the
+next pass.
+
+**A held run whose authority is gone settles instead of waiting.** Saving an edit (the draft
+`claimDispatch` would refuse it for), activating a different revision, deleting the automation and
+deleting its source each settle that trigger's held, never-started runs as `suppressed`, in the same
+transaction and with a diagnostic naming the reason (`QueuedRunSettlement`), which Activity shows as
+the receipt. The work is the stranded runs, found through `trigger_run_trigger_state` or, for a
+source, `trigger_revision_source_kind`. Pausing an automation or a source is not such a change: its
+held runs stay and are released on resume. Receipts stranded before this rule existed are settled
+once at launch by `settleStaleQueuedRuns`, a rowid-cursored pass over held runs.
+
 At launch, `TriggerRuntime` republishes daemon configuration, posts already-received dispatches,
 then drains the daemon inbox. Later inbox notifications ingest, acknowledge and dispatch in that
-order. Redelivery is safe because acceptance is durable and idempotent. One source failure cannot
-stop polling another; per-source status files provide healthy, backoff and authentication-needed
-receipts to the UI.
+order, a page of 100 files at a time until a page comes back short. Redelivery is safe because
+acceptance is durable and idempotent. A file that does not decode as a `TriggerEvent`, or that the
+store refuses on its bounds, is moved to `Inbox/Quarantine/` and the drain continues: one such file
+used to fail the whole read, so every event behind it waited for good. The quarantine keeps the 64
+newest files and evicts older ones; each move writes a `triggers` record to `EventLog` with the
+reason and byte count, never the content. A failure that could succeed later — the store itself,
+or a file that cannot be read — stops the drain and leaves the file for the next one. One source
+failure cannot stop polling another; per-source status files provide healthy, backoff and
+authentication-needed receipts to the UI.
 
 ## Surfaces
 
@@ -187,8 +215,13 @@ executable runs. No tool, extension or theme seam approves or enables a probe.
 **Projection.** `TriggerDaemonConfigurationStore.configuration(for:)` (pure, tested) adds
 `probes` to `sources.json` — approved probes only, paused ones included so **Run now** can poll
 them. The schema version stays 1; an older reader ignores the field. Run now writes an empty
-request file under `Poll Requests/` that the daemon consumes on its next five-second tick,
-whether or not the probe is still approved by then.
+request file under `Poll Requests/`. The daemon removes it only once its poll has been claimed,
+or once it never can be because the probe is no longer in a readable configuration (so a request
+for a deleted or unapproved probe cannot run under a later approval). A request that finds both
+poll slots busy, or that probe already polling, stays for a later tick: the daemon used to delete
+every request before claiming, and a busy tick dropped it. `TriggerProbeClaimPolicy` and
+`TriggerProbePollRequests` live in the shared file, so `TriggerDaemonDeliveryTests` runs the
+daemon's rule.
 
 **Polling.** `Targets/TriggerDaemon/TriggerProbeSources.swift` holds the pipeline and is compiled
 into both the daemon and the app, so the app's tests run what the daemon runs. Per poll it checks

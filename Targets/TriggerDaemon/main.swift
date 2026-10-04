@@ -392,19 +392,13 @@ private actor ProbeSchedule {
         entries = decoded
     }
 
-    /// Requested manual polls first, then the oldest scheduled deadlines; never a source already
-    /// polling, and never more than the concurrency bound in flight.
-    func claim(_ probes: [TriggerProbeDaemonSource], manual: Set<UUID>, now: Date) -> [(TriggerProbeDaemonSource, Bool)] {
-        let capacity = TriggerProbeDefaults.concurrentPolls - inFlight.count
-        guard capacity > 0 else { return [] }
-        let candidates = probes.filter { !inFlight.contains($0.id) }
-        let requested = candidates.filter { manual.contains($0.id) }.map { ($0, true) }
-        let scheduled = candidates
-            .filter { $0.enabled && !manual.contains($0.id) && (entries[$0.id.uuidString]?.due ?? .distantPast) <= now }
-            .sorted { (entries[$0.id.uuidString]?.due ?? .distantPast) < (entries[$1.id.uuidString]?.due ?? .distantPast) }
-            .prefix(TriggerProbeDefaults.duePerTick)
-            .map { ($0, false) }
-        let claimed = Array((requested + scheduled).prefix(capacity))
+    /// `TriggerProbeClaimPolicy` over this daemon's deadlines and in-flight set.
+    func claim(_ probes: [TriggerProbeDaemonSource], manual: Set<UUID>, now: Date) -> [(probe: TriggerProbeDaemonSource, manual: Bool)] {
+        let deadlines = entries
+        let claimed = TriggerProbeClaimPolicy.claim(
+            probes, manual: manual, inFlight: inFlight,
+            due: { deadlines[$0.uuidString]?.due ?? .distantPast }, now: now
+        )
         for (probe, _) in claimed { inFlight.insert(probe.id) }
         return claimed
     }
@@ -430,9 +424,18 @@ private enum ProbeLoop {
         let schedule = ProbeSchedule()
         let secrets = KeychainProbeSecrets()
         while !Task.isCancelled {
-            let probes = ((try? ConfigurationReader.read())?.probes ?? [])
-            let manual = takePollRequests()
-            for (probe, isManual) in await schedule.claim(probes, manual: manual, now: Date()) {
+            let configuration = try? ConfigurationReader.read()
+            let probes = configuration?.probes ?? []
+            let requests = Locations.pollRequests.map { TriggerProbePollRequests.pending(in: $0) } ?? [:]
+            let claimed = await schedule.claim(probes, manual: Set(requests.keys), now: Date())
+            // Only now is a request consumed: one that found every slot busy stays for a later tick.
+            TriggerProbePollRequests.settle(
+                requests,
+                claimed: Set(claimed.filter(\.manual).map(\.probe.id)),
+                // An unreadable configuration proves nothing about which probes exist.
+                configured: configuration == nil ? Set(requests.keys) : Set(probes.map(\.id))
+            )
+            for (probe, isManual) in claimed {
                 Task.detached(priority: .utility) {
                     let health = await poll(probe, manual: isManual, cursors: cursors, secrets: secrets)
                     await schedule.finish(probe, health: health, at: Date())
@@ -440,20 +443,6 @@ private enum ProbeLoop {
             }
             try? await Task.sleep(for: tick)
         }
-    }
-
-    /// Manual requests are consumed whether or not their source is still configured, so a
-    /// request for a deleted or unapproved probe cannot wait to run under a later approval.
-    private static func takePollRequests() -> Set<UUID> {
-        guard let directory = Locations.pollRequests,
-              let files = try? FileManager.default.contentsOfDirectory(
-                  at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return [] }
-        var ids: Set<UUID> = []
-        for file in files.prefix(256) {
-            try? FileManager.default.removeItem(at: file)
-            if let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent) { ids.insert(id) }
-        }
-        return ids
     }
 
     private static func poll(

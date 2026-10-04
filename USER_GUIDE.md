@@ -112,6 +112,9 @@ sleeping Mac cannot run work; its saved missed-run policy applies when it return
 **Archive successful runs** files the conversation away after a successful report and completion
 of the agent's turn. Its result remains in **Activity**. Failures and requests for your attention
 stay visible. Deleting an automation stops future scheduling and preserves its history.
+An event run still waiting for quiet hours or a free slot when you edit or delete its automation,
+or delete its source, is marked **Suppressed** in **Activity** with the reason; pausing keeps it
+waiting until you resume. One automation's backlog never holds up another automation's runs.
 
 Tasks can be read-only or permit local edits and tests. Event rules also retain **Assess only**
 and **Assess, then fix if straightforward**. Local edits use a clean project checkout or an

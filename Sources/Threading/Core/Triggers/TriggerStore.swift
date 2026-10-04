@@ -79,15 +79,19 @@ actor TriggerStore {
         let database = try readyDatabase()
         try validate(source)
         let payload = try encoder.encode(source)
-        let statement = try database.prepare(Self.upsertSource)
-        try statement
-            .bind(1, source.id.uuidString)
-            .bind(2, source.sourceType)
-            .bind(3, source.enabled ? 1 : 0)
-            .bind(4, source.health.rawValue)
-            .bind(5, source.updatedAt.timeIntervalSince1970)
-            .bind(6, payload)
-            .run()
+        try database.transaction {
+            let statement = try database.prepare(Self.upsertSource)
+            try statement
+                .bind(1, source.id.uuidString)
+                .bind(2, source.sourceType)
+                .bind(3, source.enabled ? 1 : 0)
+                .bind(4, source.health.rawValue)
+                .bind(5, source.updatedAt.timeIntervalSince1970)
+                .bind(6, payload)
+                .run()
+            // A deleted source can never deliver the authority its held runs wait on.
+            if source.isDeleted { _ = try settleQueuedRuns(ofSource: source.id, at: source.updatedAt) }
+        }
         if publishesDaemonConfiguration {
             let shouldRun = try publishDaemonConfiguration()
             Task { @MainActor in
@@ -174,6 +178,10 @@ actor TriggerStore {
             .bind(7, revision.createdAt.timeIntervalSince1970)
             .bind(8, encoder.encode(revision))
             .run()
+        // `claimDispatch` refuses any run while a draft is pending and the draft will supersede
+        // the revision those runs were reserved under, so they settle now rather than waiting.
+        try settleQueuedRuns(triggerID: definition.id, keeping: revision.id,
+                             reason: .revisionSuperseded, at: definition.updatedAt)
     }
 
     func activate(triggerID: TriggerID, revisionID: TriggerRevisionID, at date: Date = Date()) throws {
@@ -195,6 +203,7 @@ actor TriggerStore {
             .bind(4, triggerID.uuidString)
             .run()
         try resetSchedule(triggerID, at: date)
+        try settleQueuedRuns(triggerID: triggerID, keeping: revisionID, reason: .revisionSuperseded, at: date)
         }
         republishDaemonConfiguration()
         changed()
@@ -462,28 +471,161 @@ actor TriggerStore {
         return result
     }
 
-    /// Runs held before their first launch. A run that already owns a session belongs to the
-    /// assessment/fix lifecycle and must never be recycled through the opening dispatch.
-    func queuedDispatches(limit: Int = 100) throws -> [TriggerDispatch] {
-        let statement = try readyDatabase().prepare(Self.selectQueuedDispatches)
+    /// A trigger whose oldest held run may start now as far as SQL can tell: the definition is
+    /// enabled at the run's revision with no pending draft, its source is enabled, and its active
+    /// runs are below the revision's concurrency limit. Quiet hours are a clock rule, applied by
+    /// the engine to this bounded list.
+    struct QueueReleaseCandidate: Sendable {
+        let triggerID: TriggerID
+        let revision: TriggerRevision
+        let activeRunCount: Int
+    }
+
+    /// One row per eligible trigger that has held work, oldest held run first. Bounded by the
+    /// catalogue (at most 500 live definitions), never by queue depth, so a
+    /// burst held behind one trigger's concurrency limit cannot hide another trigger's run the
+    /// way a global oldest-first window did.
+    func queueReleaseCandidates() throws -> [QueueReleaseCandidate] {
+        let statement = try readyDatabase().prepare(Self.selectQueueReleaseCandidates)
         defer { statement.finalize() }
-        _ = statement.bind(1, max(1, min(limit, 100)))
+        var result: [QueueReleaseCandidate] = []
+        while try statement.step() {
+            guard let raw = statement.text(0), let triggerID = TriggerID(uuidString: raw),
+                  let revisionData = statement.data(1) else {
+                throw StoreError.invalidRecord("queue candidate data")
+            }
+            result.append(QueueReleaseCandidate(
+                triggerID: triggerID,
+                revision: try decoder.decode(TriggerRevision.self, from: revisionData),
+                activeRunCount: statement.int(2)
+            ))
+        }
+        return result
+    }
+
+    /// The oldest held, never-started runs of one trigger at one revision.
+    func queuedDispatches(
+        triggerID: TriggerID,
+        revision: TriggerRevision,
+        limit: Int
+    ) throws -> [TriggerDispatch] {
+        let statement = try readyDatabase().prepare(Self.selectQueuedDispatchesForTrigger)
+        defer { statement.finalize() }
+        _ = statement
+            .bind(1, triggerID.uuidString)
+            .bind(2, revision.id.uuidString)
+            .bind(3, max(1, min(limit, TriggerLimits.maximumConcurrentRunsBound)))
         var result: [TriggerDispatch] = []
         while try statement.step() {
-            guard let runData = statement.data(0),
-                  let revisionData = statement.data(1),
-                  let eventData = statement.data(2) else {
+            guard let runData = statement.data(0), let eventData = statement.data(1) else {
                 throw StoreError.invalidRecord("queued dispatch data")
             }
             let run = try decoder.decode(TriggerRun.self, from: runData)
             guard run.startedAt == nil, run.sessionID == nil else { continue }
             result.append(TriggerDispatch(
                 run: run,
-                revision: try decoder.decode(TriggerRevision.self, from: revisionData),
+                revision: revision,
                 event: try decoder.decode(TriggerEvent.self, from: eventData)
             ))
         }
         return result
+    }
+
+    /// Settles held runs that can never start because what authorized them is gone: a revision
+    /// superseded by an edit or activation, a deleted automation, or a deleted source. Run at
+    /// launch for receipts written before this rule existed; afterwards each of those changes
+    /// settles its own runs in the same transaction. Returns how many were settled.
+    @discardableResult
+    func settleStaleQueuedRuns(at date: Date = Date()) throws -> Int {
+        let database = try readyDatabase()
+        var settled = 0
+        var cursor: Int64 = 0
+        while true {
+            let page: [(rowid: Int64, run: TriggerRun, reason: QueuedRunSettlement)] = try {
+                let statement = try database.prepare(Self.selectStaleQueuedRuns)
+                defer { statement.finalize() }
+                _ = statement.bind(1, cursor).bind(2, Self.settlementPage)
+                var rows: [(Int64, TriggerRun, QueuedRunSettlement)] = []
+                while try statement.step() {
+                    guard let data = statement.data(1) else { throw StoreError.invalidRecord("run data") }
+                    let reason: QueuedRunSettlement = statement.int(2) == 1 ? .automationRemoved : .revisionSuperseded
+                    rows.append((Int64(statement.int(0)), try decoder.decode(TriggerRun.self, from: data), reason))
+                }
+                return rows
+            }()
+            guard let last = page.last else { break }
+            cursor = last.rowid
+            try database.transaction {
+                for row in page { try writeSettlement(row.run, reason: row.reason, at: date) }
+            }
+            settled += page.count
+            guard page.count == Self.settlementPage else { break }
+        }
+        for source in try sources() where source.isDeleted {
+            try database.transaction {
+                settled += try settleQueuedRuns(ofSource: source.id, at: date)
+            }
+        }
+        if settled > 0 { changed() }
+        return settled
+    }
+
+    /// Inside the caller's transaction: every held, never-started run of `triggerID` whose
+    /// revision is not `keeping`. An edit, activation or deletion is the change; the runs it
+    /// strands are exactly the ones this touches.
+    @discardableResult
+    private func settleQueuedRuns(
+        triggerID: TriggerID,
+        keeping revisionID: TriggerRevisionID?,
+        reason: QueuedRunSettlement,
+        at date: Date
+    ) throws -> Int {
+        let statement = try readyDatabase().prepare(Self.selectHeldRunsForTrigger)
+        var runs: [TriggerRun] = []
+        do {
+            defer { statement.finalize() }
+            _ = statement.bind(1, triggerID.uuidString)
+            while try statement.step() {
+                guard let data = statement.data(0) else { throw StoreError.invalidRecord("run data") }
+                let run = try decoder.decode(TriggerRun.self, from: data)
+                if run.triggerRevisionID != revisionID { runs.append(run) }
+            }
+        }
+        for run in runs { try writeSettlement(run, reason: reason, at: date) }
+        return runs.count
+    }
+
+    /// Inside the caller's transaction: every held, never-started run whose revision listens to
+    /// a source that has been deleted.
+    private func settleQueuedRuns(ofSource sourceID: TriggerSourceInstallationID, at date: Date) throws -> Int {
+        let statement = try readyDatabase().prepare(Self.selectHeldRunsForSource)
+        var runs: [TriggerRun] = []
+        do {
+            defer { statement.finalize() }
+            _ = statement.bind(1, sourceID.uuidString)
+            while try statement.step() {
+                guard let data = statement.data(0) else { throw StoreError.invalidRecord("run data") }
+                runs.append(try decoder.decode(TriggerRun.self, from: data))
+            }
+        }
+        for run in runs { try writeSettlement(run, reason: .sourceRemoved, at: date) }
+        return runs.count
+    }
+
+    private func writeSettlement(_ original: TriggerRun, reason: QueuedRunSettlement, at date: Date) throws {
+        var run = original
+        run.state = .suppressed
+        run.settledAt = date
+        run.holdReason = nil
+        run.boundedDiagnostic = reason.diagnostic
+        let statement = try readyDatabase().prepare(Self.updateRun)
+        try statement
+            .bind(1, run.state.rawValue)
+            .bind(2, run.sessionID?.uuidString)
+            .bind(3, run.settledAt?.timeIntervalSince1970)
+            .bind(4, encoder.encode(run))
+            .bind(5, run.id.uuidString)
+            .run()
     }
 
     /// Authorized second stages which were durably recorded before the assessment runtime
@@ -574,7 +716,7 @@ actor TriggerStore {
               (revision.accountHandleName?.utf8.count ?? 0) <= 256,
               (revision.model?.utf8.count ?? 0) <= 256,
               (revision.reasoningEffort?.utf8.count ?? 0) <= 256,
-              (1 ... 8).contains(revision.limits.maximumConcurrentRuns),
+              (1 ... TriggerLimits.maximumConcurrentRunsBound).contains(revision.limits.maximumConcurrentRuns),
               (1 ... 1_440).contains(revision.limits.maximumRuntimeMinutes),
               revision.conditions.count <= 32,
               revision.conditions.allSatisfy({ condition in
@@ -810,15 +952,70 @@ actor TriggerStore {
         ORDER BY runs.queued_at ASC
         LIMIT ?
         """
-    private static let selectQueuedDispatches = """
-        SELECT runs.data, revisions.data, events.data
+    /// Held runs of one trigger. `trigger_run_trigger_state` keeps equal keys in rowid order,
+    /// so this reads only that trigger's queue, oldest first, with no sort.
+    private static let selectQueuedDispatchesForTrigger = """
+        SELECT runs.data, events.data
         FROM trigger_run runs
-        JOIN trigger_revision revisions ON revisions.id = runs.trigger_revision_id
         JOIN trigger_event events ON events.event_key = runs.event_key
-        WHERE runs.state = 'queued'
-        ORDER BY runs.queued_at ASC
+        WHERE runs.trigger_id = ? AND runs.state = 'queued'
+          AND runs.session_id IS NULL AND runs.trigger_revision_id = ?
+        ORDER BY runs.rowid
         LIMIT ?
         """
+    /// Concurrency is compared in SQL against the revision's own limit, so a trigger at its
+    /// limit costs one row here however many runs it holds. Only definitions the catalogue
+    /// bounds participate; scheduled rules have no source row and never queue.
+    private static let selectQueueReleaseCandidates = """
+        SELECT trigger_id, revision_data, active FROM (
+          SELECT definitions.id AS trigger_id,
+                 revisions.data AS revision_data,
+                 json_extract(CAST(revisions.data AS TEXT), '$.limits.maximumConcurrentRuns') AS maximum,
+                 (SELECT COUNT(*) FROM trigger_run active
+                   WHERE active.trigger_id = definitions.id
+                     AND active.state IN (\(activeStates), 'queued')
+                     AND (active.state <> 'queued' OR active.session_id IS NOT NULL)) AS active,
+                 (SELECT held.rowid FROM trigger_run held
+                   WHERE held.trigger_id = definitions.id AND held.state = 'queued'
+                     AND held.session_id IS NULL
+                     AND held.trigger_revision_id = definitions.active_revision_id
+                   ORDER BY held.rowid LIMIT 1) AS oldest
+          FROM trigger_definition definitions
+          JOIN trigger_revision revisions ON revisions.id = definitions.active_revision_id
+          JOIN trigger_source sources ON sources.id = revisions.source_installation_id
+          WHERE definitions.enabled = 1
+            AND definitions.draft_revision_id IS NULL
+            AND sources.enabled = 1
+        )
+        WHERE oldest IS NOT NULL AND active < maximum
+        ORDER BY oldest
+        """
+    private static let heldRun = "runs.state = 'queued' AND runs.session_id IS NULL"
+    private static let selectHeldRunsForTrigger =
+        "SELECT runs.data FROM trigger_run runs WHERE runs.trigger_id = ? AND \(heldRun)"
+    private static let selectHeldRunsForSource = """
+        SELECT runs.data FROM trigger_revision revisions
+        CROSS JOIN trigger_run runs
+          ON runs.trigger_id = revisions.trigger_id AND runs.trigger_revision_id = revisions.id
+        WHERE revisions.source_installation_id = ? AND \(heldRun)
+        """
+    /// Held runs whose definition no longer names their revision, or names a pending draft
+    /// that `claimDispatch` would refuse them for. Column 2 is 1 for a deleted definition.
+    private static let selectStaleQueuedRuns = """
+        SELECT runs.rowid, runs.data,
+               CASE WHEN definitions.active_revision_id IS NULL
+                     AND definitions.draft_revision_id IS NULL THEN 1 ELSE 0 END
+        FROM trigger_run runs
+        LEFT JOIN trigger_definition definitions ON definitions.id = runs.trigger_id
+        WHERE runs.rowid > ? AND \(heldRun)
+          AND (definitions.id IS NULL
+               OR definitions.active_revision_id IS NULL
+               OR definitions.active_revision_id <> runs.trigger_revision_id
+               OR definitions.draft_revision_id IS NOT NULL)
+        ORDER BY runs.rowid
+        LIMIT ?
+        """
+    private static let settlementPage = 100
     private static let selectFixStageDispatches = """
         SELECT runs.data, revisions.data, events.data
         FROM trigger_run runs
@@ -846,13 +1043,16 @@ actor TriggerStore {
         ORDER BY queued_at ASC
         LIMIT ?
         """
+    /// Run states that hold one of a trigger's concurrency slots, besides a `queued` run that
+    /// already owns a session. Spelled as one `IN` list so `trigger_run_trigger_state` reads
+    /// only those rows rather than every receipt the trigger ever wrote.
+    private static let activeStates =
+        "'received', 'assessing', 'fixQueued', 'fixing', 'running', 'finishing'"
     private static let selectActiveRunCount = """
         SELECT COUNT(*) FROM trigger_run
         WHERE trigger_id = ?
-          AND (
-            state IN ('received', 'assessing', 'fixQueued', 'fixing', 'running', 'finishing')
-            OR (state = 'queued' AND session_id IS NOT NULL)
-          )
+          AND state IN (\(activeStates), 'queued')
+          AND (state <> 'queued' OR session_id IS NOT NULL)
         """
 }
 
@@ -927,6 +1127,7 @@ extension TriggerStore {
                 .bind(3, id.uuidString)
                 .run()
             try resetSchedule(id, at: date)
+            try settleQueuedRuns(triggerID: id, keeping: nil, reason: .automationRemoved, at: date)
         }
         republishDaemonConfiguration()
         changed()

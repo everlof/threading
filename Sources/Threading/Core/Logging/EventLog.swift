@@ -76,6 +76,10 @@ final class EventLog: @unchecked Sendable {
         /// so a run that misfired unobserved can only be reconstructed from what it wrote down.
         /// See `curfew.md`.
         case curfew
+
+        /// Triggers. Its own category because the inbox is drained when a background daemon
+        /// says so, and a file set aside there is otherwise invisible. Never event content.
+        case triggers
     }
 
     /// How the launch before this one ended, as *this* launch found it.
