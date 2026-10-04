@@ -184,9 +184,14 @@ final class MacMailDelivery {
         let targetName = Self.title(of: targetID)
         let mailbox = mailbox
         let mailboxes = mailboxes
-        let hosted = mailboxes.binding(for: targetID)?.address
         let callerHosted = mailboxes.binding(for: callerID)
         Task { @MainActor in
+            // Asked before routing, not read from this run's bindings: after a relaunch a hosted
+            // target has none until something provisions it, and its mail would otherwise land
+            // in a Mac mailbox its agent never reads. A host that cannot be asked keeps the mail
+            // here, and it moves there when the mailbox is bound.
+            let hosted: MailAddress?
+            if case .host(let binding) = await mailboxes.resolve(targetID) { hosted = binding.address } else { hosted = nil }
             do {
                 // A target whose mailbox lives on its host is queued for that host; its
                 // `<macHost>/*` grant stands for the admission the control plane already made.

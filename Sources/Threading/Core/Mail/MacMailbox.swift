@@ -220,8 +220,16 @@ actor MacMailbox {
                      chainTokenBudget: BudgetChange = .keep) async throws -> MailGrant {
         let store = try await openStore()
         return try await refusing {
-            let prior = try await store.mailGrants(recipient: recipient, limit: MacMailDefaults.grantPage).items
-                .first { $0.sender == sender }
+            // The row for exactly this pattern, wherever it is: the first page alone misses it on a
+            // mailbox with more grants, and writing at revision 0 over an existing row conflicts.
+            var prior: MailGrant?
+            var after: Int64 = 0
+            for _ in 0..<MacMailDefaults.grantScanPages {
+                let page = try await store.mailGrants(recipient: recipient, after: after, limit: MacMailDefaults.grantPage)
+                if let row = page.items.first(where: { $0.sender == sender }) { prior = row; break }
+                guard !page.items.isEmpty, page.next > after else { break }
+                after = page.next
+            }
             let budget: Int64?
             switch chainTokenBudget {
             case .keep: budget = prior?.chainTokenBudget
@@ -350,6 +358,8 @@ enum MacMailDefaults {
     static let unannouncedProbe = 20
     static let peerPage = 50
     static let grantPage = 50
+    /// Pages `ensureGrant` reads looking for an existing row; the same bound a move copies.
+    static let grantScanPages = MailboxHandoverDefaults.maximumGrantPages
     /// Project siblings granted `notify` from a host-local session mailbox.
     static let siblingGrantLimit = 32
     /// One inbox page for an agent: the controller's own default.

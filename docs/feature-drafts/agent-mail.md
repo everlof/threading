@@ -128,7 +128,20 @@ What it costs, and how each is paid:
 - **Moving a session.** When a project's execution host changes, its sessions' addresses change.
   The old host keeps a forwarding record (old address → new address, owner-written, revisioned)
   and moves unacknowledged mail with the session at the hand-over; a message arriving at the old
-  address afterwards is forwarded once, not relayed onward again.
+  address afterwards is forwarded once, not relayed onward again. The grants move **exactly**
+  (`MailGrantMirror`): every page of both sides is read, revocations are copied (a revoked sender
+  under a broader `*` grant must stay revoked), and a row the new side kept from an earlier stay is
+  rewritten to what the old side would answer for that pattern, since rows are never deleted. The
+  `<macHost>/*` row provisioning writes on a host mailbox is infrastructure and is neither copied
+  nor rewritten. A mailbox with more than `maximumGrantPages` pages is refused, never half-copied.
+- **Resolving before routing.** A host mailbox's binding (address and credential) lives in memory
+  only, so after a relaunch nothing is bound until a launch provisions it. Anything addressed to a
+  session — `mail_send`, the `send_to_session` fallback — now asks `RemoteSessionMailboxes.resolve`
+  first, which provisions from the project's execution host. A host that cannot be asked
+  (remembered for 30 s) keeps the mail in this Mac's mailbox, and binding the host mailbox later in
+  the run moves that mail there through the hand-over (`onBound`). A `mail_send` that spells one of
+  this Mac's own sessions by its host address is admitted by the same-project rule from the
+  address's id, bound or not, and refused while its host mailbox cannot be confirmed.
 - **Wake still needs the Mac.** The Mac is the authority that launches a remote-host session, so
   a `wake` for a dormant one waits until the Mac can reach the host. Mail is never lost meanwhile;
   `directory` reports the recipient as "wakes when its Mac is connected".

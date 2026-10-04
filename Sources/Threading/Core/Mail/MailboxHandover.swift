@@ -65,6 +65,11 @@ final class MailboxHandover {
         observations.observe(ProjectExecutionHostDidChange.self) { [weak self] event in
             self?.projectMoved(event)
         }
+        // A host mailbox bound after this Mac kept mail for the session (the host was down, or
+        // the app had just started) takes that mail too: the same move, from this Mac.
+        mailboxes.onBound = { [weak self] sessionID, title, endpoint in
+            Task { @MainActor in _ = await self?.move(sessionID, title: title, from: .thisMac, to: .host(endpoint)) }
+        }
     }
 
     private func projectMoved(_ event: ProjectExecutionHostDidChange) {
@@ -178,7 +183,8 @@ final class MailboxHandover {
                 newAddress = try await mailbox.register(sessionID, name: title)
                 mailboxes.forget(sessionID)
             case .host(let endpoint):
-                guard let binding = await mailboxes.provision(sessionID, name: title, endpoint: endpoint) else {
+                guard let binding = await mailboxes.provision(sessionID, name: title, endpoint: endpoint,
+                                                              movesMacMail: false) else {
                     throw RemoteControllerRPC.Failure.transport("the new host's controller did not answer")
                 }
                 newAddress = binding.address
@@ -212,7 +218,8 @@ final class MailboxHandover {
                         try await setForward(from: oldAddress, to: newAddress, on: new)
                     }
                     outcome.moved += try await moveMail(from: oldAddress, to: newAddress, on: side)
-                    outcome.grantsCopied += try await copyGrants(from: oldAddress, on: side, to: newAddress, on: new)
+                    outcome.grantsCopied += try await copyGrants(from: oldAddress, on: side, to: newAddress, on: new,
+                                                                 macHost: macHost)
                     if case .host(let endpoint) = side { kick(newAddress.host); moved(sessionID, from: endpoint) }
                 } catch {
                     if case .host(let endpoint) = side {
@@ -304,41 +311,151 @@ final class MailboxHandover {
         }
     }
 
-    private func copyGrants(from old: MailAddress, on oldSide: Side, to new: MailAddress, on newSide: Side) async throws -> Int {
-        let grants: [MailGrant]
-        switch oldSide {
-        case .thisMac:
-            let store = try await mailbox.controllerStore()
-            grants = try await store.mailGrants(recipient: old, limit: MacMailDefaults.grantPage).items
-        case .host(let endpoint):
-            let page: ControllerPage<MailGrant> = try await rpc(endpoint).owner("mail-grants", [.init(value: old.description)])
-            grants = page.items
-        }
-        var copied = 0
-        for grant in grants where grant.mode != nil {
+    /// Makes the new mailbox's grants say exactly what the old one's did.
+    ///
+    /// Every grant row on both sides is read, page by page — a mailbox an owner has opened to
+    /// many senders has more than one page, and a copy that read one would silently drop the
+    /// rest. Revocations (`mode` none) are copied like any other row: a revocation of one
+    /// sender is what overrides a broader grant (`matchingGrant` takes the most specific row),
+    /// so dropping it would *widen* who may write once the mailbox moved. And a row the new side
+    /// has that the old side does not — left from an earlier stay there — is rewritten to what
+    /// the old side would have answered for that pattern (`MailGrantMirror`), because rows are
+    /// never deleted and a stale row would otherwise keep answering.
+    ///
+    /// One row is not the owner's and is left out both ways: `<macHost>/*`, which provisioning
+    /// writes on every host mailbox as the host-side half of the same-project rule
+    /// (`RemoteSessionMailboxes.provision`). Mirroring a Mac mailbox's absence of it onto the host
+    /// would cut this Mac's sessions off from the moved one.
+    private func copyGrants(
+        from old: MailAddress,
+        on oldSide: Side,
+        to new: MailAddress,
+        on newSide: Side,
+        macHost: HostID
+    ) async throws -> Int {
+        let source = try await allGrants(of: old, on: oldSide)
+        let destination = try await allGrants(of: new, on: newSide)
+        let changes = MailGrantMirror.changes(source: source, destination: destination,
+                                              excluding: ["\(macHost)\(MailGrantMirrorDefaults.hostWildcardSuffix)"])
+        for change in changes {
+            let setting = change.setting
             switch newSide {
             case .thisMac:
-                try await mailbox.ensureGrant(recipient: new, sender: grant.sender, mode: grant.mode,
-                                              allowsInterrupt: grant.allowsInterrupt, chainTokenBudget: .set(grant.chainTokenBudget))
+                try await mailbox.ensureGrant(recipient: new, sender: setting.sender, mode: setting.mode,
+                                              allowsInterrupt: setting.allowsInterrupt,
+                                              chainTokenBudget: .set(setting.chainTokenBudget))
             case .host(let endpoint):
-                let rpc = rpc(endpoint)
-                let page: ControllerPage<MailGrant> = try await rpc.owner("mail-grants", [.init(value: new.description)])
-                let prior = page.items.first { $0.sender == grant.sender }
-                guard prior?.mode != grant.mode || prior?.allowsInterrupt != grant.allowsInterrupt
-                        || prior?.chainTokenBudget != grant.chainTokenBudget else { continue }
                 // The chain budget is the spend fuse; a grant that lost it on the way would let a
                 // moved mailbox's conversations start unlimited work.
                 var arguments: [RemoteControllerRPC.OwnerArgument] = [
-                    .init(value: new.description), .init(value: grant.sender), .init(value: String(prior?.revision ?? 0)),
-                    .init(value: grant.mode!.rawValue),
-                    .init(value: grant.allowsInterrupt ? MailPriority.interrupt.rawValue : MailPriority.normal.rawValue)
+                    .init(value: new.description), .init(value: setting.sender), .init(value: String(change.priorRevision)),
+                    .init(value: setting.mode?.rawValue ?? MailboxHandoverDefaults.revokedModeArgument),
+                    .init(value: setting.allowsInterrupt ? MailPriority.interrupt.rawValue : MailPriority.normal.rawValue)
                 ]
-                if let budget = grant.chainTokenBudget { arguments.append(.init(value: String(budget))) }
-                let _: MailGrant = try await rpc.owner("mail-grant-set", arguments)
+                if let budget = setting.chainTokenBudget { arguments.append(.init(value: String(budget))) }
+                let _: MailGrant = try await rpc(endpoint).owner("mail-grant-set", arguments)
             }
-            copied += 1
         }
-        return copied
+        return changes.count
+    }
+
+    /// Every grant row on `address`, paged and bounded. A mailbox past the bound is refused
+    /// rather than half-copied: a partial copy is a different grant set.
+    private func allGrants(of address: MailAddress, on side: Side) async throws -> [MailGrant] {
+        var grants: [MailGrant] = []
+        var after: Int64 = 0
+        for _ in 0..<MailboxHandoverDefaults.maximumGrantPages {
+            let page: ControllerPage<MailGrant>
+            switch side {
+            case .thisMac:
+                let store = try await mailbox.controllerStore()
+                page = try await store.mailGrants(recipient: address, after: after, limit: MacMailDefaults.grantPage)
+            case .host(let endpoint):
+                page = try await rpc(endpoint).owner("mail-grants", [.init(value: address.description), .init(value: String(after))])
+            }
+            grants += page.items
+            guard !page.items.isEmpty, page.next > after else { return grants }
+            after = page.next
+        }
+        throw MailboxHandoverError.tooManyGrants(address.description)
+    }
+}
+
+/// One grant row's meaning, without its revision.
+struct MailGrantSetting: Equatable, Sendable {
+    let sender: String
+    let mode: MailMode?
+    let allowsInterrupt: Bool
+    let chainTokenBudget: Int64?
+
+    /// As the store keeps it: a revocation carries no interrupt and no budget.
+    init(sender: String, mode: MailMode?, allowsInterrupt: Bool, chainTokenBudget: Int64?) {
+        self.sender = sender
+        self.mode = mode
+        self.allowsInterrupt = mode != nil && allowsInterrupt
+        self.chainTokenBudget = mode == nil ? nil : chainTokenBudget
+    }
+
+    init(_ grant: MailGrant) {
+        self.init(sender: grant.sender, mode: grant.mode, allowsInterrupt: grant.allowsInterrupt,
+                  chainTokenBudget: grant.chainTokenBudget)
+    }
+}
+
+/// Computes the writes that make one mailbox's grant rows resolve exactly as another's. Pure.
+enum MailGrantMirror {
+    struct Change: Equatable, Sendable {
+        let setting: MailGrantSetting
+        let priorRevision: Int
+    }
+
+    /// - Parameter excluding: patterns that are infrastructure rather than the owner's — neither
+    ///   copied nor rewritten.
+    static func changes(source: [MailGrant], destination: [MailGrant], excluding: Set<String> = []) -> [Change] {
+        let wanted = Dictionary(source.map { ($0.sender, MailGrantSetting($0)) }, uniquingKeysWith: { first, _ in first })
+        let current = Dictionary(destination.map { ($0.sender, $0) }, uniquingKeysWith: { first, _ in first })
+        var changes: [Change] = []
+        for sender in Set(wanted.keys).union(current.keys).subtracting(excluding).sorted() {
+            let target = wanted[sender] ?? fallThrough(for: sender, in: wanted)
+            if let prior = current[sender], MailGrantSetting(prior) == target { continue }
+            changes.append(Change(setting: target, priorRevision: current[sender]?.revision ?? 0))
+        }
+        return changes
+    }
+
+    /// What `matchingGrant` would answer on the source for a sender pattern it has no row for:
+    /// the next less specific row (an address's host, then anyone), or a revocation.
+    private static func fallThrough(for pattern: String, in wanted: [String: MailGrantSetting]) -> MailGrantSetting {
+        var broader: [String] = []
+        if pattern != MailGrantMirrorDefaults.anyone {
+            if !pattern.hasSuffix(MailGrantMirrorDefaults.hostWildcardSuffix), let address = try? MailAddress(pattern) {
+                broader.append("\(address.host)\(MailGrantMirrorDefaults.hostWildcardSuffix)")
+            }
+            broader.append(MailGrantMirrorDefaults.anyone)
+        }
+        for candidate in broader {
+            if let setting = wanted[candidate] {
+                return MailGrantSetting(sender: pattern, mode: setting.mode, allowsInterrupt: setting.allowsInterrupt,
+                                        chainTokenBudget: setting.chainTokenBudget)
+            }
+        }
+        return MailGrantSetting(sender: pattern, mode: nil, allowsInterrupt: false, chainTokenBudget: nil)
+    }
+}
+
+enum MailGrantMirrorDefaults {
+    static let anyone = "*"
+    static let hostWildcardSuffix = "/*"
+}
+
+enum MailboxHandoverError: LocalizedError, Equatable {
+    case tooManyGrants(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .tooManyGrants(let address):
+            return "\(address) has more grants than a move copies; its grants were not moved."
+        }
     }
 }
 
@@ -357,4 +474,9 @@ enum MailboxHandoverDefaults {
     /// Times an old host's unmoved part is retried after a successful sync, beyond the move that
     /// first failed, before it is given up and left in the event log.
     static let retryAttempts = 5
+    /// Grant pages read per side of a move (`MacMailDefaults.grantPage` rows each). A mailbox
+    /// has a handful of grants; this bounds a pathological one, which is refused, not truncated.
+    static let maximumGrantPages = 100
+    /// `mail-grant-set`'s spelling of a revocation.
+    static let revokedModeArgument = "none"
 }
