@@ -1,0 +1,8 @@
+# The daemon-suite cases that skip on Linux, and nothing else. xctest-watchdog.sh fails the lane
+# when the skipped set differs from this list, in either direction. Add a line only for a case the
+# platform cannot exercise, with the reason beside it.
+
+# launchd registration is macOS-only (PTYHostCLITests, `XCTSkipIf(true, "launchd is macOS-only")`).
+ThreadingPTYHostTests.PTYHostCLITests/testStatusReadsAMissingServiceAsNotRegistered
+ThreadingPTYHostTests.PTYHostCLITests/testStatusReadsARegisteredLaunchctlAnswer
+ThreadingPTYHostTests.PTYHostCLITests/testStatusReportsAnUnreadableLaunchctlAnswerAsItsOwnFinding

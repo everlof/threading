@@ -3,7 +3,12 @@
 # Runs every case of a Linux XCTest bundle in its own process, and survives one specific upstream
 # deadlock without hiding any other hang.
 #
-#   xctest-watchdog.sh <path/to/Package.xctest> [<Module.Class> ...]
+#   xctest-watchdog.sh [--expected-skips <file>] <path/to/Package.xctest> [<Module.Class> ...]
+#
+# With `--expected-skips`, the set of cases that skip must equal the cases that file lists (one
+# `Module.Class/testName` per line, `#` comments allowed) among those selected: an unlisted skip
+# fails, because it is coverage this lane silently lost, and so does a listed case that ran, because
+# the list must stay the exact record of what this platform cannot exercise.
 #
 # Runs inside the Linux container `scripts/test-ptyd-linux.sh` starts. Linux-only, bash-only: the
 # Swift image has no Python.
@@ -33,6 +38,12 @@ readonly limit_seconds=180
 readonly attempts=5
 readonly deadlock_frame="awaitUsingExpectation"
 
+expected_skips_file=""
+if [[ "${1:-}" == "--expected-skips" ]]; then
+  expected_skips_file="${2:?--expected-skips needs a file}"
+  shift 2
+  [[ -r "${expected_skips_file}" ]] || { echo "xctest-watchdog: cannot read ${expected_skips_file}" >&2; exit 1; }
+fi
 bundle="$1"
 shift
 classes=("$@")
@@ -56,6 +67,7 @@ log="$(mktemp)"
 trap 'rm -f "${log}"' EXIT
 passed=0
 skipped=()
+skipped_names=()
 failed=()
 retries=0
 
@@ -115,6 +127,7 @@ for case_name in "${cases[@]}"; do
         ;;
       skipped)
         skipped+=("${case_name}: $(grep -m1 -o 'Test skipped.*' "${log}")")
+        skipped_names+=("${case_name}")
         break
         ;;
       deadlock)
@@ -147,6 +160,22 @@ done
 echo "xctest-watchdog: $(basename "${bundle}"): ${passed} passed, ${#skipped[@]} skipped, ${#failed[@]} failed, ${retries} harness-deadlock retries"
 if (( ${#skipped[@]} > 0 )); then
   printf '  skipped: %s\n' "${skipped[@]}"
+fi
+if [[ -n "${expected_skips_file}" ]]; then
+  mapfile -t expected < <(sed -e 's/#.*//' -e 's/[[:space:]]*$//' "${expected_skips_file}" | grep -v '^$' || true)
+  for case_name in "${skipped_names[@]}"; do
+    if ! printf '%s\n' "${expected[@]}" | grep -qxF -- "${case_name}"; then
+      echo "xctest-watchdog: ${case_name} skipped but is not in ${expected_skips_file}" >&2
+      failed+=("${case_name} (unexpected skip)")
+    fi
+  done
+  for case_name in "${expected[@]}"; do
+    printf '%s\n' "${cases[@]}" | grep -qxF -- "${case_name}" || continue
+    if ! printf '%s\n' "${skipped_names[@]}" | grep -qxF -- "${case_name}"; then
+      echo "xctest-watchdog: ${case_name} is listed in ${expected_skips_file} but did not skip" >&2
+      failed+=("${case_name} (expected to skip)")
+    fi
+  done
 fi
 if (( ${#failed[@]} > 0 )); then
   printf '  failed: %s\n' "${failed[@]}" >&2
