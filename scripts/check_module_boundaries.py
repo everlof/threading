@@ -11,7 +11,9 @@ import sys
 MODULE_BOUNDARIES = {
     "ControllerRuntime": (
         pathlib.Path("Targets/Controller/Sources/ControllerRuntime"),
-        {"Foundation", "ThreadingController", "ThreadingDomain", "ThreadingPTYClient", "ThreadingPTYHostKit", "ThreadingUsage"},
+        # Darwin/Glibc: the agent tool broker's Unix socket (bind, poll, peer credentials).
+        {"Foundation", "Darwin", "Glibc", "ThreadingController", "ThreadingDomain", "ThreadingPTYClient",
+         "ThreadingPTYHostKit", "ThreadingUsage"},
     ),
     "ThreadingController": (
         pathlib.Path("Packages/ThreadingController/Sources/ThreadingController"),

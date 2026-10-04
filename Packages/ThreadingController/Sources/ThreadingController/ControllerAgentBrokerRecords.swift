@@ -5,6 +5,9 @@ import Foundation
 /// so a reader also proves the socket answers before relying on it.
 public struct ControllerAgentBrokerAdvertisement: Codable, Equatable, Sendable {
     public let socket: String
+    /// The controller executable agents run (`THREADING_CONTROLLER_BIN`) when it is not the
+    /// supervisor's own — an agent under another Unix user needs a copy it can execute.
+    public let agentBinary: String?
     public let since: String
 }
 
@@ -28,9 +31,10 @@ extension ControllerStore {
     static let brokerID = "current"
     static let refusalReasonLimit = 64
 
-    public func advertiseAgentBroker(socket: String) throws -> ControllerAgentBrokerAdvertisement {
+    public func advertiseAgentBroker(socket: String, agentBinary: String? = nil) throws -> ControllerAgentBrokerAdvertisement {
         try Limits.text(socket, field: "agent_socket", maximum: 4096)
-        let value = ControllerAgentBrokerAdvertisement(socket: socket, since: Self.now())
+        if let agentBinary { try Limits.text(agentBinary, field: "agent_binary", maximum: 4096) }
+        let value = ControllerAgentBrokerAdvertisement(socket: socket, agentBinary: agentBinary, since: Self.now())
         try db.transaction {
             try db.run("""
                 INSERT INTO record(kind,id,payload) VALUES(?,?,?)

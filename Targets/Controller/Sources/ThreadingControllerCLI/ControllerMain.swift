@@ -77,11 +77,12 @@ struct ControllerMain {
     worker-configure WORKER_UUID EXPECTED_REVISION MAX_CONCURRENT RECIPE_JSON_FILE
     worker-enable WORKER_UUID EXPECTED_REVISION
     worker-pause WORKER_UUID EXPECTED_REVISION
-    supervise [POLL_MILLISECONDS] [--agent-socket ABSOLUTE_PATH]
+    supervise [POLL_MILLISECONDS] [--agent-socket ABSOLUTE_PATH] [--agent-binary ABSOLUTE_PATH]
       (serves agent tools there, mode 0660, default DATABASE_DIR/agent.sock; children get the
        socket, never the store path. One-shot supervisor-tick and manual launch use a running
        supervisor's socket, or refuse unless THREADING_CONTROLLER_LEGACY_AGENT_DATABASE=1, which
-       hands children the store path: same-account only)
+       hands children the store path: same-account only. --agent-binary names the controller
+       executable agents run when they are another Unix user and cannot execute this one)
     supervisor-tick
     automations [CURSOR]
     automation AUTOMATION_UUID
@@ -296,7 +297,7 @@ struct ControllerMain {
             try count(0)
             let access = await ControllerAgentAccess.resolve(store: store, database: database, allowLegacy: false)
             var agentSocket: String?
-            if case .broker(let socket) = access { agentSocket = socket }
+            if case .broker(let socket, _) = access { agentSocket = socket }
             try output(HostDescription(host: await store.host(), version: .current, agentSocket: agentSocket))
         case "version":
             try count(0); try output(ControllerVersion.current)
@@ -492,16 +493,19 @@ struct ControllerMain {
             try output(await store.setWorkerEnabled(WorkerID(args[0]), expectedRevision: revision, enabled: command == "worker-enable"))
         case "supervise", "supervisor-tick":
             var rest = args
-            var agentSocket: String?
-            if command == "supervise", let flag = rest.firstIndex(of: "--agent-socket") {
+            func absoluteOption(_ name: String) throws -> String? {
+                guard command == "supervise", let flag = rest.firstIndex(of: name) else { return nil }
                 guard flag + 1 < rest.count, rest[flag + 1].hasPrefix("/") else { throw ControllerError.invalidInput("supervisor_arguments") }
-                agentSocket = rest[flag + 1]
-                rest.removeSubrange(flag...(flag + 1))
+                defer { rest.removeSubrange(flag...(flag + 1)) }
+                return rest[flag + 1]
             }
+            let agentSocket = try absoluteOption("--agent-socket")
+            let agentBinary = try absoluteOption("--agent-binary")
             guard rest.count <= (command == "supervise" ? 1 : 0),
                   let interval = rest.isEmpty ? 2_000 : Int(rest[0]) else { throw ControllerError.invalidInput("supervisor_arguments") }
             try await ControllerSupervisorCommand.run(store: store, database: database, intervalMilliseconds: interval,
-                                                      once: command == "supervisor-tick", agentSocket: agentSocket)
+                                                      once: command == "supervisor-tick", agentSocket: agentSocket,
+                                                      agentBinary: agentBinary)
         case "workers":
             let after = try cursor(0); try output(await store.workers(after: after))
         case "worker-add":

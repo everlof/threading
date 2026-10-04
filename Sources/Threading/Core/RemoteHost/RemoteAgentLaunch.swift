@@ -314,10 +314,16 @@ extension RemoteAgentLaunch {
     }
 }
 
-/// The host-local mailbox's launch words: the three variables the controller's `agent-mcp` and
+/// The host-local mailbox's launch words: the variables the controller's `agent-mcp` and
 /// `agent-notice` read, and the stdio server entry that runs `agent-mcp` on the host.
+///
+/// Where the host's supervisor serves agent tools (`agent-broker`), the agent is given that
+/// socket and never the store path, so it holds only its own mailbox credential. An older host,
+/// or one with no resident supervisor, keeps the store path: the agent then opens the store as
+/// the controller's own account, which is only honest when they are one account.
 enum MailboxEnvironment {
     static let databaseKey = "THREADING_CONTROLLER_DATABASE"
+    static let socketKey = "THREADING_CONTROLLER_AGENT_SOCKET"
     static let addressKey = "THREADING_MAILBOX_ADDRESS"
     static let credentialKey = "THREADING_MAILBOX_CREDENTIAL"
     /// Its own server name beside `threading`, so Claude lists `mcp__threading-mail__mail_send`
@@ -327,21 +333,29 @@ enum MailboxEnvironment {
 
     static var allowedToolNames: [String] { tools.map { "mcp__\(serverName)__\($0)" } }
 
+    /// The broker socket when the host serves one, else the store path.
+    private static func access(for binding: RemoteSessionMailboxes.Binding) -> (key: String, value: String) {
+        if let socket = binding.agentSocket { return (socketKey, socket) }
+        return (databaseKey, binding.endpoint.database)
+    }
+
     static func words(for binding: RemoteSessionMailboxes.Binding) -> [String] {
-        [
-            "\(databaseKey)=\(binding.endpoint.database)",
+        let access = access(for: binding)
+        return [
+            "\(access.key)=\(access.value)",
             "\(addressKey)=\(binding.address)",
             "\(credentialKey)=\(binding.credential)"
         ]
     }
 
     static func serverObject(for binding: RemoteSessionMailboxes.Binding) -> [String: Any] {
-        [
+        let access = access(for: binding)
+        return [
             "type": "stdio",
             "command": binding.endpoint.executable,
             "args": ["agent-mcp"],
             "env": [
-                databaseKey: binding.endpoint.database,
+                access.key: access.value,
                 addressKey: binding.address.description,
                 credentialKey: binding.credential
             ]

@@ -63,7 +63,8 @@ public enum ControllerPTYRuntime {
         var environment = launch.spec.environment.merging(secrets) { _, secret in secret }
         environment["THREADING_CONTROLLER_BIN"] = controllerBinary
         switch agentAccess {
-        case .broker(let socket):
+        case .broker(let socket, let agentBinary):
+            if let agentBinary { environment["THREADING_CONTROLLER_BIN"] = agentBinary }
             // Never the store path, not even one a recipe named itself.
             environment[ControllerAgentAccess.socketEnvironment] = socket
             environment[ControllerAgentAccess.databaseEnvironment] = nil

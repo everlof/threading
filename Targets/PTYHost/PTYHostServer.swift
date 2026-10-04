@@ -29,6 +29,7 @@ final class PTYHostServer: @unchecked Sendable {
     // MARK: - Properties
 
     private let socketPath: String
+    private let socketPermissions: mode_t
     private let stateDirectory: URL
     private let build: String
 
@@ -88,8 +89,10 @@ final class PTYHostServer: @unchecked Sendable {
 
     // MARK: - Initialization
 
-    init(socketPath: String, stateDirectory: URL, build: String) {
+    init(socketPath: String, stateDirectory: URL, build: String,
+         socketPermissions: mode_t = PTYHostDefaults.socketPermissions) {
         self.socketPath = socketPath
+        self.socketPermissions = socketPermissions
         self.stateDirectory = stateDirectory
         self.build = build
         journal = PTYHostJournalFile(directory: stateDirectory)
@@ -296,7 +299,7 @@ final class PTYHostServer: @unchecked Sendable {
             close(descriptor)
             return false
         }
-        _ = chmod(socketPath, PTYHostDefaults.socketPermissions)
+        _ = chmod(socketPath, socketPermissions)
         _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL, 0) | O_NONBLOCK)
 
         listener = descriptor

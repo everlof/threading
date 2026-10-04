@@ -40,8 +40,9 @@ public struct ControllerBrokerFailure: Error, Equatable, CustomStringConvertible
 
 /// How a launched agent reaches its tools. Chosen by the dispatcher, never by the recipe.
 public enum ControllerAgentAccess: Sendable, Equatable {
-    /// The resident supervisor's broker. The child gets this socket and no store path.
-    case broker(socket: String)
+    /// The resident supervisor's broker. The child gets this socket and no store path, and
+    /// `agentBinary` (when set) as the controller executable it runs its tools with.
+    case broker(socket: String, agentBinary: String?)
     /// Compatibility for a store with no resident supervisor (a manual `launch`, a one-shot
     /// `supervisor-tick`): the child opens the owner store itself, so this is honest only when
     /// the agent and the controller are one account that already trust each other.
@@ -56,7 +57,7 @@ public enum ControllerAgentAccess: Sendable, Equatable {
     public static func resolve(store: ControllerStore, database: String, allowLegacy: Bool) async -> ControllerAgentAccess? {
         if let advertised = try? await store.agentBrokerAdvertisement(),
            ControllerAgentBrokerClient.isServing(socket: advertised.socket) {
-            return .broker(socket: advertised.socket)
+            return .broker(socket: advertised.socket, agentBinary: advertised.agentBinary)
         }
         return allowLegacy ? .legacyDatabase(database) : nil
     }

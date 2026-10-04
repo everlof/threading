@@ -36,6 +36,9 @@ enum PTYHostDefaults {
     /// authorization boundary for this protocol; the socket mode restates it for anything that
     /// ever moves the file.
     static let socketPermissions: mode_t = 0o600
+    /// `--group-socket`: the controller's account reaches a daemon run as the agents' own user
+    /// through the socket's group. The directory and its group are then the boundary.
+    static let groupSocketPermissions: mode_t = 0o660
 
     /// The state directory, created and then re-applied, because it may already exist from a run
     /// that used the default mask.

@@ -272,5 +272,17 @@ class BrokerTests(unittest.TestCase):
         self.assertIn("agent_broker_unavailable", self.call("launch", self.worker, self.recipe("exit"), ok=False).stderr)
 
 
+    def test_ptyd_group_socket_is_group_writable_and_default_stays_owner_only(self):
+        self.assertEqual(stat.S_IMODE(os.stat(self.socket).st_mode), 0o600)
+        shared = self.root / "g.sock"
+        daemon = subprocess.Popen([PTYD, "--socket", str(shared), "--state", str(self.root / "gpty"), "--group-socket"],
+                                  stdout=self.log, stderr=self.log)
+        try:
+            self.wait(lambda: shared.exists())
+            self.assertEqual(stat.S_IMODE(os.stat(shared).st_mode), 0o660)
+        finally:
+            daemon.terminate(); daemon.wait(timeout=10)
+
+
 if __name__ == "__main__":
     unittest.main()

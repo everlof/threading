@@ -205,8 +205,9 @@ enum PTYHostCLI {
         \(PTYHostCLIDefaults.usageExitCode) this usage.
 
         Running the daemon itself:
-               threading-ptyd --socket <path> --state <dir>
+               threading-ptyd --socket <path> --state <dir> [--group-socket]
                threading-ptyd \(PTYHostDefaultLocations.defaultLocationsArgument)
+        --group-socket makes the socket 0660 so a controller in its group can spawn here.
         """
 
     // MARK: - Parsing

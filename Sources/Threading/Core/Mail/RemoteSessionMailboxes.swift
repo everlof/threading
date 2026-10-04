@@ -26,6 +26,16 @@ final class RemoteSessionMailboxes {
         let endpoint: RemoteControllerEndpoint
         let address: MailAddress
         let credential: String
+        /// The host supervisor's agent-tool socket, when it advertises `agent-broker` and one is
+        /// answering; the launch then passes it instead of the store path.
+        var agentSocket: String? = nil
+    }
+
+    /// The part of the host's `host` answer a launch needs. An older host reports no features.
+    private struct HostFeatures: Decodable {
+        static let agentBroker = "agent-broker"
+        let features: [String]?
+        let agentSocket: String?
     }
 
     /// Where a session's mail is kept, for the Info panel's note.
@@ -87,7 +97,9 @@ final class RemoteSessionMailboxes {
     /// then keeps today's Mac-side mailbox rather than waiting.
     ///
     /// Owner work, in order: peer the two stores (`MacMailSync.ensurePeered`), `mail-register`
-    /// the address under the session's title, read its `mail-credential`, and grant this Mac's
+    /// the address under the session's title, ask for its `mail-credential` (a host that stores
+    /// digests issues a fresh one, revoking the last; an older host reads it back), learn whether
+    /// the host serves agent tools on a broker socket (`host`), and grant this Mac's
     /// sessions `notify` on it (`<macHost>/*`). That grant is the host-side half of the
     /// same-project rule: this Mac's control plane admits a sender before anything is queued for
     /// a host mailbox, so the host need not know the project.
@@ -122,6 +134,9 @@ final class RemoteSessionMailboxes {
                 .init(value: address.description), .init(value: MacMailbox.mailboxName(name))
             ])
             let credential: String = try await rpc.owner("mail-credential", [.init(value: address.description)])
+            // Best effort: without an answer the launch keeps the store path, as before.
+            let facts = try? await rpc.owner("host", as: HostFeatures.self)
+            let agentSocket = facts?.features?.contains(HostFeatures.agentBroker) == true ? facts?.agentSocket : nil
             let pattern = "\(macHost)/*"
             let grants: ControllerPage<MailGrant> = try await rpc.owner("mail-grants", [.init(value: address.description)])
             let prior = grants.items.first { $0.sender == pattern }
@@ -132,7 +147,7 @@ final class RemoteSessionMailboxes {
                     .init(value: MailPriority.interrupt.rawValue)
                 ])
             }
-            let binding = Binding(endpoint: endpoint, address: address, credential: credential)
+            let binding = Binding(endpoint: endpoint, address: address, credential: credential, agentSocket: agentSocket)
             bindings[sessionID] = binding
             return binding
         } catch {

@@ -126,8 +126,10 @@ final class RemoteSessionMailboxTests: XCTestCase {
         let provisioned = await mailboxes.provision(session, name: "Deploy", endpoint: endpoint())
         let binding = try XCTUnwrap(provisioned)
         XCTAssertEqual(binding.address, MailAddress(host: remoteHost.id, kind: .session, id: session.rawValue))
-        let credential = try await remote.mailboxCredential(binding.address)
-        XCTAssertEqual(binding.credential, credential)
+        // The host keeps only a digest; the credential the launch carries is the one that works.
+        let directory = try await remote.mailboxRequest(address: binding.address, credential: binding.credential, request: .mailDirectory)
+        XCTAssertEqual(directory.address, binding.address)
+        XCTAssertNil(binding.agentSocket, "a host that reports no agent-broker keeps the store path")
         let grants = try await remote.mailGrants(recipient: binding.address).items
         XCTAssertEqual(grants.map(\.sender), ["\(macHost.id)/*"])
         XCTAssertEqual(grants.first?.mode, .notify)
@@ -159,6 +161,34 @@ final class RemoteSessionMailboxTests: XCTestCase {
         XCTAssertTrue(stale.note?.contains("can’t be reached") == true)
     }
 
+    func testAHostWithAnAgentBrokerGivesTheSessionItsSocketAndNotTheStorePath() async throws {
+        let remote = try ControllerStore(path: directory.appendingPathComponent("host/controller.db").path)
+        let remoteHost = try await remote.host()
+        let mac = MacMailbox(databaseURL: directory.appendingPathComponent("mac/mailbox.db"))
+        let mailboxes = RemoteSessionMailboxes()
+        let fake = OwnerRPCFake(store: remote)
+        fake.agentSocket = "/run/threading-agent/agent.sock"
+        mailboxes.runner = fake
+        mailboxes.mailbox = mac
+        mailboxes.ensurePeered = { _ in remoteHost.id }
+        let session = AgentSession(kind: .claude, title: "Deploy")
+        let provisioned = await mailboxes.provision(session.id, name: "Deploy", endpoint: endpoint())
+        let binding = try XCTUnwrap(provisioned)
+        XCTAssertEqual(binding.agentSocket, "/run/threading-agent/agent.sock")
+
+        let integration = RemoteAgentLaunch.Integration.make(
+            for: session, context: context(home: "/home/me"), reportsLifecycle: true,
+            allowedTools: ["list_sessions"], mailbox: binding
+        )
+        XCTAssertTrue(integration.environment.contains("THREADING_CONTROLLER_AGENT_SOCKET=/run/threading-agent/agent.sock"))
+        XCTAssertFalse(integration.environment.contains { $0.hasPrefix(MailboxEnvironment.databaseKey) })
+        let config = try XCTUnwrap(integration.payloads.first { $0.variable == RemoteAgentLaunchDefaults.mcpConfigVariable })
+        let servers = try XCTUnwrap(config.object.value["mcpServers"] as? [String: Any])
+        let env = try XCTUnwrap((servers[MailboxEnvironment.serverName] as? [String: Any])?["env"] as? [String: String])
+        XCTAssertEqual(env[MailboxEnvironment.socketKey], "/run/threading-agent/agent.sock")
+        XCTAssertNil(env[MailboxEnvironment.databaseKey])
+    }
+
     func testAnUnreachableHostKeepsTheMailboxOnThisMac() async {
         let mailboxes = RemoteSessionMailboxes()
         let fake = OwnerRPCFake(store: nil)
@@ -186,6 +216,8 @@ final class RoutingOwnerRPCFake: RemoteHostCommandRunning, @unchecked Sendable {
 final class OwnerRPCFake: RemoteHostCommandRunning, @unchecked Sendable {
     let store: ControllerStore?
     var offline = false
+    /// When set, `host` answers like a host whose supervisor serves agent tools there.
+    var agentSocket: String?
 
     init(store: ControllerStore?) { self.store = store }
 
@@ -196,8 +228,9 @@ final class OwnerRPCFake: RemoteHostCommandRunning, @unchecked Sendable {
         }
         let semaphore = DispatchSemaphore(value: 0)
         let box = Box()
+        let agentSocket = agentSocket
         Task.detached {
-            box.value = try? await Self.answer(store, bytes)
+            box.value = try? await Self.answer(store, bytes, agentSocket: agentSocket)
             semaphore.signal()
         }
         semaphore.wait()
@@ -205,12 +238,15 @@ final class OwnerRPCFake: RemoteHostCommandRunning, @unchecked Sendable {
         return .init(output: output, termination: .exited(0))
     }
 
-    private static func answer(_ store: ControllerStore, _ bytes: Data) async throws -> String {
+    private static func answer(_ store: ControllerStore, _ bytes: Data, agentSocket: String?) async throws -> String {
         let request = try JSONSerialization.jsonObject(with: bytes) as! [String: Any]
         let args = (request["arguments"] as! [[String: Any]]).map { ($0["value"] as? String) ?? ($0["text"] as? String) ?? "" }
         func encode<T: Encodable>(_ value: T) throws -> String { String(decoding: try JSONEncoder().encode(value), as: UTF8.self) + "\n" }
         switch request["command"] as! String {
-        case "host": return try encode(try await store.host())
+        case "host":
+            guard let agentSocket else { return try encode(try await store.host()) }
+            struct BrokerHost: Encodable { let id: HostID; let features: [String]; let agentSocket: String }
+            return try encode(BrokerHost(id: try await store.host().id, features: ["agent-broker"], agentSocket: agentSocket))
         case "mail-register": return try encode(try await store.registerMailbox(MailAddress(args[0]), name: args[1]))
         case "mail-credential": return try encode(try await store.mailboxCredential(MailAddress(args[0])))
         case "mail-grants": return try encode(try await store.mailGrants(recipient: MailAddress(args[0])))

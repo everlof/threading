@@ -82,5 +82,49 @@ class HostTests(unittest.TestCase):
                 installer.install(bundle, home)
 
 
+    def test_install_splits_controller_and_agent_user_units(self):
+        with tempfile.TemporaryDirectory(prefix='host-') as temp:
+            root = Path(temp); bundle = self.bundle(root)
+            single = root / 'single'; single.mkdir(mode=0o700)
+            installer.install(bundle, single)
+            unit = (single / '.config/systemd/user/threading-controller.service').read_text()
+            self.assertIn('supervise 2000\n', unit)
+            self.assertIn('UMask=0077', (single / '.config/systemd/user/threading-ptyd.service').read_text())
+
+            controller = root / 'controller'; controller.mkdir(mode=0o700)
+            result = installer.install(bundle, controller, role='controller', agent_socket='/srv/threading-shared/agent.sock')
+            self.assertEqual(result['units'], ['threading-controller'])
+            units = controller / '.config/systemd/user'
+            self.assertFalse((units / 'threading-ptyd.service').exists())
+            self.assertIn('supervise 2000 --agent-socket /srv/threading-shared/agent.sock\n',
+                          (units / 'threading-controller.service').read_text())
+
+            agent = root / 'agent'; agent.mkdir(mode=0o700)
+            result = installer.install(bundle, agent, role='ptyd', ptyd_socket='/srv/threading-shared/ptyd.sock')
+            self.assertEqual(result['units'], ['threading-ptyd'])
+            text = (agent / '.config/systemd/user/threading-ptyd.service').read_text()
+            self.assertIn('--socket /srv/threading-shared/ptyd.sock', text)
+            self.assertIn('--group-socket', text)
+            self.assertIn('UMask=0027', text)
+            for bad in [dict(role='ptyd', agent_socket='/x/a.sock'), dict(role='controller', agent_socket='relative'),
+                        dict(role='controller', agent_socket='/x/../a.sock'), dict(role='nobody')]:
+                with self.assertRaises(ValueError):
+                    installer.install(bundle, root / 'agent', **bad)
+
+    def bundle(self, root):
+        bundle = root / 'bundle'; bundle.mkdir()
+        for name in installer.FILES:
+            if name == 'threading-controller':
+                (bundle / name).write_bytes(Path(CONTROLLER).read_bytes())
+            else:
+                (bundle / name).write_text('fixture')
+            (bundle / name).chmod(0o700)
+        metadata = json.loads(subprocess.check_output([CONTROLLER, '--version']))
+        manifest = {'version': 1, 'system': 'Linux', 'machine': platform.machine(), 'controller': metadata,
+                    'files': {name: hashlib.sha256((bundle / name).read_bytes()).hexdigest() for name in installer.FILES}}
+        (bundle / 'manifest.json').write_text(json.dumps(manifest))
+        return bundle
+
+
 if __name__ == '__main__':
     unittest.main()

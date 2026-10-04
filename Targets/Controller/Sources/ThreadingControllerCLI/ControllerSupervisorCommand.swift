@@ -12,7 +12,7 @@ enum ControllerSupervisorCommand {
     /// store). A one-shot pass serves none; it dispatches through a resident supervisor's broker
     /// when one answers, or with the legacy store path only when the owner opted in.
     static func run(store: ControllerStore, database: String, intervalMilliseconds: Int, once: Bool,
-                    agentSocket: String?) async throws {
+                    agentSocket: String?, agentBinary: String?) async throws {
         guard (100...60_000).contains(intervalMilliseconds), let binary = Bundle.main.executableURL?.path else {
             throw ControllerError.invalidInput("supervisor_interval")
         }
@@ -29,8 +29,8 @@ enum ControllerSupervisorCommand {
             let served = try ControllerAgentBroker(socketPath: socket, store: try ControllerStore(path: database))
             served.start()
             broker = served
-            do { _ = try await store.advertiseAgentBroker(socket: socket) } catch { served.stop(); throw error }
-            access = .broker(socket: socket)
+            do { _ = try await store.advertiseAgentBroker(socket: socket, agentBinary: agentBinary) } catch { served.stop(); throw error }
+            access = .broker(socket: socket, agentBinary: agentBinary)
         }
         let supervisor = ControllerSupervisor(store: store, database: database, controllerBinary: binary, agentAccess: access)
         // The broker stops (bounded) and its advertisement is withdrawn on every way out.

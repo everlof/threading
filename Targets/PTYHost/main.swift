@@ -32,13 +32,21 @@ import ThreadingPTYHostKit
 /// from the names both ends share in `PTYHostDefaultLocations`. It takes no value, is refused
 /// alongside `--socket`/`--state`, and is used by the plist and by nothing else: every test still
 /// names its own scratch rendezvous explicitly.
+///
+/// **`--group-socket`** makes the rendezvous `0660` instead of `0600`, for a controller host that
+/// runs agents under their own Unix user: the controller's account, in the socket's group, can
+/// then spawn here while the agents cannot read the controller's store. It takes no value, needs
+/// `--socket`/`--state`, and widens nothing else — the directory holding the socket, and its
+/// group, remain the authorization boundary (see pty-host.md, "Linux").
 struct PTYHostArguments {
     let socketPath: String
     let stateDirectory: String
+    var groupSocket = false
 
     private enum Flag {
         static let socket = "--socket"
         static let state = "--state"
+        static let groupSocket = "--group-socket"
     }
 
     /// Parses the arguments after `argv[0]`.
@@ -51,10 +59,18 @@ struct PTYHostArguments {
         var socketPath: String?
         var stateDirectory: String?
         var usesDefaultLocations = false
+        var groupSocket = false
 
         var index = arguments.startIndex
         while index < arguments.endIndex {
             let flag = arguments[index]
+
+            if flag == Flag.groupSocket {
+                guard !groupSocket else { return nil }
+                groupSocket = true
+                index = arguments.index(after: index)
+                continue
+            }
 
             if flag == PTYHostDefaultLocations.defaultLocationsArgument {
                 guard !usesDefaultLocations else { return nil }
@@ -85,7 +101,7 @@ struct PTYHostArguments {
             // Not a fallback for a half-named command line: mixing the two would let a typo in
             // `--socket` quietly become "the default one", which is the failure the required
             // flags exist to prevent.
-            guard socketPath == nil, stateDirectory == nil else { return nil }
+            guard socketPath == nil, stateDirectory == nil, !groupSocket else { return nil }
             guard let directory = PTYHostDefaultLocations.directory() else { return nil }
             return PTYHostArguments(
                 socketPath: directory
@@ -96,7 +112,7 @@ struct PTYHostArguments {
         }
 
         guard let socketPath, let stateDirectory else { return nil }
-        return PTYHostArguments(socketPath: socketPath, stateDirectory: stateDirectory)
+        return PTYHostArguments(socketPath: socketPath, stateDirectory: stateDirectory, groupSocket: groupSocket)
     }
 }
 
@@ -133,7 +149,8 @@ enum ThreadingPTYHost {
         let server = PTYHostServer(
             socketPath: arguments.socketPath,
             stateDirectory: URL(fileURLWithPath: arguments.stateDirectory, isDirectory: true),
-            build: buildString
+            build: buildString,
+            socketPermissions: arguments.groupSocket ? PTYHostDefaults.groupSocketPermissions : PTYHostDefaults.socketPermissions
         )
         switch server.start() {
         case .listening:
