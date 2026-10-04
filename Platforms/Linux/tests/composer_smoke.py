@@ -123,6 +123,19 @@ try:
         eventually(lambda: panel(app).get_child_at_index(0).get_name() == 'No Session Selected',
                    'Escape cancels composer', process)
         composer = open_composer(app, process)
+        editor = eventually(lambda: next((composer.get_child_at_index(index)
+            for index in range(composer.get_child_count())
+            if composer.get_child_at_index(index).get_accessible_id() == 'linux.composer.editor'),
+            None), 'AT-SPI composer editor', process)
+        xdo('key', 'Tab')
+        eventually(lambda: not editor.get_state_set().contains(Atspi.StateType.FOCUSED),
+                   'composer action focus', process)
+        subprocess.run(['import', '-window', window,
+                        str(output / 'composer-empty-placeholder.png')], check=True, timeout=5)
+        xdo('mousemove', '--window', window, '700', '400')
+        xdo('click', '1')
+        eventually(lambda: editor.get_state_set().contains(Atspi.StateType.FOCUSED),
+                   'composer editor refocus', process)
         xdo('key', 'ctrl+a')
         opening = 'Please inspect $(literal) 🦉'
         subprocess.run(['xclip', '-selection', 'clipboard'], input=opening.encode(),
@@ -130,10 +143,6 @@ try:
         xdo('key', 'ctrl+v')
         xdo('key', 'Return')
         xdo('type', '--clearmodifiers', '--delay', '20', 'Second line')
-        editor = eventually(lambda: next((composer.get_child_at_index(index)
-            for index in range(composer.get_child_count())
-            if composer.get_child_at_index(index).get_accessible_id() == 'linux.composer.editor'),
-            None), 'AT-SPI composer editor', process)
         prompt = opening + '\nSecond line'
         editor_text = editor.get_text_iface()
         eventually(lambda: Atspi.Text.get_text(editor_text, 0, -1) == prompt,
@@ -195,7 +204,7 @@ try:
         subprocess.run(['import', '-window', window,
                         str(output / 'composer-accessibility-edited.png')],
                        check=True, timeout=5)
-        assert composer.get_child_at_index(composer.get_child_count() - 1).get_action_iface().do_action(0)
+        xdo('key', 'super+Return')
         marker = project / 'composer-agent.json'
         report = eventually(lambda: json.loads(marker.read_text()) if marker.exists() else None,
                             'agent with opening brief', process)

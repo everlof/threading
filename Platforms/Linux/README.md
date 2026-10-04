@@ -475,13 +475,14 @@ journeys, text shaping, and an accessibility tree. Visible project, agent and te
 shared production content, the idle pane mounts the production placeholder, and command menus use
 production rows. Account rows remain diagnostic;
 a complete production screen is not mounted.
-The right-pane New Session path now mounts the unchanged production `ThemedTextView` in a
-scrolling composer. The Linux TextKit shim shapes and edits Unicode text, wraps and scrolls,
-tracks selection and undo, and accepts SDL committed text and IME preedit without sending it
+The right-pane New Session path now mounts the production `PromptTextView` from the shared
+Design source in a scrolling composer. The Linux TextKit shim shapes and edits Unicode text,
+wraps and scrolls, tracks selection and undo, and accepts SDL committed text and IME preedit without sending it
 to the PTY. The host passes a nonempty opening brief through the existing exact-project agent
 launch. `tests/text_editor/run.sh` exercises the editor itself;
 `THREADING_LINUX_COMPOSER_ONLY=1 ./window-smoke.sh` exercises the native X11 window,
-AT-SPI text, screenshot, and agent launch.
+AT-SPI text, screenshot, and agent launch. The shared editor draws the empty placeholder and
+handles Return and Command-Return; the Linux host still owns project selection and launch.
 The installed `bundle-smoke.sh` repeats that journey from the packaged binary. AT-SPI publishes
 up to 64 KiB of composer text and queues programmatic text, selection and clipboard edits through
 the same TextKit editor as keyboard input. Each queued edit carries a fresh composer identity so

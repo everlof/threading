@@ -1186,6 +1186,11 @@ into it (see the `maxSize` rule under [Themed Controls](#themed-controls)). Whic
 is why the scroller is decided *before* the height guard in `updateHeight`: by the time text
 overflows, the box is already at its cap and the constant has stopped moving.
 
+`PromptTextView` now lives in its own Design source and remains the editor inside `PromptView`.
+`PromptTextView.scrollingPrompt()` exposes the same text and scroll wiring to the Linux host,
+which supplies its surrounding session composer. The shared editor owns placeholder drawing,
+focus and Return/⌘Return behavior; Threading retains text admission, submission and drafts.
+
 **Undo has two owners, and both are required.** `ThemedTextView.allowsUndo` makes user edits enter
 the text system's manager; the application menu then reaches that manager through AppKit's window
 responder actions, `undo:` and `redo:`. Those colons are load-bearing. `UndoManager.undo` and

@@ -4715,9 +4715,9 @@ The full production `PromptView` is a larger integration boundary than its text 
 creates completion and context-rail presenters and compiles attachment, pasteboard, drag, image
 and QuickLook paths even when those features are hidden. Several of those AppKit services and
 Objective-C selectors have no Linux shim yet. This slice reuses its unchanged production
-`ThemedTextView` instead of copying `PromptView` into a Linux fork. A later shared extraction
-can expose the prompt's text/focus/submit core while leaving optional media and platform
-services behind the production Design boundary.
+`ThemedTextView` instead of copying `PromptView` into a Linux fork. The shared extraction
+in section 156 exposes the prompt's text/focus/submit core while leaving optional media and
+platform services behind the production Design boundary.
 
 Verification on 2026-10-04: strict Ubuntu arm64 C compilation, the focused native X11 composer
 smoke, the theme-boundary and main-actor-latency checks, and the full non-root installed
@@ -4728,3 +4728,37 @@ programmatic edits. The installed `.deb` SHA-256 is
 The rebuilt package also passed `tests/wayland_smoke.sh --actions`, including real compositor
 input for the multiline Swedish composer. Its evidence is `out/wayland-smoke.DbZITLu6`; I
 inspected `composer/capture/open.bmp` after conversion to PNG at its native 1120×480 size.
+
+## 156. The Linux composer mounts the production prompt editor
+
+`PromptTextView` has moved from inside `PromptView.swift` to its own shared Design source.
+The macOS `PromptView` still uses that class and its plain-text setup. The Linux composer
+mounts the same class through `PromptTextView.scrollingPrompt()`, so placeholder drawing,
+focus callbacks and Return semantics have one implementation. The surrounding Linux pane
+continues to own project selection, text bounds, session launch and persistence. Full
+`PromptView` still depends on Mac attachment and context services; the Linux host keeps its
+existing composer shell around the shared editor.
+
+The Linux AppKit shim now supports the editor's bounded string drawing, plain-text settings
+and scroll elasticity. It reserves keys for SDL's composition events while IME text is
+marked; Escape cancels that preedit before it can close the composer. The focused editor
+fixture covers placeholder pixels, long-text caret scrolling, Return variants and marked
+text commit. The installed X11 composer journey checks the empty placeholder, Unicode
+editing through AT-SPI, and Command-Return session launch.
+
+Customization gate: this is a shared production Design editor in a Linux host, with no new
+public extension surface. The host retains the `composer.session-start@1` command and its
+project, provider, admission and draft decisions. Prompt presentation remains in Design.
+
+Verification on 2026-10-04: the macOS app built and its focused prompt tests passed; a movie
+attachment test that timed out during the first parallel run passed alone on rerun. The
+Linux editor fixture, focused native X11 composer smoke, theme-boundary and main-actor
+latency checks, and full non-root installed Ubuntu arm64 `bundle-smoke.sh` passed. The
+installed evidence is `out/bundle-smoke/run.7Rgnxkhl`; I inspected its
+`restart-out/composer/composer-empty-placeholder.png` at 1120×480. The rebuilt `.deb` is
+SHA-256 `9bfee3bb46215d605ea4b04331e99e89ec20b219dc5b4aa5f10175960686fbc5`.
+Installed Weston `tests/wayland_smoke.sh --actions` passed rendering, AT-SPI, seat input,
+and the multiline Swedish composer. Its evidence is `out/wayland-smoke.YaFoq797`; I
+inspected `composer/capture/open.bmp` at its native 1120×480 resolution. Live composer
+IME cancellation with Escape has not been driven through IBus; the marked-text behavior
+is covered by the focused editor fixture.

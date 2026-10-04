@@ -74,6 +74,10 @@ open class NSClipView: NSView {
 /// supplies only its visible children and uses the clip view's bounds as the viewport.
 @MainActor
 open class NSScrollView: NSView {
+    public enum Elasticity: Equatable, Sendable {
+        case automatic, allowed, none
+    }
+
     private var storedContentView: NSClipView
 
     open var contentView: NSClipView {
@@ -98,6 +102,12 @@ open class NSScrollView: NSView {
     open var drawsBackground = false
     open var hasVerticalScroller = false
     open var hasHorizontalScroller = false
+    /// The clip view clamps to the document bounds; there is no rubber-band animation in the
+    /// Linux host. Let shared views request that behavior explicitly, and reject other modes.
+    open var verticalScrollElasticity: Elasticity = .none {
+        didSet { precondition(verticalScrollElasticity == .none,
+                              "Linux NSScrollView does not support elastic scrolling") }
+    }
     open var verticalLineScroll: CGFloat = 10
     open var horizontalLineScroll: CGFloat = 10
 

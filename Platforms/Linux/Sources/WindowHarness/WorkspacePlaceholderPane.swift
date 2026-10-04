@@ -16,7 +16,7 @@ final class WorkspacePlaceholderPane {
     private let placeholderRoot = SessionPlaceholderView(frame: .zero)
     private let composerRoot = NSView(frame: .zero)
     private let composerHero = SessionPlaceholderView(frame: .zero)
-    private let composerEditor = ThemedTextView.scrolling()
+    private let composerEditor = PromptTextView.scrollingPrompt()
     private var showsComposer = false
     private(set) var composerIdentity: String?
     private var root: NSView { showsComposer ? composerRoot : placeholderRoot }
@@ -26,7 +26,8 @@ final class WorkspacePlaceholderPane {
     private var presentedSize = NSSize.zero
     private var needsPresentation = true
 
-    init(hasProjects: Bool, onAction: @escaping () -> Void) {
+    init(hasProjects: Bool, onAction: @escaping () -> Void,
+         onSubmit: @escaping () -> Void) {
         NSImage.systemSymbolProvider = { name, _ in
             Design.Symbol.image(name, slot: PlaceholderDefaults.iconSize,
                                 pointSize: 36, weight: .regular)
@@ -35,6 +36,9 @@ final class WorkspacePlaceholderPane {
         composerHero.onAction = onAction
         composerRoot.addSubview(composerHero)
         composerRoot.addSubview(composerEditor)
+        composerEditor.textView.placeholder = "Describe a task or ask a question"
+        composerEditor.textView.submitsOnReturn = { false }
+        composerEditor.textView.onSubmit = { _ in onSubmit() }
         composerEditor.textView.drawsBackground = true
         composerEditor.textView.backgroundColor = LinuxTheme.color("fieldSurface")
         composerEditor.textView.textContainerInset = NSSize(width: 10, height: 8)
@@ -174,6 +178,14 @@ final class WorkspacePlaceholderPane {
         composerEditor.textView.setMarkedText(text, selectedRange: selectedRange,
             replacementRange: NSRange(location: NSNotFound, length: 0))
         needsPresentation = true
+    }
+
+    func cancelMarkedText() -> Bool {
+        guard showsComposer, composerEditor.textView.hasMarkedText() else { return false }
+        composerEditor.textView.setMarkedText("", selectedRange: NSRange(location: 0, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0))
+        needsPresentation = true
+        return true
     }
 
     func handleEditorKey(_ event: NSEvent) {

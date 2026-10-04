@@ -282,4 +282,12 @@ public extension NSString {
         boundedAttributed(attributes).draw(in: rect)
     }
 }
+
+public extension String {
+    /// AppKit exposes NSString's drawing methods on Swift strings through bridging. Linux
+    /// Foundation has no Objective-C bridge, so keep the same call available to shared views.
+    func draw(at point: NSPoint, withAttributes attributes: [NSAttributedString.Key: Any]? = nil) {
+        (self as NSString).draw(at: point, withAttributes: attributes)
+    }
+}
 #endif
