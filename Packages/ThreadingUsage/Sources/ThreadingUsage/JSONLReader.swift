@@ -43,7 +43,7 @@ public enum JSONLReader {
             from: offset,
             limit: limit,
             deliversTrailingRecord: false
-        ) { line, start, end in
+        ) { line, start, end, _ in
             guard let record = dictionary(from: line) else { return true }
             return handle(record, start, end)
         }) ?? offset
@@ -73,7 +73,7 @@ public enum JSONLReader {
             from: offset,
             limit: limit,
             deliversTrailingRecord: false
-        ) { line, _, _ in
+        ) { line, _, _, _ in
             deliver(line, to: handle)
         }) ?? offset
     }
@@ -94,7 +94,7 @@ public enum JSONLReader {
             from: 0,
             limit: limit,
             deliversTrailingRecord: true
-        ) { line, _, _ in handle(line) }
+        ) { line, _, _, _ in handle(line) }
     }
 
     /// The usage ledger's strict sibling to `forEachLine`.
@@ -114,7 +114,25 @@ public enum JSONLReader {
             from: 0,
             limit: limit,
             deliversTrailingRecord: true
-        ) { line, _, _ in try handle(line) }
+        ) { line, _, _, _ in try handle(line) }
+    }
+
+    /// `forEachLineStrict`, also saying whether each line ended in a newline.
+    ///
+    /// Only the last line of a file can arrive unterminated. For a bill read after the writer
+    /// stopped, that is the one place a record may have been cut off mid-write, so a receipt
+    /// reader treats it as an explicit gap even when the bytes happen to parse.
+    public static func forEachLineStrict(
+        at url: URL,
+        limit: Int,
+        reportingTermination handle: (_ line: Data, _ terminated: Bool) throws -> Bool
+    ) throws {
+        _ = try scanForward(
+            at: url,
+            from: 0,
+            limit: limit,
+            deliversTrailingRecord: true
+        ) { line, _, _, terminated in try handle(line, terminated) }
     }
 
     /// The one forward implementation, so the chunking, the newline handling, the
@@ -128,7 +146,7 @@ public enum JSONLReader {
         from offset: UInt64,
         limit: Int,
         deliversTrailingRecord: Bool,
-        _ handle: (Data, UInt64, UInt64) throws -> Bool
+        _ handle: (Data, UInt64, UInt64, Bool) throws -> Bool
     ) throws -> UInt64 {
         let file = try FileHandle(forReadingFrom: url)
         defer { try? file.close() }
@@ -188,7 +206,7 @@ public enum JSONLReader {
                 if discardingLeadingFragment {
                     discardingLeadingFragment = false
                 } else if !line.isEmpty,
-                          try !handle(Data(line), absoluteLineStart, absoluteLineEnd)
+                          try !handle(Data(line), absoluteLineStart, absoluteLineEnd, true)
                 {
                     return absoluteLineEnd
                 }
@@ -221,7 +239,8 @@ public enum JSONLReader {
             _ = try handle(
                 buffer,
                 bufferStartOffset,
-                bufferStartOffset + UInt64(buffer.count)
+                bufferStartOffset + UInt64(buffer.count),
+                false
             )
         }
 

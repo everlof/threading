@@ -11,6 +11,34 @@ public enum UsageTranscriptAdapterFailure: Error, Equatable, LocalizedError {
     }
 }
 
+// MARK: - Recovering Reading
+
+/// What a receipt reader learns from one transcript when it must keep what it could read.
+///
+/// The throwing `records` entry points refuse a whole file for one unreadable usage line, which
+/// is right for the Mac's Usage page: it marks that runtime partial and shows no confident total.
+/// A per-execution receipt is different. Dropping every readable record for one bad line turns a
+/// small, visible gap into a large invisible undercount, so the controller reads the same lines
+/// through the same parser, keeps every record it can, and reports the gap beside them.
+public struct UsageTranscriptReading: Equatable, Sendable {
+    public var records: [UsageLedgerRecord] = []
+    /// Usage-bearing lines the adapter could not read.
+    public var unreadableRecordCount = 0
+    public var firstUnreadableLine: Int?
+    /// The file's last line had no newline: the writer may have stopped mid-record.
+    public var endsUnterminated = false
+
+    public init() {}
+
+    /// Every usage-bearing line was read and the file ended on a record boundary.
+    public var isComplete: Bool { unreadableRecordCount == 0 && !endsUnterminated }
+
+    mutating func noteUnreadable(line: Int) {
+        unreadableRecordCount += 1
+        if firstUnreadableLine == nil { firstUnreadableLine = line }
+    }
+}
+
 // MARK: - Claude
 
 /// Claude's JSONL usage adapter. It emits one record per assistant response and leaves global
@@ -21,79 +49,134 @@ public enum ClaudeUsageAdapter {
         accountID: String,
         accountName: String
     ) throws -> [UsageLedgerRecord] {
-        let marker = Array(UsageIndexDefaults.usageMarker.utf8)
-        let sessionID = url.deletingPathExtension().lastPathComponent
-        let parentSessionID = parentSessionID(of: url)
+        try scan(url, accountID: accountID, accountName: accountName, recovering: false).records
+    }
+
+    /// The same records, keeping every readable one and reporting unreadable lines and an
+    /// unterminated final line instead of refusing the file. Throws only when the file itself
+    /// cannot be opened or read.
+    public static func reading(
+        transcriptAt url: URL,
+        accountID: String,
+        accountName: String
+    ) throws -> UsageTranscriptReading {
+        try scan(url, accountID: accountID, accountName: accountName, recovering: true)
+    }
+
+    private static func scan(
+        _ url: URL,
+        accountID: String,
+        accountName: String,
+        recovering: Bool
+    ) throws -> UsageTranscriptReading {
+        let context = ClaudeLineContext(
+            url: url,
+            marker: Array(UsageIndexDefaults.usageMarker.utf8),
+            sessionID: url.deletingPathExtension().lastPathComponent,
+            parentSessionID: parentSessionID(of: url),
+            accountID: accountID,
+            accountName: accountName
+        )
         var lineNumber = 0
-        var found: [UsageLedgerRecord] = []
+        var reading = UsageTranscriptReading()
 
-        try JSONLReader.forEachLineStrict(at: url, limit: .max) { line in
+        try JSONLReader.forEachLineStrict(at: url, limit: .max) { line, terminated in
             lineNumber += 1
-            guard UsageLineMarker.contains(marker, in: line) else { return true }
-
-            guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any]
-            else { throw unreadable(lineNumber) }
-            // `"usage"` also appears in provider-owned metadata. It becomes a billable
-            // candidate only under a message; once present there, refusing an unreadable shape
-            // is safer than silently filing a smaller transcript total.
-            guard let message = object[UsageIndexDefaults.messageKey] as? [String: Any],
-                  let rawUsage = message[UsageIndexDefaults.usageKey]
-            else { return true }
-            guard let usage = rawUsage as? [String: Any] else {
-                throw unreadable(lineNumber)
+            if !terminated { reading.endsUnterminated = true }
+            do {
+                if let record = try record(from: line, lineNumber: lineNumber, context) {
+                    reading.records.append(record)
+                }
+            } catch let failure as UsageTranscriptAdapterFailure {
+                guard recovering else { throw failure }
+                reading.noteUnreadable(line: lineNumber)
             }
-
-            let messageID = message[UsageIndexDefaults.idKey] as? String ?? ""
-            let requestID = object[UsageIndexDefaults.requestKey] as? String ?? ""
-            let identity: String
-            if messageID.isEmpty && requestID.isEmpty {
-                identity = "claude|\(url.path)|\(lineNumber)"
-            } else {
-                identity = "claude|\(messageID)|\(requestID)"
-            }
-
-            let timestamp = object[UsageIndexDefaults.timestampKey] as? String ?? ""
-            let reported = double(object["costUSD"])
-                ?? double(message["costUSD"])
-                ?? double(object["cost_usd"])
-            let cacheCreation = usage[UsageIndexDefaults.cacheWriteDetailKey]
-                as? [String: Any]
-
-            // A count this app cannot hold makes the source incomplete. Writing `0` into the
-            // field instead would put a number in the bill the account was never charged, and
-            // skipping only this response would present the smaller source total as complete.
-            guard let uncachedInput = count(usage[UsageIndexDefaults.inputKey]),
-                  let cachedInput = count(usage[UsageIndexDefaults.cacheReadKey]),
-                  let cacheWrite = count(usage[UsageIndexDefaults.cacheWriteKey]),
-                  let cacheWrite1h = count(cacheCreation?[UsageIndexDefaults.cacheWrite1hKey]),
-                  let output = count(usage[UsageIndexDefaults.outputKey])
-            else { throw unreadable(lineNumber) }
-
-            found.append(UsageLedgerRecord(
-                identity: identity,
-                sessionID: sessionID,
-                at: UsageLedgerDate.parse(timestamp),
-                origin: .direct(.claude),
-                accountID: accountID,
-                accountName: accountName,
-                model: message[UsageIndexDefaults.modelKey] as? String
-                    ?? UsageIndexDefaults.unknownModel,
-                workingDirectory: object[UsageIndexDefaults.cwdKey] as? String ?? "",
-                tokens: UsageTokenCounts(
-                    uncachedInput: uncachedInput,
-                    cachedInput: cachedInput,
-                    cacheWrite: cacheWrite,
-                    cacheWrite1h: cacheWrite1h,
-                    output: output
-                ),
-                reportedCostUSD: reported,
-                sessionKind: parentSessionID == nil ? .root : .subagent,
-                parentSessionID: parentSessionID
-            ))
             return true
         }
 
-        return found
+        return reading
+    }
+
+    private struct ClaudeLineContext {
+        let url: URL
+        let marker: [UInt8]
+        let sessionID: String
+        let parentSessionID: String?
+        let accountID: String
+        let accountName: String
+    }
+
+    private static func record(
+        from line: Data,
+        lineNumber: Int,
+        _ context: ClaudeLineContext
+    ) throws -> UsageLedgerRecord? {
+        let url = context.url
+        let sessionID = context.sessionID
+        let parentSessionID = context.parentSessionID
+        let accountID = context.accountID
+        let accountName = context.accountName
+        guard UsageLineMarker.contains(context.marker, in: line) else { return nil }
+
+        guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any]
+        else { throw unreadable(lineNumber) }
+        // `"usage"` also appears in provider-owned metadata. It becomes a billable
+        // candidate only under a message; once present there, refusing an unreadable shape
+        // is safer than silently filing a smaller transcript total.
+        guard let message = object[UsageIndexDefaults.messageKey] as? [String: Any],
+              let rawUsage = message[UsageIndexDefaults.usageKey]
+        else { return nil }
+        guard let usage = rawUsage as? [String: Any] else {
+            throw unreadable(lineNumber)
+        }
+
+        let messageID = message[UsageIndexDefaults.idKey] as? String ?? ""
+        let requestID = object[UsageIndexDefaults.requestKey] as? String ?? ""
+        let identity: String
+        if messageID.isEmpty && requestID.isEmpty {
+            identity = "claude|\(url.path)|\(lineNumber)"
+        } else {
+            identity = "claude|\(messageID)|\(requestID)"
+        }
+
+        let timestamp = object[UsageIndexDefaults.timestampKey] as? String ?? ""
+        let reported = double(object["costUSD"])
+            ?? double(message["costUSD"])
+            ?? double(object["cost_usd"])
+        let cacheCreation = usage[UsageIndexDefaults.cacheWriteDetailKey]
+            as? [String: Any]
+
+        // A count this app cannot hold makes the source incomplete. Writing `0` into the
+        // field instead would put a number in the bill the account was never charged, and
+        // skipping only this response would present the smaller source total as complete.
+        guard let uncachedInput = count(usage[UsageIndexDefaults.inputKey]),
+              let cachedInput = count(usage[UsageIndexDefaults.cacheReadKey]),
+              let cacheWrite = count(usage[UsageIndexDefaults.cacheWriteKey]),
+              let cacheWrite1h = count(cacheCreation?[UsageIndexDefaults.cacheWrite1hKey]),
+              let output = count(usage[UsageIndexDefaults.outputKey])
+        else { throw unreadable(lineNumber) }
+
+        return UsageLedgerRecord(
+            identity: identity,
+            sessionID: sessionID,
+            at: UsageLedgerDate.parse(timestamp),
+            origin: .direct(.claude),
+            accountID: accountID,
+            accountName: accountName,
+            model: message[UsageIndexDefaults.modelKey] as? String
+                ?? UsageIndexDefaults.unknownModel,
+            workingDirectory: object[UsageIndexDefaults.cwdKey] as? String ?? "",
+            tokens: UsageTokenCounts(
+                uncachedInput: uncachedInput,
+                cachedInput: cachedInput,
+                cacheWrite: cacheWrite,
+                cacheWrite1h: cacheWrite1h,
+                output: output
+            ),
+            reportedCostUSD: reported,
+            sessionKind: parentSessionID == nil ? .root : .subagent,
+            parentSessionID: parentSessionID
+        )
     }
 
     private static func parentSessionID(of transcript: URL) -> String? {
@@ -121,6 +204,24 @@ public enum CodexUsageAdapter {
         accountID: String,
         accountName: String
     ) throws -> [UsageLedgerRecord] {
+        try scan(url, accountID: accountID, accountName: accountName, recovering: false).records
+    }
+
+    /// The recovering reading: see `UsageTranscriptReading`.
+    public static func reading(
+        rolloutAt url: URL,
+        accountID: String,
+        accountName: String
+    ) throws -> UsageTranscriptReading {
+        try scan(url, accountID: accountID, accountName: accountName, recovering: true)
+    }
+
+    private static func scan(
+        _ url: URL,
+        accountID: String,
+        accountName: String,
+        recovering: Bool
+    ) throws -> UsageTranscriptReading {
         let markers = CodexMarkers.all.map { Array($0.utf8) }
         var sessionID = url.deletingPathExtension().lastPathComponent
         var parentSessionID: String?
@@ -132,11 +233,11 @@ public enum CodexUsageAdapter {
         var lineNumber = 0
         var beforeBoundary: [UsageLedgerRecord] = []
         var afterBoundary: [UsageLedgerRecord] = []
+        var reading = UsageTranscriptReading()
 
-        try JSONLReader.forEachLineStrict(at: url, limit: .max) { line in
-            lineNumber += 1
+        func consume(_ line: Data) throws {
             guard markers.contains(where: { UsageLineMarker.contains($0, in: line) }) else {
-                return true
+                return
             }
             guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                   let type = object["type"] as? String,
@@ -172,15 +273,15 @@ public enum CodexUsageAdapter {
                 }
 
             case "event_msg":
-                guard payload["type"] as? String == "token_count" else { return true }
+                guard payload["type"] as? String == "token_count" else { return }
                 guard let rawInfo = payload["info"] else {
                     throw unreadable(lineNumber)
                 }
-                if rawInfo is NSNull { return true }
+                if rawInfo is NSNull { return }
                 guard let info = rawInfo as? [String: Any],
                       let rawLast = info["last_token_usage"]
                 else { throw unreadable(lineNumber) }
-                if rawLast is NSNull { return true }
+                if rawLast is NSNull { return }
                 guard let last = rawLast as? [String: Any] else {
                     throw unreadable(lineNumber)
                 }
@@ -222,7 +323,7 @@ public enum CodexUsageAdapter {
                 } else {
                     signature = "last|\(stamp)|\(input)|\(cached)|\(output)|\(reasoning)|\(model)"
                 }
-                guard signature != previousSignature else { return true }
+                guard signature != previousSignature else { return }
                 previousSignature = signature
 
                 let identity = stamp.isEmpty
@@ -256,10 +357,22 @@ public enum CodexUsageAdapter {
             default:
                 break
             }
+        }
+
+        try JSONLReader.forEachLineStrict(at: url, limit: .max) { line, terminated in
+            lineNumber += 1
+            if !terminated { reading.endsUnterminated = true }
+            do {
+                try consume(line)
+            } catch let failure as UsageTranscriptAdapterFailure {
+                guard recovering else { throw failure }
+                reading.noteUnreadable(line: lineNumber)
+            }
             return true
         }
 
-        return crossedChildBoundary ? afterBoundary : beforeBoundary
+        reading.records = crossedChildBoundary ? afterBoundary : beforeBoundary
+        return reading
     }
 
     public static func rollouts(inAccountAt configPath: String) -> [URL] {

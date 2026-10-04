@@ -244,20 +244,54 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertEqual(priced.cacheSavingsUSD, 4.5, accuracy: 0.000_001)
     }
 
+    /// The one merge both the Mac ledger and the controller's receipts use: repeated
+    /// observations of a response keep component-wise maxima, never a sum and never the first.
+    func testRepeatedResponsesMergeToComponentMaximaInEitherOrder() {
+        let partial = makeRecord(identity: "r", tokens: .init(uncachedInput: 10, cachedInput: 50, output: 3))
+        let final = makeRecord(identity: "r", tokens: .init(uncachedInput: 10, cachedInput: 40, output: 90))
+        let expected = UsageTokenCounts(uncachedInput: 10, cachedInput: 50, output: 90)
+
+        XCTAssertEqual(partial.mergingUsageMaximums(with: final).tokens, expected)
+        XCTAssertEqual(final.mergingUsageMaximums(with: partial).tokens, expected)
+    }
+
+    /// A conversation copied into another account repeats its responses there. Which copy a
+    /// scan reads first must not decide which account is charged.
+    func testCopiedResponseAttributionDoesNotDependOnScanOrder() {
+        let original = makeRecord(identity: "r", tokens: .init(output: 5), accountID: "claude:work", sessionID: "a")
+        let copy = makeRecord(identity: "r", tokens: .init(output: 5), accountID: "claude:spare", sessionID: "b")
+
+        let forward = original.mergingUsageMaximums(with: copy)
+        let backward = copy.mergingUsageMaximums(with: original)
+        XCTAssertEqual(forward.accountID, backward.accountID)
+        XCTAssertEqual(forward.sessionID, backward.sessionID)
+        XCTAssertEqual(forward.tokens, .init(output: 5))
+
+        let earlier = makeRecord(identity: "r", at: Date(timeIntervalSince1970: 1), tokens: .init(output: 5),
+                                 accountID: "claude:zzz", sessionID: "z")
+        XCTAssertEqual(original.mergingUsageMaximums(with: earlier).accountID, "claude:zzz")
+        XCTAssertEqual(earlier.mergingUsageMaximums(with: original).accountID, "claude:zzz")
+
+        let ranked = copy.mergingUsageMaximums(with: original, attributingTo: { lhs, _ in lhs.accountID == "claude:spare" })
+        XCTAssertEqual(ranked.accountID, "claude:spare")
+    }
+
     private func makeRecord(
         identity: String,
         at: Date? = Date(timeIntervalSince1970: 1_770_000_000),
         origin: UsageOrigin = .direct(.codex),
         model: String = "gpt-5.4",
         tokens: UsageTokenCounts,
-        reportedCostUSD: Double? = nil
+        reportedCostUSD: Double? = nil,
+        accountID: String = "codex:default",
+        sessionID: String = "session"
     ) -> UsageLedgerRecord {
         UsageLedgerRecord(
             identity: identity,
-            sessionID: "session",
+            sessionID: sessionID,
             at: at,
             origin: origin,
-            accountID: "codex:default",
+            accountID: accountID,
             accountName: "Codex",
             model: model,
             workingDirectory: "/tmp/project",

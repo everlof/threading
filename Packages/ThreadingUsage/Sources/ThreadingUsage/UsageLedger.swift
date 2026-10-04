@@ -279,28 +279,58 @@ public struct UsageLedgerRecord: Codable, Equatable, Sendable {
         self.cacheSavingsUSD = max(0, cacheSavingsUSD)
     }
 
-    /// Preserve last-wins provenance while making repeated streaming counters monotonic.
-    public func mergingUsageMaximums(with later: Self) -> Self {
-        precondition(identity == later.identity)
-        let reported = [reportedCostUSD, later.reportedCostUSD]
+    /// Merges two observations of one response: counters take component-wise maxima, so a
+    /// repeated streaming partial or a copied record can never add to or reduce the total.
+    ///
+    /// Attribution — account, session, directory, time — comes from whichever observation
+    /// `attributionPrecedes` puts first, so the result does not depend on which file a scan
+    /// happened to read first. A conversation copied into another account (a migration or an
+    /// account failover) keeps its spend on the account where the response was first observed.
+    public func mergingUsageMaximums(with other: Self) -> Self {
+        mergingUsageMaximums(with: other, attributingTo: Self.attributionPrecedes)
+    }
+
+    /// The same merge with a caller-supplied attribution order. The controller passes its
+    /// recipe's declared account attempt order, which is stronger evidence than timestamps.
+    public func mergingUsageMaximums(
+        with other: Self,
+        attributingTo precedes: (Self, Self) -> Bool
+    ) -> Self {
+        precondition(identity == other.identity)
+        let reported = [reportedCostUSD, other.reportedCostUSD]
             .compactMap { $0 }
             .filter { $0.isFinite && $0 >= 0 }
             .max()
+        let (first, second) = precedes(other, self) ? (other, self) : (self, other)
 
         return Self(
-            identity: later.identity,
-            sessionID: later.sessionID,
-            at: later.at,
-            origin: later.origin,
-            accountID: later.accountID,
-            accountName: later.accountName,
-            model: later.model,
-            workingDirectory: later.workingDirectory,
-            tokens: tokens.mergingMaximums(with: later.tokens),
+            identity: first.identity,
+            sessionID: first.sessionID,
+            at: first.at,
+            origin: first.origin,
+            accountID: first.accountID,
+            accountName: first.accountName,
+            model: first.model,
+            workingDirectory: first.workingDirectory,
+            tokens: tokens.mergingMaximums(with: other.tokens),
             reportedCostUSD: reported,
-            sessionKind: later.sessionKind ?? sessionKind ?? .root,
-            parentSessionID: later.parentSessionID ?? parentSessionID
+            sessionKind: first.sessionKind ?? second.sessionKind ?? .root,
+            parentSessionID: first.parentSessionID ?? second.parentSessionID
         )
+    }
+
+    /// The default, scan-order-independent attribution order: the earliest observation wins
+    /// (a record without a time sorts last), and identical times fall back to a total order on
+    /// account, session and directory so equal inputs always produce the same owner.
+    public static func attributionPrecedes(_ lhs: Self, _ rhs: Self) -> Bool {
+        switch (lhs.at, rhs.at) {
+        case let (left?, right?) where left != right: return left < right
+        case (.some, nil): return true
+        case (nil, .some): return false
+        default: break
+        }
+        return (lhs.accountID, lhs.sessionID, lhs.workingDirectory)
+            < (rhs.accountID, rhs.sessionID, rhs.workingDirectory)
     }
 }
 
