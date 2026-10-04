@@ -14,6 +14,11 @@ public struct MailForward: Codable, Equatable, Sendable {
     public let from: MailAddress
     public let to: MailAddress
     public let revision: Int
+    /// On the store that receives the move: until when it takes forwarded copies from the old
+    /// host. A move completes in minutes; consent that outlives it would let the old host keep
+    /// delivering into this mailbox indefinitely. Nil on the forwarding store, and on records
+    /// written before expiry existed.
+    public var acceptsUntil: String? = nil
 }
 
 extension MailEnvelope {
@@ -48,7 +53,10 @@ extension ControllerStore {
             }
             let prior: MailForward? = try optional("mailForward", from.description)
             guard (prior?.revision ?? 0) == expectedRevision else { throw ControllerError.conflict }
-            let value = MailForward(from: from, to: to, revision: expectedRevision + 1)
+            var value = MailForward(from: from, to: to, revision: expectedRevision + 1)
+            if to.host == local, from.host != local {
+                value.acceptsUntil = ISO8601DateFormatter().string(from: Date().addingTimeInterval(MailLimits.forwardAcceptance))
+            }
             if prior == nil { try insert("mailForward", from.description, state: "active", value: value) }
             else { try update("mailForward", from.description, state: "active", value: value) }
             try event("mail.forward_changed", from.description)
@@ -105,6 +113,7 @@ extension ControllerStore {
                     try update("mail", id, state: message.state.rawValue, value: message)
                 } else {
                     message.state = .moved
+                    message.queuedAt = Self.now()
                     try update("mail", id, state: message.state.rawValue, value: message)
                     try db.run("INSERT OR IGNORE INTO mail_outbound(host,message) VALUES(?,?)", [.text(to.host.description), .text(id)])
                 }
@@ -117,11 +126,14 @@ extension ControllerStore {
 
     // MARK: - Accepting
 
-    /// Whether `envelope` is a forwarded copy this store's owner agreed to take from `peer`.
+    /// Whether `envelope` is a forwarded copy this store's owner agreed to take from `peer`, and
+    /// still does: the consent lapses at `acceptsUntil`.
     func expectsForward(_ envelope: MailEnvelope, from peer: HostID?) throws -> Bool {
         guard let old = envelope.forwardedFrom, let peer, old.host == peer,
-              let forward = try mailForward(old) else { return false }
-        return forward.to == envelope.recipient
+              let forward = try mailForward(old), forward.to == envelope.recipient else { return false }
+        guard let until = forward.acceptsUntil else { return true }
+        guard let deadline = ISO8601DateFormatter().date(from: until) else { return false }
+        return Date() < deadline
     }
 
     /// Mail accepted for a forwarded address goes on once: re-addressed here, or queued for the
@@ -137,7 +149,8 @@ extension ControllerStore {
         }
         guard try mailPeer(forward.to.host) != nil else { throw ControllerError.invalidInput("unknown_host") }
         try copy.validate()
-        let message = MailMessage(envelope: copy, state: .moved, acceptedAt: Self.now())
+        var message = MailMessage(envelope: copy, state: .moved, acceptedAt: Self.now())
+        message.queuedAt = message.acceptedAt
         let id = copy.id.uuidString.lowercased()
         try insert("mail", id, parent: envelope.recipient.description, state: message.state.rawValue,
                    scope: copy.sender.description, value: message)
@@ -146,30 +159,24 @@ extension ControllerStore {
         return message
     }
 
-    /// A mailbox moved away and back: the copy it left here as `moved` gives way to the one
-    /// coming home, under the same id. Only for the address this store's owner forwards from.
-    func retireReturningMove(_ prior: MailMessage, _ envelope: MailEnvelope, from peer: HostID?) throws -> Bool {
-        guard prior.state == .moved, envelope.forwardedFrom == prior.envelope.recipient,
-              try expectsForward(envelope, from: peer) else { return false }
-        let id = envelope.id.uuidString.lowercased()
-        try db.run("DELETE FROM mail_outbound WHERE message=?", [.text(id)])
-        try db.run("DELETE FROM record WHERE kind='mail' AND id=?", [.text(id)])
-        try event("mail.returned", id)
-        return true
+    /// Whether the copy of this message already held here gives way to an expected forwarded
+    /// copy arriving under the same id. Two cases, both proof that the message is genuine:
+    /// a mailbox moved away and back (the `moved` copy it left), or a mailbox moved onto the
+    /// sender's own host (the sent copy). One store keeps one record per message.
+    func priorCopyGivesWay(_ prior: MailMessage, _ envelope: MailEnvelope, expectedForward: Bool) throws -> Bool {
+        guard expectedForward, envelope.forwardedFrom == prior.envelope.recipient,
+              prior.envelope.sameRequest(as: envelope, ignoringRecipient: true) else { return false }
+        if prior.state == .moved { return true }
+        let local = try host().id
+        return [.outbound, .forwarded, .bounced].contains(prior.state) && prior.envelope.sender.host == local
     }
 
-    /// A mailbox moved onto the sender's own host: the forwarded copy arriving here carries the
-    /// id of the copy this host already holds as sent. One store keeps one record per message,
-    /// so the sent copy gives way and the message is accepted as the recipient's inbox copy.
-    func adoptSentCopy(_ prior: MailMessage, _ envelope: MailEnvelope, expectedForward: Bool) throws -> Bool {
-        guard expectedForward, [.outbound, .forwarded, .bounced].contains(prior.state),
-              prior.envelope.sender.host == (try host().id), envelope.forwardedFrom == prior.envelope.recipient,
-              prior.envelope.sameRequest(as: envelope, ignoringRecipient: true) else { return false }
+    /// Removes the copy `priorCopyGivesWay` approved, so the arriving one is accepted in its place.
+    func retirePriorCopy(_ prior: MailMessage, _ envelope: MailEnvelope) throws {
         let id = envelope.id.uuidString.lowercased()
         try db.run("DELETE FROM mail_outbound WHERE message=?", [.text(id)])
         try db.run("DELETE FROM record WHERE kind='mail' AND id=?", [.text(id)])
-        try event("mail.came_home", id)
-        return true
+        try event(prior.state == .moved ? "mail.returned" : "mail.came_home", id)
     }
 
     /// Whether `address` is a mailbox here: a registered session mailbox or an existing worker.
