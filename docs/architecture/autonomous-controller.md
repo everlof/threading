@@ -88,22 +88,41 @@ launch to `running`. `launch WORKER_UUID RECIPE_JSON_FILE` composes these operat
 can exit: ptyd owns the child, and tools use the host-local work store with no Mac dependency.
 
 A failed connection before dispatch leaves a prepared intent that can be explicitly dispatched.
-A lost spawn response leaves `dispatching`, which cannot be dispatched again. An explicit spawn
-refusal other than `alreadyExists` confirms no process started and interrupts unfinished work.
-There is no timeout-based reassignment. `launches WORK_UUID` finds saved intents after a lost CLI
+A lost spawn response leaves `dispatching`, which cannot be dispatched again. A definite "no
+process started" answer — a spawn refusal other than `alreadyExists`, or ptyd's `spawnFailed`
+error for a failed fork (which now names the spawn and its errno; on a connection carrying one
+spawn it is unambiguous from an older daemon too) — records the launch stopped with a bounded
+`failure`. A recipe fault (`executableUnavailable`, `unsupportedChannel`) interrupts unfinished
+work; a host fault (`retiring`, `capacity`, a fork failure) returns it to the queue, because
+nothing ran and nothing about the recipe is wrong. There is no timeout-based reassignment. `launches WORK_UUID` finds saved intents after a lost CLI
 response. Status output omits the recipe's argv/environment and the execution credential.
 
 `launch-status EXECUTION_UUID` reads ptyd's inventory without attaching to or resizing a terminal.
-It reports `running`, `stopped` or `absent`. A retained exit receipt confirms the launch stopped;
-exit alone interrupts unfinished work, even for exit zero. It never invents a result. An absent
-entry leaves the durable launch unresolved: ptyd retains exits for a bounded window, and restart
-cannot prove an old process stopped merely by omitting it from inventory. A live inventory after
-a lost spawn receipt may report `presence=running` with a still-`dispatching` durable launch;
-this is observation, not a fabricated pid/start-time receipt.
+It reports `running`, `stopped` or `absent`. Stop evidence, strongest first: a retained ptyd
+receipt (spawns set `retainReceipt`, so ptyd keeps each exit or loss durably, across restarts,
+until the controller acknowledges it — see [pty-host.md](pty-host.md#exit-kill-and-release)); an
+exited inventory entry; and the current daemon's `lost` report, which follows ptyd reclaiming the
+orphaned process group. A loss is recorded as `failure {stage: host, reason: lost, incident}` and
+interrupts the work; like an exit, it is never an automatic retry. Exit alone interrupts
+unfinished work, even for exit zero, and never invents a result. A non-zero, signalled or early
+exit records `failure {stage: exit}` and a 2 KiB output tail with control sequences removed and
+every recipe argument/environment value and the execution credential (8+ characters) redacted —
+best effort, not a secret scanner, so it stays an owner-only diagnostic. After recording, the
+controller acknowledges only receipts whose launch exists in its own store and is stopped.
 
-`launch-stop EXECUTION_UUID` attaches to that exact identity, requests kill and waits for its exit
-receipt before recording stopped. Timeout remains unresolved. `launch-confirm-stopped` is an
-owner-only recovery assertion requiring independent evidence; it does not signal a process.
+An absent entry with no receipt or loss report leaves the durable launch unresolved: an older
+ptyd retains exits for a bounded window only, and omission from inventory proves nothing. A pid
+that differs from the recorded one is reported (`process_identity_mismatch`) and never recorded.
+A live inventory after a lost spawn receipt may report `presence=running` with a still-
+`dispatching` durable launch; this is observation, not a fabricated pid/start-time receipt.
+
+`launch-stop EXECUTION_UUID` first records any existing stop evidence, otherwise attaches to that
+exact identity, requests kill and waits for its exit receipt before recording stopped. Timeout
+remains unresolved. `launch-confirm-stopped EXECUTION_UUID [EXPECTED_STATE]` is an owner-only
+recovery assertion requiring independent evidence; it does not signal a process. The expected
+state (`prepared`, `dispatching`, `running`) fences it against a launch that moved since the
+owner looked; owner RPC requires it. `interrupt` is refused while the execution's launch is
+unresolved — confirm the launch first, which interrupts it.
 Answered work stays unclaimable while any prior launch is prepared, dispatching or running.
 Other work remains eligible. The resident supervisor records available exit receipts before
 launching continuations; manual users can do the same with `launch-status`. Provider grandchildren are subject to the
@@ -162,7 +181,17 @@ Systemd deployment, resource budgets and which workers to enable belong to the d
 for the resident loop, which retains fairness cursors.
 
 Each tick reads at most eight unresolved launches and eight worker policies, wraps its cursors,
-and sends at most two new spawn attempts. Inventory is shared once per socket in the page, with
+and sends at most two new spawn attempts. One item never stops the loop: a failed observation,
+cancellation, dispatch or policy admission becomes an issue (`observe_failed`, `workerIssues`,
+…) and an in-memory backoff for that item (30 s doubling to 15 min), and the pass continues. A
+busy store (`SQLITE_BUSY`/`LOCKED` past the 3 s busy timeout) is reported in `tickIssues` and
+retried next pass without quarantine. Only a store the process can no longer trust or write —
+corrupt, not a database, read-only, full, I/O failure, or migrated by a newer build — ends the
+resident loop, so one held lock cannot exhaust a service manager's restart budget. A socket
+that fails inventory, refuses to connect, or answers with a transient refusal is skipped for a
+backoff (5 s doubling to 5 min): no prepared intent is dispatched to it and no new intent is
+prepared against it (`host_unavailable`). Transcript-collection failures are reported in
+`usageIssues` rather than swallowed. Inventory is shared once per socket in the page, with
 at most eight concurrent bounded requests. One attempt is reserved for fresh work so repeated
 connection failures on an old prepared intent cannot starve another worker. No transcript is
 retained, no TUI is attached, and no external destination is invoked by the supervisor. Its JSON
@@ -171,12 +200,20 @@ idle passes emit nothing.
 
 Admission and preparation share one SQLite write transaction. Per-worker limits count every
 unresolved launch, including manual and uncertain launches. Automatic admission also has a
-store-wide ceiling of 32 unresolved launches. An explicit manual owner launch can exceed those
+store-wide ceiling of 32 unresolved launches and a per-socket ceiling of 16, so a host whose
+launches cannot be resolved holds at most its own share. Queued work that admission holds back
+is reported as `held: [{workerID, reason}]` — `host_unavailable`, `global_capacity`,
+`host_capacity`, `worker_capacity`, `quarantined` or a `worker-capacity` reason such as
+`usageUnsettled` — whenever the set changes (every one-shot `supervisor-tick` prints it); an idle
+worker with nothing queued is not a hold. `launch-occupancy` reports unresolved launches by host
+and state with both limits. An explicit manual owner launch can exceed those
 scheduling limits; it still contributes to the supervisor's occupied slots. `active-launches
 [CURSOR]` inspects these records without exposing recipes. Failed work stays interrupted until
 an owner explicitly retries it. Missing inventory, timeouts and daemon restarts never authorize
-an automatic replacement. A definite spawn refusal pauses the matching policy revision so a
-broken recipe cannot consume the entire queue; a newer owner revision is not overwritten.
+an automatic replacement. A definite recipe refusal pauses the matching policy revision so a
+broken recipe cannot consume the entire queue; a newer owner revision is not overwritten. A
+transient host refusal or fork failure requeues the work (`requeued`) and backs the host off
+instead.
 
 A supervised intent records the policy revision that prepared it. Restart can dispatch that
 intent only while it is still prepared and the same revision remains enabled. A superseded or
@@ -191,9 +228,11 @@ at dispatch. No shell expansion or substitution of work text occurs. This lets a
 recipe mint a new provider session per execution without reusing one configured session ID.
 Embedded MCP environment placeholders remain the provider configuration's responsibility.
 
-The supervisor also admits the host-owned recurring automations described below. It is not a self-healing service. Exit receipts
-are still bounded by ptyd's retention window. An outage or sufficiently delayed observation can
-leave a launch unresolved for operator reconciliation. Backup/retention, provider authentication,
+The supervisor also admits the host-owned recurring automations described below. It is not a
+self-healing service. Retained receipts are bounded (256 per daemon, oldest evicted and
+journalled), an older ptyd still applies its ordinary retention window, and a lost or replaced
+state directory, or a ptyd that never comes back, leaves a launch unresolved for operator
+reconciliation through the fenced owner-RPC repairs. Backup/retention, provider authentication,
 remote identities and destination delivery are consumer adapters; Rindabox now implements an
 owner/admin inbox and draft consumers. Production activation remains opt-in.
 
@@ -209,6 +248,12 @@ synchronous commits preserve acknowledgements. No client opens a SQLite file ove
 network filesystem. Each mutation and its journal entries commit together. Failed, corrupt or
 future-schema stores are errors and are not recreated as empty. Corrupt stores are left in place
 for explicit recovery, rather than automatically moving files under another running process.
+Each migration step runs in its own `BEGIN IMMEDIATE` transaction that re-reads `user_version`,
+applies only below its target and never writes a lower version, so concurrent opens of an old
+store serialize and each backfill runs once. Every later write transaction re-reads the version
+under its write lock and refuses (`unsupported_schema`) unless it is exactly this build's, so an
+older process left running after a newer build migrated stops writing; a resident supervisor
+exits on it. Reads outside a write transaction are not fenced.
 
 Schema v6 stores small typed payload rows with indexes for kind, identity, parent, source key,
 state and cursor. State indexes and payloads have one write owner. Reads decode only the requested
@@ -329,7 +374,12 @@ worker-local memory remains private to that worker's scoped tools. Shared knowle
 context and may contain mistaken or malicious instructions; it is not host policy.
 
 `owner-rpc` carries one command and up to 16 value/text arguments in at most 256 KiB of JSON on
-stdin, returning one JSON response. Text arguments become private bounded host files and are
+stdin, returning one JSON response. It includes fenced recovery: `launch-confirm-stopped` (its
+expected-state argument is mandatory over RPC), `interrupt`, `launch-dispatch` (a still-prepared
+intent only) and `delivery-confirm-absent` (the named attempt only), plus `launch-occupancy`.
+`version`, `--version` and `host` report `{protocol, schema, features[]}`; a client checks a
+feature (`launch-repair`, `host-receipts`, `launch-failure`, `launch-occupancy`, `schema-fence`)
+before relying on it. `capabilities` keeps its original string for installers that pinned it. Text arguments become private bounded host files and are
 removed after the operation. Only a fixed set of bounded operations is available: it cannot
 start a supervisor. Worker configuration accepts a bounded owner-authored recipe with the same
 revision checks and paused-on-configure behavior as the local CLI. A consumer must construct
@@ -661,8 +711,18 @@ Wake admission rechecks current mail authority. Explicit revocations prevent fut
 from retained mail. Mac default provisioning preserves revocations; its bounded eight-host sync
 pass rotates through all hosts. Mail transport and probes share `BoundedCommand`: private process
 groups, nonblocking bounded streams, bounded cleanup, and no unbounded wait for descendant EOF.
+A descendant that leaves the group (`setsid`) survives the group kill; the run then reports
+exit 0 with a `failure`, and both callers treat any failure as a failed run (audited; pinned by
+`ControllerHardeningTests/anEscapedDescendantFailsTheRunEvenAfterExitZero`). On Linux the
+cleanup also kills processes still holding the command's output pipes, found by pipe inode in
+`/proc` (bounded scan), reported as `escaped_descendant_killed`. macOS has no such sweep: the
+escapee survives and is reported. Containment beyond that needs a cgroup or container boundary.
 
-`scripts/test-controller.sh` runs core, runtime, CLI and real-ptyd suites. It uses the existing
+`scripts/test-controller.sh` runs core, runtime, CLI and real-ptyd suites, including
+`ControllerRecoveryTests` and `scripts/tests/test_controller_recovery.py` (ptyd SIGKILL with two
+restarts, fork failure under `RLIMIT_NPROC`, a watcher-observed exit outliving supervisor
+downtime, a 12 s write lock against the resident loop, an old supervisor after migration, and
+fenced owner-RPC repair; each fails against the 0708ee200 binaries). It uses the existing
 XCTest harness watchdog on Linux; Swift Testing failures are not retried. The standard Mac CI
 and a separate Ubuntu lane both invoke it. `threading-controller --version` reports protocol,
 schema and capabilities without opening or migrating a database. Before an upgrade, preserve an

@@ -36,11 +36,11 @@ are `PTYHostFrame.swift`; this table is the same set in prose.
 
 | Frame | Dir | kind | Fields |
 |---|---|---|---|
-| `hello` | → ← | 0 | `protocol`, `minimumSupported`, `build`, `pid` |
+| `hello` | → ← | 0 | `protocol`, `minimumSupported`, `build`, `pid`, optional `features` |
 | `helloRefused` | ← | 0 | `compatibility`, `update` |
 | `list` | → | 0 | — |
 | `sessions` | ← | 0 | `[PTYHostSessionSummary]` — `id`, `pid`, `startedAt`, `executable`, `grid`, `isAttached`, `exit`, `channel` |
-| `spawn` | → | 0 | `id`, `channel` (`.pty(grid:)` \| `.pipes`), `executable`, `arguments`, `execName`, `environment`, `cwd` |
+| `spawn` | → | 0 | `id`, `channel` (`.pty(grid:)` \| `.pipes`), `executable`, `arguments`, `execName`, `environment`, `cwd`, optional `replaceExisting`, optional `retainReceipt` |
 | `spawned` | ← | 0 | `id`, `pid`, `startTime` |
 | `spawnRefused` | ← | 0 | `id`, `reason` (`alreadyExists`, `executableUnavailable`, `retiring`, `capacity`, `unsupportedChannel`) |
 | `attach` | → | 0 | `id`, `replayBudget` |
@@ -59,7 +59,10 @@ are `PTYHostFrame.swift`; this table is the same set in prose.
 | `retire` | → | 0 | — |
 | `journalTail` | → | 0 | `maxBytes` |
 | `journal` | ← | 0 | `lines` |
-| `error` | ← | 0 | `code`, `detail` |
+| `error` | ← | 0 | `code`, `detail`, optional `id`, optional `errorNumber` |
+| `receiptList` | → | 0 | — (only to a daemon whose `hello` names `retainedReceipts`) |
+| `receipts` | ← | 0 | `[PTYHostReceipt]` — `id`, `pid`, `startTime`, `ending` (`exited` \| `lost`), `status`, `signalled`, `incidentID`, `at`, `tail` |
+| `acknowledge` | → | 0 | `ids` (at most 64; same feature gate) |
 
 Session ids are `TerminalInstanceIdentity` from `ThreadingDomain` — a daemon that minted its own
 session numbers would be a second identity space to reconcile. The domain type is not `Codable`,
@@ -543,6 +546,26 @@ unknown; for half an hour if nobody was attached, because the app may be closed;
 daemon is retiring, since it is being replaced and the app has already been told. Release closes
 the master, cancels the timers, unbinds any watcher still holding it, and is journalled.
 
+**A `retainReceipt` spawn's ending is kept until acknowledged.** The windows above serve a person
+who reconnects; an unattended owner (the autonomous controller) may look after a watcher already
+saw the exit, after its own restart, or after ptyd restarted twice, and lost exits left its work
+running and its slots held forever. So a spawn that sets the optional `retainReceipt` keeps a
+receipt — exit status and signal, or `lost` with the recovery incident — independent of the
+session's release, rebuilt from `sessions.jsonl` on every restart, until a client sends
+`acknowledge`. The receipt also carries the last 4 KiB of output while the reaping daemon is
+alive; that tail is never written to disk. Receipts are bounded to 256 per daemon; the oldest is
+evicted and journalled (`receiptEvicted`). A new spawn of the same identity supersedes its
+receipt. This is the acknowledged state the `lost` frame deliberately does without: that frame
+stays a per-lifetime report for the app, whose answer is idempotent, while receipts are opt-in.
+`receiptList` and `acknowledge` are new client frames, so a client sends them only when the
+daemon's `hello` lists the `retainedReceipts` feature — an older daemon would close the
+connection on an unknown frame type. `features` is additive and never gates admission; the
+protocol pair is unchanged.
+
+A failed `fork` is answered `error(spawnFailed)` carrying the spawn's `id` and the `errno`
+(`errorNumber`), so the caller can record a definite "no process started" instead of treating an
+unanswered spawn as uncertain. Both fields are optional additions to the existing frame.
+
 ### Retire
 
 `retire` stops accepting, closes the listener and **unlinks the socket immediately** so no new
@@ -561,8 +584,10 @@ is on disk at a moment nobody chose.
 ### The state file, and what a restart lost
 
 `sessions.jsonl` in the state directory is append-only over `O_APPEND`, one versioned record per
-lifecycle edge — `spawned`, `exited`, `lost` — written **synchronously, before the edge is reported
-to anybody**. The record that matters most is always the one written immediately before the process
+lifecycle edge — `spawned` (with `retain` for a `retainReceipt` spawn), `exited`, `lost` (with its
+`incidentID`) and, for retained sessions, `acknowledged` — written **synchronously, before the
+edge is reported to anybody**. An older daemon skips the `acknowledged` line as unreadable, which
+only means it keeps a receipt longer than it had to. The record that matters most is always the one written immediately before the process
 died, and a child nobody wrote down is a child a restart cannot even say it lost. It is read
 leniently: a line that does not parse is skipped and counted, because the file exists to be
 readable after a crash truncated a write, and refusing it whole would throw away every session
