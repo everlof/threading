@@ -1753,7 +1753,13 @@ verbs live in `PTYHostCLI.swift`, `PTYHostCLIControl.swift` and `PTYHostCLIForma
 handshake, framing, session binding and bounded writes with the app. The import fence permits
 that transport package alongside Foundation, the platform C library, Dispatch and the wire kit;
 project policy, provider logic, registration and app persistence remain outside the daemon.
-The CLI sets `retiresOlderDaemon: false`; app hosts retain their default retire-on-upgrade policy.
+The CLI sets `retiresOlderDaemon: false`; app hosts retain their default retire-on-upgrade policy
+for **this Mac's own** daemon only. Every client of a remote host's daemon — the preparation probe,
+the holdings survey, attaches and launches through the tunnel — sets it false too, and the app's
+client defaults to false for any socket under the forwarded-socket directory
+(`RemoteHostSockets`), because a remote daemon may belong to another installer. Upgrading a remote
+generation this Mac installed is an explicit, provenance-checked step in preparation instead
+([`remote-execution-hosts.md`](../feature-drafts/remote-execution-hosts.md#installer-provenance-2026-10-04)).
 A real CLI invocation against an older fake host asserts that only hello crosses the socket.
 
 **The two command lines cannot collide.** `PTYHostCLI.parse` declines anything whose first

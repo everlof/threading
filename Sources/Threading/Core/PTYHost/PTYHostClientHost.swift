@@ -4,6 +4,11 @@ import ThreadingPTYClient
 import ThreadingPTYHostKit
 
 extension PTYHostClient {
+    /// `retiresOlderDaemon` is this Mac's upgrade authority, and it reaches only this Mac's own
+    /// daemon. A daemon behind a remote-host tunnel may belong to another installer (Rindabox's
+    /// Ansible, a person's own unit), so a client for one never sends it `retire`: nil derives the
+    /// answer from the socket — false for anything under the forwarded-socket directory — and
+    /// every remote call site also passes false explicitly. See `RemoteHostProvenance`.
     convenience init(
         socketPath: String,
         build: String,
@@ -12,13 +17,16 @@ extension PTYHostClient {
         queue: DispatchQueue? = nil,
         connectTimeout: TimeInterval = PTYHostClientDefaults.connectTimeout,
         helloTimeout: TimeInterval = PTYHostClientDefaults.helloTimeout,
-        maximumQueuedWriteBytes: Int = PTYHostClientDefaults.maximumQueuedWriteBytes
+        maximumQueuedWriteBytes: Int = PTYHostClientDefaults.maximumQueuedWriteBytes,
+        retiresOlderDaemon: Bool? = nil
     ) {
         self.init(socketPath: socketPath, build: build, events: events,
                   journal: { message, detail in eventLog.record(.session, message, detail) },
                   diagnostic: { Self.record($0) },
                   queue: queue, connectTimeout: connectTimeout, helloTimeout: helloTimeout,
-                  maximumQueuedWriteBytes: maximumQueuedWriteBytes)
+                  maximumQueuedWriteBytes: maximumQueuedWriteBytes,
+                  retiresOlderDaemon: retiresOlderDaemon
+                    ?? !RemoteHostSockets.isForwardedDaemonSocket(socketPath))
     }
 
     private static func record(_ diagnostic: PTYHostClientDiagnostic) {
@@ -68,13 +76,15 @@ extension PTYHostClient {
     static func probe(
         socketPath: String,
         build: String,
-        eventLog: EventLog = .shared
+        eventLog: EventLog = .shared,
+        retiresOlderDaemon: Bool? = nil
     ) -> PTYHostProbeOutcome {
         let client = PTYHostClient(
             socketPath: socketPath,
             build: build,
             events: .ignored,
-            eventLog: eventLog
+            eventLog: eventLog,
+            retiresOlderDaemon: retiresOlderDaemon
         )
         do {
             _ = try client.connect()

@@ -502,11 +502,16 @@ enum AgentLauncher {
             binding: MCPSessionRegistry.binding(for: sessionID, decision: mcpDecision)
         ) else { return nil }
 
+        // The research run is no session of ours, so nothing else exports the token its MCP
+        // server is addressed by; it travels with the credentials, in the spawn environment.
+        let routing = AgentAccountRouting.route(for: kind, account: account).credentials
         return launchPlan(
             command: command,
             in: folder,
             resumeState: .unavailable,
-            credentials: AgentAccountRouting.route(for: kind, account: account).credentials
+            credentials: AgentCredentialEnvironment(routing.entries.merging(
+                [MCPDefaults.sessionTokenEnvironmentKey: MCPSessionRegistry.token(for: sessionID)]
+            ) { routed, _ in routed })
         )
     }
 
@@ -759,6 +764,15 @@ enum AgentLauncher {
     /// `args` (stdio). They are alternatives, not a pair: a table carrying both would be asking
     /// Codex to decide which of two addresses this session is at, so the stdio form writes no
     /// `url` at all.
+    ///
+    /// **Neither form carries the session token.** These overrides are `codex` arguments, and a
+    /// process's arguments are readable by every user on the Mac for as long as it runs. The
+    /// token instead reaches Codex in its environment (`THREADING_SESSION_TOKEN`, which every
+    /// launch through `routed` or `settingsResearchPlan` sets) and Codex passes it on from there:
+    /// to the shared HTTP endpoint as an `Authorization: Bearer` header through
+    /// `bearer_token_env_var`, and to the stdio bridge's environment through `env_vars` (Codex
+    /// hands a stdio server only a short allowlist otherwise). Both keys are Codex's documented
+    /// `mcp_servers` fields, verified against `codex mcp add --bearer-token-env-var`.
     private static func appendCodexServerAddress(
         _ binding: MCPServerBinding,
         under server: String,
@@ -766,12 +780,23 @@ enum AgentLauncher {
     ) {
         switch binding {
         case .http(let url):
-            appendCodexConfigOverride("\(server).url", string: url, to: &command)
+            appendCodexConfigOverride("\(server).url", string: MCPSessionRegistry.bearerEndpointURL(from: url),
+                                      to: &command)
+            appendCodexConfigOverride(
+                "\(server).bearer_token_env_var",
+                string: MCPDefaults.sessionTokenEnvironmentKey,
+                to: &command
+            )
         case .stdio(let invocation):
             appendCodexConfigOverride("\(server).command", string: invocation.command, to: &command)
             appendCodexConfigOverride(
                 "\(server).args",
                 tomlValue: tomlArray(invocation.arguments),
+                to: &command
+            )
+            appendCodexConfigOverride(
+                "\(server).env_vars",
+                tomlValue: tomlArray([MCPDefaults.sessionTokenEnvironmentKey]),
                 to: &command
             )
         }

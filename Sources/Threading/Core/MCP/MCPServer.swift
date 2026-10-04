@@ -492,12 +492,15 @@ final class MCPServer: @unchecked Sendable {
         connection: MCPConnection,
         respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
+        let endpointToken = MCPDefaults.sessionToken(
+            path: request.path,
+            authorization: request.header(MCPDefaults.authorizationHeader)
+        )
         if request.method == "GET" {
-            guard request.path.hasPrefix(MCPDefaults.pathPrefix) else {
+            guard let token = endpointToken else {
                 respond(.status(404, "Not Found"))
                 return
             }
-            let token = String(request.path.dropFirst(MCPDefaults.pathPrefix.count))
             guard let sessionID = MCPSessionRegistry.session(forToken: token),
                   request.header("accept")?.contains("text/event-stream") == true else {
                 respond(.status(404, "Not Found"))
@@ -535,13 +538,8 @@ final class MCPServer: @unchecked Sendable {
             return
         }
 
-        guard request.path.hasPrefix(MCPDefaults.pathPrefix) else {
-            respond(.status(404, "Not Found"))
-            return
-        }
-
-        let token = String(request.path.dropFirst(MCPDefaults.pathPrefix.count))
-        guard let sessionID = MCPSessionRegistry.session(forToken: token) else {
+        guard let token = endpointToken,
+              let sessionID = MCPSessionRegistry.session(forToken: token) else {
             respond(.status(404, "Not Found"))
             return
         }

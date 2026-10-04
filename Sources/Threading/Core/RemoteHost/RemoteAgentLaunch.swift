@@ -273,10 +273,11 @@ extension RemoteAgentLaunch {
                     command: bridgePath,
                     arguments: [
                         MCPBridgeDefaults.socketArgument, route.socketPath,
-                        MCPBridgeDefaults.tokenArgument, token,
                         MCPBridgeDefaults.cacheArgument,
                         "\(route.cacheDirectory)/\(stem).\(MCPDefaults.configFileExtension)"
-                    ]
+                    ],
+                    // In the owner-only config file, never the bridge's argv on the host.
+                    environment: [MCPDefaults.sessionTokenEnvironmentKey: token]
                 )
                 servers[MCPDefaults.serverName] = MCPServerBinding.stdio(invocation).claudeServerObject
                 integration.flags.allowedTools = allowedTools

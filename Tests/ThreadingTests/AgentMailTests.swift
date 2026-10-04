@@ -643,6 +643,26 @@ final class MacMailSyncTests: XCTestCase {
         XCTAssertEqual(Set((first + second).map(\.hostID)).count, 12)
     }
 
+    /// Mail this Mac queued for a host that never came back used to wait forever; the pass now
+    /// bounces it after `MailLimits.outboundLifetime`, as hosts do each supervisor pass.
+    func testOutboundMailToAHostThatNeverAnswersExpires() async throws {
+        let mac = MacMailbox(databaseURL: directory.appendingPathComponent("mac/mailbox.db"))
+        let store = try await mac.controllerStore()
+        let sync = MacMailSync(mailbox: mac, runner: FakeRemote(store: store))
+        let gone = HostID()
+        _ = try await store.setMailPeer(host: gone, expectedRevision: 0, name: "gone", transport: nil, push: false, pull: false)
+        let id = UUID()
+        _ = try await mac.send(from: SessionID(), senderName: "Fix the importer",
+                               to: MailAddress(host: gone, kind: .session, id: UUID()), id: id,
+                               text: "Still there?", replyTo: nil, priority: .normal, ownerAdmitted: false)
+        let early = await sync.expireStaleOutbound()
+        XCTAssertEqual(early, [], "within its lifetime it keeps waiting")
+        let expired = await sync.expireStaleOutbound(now: Date().addingTimeInterval(MailLimits.outboundLifetime + 60))
+        XCTAssertEqual(expired, [id])
+        let queued = try await store.outboundBatch(for: gone).envelopes
+        XCTAssertTrue(queued.isEmpty)
+    }
+
     func testPeeringPushAndPullCarryMailBothWaysAndRefuseAWrongHost() async throws {
         let mac = MacMailbox(databaseURL: directory.appendingPathComponent("mac/mailbox.db"))
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("host"), withIntermediateDirectories: true)

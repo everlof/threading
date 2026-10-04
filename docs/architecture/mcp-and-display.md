@@ -47,10 +47,23 @@ completion: a launch that ran before the rendezvous had answered would choose HT
 that could have had a durable bridge, or stdio for one that could not.
 
 **Session routing is the whole design.** `MCPSessionRegistry` mints a per-session token and
-`AgentLauncher` passes a URL embedding it through Claude's `--mcp-config` file or Codex's
-one-run `mcp_servers` overrides, so a tool call arrives already attributed — the URL *is* the
-identity. `AgentSession.id` is the key, not
-`agentSessionID`, which is nil for Codex until discovery.
+every tool call carries it, so it arrives already attributed — the token *is* the identity.
+`AgentSession.id` is the key, not `agentSessionID`, which is nil for Codex until discovery.
+
+**The token is never a process argument.** Arguments are readable by every user on the Mac for
+the life of the process, and the token is the session's whole authority over its tools. Codex's
+`mcp_servers` overrides are `codex` arguments, so they name only where the token is: the HTTP form
+addresses the shared endpoint `/mcp` with `bearer_token_env_var = "THREADING_SESSION_TOKEN"`, and
+the server reads `Authorization: Bearer` there (`MCPDefaults.sessionToken`; a `/mcp/<token>` path
+still works for Claude's config file and ACP's `session/new`, which are not argv). The stdio form
+forwards the same variable to the bridge with `env_vars`. Claude's `--mcp-config` file and the
+remote launch's owner-only config carry the token in the stdio server's `env`, and
+`threading-mcp-bridge` reads `THREADING_SESSION_TOKEN` instead of `--token` (still accepted for an
+older launch). The key names are Codex's own, checked against `codex mcp add --bearer-token-env-var`
+on codex-cli 0.160. `AgentLaunchQuotingTests/testACodexSessionLaunchNeverPutsTheSessionTokenInItsArguments`
+and `MCPBearerEndpointTests` pin both halves. The one remaining appearance is transient: the
+`env THREADING_SESSION_TOKEN=…` word of the login-shell command, which the shell replaces by
+`exec` before the agent runs.
 
 **The token is durable**, and that is what makes a hook's address outlive one launch. It used to
 live in an in-memory dictionary documented as stable for the app's lifetime, so a report arriving
@@ -146,8 +159,9 @@ where it can be retried. So the per-session configuration can name a helper inst
 ```json
 {"mcpServers": {"threading": {"type": "stdio",
   "command": "…/Contents/Helpers/threading-mcp-bridge",
-  "args": ["--socket", "…/Threading/bridge/mcp.sock", "--token", "…",
-           "--cache", "…/bridge-catalogues/<session>.json"]}}}
+  "args": ["--socket", "…/Threading/bridge/mcp.sock",
+           "--cache", "…/bridge-catalogues/<session>.json"],
+  "env": {"THREADING_SESSION_TOKEN": "…"}}}}
 ```
 
 **It is opt-in, and off.** This is step 2 of the rollout in

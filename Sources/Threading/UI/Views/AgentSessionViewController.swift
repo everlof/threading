@@ -724,7 +724,8 @@ final class AgentSessionViewController: NSViewController {
         session.hostPlacement = placement
         session.hostTransportFactory = PTYHostPolicy.attachingTransportFactory(
             socketPath: socketPath,
-            bundle: bundle
+            bundle: bundle,
+            retiresOlderDaemon: !placement.isRemote
         )
         // Armed before the attach, because the link fires it from the first coalesced flush and
         // that can be the very next main-queue turn.
@@ -1002,7 +1003,8 @@ final class AgentSessionViewController: NSViewController {
                 ])
                 clearPendingRemoteLaunch()
                 plan = launch.plan
-                hostFactory = PTYHostPolicy.attachingTransportFactory(socketPath: socketPath)
+                hostFactory = PTYHostPolicy.attachingTransportFactory(socketPath: socketPath,
+                                                                      retiresOlderDaemon: false)
                 placement = .remote(environment: launch.environment)
             case .attach(let summary, let context):
                 EventLog.shared.record(.session, "Taking session back from remote host", [
