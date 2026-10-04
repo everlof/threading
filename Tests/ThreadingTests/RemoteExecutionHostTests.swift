@@ -145,7 +145,8 @@ final class RemoteExecutionHostTests: XCTestCase {
     /// paths. Once this build runs, every other enabled instance is disabled for boot — and only
     /// for boot, so an agent under a running one is not touched.
     func testOtherEnabledInstancesAreDisabledForBootButNeverStopped() throws {
-        let facts = try RemoteHostFacts.parse(Self.debianProbe)
+        // Only a generation this Mac marked as its own (`RemoteHostProvenanceTests` covers the rest).
+        let facts = try RemoteHostFacts.parse(Self.debianProbe + "\nmanaged=spike-gen2 threading-mac")
         let plan = RemoteHostInstallPlan.make(facts: facts, binary: binary("0123456789abcdef"))
         XCTAssertEqual(plan.otherEnabledInstances, ["spike-gen2"])
 
@@ -467,9 +468,12 @@ final class RemoteExecutionHostTests: XCTestCase {
         XCTAssertEqual(server["command"] as? String, "\(home)/.local/lib/threading/bridge/00aa11bb22cc33dd/threading-mcp-bridge")
         XCTAssertEqual(server["args"] as? [String], [
             "--socket", "\(home)/.local/state/threading/bridge/mcp.sock",
-            "--token", token,
             "--cache", "\(home)/.local/state/threading/bridge/catalogues/\(session.id.uuidString).json"
         ])
+        // The token reaches the bridge in its environment, from the owner-only config file —
+        // never in the argv every user on the host can read.
+        XCTAssertEqual((server["env"] as? [String: String])?["THREADING_SESSION_TOKEN"], token)
+        XCTAssertFalse((server["args"] as? [String] ?? []).contains(token))
         XCTAssertTrue(arguments.contains("--allowedTools"))
         XCTAssertTrue(arguments.contains("mcp__threading__set_session_name"))
     }

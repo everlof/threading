@@ -27,7 +27,7 @@ struct BridgeArguments: Sendable {
     var endpointPath: String { BridgeDefaults.pathPrefix + token }
 
     static let usage =
-        "usage: threading-mcp-bridge --socket <path> --token <token> --cache <path>"
+        "usage: \(BridgeDefaults.tokenEnvironmentKey)=<token> threading-mcp-bridge --socket <path> --cache <path>"
 
     private enum Flag {
         static let socket = "--socket"
@@ -37,7 +37,15 @@ struct BridgeArguments: Sendable {
 
     /// Parses the arguments after `argv[0]`. Flags may appear in any order; each is required,
     /// may appear once, and must carry a non-empty value. Anything else answers `nil`.
-    static func parse(_ arguments: [String]) -> BridgeArguments? {
+    ///
+    /// The token comes from `THREADING_SESSION_TOKEN` in the environment. `--token` is still
+    /// read, for a launch an older app composed, but nothing this app writes passes it: a
+    /// process's arguments are readable by every user on the machine for its whole life, and the
+    /// token is the session's whole authority over its tools.
+    static func parse(
+        _ arguments: [String],
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> BridgeArguments? {
         var socketPath: String?
         var token: String?
         var cachePath: String?
@@ -66,6 +74,9 @@ struct BridgeArguments: Sendable {
             index = arguments.index(after: valueIndex)
         }
 
+        if token == nil, let inherited = environment[BridgeDefaults.tokenEnvironmentKey], !inherited.isEmpty {
+            token = inherited
+        }
         guard let socketPath, let token, let cachePath else { return nil }
         return BridgeArguments(socketPath: socketPath, token: token, cachePath: cachePath)
     }

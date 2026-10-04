@@ -132,6 +132,15 @@ enum MCPSessionRegistry {
     /// CLI expects the same URL inside a JSON file, which `writeConfiguration` creates below.
     /// Returns nil when the server is not listening, which leaves the launch to proceed
     /// without MCP rather than failing outright.
+    /// The shared endpoint on the same listener as `url`, for a client that sends the session
+    /// token as a bearer header rather than in the path (Codex — see `MCPDefaults.bearerEndpointPath`).
+    static func bearerEndpointURL(from url: String) -> String {
+        guard var components = URLComponents(string: url) else { return url }
+        components.path = MCPDefaults.bearerEndpointPath
+        components.query = nil
+        return components.string ?? url
+    }
+
     static func endpointURL(for sessionID: SessionID, port: UInt16?) -> String? {
         guard let port else { return nil }
 
@@ -181,9 +190,9 @@ enum MCPSessionRegistry {
             command: decision.helperURL.path,
             arguments: [
                 MCPBridgeDefaults.socketArgument, socketPath,
-                MCPBridgeDefaults.tokenArgument, token(for: sessionID),
                 MCPBridgeDefaults.cacheArgument, bridgeCacheFile(for: sessionID).path
-            ]
+            ],
+            environment: [MCPDefaults.sessionTokenEnvironmentKey: token(for: sessionID)]
         )
     }
 

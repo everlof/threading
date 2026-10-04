@@ -182,6 +182,10 @@ enum MCPBridgeLocation {
 struct MCPBridgeInvocation: Equatable, Sendable {
     let command: String
     let arguments: [String]
+    /// Entries the bridge's own environment needs — the session token. Never rendered into an
+    /// argument: each client states it in its config file or forwards it from its own
+    /// environment (Codex's `env_vars`), because arguments are readable by every user.
+    var environment: [String: String] = [:]
 }
 
 // MARK: - MCP Bridge Decision
@@ -257,11 +261,13 @@ enum MCPServerBinding: Equatable, Sendable {
         case .http(let url):
             return ["type": "http", "url": url]
         case .stdio(let invocation):
-            return [
+            var object: [String: Any] = [
                 "type": "stdio",
                 "command": invocation.command,
                 "args": invocation.arguments
             ]
+            if !invocation.environment.isEmpty { object["env"] = invocation.environment }
+            return object
         }
     }
 
@@ -282,7 +288,9 @@ enum MCPServerBinding: Equatable, Sendable {
                 "name": name,
                 "command": invocation.command,
                 "args": invocation.arguments,
-                "env": []
+                "env": invocation.environment.keys.sorted().map { key in
+                    ["name": key, "value": invocation.environment[key] ?? ""]
+                }
             ]
         }
     }

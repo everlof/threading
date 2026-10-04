@@ -616,6 +616,39 @@ final class AgentLaunchQuotingTests: XCTestCase {
         )
     }
 
+    /// The session token is the session's whole authority over its tools, and a process's
+    /// arguments are readable by every user on the Mac. A Codex session launch once carried it
+    /// in `-c mcp_servers.threading.url=http://127.0.0.1:PORT/mcp/<token>`; now neither the HTTP
+    /// nor the stdio form puts it in an argument, and both name where Codex finds it instead.
+    func testACodexSessionLaunchNeverPutsTheSessionTokenInItsArguments() throws {
+        let session = AgentSession(kind: .codex, title: "ordinary chat")
+        defer { MCPSessionRegistry.remove(sessionID: session.id) }
+        let token = MCPSessionRegistry.token(for: session.id)
+
+        var http = ShellCommand(word: AgentDefaults.codexExecutable)
+        AgentLauncher.appendMCPFlags(
+            for: session, to: &http,
+            decision: MCPBridgeDecision(isEnabled: false, helperURL: URL(fileURLWithPath: "/missing/threading-mcp-bridge"),
+                                        socketPath: nil, httpPort: 9)
+        )
+        XCTAssertFalse(http.source.contains(token), http.source)
+        let httpWords = try Self.tokenizing("'cd' '/tmp' && 'exec' \(http.source)")
+        XCTAssertTrue(httpWords.contains("mcp_servers.threading.url=\"http://127.0.0.1:9/mcp\""), "\(httpWords)")
+        XCTAssertTrue(httpWords.contains("mcp_servers.threading.bearer_token_env_var=\"THREADING_SESSION_TOKEN\""))
+
+        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/threading-mcp-bridge")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: helper.path))
+        var stdio = ShellCommand(word: AgentDefaults.codexExecutable)
+        AgentLauncher.appendMCPFlags(
+            for: session, to: &stdio,
+            decision: MCPBridgeDecision(isEnabled: true, helperURL: helper, socketPath: "/tmp/t5a-mcp.sock", httpPort: 9)
+        )
+        XCTAssertFalse(stdio.source.contains(token), stdio.source)
+        XCTAssertFalse(stdio.source.contains(MCPBridgeDefaults.tokenArgument))
+        let stdioWords = try Self.tokenizing("'cd' '/tmp' && 'exec' \(stdio.source)")
+        XCTAssertTrue(stdioWords.contains("mcp_servers.threading.env_vars=[\"THREADING_SESSION_TOKEN\"]"), "\(stdioWords)")
+    }
+
     /// Projects are folders, not necessarily repositories. The helper must therefore opt out
     /// of Codex's Git preflight without weakening the read-only sandbox that bounds the run.
     func testCodexProjectResearchSupportsNonRepositoryFoldersReadOnly() throws {
@@ -735,7 +768,10 @@ final class AgentLaunchQuotingTests: XCTestCase {
             "--config", "check_for_update_on_startup=false",
             "--config", "model_reasoning_effort=\"low\"",
             "--sandbox", "read-only",
-            "--config", "mcp_servers.threading.url=\"http://127.0.0.1:9/mcp/t\"",
+            // The shared endpoint and the name of the variable holding the token — never the
+            // token itself, which would be readable in `ps` for the run's whole life.
+            "--config", "mcp_servers.threading.url=\"http://127.0.0.1:9/mcp\"",
+            "--config", "mcp_servers.threading.bearer_token_env_var=\"THREADING_SESSION_TOKEN\"",
             "--config", "mcp_servers.threading.enabled_tools=[\"list_settings\"]",
             "--config", "mcp_servers.threading.tools.list_settings.approval_mode=\"approve\"",
             "exec",
@@ -751,7 +787,8 @@ final class AgentLaunchQuotingTests: XCTestCase {
     func testCodexSettingsResearchNamesTheBridgeCommandInsteadOfAURL() throws {
         let invocation = MCPBridgeInvocation(
             command: "/Applications/Threading.app/Contents/Helpers/threading-mcp-bridge",
-            arguments: ["--socket", "/tmp/b/mcp.sock", "--token", "t0", "--cache", "/tmp/c.json"]
+            arguments: ["--socket", "/tmp/b/mcp.sock", "--cache", "/tmp/c.json"],
+            environment: ["THREADING_SESSION_TOKEN": "t0"]
         )
         let command = try XCTUnwrap(AgentLauncher.settingsResearchCommand(
             kind: .codex,
@@ -772,7 +809,8 @@ final class AgentLaunchQuotingTests: XCTestCase {
             "--sandbox", "read-only",
             "--config", "mcp_servers.threading.command=\"\(invocation.command)\"",
             "--config", "mcp_servers.threading.args=[\"--socket\",\"/tmp/b/mcp.sock\","
-                + "\"--token\",\"t0\",\"--cache\",\"/tmp/c.json\"]",
+                + "\"--cache\",\"/tmp/c.json\"]",
+            "--config", "mcp_servers.threading.env_vars=[\"THREADING_SESSION_TOKEN\"]",
             "--config", "mcp_servers.threading.enabled_tools=[\"list_settings\"]",
             "--config", "mcp_servers.threading.tools.list_settings.approval_mode=\"approve\"",
             "exec",

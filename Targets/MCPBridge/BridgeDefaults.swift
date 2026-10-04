@@ -29,6 +29,10 @@ enum BridgeDefaults {
     /// Matches `MCPDefaults.pathPrefix`; the session token completes it.
     static let pathPrefix = "/mcp/"
 
+    /// Matches `MCPDefaults.sessionTokenEnvironmentKey`: where the session token arrives when it
+    /// is not on the command line, which is always, now — arguments are readable by every user.
+    static let tokenEnvironmentKey = "THREADING_SESSION_TOKEN"
+
     /// The ceiling on one message in either direction, matching `MCPDefaults.maximumRequestBytes`.
     ///
     /// Stated here rather than read from the app for the independence reason above; the number

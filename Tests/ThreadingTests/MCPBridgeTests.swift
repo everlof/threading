@@ -826,11 +826,14 @@ private final class BridgeRunner: @unchecked Sendable {
 
     init(executable: URL, socketPath: String, token: String, cachePath: String) throws {
         process.executableURL = executable
+        // The shipping launch: the token in the environment, never on the command line.
         process.arguments = [
             "--socket", socketPath,
-            "--token", token,
             "--cache", cachePath
         ]
+        var environment = ProcessInfo.processInfo.environment
+        environment[MCPDefaults.sessionTokenEnvironmentKey] = token
+        process.environment = environment
         process.standardInput = standardInput
         process.standardOutput = standardOutput
         process.standardError = standardError
