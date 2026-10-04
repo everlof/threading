@@ -50,6 +50,7 @@ enum AppThemeLayer: String, CaseIterable, Sendable {
             return variant.transition != nil
                 || variant.moments != nil
                 || variant.words != nil
+                || variant.titleMorph != nil
                 || !variant.sprites.isEmpty
                 || variant.sidebar?.mascot != nil
                 || brand.map { $0.logo != .mark || $0.title != nil || $0.motion != nil || $0.dockIcon }
@@ -75,6 +76,7 @@ enum AppThemeLayer: String, CaseIterable, Sendable {
             return before.transition == after.transition
                 && before.moments == after.moments
                 && before.words == after.words
+                && before.titleMorph == after.titleMorph
                 && before.sprites == after.sprites
                 && before.sidebar?.mascot == after.sidebar?.mascot
                 && was?.logo == now?.logo

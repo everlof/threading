@@ -1699,10 +1699,10 @@ final class ThemeToolTests: XCTestCase {
         })
     }
 
-    private func terminalColors(of theme: TerminalTheme) -> [String: String] {
-        Dictionary(uniqueKeysWithValues: ThemeColorKey.allCases.map {
+    private func terminalColors(of theme: TerminalTheme) -> TerminalColorsArguments {
+        TerminalColorsArguments(Dictionary(uniqueKeysWithValues: ThemeColorKey.allCases.map {
             ($0.wireName, theme[$0].hexString)
-        })
+        }))
     }
 
     private func schema(for name: String) throws -> [String: Any] {
@@ -2496,7 +2496,8 @@ final class ThemeToolTests: XCTestCase {
     }
 
     /// The palette is generated from `ThemeColorKey`, so a colour added to the model cannot be
-    /// left out of the schema an agent reads.
+    /// left out of the schema an agent reads. The glow and its removal are the two keys that
+    /// are not colours.
     func testCreateThemeSchemaDescribesEveryColour() throws {
         let schema = try schema(for: MCPTools.createTheme)
         let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])
@@ -2509,6 +2510,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(
             Set(palette.keys),
             Set(ThemeColorKey.allCases.map(\.wireName))
+                .union([TerminalColorsArguments.glowKey, TerminalColorsArguments.removeGlowKey])
         )
     }
 

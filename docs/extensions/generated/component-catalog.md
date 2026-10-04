@@ -30,6 +30,32 @@ A picture or live surface beneath the sidebar's brand row, list and footer.
 - Host assets: none
 - Hook limits: depth 3, nodes 6; proceed must be the top of a root overlay (content is drawn beneath the host's); custom surfaces at most 30 fps
 
+## `display.backdrop` v1
+
+A picture or live surface beneath the display panel's tabs and content.
+
+- Context: `application`
+- Replacement: `none`
+- Composable hooks: around content
+- Properties: none
+- Slots: none
+- Host-owned behavior: `legibility-ceiling`, `frame-cadence`, `pointer-passthrough`, `reduced-motion`, `accessibility-container`
+- Host assets: none
+- Hook limits: depth 3, nodes 6; proceed must be the top of a root overlay (content is drawn beneath the host's); custom surfaces at most 30 fps
+
+## `composer.backdrop` v1
+
+A picture or live surface beneath the new-session composer's content.
+
+- Context: `application`
+- Replacement: `none`
+- Composable hooks: around content
+- Properties: none
+- Slots: none
+- Host-owned behavior: `legibility-ceiling`, `frame-cadence`, `pointer-passthrough`, `reduced-motion`, `accessibility-container`
+- Host assets: none
+- Hook limits: depth 3, nodes 6; proceed must be the top of a root overlay (content is drawn beneath the host's); custom surfaces at most 30 fps
+
 ## `composer.session-start` v1
 
 Compact accessories before or after the protected new-session prompt.

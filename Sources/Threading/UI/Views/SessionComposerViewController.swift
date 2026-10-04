@@ -420,6 +420,14 @@ final class SessionComposerViewController: NSViewController {
         }
     )
     private let customizationLookup: ComponentCustomizationHost.Lookup
+    /// How the backdrop plane resolves a package picture. A seam so a test can dress the plane
+    /// without an installed extension; production reads the package.
+    private let extensionBackdropImageResolver: ComponentCustomizationHost.ImageResolver
+
+    /// The plane an extension may dress through `composer.backdrop@1`: the root's first
+    /// subview, beneath the greeting, the chips, the prompt box and the actions — see
+    /// `installExtensionBackdrop`.
+    private(set) var extensionBackdrop: ExtensionBackdropPlaneView?
 
     /// Invoked for semantic actions in extension-provided prompt accessories.
     var onCustomizationAction: ((ComponentCustomizationAction) -> Void)?
@@ -496,9 +504,12 @@ final class SessionComposerViewController: NSViewController {
         },
         projectDefaults: ProjectDefaults = .live,
         appSettings: AppSettings = .shared,
-        accountPreferences: AccountPreferencesStore = .shared
+        accountPreferences: AccountPreferencesStore = .shared,
+        extensionBackdropImageResolver: @escaping ComponentCustomizationHost.ImageResolver =
+            ExtensionComponentResourceResolver.image
     ) {
         self.customizationLookup = customizationLookup
+        self.extensionBackdropImageResolver = extensionBackdropImageResolver
         self.newSessionAccountHandle = newSessionAccountHandle
         self.projectDefaults = projectDefaults
         self.appSettings = appSettings
@@ -624,6 +635,7 @@ final class SessionComposerViewController: NSViewController {
         stack.spacing = Design.Spacing.medium
         stack.translatesAutoresizingMaskIntoConstraints = false
 
+        installExtensionBackdrop()
         view.addSubview(stack)
         view.addSubview(heroStack)
         view.addLayoutGuide(heroRegion)
@@ -727,6 +739,21 @@ final class SessionComposerViewController: NSViewController {
         promptContentContainer.setAccessibilityIdentifier("composer.session-start.content")
         // A family-wide patch must not appear before the composer has a real project context.
         promptCustomizationHost.deactivate()
+    }
+
+    /// The plane `composer.backdrop@1` dresses, filling the pane beneath everything the
+    /// composer draws. Like the sidebar's, it composes with an empty `.proceed`: the prompt
+    /// being typed into is never re-parented into an extension's tree, and the plane takes no
+    /// click, so the chips and the box above it keep every one.
+    private func installExtensionBackdrop() {
+        let plane = ExtensionBackdropPlaneView(
+            placement: .composer,
+            lookup: customizationLookup,
+            imageResolver: extensionBackdropImageResolver
+        )
+        view.addSubview(plane, positioned: .below, relativeTo: nil)
+        plane.pinToEdges(of: view)
+        extensionBackdrop = plane
     }
 
     /// Rings the prompt with the ambient agent-activity beam. A sibling pinned over the

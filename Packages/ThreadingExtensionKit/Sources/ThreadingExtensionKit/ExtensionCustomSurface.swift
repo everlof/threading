@@ -13,6 +13,7 @@ public enum ExtensionCustomSurface: Codable, Equatable, Sendable {
         case fragmentFunction
         case preferredFramesPerSecond
         case inputs
+        case texture
     }
 
     public init(from decoder: Decoder) throws {
@@ -32,7 +33,8 @@ public enum ExtensionCustomSurface: Codable, Equatable, Sendable {
                 inputs: try container.decodeIfPresent(
                     [ExtensionSurfaceInputBinding].self,
                     forKey: .inputs
-                ) ?? []
+                ) ?? [],
+                texture: try container.decodeIfPresent(String.self, forKey: .texture)
             ))
         }
     }
@@ -49,6 +51,9 @@ public enum ExtensionCustomSurface: Codable, Equatable, Sendable {
                 forKey: .preferredFramesPerSecond
             )
             try container.encode(surface.inputs, forKey: .inputs)
+            // Absent rather than null: a surface without a picture encodes exactly as it did
+            // before the field existed, so an old publication round-trips byte for byte.
+            try container.encodeIfPresent(surface.texture, forKey: .texture)
         }
     }
 
@@ -74,28 +79,55 @@ public enum ExtensionCustomSurfaceKind: String, Codable, Equatable, Sendable {
 ///
 /// `shaderResource` is package-relative source. Threading supplies the fullscreen vertex stage,
 /// a stable uniform ABI, and at most eight scalar inputs. The extension never receives an
-/// `MTLDevice`, command encoder, texture, buffer, or AppKit object.
+/// `MTLDevice`, command encoder, buffer, or AppKit object, and never constructs a texture.
+///
+/// A surface may name one package image as `texture`. The host — never the extension — reads it
+/// through the package image limits (4 MiB, 1,024 × 1,024), decodes it off the main thread,
+/// uploads it, and hands the fragment function a read-only `texture2d<float>` and a linear,
+/// clamp-to-edge sampler. With a texture stated, the fragment function's signature is
+///
+/// ```metal
+/// float4 threadingExtensionFragment(
+///     float2 uv,
+///     constant ThreadingSurfaceUniforms &uniforms,
+///     texture2d<float> image,
+///     sampler imageSampler
+/// );
+/// ```
+///
+/// Until the picture arrives — and if it never does — the host binds a 1 × 1 transparent
+/// texture, so a sample reads `float4(0)` and the surface draws on. Samples are sRGB-encoded
+/// with straight (not premultiplied) alpha — the convention the fragment function's own return
+/// value is blended in — so returning a sample composites the picture as it is. Without
+/// `texture` the two-argument signature is unchanged.
 public struct ExtensionMetalSurface: Equatable, Sendable {
     public static let defaultFragmentFunction = "threadingExtensionFragment"
     /// The SDK's own cadence ceiling. A contract may state a lower one through
     /// `ExtensionComponentNodeConstraints.maximumCustomSurfaceFramesPerSecond`.
     public static let maximumFramesPerSecond = 60
+    /// The package image formats a surface's `texture` may name.
+    public static let textureExtensions: Set<String> = ["png", "jpg", "jpeg"]
 
     public let shaderResource: String
     public let fragmentFunction: String
     public let preferredFramesPerSecond: Int
     public let inputs: [ExtensionSurfaceInputBinding]
+    /// A package-relative PNG or JPEG the host binds at fragment texture index 0, or nil for a
+    /// surface drawn from its inputs alone. Stating one changes the fragment ABI; see the type.
+    public let texture: String?
 
     public init(
         shaderResource: String,
         fragmentFunction: String = Self.defaultFragmentFunction,
         preferredFramesPerSecond: Int = 60,
-        inputs: [ExtensionSurfaceInputBinding] = []
+        inputs: [ExtensionSurfaceInputBinding] = [],
+        texture: String? = nil
     ) {
         self.shaderResource = shaderResource
         self.fragmentFunction = fragmentFunction
         self.preferredFramesPerSecond = preferredFramesPerSecond
         self.inputs = inputs
+        self.texture = texture
     }
 
     func validationIssues(path: String) -> [ExtensionValidationIssue] {
@@ -105,6 +137,16 @@ public struct ExtensionMetalSurface: Equatable, Sendable {
             issues.append(.init(
                 path: "\(path).shaderResource",
                 message: "must be a package-relative '.metal' path"
+            ))
+        }
+        if let texture,
+           !ExtensionIdentifierRules.isSafeRelativePath(texture)
+            || !Self.textureExtensions.contains(
+                URL(fileURLWithPath: texture).pathExtension.lowercased()
+            ) {
+            issues.append(.init(
+                path: "\(path).texture",
+                message: "must be a package-relative '.png', '.jpg' or '.jpeg' path"
             ))
         }
         if !Self.isMetalIdentifier(fragmentFunction) {
@@ -298,6 +340,62 @@ public struct ExtensionHostSignal: RawRepresentable, Codable, Hashable, Sendable
 
     public var requiresAudioCapture: Bool { Self.audioSignals.contains(self) }
 
+    /// `1` when the app theme variant in force for the *surface's own* appearance is a dark
+    /// variant, else `0`. Answered per surface, so under an adaptive theme a window drawn in
+    /// light and one drawn in dark each read their own variant.
+    public static let themeDark: Self = "theme.dark"
+    /// The red, green and blue components, `0...1` in sRGB, of the theme's resolved `accent`
+    /// role for the surface's own appearance — what Threading draws its own accents in, so a
+    /// surface can lean toward the user's theme without the extension ever reading a colour.
+    public static let themeAccentRed: Self = "theme.accent.red"
+    public static let themeAccentGreen: Self = "theme.accent.green"
+    public static let themeAccentBlue: Self = "theme.accent.blue"
+    /// The red, green and blue components, `0...1` in sRGB, of the theme's resolved `ground`
+    /// role — the window's own backdrop — for the surface's own appearance.
+    public static let themeGroundRed: Self = "theme.ground.red"
+    public static let themeGroundGreen: Self = "theme.ground.green"
+    public static let themeGroundBlue: Self = "theme.ground.blue"
+
+    /// The theme readings, in a stable order: darkness, then the accent and ground triples.
+    public static let themeSignals: [Self] = [
+        .themeDark,
+        .themeAccentRed, .themeAccentGreen, .themeAccentBlue,
+        .themeGroundRed, .themeGroundGreen, .themeGroundBlue
+    ]
+
+    /// A pulse when any session's turn comes back with an answer: `1` at the moment it happens,
+    /// easing smoothly to `0` over `momentPulseDuration`, and `0` between moments. A turn that
+    /// was interrupted, refused or stopped by a usage limit is not a finish and does not pulse.
+    public static let momentTurnFinished: Self = "moment.turn-finished"
+    /// A pulse when any session starts waiting on the person — a permission, a question — with
+    /// the same shape as `momentTurnFinished`.
+    public static let momentNeedsAttention: Self = "moment.needs-attention"
+
+    /// How long a moment pulse takes to fall from `1` to `0`, in seconds. A moment arriving
+    /// before the last one has decayed restarts the pulse at `1`.
+    public static let momentPulseDuration: Double = 1.5
+
+    /// The app-event pulses. A host reads them only while motion is allowed; otherwise a
+    /// binding reads its fallback, as audio does.
+    public static let momentSignals: [Self] = [.momentTurnFinished, .momentNeedsAttention]
+
+    /// Whether this signal is a *reaction* to something happening — work, sound, an app event —
+    /// rather than a standing fact about where or when the surface is drawn.
+    ///
+    /// True for `workload.*`, the audio level, bass/mids/treble and band readings, and
+    /// `moment.*`. False for `audio.available` (a capability, not a reading), the theme
+    /// readings, the time of day and the account's remaining usage. A host applies the person's
+    /// reaction policy and strength to reactive readings — it may damp, hold or silence them —
+    /// and never to the others, so bind a reactive signal for movement and a non-reactive one
+    /// for identity and colour.
+    public var isReactive: Bool { Self.reactiveSignals.contains(self) }
+
+    private static let reactiveSignals: Set<Self> = Set(
+        [.workloadIntensity, .workloadWorkingCount]
+            + audioSignals.filter { $0 != .audioAvailable }
+            + momentSignals
+    )
+
     /// Every signal this SDK release names. A host may supply fewer — it refuses a patch naming
     /// one it cannot answer — and never more without a new SDK release naming them here.
     public static let all: [Self] = [
@@ -305,7 +403,7 @@ public struct ExtensionHostSignal: RawRepresentable, Codable, Hashable, Sendable
         .workloadIntensity,
         .workloadWorkingCount,
         .timeOfDayFraction
-    ] + audioSignals
+    ] + audioSignals + themeSignals + momentSignals
 }
 
 public struct ExtensionScalarMapping: Codable, Equatable, Sendable {

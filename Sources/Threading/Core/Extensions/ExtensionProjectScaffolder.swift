@@ -360,12 +360,15 @@ enum ExtensionProjectScaffolder {
           exit 73
         fi
 
+        # Release: optimized code for the runner. Measured on a four-hook extension the module
+        # is 68 MB against 73 MB in debug; most of either is Foundation's own data and code.
         "$SWIFT_COMMAND" build --disable-sandbox \
+          -c release \
           --package-path "$PROJECT_DIR" \
           --swift-sdk "$SDK_ID" \
           --product ExtensionMain
 
-        MODULE="$PROJECT_DIR/.build/wasm32-unknown-wasip1/debug/ExtensionMain.wasm"
+        MODULE="$PROJECT_DIR/.build/wasm32-unknown-wasip1/release/ExtensionMain.wasm"
         if [ ! -f "$MODULE" ]; then
           echo "WebAssembly build did not produce $MODULE" >&2
           exit 66

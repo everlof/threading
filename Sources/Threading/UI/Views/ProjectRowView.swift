@@ -606,7 +606,10 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         }
         // No real mark yet: a deterministic tile from the name, so every project is
         // distinguishable at a glance without anything having been found or stored.
-        iconView.image = stored ?? GeneratedProjectIcon.image(for: shownProjectName)
+        iconView.image = stored ?? GeneratedProjectIcon.image(
+            for: shownProjectName,
+            tint: generatedTileInk()
+        )
         nativeIcon = iconView.image
     }
 
@@ -631,8 +634,22 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         rederiveThemedContent()
     }
 
+    /// The accent a generated tile is inked in under a tinted theme (`IdentityMarkInk`), resolved
+    /// for this row's appearance — or nil for the tile's own hashed colour.
+    private func generatedTileInk() -> NSColor? {
+        var ink: NSColor?
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            if IdentityMarkInk.isTinted(for: effectiveAppearance) {
+                ink = IdentityMarkInk.ink.usingColorSpace(.sRGB)
+            }
+        }
+        return ink
+    }
+
     func rederiveThemedContent() {
-        guard shownProjectIcon != nil else { return }
+        // A stored icon re-plates against the new ground; a generated tile re-inks, because a
+        // tinted theme draws it in its accent.
+        guard !iconView.isHidden else { return }
         applyIconImage()
         customizationHost.refresh()
     }

@@ -1242,6 +1242,30 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
         }
     }
 
+    private var _textGlow: TerminalTextGlow?
+
+    /// A soft halo behind text in each run's own colour — a phosphor glow — or
+    /// nil for none, which is the default.
+    ///
+    /// Drawn by the Core Graphics renderer only; see ``TerminalTextGlow``. A
+    /// radius or opacity of zero is the same as nil, a radius above
+    /// ``TerminalTextGlow/maximumRadius`` is clamped and an opacity above 1 is
+    /// read as 1. While a glow is set, every dirty region is widened by the rows
+    /// a halo can reach, so a changed row also repaints the halo it leaves on
+    /// its neighbours.
+    public var textGlow: TerminalTextGlow? {
+        get { _textGlow }
+        set {
+            let normalized = newValue?.normalized
+            guard _textGlow != normalized else { return }
+            _textGlow = normalized
+            // The prepared rows do not depend on the glow, so no cache is reset;
+            // every row is repainted because every row's halo changed.
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
+        }
+    }
+
     /**
      * This will set the native foreground color to the specified native color (UIColor or NSColor)
      * and will have this reflected into the underlying's terminal `foregroundColor` and

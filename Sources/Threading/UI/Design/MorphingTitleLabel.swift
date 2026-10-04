@@ -10,6 +10,9 @@ public final class MorphingTitleLabel: NSView, ThemedComponent {
 
     private enum Defaults {
         static let intensity = 0.72
+        /// What "Theme's Choice" plays under a theme that states no morph. Computed: the style
+        /// enum is not `Sendable`, so a stored static would be shared mutable state to Swift 6.
+        static var unthemedStyle: ChatNameMorphStyle { .shapeMorph }
     }
 
     private let label = MorphingLabel()
@@ -42,6 +45,9 @@ public final class MorphingTitleLabel: NSView, ThemedComponent {
     }
 
     public var stringValue: String { label.text }
+
+    /// The effect the next rename plays — what the person's style and the theme resolved to.
+    var activeEffect: TextMorphEffect? { label.effect }
 
     public var font: NSFont {
         get { label.font }
@@ -190,7 +196,7 @@ public final class MorphingTitleLabel: NSView, ThemedComponent {
     /// mid-flight or leaves the row looking finished. Zero under Reduce Motion, where
     /// `setStringValue` does not animate at all.
     public func morphSettleDuration(to value: String) -> TimeInterval {
-        guard !Design.Motion.reducesMotion, let preset = currentPreset else { return 0 }
+        guard !Design.Motion.reducesMotion, let preset = currentMorph?.preset else { return 0 }
         let characters = max(stringValue.count, value.count)
         let timing = Self.timing(for: preset, characters: characters)
         return timing.duration + timing.stagger * Double(max(0, characters - 1))
@@ -227,16 +233,26 @@ public final class MorphingTitleLabel: NSView, ThemedComponent {
         }
     }
 
-    private var currentPreset: MorphPreset? {
-        let style = morphStyleOverride ?? DesignSettings.current.chatNameMorphStyle
-        return MorphPreset(rawValue: style.rawValue)
+    /// The morph a rename plays: the person's style, or — under "Theme's Choice", the default —
+    /// the theme's (`ThemeTitleMorph`). A scramble draws from the theme's alphabet whoever chose
+    /// the scramble, because the alphabet says what a scramble looks like here, not whether to.
+    private var currentMorph: (preset: MorphPreset, scramble: [Character]?)? {
+        let chosen = morphStyleOverride ?? DesignSettings.current.chatNameMorphStyle
+        let themed = AppThemePalette.current.variant(for: effectiveAppearance)?.titleMorph
+        let style = chosen == .automatic ? themed?.style ?? Defaults.unthemedStyle : chosen
+        guard let preset = MorphPreset(rawValue: style.rawValue) else { return nil }
+        return (preset, style == .scramble ? themed?.scrambleCharacters : nil)
     }
 
     private func applyEffect(morphingTo value: String) {
-        guard let preset = currentPreset else { return }
+        guard let morph = currentMorph else { return }
 
-        label.effect = preset.makeEffect(intensity: Defaults.intensity)
-        label.timing = Self.timing(for: preset,
+        if let pool = morph.scramble {
+            label.effect = ScrambleEffect(characters: pool)
+        } else {
+            label.effect = morph.preset.makeEffect(intensity: Defaults.intensity)
+        }
+        label.timing = Self.timing(for: morph.preset,
                                    characters: max(stringValue.count, value.count))
     }
 

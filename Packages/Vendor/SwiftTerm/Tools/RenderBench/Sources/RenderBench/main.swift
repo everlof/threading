@@ -7,10 +7,13 @@
 //  byte-identical input and their profiles are directly comparable.
 //
 //  Usage:
-//    RenderBench [--metal] [--seconds N]
+//    RenderBench [--metal] [--seconds N] [--glow RADIUS,OPACITY]
 //                [--scenario dense|medium|scroll|arabic|arabic-line|stalled-frame]
-//    RenderBench [--metal] [--seconds N] --vtebench NAME|all
+//    RenderBench [--metal] [--seconds N] [--glow RADIUS,OPACITY] --vtebench NAME|all
 //    RenderBench --list-vtebench
+//
+//  --glow sets TerminalView.textGlow (Core Graphics only). Run with
+//  SWIFTTERM_PROFILE_STATS=1 to print the Frame.Draw distribution at the end.
 //
 //  Scenarios:
 //    dense   every cell gets its own truecolor foreground and background
@@ -34,8 +37,8 @@ import VTEBenchWorkloads
 import os
 
 let usage = """
-    usage: RenderBench [--metal] [--seconds N] [--scenario dense|medium|scroll|arabic|arabic-line|stalled-frame]
-           RenderBench [--metal] [--seconds N] --vtebench NAME|all
+    usage: RenderBench [--metal] [--seconds N] [--glow RADIUS,OPACITY] [--scenario dense|medium|scroll|arabic|arabic-line|stalled-frame]
+           RenderBench [--metal] [--seconds N] [--glow RADIUS,OPACITY] --vtebench NAME|all
            RenderBench --list-vtebench
     """
 
@@ -45,6 +48,7 @@ var scenario = "dense"
 var scenarioWasSpecified = false
 var vteBenchSelection: String?
 var listVTEBenchWorkloads = false
+var textGlow: TerminalTextGlow?
 
 var argIterator = CommandLine.arguments.dropFirst().makeIterator()
 while let argument = argIterator.next() {
@@ -72,6 +76,13 @@ while let argument = argIterator.next() {
         vteBenchSelection = selection
     case "--list-vtebench":
         listVTEBenchWorkloads = true
+    case "--glow":
+        let parts = (argIterator.next() ?? "").split(separator: ",").compactMap { Double($0) }
+        guard parts.count == 2, parts.allSatisfy({ $0.isFinite && $0 >= 0 }) else {
+            print("--glow requires RADIUS,OPACITY, for example --glow 3,0.4")
+            exit(1)
+        }
+        textGlow = TerminalTextGlow(radius: CGFloat(parts[0]), opacity: CGFloat(parts[1]))
     case "--help", "-h":
         print(usage)
         exit(0)
@@ -293,6 +304,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = "RenderBench: \(runName)\(useMetal ? " (Metal)" : " (CG)")"
         terminalView = TerminalView(frame: window.contentView!.bounds)
         terminalView.terminalDelegate = terminalViewDelegate
+        terminalView.textGlow = textGlow
+        // A benchmark measures rendering, not the occlusion pause: without this
+        // a covered window (or a locked session) draws nothing and the run
+        // reports a feed rate with no frames behind it.
+        terminalView.suspendsRenderingWhenNotVisible = false
         window.contentView!.addSubview(terminalView)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -309,7 +325,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if selectedVTEBenchWorkloads.isEmpty {
             let dimensions = terminalView.terminalDimensions
             print("renderer=\(rendererName) scenario=\(scenario) " +
-                  "cols=\(dimensions.cols) rows=\(dimensions.rows) seconds=\(seconds)")
+                  "cols=\(dimensions.cols) rows=\(dimensions.rows) seconds=\(seconds) " +
+                  "glow=\(glowDescription)")
             if scenario == "stalled-frame" {
                 print("FAULT ACTIVE: the Metal frame permit is held before the first draw.")
                 print("EXPECTED: the pane stays black while the terminal accepts synthetic output.")
@@ -352,6 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if elapsed >= seconds {
             report(elapsed: elapsed, prefix: "TOTAL")
+            reportFrameDraw()
             if scenario == "stalled-frame" {
                 print("REPRODUCED: the terminal accepted \(frameCount) updates, " +
                       "but every Metal draw was refused.")
@@ -366,6 +384,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fps = Double(frameCount) / elapsed
         print(String(format: "%@ frames=%d bytes=%d %.1f MB/s %.1f frames/s",
                      prefix, frameCount, byteCount, mbps, fps))
+    }
+
+    private var glowDescription: String {
+        guard let glow = terminalView.textGlow else { return "off" }
+        return String(format: "%.2f,%.2f", glow.radius, glow.opacity)
+    }
+
+    /// One line per run for the CG draw distribution, so A/B runs can be
+    /// compared without reading the markdown table.
+    private func reportFrameDraw() {
+        guard TerminalProfiling.isRecording,
+              let draw = TerminalProfiling.summaries().first(where: { $0.event == "Frame.Draw" })
+        else { return }
+        print(String(
+            format: "FRAMEDRAW glow=%@ n=%d p50_ms=%.3f p99_ms=%.3f max_ms=%.3f total_ms=%.1f",
+            glowDescription, draw.count, draw.p50Ms, draw.p99Ms, draw.maxMs, draw.totalMs))
     }
 
     private var rendererName: String {

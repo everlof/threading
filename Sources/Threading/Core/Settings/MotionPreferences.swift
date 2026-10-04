@@ -35,6 +35,9 @@ enum WorkingOrbStyle: String, CaseIterable {
 /// Raw values mirror `LabelMorph.MorphPreset`; the adapter at the UI boundary
 /// owns the package mapping and the fixed intensity/timing.
 public enum ChatNameMorphStyle: String, CaseIterable {
+    /// The theme's choice (`ThemeTitleMorph`), or Shape Morph when the theme states none. The
+    /// default, so a theme's decode or flip reaches everyone who has not picked a style.
+    case automatic
     case shapeMorph
     case crossfade
     case slideUp
@@ -49,6 +52,7 @@ public enum ChatNameMorphStyle: String, CaseIterable {
 
     var displayName: String {
         switch self {
+        case .automatic: return L10n.string("Theme’s Choice")
         case .shapeMorph: return L10n.string("Shape Morph")
         case .crossfade: return L10n.string("Crossfade")
         case .slideUp: return L10n.string("Slide Up")
@@ -66,5 +70,11 @@ public enum ChatNameMorphStyle: String, CaseIterable {
 
 enum MotionPreferencesDefaults {
     static let workingOrbStyle = WorkingOrbStyle.random
-    static let chatNameMorphStyle = ChatNameMorphStyle.shapeMorph
+    static let chatNameMorphStyle = ChatNameMorphStyle.automatic
+}
+
+/// The Threading-wide scale on how strongly decoration reacts (`ThemeReactions`).
+enum ThemeReactionDefaults {
+    static let strengthPercent = 100
+    static let strengthPercentRange = 0...200
 }

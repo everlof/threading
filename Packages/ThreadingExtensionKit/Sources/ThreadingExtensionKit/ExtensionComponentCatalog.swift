@@ -87,15 +87,17 @@ public enum ThreadingComponentCatalog {
         allowedCustomSurfaceKinds: [.metal]
     )
 
-    /// A backdrop is drawn *under* the sidebar's content, so its vocabulary is the two things
-    /// that can honestly sit behind a column of names: a picture that covers the column, and a
+    /// A backdrop is drawn *under* a host surface's content — the sidebar's rows, the display
+    /// panel's tabs, the composer's prompt — so its vocabulary is the two things that can
+    /// honestly sit behind content someone reads: a picture that covers the plane, and a
     /// host-run fragment surface. No text, no control, no scene and no media, because nothing
-    /// beneath the rows can be read or pressed — the host hit-tests straight through the whole
-    /// tree. The root must be an overlay whose *top* is `.proceed`: the window hook's shape
-    /// turned over, so a tree that would draw across the rows is refused rather than composited
-    /// at the wrong depth. The cadence ceiling is the window hook's halved: this surface lives
-    /// as long as the window does.
-    private static let sidebarBackdropHookConstraints = ExtensionComponentNodeConstraints(
+    /// beneath the content can be read or pressed — the host hit-tests straight through the
+    /// whole tree. The root must be an overlay whose *top* is `.proceed`: the window hook's
+    /// shape turned over, so a tree that would draw across the content is refused rather than
+    /// composited at the wrong depth. The cadence ceiling is the window hook's halved: a
+    /// backdrop lives as long as its window does. Every backdrop placement shares these values,
+    /// so one example is valid at all of them.
+    private static let backdropHookConstraints = ExtensionComponentNodeConstraints(
         maximumDepth: 3,
         maximumNodes: 6,
         maximumTextLength: 80,
@@ -334,7 +336,7 @@ public enum ThreadingComponentCatalog {
         id: .sidebarBackdrop,
         version: 1,
         context: .application,
-        hookConstraints: sidebarBackdropHookConstraints,
+        hookConstraints: backdropHookConstraints,
         hostOwnedBehavior: [
             .legibilityCeiling,
             .frameCadence,
@@ -343,6 +345,45 @@ public enum ThreadingComponentCatalog {
             .accessibilityContainer
         ]
     )
+
+    /// `sidebar.backdrop@1` at the display panel: beneath its tab row and content, above the
+    /// panel's own themed ground.
+    public static let displayBackdrop = ExtensionComponentContract(
+        id: .displayBackdrop,
+        version: 1,
+        context: .application,
+        hookConstraints: backdropHookConstraints,
+        hostOwnedBehavior: [
+            .legibilityCeiling,
+            .frameCadence,
+            .pointerPassthrough,
+            .reducedMotion,
+            .accessibilityContainer
+        ]
+    )
+
+    /// `sidebar.backdrop@1` at the new-session composer: beneath its greeting, chips, prompt
+    /// box and actions.
+    public static let composerBackdrop = ExtensionComponentContract(
+        id: .composerBackdrop,
+        version: 1,
+        context: .application,
+        hookConstraints: backdropHookConstraints,
+        hostOwnedBehavior: [
+            .legibilityCeiling,
+            .frameCadence,
+            .pointerPassthrough,
+            .reducedMotion,
+            .accessibilityContainer
+        ]
+    )
+
+    /// Every placement that draws beneath a host surface's content with the backdrop contract.
+    public static let backdropPlacements: [ExtensionComponentContract] = [
+        sidebarBackdrop,
+        displayBackdrop,
+        composerBackdrop
+    ]
 
     public static let composerSessionStart = ExtensionComponentContract(
         id: .composerSessionStart,
@@ -609,6 +650,68 @@ public enum ThreadingComponentCatalog {
                                     )
                                 ),
                                 .init(name: "opacity", value: .constant(0.5))
+                            ]
+                        )),
+                        accessibilityLabel: nil
+                    ),
+                    overlay: .proceed
+                )
+            )
+        ),
+        ExtensionComponentCatalogEntry(
+            summary: "A picture or live surface beneath the display panel's tabs and content.",
+            contract: displayBackdrop,
+            examplePatch: ExtensionComponentPatch(
+                id: "display-paper",
+                target: .displayBackdrop(),
+                hook: .overlay(
+                    base: .customSurface(
+                        .metal(ExtensionMetalSurface(
+                            shaderResource: "Resources/paper.metal",
+                            preferredFramesPerSecond: 12,
+                            inputs: [
+                                .init(
+                                    name: "dark",
+                                    value: .signal(.themeDark, mapping: .identity)
+                                ),
+                                .init(name: "opacity", value: .constant(0.4))
+                            ],
+                            texture: "Resources/paper.png"
+                        )),
+                        accessibilityLabel: nil
+                    ),
+                    overlay: .proceed
+                )
+            )
+        ),
+        ExtensionComponentCatalogEntry(
+            summary: "A picture or live surface beneath the new-session composer's content.",
+            contract: composerBackdrop,
+            examplePatch: ExtensionComponentPatch(
+                id: "composer-glow",
+                target: .composerBackdrop(),
+                hook: .overlay(
+                    base: .customSurface(
+                        .metal(ExtensionMetalSurface(
+                            shaderResource: "Resources/glow.metal",
+                            preferredFramesPerSecond: 30,
+                            inputs: [
+                                .init(
+                                    name: "pulse",
+                                    value: .signal(.momentTurnFinished, mapping: .identity)
+                                ),
+                                .init(
+                                    name: "accent.red",
+                                    value: .signal(.themeAccentRed, mapping: .identity)
+                                ),
+                                .init(
+                                    name: "accent.green",
+                                    value: .signal(.themeAccentGreen, mapping: .identity)
+                                ),
+                                .init(
+                                    name: "accent.blue",
+                                    value: .signal(.themeAccentBlue, mapping: .identity)
+                                )
                             ]
                         )),
                         accessibilityLabel: nil

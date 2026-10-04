@@ -91,8 +91,9 @@ public enum ExtensionImageRole: String, Codable, CaseIterable, Equatable, Sendab
     case decoration
     /// A picture that covers the surface *behind* other content: scaled to fill, cropped at
     /// the edges, and given no size of its own, so it can never dictate a row's or a column's
-    /// measure. Only a contract that draws under content admits it — the sidebar backdrop is
-    /// the first — and every contract written before it existed lists `inline` instead.
+    /// measure. Only a contract that draws under content admits it — the backdrop placements
+    /// in `ThreadingComponentCatalog.backdropPlacements` — and every contract written before it
+    /// existed lists `inline` instead.
     case backdrop
 
     /// The roles that occupy a slot *inside* a row, card, panel or navigator: a fixed-size

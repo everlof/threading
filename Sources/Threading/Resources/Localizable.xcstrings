@@ -2743,6 +2743,17 @@
         }
       }
     },
+    "%lld percent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld procent"
+          }
+        }
+      }
+    },
     "%lld projects" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26206,6 +26217,17 @@
         }
       }
     },
+    "How strongly themes and extensions answer agent activity and music. Each theme chooses its own response; 0% holds it still and 200% doubles it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hur starkt teman och tillägg svarar på agentaktivitet och musik. Varje tema väljer sitt eget svar; 0 % håller det stilla och 200 % dubblar det."
+          }
+        }
+      }
+    },
     "How the content pane names what it is showing: a mark, the page's name, and the one menu that acts on it. Plain until the pointer is on it — it is a label that answers a press, not a tab." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40422,6 +40444,28 @@
         }
       }
     },
+    "Reaction strength" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reaktionsstyrka"
+          }
+        }
+      }
+    },
+    "Reactions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reaktioner"
+          }
+        }
+      }
+    },
     "Read a chrome theme's exact semantic colours and material." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49851,6 +49895,17 @@
         }
       }
     },
+    "Some themes and extensions move with what the app is doing: particles that stream faster while agents work, rain that thickens, spectra that follow the music." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vissa teman och tillägg rör sig med det appen gör: partiklar som strömmar snabbare medan agenter arbetar, regn som tätnar, spektrum som följer musiken."
+          }
+        }
+      }
+    },
     "Somebody has this chat open from another device" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58109,6 +58164,17 @@
         }
       }
     },
+    "Theme’s Choice" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Temats val"
+          }
+        }
+      }
+    },
     "There is no next location." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59400,6 +59466,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här runtimen sparar inget transkript som Threading kan läsa. Filer som en tur ändrar visas här när den har körts i en git-utcheckning."
+          }
+        }
+      }
+    },
+    "This scales all of them at once. It changes only decoration — working counts, statuses and notifications stay exactly as they are — and it never starts audio capture. Reduce Motion and Theme animations still stop the motion." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det här skalar alla på en gång. Det ändrar bara dekoration – antal arbetande agenter, statusar och aviseringar förblir precis som de är – och det startar aldrig ljudinspelning. Minska rörelse och Temaanimationer stoppar fortfarande rörelsen."
           }
         }
       }

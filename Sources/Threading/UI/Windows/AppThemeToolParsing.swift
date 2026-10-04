@@ -1141,6 +1141,11 @@ enum AppThemeToolParsing {
                 "words cannot set composer_placeholder and remove_composer_placeholder in the same patch."
             )
         }
+        guard patch.untitledSession == nil || patch.removeUntitledSession != true else {
+            throw AppThemeEditingError.invalid(
+                "words cannot set untitled_session and remove_untitled_session in the same patch."
+            )
+        }
         var words = base ?? ThemeWords()
         if patch.removeWorking == true {
             words.working = []
@@ -1152,7 +1157,70 @@ enum AppThemeToolParsing {
         } else if let placeholder = patch.composerPlaceholder {
             words.composerPlaceholder = placeholder.trimmingCharacters(in: .whitespacesAndNewlines)
         }
+        if patch.removeUntitledSession == true {
+            words.untitledSession = nil
+        } else if let untitled = patch.untitledSession {
+            words.untitledSession = untitled.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         return words.isEmpty ? .remove : .set(words)
+    }
+
+    // MARK: - Title Morph
+
+    static func titleMorph(
+        _ patch: AppThemeTitleMorphArguments?,
+        remove: Bool?,
+        base: ThemeTitleMorph?
+    ) throws -> AppThemeEditing.BlockChange<ThemeTitleMorph> {
+        if remove == true {
+            guard patch == nil else {
+                throw AppThemeEditingError.invalid(
+                    "title_morph cannot be set and removed in the same patch."
+                )
+            }
+            return .remove
+        }
+        guard let patch else { return .inherit }
+        guard patch.characters == nil || patch.removeCharacters != true else {
+            throw AppThemeEditingError.invalid(
+                "title_morph cannot set characters and remove_characters in the same patch."
+            )
+        }
+        let style: ChatNameMorphStyle
+        if let raw = patch.style {
+            guard let parsed = ChatNameMorphStyle(rawValue: raw), parsed != .automatic else {
+                let names = ChatNameMorphStyle.allCases
+                    .filter { $0 != .automatic }
+                    .map(\.rawValue)
+                    .joined(separator: ", ")
+                throw AppThemeEditingError.invalid(
+                    "title_morph.style \"\(raw)\" is not one of \(names)."
+                )
+            }
+            style = parsed
+        } else if let base {
+            style = base.style
+        } else {
+            throw AppThemeEditingError.invalid("A new title_morph needs a style.")
+        }
+        var morph = ThemeTitleMorph(style: style, characters: base?.characters)
+        if patch.removeCharacters == true {
+            morph.characters = nil
+        } else if let characters = patch.characters {
+            morph.characters = characters
+        }
+        // Only a scramble cycles characters; a style change away from it drops the alphabet
+        // it no longer uses rather than refusing the switch.
+        if morph.style != .scramble, patch.characters == nil {
+            morph.characters = nil
+        }
+        return .set(morph)
+    }
+
+    static func document(_ morph: ThemeTitleMorph) -> [String: Any] {
+        var document: [String: Any] = ["style": morph.style.rawValue]
+        if let characters = morph.characters { document["characters"] = characters }
+        return document
     }
 
     static func document(_ words: ThemeWords) -> [String: Any] {
@@ -1160,6 +1228,9 @@ enum AppThemeToolParsing {
         if !words.working.isEmpty { document["working"] = words.working }
         if let placeholder = words.composerPlaceholder {
             document["composer_placeholder"] = placeholder
+        }
+        if let untitled = words.untitledSession {
+            document["untitled_session"] = untitled
         }
         return document
     }

@@ -30,6 +30,7 @@ enum RemoteThemeBridge {
         var glowColor: String?
         var backdropGradient: RemoteThemeGradient?
         var material = AppTheme.Material.system
+        var words: RemoteThemeDTO.Words?
         let appearance = drawingAppearance(for: theme)
 
         appearance.performAsCurrentDrawingAppearance {
@@ -40,6 +41,9 @@ enum RemoteThemeBridge {
                     : .light
             }
             material = theme.variant(for: appearance)?.material ?? theme.material
+            if !theme.isSystem, let stated = theme.variant(for: appearance)?.words {
+                words = remoteWords(stated)
+            }
             if let gradient = material.backdrop?.gradient,
                (2...ThemeBackdropLimits.maximumGradientStops).contains(gradient.stops.count),
                gradient.angleDegrees.isFinite,
@@ -98,8 +102,25 @@ enum RemoteThemeBridge {
                     Design.Typography.availableFamilies.contains($0)
                 },
                 backdropGradient: backdropGradient
-            )
+            ),
+            words: words
         )
+    }
+
+    /// The theme's words, cleaned as the Mac uses them (`ThemeWording`): empty slots are left
+    /// out so the phone's own copy answers for them.
+    private static func remoteWords(_ words: ThemeWords) -> RemoteThemeDTO.Words? {
+        func cleaned(_ value: String?) -> String? {
+            let clean = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return clean?.isEmpty == false ? clean : nil
+        }
+        let working = words.working.compactMap { cleaned($0) }
+        let remote = RemoteThemeDTO.Words(
+            working: working.isEmpty ? nil : working,
+            composerPlaceholder: cleaned(words.composerPlaceholder),
+            untitledSession: cleaned(words.untitledSession)
+        )
+        return remote == RemoteThemeDTO.Words() ? nil : remote
     }
 
     static func terminalTheme(for sessionID: SessionID) -> RemoteTerminalThemeDTO {

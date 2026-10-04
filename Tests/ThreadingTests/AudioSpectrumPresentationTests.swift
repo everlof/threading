@@ -100,7 +100,7 @@ final class AudioSpectrumPresentationTests: HostedStoreTestCase {
             specification: .init(shaderResource: "Resources/spectrum.metal", preferredFramesPerSecond: 30,
                                  inputs: ExtensionHostSignal.audioBands.enumerated().map { index, signal in
                 .init(name: "band.\(index)", value: .signal(signal, mapping: .identity))
-            }), source: try shaderSource(), signalProvider: { _ in available ? 0.8 : nil })
+            }), source: try shaderSource(), signalProvider: { _, _ in available ? 0.8 : nil })
         XCTAssertNil(surface.hitTest(.zero))
         XCTAssertEqual(surface.preferredFramesPerSecond, 30)
         let playing = try XCTUnwrap(surface.snapshotImage(size: CGSize(width: 128, height: 64), time: 1))

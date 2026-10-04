@@ -54,10 +54,17 @@ enum AccountBadge {
         let presentation = resolved ?? AccountPresentation.resolve(account, surface: surface, store: store)
         guard presentation.showsBadge(isDefault: account.isDefault, surface: surface) else { return nil }
         let avatar = presentation.imageID.flatMap { AccountImageStore.image($0) }
+        // A tinted theme inks the generated initial chip in its accent (`IdentityMarkInk`); a
+        // colour the person picked for this account stays theirs.
+        let inksIdentity = IdentityMarkInk.isTinted(for: NSApp.effectiveAppearance)
+            && presentation.style.backgroundHex == nil
+            && presentation.style.foregroundHex == nil
+        let background = inksIdentity ? IdentityMarkInk.tileFill : presentation.background
+        let foreground = inksIdentity ? IdentityMarkInk.ink : presentation.foreground
         let key = [
             account.id.rawValue, surface.rawValue, presentation.glyph,
-            String(presentation.isEmoji), presentation.background.hexString,
-            presentation.foreground.hexString, presentation.imageID ?? "",
+            String(presentation.isEmoji), background.hexString,
+            foreground.hexString, presentation.imageID ?? "",
             avatar.map { String(ObjectIdentifier($0).hashValue) } ?? ""
         ].joined(separator: "|") as NSString
         if resolved == nil, let cached = cache.object(forKey: key) {
@@ -71,8 +78,14 @@ enum AccountBadge {
             image = drawEmoji(presentation.glyph)
         } else {
             image = chipImage { bounds in
-                presentation.background.setFill()
+                background.setFill()
                 NSBezierPath(ovalIn: bounds).fill()
+                if inksIdentity {
+                    foreground.setStroke()
+                    let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5))
+                    ring.lineWidth = 1
+                    ring.stroke()
+                }
                 drawCentred(
                     text: presentation.glyph,
                     font: .systemFont(
@@ -80,7 +93,7 @@ enum AccountBadge {
                             ? AccountBadgeDefaults.fontSize / 1.4 : AccountBadgeDefaults.fontSize,
                         weight: .heavy
                     ),
-                    colour: presentation.foreground, in: bounds
+                    colour: foreground, in: bounds
                 )
             }
         }

@@ -18,6 +18,26 @@ final class RemoteThemeGradientTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(ThemeGradientDrift.self, from: Data("{}".utf8)), .init())
     }
 
+    func testOlderThemeDecodesWithoutWordsAndThemeWordsRoundTrip() throws {
+        let old = Data(#"{"id":"old","name":"Old","mode":"dark","colors":{},"material":{"panelRadius":8,"controlRadius":4,"borderWidth":1}}"#.utf8)
+        XCTAssertNil(try JSONDecoder().decode(RemoteThemeDTO.self, from: old).words)
+        let theme = RemoteThemeDTO(
+            id: "matrix", name: "The Matrix", mode: .dark, colors: [:],
+            material: .init(panelRadius: 0, controlRadius: 0, borderWidth: 1),
+            words: .init(
+                working: ["Jacking in…"],
+                composerPlaceholder: "Follow the white rabbit.",
+                untitledSession: "Unknown program"
+            )
+        )
+        XCTAssertEqual(try JSONDecoder().decode(RemoteThemeDTO.self, from: JSONEncoder().encode(theme)), theme)
+        let partial = Data(#"{"id":"p","name":"P","mode":"light","colors":{},"material":{"panelRadius":8,"controlRadius":4,"borderWidth":1},"words":{"untitledSession":"Fresh pup"}}"#.utf8)
+        let words = try XCTUnwrap(JSONDecoder().decode(RemoteThemeDTO.self, from: partial).words)
+        XCTAssertEqual(words.untitledSession, "Fresh pup")
+        XCTAssertNil(words.working)
+        XCTAssertNil(words.composerPlaceholder)
+    }
+
     func testGeometryMirrorsAcrossPlatformsAndClosesTheLoop() {
         let drift = ThemeGradientDrift(duration: 24, distance: 0.2)
         for angle in [0.0, 45, 90, 180, 270] {

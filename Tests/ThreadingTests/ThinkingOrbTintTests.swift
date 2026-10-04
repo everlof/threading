@@ -278,7 +278,7 @@ final class ThinkingOrbTintTests: XCTestCase {
 
         let settings = AppSettings(defaults: defaults)
         XCTAssertEqual(settings.workingOrbStyle, .random)
-        XCTAssertEqual(settings.chatNameMorphStyle, .shapeMorph)
+        XCTAssertEqual(settings.chatNameMorphStyle, .automatic, "Theme’s Choice by default")
 
         settings.workingOrbStyle = .breathing
         settings.chatNameMorphStyle = .scramble

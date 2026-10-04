@@ -36,6 +36,7 @@ final class MotionPreferencesViewController: NSViewController {
     private let nameStylePopUp = ThemedPopUp()
     private let namePreview = MorphingTitleLabel()
     private let audioPreferences = ThemeAudioPreferences()
+    private let reactionPreferences = ThemeReactionPreferences()
     private var previewNameIndex = 0
 
     /// One live preview per choice, made up front and handed to the menu item.
@@ -244,7 +245,8 @@ final class MotionPreferencesViewController: NSViewController {
         let page = SettingsUI.page(title: "Motion", sections: [
             SettingsUI.section("Working", indicatorCard),
             SettingsUI.section("Chat names", transitionCard),
-            audioPreferences.section()
+            audioPreferences.section(),
+            reactionPreferences.section()
         ], hostPage: .motion)
 
         page.translatesAutoresizingMaskIntoConstraints = false

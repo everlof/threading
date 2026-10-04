@@ -2,12 +2,13 @@ import AppKit
 
 // MARK: - Theme Wording
 
-/// What the theme in force says in the two places a theme may speak (`ThemeWords`), with the
-/// app's own copy as the answer whenever it says nothing.
+/// What the theme in force says in the places a theme may speak (`ThemeWords`), with the app's
+/// own copy as the answer whenever it says nothing.
 ///
-/// Read at the moment the words are used — a turn starting, a composer emptying — rather than
-/// pushed, because both are already re-read at exactly those moments: a theme switch changes the
-/// next turn's word and the next empty composer's invitation, and nothing on screen mid-turn.
+/// Read at the moment the words are used — a turn starting, a composer emptying, a row filling
+/// in — rather than pushed, because each is already re-read at exactly those moments: a theme
+/// switch changes the next turn's word and the next empty composer's invitation, and the theme
+/// sweep re-derives the rows still showing an untitled session.
 @MainActor
 enum ThemeWording {
 
@@ -22,6 +23,12 @@ enum ThemeWording {
     /// The theme's invitation for an empty new-session composer, or nil for the app's own.
     static var composerPlaceholder: String? {
         let stated = words?.composerPlaceholder?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return stated?.isEmpty == false ? stated : nil
+    }
+
+    /// The theme's name for a session nothing has named yet, or nil for "New Session".
+    static var untitledSessionName: String? {
+        let stated = words?.untitledSession?.trimmingCharacters(in: .whitespacesAndNewlines)
         return stated?.isEmpty == false ? stated : nil
     }
 

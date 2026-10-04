@@ -119,7 +119,9 @@ struct SessionDraftView: View {
     }
 
     private var principalTitle: String {
-        guard let startedSession else { return MobileL10n.string("New session") }
+        guard let startedSession else {
+            return theme.untitledSessionName ?? MobileL10n.string("New session")
+        }
         return MobileSessionChrome.navigationTitle(
             for: startedSession,
             in: model.me,
@@ -1196,9 +1198,11 @@ private struct SessionDraftComposerScreen: View {
         .accessibilityLabel(MobileL10n.string("Start session"))
     }
 
-    /// A chat gets one of the task suggestions; a manager is briefed, not tasked.
+    /// A chat gets the Mac theme's invitation when it states one, else one of the task
+    /// suggestions; a manager is briefed, not tasked.
     private var promptPlaceholder: String {
-        role == .manager ? MobileL10n.string("Brief the manager…") : promptSuggestion
+        if role == .manager { return MobileL10n.string("Brief the manager…") }
+        return theme.composerPlaceholder ?? promptSuggestion
     }
 
     // MARK: - Choices

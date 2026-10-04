@@ -28,8 +28,11 @@ if [ -e "$OUTPUT" ]; then
   exit 73
 fi
 
+# The Wasm module is packaged from a release build, as the scaffold's script does: a debug
+# module ships its debug information and unoptimized code.
 THREADING_EXTENSION_SDK_PATH="$SDK_ROOT" "$SWIFT_COMMAND" build \
   --disable-sandbox \
+  -c release \
   --package-path "$PROJECT_DIR" \
   --swift-sdk "$SDK_ID" \
   --product ExtensionMain
@@ -38,6 +41,7 @@ THREADING_EXTENSION_SDK_PATH="$SDK_ROOT" "$SWIFT_COMMAND" build \
   --product SimulatorRelayCompanionExample
 
 CORE_BIN_DIR="$(THREADING_EXTENSION_SDK_PATH="$SDK_ROOT" "$SWIFT_COMMAND" build \
+  -c release \
   --package-path "$PROJECT_DIR" \
   --swift-sdk "$SDK_ID" \
   --show-bin-path)"

@@ -92,7 +92,9 @@ final class AudioSpectrumView: NSView, ThemedComponent, ThemeParticleHolding {
         guard width > 0, height > 0 else { return }
         let bands = frozen ? spectrum?.bands : (ThemeParticleHold.motionAllowed ? service.reading()?.bands : nil)
         for band in 0..<AudioSpectrum.bandCount {
-            let count = Int(((bands?[band] ?? 0) * Double(metrics.cellCount)).rounded())
+            // Drawn through the person's Reaction strength, like every music-driven decoration.
+            let level = ThemeReactions.scaled(bands?[band] ?? 0)
+            let count = Int((level * Double(metrics.cellCount)).rounded())
             for cell in 0..<metrics.cellCount {
                 (cell < count ? Design.Surface.accent : Design.Surface.border).setFill()
                 NSRect(x: rect.minX + CGFloat(band) * (width + metrics.bandGap),

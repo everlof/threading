@@ -130,10 +130,19 @@ Options:
   shaping, font fallback)
 - `--seconds N` — run duration (default 15)
 - `--metal` — use the Metal renderer instead of CoreGraphics
+- `--glow RADIUS,OPACITY` — set `TerminalView.textGlow` (CoreGraphics only),
+  for example `--glow 3,0.4`
 - `--vtebench NAME` — run one of the shared vtebench workloads through the
   real `TerminalView`; use `all` for all 12 cases. `--seconds` is the duration
   for each case.
 - `--list-vtebench` — print the available vtebench workload names and exit
+
+With `SWIFTTERM_PROFILE_STATS=1` the run ends with a `FRAMEDRAW` line: the
+`Frame.Draw` count, p50, p99, max and total, which is the number to compare
+for a change to the CoreGraphics draw itself. RenderBench turns off
+`suspendsRenderingWhenNotVisible`, so a covered window keeps drawing; a locked
+session with the display asleep still draws nothing new, because no display
+link ticks — see "Text glow" below for the fixture that does not need one.
 
 For example, run all vtebench workloads through the Metal UI renderer:
 
@@ -153,6 +162,37 @@ The package pins its dependency identity (`.package(name: "SwiftTerm",
 path: "../..")`), so it also builds inside a worktree whose directory is not
 named `SwiftTerm` — copy `Tools/RenderBench` into the worktree if the
 revision under test predates it.
+
+### Text glow
+
+`TerminalView.textGlow` paints a blurred copy of each frame's text beneath it
+(`Sources/SwiftTerm/Apple/TerminalTextGlow.swift`). Its cost is measured by an
+opt-in fixture that drives the production `drawTerminalContents` into a 2x
+bitmap with no window, replaying RenderBench's `dense` and `scroll` frames and
+a one-row `line` update on RenderBench's 800 × 600-point view:
+
+```bash
+SWIFTTERM_GLOW_BENCH=1 SWIFTTERM_GLOW_BENCH_ROUNDS=3 \
+    swift test -c release -Xswiftc -enable-testing --filter TextGlowCost
+```
+
+Release, Apple M1 Max, 120 frames per cell, two runs (per-frame p50):
+
+| scenario | off | 3 pt, 0.40 | 6 pt, 0.80 |
+| --- | --- | --- | --- |
+| dense | 1.74–1.79 ms | 7.2–8.3 ms | 7.2–7.5 ms |
+| scroll | 1.64–1.65 ms | 6.9–7.8 ms | 7.1–7.4 ms |
+| line | 0.19 ms | 1.29–1.31 ms | 1.38 ms |
+
+A zero-offset `CGContext.setShadow` per glyph run, the obvious
+implementation, measured 12.9–18.1 ms on the full-frame rows (7.4–10×):
+Core Graphics blurs every shadowed operation on its own. The underlay blurs
+once per frame with three `vImageBoxConvolve` passes at device resolution,
+applies the opacity afterwards (a context alpha below 1 leaves Core Graphics'
+fast paths for both text and image drawing), and composites 1:1, which keeps
+a partial repaint pixel-identical to a full one. The cost is per pixel rather
+than per radius. Threading's `docs/architecture/performance.md` has the
+attribution and the alternatives that were measured and rejected.
 
 ### Profiling with Instruments
 

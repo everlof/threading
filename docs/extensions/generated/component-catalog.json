@@ -438,6 +438,479 @@
     {
       "entry" : {
         "contract" : {
+          "context" : "application",
+          "hookConstraints" : {
+            "allowedButtonRoles" : [
+
+            ],
+            "allowedCustomSurfaceKinds" : [
+              "metal"
+            ],
+            "allowedImageRoles" : [
+              "backdrop"
+            ],
+            "allowedStackAxes" : [
+
+            ],
+            "allowedStatusRoles" : [
+
+            ],
+            "allowedTextRoles" : [
+
+            ],
+            "allowsDivider" : false,
+            "allowsFixedSpacer" : false,
+            "allowsFlexibleSpacer" : false,
+            "allowsMedia" : false,
+            "allowsOverlay" : true,
+            "allowsProceed" : true,
+            "allowsTextInput" : false,
+            "maximumCustomSurfaceFramesPerSecond" : 30,
+            "maximumDepth" : 3,
+            "maximumNodes" : 6,
+            "maximumPickerOptions" : 0,
+            "maximumRenderedElements" : 6,
+            "maximumSceneItems" : 0,
+            "maximumTextLength" : 80,
+            "proceedPlacement" : "overlayTop",
+            "requiresProceed" : true
+          },
+          "hostOwnedBehavior" : [
+            "legibility-ceiling",
+            "frame-cadence",
+            "pointer-passthrough",
+            "reduced-motion",
+            "accessibility-container"
+          ],
+          "id" : "display.backdrop",
+          "properties" : [
+
+          ],
+          "replacement" : "none",
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "hook" : {
+            "base" : {
+              "surface" : {
+                "fragmentFunction" : "threadingExtensionFragment",
+                "inputs" : [
+                  {
+                    "name" : "dark",
+                    "value" : {
+                      "mapping" : {
+                        "curve" : "linear",
+                        "fallback" : 0,
+                        "inputMaximum" : 1,
+                        "inputMinimum" : 0,
+                        "outputMaximum" : 1,
+                        "outputMinimum" : 0
+                      },
+                      "signal" : "theme.dark",
+                      "type" : "signal"
+                    }
+                  },
+                  {
+                    "name" : "opacity",
+                    "value" : {
+                      "type" : "constant",
+                      "value" : 0.4
+                    }
+                  }
+                ],
+                "preferredFramesPerSecond" : 12,
+                "shaderResource" : "Resources/paper.metal",
+                "texture" : "Resources/paper.png",
+                "type" : "metal"
+              },
+              "type" : "customSurface"
+            },
+            "overlay" : {
+              "type" : "proceed"
+            },
+            "type" : "overlay"
+          },
+          "id" : "display-paper",
+          "properties" : [
+
+          ],
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "display.backdrop",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "A picture or live surface beneath the display panel's tabs and content."
+      },
+      "patchSchema" : {
+        "$id" : "https://threading.codes/schema/components/display.backdrop-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "hook" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
+              "allowedButtonRoles" : [
+
+              ],
+              "allowedCustomSurfaceKinds" : [
+                "metal"
+              ],
+              "allowedImageRoles" : [
+                "backdrop"
+              ],
+              "allowedStackAxes" : [
+
+              ],
+              "allowedStatusRoles" : [
+
+              ],
+              "allowedTextRoles" : [
+
+              ],
+              "allowsDivider" : false,
+              "allowsFixedSpacer" : false,
+              "allowsFlexibleSpacer" : false,
+              "allowsMedia" : false,
+              "allowsOverlay" : true,
+              "allowsProceed" : true,
+              "allowsTextInput" : false,
+              "maximumCustomSurfaceFramesPerSecond" : 30,
+              "maximumDepth" : 3,
+              "maximumNodes" : 6,
+              "maximumPickerOptions" : 0,
+              "maximumRenderedElements" : 6,
+              "maximumSceneItems" : 0,
+              "maximumTextLength" : 80,
+              "proceedPlacement" : "overlayTop",
+              "requiresProceed" : true
+            }
+          },
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "display.backdrop"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Threading display.backdrop v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "application",
+          "hookConstraints" : {
+            "allowedButtonRoles" : [
+
+            ],
+            "allowedCustomSurfaceKinds" : [
+              "metal"
+            ],
+            "allowedImageRoles" : [
+              "backdrop"
+            ],
+            "allowedStackAxes" : [
+
+            ],
+            "allowedStatusRoles" : [
+
+            ],
+            "allowedTextRoles" : [
+
+            ],
+            "allowsDivider" : false,
+            "allowsFixedSpacer" : false,
+            "allowsFlexibleSpacer" : false,
+            "allowsMedia" : false,
+            "allowsOverlay" : true,
+            "allowsProceed" : true,
+            "allowsTextInput" : false,
+            "maximumCustomSurfaceFramesPerSecond" : 30,
+            "maximumDepth" : 3,
+            "maximumNodes" : 6,
+            "maximumPickerOptions" : 0,
+            "maximumRenderedElements" : 6,
+            "maximumSceneItems" : 0,
+            "maximumTextLength" : 80,
+            "proceedPlacement" : "overlayTop",
+            "requiresProceed" : true
+          },
+          "hostOwnedBehavior" : [
+            "legibility-ceiling",
+            "frame-cadence",
+            "pointer-passthrough",
+            "reduced-motion",
+            "accessibility-container"
+          ],
+          "id" : "composer.backdrop",
+          "properties" : [
+
+          ],
+          "replacement" : "none",
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "hook" : {
+            "base" : {
+              "surface" : {
+                "fragmentFunction" : "threadingExtensionFragment",
+                "inputs" : [
+                  {
+                    "name" : "pulse",
+                    "value" : {
+                      "mapping" : {
+                        "curve" : "linear",
+                        "fallback" : 0,
+                        "inputMaximum" : 1,
+                        "inputMinimum" : 0,
+                        "outputMaximum" : 1,
+                        "outputMinimum" : 0
+                      },
+                      "signal" : "moment.turn-finished",
+                      "type" : "signal"
+                    }
+                  },
+                  {
+                    "name" : "accent.red",
+                    "value" : {
+                      "mapping" : {
+                        "curve" : "linear",
+                        "fallback" : 0,
+                        "inputMaximum" : 1,
+                        "inputMinimum" : 0,
+                        "outputMaximum" : 1,
+                        "outputMinimum" : 0
+                      },
+                      "signal" : "theme.accent.red",
+                      "type" : "signal"
+                    }
+                  },
+                  {
+                    "name" : "accent.green",
+                    "value" : {
+                      "mapping" : {
+                        "curve" : "linear",
+                        "fallback" : 0,
+                        "inputMaximum" : 1,
+                        "inputMinimum" : 0,
+                        "outputMaximum" : 1,
+                        "outputMinimum" : 0
+                      },
+                      "signal" : "theme.accent.green",
+                      "type" : "signal"
+                    }
+                  },
+                  {
+                    "name" : "accent.blue",
+                    "value" : {
+                      "mapping" : {
+                        "curve" : "linear",
+                        "fallback" : 0,
+                        "inputMaximum" : 1,
+                        "inputMinimum" : 0,
+                        "outputMaximum" : 1,
+                        "outputMinimum" : 0
+                      },
+                      "signal" : "theme.accent.blue",
+                      "type" : "signal"
+                    }
+                  }
+                ],
+                "preferredFramesPerSecond" : 30,
+                "shaderResource" : "Resources/glow.metal",
+                "type" : "metal"
+              },
+              "type" : "customSurface"
+            },
+            "overlay" : {
+              "type" : "proceed"
+            },
+            "type" : "overlay"
+          },
+          "id" : "composer-glow",
+          "properties" : [
+
+          ],
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "composer.backdrop",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "A picture or live surface beneath the new-session composer's content."
+      },
+      "patchSchema" : {
+        "$id" : "https://threading.codes/schema/components/composer.backdrop-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "hook" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
+              "allowedButtonRoles" : [
+
+              ],
+              "allowedCustomSurfaceKinds" : [
+                "metal"
+              ],
+              "allowedImageRoles" : [
+                "backdrop"
+              ],
+              "allowedStackAxes" : [
+
+              ],
+              "allowedStatusRoles" : [
+
+              ],
+              "allowedTextRoles" : [
+
+              ],
+              "allowsDivider" : false,
+              "allowsFixedSpacer" : false,
+              "allowsFlexibleSpacer" : false,
+              "allowsMedia" : false,
+              "allowsOverlay" : true,
+              "allowsProceed" : true,
+              "allowsTextInput" : false,
+              "maximumCustomSurfaceFramesPerSecond" : 30,
+              "maximumDepth" : 3,
+              "maximumNodes" : 6,
+              "maximumPickerOptions" : 0,
+              "maximumRenderedElements" : 6,
+              "maximumSceneItems" : 0,
+              "maximumTextLength" : 80,
+              "proceedPlacement" : "overlayTop",
+              "requiresProceed" : true
+            }
+          },
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "composer.backdrop"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Threading composer.backdrop v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
           "context" : "project-presentation",
           "hookConstraints" : {
             "allowedButtonRoles" : [

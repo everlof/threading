@@ -856,7 +856,9 @@ final class RemoteSessionMirrorRegistry {
         ).policy
         return RemoteSessionSummaryDTO(
             id: session.id.uuidString,
-            title: session.displayTitle,
+            // What the phone lists is what the Mac's sidebar shows, an unnamed session's
+            // themed stand-in included.
+            title: session.presentedTitle,
             agentKind: session.kind.rawValue,
             surface: session.usesNativeUI ? .conversation : .terminal,
             state: RemoteSessionActivity(AgentRuntime.shared.activity(
@@ -1669,7 +1671,7 @@ final class RemoteSessionMirrorRegistry {
             capability: RemoteAdvertisedCapability(authorization.capability),
             cols: 0,
             rows: 0,
-            title: ProjectStore.shared.session(withID: sessionID)?.displayTitle ?? "",
+            title: ProjectStore.shared.session(withID: sessionID)?.presentedTitle ?? "",
             theme: RemoteThemeBridge.appTheme(),
             terminalTheme: RemoteThemeBridge.terminalTheme(for: sessionID),
             features: Self.advertisedFeatures(for: authorization)

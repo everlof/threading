@@ -38,6 +38,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case playsThemeSounds
     case sharesThemeAudio
     case themeAudioSource
+    case themeReactionStrength
     case convertsDroppedImages
     case copiesTerminalSelection
     case notifiesOnAttention
@@ -1529,6 +1530,18 @@ enum AppSettingDefinitions {
         presentations: [row("motion", 3, "Music", "Audio source",
                             ["music", "audio", "source", "player", "Spotify"])]
     )
+    /// How strongly decoration answers agent activity and music, as a percentage of what each
+    /// theme or extension authored. A user choice, so it lives beside the audio opt-in.
+    static let themeReactionStrength = AppSettingDescriptor<Int>(
+        identity: .themeReactionStrength,
+        persistenceKey: "themeReactionStrength",
+        absence: .registered(ThemeReactionDefaults.strengthPercent),
+        // 0% is a decision — reactions held at rest — not "unset", so the floor is honoured.
+        validation: .clampingRange(ThemeReactionDefaults.strengthPercentRange),
+        presentations: [row("motion", 4, "Reactions", "Reaction strength",
+                            ["reaction", "strength", "intensity", "music", "activity",
+                             "agents", "scale", "equalizer", "particles"])]
+    )
     static let chatNameMorphStyle = AppSettingDescriptor<String>(
         identity: .chatNameMorphStyle,
         persistenceKey: "chatNameMorphStyle",
@@ -1626,6 +1639,7 @@ enum AppSettingDefinitions {
         .init(updateChannelSubscription),
         .init(automaticUpdateChecksEnabled), .init(preventsIdleSystemSleepWhileAgentsWork),
         .init(workingOrbStyle), .init(sharesThemeAudio), .init(themeAudioSource),
+        .init(themeReactionStrength),
         .init(chatNameMorphStyle), .init(chromeFontFamily), .init(conversationFontFamily),
         .init(appTextSize)
     ]

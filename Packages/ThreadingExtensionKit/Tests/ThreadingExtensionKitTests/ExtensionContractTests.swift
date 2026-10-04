@@ -36,6 +36,8 @@ final class ExtensionContractTests: XCTestCase {
                 .sidebarSessionHoverCard: 1,
                 .sidebarSessionRow: 1,
                 .sidebarBackdrop: 1,
+                .displayBackdrop: 1,
+                .composerBackdrop: 1,
                 .sessionCornerCard: 1,
                 .toolbarAccountUsagePopover: 1
             ]
@@ -1019,12 +1021,47 @@ final class ExtensionContractTests: XCTestCase {
     }
 
     /// The backdrop contract is the window hook turned over: its content goes *under* the
-    /// sidebar's, and the SDK refuses every shape that would put it anywhere else.
-    func testSidebarBackdropHookKeepsExtensionContentBeneathTheSidebar() throws {
-        let contract = ThreadingComponentCatalog.sidebarBackdrop
+    /// host's, and the SDK refuses every shape that would put it anywhere else — at the sidebar,
+    /// the display panel and the composer alike.
+    func testEveryBackdropPlacementKeepsExtensionContentBeneathItsHost() throws {
+        XCTAssertEqual(
+            ThreadingComponentCatalog.backdropPlacements.map(\.id),
+            [.sidebarBackdrop, .displayBackdrop, .composerBackdrop]
+        )
+        XCTAssertEqual(ExtensionComponentTarget.sidebarBackdrop().component, .sidebarBackdrop)
+        XCTAssertEqual(ExtensionComponentTarget.displayBackdrop().component, .displayBackdrop)
+        XCTAssertEqual(ExtensionComponentTarget.composerBackdrop().component, .composerBackdrop)
+        for contract in ThreadingComponentCatalog.backdropPlacements {
+            try assertBackdropShape(contract)
+        }
+    }
+
+    /// The new placements are the sidebar's contract moved, not a looser copy of it.
+    func testBackdropPlacementsShareOneContractShape() throws {
+        let sidebar = ThreadingComponentCatalog.sidebarBackdrop
+        for contract in ThreadingComponentCatalog.backdropPlacements {
+            XCTAssertEqual(contract.version, 1)
+            XCTAssertEqual(contract.context, sidebar.context, contract.id.rawValue)
+            XCTAssertEqual(contract.hookConstraints, sidebar.hookConstraints, contract.id.rawValue)
+            XCTAssertEqual(
+                contract.hostOwnedBehavior,
+                sidebar.hostOwnedBehavior,
+                contract.id.rawValue
+            )
+            XCTAssertNil(contract.replacementConstraints, contract.id.rawValue)
+            XCTAssertTrue(contract.slots.isEmpty, contract.id.rawValue)
+        }
+    }
+
+    private func assertBackdropShape(_ contract: ExtensionComponentContract) throws {
+        let target = ExtensionComponentTarget(
+            component: contract.id,
+            contractVersion: contract.version
+        )
+        let name = contract.id.rawValue
         let picture = ExtensionComponentPatch(
             id: "picture",
-            target: .sidebarBackdrop(),
+            target: target,
             hook: .overlay(
                 base: .image(
                     .extensionResource("Resources/dunes.png"),
@@ -1040,18 +1077,20 @@ final class ExtensionContractTests: XCTestCase {
                 ExtensionComponentPatch.self,
                 from: JSONEncoder().encode(picture)
             ),
-            picture
+            picture,
+            name
         )
 
         let example = try XCTUnwrap(
-            ThreadingComponentCatalog.entry(id: .sidebarBackdrop)?.examplePatch
+            ThreadingComponentCatalog.entry(id: contract.id)?.examplePatch,
+            name
         )
         try contract.validate(example)
 
         // The rain shape — surface over proceed — is exactly what a backdrop must never do.
-        let overTheRows = ExtensionComponentPatch(
+        let overTheContent = ExtensionComponentPatch(
             id: "over",
-            target: .sidebarBackdrop(),
+            target: target,
             hook: .overlay(
                 base: .proceed,
                 overlay: .image(
@@ -1061,12 +1100,12 @@ final class ExtensionContractTests: XCTestCase {
                 )
             )
         )
-        XCTAssertThrowsError(try contract.validate(overTheRows))
+        XCTAssertThrowsError(try contract.validate(overTheContent), name)
 
         // A stack holding the proceed node shares the top layer with a sibling: refused.
         let sharedTop = ExtensionComponentPatch(
             id: "shared-top",
-            target: .sidebarBackdrop(),
+            target: target,
             hook: .overlay(
                 base: .image(
                     .extensionResource("Resources/dunes.png"),
@@ -1076,33 +1115,36 @@ final class ExtensionContractTests: XCTestCase {
                 overlay: .stack(axis: .vertical, spacing: .none, children: [.proceed])
             )
         )
-        XCTAssertThrowsError(try contract.validate(sharedTop))
+        XCTAssertThrowsError(try contract.validate(sharedTop), name)
 
-        // Nothing under the rows can be read or pressed, so the inline roles and every
+        // Nothing under the content can be read or pressed, so the inline roles and every
         // control are refused; only the fill role is admitted.
         let icon = ExtensionComponentPatch(
             id: "icon",
-            target: .sidebarBackdrop(),
+            target: target,
             hook: .overlay(
                 base: .image(.systemSymbol("cloud"), role: .icon, accessibilityLabel: nil),
                 overlay: .proceed
             )
         )
-        XCTAssertThrowsError(try contract.validate(icon))
+        XCTAssertThrowsError(try contract.validate(icon), name)
         let words = ExtensionComponentPatch(
             id: "words",
-            target: .sidebarBackdrop(),
+            target: target,
             hook: .overlay(base: .text("Hello", role: .body), overlay: .proceed)
         )
-        XCTAssertThrowsError(try contract.validate(words))
+        XCTAssertThrowsError(try contract.validate(words), name)
 
         // The cadence ceiling is the contract's, and it is below the SDK's own 60.
-        let cap = try XCTUnwrap(contract.hookConstraints?.maximumCustomSurfaceFramesPerSecond)
-        XCTAssertLessThan(cap, ExtensionMetalSurface.maximumFramesPerSecond)
+        let cap = try XCTUnwrap(
+            contract.hookConstraints?.maximumCustomSurfaceFramesPerSecond,
+            name
+        )
+        XCTAssertLessThan(cap, ExtensionMetalSurface.maximumFramesPerSecond, name)
         func shader(fps: Int) -> ExtensionComponentPatch {
             ExtensionComponentPatch(
                 id: "shader",
-                target: .sidebarBackdrop(),
+                target: target,
                 hook: .overlay(
                     base: .customSurface(
                         .metal(ExtensionMetalSurface(
@@ -1116,15 +1158,17 @@ final class ExtensionContractTests: XCTestCase {
             )
         }
         try contract.validate(shader(fps: cap))
-        XCTAssertThrowsError(try contract.validate(shader(fps: cap + 1)))
+        XCTAssertThrowsError(try contract.validate(shader(fps: cap + 1)), name)
     }
 
     /// The fill role is opt-in per contract. Every surface that existed before it lists the
-    /// inline roles, so `allCases` growing did not hand a wallpaper to a hover card.
+    /// inline roles, so `allCases` growing did not hand a wallpaper to a hover card — only the
+    /// backdrop placements admit it.
     func testTheBackdropImageRoleIsNotAnInlineRole() throws {
         XCTAssertTrue(ExtensionImageRole.allCases.contains(.backdrop))
         XCTAssertFalse(ExtensionImageRole.inline.contains(.backdrop))
-        for contract in ThreadingComponentCatalog.all where contract.id != .sidebarBackdrop {
+        let backdrops = Set(ThreadingComponentCatalog.backdropPlacements.map(\.id))
+        for contract in ThreadingComponentCatalog.all where !backdrops.contains(contract.id) {
             for constraints in [contract.hookConstraints, contract.replacementConstraints]
                 + contract.slots.map(\.contentConstraints) {
                 XCTAssertFalse(
@@ -1168,9 +1212,139 @@ final class ExtensionContractTests: XCTestCase {
                 .timeOfDayFraction,
                 .audioAvailable, .audioLevel, .audioBass, .audioMids, .audioTreble,
                 .audioBand0, .audioBand1, .audioBand2, .audioBand3,
-                .audioBand4, .audioBand5, .audioBand6, .audioBand7
+                .audioBand4, .audioBand5, .audioBand6, .audioBand7,
+                .themeDark,
+                .themeAccentRed, .themeAccentGreen, .themeAccentBlue,
+                .themeGroundRed, .themeGroundGreen, .themeGroundBlue,
+                .momentTurnFinished, .momentNeedsAttention
             ]
         )
+        XCTAssertEqual(ExtensionHostSignal.all.count, Set(ExtensionHostSignal.all).count)
+        XCTAssertEqual(
+            ExtensionHostSignal.themeSignals.map(\.rawValue),
+            [
+                "theme.dark",
+                "theme.accent.red", "theme.accent.green", "theme.accent.blue",
+                "theme.ground.red", "theme.ground.green", "theme.ground.blue"
+            ]
+        )
+        XCTAssertEqual(
+            ExtensionHostSignal.momentSignals.map(\.rawValue),
+            ["moment.turn-finished", "moment.needs-attention"]
+        )
+        XCTAssertEqual(ExtensionHostSignal.momentPulseDuration, 1.5)
+    }
+
+    /// Reactive means "moves because something happened": the host may damp those for the
+    /// person, and never a standing fact like the theme's colours or the hour.
+    func testOnlyEventDrivenSignalsAreReactive() {
+        let reactive = Set(ExtensionHostSignal.all.filter(\.isReactive))
+        XCTAssertEqual(
+            reactive,
+            Set(
+                [.workloadIntensity, .workloadWorkingCount]
+                    + ExtensionHostSignal.audioSignals.filter { $0 != .audioAvailable }
+                    + ExtensionHostSignal.momentSignals
+            )
+        )
+        XCTAssertFalse(ExtensionHostSignal.audioAvailable.isReactive)
+        XCTAssertFalse(ExtensionHostSignal.timeOfDayFraction.isReactive)
+        XCTAssertFalse(ExtensionHostSignal.activeAccountUsageRemaining.isReactive)
+        for signal in ExtensionHostSignal.themeSignals {
+            XCTAssertFalse(signal.isReactive, signal.rawValue)
+        }
+        XCTAssertFalse(ExtensionHostSignal(rawValue: "future.signal").isReactive)
+    }
+
+    /// A surface may name one package picture. Absent, the wire form is exactly the form before
+    /// the field existed; present, it must be a contained PNG or JPEG path.
+    func testMetalSurfaceTextureIsOptionalContainedAndAnImage() throws {
+        let plain = ExtensionCustomSurface.metal(ExtensionMetalSurface(
+            shaderResource: "Resources/effect.metal",
+            inputs: [.init(name: "amount", value: .constant(0.5))]
+        ))
+        let plainObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(plain)) as? [String: Any]
+        )
+        XCTAssertNil(plainObject["texture"], "an absent texture is not encoded, not even as null")
+        XCTAssertEqual(
+            Set(plainObject.keys),
+            ["type", "shaderResource", "fragmentFunction", "preferredFramesPerSecond", "inputs"]
+        )
+        let legacy = Data(#"{"type":"metal","shaderResource":"Resources/effect.metal"}"#.utf8)
+        guard case .metal(let decodedLegacy) = try JSONDecoder().decode(
+            ExtensionCustomSurface.self,
+            from: legacy
+        ) else { return XCTFail("decoded a different surface kind") }
+        XCTAssertNil(decodedLegacy.texture)
+
+        let textured = ExtensionCustomSurface.metal(ExtensionMetalSurface(
+            shaderResource: "Resources/effect.metal",
+            texture: "Resources/paper.png"
+        ))
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ExtensionCustomSurface.self,
+                from: JSONEncoder().encode(textured)
+            ),
+            textured
+        )
+        for accepted in ["Resources/paper.png", "Resources/paper.JPG", "paper.jpeg"] {
+            let surface = ExtensionMetalSurface(
+                shaderResource: "Resources/effect.metal",
+                texture: accepted
+            )
+            XCTAssertNoThrow(
+                try ExtensionComponentNodeConstraints(
+                    maximumDepth: 1,
+                    maximumNodes: 1,
+                    maximumTextLength: 1,
+                    allowedCustomSurfaceKinds: [.metal]
+                ).validate(.customSurface(.metal(surface), accessibilityLabel: nil)),
+                accepted
+            )
+        }
+
+        // The refusal reaches a contract's validation, not only the surface's own.
+        func patch(texture: String) -> ExtensionComponentPatch {
+            ExtensionComponentPatch(
+                id: "bad-texture",
+                target: .displayBackdrop(),
+                hook: .overlay(
+                    base: .customSurface(
+                        .metal(ExtensionMetalSurface(
+                            shaderResource: "Resources/paper.metal",
+                            preferredFramesPerSecond: 12,
+                            texture: texture
+                        )),
+                        accessibilityLabel: nil
+                    ),
+                    overlay: .proceed
+                )
+            )
+        }
+        XCTAssertNoThrow(
+            try ThreadingComponentCatalog.displayBackdrop.validate(patch(texture: "Resources/a.png"))
+        )
+        for refused in [
+            "Resources/paper.gif",
+            "Resources/paper",
+            "Resources/effect.metal",
+            "/Resources/paper.png",
+            "../paper.png",
+            "Resources/../../paper.png",
+            ""
+        ] {
+            XCTAssertThrowsError(
+                try ThreadingComponentCatalog.displayBackdrop.validate(patch(texture: refused)),
+                refused
+            ) { error in
+                XCTAssertTrue(
+                    String(describing: error).contains("texture"),
+                    "\(refused): \(error)"
+                )
+            }
+        }
     }
 
     func testComponentContractAndHStackPatchRoundTrip() throws {
@@ -3472,12 +3646,14 @@ final class ExtensionContractTests: XCTestCase {
     }
 
     func testPublicComponentCatalogueExamplesUseTheirOwnRuntimeValidator() throws {
-        XCTAssertEqual(ThreadingComponentCatalog.entries.count, 17)
+        XCTAssertEqual(ThreadingComponentCatalog.entries.count, 19)
         XCTAssertEqual(
             Set(ThreadingComponentCatalog.all.map(\.id.rawValue)),
             [
                 "application.main-window",
                 "sidebar.backdrop",
+                "display.backdrop",
+                "composer.backdrop",
                 "composer.conversation-reply",
                 "composer.session-start",
                 "conversation.assistant-message",

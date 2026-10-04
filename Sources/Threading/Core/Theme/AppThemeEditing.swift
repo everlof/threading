@@ -147,7 +147,8 @@ public enum AppThemeEditing {
         transition: TransitionChange = .inherit,
         sprites: BlockChange<[ThemeSprite]> = .inherit,
         moments: BlockChange<ThemeMoments> = .inherit,
-        words: BlockChange<ThemeWords> = .inherit
+        words: BlockChange<ThemeWords> = .inherit,
+        titleMorph: BlockChange<ThemeTitleMorph> = .inherit
     ) -> AppTheme.Variant {
         let appearance = kind.appearance ?? NSAppearance.currentDrawing()
         let source = base.variant(kind)
@@ -173,7 +174,8 @@ public enum AppThemeEditing {
             transition: transition.applied(to: source?.transition),
             sprites: sprites.applied(to: source?.sprites) ?? [],
             moments: moments.applied(to: source?.moments).flatMap { $0.isEmpty ? nil : $0 },
-            words: words.applied(to: source?.words).flatMap { $0.isEmpty ? nil : $0 }
+            words: words.applied(to: source?.words).flatMap { $0.isEmpty ? nil : $0 },
+            titleMorph: titleMorph.applied(to: source?.titleMorph)
         )
     }
 
@@ -419,6 +421,14 @@ public enum AppThemeEditing {
                     + "\(variant.terminalPalette.boldForeground.hexString) is only "
                     + "\(formatted(ratio)):1 against its background; "
                     + "at least \(Int(ThemeContrast.minimumRatio)):1 is required."
+            )
+        }
+
+        // The glow is bounded wherever a palette arrives from, not only through the tools: a
+        // halo past the bounds sits on the neighbouring rows' text.
+        if let error = variant.terminalPalette.glow?.validationError(field: "terminal_colors.glow") {
+            throw AppThemeEditingError.invalid(
+                "The \(kind.rawValue) variant's paired terminal palette: \(error)"
             )
         }
 
@@ -725,6 +735,9 @@ public enum AppThemeEditing {
         if let words = variant.words {
             try validate(words)
         }
+        if let titleMorph = variant.titleMorph {
+            try validate(titleMorph)
+        }
 
         // Every sprite a particle block names has to be in this variant's library: the two
         // halves of an adaptive theme keep libraries of their own, and a dark block naming a
@@ -812,6 +825,28 @@ public enum AppThemeEditing {
         }
     }
 
+    nonisolated private static func validate(_ morph: ThemeTitleMorph) throws {
+        guard morph.style != .automatic else {
+            throw AppThemeEditingError.invalid(
+                "title_morph.style names a transition; automatic is the person's setting."
+            )
+        }
+        guard let characters = morph.characters else { return }
+        guard morph.style == .scramble else {
+            throw AppThemeEditingError.invalid(
+                "title_morph.characters applies only to style \"scramble\"."
+            )
+        }
+        let pool = characters.filter { !$0.isWhitespace && !$0.isNewline }
+        guard !pool.isEmpty,
+              pool.count <= ThemeTitleMorphLimits.maximumScrambleCharacters else {
+            throw AppThemeEditingError.invalid(
+                "title_morph.characters is 1 to "
+                    + "\(ThemeTitleMorphLimits.maximumScrambleCharacters) characters to cycle through."
+            )
+        }
+    }
+
     nonisolated private static func validate(_ words: ThemeWords) throws {
         guard words.working.count <= ThemeWordsLimits.maximumWorkingWords else {
             throw AppThemeEditingError.invalid(
@@ -837,6 +872,17 @@ public enum AppThemeEditing {
                 throw AppThemeEditingError.invalid(
                     "words.composer_placeholder is one line of 1 to "
                         + "\(ThemeWordsLimits.maximumPlaceholderLength) characters."
+                )
+            }
+        }
+        if let untitled = words.untitledSession {
+            let clean = untitled.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !clean.isEmpty,
+                  clean.count <= ThemeWordsLimits.maximumUntitledSessionLength,
+                  !clean.contains(where: \.isNewline) else {
+                throw AppThemeEditingError.invalid(
+                    "words.untitled_session is one line of 1 to "
+                        + "\(ThemeWordsLimits.maximumUntitledSessionLength) characters."
                 )
             }
         }

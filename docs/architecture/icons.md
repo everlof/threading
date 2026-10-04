@@ -7,13 +7,23 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
 Two kinds of icon, resolved differently on purpose.
 
 **Agent marks** (`AgentBrandIcons`): a session row's icon slot shows the agent's own
-favicon — Claude's coral starburst, OpenAI's knot — instead of an SF Symbol. Loose PNGs under
-`Resources/Icons`, loaded via `Bundle.main` (the folder is an explicit-folder resource, so it
-lands under `Contents/Resources/Icons/`), *not* the asset catalogue. The OpenAI knot is monochrome by design, so it
+favicon — Claude's coral starburst, OpenAI's knot — instead of an SF Symbol. The marks are
+image sets in the asset catalogue, loaded with `NSImage(named:)` (`AgentBrandIcons`;
+`AccountMarkTests` pins it). The OpenAI knot is monochrome by design, so it
 ships as a **template image** and tints with its context like the symbols beside it — which
 is what makes it work in dark mode and dim for dormancy. Claude's mark keeps its brand
 colour; tinting cannot dim a non-template image, so dormancy dims it through the view's
 alpha instead (`SessionRowView.applyAgentIcon`).
+
+**A theme may ink every generated mark in its accent** (`Material.identityMarks = .tinted`,
+owned by `IdentityMarkInk`): the project tile becomes an accent-outlined, accent-lettered tile
+over a held-back accent fill (`GeneratedProjectIcon.image(for:tint:)`, cached by name *and* ink),
+the agent mark becomes a template silhouette tinted in the accent — the conversion selection
+already makes — and an initial chip is filled and ringed in it. Only *generated* marks: a stored
+project icon, an account photo and a colour picked in Settings keep their pixels, because a theme
+recolours the app's defaults and never a person's choice. A tinted tile depends on the theme, so
+`ProjectRowView.rederiveThemedContent` re-inks generated tiles as well as re-plating stored icons.
+The iPhone keeps natural marks. See [`themes.md`](themes.md) (2026-10-04).
 
 Grok and OpenCode currently use `bolt.circle` and `curlybraces.square` SF Symbol fallbacks.
 `AgentKind.icon` is the

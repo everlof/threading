@@ -297,7 +297,7 @@ final class ProjectSidebarViewController: NSViewController {
 
     /// The plane an extension may dress through `sidebar.backdrop@1`, above the theme's
     /// ground and beneath everything else — see `applySidebarSurface`.
-    private(set) var extensionBackdrop: SidebarExtensionBackdropView?
+    private(set) var extensionBackdrop: ExtensionBackdropPlaneView?
     /// The theme's band behind the header, when it states one.
     private(set) var brandBand: SidebarBrandBandView?
     /// The theme's mascot at the column's foot, beneath the list (`ThemeMascot`).
@@ -888,7 +888,8 @@ private extension ProjectSidebarViewController {
         let backdrop = SidebarBackdropView()
         view.addSubview(backdrop, positioned: .below, relativeTo: nil)
 
-        let extensionPlane = SidebarExtensionBackdropView(
+        let extensionPlane = ExtensionBackdropPlaneView(
+            placement: .sidebar,
             lookup: extensionBackdropLookup ?? {
                 ComponentCustomizationProviderSlot.shared.customization(for: $0)
             },

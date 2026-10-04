@@ -1264,6 +1264,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             guard event.sessionID == self?.currentSessionID else { return }
             self?.updateSessionTitleItem()
         }
+        // An unnamed session's page title is the theme's stand-in (`ThemeWords.untitledSession`).
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.updateSessionTitleItem()
+        }
         appEvents.observe(ManagerActionNoticeDidChange.self) { [weak self] event in
             guard event.sessionID == self?.currentSessionID else { return }
             self?.presentManagerMoveNoticeIfNeeded(for: event.sessionID)
@@ -2843,14 +2847,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         if let sessionID, let session {
             let project = environment.projectStore.project(forSessionID: sessionID)
             showPageTitle(
-                title: session.displayTitle,
+                title: session.presentedTitle,
                 symbolName: SessionTitleDefaults.projectSymbolName,
                 identity: session.id,
                 // The agent's own mark rather than a symbol, which is what the sidebar row beside
                 // it shows for the same session.
                 icon: session.kind.icon,
                 roleSymbol: ControlGrantStore.shared.isManager(sessionID) ? "person.3" : nil,
-                toolTip: project.map { "\($0.name) — \(session.displayTitle)" }
+                toolTip: project.map { "\($0.name) — \(session.presentedTitle)" }
             )
         } else if let terminalID = containerViewController.currentTerminalID,
                   let terminal = environment.projectStore.terminal(withID: terminalID)

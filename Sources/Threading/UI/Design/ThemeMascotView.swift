@@ -26,6 +26,10 @@ final class ThemeMascotView: NSView, ThemeParticleHolding {
 
     // MARK: - Properties
 
+    /// The least a working pose's stream gives off while any agent works, so one quiet agent
+    /// still reads as work. Scaled down with the person's Reaction strength.
+    private static let workingStreamFloor = 0.35
+
     private enum Keys {
         static let loop = "mascot.loop"
         static let poseFade = "mascot.fade"
@@ -222,7 +226,12 @@ final class ThemeMascotView: NSView, ThemeParticleHolding {
             emitter.birthRate = 0
             return
         }
-        let intensity = mood == .working ? max(workingIntensity, 0.35) : 1
+        // A working pose answers the agents through the person's Reaction strength; its floor
+        // scales down with it so 0% leaves the pose still, and never rises above as authored.
+        let intensity = mood == .working
+            ? max(ThemeReactions.scaled(workingIntensity),
+                  ThemeReactions.scaledFloor(Self.workingStreamFloor))
+            : 1
         let full = ThemeParticleEmitter.streamRate(for: particles.spec, intensity: 1)
         let wanted = ThemeParticleEmitter.streamRate(for: particles.spec, intensity: intensity)
         emitter.birthRate = full > 0 ? Float(wanted / full) : 0

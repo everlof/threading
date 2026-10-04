@@ -254,6 +254,14 @@ final class ThemeCharacterTests: XCTestCase {
             mentioning: "composer_placeholder"
         )
         assertRefused(
+            try variant(words: ThemeWords(untitledSession: String(repeating: "n", count: 40))),
+            mentioning: "untitled_session"
+        )
+        assertRefused(
+            try variant(words: ThemeWords(untitledSession: "   ")),
+            mentioning: "untitled_session"
+        )
+        assertRefused(
             try variant(sidebar: SidebarStyle(brand: SidebarStyle.Brand(logo: .mark, dockIcon: true))),
             mentioning: "logo_in_dock"
         )
@@ -651,7 +659,45 @@ final class ThemeCharacterTests: XCTestCase {
         AppThemePalette.set(AppTheme.system)
         XCTAssertEqual(ThemeWording.workingWords, WorkingWords.all)
         XCTAssertNil(ThemeWording.composerPlaceholder)
+        XCTAssertNil(ThemeWording.untitledSessionName)
         XCTAssertEqual(ComposerDefaults.invitation, ComposerDefaults.promptPlaceholder)
+    }
+
+    func testAnUnnamedSessionWearsTheThemesNameOnScreenOnly() throws {
+        let worded = theme(try variant(words: ThemeWords(untitledSession: "  Unknown program ")))
+        AppThemePalette.set(worded)
+        defer { AppThemePalette.set(AppTheme.system) }
+
+        let unnamed = AgentSession(kind: .claude, title: "")
+        XCTAssertTrue(unnamed.isUnnamed)
+        XCTAssertEqual(ThemeWording.untitledSessionName, "Unknown program")
+        XCTAssertEqual(unnamed.presentedTitle, "Unknown program")
+        XCTAssertEqual(
+            unnamed.displayTitle, AgentDefaults.untitledSessionName,
+            "the name a migration stores or a notification reads stays the app's own"
+        )
+
+        var named = AgentSession(kind: .claude, title: "Fix the login redirect")
+        XCTAssertFalse(named.isUnnamed)
+        XCTAssertEqual(named.presentedTitle, "Fix the login redirect")
+        named.customTitle = "Mine"
+        XCTAssertEqual(named.presentedTitle, "Mine")
+
+        AppThemePalette.set(AppTheme.system)
+        XCTAssertEqual(unnamed.presentedTitle, AgentDefaults.untitledSessionName)
+    }
+
+    func testTheThemesWordsReachTheIPhone() throws {
+        let worded = theme(try variant(words: ThemeWords(
+            working: ["Jacking in…", " "],
+            composerPlaceholder: "Follow the white rabbit.",
+            untitledSession: "Unknown program"
+        )))
+        let words = try XCTUnwrap(RemoteThemeBridge.appTheme(worded).words)
+        XCTAssertEqual(words.working, ["Jacking in…"])
+        XCTAssertEqual(words.composerPlaceholder, "Follow the white rabbit.")
+        XCTAssertEqual(words.untitledSession, "Unknown program")
+        XCTAssertNil(RemoteThemeBridge.appTheme(theme(try variant())).words, "silent theme sends none")
     }
 
     // MARK: - Tools
@@ -703,7 +749,11 @@ final class ThemeCharacterTests: XCTestCase {
                     duration: 1.6
                 )
             ),
-            words: AppThemeWordsArguments(working: ["Herding…"], composerPlaceholder: "Woof?")
+            words: AppThemeWordsArguments(
+                working: ["Herding…"],
+                composerPlaceholder: "Woof?",
+                untitledSession: "Fresh pup"
+            )
         )
         let created = await coordinator().createAppTheme(CreateAppThemeArguments(
             name: name,
@@ -734,6 +784,7 @@ final class ThemeCharacterTests: XCTestCase {
         XCTAssertEqual(dark.sidebar?.brand?.dockIcon, true)
         XCTAssertEqual(dark.moments?[.needsAttention]?.duration, 1.6)
         XCTAssertEqual(dark.words?.composerPlaceholder, "Woof?")
+        XCTAssertEqual(dark.words?.untitledSession, "Fresh pup")
 
         let get = coordinator().getAppTheme(AppThemeReferenceArguments(themeID: stored.id.rawValue))
         let document = try XCTUnwrap(
@@ -779,7 +830,10 @@ final class ThemeCharacterTests: XCTestCase {
                     image: AppThemeSidebarImageArguments(alignment: "bottom_trailing"),
                     mascot: AppThemeMascotArguments(removePoses: ["working"])
                 ),
-                words: AppThemeWordsArguments(removeComposerPlaceholder: true)
+                words: AppThemeWordsArguments(
+                    removeComposerPlaceholder: true,
+                    removeUntitledSession: true
+                )
             )],
             roles: nil,
             material: nil,
@@ -793,6 +847,7 @@ final class ThemeCharacterTests: XCTestCase {
         XCTAssertEqual(after.sidebar?.mascot?.poses.keys.sorted { $0.rawValue < $1.rawValue }, [.idle])
         XCTAssertEqual(after.words?.working, ["Herding…"])
         XCTAssertNil(after.words?.composerPlaceholder)
+        XCTAssertNil(after.words?.untitledSession)
         XCTAssertEqual(after.sprites.map(\.name), ["paw"], "an unnamed block is kept")
     }
 

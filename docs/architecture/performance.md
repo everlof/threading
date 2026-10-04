@@ -858,6 +858,30 @@ overlap report is linear. The 8,000-mark case returns one issue in under a milli
 `ExtensionContractTests/testAnOversizedSceneIsAnsweredByItsSizeAlone` and
 `testOverlappingSiblingsAreNamedOncePerMarkRatherThanOncePerPair` keep it that way.
 
+### Extension custom-surface signal and texture contract
+
+A Metal custom surface reads its bound signals once per frame, at up to 60 fps for the window
+hook and 30 fps for the three backdrop planes (sidebar, display panel, composer). Cardinality is
+fixed and small: at most four surfaces per window, at most eight inputs each, so a frame performs
+at most a few dozen signal reads. Every read is O(1) and touches no file, store or process:
+
+- Theme readings (`theme.dark`, `theme.accent.*`, `theme.ground.*`) are resolved once per
+  appearance name — two to four entries in practice — and cached in `ExtensionHostSignals` until
+  `AppThemeDidChange`, a system-colour change or an accessibility display change drops the cache.
+  The surface caches its own effective appearance on `viewDidChangeEffectiveAppearance`, so a
+  frame does not walk the view hierarchy.
+- Moment pulses are one subtraction against the last event's uptime; the reader holds two
+  timestamps and listens only while a mounted surface binds a moment.
+- A surface's optional package texture is read (≤ 4 MiB, ≤ 1,024 × 1,024) and decoded on a worker
+  once per surface build, with the process generation rechecked before the main actor uploads it.
+  Retained texture memory is bounded at 4 MiB per textured surface; a 1 × 1 placeholder is bound
+  until it lands.
+
+The Metal library compile in `ExtensionMetalSurfaceView.init` and the bounded shader-source read
+in `ExtensionManager.customSurfaceSource` remain synchronous main-actor work per surface build —
+existing debt, unchanged here, bounded by the 256 KiB source ceiling and by builds happening only
+on publication, not per frame.
+
 ### Mobile remote dashboard scaling contract
 
 The three-chat project preview (2026-09-15) caps the ordered value projection before
@@ -2624,6 +2648,80 @@ findings before publishing them. Diagnostics expose built/reused Core Graphics r
 hits/misses and contrast rows scanned/reused. The regression draws exercise unchanged and
 single-row content, selection/style, BiDi dependencies and appearance invalidation; image changes
 share the snapshot's existing revision gate rather than adding a second cache authority.
+
+## Terminal text glow (2026-10-04)
+
+An opt-in palette `glow` (see [`themes.md`](themes.md), 2026-10-04) makes SwiftTerm's Core Graphics
+renderer paint a blurred copy of each frame's text beneath it. The contract:
+
+- **Zero cost when off.** No palette ships with a glow. With none, the frame tick widens no region,
+  the draw takes one nil check per frame, and the rows are drawn by exactly the code they were.
+- **O(dirty area) when on, never O(content).** The underlay covers the dirty rectangle plus the
+  halo's reach, at device resolution; it is not retained between frames. The frame tick widens a
+  partial region by one row each side at every allowed radius (0.5–6 points) and ordinary line
+  height, so a one-row change repaints three rows.
+- **Exactness.** A partial repaint is pixel-identical to a full one
+  (`TextGlowTests.aPartialRepaintMatchesAFullOne`, 1x and 2x, four radii).
+
+**The fixture.** RenderBench gained `--glow RADIUS,OPACITY` and, under
+`SWIFTTERM_PROFILE_STATS=1`, a `FRAMEDRAW` line with the `Frame.Draw` distribution, but it could not
+measure this change: the session was locked with the display asleep for the whole of the work, no
+display link ticked, and its on-screen window repainted a stale snapshot (37 glyph runs per
+"dense" draw instead of 3,700). The numbers below come from an opt-in fixture that drives the
+production `drawTerminalContents` into a Retina bitmap with no window, so it measures the same work
+whether or not a display is awake:
+
+```bash
+SWIFTTERM_GLOW_BENCH=1 SWIFTTERM_GLOW_BENCH_ROUNDS=3 \
+  swift test -c release -Xswiftc -enable-testing \
+  --package-path Packages/Vendor/SwiftTerm --filter TextGlowCost
+```
+
+It replays RenderBench's frame shapes — `dense` (every cell its own truecolor foreground and
+background), `scroll` (a screen of plain ASCII lines) and `line` (one row rewritten in place, the
+case whose region the glow widens) — on RenderBench's 800 × 600-point view (100 × 37 cells) at 2x,
+interleaving the configurations round by round so machine load lands on all of them alike, and
+reports per-frame draw time and the region drawn. Release, Apple M1 Max, macOS 26.5, 120 frames
+per cell after a warm-up round, two runs each; the machine's load average was 13–120 from unrelated
+builds, which is why the tails are reported but not leaned on.
+
+| scenario | glow | per-run shadow p50 | underlay p50 (2 runs) | underlay p95 | vs off |
+|---|---|---:|---:|---:|---:|
+| dense | off | 1.77 ms | 1.74 / 1.79 ms | 26 ms | 1× |
+| dense | 3 pt, 0.40 | 13.5–13.7 ms | 7.2 / 8.3 ms | 38 ms | 4.2–4.6× |
+| dense | 6 pt, 0.80 | 17.9–18.1 ms | 7.2 / 7.5 ms | 39 ms | 4.1–4.2× |
+| scroll | off | 1.70 ms | 1.65 / 1.64 ms | 1.7–2.8 ms | 1× |
+| scroll | 3 pt, 0.40 | 12.9–13.0 ms | 7.8 / 6.9 ms | 7.4–14 ms | 4.2–4.7× |
+| scroll | 6 pt, 0.80 | 16.8–17.5 ms | 7.4 / 7.1 ms | 8.2 ms¹ | 4.3–4.5× |
+| line | off | 0.19 ms | 0.19 / 0.19 ms | 0.24 ms | 1× |
+| line | 3 pt, 0.40 | 1.2 ms | 1.31 / 1.29 ms | 1.4–1.6 ms | 7.0× |
+| line | 6 pt, 0.80 | 1.7 ms | 1.38 / 1.38 ms | 1.6 ms | 7.3–7.4× |
+
+¹ One run's p95 was 112 ms, a burst of external load that the same cell's other run did not
+repeat. The `dense` p95 of 26 ms with the glow off is the baseline's own: roughly one dense frame
+in ten costs that much whether or not anything glows.
+
+**Attribution** (median per full frame, underlay with the glow's alpha applied while drawing the
+text, before the last change): drawing the rows into the underlay 3.1–3.4 ms, the three box passes
+2.2 ms, `makeImage` 0.13 ms, compositing 1.3–1.4 ms. Drawing the text opaque instead took the row
+phase to 1.6–2.3 ms, which is why the opacity moved after the blur (one `vImageMatrixMultiply`,
+about 0.9 ms in isolation). The per-run shadow it replaced spent its time in Core Graphics'
+per-operation blur, which no amount of run coalescing could reach: `scroll` has 37 runs a frame
+and `dense` 3,700, and both cost the same.
+
+**The honest reading.** A glowing full repaint costs about four times a plain one: +5.5 ms on an
+800 × 600-point Retina view, so roughly +18 ms on a 1,600 × 1,000-point window, which is past one
+60 Hz frame while a full screen scrolls. A typed character or an updated status line costs
++1.1 ms. The cost is per pixel, not per radius — the box passes cost the same at every width — so
+limiting the radius would not have bought it back. That is acceptable for an effect a user asks
+for and can turn off, and it is why no stock palette states one. Measured and rejected on the way:
+a coarser underlay upscaled by Core Graphics (+10–18 ms for the upscale alone), a context alpha at
+composite time (9.7 ms against 0.4 ms), translucent glyph colours instead of opaque (as slow as a
+context alpha), and a retained underlay surface (page faults traded one-for-one against a clear).
+
+**Next, if it matters:** composite in the render server — a sublayer holding a coarse blurred image
+that Core Animation scales and blends on the GPU — or bound the underlay to each row's inked extent
+so blank right-hand margins are neither blurred nor composited.
 
 ## Whole-window resize stress target
 

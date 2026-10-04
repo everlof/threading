@@ -21,6 +21,9 @@ public protocol DesignSettingsReading {
     /// Whether a theme's own motion — ambient particles, logo gestures, switch transitions —
     /// plays. Reduce Motion overrides it; this is the user's separate choice.
     var playsThemeMotion: Bool { get }
+    /// How strongly decoration answers agent activity and music, as a multiple of what the theme
+    /// or extension authored — `0…2`, 1 meaning as authored. See `ThemeReactions`.
+    var themeReactionStrength: Double { get }
 }
 
 /// Where `UI/Design/` reads its preferences from.
@@ -58,4 +61,7 @@ public struct ApplicationDesignSettings: DesignSettingsReading {
     public var promptReturnKey: PromptReturnKey { AppSettings.promptReturnKey }
     public var chatNameMorphStyle: ChatNameMorphStyle { AppSettings.shared.chatNameMorphStyle }
     public var playsThemeMotion: Bool { AppSettings.playsThemeMotion }
+    public var themeReactionStrength: Double {
+        Double(AppSettings.shared.themeReactionStrength) / 100
+    }
 }

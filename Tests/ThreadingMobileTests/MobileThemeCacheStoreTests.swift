@@ -87,6 +87,36 @@ final class MobileThemeCacheStoreTests: XCTestCase {
         XCTAssertEqual(defaults.data(forKey: MobileThemeCacheStore.archiveKey), persisted)
     }
 
+    func testThemeWordsAreCachedAndBoundedWithTheTheme() {
+        let store = MobileThemeCacheStore(defaults: defaults)
+        let base = theme(id: "matrix", ground: "#020A04")
+        let worded = RemoteThemeDTO(
+            id: base.id, name: base.name, mode: base.mode, colors: base.colors,
+            material: base.material,
+            words: .init(
+                working: ["Jacking in…"],
+                composerPlaceholder: "Follow the white rabbit.",
+                untitledSession: "Unknown program"
+            )
+        )
+        XCTAssertTrue(store.remember(worded, for: "host:mac"))
+        let reloaded = MobileThemeCacheStore(defaults: defaults).theme(for: "host:mac")
+        XCTAssertEqual(reloaded?.words?.untitledSession, "Unknown program")
+        XCTAssertEqual(RemoteThemePalette(reloaded).untitledSessionName, "Unknown program")
+        XCTAssertEqual(RemoteThemePalette(reloaded).composerPlaceholder, "Follow the white rabbit.")
+
+        let flooded = RemoteThemeDTO(
+            id: base.id, name: base.name, mode: base.mode, colors: base.colors,
+            material: base.material,
+            words: .init(working: Array(
+                repeating: "w",
+                count: MobileThemeCacheStore.maximumThemeWorkingWords + 1
+            ))
+        )
+        XCTAssertFalse(store.remember(flooded, for: "host:mac"))
+        XCTAssertEqual(store.theme(for: "host:mac"), worded, "the last good theme stays")
+    }
+
     func testCorruptArchiveIsQuarantinedBeforeAReplacementIsWritten() {
         let original = Data("not-json".utf8)
         defaults.set(original, forKey: MobileThemeCacheStore.archiveKey)

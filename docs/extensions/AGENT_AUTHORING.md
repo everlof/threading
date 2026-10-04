@@ -1318,7 +1318,41 @@ binding names are documentation and stable source identifiers, not shader reflec
 the live-signal table below; unavailable readings use the binding's fallback. The host owns the `MTKView`, pipeline
 wrapper, command queue, fullscreen geometry, transparency, hit testing, frame cadence and
 reduced-motion behavior. Shader source is limited to 256 KiB at the actual opened-file read (a
-package-size preflight is not trusted) and frame rate to 60 fps.
+package-size preflight is not trusted) and frame rate to 60 fps. `uv` runs `0…1` from the
+top-left corner. Return straight (not premultiplied) colour; the host blends it over what is
+beneath.
+
+A surface may name one package picture as `texture` — a package-relative `.png`, `.jpg` or
+`.jpeg` under `Resources/`. Stating it changes the function the extension supplies to:
+
+```metal
+float4 threadingExtensionFragment(
+    float2 uv,
+    constant ThreadingSurfaceUniforms &uniforms,
+    texture2d<float> image,
+    sampler imageSampler
+);
+```
+
+The host binds the picture at fragment texture index 0 and a linear, clamp-to-edge sampler at
+sampler index 0, and passes both through; `image.sample(imageSampler, uv)` draws it upright and
+stretched over the surface. Samples are sRGB-encoded with straight alpha — the same convention as
+the colour you return — so returning a sample composites the picture as it is. The package image
+limits apply (4 MiB, 1,024 × 1,024), the host reads and decodes it off the main thread, and until
+it arrives — or for good, when it cannot be read — the host binds a 1 × 1 transparent texture, so
+`image.sample` reads `float4(0)` and the surface keeps drawing. Mix the picture with your own
+fallback rather than assuming it is there on the first frame. A surface without `texture` keeps
+the two-argument function; a two-argument function against a stated texture, or a four-argument
+one without it, does not compile and the hook is skipped.
+
+```swift
+.metal(ExtensionMetalSurface(
+    shaderResource: "Resources/paper.metal",
+    preferredFramesPerSecond: 12,
+    inputs: [.init(name: "dark", value: .signal(.themeDark, mapping: .identity))],
+    texture: "Resources/paper.png"
+))
+```
 
 Use `Packages/ThreadingExtensionKit/Examples/RainWindowExtension` as the complete hook/surface example.
 Never import Metal, MetalKit, AppKit or SwiftUI in extension Swift source.
@@ -1378,6 +1412,33 @@ leaves the theme's dressing exactly as it was.
 
 Use `Packages/ThreadingExtensionKit/Examples/SidebarAuroraExtension` as the complete example.
 
+### Beneath the display panel and the composer
+
+`display.backdrop@1` and `composer.backdrop@1` are the same contract at two more places, with the
+same constraints and the same host-owned behaviour — an overlay whose top is `.proceed`, a
+`backdrop` image or a Metal surface beneath it, at most 30 fps, the 60% ceiling, pointer
+passthrough, reduced motion and accessibility silence. Only the target changes:
+
+```swift
+let paper = ExtensionComponentPatch(
+    id: "display-paper",
+    target: .displayBackdrop(),          // or .composerBackdrop()
+    hook: .overlay(base: surface, overlay: .proceed)
+)
+try ThreadingComponentCatalog.displayBackdrop.validate(paper)
+```
+
+- **`display.backdrop@1`** sits above the display panel's own themed ground and beneath its tab
+  row and content. Tabs host browsers, reviews, simulators and documents, and those are usually
+  opaque, so your backdrop shows where the panel is transparent: behind the tab row, around a
+  picture, under an empty panel. Do not count on it behind a web page.
+- **`composer.backdrop@1`** sits beneath the new-session composer's greeting, chips, prompt box
+  and actions, covering the pane the composer fills. The prompt is being typed into: keep it calm.
+
+One patch dresses every display panel, or every composer — neither takes an entity. An extension
+may publish to any of the three backdrop placements at once
+(`ThreadingComponentCatalog.backdropPlacements`).
+
 ### Live signals a surface may bind
 
 A `customSurface` input may be a constant or a `signal` the host answers at draw time. The host
@@ -1393,9 +1454,26 @@ refuses a patch that names a signal it cannot answer, so bind only these:
 | `audio.level` | `0…1` | Smoothed RMS loudness in an absolute −60…0 dBFS display range. Unavailable uses the mapping fallback. |
 | `audio.bass`, `audio.mids`, `audio.treble` | `0…1` | Means of bands 0–1, 2–4 and 5–7, respectively. Unavailable uses the mapping fallback. |
 | `audio.band.0` … `audio.band.7` | `0…1` | Eight low-to-high spectrum ranges: 20–80, 80–200, 200–500, 500–1,200, 1,200–3,000, 3,000–6,000, 6,000–12,000, 12,000–20,000 Hz. |
+| `theme.dark` | `0` or `1` | `1` when the app theme variant in force for *this surface's* appearance is dark. Under an adaptive theme a light window and a dark one each read their own. |
+| `theme.accent.red`, `.green`, `.blue` | `0…1` | The sRGB components of the theme's resolved accent for this surface's appearance. |
+| `theme.ground.red`, `.green`, `.blue` | `0…1` | The sRGB components of the theme's resolved ground — the window's own backdrop — for this surface's appearance. |
+| `moment.turn-finished` | `0…1` | A pulse when any session's turn comes back with an answer: `1` at the moment, easing smoothly to `0` over 1.5 s (`ExtensionHostSignal.momentPulseDuration`), `0` between moments. Interrupted, refused and limit-stopped turns do not pulse. |
+| `moment.needs-attention` | `0…1` | The same pulse when any session starts waiting on the person — a permission, a question. |
 
 Every signal is cheap and read once per frame; none reaches a store, a file or a process, and
-none identifies a session, an account or a person.
+none identifies a session, an account or a person. The theme readings change only when the theme,
+the window's appearance or the system accent does; the host resolves them once and caches them.
+
+Moments are motion: while Reduce Motion, the Theme animations setting or Low Power Mode holds
+motion, a moment binding reads its fallback, as audio does — choose `0` unless a resting glow is
+the point. Threading listens for moments only while a surface binding one is on screen in a
+window. A moment says *something* happened somewhere; it never says which session.
+
+`ExtensionHostSignal.isReactive` is `true` for `workload.*`, the audio level, bass/mids/treble and
+band readings, and `moment.*` — readings that move because something happened. A host applies the
+person's reaction policy and strength to reactive readings and may damp, hold or silence them; it
+never touches the others. Bind a reactive signal for movement, and a non-reactive one (the theme,
+the hour, the account) for identity and colour.
 
 Audio bindings are presentation only: Threading owns the explicit **Motion → Music-reactive
 themes** opt-in, audio-source selection, macOS 14.2+ system-audio permission, local analysis,
@@ -1551,7 +1629,8 @@ Before reporting an extension complete:
 1. Call `manifest.validate()`.
 2. Call `registration.validate(for: manifest)`.
 3. For a scaffolded project, run `Scripts/package.sh <swift-wasm-sdk-id>`; this runs the
-   policy-checked Wasm build and creates the source-bundled package under `Build/`.
+   policy-checked Wasm build in the release configuration and creates the source-bundled package
+   under `Build/`.
 4. Run `swift test` when the extension has tests.
 5. Confirm the policy plugin ran.
 6. Confirm every registered contribution has its required capability.
@@ -1578,9 +1657,11 @@ Before reporting an extension complete:
 15. For `storage.secrets`, test missing, set, replace, list-names, remove, oversized-value,
     missing-capability, cross-extension isolation, and revoked-generation behavior without
     printing the value.
-16. For a `sidebar.backdrop@1` hook, keep the root an overlay whose top is `.proceed`, draw
-    low-contrast and low-frequency (the rows sit on it), ask for a cadence at or below 30 fps,
-    and check the column under a light and a dark theme with the 60% ceiling in mind.
+16. For a `sidebar.backdrop@1`, `display.backdrop@1` or `composer.backdrop@1` hook, keep the root
+    an overlay whose top is `.proceed`, draw low-contrast and low-frequency (content sits on it),
+    ask for a cadence at or below 30 fps, and check it under a light and a dark theme with the
+    60% ceiling in mind. For a textured surface, check the first frames, drawn before the
+    picture arrives, and a package without the picture.
 17. For `ui.rendering.metal`, review the packaged shader source, test its fallback signal value,
     compile it on a Metal-capable Mac, verify controls below it remain clickable, and verify
     reduced motion freezes animation.

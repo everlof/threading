@@ -1,0 +1,102 @@
+{
+  "$id" : "https://threading.codes/schema/components/composer.backdrop-v1.schema.json",
+  "$schema" : "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties" : false,
+  "properties" : {
+    "hook" : {
+      "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+      "x-threading-node-constraints" : {
+        "allowedButtonRoles" : [
+
+        ],
+        "allowedCustomSurfaceKinds" : [
+          "metal"
+        ],
+        "allowedImageRoles" : [
+          "backdrop"
+        ],
+        "allowedStackAxes" : [
+
+        ],
+        "allowedStatusRoles" : [
+
+        ],
+        "allowedTextRoles" : [
+
+        ],
+        "allowsDivider" : false,
+        "allowsFixedSpacer" : false,
+        "allowsFlexibleSpacer" : false,
+        "allowsMedia" : false,
+        "allowsOverlay" : true,
+        "allowsProceed" : true,
+        "allowsTextInput" : false,
+        "maximumCustomSurfaceFramesPerSecond" : 30,
+        "maximumDepth" : 3,
+        "maximumNodes" : 6,
+        "maximumPickerOptions" : 0,
+        "maximumRenderedElements" : 6,
+        "maximumSceneItems" : 0,
+        "maximumTextLength" : 80,
+        "proceedPlacement" : "overlayTop",
+        "requiresProceed" : true
+      }
+    },
+    "id" : {
+      "minLength" : 1,
+      "type" : "string"
+    },
+    "properties" : {
+      "items" : {
+        "properties" : {
+          "property" : {
+            "enum" : [
+
+            ]
+          },
+          "value" : {
+            "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
+          }
+        },
+        "required" : [
+          "property",
+          "value"
+        ],
+        "type" : "object"
+      },
+      "type" : "array"
+    },
+    "slots" : {
+      "items" : false,
+      "type" : "array"
+    },
+    "target" : {
+      "additionalProperties" : false,
+      "properties" : {
+        "component" : {
+          "const" : "composer.backdrop"
+        },
+        "contractVersion" : {
+          "const" : 1
+        },
+        "entityID" : {
+          "minLength" : 1,
+          "type" : "string"
+        }
+      },
+      "required" : [
+        "component",
+        "contractVersion"
+      ],
+      "type" : "object"
+    }
+  },
+  "required" : [
+    "id",
+    "target",
+    "properties",
+    "slots"
+  ],
+  "title" : "Threading composer.backdrop v1 component patch",
+  "type" : "object"
+}

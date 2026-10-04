@@ -556,6 +556,15 @@ final class TerminalRenderOwner: Sendable {
                         terminal.rows - 1,
                         dependencies.upperBound - buffer.yDisp)
                 }
+                // A text glow paints a changed row's halo onto its neighbours,
+                // so they are repainted too: the old halo has to be cleared and
+                // the new one drawn. Zero rows without a glow, which keeps the
+                // region exactly what it was before glows existed.
+                let glowReach = request.viewState.textGlowReachRows
+                if glowReach > 0 {
+                    redrawStart = max(0, redrawStart - glowReach)
+                    redrawEnd = max(redrawEnd, min(terminal.rows - 1, redrawEnd + glowReach))
+                }
 
                 if buffer.yDisp != buffer.yBase {
                     region = request.viewState.viewBounds

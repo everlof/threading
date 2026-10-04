@@ -22,15 +22,24 @@ enum ExtensionMetalSurfaceError: LocalizedError {
 /// Host-owned execution of an extension-defined fragment surface.
 ///
 /// The extension supplies one pure fragment function. Threading supplies the vertex stage,
-/// command queue, drawable, uniform buffer, frame cadence, transparency and input mapping.
-/// No Metal or AppKit object crosses the extension process boundary.
+/// command queue, drawable, uniform buffer, frame cadence, transparency and input mapping —
+/// and, when the surface names a package picture, the texture and its sampler. No Metal or
+/// AppKit object crosses the extension process boundary.
 @MainActor
 final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHolding {
-    typealias SignalProvider = @MainActor (ExtensionHostSignal) -> Double?
+    /// Answers one signal for a surface drawn in `context`. The context carries the surface's
+    /// own appearance, which is what lets an adaptive theme answer each window for itself.
+    typealias SignalProvider = @MainActor (
+        ExtensionHostSignal,
+        ExtensionHostSignalContext
+    ) -> Double?
 
     private static let maximumInputs = 8
     private static let hostVertexFunction = "threadingHostSurfaceVertex"
     private static let hostFragmentFunction = "threadingHostSurfaceFragment"
+    /// Where a textured surface's picture and sampler are bound — the ABI the SDK documents.
+    private static let imageTextureIndex = 0
+    private static let imageSamplerIndex = 0
 
     private let specification: ExtensionMetalSurface
     private let signalProvider: SignalProvider
@@ -39,6 +48,19 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
     private let beganAt = ProcessInfo.processInfo.systemUptime
     private let audioDemand: AudioSpectrumDemand?
     private var audioViewportObserver: AudioSpectrumViewportObserver?
+    /// Held while the surface binds a moment signal and is mounted in a window — what keeps
+    /// the moment reader, and through it the mood monitor, listening on this surface's behalf.
+    private let momentDemand: ExtensionMomentDemand?
+    /// The appearance every signal read is answered for, cached so a frame walks no view
+    /// hierarchy. Refreshed when the view's effective appearance or its window changes.
+    private var signalContext = ExtensionHostSignalContext.application
+    /// The sampler a textured surface's picture is read through; nil without a texture.
+    private let imageSampler: MTLSamplerState?
+    /// The picture bound at texture index 0: a transparent pixel until `installTexture` lands
+    /// the real one. Nil for a surface without a texture.
+    private var imageTexture: MTLTexture?
+    /// Whether the package picture — not the placeholder — is what the surface samples.
+    private(set) var showsTexture = false
     /// Whether the view has decided to hold its frames because nobody could see them.
     ///
     /// Separate from `isPaused` so a test can ask *why* the view is paused, and so the
@@ -59,17 +81,35 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
             throw ExtensionMetalSurfaceError.metalUnavailable
         }
         self.specification = specification
-        self.audioDemand = specification.inputs.contains {
-            if case .signal(let signal, _) = $0.value { return signal.requiresAudioCapture }
-            return false
-        } ? AudioSpectrumDemand() : nil
+        let boundSignals = specification.inputs.compactMap { input -> ExtensionHostSignal? in
+            if case .signal(let signal, _) = input.value { return signal }
+            return nil
+        }
+        self.audioDemand = boundSignals.contains(where: \.requiresAudioCapture)
+            ? AudioSpectrumDemand()
+            : nil
+        self.momentDemand = boundSignals.contains(where: Self.isMomentSignal)
+            ? ExtensionMomentDemand()
+            : nil
         self.signalProvider = signalProvider
         self.commandQueue = commandQueue
+        if specification.texture != nil {
+            guard let sampler = ExtensionSurfaceTexture.sampler(device: device),
+                  let placeholder = ExtensionSurfaceTexture.placeholder(device: device) else {
+                throw ExtensionMetalSurfaceError.metalUnavailable
+            }
+            imageSampler = sampler
+            imageTexture = placeholder
+        } else {
+            imageSampler = nil
+            imageTexture = nil
+        }
 
         let library = try device.makeLibrary(
             source: Self.completeSource(
                 extensionSource: source,
-                fragmentFunction: specification.fragmentFunction
+                fragmentFunction: specification.fragmentFunction,
+                isTextured: specification.texture != nil
             ),
             options: nil
         )
@@ -105,6 +145,7 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         wantsLayer = true
         layer?.isOpaque = false
         setAccessibilityElement(false)
+        signalContext = ExtensionHostSignalContext(appearance: effectiveAppearance)
         if audioDemand != nil { ThemeParticleHold.shared.register(self) }
         updateVisibilityHold()
     }
@@ -136,6 +177,9 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
             }
         }
         NotificationCenter.default.removeObserver(self)
+        // Moments are wanted only while somebody has mounted this surface in a window.
+        momentDemand?.setActive(window != nil)
+        signalContext = ExtensionHostSignalContext(appearance: effectiveAppearance)
         if let window {
             for name in [
                 NSWindow.didChangeOcclusionStateNotification,
@@ -156,6 +200,13 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
     override func viewDidHide() {
         super.viewDidHide()
         updateVisibilityHold()
+    }
+
+    /// The theme readings answer for the appearance this surface is drawn in; a window moving
+    /// between light and dark, or an ancestor stating its own appearance, changes the answer.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        signalContext = ExtensionHostSignalContext(appearance: effectiveAppearance)
     }
 
     override func viewDidUnhide() {
@@ -185,6 +236,23 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
     }
 
     func refreshParticleMotion() { updateVisibilityHold() }
+
+    // MARK: - Texture
+
+    /// Swaps the placeholder for the surface's package picture. Returns false — and keeps the
+    /// placeholder, so the surface draws on — when the surface states no texture or the upload
+    /// fails. Called on the main actor once a worker has read and decoded the picture.
+    @discardableResult
+    func installTexture(_ pixels: ExtensionSurfaceTexturePixels) -> Bool {
+        guard specification.texture != nil,
+              let device,
+              let texture = ExtensionSurfaceTexture.make(pixels, device: device) else {
+            return false
+        }
+        imageTexture = texture
+        showsTexture = true
+        return true
+    }
 
     override func layout() {
         super.layout()
@@ -246,34 +314,51 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
 
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
-        guard commandBuffer.status == .completed,
-              let representation = NSBitmapImageRep(
-                bitmapDataPlanes: nil,
-                pixelsWide: pixelWidth,
-                pixelsHigh: pixelHeight,
-                bitsPerSample: 8,
-                samplesPerPixel: 4,
-                hasAlpha: true,
-                isPlanar: false,
-                colorSpaceName: .deviceRGB,
-                bitmapFormat: [.alphaFirst, .thirtyTwoBitLittleEndian],
-                bytesPerRow: pixelWidth * 4,
-                bitsPerPixel: 32
-              ),
-              let bytes = representation.bitmapData else {
+        guard commandBuffer.status == .completed else { return nil }
+
+        let bytesPerRow = pixelWidth * Self.snapshotBytesPerPixel
+        var bytes = Data(count: bytesPerRow * pixelHeight)
+        bytes.withUnsafeMutableBytes { buffer in
+            guard let base = buffer.baseAddress else { return }
+            texture.getBytes(
+                base,
+                bytesPerRow: bytesPerRow,
+                from: MTLRegionMake2D(0, 0, pixelWidth, pixelHeight),
+                mipmapLevel: 0
+            )
+        }
+        // `bgra8Unorm` is one little-endian, alpha-first, premultiplied word per pixel, and that
+        // is stated to Core Graphics directly. `NSBitmapImageRep`'s own initializer silently
+        // drops `.thirtyTwoBitLittleEndian` and reads the same bytes as big-endian ARGB — an
+        // opaque red came back transparent and blue stood in for alpha.
+        guard let provider = CGDataProvider(data: bytes as CFData),
+              let rendered = CGImage(
+                width: pixelWidth,
+                height: pixelHeight,
+                bitsPerComponent: Self.snapshotBitsPerComponent,
+                bitsPerPixel: Self.snapshotBytesPerPixel * Self.snapshotBitsPerComponent,
+                bytesPerRow: bytesPerRow,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo(
+                    rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue
+                        | CGBitmapInfo.byteOrder32Little.rawValue
+                ),
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: false,
+                intent: .defaultIntent
+              ) else {
             return nil
         }
-        texture.getBytes(
-            bytes,
-            bytesPerRow: pixelWidth * 4,
-            from: MTLRegionMake2D(0, 0, pixelWidth, pixelHeight),
-            mipmapLevel: 0
-        )
+        let representation = NSBitmapImageRep(cgImage: rendered)
         representation.size = size
         let image = NSImage(size: size)
         image.addRepresentation(representation)
         return image
     }
+
+    private static let snapshotBytesPerPixel = 4
+    private static let snapshotBitsPerComponent = 8
 
     private func encode(
         pass: MTLRenderPassDescriptor,
@@ -291,6 +376,10 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
             length: uniforms.count * MemoryLayout<Float>.stride,
             index: 0
         )
+        if let imageTexture, let imageSampler {
+            encoder.setFragmentTexture(imageTexture, index: Self.imageTextureIndex)
+            encoder.setFragmentSamplerState(imageSampler, index: Self.imageSamplerIndex)
+        }
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         encoder.endEncoding()
         return true
@@ -315,13 +404,30 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         return result
     }
 
+    /// `measured` as decoration should answer it (`ThemeReactions`). Counts scale as counts;
+    /// facts — `audio.available`, the theme, the clock, the account — pass through.
+    static func reacted(_ signal: ExtensionHostSignal, _ measured: Double) -> Double {
+        guard signal.isReactive else { return measured }
+        return signal == .workloadWorkingCount
+            ? ThemeReactions.scaledCount(measured)
+            : ThemeReactions.scaled(measured)
+    }
+
     private func resolve(_ scalar: ExtensionSurfaceScalar) -> Double {
         switch scalar {
         case .constant(let value):
             return value
         case .signal(let signal, let mapping):
-            if signal.requiresAudioCapture, !ThemeParticleHold.motionAllowed { return mapping.fallback }
-            guard let raw = signalProvider(signal) else { return mapping.fallback }
+            // Sound and app moments are motion: with motion held they read their fallback, as
+            // the surface's clock stops.
+            if signal.requiresAudioCapture || Self.isMomentSignal(signal),
+               !ThemeParticleHold.motionAllowed {
+                return mapping.fallback
+            }
+            guard let measured = signalProvider(signal, signalContext) else { return mapping.fallback }
+            // A reactive reading — agent work, music, a moment — answers through the person's
+            // Reaction strength before the extension's own mapping sees it.
+            let raw = Self.reacted(signal, measured)
             let position = min(max(
                 (raw - mapping.inputMinimum)
                     / (mapping.inputMaximum - mapping.inputMinimum),
@@ -343,11 +449,40 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         }
     }
 
+    private static func isMomentSignal(_ signal: ExtensionHostSignal) -> Bool {
+        ExtensionHostSignal.momentSignals.contains(signal)
+    }
+
+    /// The extension's source between the host's vertex stage and the host's fragment wrapper.
+    ///
+    /// A textured surface's wrapper takes the picture and its sampler at index 0 and passes them
+    /// on as the author's third and fourth arguments; an untextured one keeps the two-argument
+    /// call every surface written before textures existed was compiled against.
     private static func completeSource(
         extensionSource: String,
-        fragmentFunction: String
+        fragmentFunction: String,
+        isTextured: Bool
     ) -> String {
-        """
+        let fragmentWrapper = isTextured
+            ? """
+            fragment float4 \(hostFragmentFunction)(
+                ThreadingSurfaceVertexOut in [[stage_in]],
+                constant ThreadingSurfaceUniforms &uniforms [[buffer(0)]],
+                texture2d<float> image [[texture(\(imageTextureIndex))]],
+                sampler imageSampler [[sampler(\(imageSamplerIndex))]]
+            ) {
+                return \(fragmentFunction)(in.uv, uniforms, image, imageSampler);
+            }
+            """
+            : """
+            fragment float4 \(hostFragmentFunction)(
+                ThreadingSurfaceVertexOut in [[stage_in]],
+                constant ThreadingSurfaceUniforms &uniforms [[buffer(0)]]
+            ) {
+                return \(fragmentFunction)(in.uv, uniforms);
+            }
+            """
+        return """
         #include <metal_stdlib>
         using namespace metal;
 
@@ -377,12 +512,7 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
 
         \(extensionSource)
 
-        fragment float4 \(hostFragmentFunction)(
-            ThreadingSurfaceVertexOut in [[stage_in]],
-            constant ThreadingSurfaceUniforms &uniforms [[buffer(0)]]
-        ) {
-            return \(fragmentFunction)(in.uv, uniforms);
-        }
+        \(fragmentWrapper)
         """
     }
 }
