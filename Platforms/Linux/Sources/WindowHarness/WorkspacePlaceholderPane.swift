@@ -30,6 +30,7 @@ final class WorkspacePlaceholderPane {
     private let composerRoot = NSView(frame: .zero)
     private let composerHero = SessionPlaceholderView(frame: .zero)
     private let composerEditor = PromptTextView.scrollingPrompt()
+    private let composerStartButton = ThemedButton()
     private lazy var projectChip = ChipView()
     private lazy var providerChip = ChipView()
     private let choiceSurface = SessionMenuSurface(frame: .zero)
@@ -53,7 +54,7 @@ final class WorkspacePlaceholderPane {
     private(set) var composerIdentity: String?
     private var root: NSView { showsComposer ? composerRoot : placeholderRoot }
     private var actionAnchor: ThemedButton {
-        showsComposer ? composerHero.actionAnchor : placeholderRoot.actionAnchor
+        showsComposer ? composerStartButton : placeholderRoot.actionAnchor
     }
     private var presentedSize = NSSize.zero
     private var needsPresentation = true
@@ -65,9 +66,9 @@ final class WorkspacePlaceholderPane {
                                 pointSize: 36, weight: .regular)
         }
         placeholderRoot.onAction = onAction
-        composerHero.onAction = onAction
         composerRoot.addSubview(composerHero)
         composerRoot.addSubview(composerEditor)
+        composerRoot.addSubview(composerStartButton)
         composerRoot.addSubview(projectChip)
         composerRoot.addSubview(providerChip)
         composerRoot.addSubview(choiceSurface)
@@ -83,6 +84,16 @@ final class WorkspacePlaceholderPane {
         composerEditor.textView.placeholder = "Describe a task or ask a question"
         composerEditor.textView.submitsOnReturn = { false }
         composerEditor.textView.onSubmit = { _ in onSubmit() }
+        composerStartButton.title = "Start Session"
+        composerStartButton.isProminent = true
+        composerStartButton.shortcut = KeyboardShortcut(key: "\r", modifiers: .command)
+        composerStartButton.setAccessibilityIdentifier("composer.session-start.submit")
+        composerStartButton.action = { [weak self] in
+            guard let self, self.showsComposer, self.composerIdentity != nil,
+                  self.composerStartButton.isEnabled else { return }
+            onSubmit()
+        }
+        composerStartButton.isEnabled = false
         composerEditor.textView.drawsBackground = true
         composerEditor.textView.backgroundColor = LinuxTheme.color("fieldSurface")
         composerEditor.textView.textContainerInset = NSSize(width: 10, height: 8)
@@ -120,13 +131,13 @@ final class WorkspacePlaceholderPane {
         title = "Start a \(providerName) session"
         detail = "In \(projectName). Write a brief below."
         actionTitle = "Start Session"
-        composerHero.configure(symbolName: "terminal", title: title, detail: detail,
-                               actionTitle: actionTitle)
+        composerHero.configure(symbolName: "terminal", title: title, detail: detail)
         projectChip.configure(symbolName: "folder", title: projectName)
         providerChip.configure(symbolName: "terminal", title: providerName)
         selectedProjectName = projectName
         selectedProviderName = providerName
         composerEditor.textView.string = ""
+        refreshStartButton()
         window.contentView = composerRoot
         _ = window.makeFirstResponder(composerEditor.textView)
         needsPresentation = true
@@ -156,8 +167,7 @@ final class WorkspacePlaceholderPane {
         if showsComposer, !selectedProjectName.isEmpty, !selectedProviderName.isEmpty {
             title = "Start a \(selectedProviderName) session"
             detail = "In \(selectedProjectName). Write a brief below."
-            composerHero.configure(symbolName: "terminal", title: title, detail: detail,
-                                   actionTitle: actionTitle)
+            composerHero.configure(symbolName: "terminal", title: title, detail: detail)
         }
         projectChip.isEnabled = !projects.isEmpty
         providerChip.isEnabled = !providers.isEmpty
@@ -372,6 +382,7 @@ final class WorkspacePlaceholderPane {
         guard showsComposer else { return }
         composerEditor.textView.insertText("",
             replacementRange: composerEditor.textView.selectedRange())
+        refreshStartButton()
         needsPresentation = true
     }
 
@@ -379,6 +390,7 @@ final class WorkspacePlaceholderPane {
         guard showsComposer else { return }
         composerEditor.textView.insertText(text,
             replacementRange: NSRange(location: NSNotFound, length: 0))
+        refreshStartButton()
         needsPresentation = true
     }
 
@@ -418,6 +430,7 @@ final class WorkspacePlaceholderPane {
             view.insertText(pasted, replacementRange: range)
         default: return false
         }
+        refreshStartButton()
         needsPresentation = true
         return true
     }
@@ -435,6 +448,7 @@ final class WorkspacePlaceholderPane {
         guard showsComposer else { return }
         composerEditor.textView.setMarkedText(text, selectedRange: selectedRange,
             replacementRange: NSRange(location: NSNotFound, length: 0))
+        refreshStartButton()
         needsPresentation = true
     }
 
@@ -442,6 +456,7 @@ final class WorkspacePlaceholderPane {
         guard showsComposer, composerEditor.textView.hasMarkedText() else { return false }
         composerEditor.textView.setMarkedText("", selectedRange: NSRange(location: 0, length: 0),
             replacementRange: NSRange(location: NSNotFound, length: 0))
+        refreshStartButton()
         needsPresentation = true
         return true
     }
@@ -449,7 +464,16 @@ final class WorkspacePlaceholderPane {
     func handleEditorKey(_ event: NSEvent) {
         guard showsComposer else { return }
         _ = window.dispatchToContent(event)
+        refreshStartButton()
         needsPresentation = true
+    }
+
+    private func refreshStartButton() {
+        let text = composerEditor.textView.string
+        let canSubmit = showsComposer && !composerEditor.textView.hasMarkedText()
+            && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        composerStartButton.isEnabled = canSubmit
+        composerStartButton.toolTip = canSubmit ? nil : "Write the brief first."
     }
 
     func focus(_ focused: Bool) {
@@ -501,22 +525,33 @@ final class WorkspacePlaceholderPane {
         guard needsPresentation || presentedSize != size else { return }
         root.frame = NSRect(origin: .zero, size: size)
         if showsComposer {
-            let horizontalInset: CGFloat = 24
+            let horizontalInset = min(24, max(8, size.width * 0.08))
             let bottomInset: CGFloat = 8
-            let editorHeight = min(108, max(44, size.height * 0.25))
+            let isShort = size.height < 160
+            let actionGap: CGFloat = isShort ? 4 : 8
+            let chipGap: CGFloat = isShort ? 4 : 8
+            let actionHeight = max(26, composerStartButton.intrinsicContentSize.height)
+            let editorHeight = min(108, max(isShort ? 36 : 44, size.height * 0.20))
             let chipHeight = max(24, Design.Size.choiceHeight)
-            let chipY = bottomInset + editorHeight + 8
+            let editorY = bottomInset + actionHeight + actionGap
+            let chipY = editorY + editorHeight + chipGap
             let heroBottom = chipY + chipHeight + 4
-            composerEditor.frame = NSRect(x: horizontalInset, y: bottomInset,
+            let available = max(1, size.width - 2 * horizontalInset)
+            let actionWidth = min(available, max(120, composerStartButton.intrinsicContentSize.width))
+            composerStartButton.frame = NSRect(
+                x: size.width - horizontalInset - actionWidth, y: bottomInset,
+                width: actionWidth, height: actionHeight
+            )
+            composerEditor.frame = NSRect(x: horizontalInset, y: editorY,
                 width: max(1, size.width - horizontalInset * 2), height: editorHeight)
             composerHero.frame = NSRect(x: 0, y: heroBottom,
                 width: size.width, height: max(0, size.height - heroBottom))
-            let available = max(1, size.width - 2 * horizontalInset)
+            composerHero.isHidden = composerHero.frame.height < 110
             let gap: CGFloat = 8
-            let projectWidth = min(max(94, projectChip.intrinsicContentSize.width),
-                                   max(1, (available - gap) * 0.58))
             let providerWidth = min(max(84, providerChip.intrinsicContentSize.width),
-                                    max(1, available - projectWidth - gap))
+                                    max(1, available - gap - 48))
+            let projectWidth = min(max(72, projectChip.intrinsicContentSize.width),
+                                   max(1, available - providerWidth - gap))
             projectChip.frame = NSRect(x: horizontalInset, y: chipY,
                                        width: projectWidth, height: chipHeight)
             providerChip.frame = NSRect(x: horizontalInset + projectWidth + gap, y: chipY,
@@ -551,6 +586,7 @@ final class WorkspacePlaceholderPane {
             detail.withCString { explanation in
                 actionTitle.withCString { action in
                     tw_accessibility_placeholder(nativeWindow, name, explanation, action,
+                        actionAnchor.isEnabled ? 1 : 0,
                         Int32(buttonX), Int32(buttonY), Int32(buttonWidth), Int32(buttonHeight))
                 }
             }

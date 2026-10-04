@@ -250,7 +250,22 @@ enum AttributedTextDrawing {
 public extension NSAttributedString {
     func size() -> NSSize {
         guard let metric = AttributedTextDrawing.prepare(self, scale: 1).measure() else { return .zero }
-        return NSSize(width: CGFloat(metric.width), height: CGFloat(metric.height))
+        var width = CGFloat(metric.width)
+        var height = CGFloat(metric.height)
+        // Pango rounds a shaped line to device pixels. A single-line control that measures
+        // at 1× and draws at the Linux window's 2× backing scale can need one more device
+        // pixel than twice its measured width. That is enough for tail ellipsizing to replace
+        // several visible letters on a button sized to its own intrinsic content.
+        let paragraph = length > 0
+            ? attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+            : nil
+        if paragraph?.lineBreakMode == .byTruncatingTail ||
+            paragraph?.lineBreakMode == .byClipping,
+           let backing = AttributedTextDrawing.prepare(self, scale: 2).measure() {
+            width = max(width, ceil(CGFloat(backing.width) / 2))
+            height = max(height, ceil(CGFloat(backing.height) / 2))
+        }
+        return NSSize(width: width, height: height)
     }
 
     func draw(at point: NSPoint) {

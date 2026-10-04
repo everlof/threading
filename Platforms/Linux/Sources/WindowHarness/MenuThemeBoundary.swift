@@ -4,7 +4,7 @@ import AppKit
 // support the unchanged production menu row; no theme decisions belong in the AppKit shim.
 @MainActor
 public enum AppTheme {
-    public enum Material {
+    public struct Material {
         public enum ChoiceStyle: Equatable {
             case chip, dropdown, popup, doubleArrowPopup, aquaPopup, cycle
 

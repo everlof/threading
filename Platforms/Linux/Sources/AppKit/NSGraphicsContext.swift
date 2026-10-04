@@ -479,6 +479,7 @@ extension NSGraphicsContext {
 
 public struct CGContextShim {
     let owner: NSGraphicsContext
+    public func translateBy(x: CGFloat, y: CGFloat) { owner.translateBy(x: x, y: y) }
     public func setAlpha(_ value: CGFloat) {
         precondition(value.isFinite, "non-finite graphics alpha")
         owner.alpha = min(1, max(0, value))

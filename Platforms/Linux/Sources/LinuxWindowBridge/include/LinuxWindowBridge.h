@@ -155,7 +155,8 @@ void tw_accessibility_session_menu_end(TWWindow *);
 // A bounded idle panel with title/detail labels and one optional action button. NULL title
 // unmounts it; NULL actionLabel omits the button. Button bounds are window pixels.
 void tw_accessibility_placeholder(TWWindow *, const char *title, const char *detail,
-                                   const char *actionLabel, int x, int y, int width, int height);
+                                   const char *actionLabel, int actionEnabled,
+                                   int x, int y, int width, int height);
 // Publish the mounted composer's editable text to AT-SPI. NULL utf8 unmounts the editor;
 // otherwise length is 0...65536 bytes of valid UTF-8, with no embedded NUL. Selection
 // bounds are ordered Unicode scalar offsets (not UTF-16 indices); the end is the caret.

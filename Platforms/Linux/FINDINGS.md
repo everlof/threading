@@ -4802,3 +4802,27 @@ composer choices and exact project launch from the packaged `.deb`. Its evidence
 `out/bundle-smoke/run.cK3kh2ki`; I inspected
 `restart-out/composer/composer-project-menu.png` from that installed window. The `.deb`
 SHA-256 is `f272b47cc67b394d4a17bc00f83c463eccda293a70449a575466462e8e171f03`.
+
+## 158. Linux reuses the production primary button
+
+The Linux idle placeholder and New Session composer now mount the unchanged production
+`ThemedButton` instead of a Linux-only control copy. The composer moves Start Session below the
+shared `PromptTextView`, matching the production action order. Its button shows the shared
+Command-Return shortcut, disables for an empty or provisional IME draft, and sends its action
+through the existing host-owned submission path. Project/provider identity, admission and agent
+launch remain with the Linux host. This is part of the existing
+`composer.session-start@1` surface; it adds no extension contract.
+
+The shim gained the button's AppKit, CoreText and Core Animation vocabulary. Ordinary controls
+still paint through the retained bitmap view tree. The optional floating layer path compiles but
+is not mounted or visually verified in this slice. Linux Pango now measures clipped single-line
+attributed text at both 1× and 2×, reserving the larger rounded width so the production button
+does not truncate its own title at 2×.
+
+Verification on 2026-10-04: Ubuntu arm64 `WindowHarness` and the focused native X11 composer
+smoke passed. The smoke checked that the button lies below the editor, is disabled before input,
+enables after a draft, and launches one agent in the selected project by a real pointer click.
+It also exercised project/provider choices and multiline Unicode editing. I inspected the fresh
+1120×480 `out/composer/composer.png`: the full Start Session title, shortcut cue, editor and
+focus state are visible. Theme-boundary and main-actor-latency scripts passed. The packaged
+`.deb` suite and floating button behavior were not rerun for this checkpoint.
