@@ -102,6 +102,63 @@ enum RemoteHostInstallError: LocalizedError, Equatable {
     }
 }
 
+// MARK: - Provenance
+
+/// Who installed one generation on a host, read from `<install dir>/.threading-managed-by`.
+///
+/// A host can have two installers — this Mac's Remote Hosts setup and, say, Rindabox's Ansible —
+/// and each must leave the other's generations alone: retiring, disabling at boot or pruning a
+/// generation another installer put there takes its agents' daemon away from under the system
+/// that manages it, and that system puts it straight back. So this Mac acts only on what it can
+/// prove it installed. A directory with no marker — a hand install, or a generation an older
+/// build of this app set up before markers existed — is read as external: failing safe costs an
+/// upgrade the person can do by hand, failing open costs somebody's running agents.
+enum RemoteHostProvenance: Equatable, Sendable {
+    /// `threading-mac`: this Mac's installer wrote it.
+    case threadingMac
+    /// `external:<name>`: another installer owns it and upgrades it.
+    case external(String)
+    /// No marker, or one this build cannot read. Treated exactly as external.
+    case unmarked
+
+    var isThreadingMac: Bool { self == .threadingMac }
+
+    /// The installer to send a person to, or nil when nothing says who it is.
+    var managerName: String? {
+        if case .external(let name) = self { return name }
+        return nil
+    }
+
+    /// A marker file's first line.
+    init(marker: String) {
+        let line = marker.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed == RemoteHostDefaults.provenanceThreadingMac {
+            self = .threadingMac
+            return
+        }
+        guard trimmed.hasPrefix(RemoteHostDefaults.provenanceExternalPrefix) else {
+            self = .unmarked
+            return
+        }
+        let name = String(trimmed.dropFirst(RemoteHostDefaults.provenanceExternalPrefix.count))
+        guard !name.isEmpty, name.count <= RemoteHostDefaults.provenanceNameMaximumLength,
+              name.unicodeScalars.allSatisfy({ RemoteHostFactsDefaults.instanceNameCharacters.contains($0) })
+        else {
+            self = .unmarked
+            return
+        }
+        self = .external(name)
+    }
+
+    /// One probe line's value, `<identifier> <marker>`.
+    static func parse(markerLine: String) -> (String, RemoteHostProvenance)? {
+        let parts = markerLine.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        guard let identifier = parts.first.map(String.init), !identifier.isEmpty else { return nil }
+        return (identifier, RemoteHostProvenance(marker: parts.count > 1 ? String(parts[1]) : ""))
+    }
+}
+
 // MARK: - The plan
 
 /// What preparing a host has to do, decided from its facts and the binary this Mac has. Pure, so
@@ -114,24 +171,49 @@ struct RemoteHostInstallPlan: Equatable, Sendable {
     /// Active instances of another build, which have to be retired before this one can own the
     /// state directory — and only when they hold no sessions, which is asked through the tunnel.
     let otherActiveInstances: [String]
+    /// The subset of `otherActiveInstances` this Mac did not install, with who did when a marker
+    /// says. Never retired, disabled or pruned: a compatible one is used as it is, and an
+    /// incompatible one is reported as the other installer's to upgrade.
+    var externalActiveInstances: [String: RemoteHostProvenance] = [:]
+    /// Every installer other than this Mac that an installed daemon generation's marker names.
+    var installedExternalManagers: Set<String> = []
     /// Whether this build's own instance is already running.
     let isRunning: Bool
     /// Other instances still enabled to start at boot. Disabled — never stopped — once this
     /// build's instance runs, because the unit template is shared: an old instance left enabled
     /// comes back at the next boot on *this* build's paths, and a binary older than the
     /// state-directory lock would then take the rendezvous from the running daemon (measured on
-    /// the spike's VM).
+    /// the spike's VM). Only instances this Mac installed: another installer's boot policy is its
+    /// own.
     let otherEnabledInstances: [String]
 
     static func make(facts: RemoteHostFacts, binary: RemoteHostBinary) -> RemoteHostInstallPlan {
         let identifier = binary.installIdentifier
+        let others = facts.activeInstances.filter { $0 != identifier }
+        var external: [String: RemoteHostProvenance] = [:]
+        for instance in others where !facts.provenance(ofDaemon: instance).isThreadingMac {
+            external[instance] = facts.provenance(ofDaemon: instance)
+        }
         return RemoteHostInstallPlan(
             uploadsBinary: !facts.installedBinaries.contains(identifier),
             enablesLinger: facts.lingerEnabled != true,
-            otherActiveInstances: facts.activeInstances.filter { $0 != identifier },
+            otherActiveInstances: others,
+            externalActiveInstances: external,
+            installedExternalManagers: Set(facts.daemonProvenance.values.compactMap(\.managerName)),
             isRunning: facts.activeInstances.contains(identifier),
-            otherEnabledInstances: facts.enabledInstances.filter { $0 != identifier }
+            otherEnabledInstances: facts.enabledInstances.filter {
+                $0 != identifier && facts.provenance(ofDaemon: $0).isThreadingMac
+            }
         )
+    }
+
+    /// The installer to name when a daemon this Mac did not install refuses this build: the one
+    /// an externally managed active instance's marker names, else the one any installed
+    /// generation's marker names — nil when none or several do.
+    var externalManagerName: String? {
+        let active = Set(externalActiveInstances.values.compactMap(\.managerName))
+        let names = active.isEmpty ? installedExternalManagers : active
+        return names.count == 1 ? names.first : nil
     }
 }
 
@@ -153,6 +235,7 @@ enum RemoteHostInstallScripts {
     static let unitTemplate = """
         [Unit]
         Description=Threading background session host (%i)
+        \(RemoteHostInstallScripts.unitProvenanceLine)
 
         [Service]
         Type=simple
@@ -168,12 +251,45 @@ enum RemoteHostInstallScripts {
     /// Receives the binary on stdin into its content-named directory, atomically. The identifier is
     /// hex and every path is relative to the login directory, so the command line needs no quoting
     /// in any shell `ssh` hands it to.
+    ///
+    /// It also records this Mac as the directory's installer — unless a marker is already there,
+    /// because a directory another installer created stays that installer's even when this Mac
+    /// fills in a missing binary.
     static func uploadCommand(for binary: RemoteHostBinary) -> String {
         let directory = "\(binary.kind.remoteLibraryDirectory)/\(binary.installIdentifier)"
         let target = binary.remotePath
-        return "mkdir -p \(directory) && cat > \(target).partial && chmod 700 \(target).partial"
+        let marker = "\(directory)/\(RemoteHostDefaults.provenanceMarkerFileName)"
+        return "mkdir -p \(directory)"
+            + " && { [ -e \(marker) ] || echo \(RemoteHostDefaults.provenanceThreadingMac) > \(marker); }"
+            + " && cat > \(target).partial && chmod 700 \(target).partial"
             + " && mv \(target).partial \(target) && sha256sum \(target)"
     }
+
+    /// Marks the unit template as this Mac's. systemd ignores `X-` keys, so the line costs nothing
+    /// to the unit and lets a later preparation tell its own template from another installer's.
+    static let unitProvenanceLine = "X-Threading-Managed-By=\(RemoteHostDefaults.provenanceThreadingMac)"
+
+    /// The exit status `unitOwnershipScript` uses for "another installer's template; leave it".
+    static let foreignUnitExitStatus: Int32 = 3
+
+    /// Whether this Mac may write the shared unit template: yes when there is none, when it carries
+    /// this Mac's line, or — for a template an older build of this app wrote before the line
+    /// existed — when no install directory names another installer. Otherwise the template is
+    /// another installer's, and overwriting it would repoint that installer's instances at paths
+    /// of this Mac's choosing.
+    static let unitOwnershipScript = """
+        unit="$HOME/\(RemoteHostDefaults.remoteUnitDirectory)/\(RemoteHostDefaults.remoteUnitTemplateName)"
+        [ -e "$unit" ] || exit 0
+        grep -qx '\(unitProvenanceLine)' "$unit" && exit 0
+        for marker in "$HOME/\(RemoteHostDefaults.remoteLibraryDirectory)"/*/\(RemoteHostDefaults.provenanceMarkerFileName) \
+          "$HOME/\(RemoteHostDefaults.remoteBridgeLibraryDirectory)"/*/\(RemoteHostDefaults.provenanceMarkerFileName); do
+          [ -f "$marker" ] || continue
+          case "$(head -n 1 "$marker")" in
+            \(RemoteHostDefaults.provenanceExternalPrefix)*) exit \(foreignUnitExitStatus) ;;
+          esac
+        done
+        exit 0
+        """
 
     /// Writes the unit template from stdin.
     static let unitCommand = "mkdir -p \(RemoteHostDefaults.remoteUnitDirectory) && cat > "
@@ -227,12 +343,15 @@ enum RemoteHostInstallScripts {
         rm -f "$HOME/\(RemoteHostDefaults.remoteBridgeDirectory)/\(RemoteHostDefaults.remoteBridgeSocketFileName)"
         """
 
-    /// Removes every install directory but the ones named, for both the daemon and the bridge.
+    /// Removes every install directory this Mac installed but the ones named, for both the daemon
+    /// and the bridge.
     ///
     /// The names are hex identifiers this Mac computed, so the command needs no quoting; a directory
     /// whose name is not one of them is a build nothing runs any more. `rm -rf` reaches only inside
     /// the two install roots, and the `case` guard keeps a name that is not hex from being removed
-    /// at all — a directory a person put there by hand stays.
+    /// at all — a directory a person put there by hand stays. The provenance marker is read on the
+    /// host at removal time rather than from the earlier facts, so only a directory still marked
+    /// `threading-mac` goes: another installer's generation, or one with no marker, stays.
     static func pruneScript(keeping identifiers: [String]) -> String {
         let keep = identifiers.joined(separator: " ")
         return """
@@ -251,6 +370,8 @@ enum RemoteHostInstallScripts {
                 case " $keep " in
                   *" $name "*) continue ;;
                 esac
+                owner="$(head -n 1 "$directory/\(RemoteHostDefaults.provenanceMarkerFileName)" 2>/dev/null || true)"
+                [ "$owner" = "\(RemoteHostDefaults.provenanceThreadingMac)" ] || continue
                 rm -rf "$directory"
               done
             done

@@ -56,6 +56,11 @@ struct RemoteHostFacts: Equatable, Sendable {
     /// lets the Remote Hosts page say "sign in there first" instead of leaving a person to find out
     /// from a login prompt inside a session.
     var claudeSignedIn: Bool?
+    /// Who installed each daemon install directory, from its provenance marker. A directory with
+    /// no marker is absent here and reads as `.unmarked`.
+    var daemonProvenance: [String: RemoteHostProvenance] = [:]
+    /// The same for each bridge install directory.
+    var bridgeProvenance: [String: RemoteHostProvenance] = [:]
 
     var architecture: RemoteHostArchitecture? { RemoteHostArchitecture(unameMachine: machine) }
 
@@ -68,6 +73,12 @@ struct RemoteHostFacts: Equatable, Sendable {
     var hasPOSIXLoginShell: Bool {
         let name = (loginShell as NSString).lastPathComponent
         return RemoteHostFactsDefaults.posixShellNames.contains(name)
+    }
+
+    /// Who installed the daemon generation `identifier` — an instance name read off the host as
+    /// well as an install directory. Anything this Mac cannot prove it installed is not its own.
+    func provenance(ofDaemon identifier: String) -> RemoteHostProvenance {
+        daemonProvenance[identifier] ?? .unmarked
     }
 }
 
@@ -88,6 +99,8 @@ enum RemoteHostFactsDefaults {
         static let bridge = "bridge"
         static let curl = "curl"
         static let auth = "auth"
+        static let managed = "managed"
+        static let bridgeManaged = "bridgemanaged"
     }
 
     static let instanceNameCharacters = CharacterSet(
@@ -128,11 +141,20 @@ extension RemoteHostFacts {
         printf 'shell=%s\\n' "$shell"
         printf 'systemctl=%s\\n' "$(command -v systemctl 2>/dev/null || true)"
         printf 'linger=%s\\n' "$(loginctl show-user "$user" -p Linger --value 2>/dev/null || true)"
+        marker() {
+          [ -f "$1/\(RemoteHostDefaults.provenanceMarkerFileName)" ] || return 0
+          printf '%s=%s %s\\n' "$2" "$(basename "$1")" \\
+            "$(head -n 1 "$1/\(RemoteHostDefaults.provenanceMarkerFileName)" 2>/dev/null | tr -cd 'A-Za-z0-9:._-')"
+        }
         for binary in "$HOME"/\(RemoteHostDefaults.remoteLibraryDirectory)/*/\(RemoteHostDefaults.daemonExecutableName); do
-          [ -x "$binary" ] && printf 'installed=%s\\n' "$(basename "$(dirname "$binary")")"
+          [ -x "$binary" ] || continue
+          printf 'installed=%s\\n' "$(basename "$(dirname "$binary")")"
+          marker "$(dirname "$binary")" \(RemoteHostFactsDefaults.Key.managed)
         done
         for binary in "$HOME"/\(RemoteHostDefaults.remoteBridgeLibraryDirectory)/*/\(RemoteHostDefaults.bridgeExecutableName); do
-          [ -x "$binary" ] && printf 'bridge=%s\\n' "$(basename "$(dirname "$binary")")"
+          [ -x "$binary" ] || continue
+          printf 'bridge=%s\\n' "$(basename "$(dirname "$binary")")"
+          marker "$(dirname "$binary")" \(RemoteHostFactsDefaults.Key.bridgeManaged)
         done
         for unit in "$HOME"/\(RemoteHostDefaults.remoteUnitDirectory)/default.target.wants/\(RemoteHostDefaults.remoteUnitPrefix)*\(RemoteHostDefaults.remoteUnitSuffix); do
           [ -e "$unit" ] && printf 'enabled=%s\\n' "$(basename "$unit")"
@@ -159,6 +181,8 @@ extension RemoteHostFacts {
         var active: [String] = []
         var enabled: [String] = []
         var bridges = Set<String>()
+        var daemonProvenance: [String: RemoteHostProvenance] = [:]
+        var bridgeProvenance: [String: RemoteHostProvenance] = [:]
 
         for line in output.split(whereSeparator: \.isNewline) {
             guard let separator = line.firstIndex(of: "=") else { continue }
@@ -173,6 +197,13 @@ extension RemoteHostFacts {
                 if let instance = instanceName(fromUnit: value) { enabled.append(instance) }
             case Key.bridge:
                 if !value.isEmpty { bridges.insert(value) }
+            case Key.managed, Key.bridgeManaged:
+                guard let (identifier, provenance) = RemoteHostProvenance.parse(markerLine: value) else { continue }
+                if key == Key.managed {
+                    daemonProvenance[identifier] = provenance
+                } else {
+                    bridgeProvenance[identifier] = provenance
+                }
             case Key.machine, Key.home, Key.user, Key.shell, Key.systemctl, Key.linger, Key.claude,
                  Key.curl, Key.auth:
                 single[key] = value
@@ -216,7 +247,9 @@ extension RemoteHostFacts {
             claudePath: claude,
             installedBridges: bridges,
             curlPath: curl,
-            claudeSignedIn: signedIn
+            claudeSignedIn: signedIn,
+            daemonProvenance: daemonProvenance,
+            bridgeProvenance: bridgeProvenance
         )
     }
 

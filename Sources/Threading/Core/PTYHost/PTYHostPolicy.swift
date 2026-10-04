@@ -144,13 +144,17 @@ enum PTYHostPolicy {
     /// just answered `list` on this exact socket, so asking again would be asking a question
     /// already answered — and answering it differently the second time would mean building a
     /// terminal for a session nothing is going to hand back.
+    ///
+    /// `retiresOlderDaemon` is false for a remote host's daemon: this Mac may not own it.
     static func attachingTransportFactory(
         socketPath: String,
-        bundle: Bundle = .main
+        bundle: Bundle = .main,
+        retiresOlderDaemon: Bool? = nil
     ) -> PTYHostTransportFactory {
         let build = PTYHostBuild.string(for: bundle)
         return { events in
-            let client = PTYHostClient(socketPath: socketPath, build: build, events: events)
+            let client = PTYHostClient(socketPath: socketPath, build: build, events: events,
+                                       retiresOlderDaemon: retiresOlderDaemon)
             try client.connect()
             return client
         }
