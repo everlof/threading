@@ -140,10 +140,12 @@ final class RemoteHostComponentTests: XCTestCase {
         }
     }
 
-    // MARK: - Pruning the host    // MARK: - Pruning the host
+    // MARK: - Pruning the host
 
-    /// Every build a host was ever given is tens of megabytes. What runs now is kept; everything
-    /// else in the two install roots goes — and a name that is not one of ours is left alone.
+    /// Every build a host was ever given is tens of megabytes. What runs now is kept; a stale
+    /// generation this Mac installed (its marker says `threading-mac`) goes. A generation another
+    /// installer owns, or one with no marker at all, is never this Mac's to delete — and a name
+    /// that is not one of ours is left alone.
     func testPruningKeepsWhatRunsAndRefusesToTouchAnythingElse() throws {
         let script = RemoteHostInstallScripts.pruneScript(keeping: ["aaaabbbbccccdddd", "1111222233334444"])
         XCTAssertTrue(script.contains("keep=\"aaaabbbbccccdddd 1111222233334444\""))
@@ -151,15 +153,22 @@ final class RemoteHostComponentTests: XCTestCase {
         let home = root.appendingPathComponent("home", isDirectory: true)
         let daemons = home.appendingPathComponent(RemoteHostDefaults.remoteLibraryDirectory, isDirectory: true)
         let bridges = home.appendingPathComponent(RemoteHostDefaults.remoteBridgeLibraryDirectory, isDirectory: true)
-        for directory in [
-            daemons.appendingPathComponent("aaaabbbbccccdddd"),
-            daemons.appendingPathComponent("deadbeefdeadbeef"),
-            daemons.appendingPathComponent("notes-from-a-person"),
-            bridges.appendingPathComponent("1111222233334444"),
-            bridges.appendingPathComponent("5555666677778888")
-        ] {
+        let marked: [(URL, String?)] = [
+            (daemons.appendingPathComponent("aaaabbbbccccdddd"), RemoteHostDefaults.provenanceThreadingMac),
+            (daemons.appendingPathComponent("deadbeefdeadbeef"), RemoteHostDefaults.provenanceThreadingMac),
+            (daemons.appendingPathComponent("0123456789abcdef"), "external:rindabox-ansible"),
+            (daemons.appendingPathComponent("fedcba9876543210"), nil),
+            (daemons.appendingPathComponent("notes-from-a-person"), nil),
+            (bridges.appendingPathComponent("1111222233334444"), RemoteHostDefaults.provenanceThreadingMac),
+            (bridges.appendingPathComponent("5555666677778888"), RemoteHostDefaults.provenanceThreadingMac)
+        ]
+        for (directory, owner) in marked {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try Data().write(to: directory.appendingPathComponent("threading-ptyd"))
+            if let owner {
+                try Data((owner + "\n").utf8).write(
+                    to: directory.appendingPathComponent(RemoteHostDefaults.provenanceMarkerFileName))
+            }
         }
 
         let shell = Process()
@@ -173,7 +182,7 @@ final class RemoteHostComponentTests: XCTestCase {
         // `bridge` is the bridge's own root, which lives inside the daemon's; the sweep steps over
         // it by name rather than reading it as a stale install.
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: daemons.path).sorted(),
-                       ["aaaabbbbccccdddd", "bridge", "notes-from-a-person"])
+                       ["0123456789abcdef", "aaaabbbbccccdddd", "bridge", "fedcba9876543210", "notes-from-a-person"])
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: bridges.path).sorted(),
                        ["1111222233334444"])
     }
