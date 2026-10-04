@@ -594,35 +594,114 @@ receipts, daily cells and budgets, `ControllerUsageCollector` (runtime) reads tr
 - **One parser.** Transcripts are read through `Packages/ThreadingUsage` — the same Claude and
   Codex adapters, strict reader and pricing catalogue as the Mac's Usage page — so a worker's
   spend and a Mac session's spend are computed by identical code.
-- **A receipt per execution, owed from the confirmed stop.** A recipe names its transcript with
-  `usage: {runtime, home, account}`. Confirming a launch stopped records it in `usage_pending` in
-  the same transaction; the supervisor writes receipts beside supervision (two at a time), and
+- **A receipt per execution, owed from the confirmed stop.** A recipe names its transcripts with
+  `usage` (contract below). Confirming a launch stopped records it in `usage_pending` in the same
+  transaction; the supervisor writes receipts beside supervision (two at a time), and
   `usage-collect` writes one by hand. Attribution — worker, task, the mail chain the execution
-  acted on, the trigger whose event admitted it — comes from controller records only.
-- **Finding the transcript.** Claude: `<home>/projects/*/<execution>.jsonl` plus its
-  `subagents/`, exact because the recipe passes the execution id as the session id. Codex names
-  its own session: the authenticated session-start hook binds its exact session ID and path.
-  Collection verifies the path lies under the configured account home and the transcript metadata
-  has that same ID. Missing or conflicting identity is `unavailable`, never guessed.
-- **Refuse, don't undercount.** An unreadable transcript makes the receipt `partial` or `failed`;
-  a missing one `unavailable`. Cells are per model with five token categories, requests and cost
-  (provider-reported or catalogue-priced; unpriced tokens counted separately), bounded to 16
-  models with an "other models" cell that keeps totals exact.
+  acted on, the trigger whose event admitted it, the account — comes from controller records only.
+- **Declared accounts, in attempt order (the multi-account contract).** A runner that fails over
+  from an exhausted login resumes the conversation under the next one, which copies the transcript
+  into that login's home. The recipe declares every login it may use:
+
+  ```json
+  "usage": {
+    "runtime": "claude",
+    "accounts": [
+      {"account": "work",  "home": "/srv/agents/claude-work"},
+      {"account": "spare", "home": "/srv/agents/claude-spare"}
+    ]
+  }
+  ```
+
+  `runtime` is `claude` or `codex`; `home` is the absolute `CLAUDE_CONFIG_DIR`/`CODEX_HOME`;
+  `account` is the name spend is attributed to (≤ 256 bytes). 1–8 entries, distinct names, homes
+  that are distinct and do not nest. The legacy shape `{"runtime", "home", "account"?}` remains
+  valid and is one attempt named by `account` (or by `home` when unnamed); stored policies keep
+  working unchanged and re-encode without an `accounts` key. A recipe may carry both shapes so a
+  controller older than this contract still reads `home`/`account`; they must then equal the first
+  entry, or validation refuses `usage_accounts_conflict`. `--version` lists `usage-accounts`.
+- **Binding each attempt.** The authenticated `agent-notice` hook reports `{session_id,
+  transcript_path}`. A path inside a declared home binds that attempt (one binding per home,
+  recorded on the launch as `providerTranscripts: [{account, sessionID, path}]`, in report order;
+  `providerTranscript` stays the first). Repeating a binding is a no-op. A path outside every
+  declared home (`forbidden`) or a different session/path in an already bound home (`conflict`)
+  marks the launch `providerTranscriptChanged`, and its receipt is `partial`.
+- **Finding transcripts.** Every declared home is read. Claude: the bound path when there is one —
+  it must resolve, symlinks included, inside `<home>/projects/` and be named `<execution>.jsonl` —
+  otherwise `<home>/projects/*/<execution>.jsonl`, plus `subagents/` (at most 200). Codex: only the
+  bound rollout, whose first line (read through its own 1 MiB bound) must be `session_meta` with
+  the bound session ID. A home with no transcript and no binding was simply not used.
+- **Counted once, on the earliest account.** Records from all homes merge by response identity
+  through ThreadingUsage's `mergingUsageMaximums` (component-wise maxima, the Mac's one merge), with
+  attribution to the earliest declared account the identity appears in. A copied history therefore
+  adds nothing and stays on the first login; the responses made after the failover land on the
+  second.
+- **Receipt shape.** `account` is the first declared account. Each cell carries `account` beside
+  `model`, five token categories, `requests`, `costUSD`, `unpricedTokens` and `catalogCostUSD`
+  (the catalogue-estimated part of `costUSD`). `accounts` lists every declared account in attempt
+  order, including those that spent nothing:
+  `[{"account","tokens":{…},"budgetTokens","requests","costUSD","unpricedTokens"}]`.
+  `pricingVersion` names the catalogue. Cells are bounded to 15 plus one "other models" cell per
+  account, so per-account totals stay exact. Receipts written before this contract lack these
+  fields; their cells belong to the receipt's `account`.
+- **Keep what was read; name the gap.** Receipts read through ThreadingUsage's recovering reading:
+  an unreadable usage line or an unterminated final line (a writer stopped mid-record) keeps every
+  readable record and makes the receipt `partial` with a reason (`unreadable_usage_records`,
+  `transcript_unterminated`, `subagent_transcripts_incomplete`, `provider_transcript_identity`,
+  `provider_transcript_unreadable`; prefixed `account: ` when several accounts are declared). A
+  bound transcript that cannot be read at all is `failed`. Cells are priced by provider report
+  or the catalogue; unpriced tokens are counted separately.
+- **Zero is settled, not guessed.** A launch that never dispatched (an obsolete preparation, a
+  stop confirmed before spawn) settles `complete` with reason `never_spawned`. A spawned run with
+  no transcript and no binding in any declared home settles `complete` with
+  `no_provider_session`: Claude writes its transcript before its first request, and Codex's
+  session-start hook binds before its first turn — which is why the hook is required even for
+  mailbox-free workers. Claude homes that all lack a `projects` directory are a misconfiguration,
+  `unavailable` (`no_projects_directory`).
 - **Reads are O(days × cells).** Each receipt adds to `usage_daily` (day, worker, account, model)
-  in its transaction; `usage-summary FROM THROUGH` pages those cells, `usage-receipts WORKER`
-  pages receipts. Both go through `owner-rpc` for the Mac's Remote page and Rindabox.
+  under each cell's own account, in its transaction; `usage-summary FROM THROUGH` pages those
+  cells, `usage-receipts WORKER` pages receipts. Both go through `owner-rpc` for the Mac's Remote
+  page and Rindabox. Each daily cell is labelled from a `usageDailyLabel` record (no DDL; joined
+  on SQLite's own `json_array(day,worker,account,model)` key): `unpricedTokens`, `catalogCostUSD`,
+  `pricingVersion`, `costIsEstimate` (any catalogue estimate or unpriced tokens — the figure is not
+  an invoice) and `coverage` counts of the receipts behind it. Cells written before labelling have
+  these fields absent.
 - **Budgets act at admission, in budget tokens** (uncached input + cache writes + output; cached
   reads excluded because a long conversation rereads its context every turn). A worker's daily
   budget (`worker-budget-set`) stops the supervisor starting new executions for it; a mail
   grant's chain budget stops that chain's mail from waking its recipient, while still delivering
   it. Nothing running is ever stopped by a budget. Chain totals are those of executions on this
   host. A fraction-of-account-window ceiling needs usage readings this host does not take yet.
+- **Manual launches pass the same budget.** `launch`/`launch-prepare` judge the worker's budget on
+  the recipe they will run (no usage source, unsettled usage, or spend past the day's budget refuse
+  with `worker_capacity_<reason>`). `--override-budget` admits anyway and records
+  `launch.budget_overridden` with the refused reason. The paused flag and capacity holds are
+  supervisor policy and do not apply.
+- **Waiving.** `usage-waive EXECUTION REASON` (owner CLI and `owner-rpc`) releases one stopped
+  execution's unsettled-usage hold when no transcript can settle it: a `usageWaiver` record and a
+  `launch.usage_waived` event carrying the reason on the work's activity. It is idempotent, refuses
+  an execution still running or already settled (`conflict`), and leaves collection owed, so a
+  transcript that appears later is still counted.
+- **Capacity holds.** `capacity-hold-set ACCOUNT UNTIL REASON` (ISO 8601 `UNTIL`),
+  `capacity-hold-list [CURSOR]` and `capacity-hold-clear ACCOUNT` (all on `owner-rpc`) record an
+  owner signal that an account is scarce — for example a provider cooldown Rindabox observed.
+  Supervised admission defers a worker (`worker-capacity` reason `capacityHeld`, with `heldUntil`
+  the earliest release) only while **every** account its recipe declares has an unexpired hold; a
+  worker with no usage source is never held. Holds are owner input, never inferred from token
+  totals. `--version` lists `usage-waive` and `capacity-hold`.
 
 Validation: `ControllerUsageTests` (receipt idempotence and daily cells, a stop that owes nothing,
-the daily budget at admission, a chain past its budget delivering without waking) and
-`scripts/tests/test_controller_usage.py` (an agent under ptyd writes a Claude transcript; the
-resident supervisor writes a complete, priced, attributed receipt and then holds a worker past its
-budget).
+the daily budget at admission, a chain past its budget delivering without waking, `usage-waive`,
+manual launch budget refusal and override, capacity holds deferring admission, the usage source
+contract and its legacy compatibility, one binding per declared home, per-account daily cells and
+labels); `ControllerRuntimeTests/UsageCollectorTests` (failover across two declared homes with a
+copied transcript counted once per account, never-spawned and no-session zero settlement, the max
+merge of repeated responses, a truncated final line kept as partial, bound Claude path enforcement,
+a Codex `session_meta` line past 64 KB); and `scripts/tests/test_controller_usage.py` (an agent
+under ptyd writes a Claude transcript and the resident supervisor writes a complete, priced,
+attributed receipt and then holds a worker past its budget; a runner fails over between two
+declared homes through the real `agent-notice` hook; `owner-rpc` waives usage, sets and clears a
+capacity hold, and a manual launch is refused and then overridden).
 
 ## Host hardening and observability (schema v10)
 
@@ -637,14 +716,16 @@ Daily cells use the recorded stop day, including delayed collection. Codex trans
 comes from the provider's authenticated `agent-notice` hook (`session_id`, `transcript_path`),
 not directory/time inference. Install the hook even for mailbox-free workers. An unbound path,
 identity mismatch, unreadable child directory or capped child set is an explicit coverage gap.
-Claude's execution UUID remains its exact session lookup. An authenticated hook that reports
-a changed session/path or another account home marks coverage partial; the original transcript
-cannot settle a budget after account failover. Per-account split receipts across copied transcripts
-remain future work. Complete receipts are immutable.
+Claude's execution UUID remains its exact session lookup, and a bound Claude path must resolve
+inside the home and name the execution. An authenticated hook may bind one transcript in each
+home the recipe declares (account failover); a changed session/path within a home, or a path
+outside every declared home, marks coverage partial. Receipts split per declared account (see
+above). Complete receipts are immutable.
 
 A capped worker reserves the remaining daily capacity for one execution until accounting is
-complete. Unknown, partial and pending usage hold new admissions for that UTC day; unresolved
-processes retain their reservation across days. A budgeted recipe with no usage source is held.
+complete. Unknown, partial and pending usage hold new admissions for that UTC day unless the
+owner waives them; unresolved processes retain their reservation across days. A budgeted recipe
+with no usage source is held, for manual launches too.
 This is a conservative admission policy, not a hard upper bound on a running provider's spend:
 provider turn limits and process deadlines still bound individual runs. `worker-capacity` names
 the reason and stable host authority, leaving an explicit seam for later account/window policy.

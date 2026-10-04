@@ -480,6 +480,18 @@ reading keeps `UsageReadingLabel.maximumReadings`; refresh work uses the service
 queue. The phone indexes catalogue accounts once per continuation-menu build, making its usage
 join O(accounts + destinations), rather than searching the catalogue for every row.
 
+**Spend after a move or failover stays on the login that made it.** Moving a conversation to
+another account copies its transcript, so the copy repeats every earlier response. The shared
+merge (`UsageLedgerRecord.mergingUsageMaximums`) counts each response once and attributes it to
+its earliest observation — not to whichever copy a scan read last — so the old login keeps its
+history and the new one is charged only for what it ran. A controller host applies the same merge
+with a stronger order: a recipe declares its logins in attempt order, and a response copied by an
+account failover is charged to the first declared login it appears in
+([`autonomous-controller.md`](autonomous-controller.md#usage-receipts-and-budgets-schema-v9)). The
+host's **capacity holds** are an owner-supplied scarcity signal per account name (for example
+from a cooldown a deployment observed); they defer autonomous admission only while every declared
+login is held and are never inferred from token totals or these readings.
+
 This section owns live account discovery, credentials, endpoint pacing and the compact toolbar
 reading. The combined 90-day transcript ledger and durable 180-day limit/reset dashboard are
 documented in [`usage-dashboard.md`](usage-dashboard.md); they consume these normalized readings
