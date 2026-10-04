@@ -176,7 +176,7 @@ class RuntimeTests(unittest.TestCase):
         self.wait(lambda: self.call("launch-status", launch["executionID"])["presence"] == "stopped")
         self.assertEqual(self.call("memory-get", self.worker, "stale"), None)
 
-    def test_daemon_restart_does_not_turn_absence_into_a_retry(self):
+    def test_daemon_restart_records_the_loss_without_a_retry(self):
         launch = self.call("launch", self.worker, self.recipe())
         self.daemon.kill()
         self.daemon.wait(timeout=5)
@@ -186,9 +186,11 @@ class RuntimeTests(unittest.TestCase):
             result = self.call("launch-status", launch["executionID"], ok=False)
             return json.loads(result.stdout) if result.returncode == 0 else None
         status = self.wait(observation)
-        self.assertEqual(status["presence"], "absent")
-        self.assertEqual(status["launch"]["state"], "running")
-        self.assertEqual(self.call("work", self.work["id"])["state"], "running")
+        # The restarted daemon's loss report is definite stop evidence; it is never a retry.
+        self.assertEqual(status["presence"], "stopped")
+        self.assertEqual(status["launch"]["state"], "stopped")
+        self.assertEqual(status["launch"]["failure"]["reason"], "lost")
+        self.assertEqual(self.call("work", self.work["id"])["state"], "interrupted")
         self.assertIsNone(self.call("claim", self.worker))
         self.assertNotEqual(self.call("launch-dispatch", launch["executionID"], ok=False).returncode, 0)
 
