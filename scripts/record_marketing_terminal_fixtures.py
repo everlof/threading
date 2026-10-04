@@ -31,10 +31,31 @@ from typing import Any
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 FIXTURE_DIRECTORY = REPOSITORY / "Sources/ThreadingMobile/TerminalFixtures"
+# The Mac product-window masters replay their recordings from the Mac test target's fixtures,
+# not from the iPhone bundle: only `MarketingWindowRenderTests` reads them.
+MAC_FIXTURE_DIRECTORY = REPOSITORY / "Tests/Fixtures/MarketingTerminal"
 WORKSPACE = Path("/private/tmp/threading-marketing-tui")
 CLAUDE_SESSION_ID = "7ee72d66-0e50-4e5d-912b-96104c5919bd"
 FIXED_TIMESTAMP = "2026-08-30T12:00:00.000Z"
 GRID_COLUMNS = 62
+
+# Where each recording is replayed. The phone pins one narrow grid for both providers; the Mac
+# grid is the terminal pane of the 1440 × 900 product window, which `MarketingWindowRenderTests`
+# measures and names in its failure message when the window's layout moves it.
+TARGETS = {
+    "ios": {
+        "directory": FIXTURE_DIRECTORY,
+        "suffix": "",
+        "columns": GRID_COLUMNS,
+        "rows": {"claude": 49, "codex": 55},
+    },
+    "mac": {
+        "directory": MAC_FIXTURE_DIRECTORY,
+        "suffix": "-mac",
+        "columns": 79,
+        "rows": {"claude": 53, "codex": 53},
+    },
+}
 
 # The terminal each recording believes it is drawing into. Both TUIs pick their palette from the
 # background the terminal reports (OSC 11 and `COLORFGBG`), and Claude also takes its theme as a
@@ -61,13 +82,11 @@ TERMINAL_MODES = {
 PROVIDERS = {
     "claude": {
         "binary": "claude",
-        "rows": 49,
         "settled_marker": b"recapture",
         "version_prefix": "Claude Code ",
     },
     "codex": {
         "binary": "codex",
-        "rows": 55,
         "settled_marker": b"Evidence assertions passed",
         "version_prefix": "codex-cli ",
     },
@@ -643,7 +662,7 @@ def _recording_environment() -> dict[str, str]:
     }
 
 
-def record_claude(terminal_mode: str) -> bytes:
+def record_claude(terminal_mode: str, columns: int, rows: int) -> bytes:
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     CLAUDE_EDIT_PATH.write_text(CLAUDE_OLD_CONTENT)
     session = _write_claude_session()
@@ -669,8 +688,8 @@ def record_claude(terminal_mode: str) -> bytes:
                 "--permission-mode",
                 "acceptEdits",
             ],
-            columns=GRID_COLUMNS,
-            rows=PROVIDERS["claude"]["rows"],
+            columns=columns,
+            rows=rows,
             environment=environment,
             settled_marker=PROVIDERS["claude"]["settled_marker"],
             terminal_mode=terminal_mode,
@@ -680,7 +699,7 @@ def record_claude(terminal_mode: str) -> bytes:
         CLAUDE_EDIT_PATH.unlink(missing_ok=True)
 
 
-def record_codex(terminal_mode: str) -> bytes:
+def record_codex(terminal_mode: str, columns: int, rows: int) -> bytes:
     (WORKSPACE / "evidence").mkdir(parents=True, exist_ok=True)
     (WORKSPACE / "capture-notes.md").write_text(
         "# App Store capture\n\n"
@@ -743,8 +762,8 @@ def record_codex(terminal_mode: str) -> bytes:
                 'model_reasoning_effort="xhigh"',
                 CODEX_PROMPT,
             ],
-            columns=GRID_COLUMNS,
-            rows=PROVIDERS["codex"]["rows"],
+            columns=columns,
+            rows=rows,
             environment=environment,
             settled_marker=PROVIDERS["codex"]["settled_marker"],
             terminal_mode=terminal_mode,
@@ -765,12 +784,14 @@ def record_codex(terminal_mode: str) -> bytes:
         thread.join(timeout=2)
 
 
-def fixture(provider: str, payload: bytes, terminal_mode: str) -> dict[str, Any]:
+def fixture(
+    provider: str, payload: bytes, terminal_mode: str, columns: int, rows: int
+) -> dict[str, Any]:
     version = provider_version(provider)
     if provider == "claude":
         provenance = (
             f"Installed Claude Code {version} rendering of a synthetic saved session at "
-            f"{GRID_COLUMNS} × {PROVIDERS['claude']['rows']} in safe mode with its built-in "
+            f"{columns} × {rows} in safe mode with its built-in "
             f"{terminal_mode} ANSI theme. The temporary session is "
             "deleted immediately after recording. "
             "Screenshot capture only replays these bytes and cannot spend provider usage."
@@ -778,7 +799,7 @@ def fixture(provider: str, payload: bytes, terminal_mode: str) -> dict[str, Any]
     else:
         provenance = (
             f"Installed Codex {version} rendering a deterministic patch and response at "
-            f"{GRID_COLUMNS} × {PROVIDERS['codex']['rows']} into a terminal reporting a "
+            f"{columns} × {rows} into a terminal reporting a "
             f"{terminal_mode} background, from a localhost-only fixture provider in an "
             "ephemeral MCP-free profile and disposable workspace. Screenshot capture only "
             "replays these bytes and cannot spend provider usage."
@@ -789,8 +810,8 @@ def fixture(provider: str, payload: bytes, terminal_mode: str) -> dict[str, Any]
         "provider": provider,
         "providerVersion": version,
         "terminalMode": terminal_mode,
-        "columns": GRID_COLUMNS,
-        "rows": PROVIDERS[provider]["rows"],
+        "columns": columns,
+        "rows": rows,
         "provenance": provenance,
         "payloadBase64": base64.b64encode(payload).decode(),
     }
@@ -841,6 +862,23 @@ def parse_arguments() -> argparse.Namespace:
         default="all",
         help="Terminal background the recording is made for (default: all)",
     )
+    parser.add_argument(
+        "--target",
+        choices=list(TARGETS),
+        default="ios",
+        help="Where the recording is replayed, which sets its grid and destination "
+        "(default: ios, the iPhone bundle; mac writes the Mac product-window fixtures)",
+    )
+    parser.add_argument(
+        "--columns",
+        type=int,
+        help="Override the target's terminal width in columns",
+    )
+    parser.add_argument(
+        "--rows",
+        type=int,
+        help="Override the target's terminal height in rows, for every selected provider",
+    )
     return parser.parse_args()
 
 
@@ -852,19 +890,31 @@ def main() -> int:
         if arguments.terminal_mode == "all"
         else [arguments.terminal_mode]
     )
+    target = TARGETS[arguments.target]
+    columns = arguments.columns or target["columns"]
+    if not 20 <= columns <= 240:
+        raise SystemExit("--columns must be between 20 and 240")
+    if arguments.rows is not None and not 8 <= arguments.rows <= 120:
+        raise SystemExit("--rows must be between 8 and 120")
+    target["directory"].mkdir(parents=True, exist_ok=True)
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     for provider in selected:
+        rows = arguments.rows or target["rows"][provider]
         for terminal_mode in modes:
             payload = (
-                record_claude(terminal_mode)
+                record_claude(terminal_mode, columns, rows)
                 if provider == "claude"
-                else record_codex(terminal_mode)
+                else record_codex(terminal_mode, columns, rows)
             )
             validate(provider, payload)
-            suffix = TERMINAL_MODES[terminal_mode]["suffix"]
-            destination = FIXTURE_DIRECTORY / f"marketing-{provider}-tui{suffix}.json"
+            suffix = target["suffix"] + TERMINAL_MODES[terminal_mode]["suffix"]
+            destination = target["directory"] / f"marketing-{provider}-tui{suffix}.json"
             destination.write_text(
-                json.dumps(fixture(provider, payload, terminal_mode), indent=2, ensure_ascii=False)
+                json.dumps(
+                    fixture(provider, payload, terminal_mode, columns, rows),
+                    indent=2,
+                    ensure_ascii=False,
+                )
                 + "\n"
             )
             print(
