@@ -16,8 +16,9 @@ MODULE_BOUNDARIES = {
     "ThreadingController": (
         pathlib.Path("Packages/ThreadingController/Sources/ThreadingController"),
         # ThreadingUsage: one transcript parser for the Mac's Usage page and controller receipts
-        # (docs/feature-drafts/agent-usage-ledger.md); it is Foundation-only like this module.
-        {"Foundation", "CControllerSQLite", "ThreadingDomain", "ThreadingUsage"},
+        # (docs/feature-drafts/agent-usage-ledger.md). Glibc/Musl: BoundedCommand's Linux cleanup
+        # finds escaped descendants through /proc and signals them, which Foundation cannot express.
+        {"Foundation", "CControllerSQLite", "ThreadingDomain", "ThreadingUsage", "Glibc", "Musl"},
     ),
     "ThreadingUsage": (
         pathlib.Path("Packages/ThreadingUsage/Sources/ThreadingUsage"),
