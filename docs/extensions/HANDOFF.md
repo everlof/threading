@@ -915,6 +915,11 @@ library, but keeps the value-only safe boundary:
   ceiling the host clamps to, an opacity ceiling the host owns, and three more host signals
   (`workload.intensity`, `workload.working-count`, `time.day-fraction`). Sidebar Aurora is the
   example.
+- [x] Publish `display.backdrop@1` and `composer.backdrop@1` with the same contract, served by
+  one `ExtensionBackdropPlaneView`; add the per-appearance theme signals (`theme.dark`,
+  `theme.accent.*`, `theme.ground.*`), the moment pulses (`moment.turn-finished`,
+  `moment.needs-attention`), `ExtensionHostSignal.isReactive`, and an optional package
+  `texture` for a Metal surface (four-argument fragment ABI).
 - [x] Cover hook validation, ordering, generation revocation and Metal capability enforcement in
   tests.
 - [ ] Build Usage Rain with a compatible Swift.org WebAssembly toolchain, import it disabled,

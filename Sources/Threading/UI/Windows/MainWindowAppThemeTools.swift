@@ -450,7 +450,7 @@ extension AgentToolCoordinator {
     private func hasLegacyVariantPatch(
         roles: [String: String]?,
         material: AppThemeMaterialArguments?,
-        terminalColors: [String: String]?
+        terminalColors: TerminalColorsArguments?
     ) -> Bool {
         roles != nil || material != nil || terminalColors != nil
     }
@@ -463,7 +463,7 @@ extension AgentToolCoordinator {
         patch: AppThemeVariantArguments?,
         legacyRoles: [String: String]?,
         legacyMaterial: AppThemeMaterialArguments?,
-        legacyTerminalColors: [String: String]?
+        legacyTerminalColors: TerminalColorsArguments?
     ) throws -> AppTheme.Variant {
         let source = base.variant(kind)
             ?? base.variant(kind == .light ? .dark : .light)
@@ -479,7 +479,9 @@ extension AgentToolCoordinator {
             variantKind: kind
         )
         let baseTerminal = source?.terminalPalette ?? base.terminalPalette
-        let terminal = try appTerminalPalette(terminalPatch, base: baseTerminal)
+        let terminal = try TerminalPaletteToolParsing.palette(
+            terminalPatch, base: baseTerminal, field: "terminal_colors"
+        )
         let sidebar = try AppThemeToolParsing.sidebar(
             patch?.sidebar,
             base: source?.sidebar,
@@ -521,6 +523,11 @@ extension AgentToolCoordinator {
             remove: patch?.removeWords,
             base: source?.words
         )
+        let titleMorph = try AppThemeToolParsing.titleMorph(
+            patch?.titleMorph,
+            remove: patch?.removeTitleMorph,
+            base: source?.titleMorph
+        )
         return AppThemeEditing.makeVariant(
             named: name,
             from: base,
@@ -533,7 +540,8 @@ extension AgentToolCoordinator {
             transition: transition,
             sprites: sprites,
             moments: moments,
-            words: words
+            words: words,
+            titleMorph: titleMorph
         )
     }
 
@@ -1140,6 +1148,14 @@ extension AgentToolCoordinator {
             }
             material.badgeStyle = parsed
         }
+        if let rawMarks = cleaned(patch.identityMarks) {
+            guard let parsed = AppTheme.Material.IdentityMarks(rawValue: rawMarks) else {
+                throw AppThemeEditingError.invalid(
+                    "material.identity_marks must be \"natural\" or \"tinted\"."
+                )
+            }
+            material.identityMarks = parsed
+        }
 
         if patch.removeButtonStyle == true {
             material.buttonStyle = .system
@@ -1460,28 +1476,6 @@ extension AgentToolCoordinator {
         )
     }
 
-    private func appTerminalPalette(
-        _ values: [String: String]?,
-        base: TerminalTheme
-    ) throws -> TerminalTheme {
-        var palette = base.adoptingBoldForeground(from: values ?? [:])
-        for (name, hex) in values ?? [:] {
-            guard let key = ThemeColorKey.named(name) else {
-                throw AppThemeEditingError.invalid(
-                    "\"\(name)\" is not a terminal colour. Valid names: "
-                        + ThemeColorKey.allCases.map(\.wireName).joined(separator: ", ") + "."
-                )
-            }
-            guard let color = NSColor(hex: hex) else {
-                throw AppThemeEditingError.invalid(
-                    "\"\(hex)\" is not a colour. Use #RRGGBB or #RRGGBBAA."
-                )
-            }
-            palette[key] = color
-        }
-        return palette
-    }
-
     private func cleaned(_ value: String?) -> String? {
         guard let value else { return nil }
         let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1547,7 +1541,7 @@ extension AgentToolCoordinator {
             "resolved_roles": resolved,
             "material": appThemeMaterialDocument(material),
             "terminal_palette_id": terminal.id.rawValue,
-            "terminal_colors": terminalColorDocument(terminal)
+            "terminal_colors": TerminalPaletteToolParsing.document(terminal)
         ]
         if let sidebar = variant?.sidebar {
             document["sidebar"] = AppThemeToolParsing.document(sidebar)
@@ -1566,6 +1560,9 @@ extension AgentToolCoordinator {
         }
         if let words = variant?.words {
             document["words"] = AppThemeToolParsing.document(words)
+        }
+        if let titleMorph = variant?.titleMorph {
+            document["title_morph"] = AppThemeToolParsing.document(titleMorph)
         }
         return document
     }
@@ -1663,7 +1660,8 @@ extension AgentToolCoordinator {
             "checkbox_style": material.checkboxStyle.rawValue,
             "toggle_style": material.toggleStyle.rawValue,
             "field_style": material.fieldStyle.rawValue,
-            "badge_style": material.badgeStyle.rawValue
+            "badge_style": material.badgeStyle.rawValue,
+            "identity_marks": material.identityMarks.rawValue
         ]
         if let width = material.controlBorderWidth {
             document["control_border_width"] = Double(width)
@@ -1759,11 +1757,5 @@ extension AgentToolCoordinator {
             document["control_glow"] = glowDocument(glow)
         }
         return document
-    }
-
-    private func terminalColorDocument(_ theme: TerminalTheme) -> [String: String] {
-        Dictionary(uniqueKeysWithValues: ThemeColorKey.allCases.map {
-            ($0.wireName, theme[$0].hexString)
-        })
     }
 }

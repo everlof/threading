@@ -79,6 +79,14 @@ update tools use `sidebar.analyzer: "audio"`, `"workload"`, or `"default"` (clea
 The Wasm `MusicSpectrumExtension` example binds all eight bands beneath the sidebar, with
 zero fallback and no autonomous clock animation.
 
+## The person's reaction strength
+
+Settings ▸ Motion ▸ **Reaction strength** (0–200 %, `ThemeReactions`) scales every audio level
+and band where it enters decoration — the native spectrum's bars and each extension input bound
+to a reactive `audio.*` signal — before the extension's own mapping. `audio.available` is a fact
+and passes through. The scale never requests capture and never changes the reading the service
+publishes; at 0 % decoration simply answers silence. See [`themes.md`](themes.md) (2026-10-04).
+
 ## Scaling and verification
 
 Expected size is one or a few visible consumers and tens of audio processes; stress bounds

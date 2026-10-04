@@ -730,6 +730,15 @@ struct FrameViewState: Sendable {
 #endif
     let bidiHostPolicy: BidiHostPolicy
     let glyphFallbackProvider: (any TerminalGlyphFallbackProvider)?
+    /// The Core Graphics text glow, already normalized: nil means off. Read by
+    /// the frame tick to widen the dirty region by the halo's reach, and by the
+    /// draw to paint the halo underlay.
+    let textGlow: TerminalTextGlow?
+
+    /// Rows a halo can reach beyond the row that drew it; zero with no glow.
+    var textGlowReachRows: Int {
+        textGlow?.reachInRows(cellHeight: cellDimension.height) ?? 0
+    }
 
     var effectiveForegroundColor: FrameColor { appearance.effectiveForegroundColor }
     var effectiveBackgroundColor: FrameColor { appearance.effectiveBackgroundColor }
@@ -771,6 +780,11 @@ struct FrameViewState: Sendable {
 #endif
         bidiHostPolicy = view.bidiHostPolicy
         glyphFallbackProvider = view.glyphFallbackProvider
+#if os(macOS)
+        textGlow = view.textGlow
+#else
+        textGlow = nil
+#endif
     }
 }
 
@@ -3164,6 +3178,217 @@ extension TerminalView {
     }
 
     
+    /// Draws one row's lit content — box drawing, block elements, Powerline
+    /// glyphs and the glyph runs, each in its own colour — and, when
+    /// `decorations` is set, its underlines and strikethrough.
+    ///
+    /// The frame draws it once into the view. A text glow draws it a second
+    /// time, without decorations, into the bitmap it blurs.
+    func drawRowForeground(
+        _ preparedRow: PreparedCoreGraphicsRow,
+        lineOrigin: CGPoint,
+        renderMode: BufferLine.RenderLineMode,
+        yOffset: CGFloat,
+        defaultForeground: TTColor,
+        smoothFonts: Bool,
+        decorations: Bool,
+        in context: CGContext
+    ) {
+        let lineInfo = preparedRow.lineInfo
+        if !lineInfo.boxDrawings.isEmpty {
+            drawBoxDrawings(lineInfo.boxDrawings, lineOrigin: lineOrigin, in: context)
+        }
+
+        if !lineInfo.blockElements.isEmpty {
+            drawBlockElements(lineInfo.blockElements, lineOrigin: lineOrigin, in: context)
+        }
+
+        if !lineInfo.powerlineGlyphs.isEmpty {
+            drawPowerlineGlyphs(lineInfo.powerlineGlyphs,
+                                lineOrigin: lineOrigin,
+                                renderMode: renderMode,
+                                in: context)
+        }
+
+        context.setShouldAntialias(true)
+        context.setAllowsAntialiasing(true)
+        #if os(macOS)
+        context.setShouldSmoothFonts(smoothFonts)
+        context.setAllowsFontSmoothing(smoothFonts)
+        #endif
+
+        // Glyph drawing loop — reuses cached CTLines
+        for prepared in preparedRow.segments {
+            var processedGlyphs = 0
+            for preparedRun in prepared.runs {
+                let run = preparedRun.run
+                let runGlyphsCount = CTRunGetGlyphCount(run)
+                if runGlyphsCount == 0 {
+                    continue
+                }
+                let runFont = preparedRun.font ?? fontSet.normal
+
+                let runGlyphs = [CGGlyph](unsafeUninitializedCapacity: runGlyphsCount) { (bufferPointer, count) in
+                    CTRunGetGlyphs(run, CFRange(), bufferPointer.baseAddress!)
+                    count = runGlyphsCount
+                }
+
+                var coreTextPositions = [CGPoint](repeating: .zero, count: runGlyphsCount)
+                CTRunGetPositions(run, CFRange(), &coreTextPositions)
+
+                var positions = [CGPoint](repeating: .zero, count: runGlyphsCount)
+                if prepared.segment.utf16IsCellIdentity {
+                    // One UTF-16 unit per cell: glyph index arithmetic
+                    // yields each glyph's column directly.
+                    let startColumn = prepared.segment.column + (processedGlyphs * prepared.segment.columnWidth)
+                    for i in 0..<runGlyphsCount {
+                        let glyphColumn = startColumn + (i * prepared.segment.columnWidth)
+                        positions[i] = CGPoint(
+                            x: lineOrigin.x + CGFloat(glyphColumn) * cellDimension.width,
+                            y: lineOrigin.y + yOffset + coreTextPositions[i].y)
+                    }
+                } else {
+                    var runIndices = [CFIndex](repeating: 0, count: runGlyphsCount)
+                    CTRunGetStringIndices(run, CFRange(), &runIndices)
+
+                    // Position each glyph at its source cell's column; glyphs
+                    // sharing a cell (base + combining marks) keep their
+                    // CoreText offsets relative to the cluster's first glyph,
+                    // so marks overlay the base instead of shifting columns.
+                    // Same-cell glyphs are adjacent in glyph order, so a pair
+                    // of locals replaces a per-run anchor dictionary.
+                    var anchorOrdinal = -1
+                    var anchorX: CGFloat = 0
+                    for i in 0..<runGlyphsCount {
+                        let ctPosition = coreTextPositions[i]
+                        let ordinal = prepared.segment.cellOrdinal(forUTF16: runIndices[i])
+                        let intraCluster: CGFloat
+                        if ordinal == anchorOrdinal {
+                            intraCluster = ctPosition.x - anchorX
+                        } else {
+                            anchorOrdinal = ordinal
+                            anchorX = ctPosition.x
+                            intraCluster = 0
+                        }
+                        let glyphColumn = prepared.segment.column + (ordinal * prepared.segment.columnWidth)
+                        positions[i] = CGPoint(
+                            x: lineOrigin.x + CGFloat(glyphColumn) * cellDimension.width + intraCluster,
+                            y: lineOrigin.y + yOffset + ctPosition.y)
+                    }
+                }
+                processedGlyphs += runGlyphsCount
+
+                context.setFillColor(
+                    coreGraphicsRenderCache.cgColor(
+                        for: preparedRun.foregroundColor ?? defaultForeground))
+
+                // Center full-width (CJK) and substituted glyphs within their
+                // multi-cell slot instead of pinning them to the cell's left
+                // edge. `positions` stays grid-aligned for the decorations
+                // below; only `glyphPositions` is shifted/scaled.
+                let ctRunFont = runFont as CTFont
+                var glyphPositions = positions
+                var scaledFits: [GlyphSlotFit]? = nil
+                let glyphPolicy = preparedRun.glyphPolicy
+                if glyphPolicy != nil || prepared.segment.columnWidth >= 2 {
+                    var computed = [GlyphSlotFit](repeating: .identity, count: runGlyphsCount)
+                    var anyScaled = false
+                    for i in 0..<runGlyphsCount {
+                        let fit: GlyphSlotFit
+                        if let glyphPolicy {
+                            fit = glyphSlotFit(font: ctRunFont, glyph: runGlyphs[i],
+                                               columnWidth: prepared.segment.columnWidth,
+                                               policy: glyphPolicy)
+                        } else {
+                            fit = glyphSlotFit(font: ctRunFont, glyph: runGlyphs[i], columnWidth: prepared.segment.columnWidth)
+                        }
+                        computed[i] = fit
+                        glyphPositions[i].x += fit.dx
+                        glyphPositions[i].y += fit.dy
+                        if fit.scaleX != 1 || fit.scaleY != 1 { anyScaled = true }
+                    }
+                    if anyScaled { scaledFits = computed }
+                }
+
+                if let scaledFits {
+                    // Rare path: at least one glyph is scaled and is drawn
+                    // individually — uniform scales via a resized font,
+                    // per-axis (stretch policy) scales via the CTM.
+                    for i in 0..<runGlyphsCount {
+                        let fit = scaledFits[i]
+                        var g = runGlyphs[i]
+                        var p = glyphPositions[i]
+                        if fit.isUniform {
+                            let s = fit.scale
+                            let drawFont: CTFont = s == 1
+                                ? ctRunFont
+                                : CTFontCreateCopyWithAttributes(ctRunFont, CTFontGetSize(ctRunFont) * s, nil, nil)
+                            CTFontDrawGlyphs(drawFont, &g, &p, 1, context)
+                        } else {
+                            context.saveGState()
+                            context.translateBy(x: p.x, y: p.y)
+                            context.scaleBy(x: fit.scaleX, y: fit.scaleY)
+                            var origin = CGPoint.zero
+                            CTFontDrawGlyphs(ctRunFont, &g, &origin, 1, context)
+                            context.restoreGState()
+                        }
+                    }
+                } else {
+                    CTFontDrawGlyphs(runFont, runGlyphs, &glyphPositions, glyphPositions.count, context)
+                }
+
+                // Draw other attributes (decorations stay grid-aligned).
+                // The dictionary is only bridged for the rare decorated
+                // runs; undecorated runs skip the call entirely.
+                if decorations && preparedRun.hasDecorations {
+                    let runAttributes = preparedRun.attributes as? [NSAttributedString.Key: Any] ?? [:]
+                    drawRunAttributes(runAttributes, glyphPositions: positions, in: context)
+                }
+            }
+        }
+    }
+
+    /// Applies a double-width or double-height row's transform, inside its
+    /// own graphics state. A single-width row needs nothing.
+    func beginRenderMode(_ renderMode: BufferLine.RenderLineMode,
+                         lineOrigin: CGPoint,
+                         width: CGFloat,
+                         in context: CGContext) {
+        switch renderMode {
+        case .single:
+            break
+        case .doubledDown:
+            context.saveGState()
+            let pivot = lineOrigin.y
+            let lineRect = CGRect (origin: CGPoint (x: 0, y: lineOrigin.y), size: CGSize (width: width, height: cellDimension.height))
+            context.clip(to: [lineRect])
+            context.translateBy(x: 0, y: pivot)
+            context.scaleBy (x: 2, y: 2)
+            context.translateBy(x: 0, y: -pivot)
+        case .doubledTop:
+            context.saveGState()
+            let pivot = lineOrigin.y + cellDimension.height
+            let lineRect = CGRect (origin: CGPoint (x: 0, y: lineOrigin.y), size: CGSize (width: width, height: cellDimension.height))
+            context.clip(to: [lineRect])
+            context.translateBy(x: 0, y: pivot)
+            context.scaleBy (x: 2, y: 2)
+            context.translateBy(x: 0, y: -pivot)
+        case .doubleWidth:
+            context.saveGState()
+            context.scaleBy (x: 2, y: 1)
+        }
+    }
+
+    /// Undoes `beginRenderMode`.
+    func endRenderMode(_ renderMode: BufferLine.RenderLineMode, in context: CGContext) {
+        switch renderMode {
+        case .single:
+            break
+        case .doubledDown, .doubledTop, .doubleWidth:
+            context.restoreGState()
+        }
+    }
+
     // TODO: this should not render any lines outside the dirtyRect
     func drawTerminalContents (dirtyRect: TTRect, context: CGContext, bufferOffset: Int)
     {
@@ -3201,6 +3426,11 @@ extension TerminalView {
         let renderBufferOffset = bufferOffset
         #endif
         let frameCellHeight = cellDimension.height
+        #if os(macOS)
+        let smoothsFonts = fontSmoothing
+        #else
+        let smoothsFonts = true
+        #endif
 
         func calcLineOffset (forRow: Int) -> CGFloat {
             frameCellHeight * CGFloat (forRow-renderBufferOffset+1)
@@ -3338,6 +3568,24 @@ extension TerminalView {
         // scroll region, line insert/delete) otherwise keeps stale glyphs/backgrounds.
         // Clear to transparent — not fill — so a translucent background is preserved.
         context.clear(dirtyRect)
+
+        // A text glow is painted first, beneath every row. The frame tick has
+        // already widened the dirty region by the glow's reach, so the old
+        // halo is gone with the clear above; the underlay redraws the halos of
+        // every row within reach, including the ones just outside the region.
+        // With no glow nothing here runs and the rows below are drawn exactly
+        // as they always were.
+        if let glow = viewState.textGlow, firstRow <= lastRow {
+            drawTextGlowUnderlay(
+                glow,
+                dirtyRect: dirtyRect,
+                rows: firstRow...lastRow,
+                snapshot: snapshot,
+                renderContext: renderContext,
+                yOffset: yOffset,
+                bufferOffset: renderBufferOffset,
+                in: context)
+        }
         #endif
 
         for row in firstRow...lastRow {
@@ -3351,41 +3599,7 @@ extension TerminalView {
             let lineOffset = calcLineOffset(forRow: row)
             let lineOrigin = CGPoint(x: 0, y: frame.height - lineOffset)
 
-            switch renderMode {
-            case .single:
-                break
-            case .doubledDown:
-                context.saveGState()
-                let pivot = lineOrigin.y
-                let lineRect = CGRect (origin: CGPoint (x: 0, y: lineOrigin.y), size: CGSize (width: dirtyRect.width, height: cellDimension.height))
-                context.clip(to: [lineRect])
-                // Debug aid
-                //  context.setFillColor(CGColor(red: 0, green: Double (row)/25.0, blue: 0, alpha: 1))
-                // context.fill([lineRect])
-
-                context.translateBy(x: 0, y: pivot)
-                context.scaleBy (x: 2, y: 2)
-                context.translateBy(x: 0, y: -pivot)
-
-            case .doubledTop:
-                context.saveGState()
-                let pivot = lineOrigin.y + cellDimension.height
-                let lineRect = CGRect (origin: CGPoint (x: 0, y: lineOrigin.y), size: CGSize (width: dirtyRect.width, height: cellDimension.height))
-
-                context.clip(to: [lineRect])
-                
-                // Debug Aid
-                //context.setFillColor(CGColor(red: Double (row)/25.0, green: 0, blue: 0, alpha: 1))
-                //context.fill([lineRect])
-
-                context.translateBy(x: 0, y: pivot)
-                context.scaleBy (x: 2, y: 2)
-                context.translateBy(x: 0, y: -pivot)
-                
-            case .doubleWidth:
-                context.saveGState()
-                context.scaleBy (x: 2, y: 1)
-            }
+            beginRenderMode(renderMode, lineOrigin: lineOrigin, width: dirtyRect.width, in: context)
             #if false
             // This optimization is useful, but only if we can get proper exposed regions
             // and while it works most of the time with the BigSur change, there is still
@@ -3508,157 +3722,15 @@ extension TerminalView {
                     layer: .belowText)
             }
 
-            if !lineInfo.boxDrawings.isEmpty {
-                drawBoxDrawings(lineInfo.boxDrawings, lineOrigin: lineOrigin, in: context)
-            }
-
-            if !lineInfo.blockElements.isEmpty {
-                drawBlockElements(lineInfo.blockElements, lineOrigin: lineOrigin, in: context)
-            }
-
-            if !lineInfo.powerlineGlyphs.isEmpty {
-                drawPowerlineGlyphs(lineInfo.powerlineGlyphs,
-                                    lineOrigin: lineOrigin,
-                                    renderMode: renderMode,
-                                    in: context)
-            }
-
-            context.setShouldAntialias(true)
-            context.setAllowsAntialiasing(true)
-            #if os(macOS)
-            context.setShouldSmoothFonts(fontSmoothing)
-            context.setAllowsFontSmoothing(fontSmoothing)
-            #endif
-
-            // Glyph drawing loop — reuses cached CTLines
-            for prepared in preparedSegments {
-                var processedGlyphs = 0
-                for preparedRun in prepared.runs {
-                    let run = preparedRun.run
-                    let runGlyphsCount = CTRunGetGlyphCount(run)
-                    if runGlyphsCount == 0 {
-                        continue
-                    }
-                    let runFont = preparedRun.font ?? fontSet.normal
-
-                    let runGlyphs = [CGGlyph](unsafeUninitializedCapacity: runGlyphsCount) { (bufferPointer, count) in
-                        CTRunGetGlyphs(run, CFRange(), bufferPointer.baseAddress!)
-                        count = runGlyphsCount
-                    }
-
-                    var coreTextPositions = [CGPoint](repeating: .zero, count: runGlyphsCount)
-                    CTRunGetPositions(run, CFRange(), &coreTextPositions)
-
-                    var positions = [CGPoint](repeating: .zero, count: runGlyphsCount)
-                    if prepared.segment.utf16IsCellIdentity {
-                        // One UTF-16 unit per cell: glyph index arithmetic
-                        // yields each glyph's column directly.
-                        let startColumn = prepared.segment.column + (processedGlyphs * prepared.segment.columnWidth)
-                        for i in 0..<runGlyphsCount {
-                            let glyphColumn = startColumn + (i * prepared.segment.columnWidth)
-                            positions[i] = CGPoint(
-                                x: lineOrigin.x + CGFloat(glyphColumn) * cellDimension.width,
-                                y: lineOrigin.y + yOffset + coreTextPositions[i].y)
-                        }
-                    } else {
-                        var runIndices = [CFIndex](repeating: 0, count: runGlyphsCount)
-                        CTRunGetStringIndices(run, CFRange(), &runIndices)
-
-                        // Position each glyph at its source cell's column; glyphs
-                        // sharing a cell (base + combining marks) keep their
-                        // CoreText offsets relative to the cluster's first glyph,
-                        // so marks overlay the base instead of shifting columns.
-                        // Same-cell glyphs are adjacent in glyph order, so a pair
-                        // of locals replaces a per-run anchor dictionary.
-                        var anchorOrdinal = -1
-                        var anchorX: CGFloat = 0
-                        for i in 0..<runGlyphsCount {
-                            let ctPosition = coreTextPositions[i]
-                            let ordinal = prepared.segment.cellOrdinal(forUTF16: runIndices[i])
-                            let intraCluster: CGFloat
-                            if ordinal == anchorOrdinal {
-                                intraCluster = ctPosition.x - anchorX
-                            } else {
-                                anchorOrdinal = ordinal
-                                anchorX = ctPosition.x
-                                intraCluster = 0
-                            }
-                            let glyphColumn = prepared.segment.column + (ordinal * prepared.segment.columnWidth)
-                            positions[i] = CGPoint(
-                                x: lineOrigin.x + CGFloat(glyphColumn) * cellDimension.width + intraCluster,
-                                y: lineOrigin.y + yOffset + ctPosition.y)
-                        }
-                    }
-                    processedGlyphs += runGlyphsCount
-
-                    context.setFillColor(
-                        coreGraphicsRenderCache.cgColor(
-                            for: preparedRun.foregroundColor ?? renderContext.effectiveForegroundColor))
-
-                    // Center full-width (CJK) and substituted glyphs within their
-                    // multi-cell slot instead of pinning them to the cell's left
-                    // edge. `positions` stays grid-aligned for the decorations
-                    // below; only `glyphPositions` is shifted/scaled.
-                    let ctRunFont = runFont as CTFont
-                    var glyphPositions = positions
-                    var scaledFits: [GlyphSlotFit]? = nil
-                    let glyphPolicy = preparedRun.glyphPolicy
-                    if glyphPolicy != nil || prepared.segment.columnWidth >= 2 {
-                        var computed = [GlyphSlotFit](repeating: .identity, count: runGlyphsCount)
-                        var anyScaled = false
-                        for i in 0..<runGlyphsCount {
-                            let fit: GlyphSlotFit
-                            if let glyphPolicy {
-                                fit = glyphSlotFit(font: ctRunFont, glyph: runGlyphs[i],
-                                                   columnWidth: prepared.segment.columnWidth,
-                                                   policy: glyphPolicy)
-                            } else {
-                                fit = glyphSlotFit(font: ctRunFont, glyph: runGlyphs[i], columnWidth: prepared.segment.columnWidth)
-                            }
-                            computed[i] = fit
-                            glyphPositions[i].x += fit.dx
-                            glyphPositions[i].y += fit.dy
-                            if fit.scaleX != 1 || fit.scaleY != 1 { anyScaled = true }
-                        }
-                        if anyScaled { scaledFits = computed }
-                    }
-
-                    if let scaledFits {
-                        // Rare path: at least one glyph is scaled and is drawn
-                        // individually — uniform scales via a resized font,
-                        // per-axis (stretch policy) scales via the CTM.
-                        for i in 0..<runGlyphsCount {
-                            let fit = scaledFits[i]
-                            var g = runGlyphs[i]
-                            var p = glyphPositions[i]
-                            if fit.isUniform {
-                                let s = fit.scale
-                                let drawFont: CTFont = s == 1
-                                    ? ctRunFont
-                                    : CTFontCreateCopyWithAttributes(ctRunFont, CTFontGetSize(ctRunFont) * s, nil, nil)
-                                CTFontDrawGlyphs(drawFont, &g, &p, 1, context)
-                            } else {
-                                context.saveGState()
-                                context.translateBy(x: p.x, y: p.y)
-                                context.scaleBy(x: fit.scaleX, y: fit.scaleY)
-                                var origin = CGPoint.zero
-                                CTFontDrawGlyphs(ctRunFont, &g, &origin, 1, context)
-                                context.restoreGState()
-                            }
-                        }
-                    } else {
-                        CTFontDrawGlyphs(runFont, runGlyphs, &glyphPositions, glyphPositions.count, context)
-                    }
-
-                    // Draw other attributes (decorations stay grid-aligned).
-                    // The dictionary is only bridged for the rare decorated
-                    // runs; undecorated runs skip the call entirely.
-                    if preparedRun.hasDecorations {
-                        let runAttributes = preparedRun.attributes as? [NSAttributedString.Key: Any] ?? [:]
-                        drawRunAttributes(runAttributes, glyphPositions: positions, in: context)
-                    }
-                }
-            }
+            drawRowForeground(
+                preparedRow,
+                lineOrigin: lineOrigin,
+                renderMode: renderMode,
+                yOffset: yOffset,
+                defaultForeground: renderContext.effectiveForegroundColor,
+                smoothFonts: smoothsFonts,
+                decorations: true,
+                in: context)
 
             if !lineInfo.kittyPlaceholders.isEmpty {
                 for placeholder in lineInfo.kittyPlaceholders {
@@ -3721,16 +3793,7 @@ extension TerminalView {
                     image.image.draw (in: rect)
                 }
             }
-            switch renderMode {
-            case .single:
-                break
-            case .doubledDown:
-                context.restoreGState()
-            case .doubledTop:
-                context.restoreGState()
-            case .doubleWidth:
-                context.restoreGState()
-            }
+            endRenderMode(renderMode, in: context)
         }
         
 #if os(macOS)

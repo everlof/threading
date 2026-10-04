@@ -148,9 +148,10 @@ extension AgentToolCoordinator {
             )
         }
 
-        guard let colors = arguments.colors, !colors.isEmpty else {
-            return .failure("Provide at least one colour in `colors`.")
+        guard let patch = arguments.colors, !patch.isEmpty else {
+            return .failure("Provide at least one colour, or a glow, in `colors`.")
         }
+        let colors = patch.colors
 
         // The base is what unspecified colours keep, so it defaults to what the user is
         // already looking at — which is what makes "warmer background" a one-colour call.
@@ -184,6 +185,11 @@ extension AgentToolCoordinator {
                 return .failure("\"\(value)\" is not a hex colour. Use the form \"#1E1E2E\".")
             }
             theme[key] = color
+        }
+        do {
+            theme = try TerminalPaletteToolParsing.glow(patch, applyingTo: theme, field: "colors")
+        } catch {
+            return .failure(error.localizedDescription)
         }
 
         guard ThemeContrast.isLegible(

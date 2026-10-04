@@ -174,10 +174,14 @@ public struct AppTheme: Codable, Equatable {
         /// means the app's own.
         public let words: ThemeWords?
 
+        /// How names change on screen in this variant — a decode from katakana, a flip of a
+        /// departures board. Absent means the app's own morph.
+        public let titleMorph: ThemeTitleMorph?
+
         private enum CodingKeys: String, CodingKey {
             case roles, terminalPalette
             case material, sidebar, chrome, transition
-            case sprites, moments, words
+            case sprites, moments, words, titleMorph
         }
 
         public init(
@@ -189,7 +193,8 @@ public struct AppTheme: Codable, Equatable {
             transition: ThemeTransition? = nil,
             sprites: [ThemeSprite] = [],
             moments: ThemeMoments? = nil,
-            words: ThemeWords? = nil
+            words: ThemeWords? = nil,
+            titleMorph: ThemeTitleMorph? = nil
         ) {
             self.roles = roles
             self.terminalPalette = terminalPalette
@@ -200,6 +205,7 @@ public struct AppTheme: Codable, Equatable {
             self.sprites = sprites
             self.moments = moments
             self.words = words
+            self.titleMorph = titleMorph
         }
 
         public init(from decoder: Decoder) throws {
@@ -222,6 +228,8 @@ public struct AppTheme: Codable, Equatable {
             moments = try container.decodeIfPresent(ThemeMoments.self, forKey: .moments)
                 .flatMap { $0.isEmpty ? nil : $0 }
             words = try container.decodeIfPresent(ThemeWords.self, forKey: .words)
+            // A morph this build cannot draw is dropped, not the theme around it.
+            titleMorph = try? container.decodeIfPresent(ThemeTitleMorph.self, forKey: .titleMorph)
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -238,6 +246,7 @@ public struct AppTheme: Codable, Equatable {
             if !sprites.isEmpty { try container.encode(sprites, forKey: .sprites) }
             try container.encodeIfPresent(moments, forKey: .moments)
             try container.encodeIfPresent(words, forKey: .words)
+            try container.encodeIfPresent(titleMorph, forKey: .titleMorph)
         }
 
         // MARK: - Rebuilding
@@ -266,7 +275,8 @@ public struct AppTheme: Codable, Equatable {
                 transition: transition,
                 sprites: sprites,
                 moments: moments,
-                words: words
+                words: words,
+                titleMorph: titleMorph
             )
         }
 
@@ -283,7 +293,8 @@ public struct AppTheme: Codable, Equatable {
                 transition: transition,
                 sprites: sprites,
                 moments: moments,
-                words: words
+                words: words,
+                titleMorph: titleMorph
             )
         }
 
@@ -297,7 +308,8 @@ public struct AppTheme: Codable, Equatable {
                 transition: transition,
                 sprites: sprites,
                 moments: moments,
-                words: words
+                words: words,
+                titleMorph: titleMorph
             )
         }
 
@@ -317,7 +329,23 @@ public struct AppTheme: Codable, Equatable {
                 transition: transition,
                 sprites: sprites,
                 moments: moments,
-                words: words
+                words: words,
+                titleMorph: titleMorph
+            )
+        }
+
+        public func replacingTitleMorph(_ titleMorph: ThemeTitleMorph?) -> Variant {
+            Variant(
+                roles: roles,
+                terminalPalette: terminalPalette,
+                material: material,
+                sidebar: sidebar,
+                chrome: chrome,
+                transition: transition,
+                sprites: sprites,
+                moments: moments,
+                words: words,
+                titleMorph: titleMorph
             )
         }
 
@@ -331,7 +359,8 @@ public struct AppTheme: Codable, Equatable {
                 transition: transition,
                 sprites: sprites,
                 moments: moments,
-                words: words
+                words: words,
+                titleMorph: titleMorph
             )
         }
     }
@@ -549,6 +578,11 @@ public struct AppTheme: Codable, Equatable {
         /// gives a theme with a shop's voice its price stickers.
         public var badgeStyle: BadgeStyle = .plain
 
+        /// How identity marks are inked: a project's generated tile, an agent's brand mark and an
+        /// account's initial chip. Natural keeps each one's own colour; tinted draws them in the
+        /// theme's accent, so a one-colour world is not broken by a purple tile or an orange mark.
+        public var identityMarks: IdentityMarks = .natural
+
         public enum Typeface: String, Codable, CaseIterable {
             /// SF Sans — the platform default, and the System theme's answer.
             case standard = "default"
@@ -682,6 +716,16 @@ public struct AppTheme: Codable, Equatable {
             /// at rest, so the field announces itself before it is focused. Focus adds the inner
             /// ring every field draws, which is what still tells the two states apart.
             case outlined
+        }
+
+        public enum IdentityMarks: String, Codable, CaseIterable {
+            /// Each mark in its own colour: a hashed hue per project and account, the agent's
+            /// brand colour.
+            case natural
+            /// Every generated mark in the theme's accent — a tile outlined and lettered in it,
+            /// an agent's mark as an accent silhouette. A picture the person chose (a project
+            /// icon, an account photo or colour) keeps its own pixels.
+            case tinted
         }
 
         public enum BadgeStyle: String, Codable, CaseIterable {
@@ -1170,7 +1214,8 @@ public struct AppTheme: Codable, Equatable {
             checkboxStyle: CheckboxStyle = .automatic,
             toggleStyle: ToggleStyle = .automatic,
             fieldStyle: FieldStyle = .well,
-            badgeStyle: BadgeStyle = .plain
+            badgeStyle: BadgeStyle = .plain,
+            identityMarks: IdentityMarks = .natural
         ) {
             self.panelRadius = panelRadius
             self.controlRadius = controlRadius
@@ -1200,6 +1245,7 @@ public struct AppTheme: Codable, Equatable {
             self.toggleStyle = toggleStyle
             self.fieldStyle = fieldStyle
             self.badgeStyle = badgeStyle
+            self.identityMarks = identityMarks
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -1210,7 +1256,7 @@ public struct AppTheme: Codable, Equatable {
             case fontFallbacks
             case scrollerPlacement, scrollerTrackStyle, scrollerAppearance, menuAppearance
             case progressStyle, chartStyle, choiceStyle, checkboxStyle, toggleStyle
-            case fieldStyle, badgeStyle
+            case fieldStyle, badgeStyle, identityMarks
         }
 
         /// Every field is optional on the wire: a document written before a field existed
@@ -1293,6 +1339,10 @@ public struct AppTheme: Codable, Equatable {
                 BadgeStyle.self,
                 forKey: .badgeStyle
             ) ?? .plain
+            identityMarks = try container.decodeIfPresent(
+                IdentityMarks.self,
+                forKey: .identityMarks
+            ) ?? .natural
         }
     }
 

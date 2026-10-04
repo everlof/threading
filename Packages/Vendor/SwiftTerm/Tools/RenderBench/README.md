@@ -17,7 +17,10 @@ Run one of the original synthetic scenarios:
 ```
 
 Add `--metal` to use the Metal renderer. Without it, RenderBench uses Core
-Graphics.
+Graphics. Add `--glow RADIUS,OPACITY` (for example `--glow 3,0.4`) to draw with
+`TerminalView.textGlow`, and set `SWIFTTERM_PROFILE_STATS=1` to end the run
+with a `FRAMEDRAW` line: the Core Graphics `Frame.Draw` count, p50, p99, max and
+total.
 
 ## Shared vtebench workloads
 

@@ -91,7 +91,8 @@ final class SidebarExtensionBackdropTests: HostedStoreTestCase {
             base: Self.picture(.extensionResource("Resources/dunes.png")),
             overlay: .proceed
         ))
-        let plane = SidebarExtensionBackdropView(
+        let plane = ExtensionBackdropPlaneView(
+            placement: .sidebar,
             lookup: registry.customization(for:),
             imageResolver: { [swatch] _, _ in swatch }
         )
@@ -100,6 +101,11 @@ final class SidebarExtensionBackdropTests: HostedStoreTestCase {
         XCTAssertEqual(plane.alphaValue, ExtensionBackdropLimits.maximumOpacity)
         XCTAssertFalse(plane.isAccessibilityElement())
         XCTAssertNil(plane.hitTest(NSPoint(x: 10, y: 10)))
+        XCTAssertEqual(
+            plane.accessibilityIdentifier(),
+            "sidebar.extension-backdrop",
+            "generalizing the plane kept the sidebar's identifier"
+        )
 
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 600))
         host.addSubview(plane)
@@ -128,7 +134,8 @@ final class SidebarExtensionBackdropTests: HostedStoreTestCase {
             base: Self.picture(.systemSymbol("cloud.fill")),
             overlay: .proceed
         ))
-        let plane = SidebarExtensionBackdropView(
+        let plane = ExtensionBackdropPlaneView(
+            placement: .sidebar,
             lookup: registry.customization(for:),
             imageResolver: { [swatch] _, _ in swatch }
         )
@@ -145,7 +152,8 @@ final class SidebarExtensionBackdropTests: HostedStoreTestCase {
             base: Self.picture(.extensionResource("Resources/missing.png")),
             overlay: .proceed
         ))
-        let plane = SidebarExtensionBackdropView(
+        let plane = ExtensionBackdropPlaneView(
+            placement: .sidebar,
             lookup: registry.customization(for:),
             imageResolver: { _, _ in nil }
         )
@@ -303,7 +311,7 @@ final class SidebarExtensionBackdropTests: HostedStoreTestCase {
             ),
             source: try rainSource(),
             maximumFramesPerSecond: cap,
-            signalProvider: { _ in nil }
+            signalProvider: { _, _ in nil }
         )
         XCTAssertEqual(surface.preferredFramesPerSecond, cap)
         XCTAssertLessThan(cap, ExtensionMetalSurface.maximumFramesPerSecond)

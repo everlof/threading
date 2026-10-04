@@ -87,25 +87,49 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
         }
     }
 
+    /// The theme's own voice in the places a theme may speak — the same three slots the Mac
+    /// honours (`ThemeWords`): working words, the empty new-session composer's invitation and
+    /// the name an unnamed session wears. Shown as written, never localized. Optional on the
+    /// wire in both directions: a client built before it existed ignores it, a Mac that predates
+    /// it sends none, and an absent slot means the client's own copy.
+    public struct Words: Codable, Equatable, Sendable {
+        public let working: [String]?
+        public let composerPlaceholder: String?
+        public let untitledSession: String?
+
+        public init(
+            working: [String]? = nil,
+            composerPlaceholder: String? = nil,
+            untitledSession: String? = nil
+        ) {
+            self.working = working
+            self.composerPlaceholder = composerPlaceholder
+            self.untitledSession = untitledSession
+        }
+    }
+
     public let id: String
     public let name: String
     /// Any adaptive Mac theme is resolved before sending.
     public let mode: RemoteThemeMode
     public let colors: [String: String]
     public let material: Material
+    public let words: Words?
 
     public init(
         id: String,
         name: String,
         mode: RemoteThemeMode,
         colors: [String: String],
-        material: Material
+        material: Material,
+        words: Words? = nil
     ) {
         self.id = id
         self.name = name
         self.mode = mode
         self.colors = colors
         self.material = material
+        self.words = words
     }
 }
 

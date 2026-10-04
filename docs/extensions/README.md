@@ -135,6 +135,10 @@ The first vertical slice exists:
   positions; Threading still owns the renderer and input lifecycle. `sidebar.backdrop@1` is the
   same hook the other way up: a fill image or a surface *beneath* the sidebar's rows, with the
   host keeping an opacity ceiling, the cadence, the pointer and the layering.
+  `display.backdrop@1` and `composer.backdrop@1` are the same contract beneath the display
+  panel's tabs and content and beneath the new-session composer. A surface may also name one
+  package picture as its `texture`, and bind the theme's darkness, accent and ground and the
+  app's turn-finished / needs-attention moments as live signals.
 - The `media` node is the only one whose pixels move on their own, and the host draws all of
   them. An extension states which document, whether it is playing, how fast and how it loops, and
   receives a coalesced state report; the decoder, the clock, the transport, the ceilings and the
@@ -803,16 +807,24 @@ the same language version. Verify that the selected Swift.org binary can see an 
 SWIFT_ORG="${HOME}/.swiftly/bin/swift"
 "$SWIFT_ORG" sdk list
 "$SWIFT_ORG" build --disable-sandbox \
+  -c release \
   --package-path Packages/ThreadingExtensionKit \
   --swift-sdk swift-6.3.3-RELEASE_wasm \
   --product HelloStatusExtensionExample
 ```
 
+Build in release, as the scaffold's `Scripts/package.sh` does, so the runner executes optimized
+code. Do not expect a small module from that alone: measured on a four-hook Metal extension
+(2026-10-04) the release module was 68 MB against 73 MB in debug, and its sections were 38 MB of
+data and 18 MB of code — Foundation's, which every extension links through the SDK — with about
+12 MB of names and DWARF. A materially smaller package needs an SDK that does not link full
+Foundation, not a different build configuration.
+
 Use the exact SDK identifier printed by `sdk list`; it is intentionally not inferred. Then
 assemble the directory the manifest describes:
 
 ```bash
-WASM_BIN=Packages/ThreadingExtensionKit/.build/wasm32-unknown-wasip1/debug
+WASM_BIN=Packages/ThreadingExtensionKit/.build/wasm32-unknown-wasip1/release
 mkdir -p /tmp/HelloStatusExtension/bin
 cp Packages/ThreadingExtensionKit/Examples/HelloStatusExtension/threading-extension.json \
   /tmp/HelloStatusExtension/

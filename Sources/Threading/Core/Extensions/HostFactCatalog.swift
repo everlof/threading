@@ -48,6 +48,8 @@ enum NativeSidebarFactDependency: String, CaseIterable, Sendable {
 /// `displayTitle -> session.title` explicit without making the fact catalog main-actor isolated.
 enum NativeSidebarMemberAlias: String, CaseIterable, Sendable {
     case sessionDisplayTitle = "AgentSession.displayTitle"
+    case sessionPresentedTitle = "AgentSession.presentedTitle"
+    case sessionIsUnnamed = "AgentSession.isUnnamed"
     case sessionLastUsed = "AgentSession.lastUsedAt"
     case sessionProvider = "AgentSession.kind"
     case sessionAccount = "AgentSession.accountHandle"
@@ -230,7 +232,7 @@ enum HostFactCatalog {
         session(
             ExtensionHostFactKey.sessionTitle, "Title", .string, textUsages,
             parity: [.sessionTitle],
-            nativeAliases: [.sessionDisplayTitle],
+            nativeAliases: [.sessionDisplayTitle, .sessionPresentedTitle, .sessionIsUnnamed],
             providerAliases: [.managerSessionTitle]
         ) { .string($0.title) },
         session(

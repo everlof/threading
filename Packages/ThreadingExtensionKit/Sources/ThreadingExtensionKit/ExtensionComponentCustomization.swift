@@ -79,6 +79,20 @@ public extension ExtensionComponentID {
     /// stays above it.
     static let sidebarBackdrop: Self = "sidebar.backdrop"
 
+    /// The ground beneath the display panel's tab row and content, above the panel's own themed
+    /// ground.
+    ///
+    /// The sidebar backdrop's contract at another placement: an overlay whose top is
+    /// `.proceed`, a fill image or a host-run fragment surface, hit-tested straight through.
+    /// Hosted tab content — a browser, a review, a simulator — is usually opaque, so the plane
+    /// shows where the panel's content is transparent: around and between its chrome, and
+    /// behind an empty panel.
+    static let displayBackdrop: Self = "display.backdrop"
+
+    /// The ground beneath the new-session composer's own content — its greeting, chips, prompt
+    /// box and actions — with the same contract as the sidebar backdrop.
+    static let composerBackdrop: Self = "composer.backdrop"
+
     /// The floating corner card over the selected session's content pane.
     ///
     /// Deliberately not named after any one content kind: today the card carries the
@@ -1340,6 +1354,18 @@ public extension ExtensionComponentTarget {
     /// Targets the one sidebar backdrop. The sidebar is app-wide, so there is no entity.
     static func sidebarBackdrop() -> Self {
         Self(component: .sidebarBackdrop, contractVersion: 1)
+    }
+
+    /// Targets the display panel's backdrop. One patch dresses every session's panel, so there
+    /// is no entity.
+    static func displayBackdrop() -> Self {
+        Self(component: .displayBackdrop, contractVersion: 1)
+    }
+
+    /// Targets the new-session composer's backdrop. One patch dresses the composer whichever
+    /// project it is starting a session in, so there is no entity.
+    static func composerBackdrop() -> Self {
+        Self(component: .composerBackdrop, contractVersion: 1)
     }
 
     /// Targets every project hover card when `projectID` is nil, or one concrete project.

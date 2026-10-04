@@ -147,6 +147,12 @@ The companion activation draft defines this boundary and the manual-override cas
 
 ## Personal effects policy
 
+> **Shipped in part (2026-10-04).** *React to agent activity* and a 0–200 % *Reaction strength*
+> live in Settings ▸ Motion ▸ Reactions through one owner, `ThemeReactions`, applied at the
+> decorative boundary (logo and mascot streams, the audio spectrum, every reactive extension
+> input). Music reactions remain the existing audio opt-in and decorative motion remains
+> `playsThemeMotion`. See [`themes.md`](../architecture/themes.md) (2026-10-04).
+
 Put the controls together in **Settings → Motion**, with a link from Themes and pack review.
 Reuse the existing persisted choices when relocating them; do not reset people's settings.
 

@@ -4480,6 +4480,10 @@ trip to Settings.
   and it sets those instead; the same three scopes described under [Themes](#themes).
 - **"Make me something warmer, like solarized but darker"** creates a new theme. Colours you
   do not mention are kept from whatever the session is using now.
+- **"Give the terminal a soft CRT glow"** adds a phosphor glow: a halo beneath the text in each
+  colour's own ink. An agent sets it on a terminal theme (`colors.glow` in `create_theme`) or on
+  an app theme's paired terminal palette (`terminal_colors.glow`), with a radius of 0.5–6 points
+  and a strength of 0.05–0.8, and `remove_glow` takes it away. It is off unless you ask for it.
 
 The terminal changes at once either way. Whether the *agent's own interface* follows depends on
 the runtime, because an agent draws its composer and its diff backgrounds itself and has to
@@ -4495,6 +4499,23 @@ whose text cannot be read against its own background is refused outright.
 
 Switch the group off in **Settings ▸ Tools ▸ Terminal theme** if you would rather agents left
 your colours alone.
+
+### Themes that speak and ink
+
+Beyond colours, an app theme an agent builds for you can:
+
+- **Name fresh chats in its own voice.** Until a chat is named — by its first prompt, its agent or
+  you — the sidebar, the window title and the iPhone show the theme's stand-in (a Matrix theme
+  might say *Unknown program*) instead of *New Session*. It is only shown: the chat's real title
+  is never changed, and switching themes switches the stand-in.
+- **Reach the iPhone with its words.** The new-chat invitation and the untitled name a theme
+  states also appear on the paired iPhone's new-session screen.
+- **Change how names morph.** A theme can ask for a transition — a scramble that decodes names
+  from its own characters, say — which plays while **Settings ▸ Motion ▸ Chat name transition**
+  is on **Theme's Choice**.
+- **Ink identity marks in its accent.** A one-colour theme can draw generated project tiles,
+  agent marks and account initials in its accent so nothing in the sidebar breaks the look.
+  Project icons and account colours or photos you chose yourself keep their own colours.
 
 ### Letting sessions talk to each other
 
@@ -5066,6 +5087,12 @@ Configure terminal palettes in **Settings > Themes**:
 - **Bold Text** is what a heading drawn in bold with the terminal's own text color uses, the
   same setting Terminal.app calls Bold Text. Bold text that picks an ANSI color keeps that
   color's bright variant instead, so a bold red stays red
+- An optional **glow**, a soft halo beneath the text in each color's own ink, like an old CRT.
+  No built-in theme has one and Settings has no control for it yet; ask an agent to add or remove
+  it (see [Letting an agent change the theme](#letting-an-agent-change-the-theme)). Underlines,
+  backgrounds and images do not glow, and a cell with its own background covers the glow around
+  it. A glowing terminal takes about four times as long to redraw a full screen, so it is best
+  kept for themes you mean it on; the iPhone shows the same colors without the glow
 - Import themes from Terminal.app (.terminal files)
 - Export themes as JSON
 - Duplicate and customize built-in themes (built-in themes are read-only)
@@ -5510,7 +5537,22 @@ How Threading plugs into each agent CLI's own configuration. Under **Agents** in
   nine named choices are Working, Searching, Solving, Listening, Connecting, Weaving, Composing,
   Breathing, and Shaping. The list shows every orb running side by side, so they can be compared
   without being selected one at a time; Random's row re-rolls each time you point at it.
-- **Chat name transition** defaults to **Shape Morph**. Point at a transition in the list and
+- **React to agent activity** lets themes and extensions move with what agents are doing —
+  streams that quicken, rain that thickens, a pulse when a turn comes back. Turn it off to keep
+  that decoration still while everything else stays as it is; music reactions keep their own
+  switch, **Music-reactive themes**, and **Theme animations** in Themes still stops all theme
+  motion.
+- **Reaction strength** scales how strongly every theme and extension reacts to agent activity
+  and to music, from 0% to 200% (100% is as each theme designed it). Themes decide *how* they
+  react — a logo that fizzes harder while agents work, a mascot's stream, rain that thickens, a
+  spectrum that follows the music; this one slider decides how much. 0% holds those reactions
+  still without changing anything else, and 200% doubles them, so a half-busy room drives a full
+  response. It only changes decoration: working counts, statuses and notifications stay exactly
+  as they are, and it never starts audio capture.
+- **Chat name transition** defaults to **Theme's Choice**: the transition the current theme asks
+  for (a theme can, for example, have names decode from katakana like a film's terminal), or
+  **Shape Morph** when the theme asks for none. Choosing a named transition keeps it under every
+  theme. Point at a transition in the list and
   its row demonstrates it, morphing between the transition's name and the app's own and back for
   as long as you stay on it — one row at a time, and only after a short pause, so a pointer
   crossing the list leaves every name readable. Every transition can also be

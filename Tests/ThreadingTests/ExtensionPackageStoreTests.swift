@@ -2404,6 +2404,12 @@ final class ExtensionPackageStoreTests: XCTestCase {
             encoding: .utf8
         )
         XCTAssertTrue(packageScriptSource.contains("--swift-sdk \"$SDK_ID\""))
+        // The packaged module is the optimized one: a debug build ships its debug information.
+        XCTAssertTrue(packageScriptSource.contains("-c release"))
+        XCTAssertTrue(packageScriptSource.contains(
+            "MODULE=\"$PROJECT_DIR/.build/wasm32-unknown-wasip1/release/ExtensionMain.wasm\""
+        ))
+        XCTAssertFalse(packageScriptSource.contains("wasm32-unknown-wasip1/debug"))
         XCTAssertTrue(packageScriptSource.contains("--exclude Build"))
         XCTAssertTrue(packageScriptSource.contains(
             "rsync -a \"$PROJECT_DIR/Resources/\" \"$STAGING/Resources/\""

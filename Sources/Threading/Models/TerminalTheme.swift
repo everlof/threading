@@ -40,6 +40,13 @@ public struct TerminalTheme: Codable, Equatable {
     public var brightCyan: NSColor
     public var brightWhite: NSColor
 
+    /// A phosphor glow behind the text, or nil for none — which every palette this app ships
+    /// states, and which every palette written before the glow existed decodes to.
+    ///
+    /// Unlike `boldForeground`, an absent glow is never written: a palette without one encodes
+    /// to exactly the document it did before, so a stored theme round-trips byte for byte.
+    public var glow: TerminalGlow?
+
     // MARK: - Codable
 
     public enum CodingKeys: String, CodingKey {
@@ -47,6 +54,7 @@ public struct TerminalTheme: Codable, Equatable {
         case black, red, green, yellow, blue, magenta, cyan, white
         case brightBlack, brightRed, brightGreen, brightYellow
         case brightBlue, brightMagenta, brightCyan, brightWhite
+        case glow
     }
 
     public init(from decoder: Decoder) throws {
@@ -84,6 +92,17 @@ public struct TerminalTheme: Codable, Equatable {
         brightMagenta = try Self.decodeColor(from: container, forKey: .brightMagenta)
         brightCyan = try Self.decodeColor(from: container, forKey: .brightCyan)
         brightWhite = try Self.decodeColor(from: container, forKey: .brightWhite)
+
+        // A glow that cannot be read is dropped rather than failing the palette: losing a
+        // halo leaves a readable terminal, and losing the palette would not.
+        do {
+            glow = try container.decodeIfPresent(TerminalGlow.self, forKey: .glow)
+        } catch {
+            ThreadingLogger.terminal.warning(
+                "Theme glow could not be parsed; drawing this palette without one."
+            )
+            glow = nil
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -114,6 +133,7 @@ public struct TerminalTheme: Codable, Equatable {
         try Self.encodeColor(brightMagenta, to: &container, forKey: .brightMagenta)
         try Self.encodeColor(brightCyan, to: &container, forKey: .brightCyan)
         try Self.encodeColor(brightWhite, to: &container, forKey: .brightWhite)
+        try container.encodeIfPresent(glow, forKey: .glow)
     }
 
     /// A stored colour that cannot be parsed falls back to the stock palette's colour for the
@@ -180,7 +200,8 @@ public struct TerminalTheme: Codable, Equatable {
         brightBlue: NSColor,
         brightMagenta: NSColor,
         brightCyan: NSColor,
-        brightWhite: NSColor
+        brightWhite: NSColor,
+        glow: TerminalGlow? = nil
     ) {
         self.id = id
         self.name = name
@@ -205,6 +226,7 @@ public struct TerminalTheme: Codable, Equatable {
         self.brightMagenta = brightMagenta
         self.brightCyan = brightCyan
         self.brightWhite = brightWhite
+        self.glow = glow
     }
 }
 

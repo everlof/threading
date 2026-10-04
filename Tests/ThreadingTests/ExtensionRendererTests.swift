@@ -6891,7 +6891,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     let surface = try ExtensionMetalSurfaceView(
       specification: specification,
       source: source,
-      signalProvider: { _ in nil }
+      signalProvider: { _, _ in nil }
     )
     XCTAssertNil(surface.hitTest(.zero))
     XCTAssertEqual(surface.preferredFramesPerSecond, 60)
@@ -6923,7 +6923,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     let surface = try ExtensionMetalSurfaceView(
       specification: specification,
       source: source,
-      signalProvider: { _ in nil }
+      signalProvider: { _, _ in nil }
     )
 
     let controller = makeMainWindowController()

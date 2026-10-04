@@ -824,6 +824,43 @@ final class ExtensionManager:
         return String(data: data, encoding: .utf8)
     }
 
+    /// Reads a custom surface's package picture and prepares it, without filesystem or image
+    /// work on the main actor.
+    ///
+    /// Only the installed package root and the extension's current process generation are
+    /// read here. The containment check, the bounded read at the image ceiling (4 MiB,
+    /// 1,024 × 1,024) and `prepare` — the caller's decode — run on a worker; the generation is
+    /// checked again before `completion`, so a picture read for a process that has since been
+    /// replaced or disabled is never handed to a surface. `completion` receives nil for every
+    /// refusal, and always runs on the main actor.
+    func prepareCustomSurfaceTexture<Prepared: Sendable>(
+        relativePath: String,
+        extensionIdentifier: String,
+        prepare: @escaping @Sendable (Data) -> Prepared?,
+        completion: @escaping @MainActor @Sendable (Prepared?) -> Void
+    ) {
+        guard let processGeneration = sessionGenerations[extensionIdentifier],
+              let rootURL = packages[extensionIdentifier]?.bundle?.rootURL else {
+            completion(nil)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let prepared = await Task.detached(priority: .userInitiated) { () -> Prepared? in
+                guard let data = ExtensionImageResourcePolicy.validatedData(
+                    relativePath: relativePath,
+                    packageRootURL: rootURL
+                ) else { return nil }
+                return prepare(data)
+            }.value
+            guard let self,
+                  self.sessionGenerations[extensionIdentifier] == processGeneration else {
+                completion(nil)
+                return
+            }
+            completion(prepared)
+        }
+    }
+
     private func resourceURL(
         relativePath: String,
         extensionIdentifier: String,

@@ -373,6 +373,9 @@ final class TerminalSession: NSObject {
             : nil
         terminalView.selectedTextBackgroundColor = profile.theme.selection
         terminalView.caretColor = profile.theme.cursor
+        // The palette's phosphor glow, or none. Set on every refresh, so a session moving to a
+        // palette without one stops glowing; SwiftTerm repaints only when the value changes.
+        terminalView.textGlow = profile.theme.glow?.textGlow
 
         // Apply cursor style
         let swiftTermStyle = swiftTermCursorStyle(from: profile.cursorStyle, blink: profile.cursorBlink)

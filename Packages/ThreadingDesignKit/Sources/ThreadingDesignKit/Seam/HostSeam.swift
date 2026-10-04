@@ -68,7 +68,12 @@ public struct AppSettings {
     public static let shared = AppSettings()
     public init() {}
     public var chatNameMorphStyle: ChatNameMorphStyle { AppSettings.morphStyle }
-    public nonisolated(unsafe) static var morphStyle: ChatNameMorphStyle = .shapeMorph
+    public nonisolated(unsafe) static var morphStyle: ChatNameMorphStyle = .automatic
+    /// Percent, as the application stores it; the host states the person's choice.
+    public var themeReactionStrength: Int { AppSettings.reactionStrength }
+    public nonisolated(unsafe) static var reactionStrength = 100
+    public var themeReactsToActivity: Bool { AppSettings.reactsToActivity }
+    public nonisolated(unsafe) static var reactsToActivity = true
 }
 
 /// The application's four text sizes. The scale is the load-bearing half — a plugin that read a
@@ -90,6 +95,7 @@ public enum PromptReturnKey: String, CaseIterable {
 }
 
 public enum ChatNameMorphStyle: String, CaseIterable {
+    case automatic
     case shapeMorph, crossfade, slideUp, slideDown, scale, bounce, drop, flip, blur, scramble, typewriter
 }
 

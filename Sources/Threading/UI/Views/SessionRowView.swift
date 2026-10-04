@@ -101,6 +101,13 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     private var accountChipView: NSImageView?
 
     private let titleLabel = MorphingTitleLabel()
+    /// Whether the row's session is unnamed, so its title is the theme's stand-in.
+    private var showsUntitledName = false
+    /// The extension properties last applied, so a theme-driven rename re-applies them rather
+    /// than dropping an extension's title or tooltip.
+    private var appliedCustomizationProperties: [
+        ExtensionComponentPropertyID: ExtensionComponentPropertyValue
+    ] = [:]
     /// Durable visibility state in words: the row remains findable while snoozed, and an early
     /// wake remains obvious until the session is visited.
     private var attentionOverlayLabel: NSTextField?
@@ -1037,7 +1044,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             id: NativeSidebarParity.host(.entityIdentity, session.id),
             kind: NativeSidebarParity.fact(.sessionProvider, session.kind),
             accountHandle: NativeSidebarParity.fact(.sessionAccount, session.accountHandle),
-            title: NativeSidebarParity.fact(.sessionTitle, session.displayTitle),
+            title: NativeSidebarParity.fact(.sessionTitle, session.presentedTitle),
             attention: AgentSessionRowPresentation.Attention.resolve(
                 isScheduled: rowIsScheduled,
                 hasWoken: rowWake != nil,
@@ -1065,6 +1072,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
         sessionID = row.id
         nativeTitle = row.title
+        showsUntitledName = NativeSidebarParity.fact(.sessionTitle, session.isUnnamed)
         nativeToolTip = nil
         setPinned(rowIsPinned)
         let supervision = NativeSidebarParity.fact(
@@ -1295,7 +1303,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
                 ? SidebarRowDefaults.sideChatAccessibilityLabel
                 : provider.displayName
         )
-        iconView.contentTintColor = isDormant ? Design.Text.tertiary : Design.Text.secondary
+        iconView.contentTintColor = isDormant ? Design.Text.tertiary : restingMarkTint()
 
         let dimsThroughAlpha = agentMark.map { !$0.isTemplate } ?? false
         iconView.alphaValue = (isDormant && dimsThroughAlpha) ? AgentIconDefaults.dormantAlpha : 1
@@ -1363,6 +1371,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // Unlike the buttons, NSImageView keeps the tint object it was handed. Re-ask the
         // current theme whenever the sweep reaches this retained/reused row.
         applyTextColors()
+        renameUntitledForTheme()
         guard let agentMark else { return }
         platedAgentMark = plated(agentMark)
         setIconImage(platedAgentMark)
@@ -1399,11 +1408,20 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         return sized
     }
 
+    /// A live, unselected row's mark ink: the theme's accent when it inks identity marks
+    /// (`IdentityMarkInk`), else the quiet secondary every template mark has always taken.
+    private func restingMarkTint() -> NSColor {
+        IdentityMarkInk.isTinted(for: effectiveAppearance) ? IdentityMarkInk.ink : Design.Text.secondary
+    }
+
     /// The plate spans the full slot, so it appears *around* the mark rather than replacing
     /// it: the ink stays `iconSize` either way — see `IconBackplate.compose`.
     private func plated(_ image: NSImage?) -> NSImage? {
         guard let image else { return nil }
-        if backgroundStyle == .emphasized, !image.isTemplate,
+        // A tinted theme (`IdentityMarkInk`) wants every agent mark as an accent silhouette —
+        // the same conversion selection makes, for the same reason: one ink, shape kept.
+        let inksIdentity = IdentityMarkInk.isTinted(for: effectiveAppearance)
+        if backgroundStyle == .emphasized || inksIdentity, !image.isTemplate,
            let selected = image.copy() as? NSImage {
             // Selection already supplies the row's strongest plate. Turning a provider mark
             // into selection ink keeps its identity readable without stacking a second neutral
@@ -1476,11 +1494,24 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         }
     }
 
+    /// A row still showing an unnamed session follows the theme's stand-in name
+    /// (`ThemeWords.untitledSession`) across a theme switch, morphing like any rename. Named
+    /// rows and rows whose name an extension supplies are untouched.
+    private func renameUntitledForTheme() {
+        guard showsUntitledName else { return }
+        let untitled = AgentSession.presentedUntitledTitle
+        guard nativeTitle != untitled else { return }
+        nativeTitle = untitled
+        animatesNextTitle = true
+        applyCustomizationProperties(appliedCustomizationProperties)
+    }
+
     private func applyCustomizationProperties(
         _ properties: [
             ExtensionComponentPropertyID: ExtensionComponentPropertyValue
         ]
     ) {
+        appliedCustomizationProperties = properties
         toolTip = nativeToolTip
         setIconImage(nativeIcon)
         iconView.contentTintColor = nativeIconTint
@@ -1553,7 +1584,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         let ground: InkSource? = backgroundStyle == .emphasized ? .selection : nil
         let iconTint = backgroundStyle == .emphasized
             ? Design.Ink.selection.label
-            : (isDormant ? Design.Text.tertiary : Design.Text.secondary)
+            : (isDormant ? Design.Text.tertiary : restingMarkTint())
         iconView.contentTintColor = iconTint
         // `applyCustomizationProperties` restores the native icon before applying an optional
         // replacement. Keep that snapshot on the row's current ground: caching it only in

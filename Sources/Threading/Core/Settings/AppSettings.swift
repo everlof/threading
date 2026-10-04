@@ -924,6 +924,27 @@ final class AppSettings {
         set { AppSettingDefinitions.sharesThemeAudio.write(newValue, to: userChoiceDefaults) }
     }
 
+    /// Whether decoration answers agent activity at all. Off holds every activity-driven
+    /// reaction at rest; agent status, counts and notifications are unaffected.
+    var themeReactsToActivity: Bool {
+        get { AppSettingDefinitions.themeReactsToActivity.read(from: userChoiceDefaults) ?? true }
+        set { AppSettingDefinitions.themeReactsToActivity.write(newValue, to: userChoiceDefaults) }
+    }
+
+    /// How strongly decoration answers agent activity and music, in percent of what the theme or
+    /// extension authored: 0 holds it still, 100 is as authored, 200 doubles it.
+    var themeReactionStrength: Int {
+        get {
+            AppSettingDefinitions.themeReactionStrength.read(from: userChoiceDefaults)
+                ?? ThemeReactionDefaults.strengthPercent
+        }
+        set {
+            let clamped = min(max(newValue, ThemeReactionDefaults.strengthPercentRange.lowerBound),
+                              ThemeReactionDefaults.strengthPercentRange.upperBound)
+            AppSettingDefinitions.themeReactionStrength.write(clamped, to: userChoiceDefaults)
+        }
+    }
+
     var themeAudioSource: String {
         get { AppSettingDefinitions.themeAudioSource.read(from: userChoiceDefaults) ?? AudioSpectrumSource.systemID }
         set { AppSettingDefinitions.themeAudioSource.write(newValue, to: userChoiceDefaults) }

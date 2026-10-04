@@ -268,6 +268,13 @@ final class DisplayPaneController: NSViewController {
   private var activeBrowserTabIDBySession: [SessionID: UUID] = [:]
   private let extensionPanels: ExtensionPanelRouting
   private let customizationLookup: ComponentCustomizationHost.Lookup
+  /// How the backdrop plane resolves a package picture. A seam so a test can dress the plane
+  /// without an installed extension; production reads the package.
+  private let extensionBackdropImageResolver: ComponentCustomizationHost.ImageResolver
+
+  /// The plane an extension may dress through `display.backdrop@1`: above the pane's themed
+  /// ground and beneath its tab row and content — see `setupBackdrop`.
+  private(set) var extensionBackdrop: ExtensionBackdropPlaneView?
   private let browserFactory: @MainActor (BrowserContextKind) -> BrowserViewController
   private let simulatorControl: any SimulatorControlling
   private let simulatorLeaseManager: any SimulatorLeaseManaging
@@ -363,7 +370,9 @@ final class DisplayPaneController: NSViewController {
     simulatorControl: any SimulatorControlling = SimctlSimulatorControl(),
     simulatorStreamCoordinator: any SimulatorLiveStreamCoordinating = SimulatorLiveStreamCoordinator.shared,
     simulatorInputAuthorizer: any SimulatorInputAuthorizing = SimulatorInputConsentController.shared,
-    physicalDeviceControl: (any PhysicalDeviceControlling)? = nil
+    physicalDeviceControl: (any PhysicalDeviceControlling)? = nil,
+    extensionBackdropImageResolver: @escaping ComponentCustomizationHost.ImageResolver =
+      ExtensionComponentResourceResolver.image
   ) {
     self.extensionPanels = extensionPanels ?? ExtensionManager.shared
     self.customizationLookup = customizationLookup
@@ -377,6 +386,7 @@ final class DisplayPaneController: NSViewController {
     self.simulatorStreamCoordinator = simulatorStreamCoordinator
     self.simulatorInputAuthorizer = simulatorInputAuthorizer
     self.physicalDeviceControl = physicalDeviceControl
+    self.extensionBackdropImageResolver = extensionBackdropImageResolver
     super.init(nibName: nil, bundle: nil)
 
     appEvents.observe(SessionAttachmentsDidChange.self) { [weak self] event in
@@ -422,6 +432,13 @@ final class DisplayPaneController: NSViewController {
   /// be: white beside a dark chrome, a stray tint beside a styled one. A `ThemedSurfaceView`
   /// is the component for exactly this — it is re-resolved by the theme sweep and re-resolves
   /// itself on a system light/dark switch.
+  ///
+  /// Directly above that ground, and beneath everything `setupHeader`, `setupTabBar` and
+  /// `setupContent` add after it, sits the plane an extension may dress
+  /// (`display.backdrop@1`). Two views for two owners, as in the sidebar: the ground is the
+  /// theme's, the plane is a process's that may go away. Hosted tab content — a browser, a
+  /// review, a simulator — is usually opaque, so the plane shows where the pane's content is
+  /// transparent: behind the tab row, around an image, under an empty pane.
   private func setupBackdrop() {
     let backdrop = ThemedSurfaceView()
     backdrop.applySurface(
@@ -430,6 +447,15 @@ final class DisplayPaneController: NSViewController {
       pattern: .backdrop
     )
     view.addSubview(backdrop)
+
+    let extensionPlane = ExtensionBackdropPlaneView(
+      placement: .displayPanel,
+      lookup: customizationLookup,
+      imageResolver: extensionBackdropImageResolver
+    )
+    view.addSubview(extensionPlane, positioned: .above, relativeTo: backdrop)
+    extensionPlane.pinToEdges(of: view)
+    extensionBackdrop = extensionPlane
 
     NSLayoutConstraint.activate([
       backdrop.topAnchor.constraint(equalTo: view.topAnchor),

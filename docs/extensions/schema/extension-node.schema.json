@@ -403,6 +403,11 @@
               "type": "array",
               "maxItems": 8,
               "items": { "$ref": "#/$defs/surfaceInput" }
+            },
+            "texture": {
+              "description": "Optional package-relative PNG or JPEG the host binds at fragment texture index 0 with a linear, clamp-to-edge sampler at sampler index 0. Stating it adds `texture2d<float> image, sampler imageSampler` to the fragment function's parameters.",
+              "type": "string",
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/).+\\.(?:[Pp][Nn][Gg]|[Jj][Pp][Gg]|[Jj][Pp][Ee][Gg])$"
             }
           }
         }
@@ -442,7 +447,10 @@
                 "active-account.usage-remaining", "workload.intensity", "workload.working-count",
                 "time.day-fraction", "audio.available", "audio.level", "audio.bass", "audio.mids",
                 "audio.treble", "audio.band.0", "audio.band.1", "audio.band.2", "audio.band.3",
-                "audio.band.4", "audio.band.5", "audio.band.6", "audio.band.7"
+                "audio.band.4", "audio.band.5", "audio.band.6", "audio.band.7", "theme.dark",
+                "theme.accent.red", "theme.accent.green", "theme.accent.blue", "theme.ground.red",
+                "theme.ground.green", "theme.ground.blue", "moment.turn-finished",
+                "moment.needs-attention"
               ]
             },
             "mapping": { "$ref": "#/$defs/scalarMapping" }

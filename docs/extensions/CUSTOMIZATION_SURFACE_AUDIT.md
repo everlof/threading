@@ -32,11 +32,16 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Sidebar workload analyzer | existing theme `material.chart_style: spectrum` | theme-selected host presentation | workload/intensity truth, exact count, effort judgement, accessibility, bounded motion | Implemented |
 | Music spectrum presentation | `audio.*` host signals on existing Metal surface contracts; theme `sidebar.brand.analyzer` | theme-selected host presentation | consent, source identity/selection, system permission, private tap lifetime, local analysis, signal truth/freshness, visibility/motion/power gates and bounded cadence | Implemented |
 | Music-reactive theme controls | — | host-only | explicit audio opt-in, selected source, permission explanation and Retry; themes cannot enable capture | Host-only |
+| Reactions (Motion): activity switch and strength | — | host-only | whether agent activity drives decoration at all, and the person's 0–200 % scale on every theme and extension reaction to activity and music, applied by `ThemeReactions` to reactive readings before any theme or extension mapping (activity off reads as each binding's idle fallback); no theme, pack or extension carries a value for either | Host-only |
+| Theme words, title morph, identity ink | theme document: `words.untitled_session`, `title_morph`, `material.identity_marks` | theme-selected copy and presentation from a fixed vocabulary | the untitled name is display-only and never stored; state words stay the app's own; the person's explicit morph style wins; a person's own icon, photo or colour keeps its pixels; Reduce Motion lands names directly | Implemented |
 | Project row | `sidebar.project-row@1` | properties, slot, replacement | selection, DnD, row actions, count, checkout availability mark | Implemented |
 | Project hover card | `sidebar.project-hover-card@1` | hook, replacement | hover, popover, sizing, dismissal | Implemented |
 | Session row | `sidebar.session-row@1` | properties, slot, replacement | selection, DnD, activity, actions | Implemented |
 | Session identity | `sidebar.session-identity@1` | replacement | activity precedence and row shell | Implemented |
 | Sidebar backdrop | `sidebar.backdrop@1` | under-content hook: an overlay whose top is `.proceed`, admitting only a `backdrop` image and a Metal surface | legibility ceiling, frame cadence and the visibility hold, pointer passthrough, reduced motion, accessibility silence, layering beneath the theme's navigator well | Implemented |
+| Display panel backdrop | `display.backdrop@1` | the sidebar backdrop's under-content hook, unchanged | the same five, plus layering above the panel's themed ground and beneath its tab row and content; hosted tab content (browser, review, simulator) stays opaque over it | Implemented |
+| New-session composer backdrop | `composer.backdrop@1` | the sidebar backdrop's under-content hook, unchanged | the same five, plus layering beneath the greeting, chips, prompt box and actions; text input, focus and submission are never re-parented | Implemented |
+| Custom surface theme and moment signals, surface picture | `theme.*` and `moment.*` host signals; `ExtensionMetalSurface.texture` | scalar readings and one package image on the existing Metal surface contracts | which theme variant applies per appearance and its resolved colours, which events are moments and their edges, the pulse shape, the motion hold, the mood monitor's lifetime, the image read/decode limits and upload, the placeholder | Implemented |
 | Theme particles, logo motion, header band | theme document: `ThemeBackdrop.particles`, `sidebar.brand.motion`, `sidebar.brand.band`, `title.color` | theme-selected host presentation from a fixed vocabulary (styles, shapes, beats) | particle budgets per placement, the ambient opacity ceiling, the visibility hold, Reduce Motion / Theme animations / Low Power Mode, pointer passthrough, accessibility silence, band and title contrast gates | Implemented |
 | Theme arrival transition | theme document: `variants.<kind>.transition` | theme-selected host presentation over each main window | which switches play one (deliberate picks only), timing bounds, the swap moment, finish-the-first on a second pick, pointer passthrough, accessibility silence, every reason to apply at once | Implemented |
 | Theme sprites, pinned pictures | theme document: `variants.<kind>.sprites`, `ThemeParticles.sprites`, `ThemeBackdrop.ImageLayer.alignment` | theme-selected pictures on host-owned particle motion; host-placed images | the per-placement budget shared across every sprite cell, normalised 128-pixel sprites, the ambient opacity ceiling, the visibility hold, Reduce Motion / Theme animations / Low Power Mode, clipping to the region | Implemented |
@@ -478,7 +483,16 @@ window is unseen — the frame-rate half being the one place a *contract* states
 runtime must obey, so the catalogue and the host cannot drift.
 
 The theme's own dressing stays beneath the plane and a theme's opaque navigator well stays above
-it; that layering belongs to the theme, not to the extension. The same shape is the intended
+it; that layering belongs to the theme, not to the extension.
+
+`display.backdrop@1` and `composer.backdrop@1` are the same contract at two more placements, with
+the same constraint values and host-owned behaviour — one `ExtensionBackdropPlaneView` serves all
+three, parameterized only by the contract and an accessibility identifier. The display panel's
+plane sits directly on its `ThemedSurfaceView` ground and beneath its tab row and content; the
+composer's is its root's first subview. Hosted tab content is usually opaque, so the panel's
+backdrop shows where the panel is transparent — behind the tab row, around a picture, under an
+empty pane — which is the right answer rather than a gap: nothing an extension draws can sit
+behind a live browser or a simulator's pixels and change what they say. The same shape is the intended
 answer for a display-panel or composer backdrop: a sibling contract at another placement, not a
 new vocabulary.
 

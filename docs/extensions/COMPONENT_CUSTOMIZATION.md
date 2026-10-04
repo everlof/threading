@@ -562,6 +562,31 @@ the durable extension surface.
 - [x] Hold a Metal surface's frames while its window is occluded, miniaturized or the view
   hidden, and clamp its cadence to the host's ceiling.
 
+### Phase 17 — backdrops elsewhere, theme and moment signals, a surface picture
+
+- [x] Publish `display.backdrop@1` and `composer.backdrop@1` with exactly the sidebar
+  backdrop's constraints and host-owned behaviour (`ThreadingComponentCatalog.backdropPlacements`
+  names all three). One `ExtensionBackdropPlaneView`, parameterized by a `Placement` (contract
+  plus accessibility identifier), now serves the sidebar, the display panel (directly above its
+  `ThemedSurfaceView` ground, beneath the tab row and content) and the new-session composer
+  (its root's first subview); the sidebar's behaviour and `sidebar.extension-backdrop`
+  identifier are unchanged.
+- [x] Add the theme signals — `theme.dark` and the sRGB `theme.accent.*` / `theme.ground.*`
+  triples — answered for each surface's own effective appearance (the signal provider now
+  receives an `ExtensionHostSignalContext`) from a per-appearance cache dropped on
+  `AppThemeDidChange`, system-colour and accessibility-display changes.
+- [x] Add the moment pulses — `moment.turn-finished`, `moment.needs-attention` — read per
+  frame from the last `AgentMomentDidOccur` timestamp, decaying over 1.5 s; the reader listens
+  (and starts `AgentMoodMonitor`) only while a mounted surface binds one, and a pulse reads its
+  fallback while motion is held, as audio does.
+- [x] Add `ExtensionHostSignal.isReactive` so a host can apply the person's reaction policy to
+  workload, audio readings and moments, never to standing facts like the theme or the hour.
+- [x] Let a Metal surface name one package `texture` (PNG or JPEG). The host reads it through
+  the package image limits and decodes it on a worker, binds a transparent 1 × 1 placeholder
+  until it lands (and for good when it cannot be read), and passes `texture2d<float>` and a
+  linear clamp sampler as the fragment function's third and fourth arguments; an untextured
+  surface keeps the two-argument ABI.
+
 ## Expected intrusion
 
 Core extension machinery is additive and removable:

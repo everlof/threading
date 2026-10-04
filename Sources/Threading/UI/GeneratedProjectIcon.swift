@@ -27,14 +27,19 @@ enum GeneratedProjectIcon {
 
     // MARK: - Public Methods
 
-    static func image(for name: String) -> NSImage {
-        if let cached = cache.object(forKey: name as NSString) {
+    /// The tile for `name`. With `tint`, the tile is a theme's identity ink
+    /// (`IdentityMarkInk`): the accent held back as its fill, and an outline and initial in full
+    /// accent — still told apart by its initial.
+    static func image(for name: String, tint: NSColor? = nil) -> NSImage {
+        // The cache is keyed by what is drawn: the name, and the resolved ink when there is one.
+        let key = (tint.map { "\(name)|\($0.hexString)" } ?? name) as NSString
+        if let cached = cache.object(forKey: key) {
             return cached
         }
 
-        let image = draw(name: name)
+        let image = tint.map { drawTinted(name: name, ink: $0) } ?? draw(name: name)
         image.accessibilityDescription = name
-        cache.setObject(image, forKey: name as NSString)
+        cache.setObject(image, forKey: key)
         return image
     }
 
@@ -48,6 +53,42 @@ enum GeneratedProjectIcon {
     }
 
     // MARK: - Private Methods
+
+    private static func initial(of name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let initial = String(trimmed.prefix(1)).uppercased()
+        return initial.isEmpty ? GeneratedIconDefaults.fallbackGlyph : initial
+    }
+
+    private static func drawTinted(name: String, ink: NSColor) -> NSImage {
+        let side = ProjectIconDefaults.displayPointSize
+        let glyph = initial(of: name)
+        let fill = ink.withAlphaComponent(IdentityMarkInk.tileFillAlpha)
+        return NSImage(size: NSSize(width: side, height: side), flipped: false) { bounds in
+            let inset = GeneratedIconDefaults.tintedOutlineWidth / 2
+            let tile = NSBezierPath(
+                roundedRect: bounds.insetBy(dx: inset, dy: inset),
+                xRadius: ProjectIconDefaults.displayCornerRadius,
+                yRadius: ProjectIconDefaults.displayCornerRadius
+            )
+            fill.setFill()
+            tile.fill()
+            ink.setStroke()
+            tile.lineWidth = GeneratedIconDefaults.tintedOutlineWidth
+            tile.stroke()
+
+            let text = NSAttributedString(
+                string: glyph,
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: GeneratedIconDefaults.fontSize, weight: .bold),
+                    .foregroundColor: ink
+                ]
+            )
+            let size = text.size()
+            text.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2))
+            return true
+        }
+    }
 
     private static func draw(name: String) -> NSImage {
         let side = ProjectIconDefaults.displayPointSize
@@ -100,4 +141,7 @@ enum GeneratedIconDefaults {
     static let fontSize: CGFloat = 9
     /// For the pathological all-whitespace name.
     static let fallbackGlyph = "•"
+    /// A tinted tile's outline: the edge that keeps a held-back fill from dissolving into a
+    /// dark sidebar.
+    static let tintedOutlineWidth: CGFloat = 1
 }

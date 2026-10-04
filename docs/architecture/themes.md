@@ -2026,9 +2026,9 @@ cannot arrive inside a hover card or a composer accessory because the SDK grew a
 navigator and phone renderers size it as a decoration rather than trapping, because a validated
 tree is not the place to crash.
 
-**The plane is a view of its own, and `.proceed` is empty.** `SidebarExtensionBackdropView` sits
-in `ProjectSidebarViewController` directly above `SidebarBackdropView` and beneath the header,
-list and footer. Its composition is the ordinary `ComponentCustomizationHost` — same registry
+**The plane is a view of its own, and `.proceed` is empty.** `ExtensionBackdropPlaneView` (built
+with `Placement.sidebar`) sits in `ProjectSidebarViewController` directly above
+`SidebarBackdropView` and beneath the header, list and footer. Its composition is the ordinary `ComponentCustomizationHost` — same registry
 lookup, same renderer, same refresh on `ComponentCustomizationDidChange`, same atomic skip of a
 hook that fails to render — with an empty anchor as the default content, the display-pane
 header's precedent rather than the window hook's. The list owns selection, focus, drag state and
@@ -2070,11 +2070,62 @@ hook does. `ExtensionHostSignalsTests` pins the host's set against `ExtensionHos
 with `workload.intensity`, lean teal at night and gold by day through `time.day-fraction`, and
 ask for 24 fps.
 
+### Two more placements, theme and moment signals, a surface picture
+
+**`display.backdrop@1` and `composer.backdrop@1` shipped as the same contract.** Nothing in the
+constraint or the plane was sidebar-specific, so the catalogue's `backdropHookConstraints` and
+host-owned behaviour are shared by all three (`ThreadingComponentCatalog.backdropPlacements`), and
+one `ExtensionBackdropPlaneView` serves all three, parameterized by a `Placement` — the contract
+and the plane's accessibility identifier. The sidebar's behaviour and
+`sidebar.extension-backdrop` identifier are unchanged. The display panel's plane
+(`display.extension-backdrop`) is added in `DisplayPaneController.setupBackdrop` directly above
+the pane's `ThemedSurfaceView` ground and beneath the tab row and content; hosted tab content is
+usually opaque, so the plane shows where the pane is transparent. The composer's
+(`composer.extension-backdrop`) is the first subview of `SessionComposerViewController`'s root,
+beneath the greeting, chips, prompt box and actions. Each composes with an empty `.proceed` for
+the reason the sidebar does: a live browser or a prompt being typed into is never re-parented.
+One patch dresses every display panel or every composer — there is no entity.
+
+**Theme readings are the surface's own.** `theme.dark` and the sRGB `theme.accent.*` /
+`theme.ground.*` triples are resolved for the appearance the surface is drawn in: the signal
+provider takes an `ExtensionHostSignalContext` carrying the view's effective appearance, which
+`ExtensionMetalSurfaceView` caches and refreshes on `viewDidChangeEffectiveAppearance` and window
+moves, so under an adaptive theme a light window and a dark one each read their own variant.
+`theme.dark` names the variant actually in force — a theme with only a light variant reads light
+under a dark appearance. `ExtensionHostSignals` resolves each appearance name once and answers
+from that cache — a dictionary lookup per frame — until `AppThemeDidChange`, a system-colour
+change (System's accent is the user's macOS accent) or an accessibility display change drops it.
+
+**Moments are timestamps, not events.** `ExtensionMomentSignalReader` keeps the last uptime of
+each `AgentMomentDidOccur`; the pulse is `1 − smoothstep` of the elapsed fraction of
+`ExtensionHostSignal.momentPulseDuration` (1.5 s), computed per frame, so nothing is scheduled
+and nothing redraws on an event. The reader listens — and starts `AgentMoodMonitor` — only while
+a surface binding a moment signal is mounted in a window (`ExtensionMomentDemand`, released on
+leaving the window or deallocation); the last one leaving stops the listening and forgets the
+timestamps. Moments are motion, so with motion held (Reduce Motion, Theme animations, Low Power
+Mode) a pulse reads its binding's fallback, as audio does. `ExtensionHostSignal.isReactive`
+marks workload, audio readings and moments as the readings a host may damp under the person's
+reaction policy; nothing applies a strength yet.
+
+**A surface may name one picture.** `ExtensionMetalSurface.texture` is a package-relative PNG or
+JPEG. `ExtensionManager.prepareCustomSurfaceTexture` snapshots the package root and process
+generation on the main actor, runs the containment check, the bounded read
+(`ExtensionImageResourcePolicy`: 4 MiB, 1,024 × 1,024) and the decode on a worker, and rechecks
+the generation before handing back `ExtensionSurfaceTexturePixels` — straight-alpha sRGB RGBA8,
+the convention the surface's own output blends in. The upload (≤ 4 MiB, once per build) is the
+only main-actor step. Until it lands, and for good if it fails (logged), the surface samples a
+1 × 1 transparent placeholder; the hook is never skipped for a picture that only colours it.
+With `texture` stated the fragment wrapper passes `texture2d<float> image [[texture(0)]]` and a
+linear clamp-to-edge `sampler imageSampler [[sampler(0)]]` as the author's third and fourth
+arguments; without it the two-argument ABI is untouched.
+
+**Scaling.** Three planes per window plus the window hook, each at most one surface of at most
+eight inputs and one ≤ 1,024 px picture: the per-frame signal work is a few dozen O(1) reads,
+the theme cache holds one entry per appearance name (two to four in practice), and the moment
+reader holds two timestamps. Picture memory is bounded at 4 MiB per textured surface.
+
 ### Left deliberately for later
 
-- **`display.backdrop@1` and `composer.backdrop@1`** are the same contract shape at other
-  placements. Nothing in the constraint or the plane is sidebar-specific; the display panel's
-  ground is a `ThemedSurfaceView` and would take the same plane.
 - **Band textures beyond the title bar.** `WindowChromeStyle.TitleBar.Texture` already knows
   pinstripes, brushed metal, dither and rule; letting pane header strips and the tab strip name
   the same kinds is one field and a component reading it.
@@ -2096,9 +2147,11 @@ ask for 24 fps.
 | The tool loop — create with a wash and a picture from bytes, read back, `remove_backdrop`, the asset dying with the theme — and the schema describing it | `ThemeToolTests` |
 | A contributed package's backdrop picture read at inspection, served by the registry, and a missing one refusing the package | `ExtensionAppearanceTests` |
 | The registry refusing content over the rows; the plane dressed, filled, passive and below the ceiling; undressed on republish; empty on an unresolvable image; stacked between the theme's ground and the list in the real sidebar; the cadence clamp and the visibility hold — and `sidebar-extension-backdrop-{light,dark}.png`, the real sidebar wearing an extension's picture | `SidebarExtensionBackdropTests` |
-| The host's signal set pinned to the SDK's, each reading, and the window-installed account reading | `ExtensionHostSignalsTests` |
+| The host's signal set pinned to the SDK's, each reading, and the window-installed account reading; theme readings per appearance and their cache; the moment pulse, the reader's lazy listening and the motion fallback | `ExtensionHostSignalsTests` |
+| `display.backdrop@1` and `composer.backdrop@1`: the registry refusing content over the host's; each plane dressed, passive, at the ceiling, undressed on republish; layered on the display pane's ground beneath its tab row and as the composer's first subview; the cadence clamp and the hold | `ExtensionBackdropPlacementTests` |
+| A textured surface's placeholder, the picture in place after it lands, straight-alpha decoding, the image limits, the four-argument ABI, and drawing on when the picture never arrives | `ExtensionSurfaceTextureTests` |
 | Every SDK signal accepted at publication and an unknown one refused | `ExtensionRendererTests` |
-| The contract's shape, the role's opt-in, `overlayTop`'s own coherence rule, the enumerated signals, the catalogue count | `ExtensionContractTests` (SDK) |
+| The contract's shape at every backdrop placement, the role's opt-in, `overlayTop`'s own coherence rule, the enumerated and reactive signals, the texture field's wire form and refusals, the catalogue count | `ExtensionContractTests` (SDK) |
 
 
 ## Portable gradient drift
@@ -2426,6 +2479,9 @@ and dropped on `AppThemeDidChange`.
 
 ### Words: two slots, deliberately
 
+*Since 2026-10-04 there are three, and they reach the iPhone — see "a theme you can live in"
+below. The rule this section states is unchanged.*
+
 A theme may replace the native conversation's working word list and the empty new-session
 composer's invitation, and nothing else. Both are already playful copy — the word is dealt from
 a list for variety, the invitation is a suggestion — while every word a person reads to
@@ -2575,6 +2631,117 @@ pill scroller's modern geometry, the outlined field's resting edge, the sticker'
 accessibility, the project count's sticker and switch back, old documents decoding to the quiet
 defaults, and a tool round trip of all eight values.
 
+## 2026-10-04 — a theme you can live in
+
+The case was a Matrix theme authored through the tools, recorded in use. Every layer was stated
+and the rain fell, and the recording still showed four places where the app broke the world it
+was wearing: a fresh chat called itself "New Session"; names changed with a shape morph where the
+film decodes them; project tiles and the Claude mark stayed purple, orange and blue in a
+one-colour world; and the iPhone kept saying "New session" and offering task suggestions. Beside
+those, the person wanted one knob over how hard every theme's reactions to agents and music hit,
+because a theme author's "lively" is somebody else's "busy". Four pieces of vocabulary and one
+setting answer them:
+
+| Stated in | What it is | Interpreter |
+|---|---|---|
+| `ThemeWords.untitledSession` | the name an unnamed session wears on screen | `AgentSession.presentedTitle`, `ThemeWording.untitledSessionName` |
+| `RemoteThemeDTO.words` | the three word slots, projected to the phone | `RemoteThemePalette.composerPlaceholder` / `.untitledSessionName`, `SessionDraftView` |
+| `AppTheme.Variant.titleMorph` (`ThemeTitleMorph`) | the name transition a theme suggests and, for a scramble, its alphabet | `MorphingTitleLabel.currentMorph`, `ScrambleEffect(characters:)` |
+| `Material.identityMarks` (`natural` / `tinted`) | whether generated identity marks are inked in the accent | `IdentityMarkInk`, `GeneratedProjectIcon.image(for:tint:)`, `SessionRowView.plated`, `AccountBadge.chip` |
+| `AppSettings.themeReactionStrength` (0–200 %) | the person's scale on every reaction to work and music | `ThemeReactions`, through `DesignSettingsReading.themeReactionStrength` |
+
+### The untitled name is presentation, and only presentation
+
+`displayTitle` has around 150 callers, and some of them treat the name as a fact: a migrated
+session stores `displayTitle` as its real title, notifications and the control plane quote it,
+search indexes it. A themed stand-in there would be written down — a migration would save
+"Unknown program" as the session's title, which naming detection does not recognise as a
+placeholder, so prompt naming would never replace it — and would outlive the theme. So
+`displayTitle` is unchanged and `presentedTitle` is new; only the sidebar row, the page title and
+the phone's catalogue read it. `SessionNaming` still compares *stored* titles with the app's own
+placeholder. A row remembers whether it is showing an unnamed session (`showsUntitledName`, read
+through the sidebar's fact parity like the title itself) and the theme sweep renames it — a
+morph, like any rename — while re-applying the extension properties it last applied, so an
+extension's title is never dropped. The window re-asks its page title on `AppThemeDidChange`, and
+the phone's catalogue revision already moves on every theme change.
+
+### Words cross to the phone as written
+
+`RemoteThemeDTO.words` is optional both ways, the `backdropGradient` precedent: an older phone
+ignores it, an older Mac sends none, an absent slot means the phone's own copy. The bridge sends
+words cleaned the way `ThemeWording` uses them and none for a silent theme or System. The phone
+uses the invitation in place of its rotating task suggestion (never for a manager, who is briefed)
+and the untitled name as the draft's title; it has no working-word line to dress. Theme words
+never pass through `MobileL10n.string` — the localization lint would rightly flag a dynamic key —
+and the theme cache counts them against its byte budget and caps the list.
+
+### A decode, and the scramble that never drew
+
+`ChatNameMorphStyle` gains `automatic` ("Theme's Choice"), now the default: the theme's
+`titleMorph` plays, or Shape Morph when it states none. An explicit style the person chose wins,
+but a scramble always draws from the theme's alphabet when it states one — the alphabet is what a
+scramble *looks like* here, not whether to scramble. Stored choices are unchanged, so nobody who
+picked a style loses it. Validation refuses `automatic` as a theme's style and an alphabet on any
+style but `scramble`; a style a newer build knows decodes to no morph rather than failing the
+theme.
+
+Making the decode visible found a LabelMorph bug: `ScrambleEffect` set `CATextLayer.string`, but
+every character is a `GlyphLayer` that rasters its slot's character itself, so the scramble had
+only ever faded. A glyph layer now draws a `transientCharacter` when one is set, and the
+scrambling moved to one `ScrambleTicker` for the process instead of a repeating timer per glyph
+(a forty-character rename ran eighty). Half-width katakana fit a Latin letter's slot; full-width
+forms would clip, which the tool description says. `ThemeTitleMorph.swift` is symlinked into the
+design kit with `MorphingTitleLabel`, and the kit's `ChatNameMorphStyle` carries `automatic` too.
+
+### One ink for identity
+
+A theme that states `identity_marks: tinted` gets every *generated* mark in its accent: a
+project's tile held back as a fill and outlined and lettered in full accent, an agent's brand mark
+converted to a template silhouette in the accent (the conversion selection already made), and an
+initial chip filled and ringed in it. A person's own choice — a stored project icon, an account
+photo, an account colour from Settings — keeps its pixels. Caches stay keyed by what is drawn: the
+tile's key carries the resolved ink. `ProjectRowView.rederiveThemedContent` used to return early
+for a generated tile because nothing about it depended on the theme; now it re-inks. An account
+chip already on screen follows at the row's next refresh, which while agents work is constant.
+
+### The person's say over reactions
+
+`ThemeReactions` is the one owner of whether and how strongly decoration answers what it reacts
+to, and Settings ▸ Motion ▸ Reactions holds both halves:
+
+- **React to agent activity** (`themeReactsToActivity`, default on) — off, every activity
+  reading is absent at the decorative boundary: a logo's or mascot's working stream stops (the
+  mascot's pose still changes; that is information), and an extension input bound to
+  `workload.*` or `moment.*` reads its binding's idle fallback, as if nothing were working. The
+  music half's switch is the existing **Music-reactive themes** opt-in, which already governs
+  capture, so audio needs no second switch. **Theme animations** still overrides both.
+- **Reaction strength** scales whichever half is on, and is disabled when neither is.
+
+The strength stores a whole-ten percentage (`clampingRange(0...200)`, because 0% is a
+decision, not "unset" — `range(_:)` would have folded it to the default), and `DesignSettings`
+carries it into `UI/Design` as a multiple. It is applied where reactive readings enter
+decoration: a logo's and a mascot's working streams (the mascot's floor scales down with it and
+never rises), the live audio spectrum's bars, and every extension input whose signal
+`isReactive` — workload, audio levels and bands, moments — before the extension's own mapping
+sees it; counts scale as counts, facts (`audio.available`, theme colours, the clock, the account)
+pass through. It never scales a fact the app reports, never starts capture, and leaves ambient
+time-driven motion alone. A slider move reaches mounted logos and mascots at once through the
+motion hold's existing settings fan-out. This is the activity/music half of the effects policy
+proposed in [`customization-packs.md`](../feature-drafts/customization-packs.md); decorative
+motion as a whole remains `playsThemeMotion`.
+
+### Tests
+
+| What | Where |
+|---|---|
+| The untitled slot's gates, `presentedTitle` themed while `displayTitle` stays the app's, the words reaching the bridge, the tool loop | `ThemeCharacterTests` |
+| Older themes without words decode; words round-trip | `RemoteThemeGradientTests` (RemoteKit) |
+| Words cached with the theme and bounded | `MobileThemeCacheStoreTests` |
+| The morph's wire form and unknown-style drop, its gates, Theme's Choice playing the theme's scramble, an explicit style winning, the layer report, the tool loop and schema | `ThemeTitleMorphTests` |
+| A scrambling glyph draws the pool then settles; one ticker drives every glyph and stops | `ScrambleEffectTests` (LabelMorph) |
+| Marks default natural on every stock theme; a tinted tile and chip; a person's colour kept; the tool loop | `IdentityMarkInkTests` |
+| The scale's arithmetic, activity off holding activity but not music, the setting's default and clamp, extension inputs scaled (activity off reading the fallback) and facts not, a logo's stream at 0/100/200 % and with activity off, the Motion rows: the switch, the slider landing on tens and disabling with no reaction on | `ThemeReactionsTests` |
+
 ## Opt-in music spectrum
 
 `sidebar.brand.analyzer` can explicitly choose `audio` or `workload` independently of the
@@ -2584,3 +2751,121 @@ analyzer and extension Metal `audio.*` bindings share one locally analyzed readi
 can enable capture, choose a source, or obtain raw audio. Permission, motion/visibility gates,
 the fixed eight-band contract and measured budgets are owned by
 [`audio-spectrum.md`](audio-spectrum.md).
+
+## 2026-10-04 — a palette may glow
+
+A terminal palette can now state a **phosphor glow**: a soft halo beneath the text, in each run's
+own colour, the bloom a CRT gives lit phosphor. It is opt-in in every sense — no stock palette
+states one, an unstated glow draws nothing and costs nothing, and the only way to set one today is
+through the tools.
+
+### The model
+
+`TerminalTheme.glow` is an optional `TerminalGlow { radius, opacity }`, radius in points.
+
+- **Absent is none, and absent is never written.** `encodeIfPresent`, unlike `boldForeground`,
+  which is always written: a bold colour has a meaning when unstated (the foreground) that must
+  survive a round trip, a glow does not. So every palette on disk, and every palette without a
+  glow from now on, encodes to the same bytes it did before the field existed —
+  `testAPaletteWithoutAGlowWritesNoGlowKeyAndRoundTripsByteForByte` holds that byte for byte.
+- **A glow that cannot be read is dropped, not fatal.** A present-but-malformed `glow` logs and
+  decodes as none; losing a halo leaves a readable terminal, losing the palette would not.
+- **Bounds: radius 0.5–6 points, opacity 0.05–0.8**, in `TerminalGlow.radiusRange` and
+  `opacityRange`. Wider than 6 points a halo sits on the neighbouring rows' text at ordinary line
+  heights; stronger than 0.8 it stops reading as light behind the text and reads as smudge; below
+  the floors nothing visible is drawn for the cost. The tools and the app-theme variant validator
+  (`AppThemeEditing`, beside the bold-text gate) refuse a value outside them and name the field;
+  a hand-edited document is not refused but is clamped on its way to the renderer
+  (`TerminalGlow.textGlow`).
+
+Because the glow lives on the palette it needs no wiring of its own: a custom terminal theme, an
+app theme variant's paired palette, Follow App Theme (`ThemeAssignments.palette(withID:)` returns
+the variant's palette whole) and the profile's embedded default all carry it.
+`TerminalSession.applyProfile` — the one place a palette reaches a terminal view, shell drawer and
+standalone terminals included — sets `terminalView.textGlow` on every refresh, so a session moving
+to a palette without one stops glowing.
+
+**The iPhone does not glow, and its wire is unchanged.** `RemoteThemeBridge` builds
+`RemoteTerminalThemeDTO` field by field and does not send the glow; SwiftTerm's UIKit view has no
+renderer for it. `testTheRemotePaletteIsUnchangedByAGlow` holds the DTO a glowing palette produces
+equal to the plain palette's, so no phone, old or new, sees a new key.
+
+### The tools
+
+`create_theme`'s `colors` and an app theme variant's `terminal_colors` are one object on the wire,
+now decoded by `TerminalColorsArguments`: `glow` and `remove_glow` are read out by name and every
+other key must still be a hex string, as before. A dictionary literal of colours still builds one,
+so callers written against `[String: String]` read as they did.
+
+- `glow: {radius, opacity}` — either half may be omitted; it keeps the base palette's value, or
+  `TerminalGlow.standard` (2.5 points, 0.45) when the base has none.
+- `remove_glow: true` drops the base's glow; stating both in one patch is refused, the way
+  `transition` and `remove_transition` are.
+- A patch that says nothing about the glow leaves it exactly as it was.
+- `get_app_theme` reports `terminal_colors.glow` in the same shape, so the document reads back
+  into a patch unchanged.
+- `create_theme` accepts `colors` holding only a glow.
+
+The merge and the document live in `TerminalPaletteToolParsing`, beside `AppThemeToolParsing` and
+for the same reason: the coordinator's authority ratchet is for transport. Moving the existing
+palette merge there left the coordinator files twenty lines shorter with the glow added.
+
+### The renderer: an underlay, not a shadow per run
+
+SwiftTerm's `TerminalView.textGlow` is drawn by the Core Graphics renderer, the one Threading uses;
+Metal ignores it. The first implementation was the obvious one, a zero-offset `setShadow` in the
+run's colour on every glyph run, cleared before decorations. It was correct and measured 7.4–10×
+the frame-draw cost of the same frame without a glow (`docs/architecture/performance.md`, "Terminal
+text glow"): Core Graphics blurs every shadowed operation separately, so a full Retina frame paid
+for 37 to 3,700 separate blurs.
+
+What shipped draws each frame's lit content a second time into a device-resolution bitmap, blurs
+it with three `vImageBoxConvolve` passes whose half-widths sum to the radius, scales it by the
+opacity, and paints it under the frame before any row is drawn. One blur per frame, at 4.1–4.7×.
+Four decisions inside it were measured rather than chosen:
+
+- **Device resolution, on the device grid.** A coarser bitmap blurred a ninth of the pixels but
+  had to be scaled back up, and Core Graphics scaling an 800 × 600-point underlay onto a Retina
+  store cost 10–18 ms — more than everything it saved. Drawn back 1:1 at a whole-pixel origin, a
+  partial repaint is also pixel-identical to a full one.
+- **Opacity after the blur.** Core Graphics leaves its fast paths for any alpha below 1: drawing
+  the text into the underlay at the glow's alpha (as a context alpha or as translucent colours)
+  cost about a millisecond more per frame than one `vImageMatrixMultiply` afterwards, and
+  compositing the underlay with a context alpha cost 9.7 ms against 0.4 ms for a plain
+  source-over.
+- **No retained surface.** Reusing the bitmap and blur scratch between frames removed page faults
+  and added an equal clear; the same total, and megabytes held per glowing view for nothing.
+- **The underlay shares the destination's colour space** where an 8-bit bitmap can, so
+  compositing it is not colour matching.
+
+**What glows.** Glyph runs in their resolved colour (bold, dim, ANSI, truecolor, selected text),
+and box drawing, block elements and Powerline glyphs — they are text the renderer draws itself,
+and a TUI's border that did not glow beside its text read as broken. Underlines, strikethrough,
+backgrounds, images and the caret do not. The halo sits beneath everything, so a cell with an
+explicit background covers the halo its neighbours cast into it, symmetrically above and below; a
+shadow per run had painted later rows' halos over earlier rows' text instead.
+
+**The dirty region grows by the halo's reach.** A changed row's halo lands on its neighbours, so
+the frame tick (`TerminalRenderOwner`) widens every partial region by
+`TerminalTextGlow.reachInRows` — the radius plus the blur's rounding, in whole rows, one row at
+every allowed radius and ordinary line height — and the draw redraws the underlay of every row
+within that reach. With no glow the reach is zero and the region is exactly what it was.
+`TextGlowTests.aPartialRepaintMatchesAFullOne` repaints only the region a one-row change produces
+into a backing store holding the previous frame and requires every byte to equal a full repaint,
+at 1x and 2x, for four radii; a margin one blur-width short of that failed it by 56 bytes.
+
+### Tests
+
+`TerminalGlowTests` (storage, bounds, clamping, stock palettes, variant copy and coding, the
+remote wire), `TerminalGlowSessionTests` (applied, moved and cleared on a live session),
+`TerminalGlowFollowsAppThemeTests`, `TerminalGlowToolTests` (decoding, the create/get/merge/remove
+loop, refusals by field, the validator gate, `create_theme`, the schema) and
+`TerminalGlowRenderTests`, which draws five palettes with and without a glow through real
+`TerminalView`s (each in an unshown window, its frame prepared by hand), requires each plain strip
+to draw text and each glowing strip to differ from it, and keeps
+`terminal-glow.png` under `THREADING_RENDER_OUT`. SwiftTerm's `TextGlowTests` own the pixels: a
+neighbouring row gains the run's colour and only with a glow, each run glows in its own colour,
+decorations do not glow, the dirty-region padding, and the exactness rule above.
+
+**Not built:** a Bold Text–style control in the Settings theme editor and in `ThemePreviewView`, a
+glow in `preview_app_theme`'s sample terminal, and an iOS renderer.

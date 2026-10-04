@@ -63,7 +63,8 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   (`host.project.files.read`), plus the `attachments.preview@1` offer contract and
   `attachments.file-types` registration.
 - Provider/account icon resolution and constrained session identity composition.
-- Component contracts `application.main-window@1`, `sidebar.backdrop@1`, `sidebar.project-row@1`,
+- Component contracts `application.main-window@1`, `sidebar.backdrop@1`, `display.backdrop@1`,
+  `composer.backdrop@1`, `sidebar.project-row@1`,
   `sidebar.project-hover-card@1`, `sidebar.session-row@1`,
   `sidebar.session-hover-card@1`, `sidebar.session-identity@1`,
   `toolbar.account-usage-popover@1`, `composer.session-start@1`, and
@@ -96,14 +97,24 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
 - Capability-gated Metal fragment surfaces in declared hook positions. Threading owns the native
   view, rendering lifecycle and scalar inputs; the extension supplies bounded shader source. A
   contract may place a hook *beneath* the host's content (`proceedPlacement: overlayTop`) and
-  cap a surface's cadence; `sidebar.backdrop@1` does both and admits the `backdrop` image role,
-  a fill that no earlier contract accepts. Surfaces bind host signals by name —
-  `active-account.usage-remaining`, `workload.intensity`, `workload.working-count`,
-  `time.day-fraction`, `audio.available`, `audio.level`, `audio.bass`, `audio.mids`,
-  `audio.treble`, and `audio.band.0` through `.7` — and a host refuses a patch naming one
+  cap a surface's cadence; the three backdrop placements — `sidebar.backdrop@1`,
+  `display.backdrop@1` and `composer.backdrop@1` — do both with one shared set of constraints
+  and admit the `backdrop` image role, a fill that no other contract accepts. Surfaces bind host
+  signals by name — `active-account.usage-remaining`, `workload.intensity`,
+  `workload.working-count`, `time.day-fraction`, `audio.available`, `audio.level`,
+  `audio.bass`, `audio.mids`, `audio.treble`, `audio.band.0` through `.7`, `theme.dark`,
+  `theme.accent.red`/`.green`/`.blue`, `theme.ground.red`/`.green`/`.blue`,
+  `moment.turn-finished` and `moment.needs-attention` — and a host refuses a patch naming one
   it cannot answer. Audio levels require the user's Motion-settings opt-in and a visible
   consumer; bindings never enable capture or select its source. Only normalized cached
-  levels cross this seam, with unavailable readings using the binding's fallback.
+  levels cross this seam, with unavailable readings using the binding's fallback. Theme
+  readings are answered for the surface's own appearance; moment pulses carry no session
+  identity and read their fallback while motion is held. `ExtensionHostSignal.isReactive`
+  marks the readings a host may damp under the person's reaction policy.
+- A Metal surface may name one package `texture` (PNG or JPEG, within the package image limits).
+  The host decodes and uploads it and passes `texture2d<float> image, sampler imageSampler` as
+  the fragment function's third and fourth arguments; the extension never receives the texture
+  object, and a surface without `texture` keeps the two-argument signature.
 - Optional advanced companion apps with independently reviewed OS capabilities, declared
   operations, and bounded remote surfaces rendered inside host-owned views.
 - Brokered HTTPS fetches (`network.brokered`) against origins declared in the manifest's

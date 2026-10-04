@@ -208,7 +208,9 @@ final class ThemeLogoView: NSView, ThemedComponent, ThemeParticleHolding {
             return
         }
         let hover = isHovered ? 1.0 : 0
-        let working = (motion?.spec.working ?? false) ? workingIntensity : 0
+        // The person's reaction settings decide whether and how hard the stream answers the agents.
+        let working = (motion?.spec.working ?? false)
+            ? ThemeReactions.scaledActivity(workingIntensity) : 0
         let full = ThemeParticleEmitter.streamRate(for: particles.spec, intensity: 1)
         let wanted = ThemeParticleEmitter.streamRate(
             for: particles.spec,

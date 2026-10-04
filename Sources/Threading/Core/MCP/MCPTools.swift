@@ -831,12 +831,85 @@ struct SetThemeArguments: Codable, Sendable {
   }
 }
 
+/// A terminal palette as the theme tools take it: colour names to hex strings, plus an optional
+/// `glow` block and `remove_glow`.
+///
+/// It is one JSON object on the wire — `create_theme`'s `colors` and an app theme's
+/// `terminal_colors` — so the two keys that are not colours are read out by name and every other
+/// key still has to be a hex string, as it always did. A dictionary literal of colours builds one,
+/// which keeps every caller written when this was `[String: String]` reading as it did.
+struct TerminalColorsArguments: Codable, Sendable, Equatable, ExpressibleByDictionaryLiteral {
+  typealias Key = String
+  typealias Value = String
+
+  static let glowKey = "glow"
+  static let removeGlowKey = "remove_glow"
+
+  var colors: [String: String]
+  var glow: TerminalGlowArguments?
+  var removeGlow: Bool?
+
+  init(_ colors: [String: String] = [:], glow: TerminalGlowArguments? = nil, removeGlow: Bool? = nil) {
+    self.colors = colors
+    self.glow = glow
+    self.removeGlow = removeGlow
+  }
+
+  init(dictionaryLiteral elements: (String, String)...) {
+    self.init(Dictionary(elements, uniquingKeysWith: { _, last in last }))
+  }
+
+  subscript(name: String) -> String? { colors[name] }
+
+  /// Whether the patch says anything at all.
+  var isEmpty: Bool { colors.isEmpty && glow == nil && removeGlow == nil }
+
+  private struct WireKey: CodingKey {
+    let stringValue: String
+    var intValue: Int? { nil }
+    init(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { nil }
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: WireKey.self)
+    var colors: [String: String] = [:]
+    for key in container.allKeys {
+      switch key.stringValue {
+      case Self.glowKey:
+        glow = try container.decode(TerminalGlowArguments.self, forKey: key)
+      case Self.removeGlowKey:
+        removeGlow = try container.decode(Bool.self, forKey: key)
+      default:
+        colors[key.stringValue] = try container.decode(String.self, forKey: key)
+      }
+    }
+    self.colors = colors
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: WireKey.self)
+    for (name, hex) in colors {
+      try container.encode(hex, forKey: WireKey(stringValue: name))
+    }
+    try container.encodeIfPresent(glow, forKey: WireKey(stringValue: Self.glowKey))
+    try container.encodeIfPresent(removeGlow, forKey: WireKey(stringValue: Self.removeGlowKey))
+  }
+}
+
+/// A terminal palette's phosphor glow. Either half may be omitted: it keeps the base palette's
+/// value, or `TerminalGlow.standard`'s when the base has no glow.
+struct TerminalGlowArguments: Codable, Sendable, Equatable {
+  let radius: Double?
+  let opacity: Double?
+}
+
 struct CreateThemeArguments: Codable, Sendable {
   let name: String?
   let baseID: String?
   /// Accepted for clients launched against the pre-ID schema.
   let base: String?
-  let colors: [String: String]?
+  let colors: TerminalColorsArguments?
   let apply: String?
 
   private enum CodingKeys: String, CodingKey {
@@ -932,6 +1005,7 @@ struct AppThemeMaterialArguments: Codable, Sendable {
   let toggleStyle: String?
   let fieldStyle: String?
   let badgeStyle: String?
+  let identityMarks: String?
 
   private enum CodingKeys: String, CodingKey {
     case panelRadius = "panel_radius"
@@ -972,6 +1046,7 @@ struct AppThemeMaterialArguments: Codable, Sendable {
     case toggleStyle = "toggle_style"
     case fieldStyle = "field_style"
     case badgeStyle = "badge_style"
+    case identityMarks = "identity_marks"
   }
 }
 
@@ -1203,24 +1278,30 @@ struct AppThemeMomentsArguments: Codable, Sendable {
   }
 }
 
-/// The variant's words. Each half merges: a stated list replaces the list, a stated
-/// placeholder replaces the placeholder, and each `remove_*` gives one back to the app.
+/// The variant's words. Each slot merges: a stated list replaces the list, a stated
+/// placeholder or name replaces it, and each `remove_*` gives one back to the app.
 struct AppThemeWordsArguments: Codable, Sendable {
   let working: [String]?
   let removeWorking: Bool?
   let composerPlaceholder: String?
   let removeComposerPlaceholder: Bool?
+  let untitledSession: String?
+  let removeUntitledSession: Bool?
 
   init(
     working: [String]? = nil,
     removeWorking: Bool? = nil,
     composerPlaceholder: String? = nil,
-    removeComposerPlaceholder: Bool? = nil
+    removeComposerPlaceholder: Bool? = nil,
+    untitledSession: String? = nil,
+    removeUntitledSession: Bool? = nil
   ) {
     self.working = working
     self.removeWorking = removeWorking
     self.composerPlaceholder = composerPlaceholder
     self.removeComposerPlaceholder = removeComposerPlaceholder
+    self.untitledSession = untitledSession
+    self.removeUntitledSession = removeUntitledSession
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -1228,6 +1309,8 @@ struct AppThemeWordsArguments: Codable, Sendable {
     case removeWorking = "remove_working"
     case composerPlaceholder = "composer_placeholder"
     case removeComposerPlaceholder = "remove_composer_placeholder"
+    case untitledSession = "untitled_session"
+    case removeUntitledSession = "remove_untitled_session"
   }
 }
 
@@ -1759,7 +1842,7 @@ enum AppThemeSidebarLogoArguments: Codable, Sendable {
 struct AppThemeVariantArguments: Codable, Sendable {
   let roles: [String: String]?
   let material: AppThemeMaterialArguments?
-  let terminalColors: [String: String]?
+  let terminalColors: TerminalColorsArguments?
   let sidebar: AppThemeSidebarArguments?
   let chrome: AppThemeChromeArguments?
   let transition: AppThemeTransitionArguments?
@@ -1770,13 +1853,15 @@ struct AppThemeVariantArguments: Codable, Sendable {
   let removeMoments: Bool?
   let words: AppThemeWordsArguments?
   let removeWords: Bool?
+  let titleMorph: AppThemeTitleMorphArguments?
+  let removeTitleMorph: Bool?
 
   /// Defaulted so the call sites (and tests) written before `sidebar` and `chrome` existed
   /// keep reading as they did.
   init(
     roles: [String: String]? = nil,
     material: AppThemeMaterialArguments? = nil,
-    terminalColors: [String: String]? = nil,
+    terminalColors: TerminalColorsArguments? = nil,
     sidebar: AppThemeSidebarArguments? = nil,
     chrome: AppThemeChromeArguments? = nil,
     transition: AppThemeTransitionArguments? = nil,
@@ -1786,7 +1871,9 @@ struct AppThemeVariantArguments: Codable, Sendable {
     moments: AppThemeMomentsArguments? = nil,
     removeMoments: Bool? = nil,
     words: AppThemeWordsArguments? = nil,
-    removeWords: Bool? = nil
+    removeWords: Bool? = nil,
+    titleMorph: AppThemeTitleMorphArguments? = nil,
+    removeTitleMorph: Bool? = nil
   ) {
     self.roles = roles
     self.material = material
@@ -1801,6 +1888,8 @@ struct AppThemeVariantArguments: Codable, Sendable {
     self.removeMoments = removeMoments
     self.words = words
     self.removeWords = removeWords
+    self.titleMorph = titleMorph
+    self.removeTitleMorph = removeTitleMorph
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -1814,6 +1903,27 @@ struct AppThemeVariantArguments: Codable, Sendable {
     case removeMoments = "remove_moments"
     case words
     case removeWords = "remove_words"
+    case titleMorph = "title_morph"
+    case removeTitleMorph = "remove_title_morph"
+  }
+}
+
+/// How names change on screen in a variant. Fields merge onto a stated morph; a new block needs
+/// a `style`.
+struct AppThemeTitleMorphArguments: Codable, Sendable {
+  let style: String?
+  let characters: String?
+  let removeCharacters: Bool?
+
+  init(style: String? = nil, characters: String? = nil, removeCharacters: Bool? = nil) {
+    self.style = style
+    self.characters = characters
+    self.removeCharacters = removeCharacters
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case style, characters
+    case removeCharacters = "remove_characters"
   }
 }
 
@@ -1828,7 +1938,7 @@ struct CreateAppThemeArguments: Codable, Sendable {
   /// Legacy single-variant patch fields.
   let roles: [String: String]?
   let material: AppThemeMaterialArguments?
-  let terminalColors: [String: String]?
+  let terminalColors: TerminalColorsArguments?
   let apply: Bool?
 
   private enum CodingKeys: String, CodingKey {
@@ -1884,7 +1994,7 @@ struct UpdateAppThemeArguments: Codable, Sendable {
   /// Legacy single-variant patch fields.
   let roles: [String: String]?
   let material: AppThemeMaterialArguments?
-  let terminalColors: [String: String]?
+  let terminalColors: TerminalColorsArguments?
   let apply: Bool?
 
   private enum CodingKeys: String, CodingKey {
@@ -7875,7 +7985,10 @@ enum MCPTools {
         darker".
 
         `colors` is merged onto `base_id`, so changing one colour means sending one \
-        colour, not twenty. Every value is a hex string such as "#1E1E2E".
+        colour, not twenty. Every colour is a hex string such as "#1E1E2E". `colors.glow` \
+        ({"radius": 2.5, "opacity": 0.45}) adds an optional phosphor glow, a soft halo \
+        beneath the text in each run's own colour — radius 0.5–6 points, opacity \
+        0.05–0.8 — and `colors.remove_glow` drops one the base had.
 
         An existing theme is never overwritten: pick another name if this one is taken. \
         Text that cannot be read against its own background is refused — check the pair \
@@ -7898,7 +8011,8 @@ enum MCPTools {
           "colors": MCPPropertySchema(
             type: .object,
             description: """
-              The colours to change, as hex strings. Any subset; anything omitted \
+              The colours to change, as hex strings, plus an optional `glow` \
+              ({radius, opacity}) or `remove_glow`. Any subset; anything omitted \
               is taken from `base_id`.
               """,
             properties: paletteSchema
@@ -8093,8 +8207,11 @@ enum MCPTools {
         figure at the sidebar's foot that changes pose as agents rest, work, wait and \
         finish, `moments` answers a finished turn with a sound and a waiting session with \
         a shower and a sound, `words` gives the status line and composer its voice, and \
-        `sidebar.logo_in_dock` puts the logo on the Dock tile. Check the result with \
-        preview_app_theme, which shows every mascot mood.
+        `sidebar.logo_in_dock` puts the logo on the Dock tile. A variant's \
+        `terminal_colors.glow` gives its paired terminal palette an optional phosphor glow \
+        — a soft halo beneath the text in each run's own colour (radius 0.5–6 points, \
+        opacity 0.05–0.8). Check the result with preview_app_theme, which shows every \
+        mascot mood.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -9102,10 +9219,11 @@ enum MCPTools {
     MCPBuiltInToolRegistry.descriptor(for: tool)?.definition
   }
 
-  /// The twenty-one named colours of a palette, described once for `create_theme`.
+  /// The twenty-one named colours of a palette and its optional glow, described once for
+  /// `create_theme`'s `colors` and an app theme variant's `terminal_colors`.
   ///
-  /// Generated from `ThemeColorKey` rather than written out, so a colour cannot be added to
-  /// the model and left out of the schema an agent reads.
+  /// The colours are generated from `ThemeColorKey` rather than written out, so a colour
+  /// cannot be added to the model and left out of the schema an agent reads.
   private static var paletteSchema: [String: MCPPropertySchema] {
     var properties: [String: MCPPropertySchema] = [:]
 
@@ -9141,7 +9259,36 @@ enum MCPTools {
       )
     }
 
+    properties[TerminalColorsArguments.glowKey] = MCPPropertySchema(
+      type: .object,
+      description: """
+        Optional phosphor glow: a soft halo beneath the terminal's text in each run's own \
+        colour, like a CRT's bloom. Off unless stated. Reads best on a dark background; keep \
+        it subtle (radius 2–3, opacity 0.35–0.6) for text the user reads all day. An \
+        omitted half keeps the base palette's glow, else radius 2.5 and opacity 0.45.
+        """,
+      properties: [
+        "radius": MCPPropertySchema(
+          type: .number,
+          description: "How far the halo reaches from the text, "
+            + "\(glowRange(TerminalGlow.radiusRange)) points."
+        ),
+        "opacity": MCPPropertySchema(
+          type: .number,
+          description: "The halo's strength, \(glowRange(TerminalGlow.opacityRange))."
+        ),
+      ]
+    )
+    properties[TerminalColorsArguments.removeGlowKey] = MCPPropertySchema(
+      type: .boolean,
+      description: "true removes the base palette's glow. Cannot be combined with glow."
+    )
+
     return properties
+  }
+
+  private static func glowRange<Bound: BinaryFloatingPoint>(_ range: ClosedRange<Bound>) -> String {
+    "\(Double(range.lowerBound))–\(Double(range.upperBound))"
   }
 
   private static var appRoleSchema: [String: MCPPropertySchema] {
@@ -9239,7 +9386,9 @@ enum MCPTools {
           recognisable, because errors, diffs and warnings rely on them. Every slot a \
           program writes text in — including black and bright_black on a dark ground, and \
           white and bright_white on a light one — must stay readable on the background. \
-          preview_app_theme draws a sample terminal with it.
+          preview_app_theme draws a sample terminal with it. `glow` ({radius, opacity}) \
+          adds a phosphor glow beneath the terminal's text and `remove_glow` drops the \
+          base variant's.
           """,
         properties: paletteSchema
       ),
@@ -9372,10 +9521,11 @@ enum MCPTools {
       "words": MCPPropertySchema(
         type: .object,
         description: """
-          The theme's voice in the two places a theme may speak: the word a native \
+          The theme's voice in the three places a theme may speak: the word a native \
           conversation's status line shows while a turn runs (dealt one per turn, every \
-          word before any repeats) and the empty new-session composer's invitation. \
-          State words and status text stay the app's own.
+          word before any repeats), the empty new-session composer's invitation, and the \
+          name a fresh session wears until something names it ("New Session"). All three \
+          also reach the paired iPhone. State words and status text stay the app's own.
           """,
         properties: [
           "working": MCPPropertySchema(
@@ -9396,7 +9546,51 @@ enum MCPTools {
             type: .boolean,
             description: "True returns the app's own invitation."
           ),
+          "untitled_session": MCPPropertySchema(
+            type: .string,
+            description: "What an unnamed session is called in the sidebar, the window "
+              + "title and on the iPhone until its first prompt, its agent or the person "
+              + "names it — one line of at most 32 characters, e.g. \"Unknown program\". "
+              + "Shown only; never saved as the session's title."
+          ),
+          "remove_untitled_session": MCPPropertySchema(
+            type: .boolean,
+            description: "True returns the app's own \"New Session\"."
+          ),
         ]
+      ),
+      "title_morph": MCPPropertySchema(
+        type: .object,
+        description: """
+          How every session, project and checkout name changes on screen in this variant — \
+          and, for a scramble, which characters the decoder cycles through before it settles \
+          (katakana for a hacker film, a departures board's letters for an airport). The \
+          person's Motion setting decides: its default, Theme's Choice, plays this; an explicit \
+          style there wins, though a scramble still draws from this alphabet. Reduce Motion \
+          lands every name directly. Fields merge onto a stated morph.
+          """,
+        properties: [
+          "style": MCPPropertySchema(
+            type: .string,
+            description: "\"shapeMorph\", \"crossfade\", \"slideUp\", \"slideDown\", "
+              + "\"scale\", \"bounce\", \"drop\", \"flip\", \"blur\", \"scramble\" or "
+              + "\"typewriter\". Required for a new block."
+          ),
+          "characters": MCPPropertySchema(
+            type: .string,
+            description: "With style \"scramble\": 1–96 characters the decoder cycles through, "
+              + "as one string, e.g. \"ｱｲｳｴｵｶｷｸ0123456789\". Half-width forms fit a Latin "
+              + "name's letter spacing; whitespace is ignored."
+          ),
+          "remove_characters": MCPPropertySchema(
+            type: .boolean,
+            description: "True returns a scramble to the decoder's own alphabet."
+          ),
+        ]
+      ),
+      "remove_title_morph": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns names to the app's own morph."
       ),
       "remove_words": MCPPropertySchema(
         type: .boolean,
@@ -10416,6 +10610,14 @@ enum MCPTools {
         description: "Text-field and composer construction: \"well\" (the default sunken "
           + "well) or \"outlined\" — a search bar's capsule with no bevel and a thick accent "
           + "outline at rest, the field announcing itself before it is focused."
+      ),
+      "identity_marks": MCPPropertySchema(
+        type: .string,
+        description: "How identity marks are inked: \"natural\" (the default — each project's "
+          + "hashed tile colour, each agent's brand colour, each account's chip colour) or "
+          + "\"tinted\" — every generated mark in the accent: tiles outlined and lettered in it, "
+          + "agent marks as accent silhouettes, initial chips ringed in it. A picture or colour "
+          + "the person chose keeps its own pixels. For a one-colour world."
       ),
       "badge_style": MCPPropertySchema(
         type: .string,

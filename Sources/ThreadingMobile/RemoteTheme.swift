@@ -809,6 +809,13 @@ struct RemoteThemePalette: Equatable {
     }
 
     var colorScheme: ColorScheme { source?.mode == .light ? .light : .dark }
+
+    /// The Mac theme's invitation for an empty new-session composer, or nil for the phone's own
+    /// suggestion. The theme author's text, shown as written and never localized.
+    var composerPlaceholder: String? { source?.words?.composerPlaceholder }
+    /// The Mac theme's name for a session nothing has named yet, or nil for "New session".
+    var untitledSessionName: String? { source?.words?.untitledSession }
+
     var ground: Color { color("ground", fallback: "#16181D") }
     var surface: Color { color("surface", fallback: "#1B1E24") }
     var panel: Color { color("panel", fallback: "#22252C") }

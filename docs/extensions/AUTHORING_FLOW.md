@@ -172,7 +172,8 @@ Every app build now embeds the filtered snapshot under
 `Contents/Resources/ExtensionSDK/ThreadingExtensionKit`, and a hosted test verifies its version,
 manifest, public source, and absence of `.build`. `extension_scaffold_project` copies it into an
 atomic project, adds that project to the sidebar, and writes a visible starter panel plus
-`Scripts/package.sh`. That script runs the selected official Swift/Wasm SDK and atomically
+`Scripts/package.sh`. That script runs the selected official Swift/Wasm SDK in the release
+configuration — a debug module ships its debug information and unoptimized code — and atomically
 assembles `Build/<identifier>.threadingextension` with the entire editable project under `Source/`.
 WebAssembly packages without rebuildable Swift source are refused.
 

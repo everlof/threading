@@ -25,6 +25,9 @@ final class MobileThemeCacheStore {
     static let maximumArchiveBytes = 256 * 1_024
     static let maximumRecordCount = 64
     static let maximumColorCount = 128
+    /// The Mac's own ceiling on a theme's working words (`ThemeWordsLimits`), with headroom for
+    /// a newer Mac that allows more.
+    static let maximumThemeWorkingWords = 64
     static let maximumIdentifierBytes = 1_024
     static let maximumStringBytes = 4 * 1_024
     static let maximumAggregateStringBytes = 192 * 1_024
@@ -173,6 +176,17 @@ final class MobileThemeCacheStore {
             for (role, value) in record.theme.colors {
                 try count(role, required: true, limit: maximumIdentifierBytes)
                 try count(value, required: true)
+            }
+
+            // A theme's words are its author's copy, shown as written; they only count toward the
+            // archive's byte budget, which is what bounds them.
+            if let words = record.theme.words {
+                guard (words.working?.count ?? 0) <= maximumThemeWorkingWords else {
+                    throw ValidationError.invalidArchive
+                }
+                for word in words.working ?? [] { try count(word) }
+                try count(words.composerPlaceholder)
+                try count(words.untitledSession)
             }
 
             let material = record.theme.material
