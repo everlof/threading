@@ -30,5 +30,6 @@ load-bearing implementation rules still belong in `docs/architecture/`.
 7. [Managed work and recovery](managed-work-and-recovery.md)
 8. [Accounts](accounts.md)
 9. [Remote companion](remote-companion.md)
-10. [Extensions](extensions.md)
-11. [Themes](themes.md)
+10. [Remote hosts and autonomous work](remote-hosts-and-autonomous-work.md)
+11. [Extensions](extensions.md)
+12. [Themes](themes.md)
