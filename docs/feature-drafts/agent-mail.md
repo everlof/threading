@@ -128,7 +128,10 @@ What it costs, and how each is paid:
 - **Moving a session.** When a project's execution host changes, its sessions' addresses change.
   The old host keeps a forwarding record (old address → new address, owner-written, revisioned)
   and moves unacknowledged mail with the session at the hand-over; a message arriving at the old
-  address afterwards is forwarded once, not relayed onward again. The grants move **exactly**
+  address afterwards is forwarded once, not relayed onward again. As built, the forward vouches only
+  for the old host's own senders (others need the new host's own grants), and only for seven days
+  ([`autonomous-controller.md`](../architecture/autonomous-controller.md#agent-mail-schema-v7)).
+  The grants move **exactly**
   (`MailGrantMirror`): every page of both sides is read, revocations are copied (a revoked sender
   under a broader `*` grant must stay revoked), and a row the new side kept from an earlier stay is
   rewritten to what the old side would answer for that pattern, since rows are never deleted. The

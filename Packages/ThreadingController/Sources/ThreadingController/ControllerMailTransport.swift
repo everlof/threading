@@ -79,10 +79,10 @@ extension ControllerStore {
         do {
             return try db.transaction {
                 // The same prior-copy rules as `accept`: a returning move or a mailbox that moved onto
-                // the sender's host replaces the copy held here; anything else is a duplicate.
+                // the sender's host replaces the copy held here (`accept` retires it); anything else
+                // is a duplicate.
                 if let prior: MailMessage = try optional("mail", envelope.id.uuidString.lowercased()),
-                   !(try retireReturningMove(prior, envelope, from: peer)),
-                   !(try adoptSentCopy(prior, envelope, expectedForward: try expectsForward(envelope, from: peer))) {
+                   !(try priorCopyGivesWay(prior, envelope, expectedForward: try expectsForward(envelope, from: peer))) {
                     guard prior.envelope.sameRequest(as: envelope) else { throw ControllerError.conflict }
                     return MailPushResult(id: envelope.id, outcome: .duplicate, reason: nil)
                 }
@@ -90,7 +90,7 @@ extension ControllerStore {
                 return MailPushResult(id: envelope.id, outcome: .accepted, reason: nil)
             }
         } catch let error as ControllerError {
-            if case .storage = error { return MailPushResult(id: envelope.id, outcome: .refused, reason: "unavailable") }
+            if case .storage = error { return MailPushResult(id: envelope.id, outcome: .refused, reason: MailRefusalReason.unavailable) }
             return MailPushResult(id: envelope.id, outcome: .refused, reason: error.description)
         } catch {
             return MailPushResult(id: envelope.id, outcome: .refused, reason: "invalid")
@@ -115,7 +115,7 @@ extension ControllerStore {
                 let held = try db.rows("SELECT sequence FROM mail_outbound WHERE host=? AND message=? LIMIT 1",
                                        [.text(peer.description), .text(result.id.uuidString.lowercased())])
                 guard let sequence = held.first?.integers[0] else { continue }
-                if result.outcome == .refused, result.reason == "unavailable" { continue } // Retry later.
+                if result.outcome == .refused, result.reason == MailRefusalReason.unavailable { continue } // Retry later.
                 try settle(sequence: sequence, id: result.id, refusal: result.outcome == .refused ? (result.reason ?? "refused") : nil)
             }
         }
@@ -123,17 +123,24 @@ extension ControllerStore {
 
     /// Accepts a page pulled from `peer` and moves the pull cursor in the same transaction, so a
     /// crash cannot acknowledge mail this host never stored. Refusals travel on the next pull.
-    public func acceptPulled(_ envelopes: [MailEnvelope], from peer: HostID, next: Int64) throws {
+    ///
+    /// A message this store could not write (`unavailable`) is not a refusal: the page stops
+    /// there and the cursor stays where it was, so the whole page is pulled again and what was
+    /// already stored comes back as duplicates. Returns false when the page stopped early.
+    @discardableResult
+    public func acceptPulled(_ envelopes: [MailEnvelope], from peer: HostID, next: Int64) throws -> Bool {
         try db.transaction {
             guard var record = try mailPeer(peer) else { throw ControllerError.forbidden }
             var refused: [MailRefusal] = []
             for envelope in envelopes.prefix(MailTransportLimits.batch) {
                 let result = acceptPushed(envelope, peer: peer)
+                guard !(result.outcome == .refused && result.reason == MailRefusalReason.unavailable) else { return false }
                 if result.outcome == .refused { refused.append(MailRefusal(id: envelope.id, reason: result.reason ?? "refused")) }
             }
             record.pullCursor = max(record.pullCursor, next)
             record.pendingRefusals = refused.isEmpty ? nil : refused
             try update("mailPeer", peer.description, value: record)
+            return true
         }
     }
 
@@ -145,12 +152,19 @@ extension ControllerStore {
                                    [.text(peerHost.description), .integer(after), .integer(Int64(MailTransportLimits.batch))])
             for row in rows {
                 guard let id = UUID(uuidString: try row.text(1)) else { continue }
+                if reasons[id] == MailRefusalReason.unavailable {
+                    // A caller that could not store it is not refusing it: offer it again later.
+                    try db.run("DELETE FROM mail_outbound WHERE sequence=?", [.integer(row.integers[0])])
+                    try db.run("INSERT INTO mail_outbound(host,message) VALUES(?,?)", [.text(peerHost.description), .text(try row.text(1))])
+                    continue
+                }
                 try settle(sequence: row.integers[0], id: id, refusal: reasons[id].map { String($0.prefix(256)) })
             }
         }
     }
 
-    private func settle(sequence: Int64, id: UUID, refusal: String?) throws {
+    /// `byPeer` says who gave up: the recipient's host refused it, or this host stopped trying.
+    private func settle(sequence: Int64, id: UUID, refusal: String?, byPeer: Bool = true) throws {
         try db.run("DELETE FROM mail_outbound WHERE sequence=?", [.integer(sequence)])
         var message: MailMessage = try required("mail", id.uuidString.lowercased())
         if message.state == .moved {
@@ -169,10 +183,50 @@ extension ControllerStore {
         // A refused question would otherwise wait forever: answer it with the refusal so the
         // asking work continues and can decide what to do.
         if let refusal, let question = message.envelope.questionID {
+            let why = byPeer ? "the recipient's host refused this question" : "this host stopped trying to deliver this question"
             do {
                 _ = try resolveQuestion(question, answeredBy: "host:\(try host().id)",
-                                        text: "Undeliverable: the recipient's host refused this question (\(refusal)).", authorized: false)
+                                        text: "Undeliverable: \(why) (\(refusal)).", authorized: false)
             } catch ControllerError.conflict {}
+        }
+    }
+
+    /// Owner: stops delivering a message still waiting for its peer. It bounces as `cancelled`,
+    /// so its sender sees it and a question it carried is answered. Conflict once it has left.
+    public func cancelOutboundMail(_ id: UUID) throws -> MailMessage {
+        try db.transaction {
+            let key = id.uuidString.lowercased()
+            guard let sequence = try db.rows("SELECT sequence FROM mail_outbound WHERE message=? LIMIT 1", [.text(key)]).first?.integers[0] else {
+                let _: MailMessage = try required("mail", key)
+                throw ControllerError.conflict
+            }
+            try settle(sequence: sequence, id: id, refusal: MailRefusalReason.cancelled, byPeer: false)
+            try event("mail.outbound_cancelled", key)
+            return try required("mail", key)
+        }
+    }
+
+    /// Bounces mail that has waited in the outbound queue longer than `MailLimits.outboundLifetime`
+    /// — a peer that is gone must not hold questions open forever. The queue is in queueing
+    /// order, so the scan stops at the first message still within its lifetime: O(limit).
+    public func expireOutboundMail(limit: Int = 8, now: Date = Date()) throws -> [UUID] {
+        try Limits.page(0, limit)
+        return try db.transaction {
+            let formatter = ISO8601DateFormatter()
+            let rows = try db.rows("""
+                SELECT o.sequence, r.payload FROM mail_outbound AS o JOIN record AS r ON r.kind='mail' AND r.id=o.message
+                ORDER BY o.sequence LIMIT ?
+                """, [.integer(Int64(limit))], pageByteLimit: MailTransportLimits.batchBytes)
+            var expired: [UUID] = []
+            for row in rows {
+                let message: MailMessage = try decode(row.text(1))
+                let queued = (message.queuedAt ?? message.acceptedAt ?? message.envelope.sentAt)
+                guard let since = formatter.date(from: queued) else { continue }
+                guard now.timeIntervalSince(since) >= MailLimits.outboundLifetime else { break }
+                try settle(sequence: row.integers[0], id: message.envelope.id, refusal: MailRefusalReason.expired, byPeer: false)
+                expired.append(message.envelope.id)
+            }
+            return expired
         }
     }
 

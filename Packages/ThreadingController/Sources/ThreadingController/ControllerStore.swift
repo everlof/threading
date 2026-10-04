@@ -49,22 +49,39 @@ public actor ControllerStore {
         try db.transaction {
             let _: ControllerWorker = try required("worker", workerID.description)
             try requireActiveWorker(workerID)
-            guard let row = try db.rows("""
-                SELECT payload FROM record AS work WHERE kind='work' AND parent=? AND state='queued'
-                AND NOT EXISTS (SELECT 1 FROM record AS launch WHERE launch.kind='launch'
-                    AND launch.parent=work.id AND launch.state IN ('prepared','dispatching','running'))
-                ORDER BY sequence LIMIT 1
-                """,
-                                       [.text(workerID.description)]).first else { return nil }
-            var work: WorkItem = try decode(row.text(0))
-            let execution = ControllerExecution(id: ExecutionID(), workID: work.id, state: .running)
-            work.state = .running
-            work.executionID = execution.id
-            try insert("execution", execution.id.description, parent: work.id.description,
-                       state: execution.state.rawValue, value: execution)
-            try saveWork(work)
-            try event("execution.claimed", execution.id.description)
-            return WorkClaim(work: work, execution: execution)
+            // A task mail started is admitted again here, against the mail's authority now; one
+            // that may no longer run is withdrawn and the next queued item is considered.
+            for _ in 0...MailLimits.withdrawnWakesPerClaim {
+                guard let row = try db.rows("""
+                    SELECT payload FROM record AS work WHERE kind='work' AND parent=? AND state='queued'
+                    AND NOT EXISTS (SELECT 1 FROM record AS launch WHERE launch.kind='launch'
+                        AND launch.parent=work.id AND launch.state IN ('prepared','dispatching','running'))
+                    ORDER BY sequence LIMIT 1
+                    """,
+                                           [.text(workerID.description)]).first else { return nil }
+                var work: WorkItem = try decode(row.text(0))
+                var wake: MailMessage?
+                if work.isMailWake {
+                    wake = try mailWakeAdmission(for: work)
+                    if wake == nil {
+                        work.state = .cancelled
+                        try saveWork(work)
+                        try event("mail.wake_withdrawn", work.id.description)
+                        try event("work.cancelled", work.id.description)
+                        continue
+                    }
+                }
+                let execution = ControllerExecution(id: ExecutionID(), workID: work.id, state: .running)
+                work.state = .running
+                work.executionID = execution.id
+                try insert("execution", execution.id.description, parent: work.id.description,
+                           state: execution.state.rawValue, value: execution)
+                try saveWork(work)
+                if let wake { try bindMailWake(wake, work: work, execution: execution.id) }
+                try event("execution.claimed", execution.id.description)
+                return WorkClaim(work: work, execution: execution)
+            }
+            return nil
         }
     }
 

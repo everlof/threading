@@ -259,6 +259,51 @@ class MailTests(unittest.TestCase):
         self.assertEqual([i["message"]["envelope"]["text"] for i in self.vps.call("mailbox", new)["items"]],
                          ["unread before the move", "after the move"])
 
+    def owner_rpc(self, host, command, *values, ok=True):
+        request = json.dumps({"command": command, "arguments": [{"value": v} for v in values]})
+        return host.call("owner-rpc", ok=ok, stdin=request)
+
+    def test_rotating_a_session_credential_locks_out_the_old_one(self):
+        session = "%s/session/%s" % (self.vps.id, uuid.uuid4())
+        self.vps.call("mail-register", session, "Remote Claude session")
+        old = self.vps.call("mail-credential", session)
+        new = self.owner_rpc(self.vps, "mail-credential-rotate", session)
+        self.assertNotEqual(old, new)
+        self.assertEqual(self.vps.call("mail-credential", session), new)
+
+        def inbox(credential):
+            env = {"PATH": "/usr/bin:/bin", "THREADING_CONTROLLER_DATABASE": str(self.vps.db),
+                   "THREADING_MAILBOX_ADDRESS": session, "THREADING_MAILBOX_CREDENTIAL": credential}
+            lines = [
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}},
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "mail_inbox", "arguments": {"after": 0}}},
+            ]
+            result = subprocess.run([CONTROLLER, "agent-mcp"], input="".join(json.dumps(l) + "\n" for l in lines),
+                                    capture_output=True, text=True, timeout=15, env=env)
+            replies = {r.get("id"): r for r in map(json.loads, result.stdout.splitlines())}
+            reply = replies.get(2, {})
+            return result.returncode == 0 and "result" in reply and not reply["result"].get("isError")
+
+        self.assertFalse(inbox(old))
+        self.assertTrue(inbox(new))
+
+    def test_queued_mail_for_a_peer_can_be_cancelled_and_bounces_to_its_sender(self):
+        _, recipient, _ = self.worker(self.vps, "Reviewer", None)
+        session = "%s/session/%s" % (self.mac.id, uuid.uuid4())
+        self.mac.call("mail-register", session, "Release notes")
+        message = str(uuid.uuid4())
+        queued = self.mac.call("mail-send", session, recipient, message, self.mac.file("q", "for a host that is gone"))
+        self.assertEqual(queued["state"], "outbound")
+        cancelled = self.owner_rpc(self.mac, "mail-outbound-cancel", message)
+        self.assertEqual((cancelled["state"], cancelled["bounce"]), ("bounced", "cancelled"))
+        self.assertEqual(self.mac.call("mail-outbound", self.vps.id), [])
+        self.assertEqual(self.mac.call("mail-sent", session)[0]["state"], "bounced")
+        self.assertNotEqual(self.owner_rpc(self.mac, "mail-outbound-cancel", message, ok=False).returncode, 0)
+        # Nothing is pushed for it afterwards.
+        self.assertEqual(self.mac.call("mail-sync")["pushed"], 0)
+        self.assertEqual(self.vps.call("mailbox", recipient)["items"], [])
+
     def test_the_receiving_end_refuses_unknown_peers_and_spoofed_senders(self):
         stranger = str(uuid.uuid4())
         request = json.dumps({"pull": {"after": 0}})
