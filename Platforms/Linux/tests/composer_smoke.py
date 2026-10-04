@@ -22,6 +22,10 @@ project = root / 'ComposerProject'
 project.mkdir()
 subprocess.run([host, '--add-project', str(store), str(project)],
                check=True, capture_output=True, timeout=8)
+other_project = root / 'ComposerOther'
+other_project.mkdir()
+subprocess.run([host, '--add-project', str(store), str(other_project)],
+               check=True, capture_output=True, timeout=8)
 child = root / 'record-agent'
 child.write_text('''#!/usr/bin/python3
 import json, os, sys, termios, tty
@@ -80,6 +84,12 @@ def panel(app):
                 if frame(app).get_child_at_index(index).get_role_name() == 'panel')
 
 
+def child_by_id(parent, identity):
+    return next((parent.get_child_at_index(index)
+                 for index in range(parent.get_child_count())
+                 if parent.get_child_at_index(index).get_accessible_id() == identity), None)
+
+
 def menu(app, name):
     return next(frame(app).get_child_at_index(index)
                 for index in range(frame(app).get_child_count())
@@ -110,8 +120,8 @@ try:
     home = root / 'home'
     home.mkdir()
     with window_log.open('w') as log:
-        process = subprocess.Popen([binary, '--app-codex-project', str(store), str(socket),
-                                    '/bin/sh', str(child), str(project)],
+        process = subprocess.Popen([binary, '--app-agents-project', str(store), str(socket),
+                                    '/bin/sh', str(child), str(child), str(project)],
                                    env=dict(os.environ, HOME=str(home)), stdout=log, stderr=log)
         app = eventually(lambda: application(process), 'AT-SPI app', process)
         window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid',
@@ -123,10 +133,70 @@ try:
         eventually(lambda: panel(app).get_child_at_index(0).get_name() == 'No Session Selected',
                    'Escape cancels composer', process)
         composer = open_composer(app, process)
-        editor = eventually(lambda: next((composer.get_child_at_index(index)
-            for index in range(composer.get_child_count())
-            if composer.get_child_at_index(index).get_accessible_id() == 'linux.composer.editor'),
-            None), 'AT-SPI composer editor', process)
+        editor = eventually(lambda: child_by_id(composer, 'linux.composer.editor'),
+                            'AT-SPI composer editor', process)
+        xdo('type', '--clearmodifiers', '--delay', '20', 'Draft stays')
+        eventually(lambda: Atspi.Text.get_text(editor.get_text_iface(), 0, -1) == 'Draft stays',
+                   'draft before choice change', process)
+        project_chip = eventually(lambda: child_by_id(composer, 'linux.composer.project'),
+                                  'AT-SPI project chip', process)
+        assert project_chip.get_role_name() == 'combo box'
+        assert project_chip.get_action_iface().do_action(0)
+        choices = eventually(lambda: child_by_id(composer, 'linux.composer.choices'),
+                             'AT-SPI project choices', process)
+        subprocess.run(['import', '-window', window, str(output / 'composer-project-menu.png')],
+                       check=True, timeout=5)
+        other_row = eventually(lambda: next((choices.get_child_at_index(index)
+            for index in range(choices.get_child_count())
+            if choices.get_child_at_index(index).get_name() == other_project.name), None),
+            'other project choice', process)
+        assert other_row.get_action_iface().do_action(0)
+        eventually(lambda: composer.get_child_at_index(1).get_name().startswith('In ComposerOther'),
+                   'composer project changed', process)
+        provider_chip = eventually(lambda: child_by_id(composer, 'linux.composer.provider'),
+                                   'AT-SPI provider chip', process)
+        assert provider_chip.get_action_iface().do_action(0)
+        choices = eventually(lambda: child_by_id(composer, 'linux.composer.choices'),
+                             'AT-SPI provider choices', process)
+        subprocess.run(['import', '-window', window, str(output / 'composer-provider-menu.png')],
+                       check=True, timeout=5)
+        claude_row = eventually(lambda: next((choices.get_child_at_index(index)
+            for index in range(choices.get_child_count())
+            if choices.get_child_at_index(index).get_name() == 'Claude Code'), None),
+            'Claude provider choice', process)
+        assert claude_row.get_action_iface().do_action(0)
+        eventually(lambda: composer.get_child_at_index(0).get_name() == 'Start a Claude Code session',
+                   'composer provider changed', process)
+        assert Atspi.Text.get_text(editor.get_text_iface(), 0, -1) == 'Draft stays'
+        provider_bounds = provider_chip.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        xdo('mousemove', '--window', window,
+            str(provider_bounds.x + provider_bounds.width // 2),
+            str(provider_bounds.y + provider_bounds.height // 2))
+        xdo('click', '1')
+        choices = eventually(lambda: child_by_id(composer, 'linux.composer.choices'),
+                             'pointer-opened provider choices', process)
+        codex_row = next(choices.get_child_at_index(index)
+                         for index in range(choices.get_child_count())
+                         if choices.get_child_at_index(index).get_name() == 'Codex')
+        codex_bounds = codex_row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        xdo('mousemove', '--window', window,
+            str(codex_bounds.x + codex_bounds.width // 2),
+            str(codex_bounds.y + codex_bounds.height // 2))
+        xdo('click', '1')
+        eventually(lambda: composer.get_child_at_index(0).get_name() == 'Start a Codex session',
+                   'pointer provider choice', process)
+        xdo('mousemove', '--window', window,
+            str(provider_bounds.x + provider_bounds.width // 2),
+            str(provider_bounds.y + provider_bounds.height // 2))
+        xdo('click', '1')
+        eventually(lambda: child_by_id(composer, 'linux.composer.choices'),
+                   'keyboard provider choices', process)
+        xdo('key', 'Down', 'Up')
+        xdo('type', '--clearmodifiers', 'C')
+        xdo('key', 'Return')
+        eventually(lambda: composer.get_child_at_index(0).get_name() == 'Start a Claude Code session',
+                   'keyboard provider choice', process)
+        assert Atspi.Text.get_text(editor.get_text_iface(), 0, -1) == 'Draft stays'
         xdo('key', 'Tab')
         eventually(lambda: not editor.get_state_set().contains(Atspi.StateType.FOCUSED),
                    'composer action focus', process)
@@ -205,21 +275,21 @@ try:
                         str(output / 'composer-accessibility-edited.png')],
                        check=True, timeout=5)
         xdo('key', 'super+Return')
-        marker = project / 'composer-agent.json'
+        marker = other_project / 'composer-agent.json'
         report = eventually(lambda: json.loads(marker.read_text()) if marker.exists() else None,
                             'agent with opening brief', process)
-        assert report['cwd'] == str(project), report
+        assert report['cwd'] == str(other_project), report
         assert report['argv'][-2:] == ['--', prompt], report
         with sqlite3.connect(str(store / 'threading.db')) as database:
             count = database.execute('SELECT COUNT(*) FROM session JOIN project '
                                      'ON session.project_id = project.id '
-                                     'WHERE project.folder_path = ?', (str(project),)).fetchone()[0]
+                                     'WHERE project.folder_path = ?', (str(other_project),)).fetchone()[0]
         assert count == 1, count
         xdo('key', 'q')
-        eventually(lambda: (project / 'composer-agent-complete').exists(),
+        eventually(lambda: (other_project / 'composer-agent-complete').exists(),
                    'agent received only its own terminal input', process)
-        print('PASS right-pane composer, keyboard and AT-SPI multiline Unicode edits, '
-              'exact project and one agent launch', flush=True)
+        print('PASS right-pane composer, project/provider choices, keyboard and AT-SPI '
+              'multiline Unicode edits, exact project and one agent launch', flush=True)
 finally:
     if process is not None and process.poll() is None:
         process.terminate()

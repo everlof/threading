@@ -75,6 +75,19 @@ public final class NSImage {
         self.accessibilityDescription = accessibilityDescription
     }
 
+    /// Preserve the provider's raster artwork while applying the requested point-size canvas.
+    /// The host authors supported symbol weights in its raster artwork.
+    public func withSymbolConfiguration(_ configuration: SymbolConfiguration) -> NSImage {
+        precondition(configuration.pointSize.isFinite && configuration.pointSize > 0,
+                     "invalid symbol configuration")
+        let image = NSImage(validatedRGBA: rgba, width: width, height: height,
+                            size: NSSize(width: configuration.pointSize,
+                                         height: configuration.pointSize))
+        image.isTemplate = isTemplate
+        image.accessibilityDescription = accessibilityDescription
+        return image
+    }
+
     /// A small AppKit drawing-handler image, rasterized eagerly at the diagnostic window's 2×
     /// backing scale. The callback is bounded by the same maximum as decoded artwork; the
     /// production generated project icon uses a 16-point canvas and is cached after this pass.

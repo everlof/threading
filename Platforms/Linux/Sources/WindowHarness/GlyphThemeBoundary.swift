@@ -101,7 +101,8 @@ public enum Design {
         /// Images rasterize once per visible control at 2×, capped to a 32-point canvas.
         public static func image(_ name: String, slot: CGFloat, pointSize: CGFloat,
                                  weight: NSFont.Weight) -> NSImage? {
-            precondition(name == "ellipsis" || name == "plus" || name == "terminal",
+            precondition(name == "ellipsis" || name == "plus" || name == "terminal"
+                         || name == "chevron.down" || name == "folder",
                          "No Linux diagnostic symbol artwork for \(name)")
             precondition(slot.isFinite && pointSize.isFinite && slot > 0 && pointSize > 0)
             // Keep the artwork at its optical point size inside the requested layout slot.
@@ -139,6 +140,37 @@ public enum Design {
                            width: span, height: stroke).fill()
                     NSRect(x: canvas.midX - stroke / 2, y: canvas.midY - span / 2,
                            width: stroke, height: span).fill()
+                } else if name == "chevron.down" {
+                    let chevron = NSBezierPath()
+                    chevron.move(to: NSPoint(x: origin + side * 0.22,
+                                              y: origin + side * 0.39))
+                    chevron.line(to: NSPoint(x: origin + side * 0.5,
+                                              y: origin + side * 0.65))
+                    chevron.line(to: NSPoint(x: origin + side * 0.78,
+                                              y: origin + side * 0.39))
+                    // ChipView asks for semibold at a nine-point slot. The provider is
+                    // materialized before image configuration, so author that weight here.
+                    chevron.lineWidth = max(1.5, side * 0.15 * weightFactor)
+                    NSColor.white.setStroke()
+                    chevron.stroke()
+                } else if name == "folder" {
+                    let folder = NSBezierPath()
+                    folder.move(to: NSPoint(x: origin + side * 0.1,
+                                             y: origin + side * 0.28))
+                    folder.line(to: NSPoint(x: origin + side * 0.1,
+                                             y: origin + side * 0.72))
+                    folder.line(to: NSPoint(x: origin + side * 0.9,
+                                             y: origin + side * 0.72))
+                    folder.line(to: NSPoint(x: origin + side * 0.9,
+                                             y: origin + side * 0.36))
+                    folder.line(to: NSPoint(x: origin + side * 0.56,
+                                             y: origin + side * 0.36))
+                    folder.line(to: NSPoint(x: origin + side * 0.45,
+                                             y: origin + side * 0.28))
+                    folder.close()
+                    folder.lineWidth = max(1.5, side * 0.09 * weightFactor)
+                    NSColor.white.setStroke()
+                    folder.stroke()
                 } else {
                     let dot = max(1.5, side * 0.19 * weightFactor)
                     for fraction in [CGFloat(0.23), 0.5, 0.77] {

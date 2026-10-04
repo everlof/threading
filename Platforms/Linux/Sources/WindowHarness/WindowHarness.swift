@@ -1700,6 +1700,44 @@ struct WindowHarness {
                                      onSubmit: { composerSubmitRequested = true })
         }
         idlePane?.setThemeAppearance()
+        func refreshComposerChoices() {
+            guard let choice = composerChoice, let pane = idlePane, pane.isComposing,
+                  let projectIndex = projectIndexes[choice.projectID],
+                  projects.indices.contains(projectIndex),
+                  projects[projectIndex].id == choice.projectID else { return }
+            let projectChoices = projects.map { (id: $0.id, name: $0.name) }
+            var providerChoices: [(id: String, name: String)] = []
+            if agentExecutable != nil {
+                providerChoices.append((id: AgentKind.codex.rawValue, name: AgentKind.codex.displayName))
+            }
+            if claudeExecutable != nil {
+                providerChoices.append((id: AgentKind.claude.rawValue, name: AgentKind.claude.displayName))
+            }
+            pane.configureComposerChoices(projects: projectChoices,
+                selectedProjectID: choice.projectID,
+                providers: providerChoices,
+                selectedProviderID: choice.kind.rawValue,
+                onProjectChoice: { projectID in
+                    guard let current = composerChoice, pane.isComposing,
+                          let index = projectIndexes[projectID], projects.indices.contains(index),
+                          projects[index].id == projectID else { return }
+                    selected = index
+                    inlineSelection = .project(projectIndex: index, id: projectID)
+                    outlineScrollSelection = true
+                    composerChoice = (projectID, current.kind)
+                    refreshComposerChoices()
+                    dirty = true
+                },
+                onProviderChoice: { providerID in
+                    guard let current = composerChoice, pane.isComposing,
+                          let kind = AgentKind(rawValue: providerID),
+                          (kind == .codex ? agentExecutable : claudeExecutable) != nil
+                    else { return }
+                    composerChoice = (current.projectID, kind)
+                    refreshComposerChoices()
+                    dirty = true
+                })
+        }
         var activePane: WorkspaceTerminalPane?
         var activePageTarget: NavigatorOutlineItem?
         var pendingPageReveal: NavigatorOutlineItem?
@@ -1831,6 +1869,22 @@ struct WindowHarness {
             fflush(nil)
         }
         func routeTerminalInput(_ event: TWEvent) -> Bool {
+            if event.kind == 50 || event.kind == 51 {
+                guard activePane == nil, let idlePane, idlePane.isComposing,
+                      let identity = idlePane.composerIdentity else { return true }
+                var actionEvent = event
+                let value = String(validatingCString: tw_event_text(&actionEvent)) ?? ""
+                if event.kind == 50, value == identity {
+                    _ = idlePane.pressComposerChoice(kind: Int(event.action), identity: identity)
+                } else if event.kind == 51 {
+                    _ = idlePane.chooseComposerChoice(kind: Int(event.action),
+                        index: Int(event.key), id: value, identity: identity)
+                }
+                _ = tw_workspace_editor_focus(window,
+                    idlePane.editorHasFocus || idlePane.hasOpenComposerChoice ? 1 : 0)
+                dirty = true
+                return true
+            }
             if event.kind == 49 {
                 var operation: Int32 = 0
                 var start: Int32 = 0
@@ -1857,7 +1911,12 @@ struct WindowHarness {
                 if event.kind == 46 {
                     var committed = event
                     if let value = String(validatingCString: tw_event_text(&committed)) {
-                        idlePane.insertCommittedText(value)
+                        if idlePane.hasOpenComposerChoice {
+                            _ = idlePane.handleComposerChoiceKey(NSEvent(type: .keyDown,
+                                charactersIgnoringModifiers: value))
+                        } else {
+                            idlePane.insertCommittedText(value)
+                        }
                     }
                 } else if event.kind == 47 {
                     var preedit = event
@@ -1870,6 +1929,24 @@ struct WindowHarness {
                         idlePane.updatePreedit(value, selectedRange: range)
                     }
                 } else if event.action != 3 {
+                    if idlePane.hasOpenComposerChoice {
+                        let keyCode: UInt16
+                        switch Int(event.key) {
+                        case TW_KEY_ESCAPE: keyCode = 53
+                        case TW_KEY_UP: keyCode = 126
+                        case TW_KEY_DOWN: keyCode = 125
+                        case TW_KEY_ENTER: keyCode = 36
+                        default: keyCode = 0
+                        }
+                        if keyCode != 0,
+                           idlePane.handleComposerChoiceKey(NSEvent(type: .keyDown,
+                               keyCode: keyCode, charactersIgnoringModifiers: "")) {
+                            _ = tw_workspace_editor_focus(window,
+                                idlePane.editorHasFocus || idlePane.hasOpenComposerChoice ? 1 : 0)
+                            dirty = true
+                            return true
+                        }
+                    }
                     if Int(event.key) == TW_KEY_ESCAPE {
                         if idlePane.cancelMarkedText() { return true }
                         composerChoice = nil
@@ -1963,7 +2040,8 @@ struct WindowHarness {
                     if event.action == 1 { focusSidebar(false) }
                     idlePane.handle(event)
                     if idlePane.isComposing {
-                        _ = tw_workspace_editor_focus(window, idlePane.editorHasFocus ? 1 : 0)
+                        _ = tw_workspace_editor_focus(window,
+                            idlePane.editorHasFocus || idlePane.hasOpenComposerChoice ? 1 : 0)
                     }
                 } else {
                     _ = idlePane.pressAction()
@@ -3170,6 +3248,12 @@ struct WindowHarness {
             switch event.kind {
             case 5: return
             case 12:
+                if let idlePane, idlePane.hasOpenComposerChoice,
+                   idlePane.handleComposerChoiceKey(NSEvent(type: .keyDown,
+                       keyCode: 53, charactersIgnoringModifiers: "")) {
+                    dirty = true
+                    continue
+                }
                 if accountPicker != nil {
                     accountPicker = nil
                     dirty = true
@@ -3394,6 +3478,7 @@ struct WindowHarness {
                     composerChoice = (targetID, kind)
                     idlePane.showComposer(projectName: projects[selected].name,
                         providerName: kind.displayName)
+                    refreshComposerChoices()
                     focusSidebar(false)
                     guard tw_workspace_editor_focus(window, 1) == 0 else {
                         throw WindowFailure("native editor focus unavailable")

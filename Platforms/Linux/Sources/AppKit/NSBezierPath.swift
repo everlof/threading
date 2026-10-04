@@ -25,6 +25,9 @@ public final class NSBezierPath {
     private var elements: [Element] = []
 
     public var lineWidth: CGFloat = 1
+    public func setLineDash(_ pattern: [CGFloat], count: Int, phase: CGFloat) {
+        preconditionFailure("Linux NSBezierPath does not yet rasterize dashed strokes")
+    }
     public var windingRule: NSBezierPathWindingRule = .nonZero
     public var lineCapStyle: NSLineCapStyle = .butt
     public var lineJoinStyle: NSLineJoinStyle = .miter

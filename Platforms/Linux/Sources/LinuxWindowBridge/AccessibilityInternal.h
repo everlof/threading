@@ -17,6 +17,9 @@ int tw_accessibility_row_can_open(int row);
 int tw_accessibility_project_action_identity(int row, char *id, int capacity);
 int tw_accessibility_project_create_identity(int row, char *id, int capacity);
 int tw_accessibility_session_menu_row_identity(int row, char *identity, int capacity);
+int tw_accessibility_composer_chip_identity(int kind, char *identity, int capacity);
+int tw_accessibility_composer_menu_row_identity(int row, int *kind, int *optionIndex,
+                                                 char *id, int capacity);
 void tw_accessibility_actions_button(TWWindow *, const char *label, int enabled,
                                      int x, int y, int width, int height);
 void tw_accessibility_add_project_button(TWWindow *, int enabled,

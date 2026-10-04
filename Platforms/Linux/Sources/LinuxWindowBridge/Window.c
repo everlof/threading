@@ -842,6 +842,17 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 if (!w->sessionMenuTexture ||
                     !tw_accessibility_session_menu_row_identity(row, out->text, sizeof(out->text))) continue;
                 out->kind = 43; out->key = row; out->action = 1;
+            } else if (e.user.code == 12 && w->placeholderMode) {
+                const int kind = (int)(intptr_t)e.user.data1;
+                if (!tw_accessibility_composer_chip_identity(kind, out->text,
+                                                              sizeof(out->text))) continue;
+                out->kind = 50; out->action = kind;
+            } else if (e.user.code == 13 && w->placeholderMode) {
+                const int row = (int)(intptr_t)e.user.data1;
+                int kind = 0, optionIndex = -1;
+                if (!tw_accessibility_composer_menu_row_identity(row, &kind, &optionIndex,
+                                                                  out->text, sizeof(out->text))) continue;
+                out->kind = 51; out->action = kind; out->key = optionIndex;
             }
         }
         else if (e.type == SDL_WINDOWEVENT) {
