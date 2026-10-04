@@ -59,7 +59,7 @@ architecture notes linked throughout, chiefly [The PTY host](../architecture/pty
 | **Agent tool broker** | Inside `supervise` | A Unix socket (`agent.sock`) through which agents use their execution-scoped tools without opening the store | Any owner operation |
 | **`threading-mcp-bridge`** | Linux, interactive chats only | A stdio-to-socket bridge so a remote Claude reaches the Mac's MCP server through the reverse-forwarded socket | Anything on the host |
 | **`threading-triggerd`** | Mac | Polling the Mac's own trigger sources and handing events to the app | Launching agents; the controller |
-| **Controller probe sources** | Linux, inside `supervise` | Polling approved probe executables on the same contract as the Mac's | — |
+| **Controller probe sources** | Linux, inside `supervise` | Polling approved probe executables on the same contract as the Mac's | None |
 
 The PTY host is the one execution protocol. The Mac reaches a remote `threading-ptyd` through a
 forwarded Unix socket; the controller reaches it through its local socket. Neither scrapes a TUI.
@@ -87,10 +87,10 @@ host-local mailbox (see [Mail between agents and hosts](#mail-between-agents-and
 | **Controller host** (`HostID`) | The store, once, on first open | Restarts, upgrades, backups | `threading-controller --database DB host` prints it. The name defaults to the machine's host name; change it with `host-set-name`. A restored backup keeps the same host ID, so never run two live copies. |
 | **Worker** (`WORKER_UUID`) | You (`worker-add WORKER_UUID NAME`) | Everything; a hosted agent is identified by (host ID, worker ID) | Memory, budgets, mail address and policy hang off it. Choose the UUID yourself and keep it in your deployment configuration. |
 | **Work item** | The store, deduplicated by `SOURCE_KEY` | Retries | The same key returns the same work. |
-| **Execution** | One per claim | — | Also the PTY identity in ptyd and the Claude session ID when a recipe passes `${THREADING_EXECUTION_ID}`. A continuation after an answer is a new execution. |
-| **Mail address** | Derived | — | `HOST_UUID/worker/WORKER_UUID` or `HOST_UUID/session/SESSION_UUID`. The host part is where the agent's process runs. |
-| **ptyd generation** | The build | — | `MARKETING_VERSION (CURRENT_PROJECT_VERSION)@revision`, compiled in. Reported in `hello`; never an admission condition. |
-| **Remote host record** (Mac) | You, in Settings ▸ Remote Hosts | — | Name, SSH destination, optional SSH config file, default checkout folder, and once connected, the controller's executable and database paths. |
+| **Execution** | One per claim | None | Also the PTY identity in ptyd and the Claude session ID when a recipe passes `${THREADING_EXECUTION_ID}`. A continuation after an answer is a new execution. |
+| **Mail address** | Derived | None | `HOST_UUID/worker/WORKER_UUID` or `HOST_UUID/session/SESSION_UUID`. The host part is where the agent's process runs. |
+| **ptyd generation** | The build | None | `MARKETING_VERSION (CURRENT_PROJECT_VERSION)@revision`, compiled in. Reported in `hello`; never an admission condition. |
+| **Remote host record** (Mac) | You, in Settings ▸ Remote Hosts | None | Name, SSH destination, optional SSH config file, default checkout folder, and once connected, the controller's executable and database paths. |
 
 ### Where state lives on the host
 
