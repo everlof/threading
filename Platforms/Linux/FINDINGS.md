@@ -4767,3 +4767,38 @@ is underlined and Escape removes it without closing the pane; `你好` renders a
 The IBus journey verifies that no session starts during either preedit, then Return adds a
 line and Command-Return launches one exact-project session without leaking the brief into
 the PTY. The app and IBus daemon must share `HOME` for SDL to find the input context.
+
+## 157. Linux reuses the production composer choice control
+
+The Linux composer now mounts the unchanged production `ChipView` source twice, for project and
+provider selection. Its choice presentation callback opens a bounded overlay of production
+`ThemedMenuRowView` rows. The pane keeps at most six menu rows mounted even when the host has
+thousands of projects; changing the visible page replaces those rows. The Linux AppKit shim
+supplies the chip's surface painting, text measurement, symbol art and accessibility hooks.
+It does not copy the Mac composer or its choice control into a Linux fork.
+
+The host supplies exact project and provider identities and revalidates a choice before changing
+the active composer target. Changing either choice updates the title and chip while preserving
+the prompt text and composer identity. The AT-SPI bridge exposes two combo boxes and the
+visible menu rows, and sends exact row identity back through the host event path. Old composer
+actions cannot select a row in a new composer instance. Pointer and keyboard selection use the
+same pane model. The native key route remains with an open menu after a pointer press, and
+selection returns focus to the prompt. Printable keys select a matching menu entry without
+editing the draft. The host still owns project and provider availability, prompt admission,
+process launch and persistence. This is a Linux host mounting shared Design components inside
+the existing `composer.session-start@1` customization boundary, with no new extension surface.
+
+Verification on 2026-10-04: the Ubuntu arm64 `WindowHarness` target and focused native X11
+composer smoke passed. The smoke opened both choices through AT-SPI, chose a second project and
+Claude Code, selected provider rows with the pointer and keyboard, used type-to-select, and
+preserved a draft across those changes. It edited Unicode through the shared prompt view and
+launched exactly one agent in the selected project. I inspected the real 1120×480
+window captures `out/composer/composer-project-menu.png`, `composer-provider-menu.png` and
+`composer.png`; the chips and selected, bounded menu rows are visible. Theme-boundary and
+main-actor-latency checks passed.
+
+The full non-root installed Ubuntu arm64 `bundle-smoke.sh` suite also passed, including the
+composer choices and exact project launch from the packaged `.deb`. Its evidence is
+`out/bundle-smoke/run.cK3kh2ki`; I inspected
+`restart-out/composer/composer-project-menu.png` from that installed window. The `.deb`
+SHA-256 is `f272b47cc67b394d4a17bc00f83c463eccda293a70449a575466462e8e171f03`.

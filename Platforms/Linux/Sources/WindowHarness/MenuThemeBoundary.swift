@@ -5,6 +5,11 @@ import AppKit
 @MainActor
 public enum AppTheme {
     public enum Material {
+        public enum ChoiceStyle: Equatable {
+            case chip, dropdown, popup, doubleArrowPopup, aquaPopup, cycle
+
+            var isClassic: Bool { self != .chip }
+        }
         public enum MenuAppearance {
             case automatic, windows98, platinum, beOS, openStep, irix, amiga, aqua, aquaTiger
 
@@ -15,6 +20,11 @@ public enum AppTheme {
 
 extension AppThemePalette.Material {
     var menuAppearance: AppTheme.Material.MenuAppearance { .automatic }
+    var choiceStyle: AppTheme.Material.ChoiceStyle { .chip }
+}
+
+extension AppThemePalette.Palette {
+    func material(for appearance: NSAppearance) -> AppThemePalette.Material { material }
 }
 
 @MainActor
@@ -41,6 +51,7 @@ extension Design.Radius {
 
 extension Design.Surface {
     static var elevated: NSColor { LinuxTheme.color("elevated") }
+    static var field: NSColor { LinuxTheme.color("fieldSurface") }
     static var controlResting: NSColor { LinuxTheme.color("controlResting") }
     static var controlHover: NSColor { LinuxTheme.color("controlHover") }
 }

@@ -54,6 +54,10 @@ typedef struct TWWindow TWWindow;
 // are editor-owned and must never be sent to the terminal PTY or sidebar navigation.
 // Kind49 announces a queued AT-SPI composer edit; key is its opaque native serial.
 // Read it exactly once with tw_accessibility_take_composer_edit. The event carries no text.
+// Kind50 presses a mounted composer ChipView: action is 1 project or 2 provider and text is
+// the exact composer token. Kind51 presses a mounted choice row: action is the same kind,
+// key is its absolute option index and text is its exact host ID. The Swift host validates
+// these against the active composer and current options before changing a choice.
 typedef struct {
     int kind, x, y, width, height;
     char text[1024];
@@ -165,6 +169,23 @@ void tw_accessibility_composer_editor(TWWindow *, const char *identity,
                                       const char *utf8, int length,
                                       int selectionStart, int selectionEnd, int focused,
                                       int x, int y, int width, int height);
+// Publish the two mounted production ChipView choices. kind is 1 for project or 2 for
+// provider. identity is the current composer-opening token and must match the editor.
+// label/value form the accessible name; NULL label unmounts that chip. Bounds are
+// window pixels inside the right pane. AT-SPI presses are queued for host validation.
+void tw_accessibility_composer_chip(TWWindow *, const char *identity, int kind,
+                                    const char *label, const char *value,
+                                    int x, int y, int width, int height);
+// Publish only the currently visible choice rows (at most six). A NULL identity or
+// zero rows unmounts the menu. optionIndex is the absolute choice index; id is its
+// exact host identity. AT-SPI actions never mutate the choice directly.
+void tw_accessibility_composer_menu_begin(TWWindow *, const char *identity, int kind,
+                                          int x, int y, int width, int height);
+int tw_accessibility_composer_menu_add_row(TWWindow *, int optionIndex,
+                                           const char *id, const char *name,
+                                           int selected, int enabled,
+                                           int x, int y, int width, int height);
+void tw_accessibility_composer_menu_end(TWWindow *);
 // Returns a queued edit's UTF-8 byte count (0...65536), or -1 if stale/absent.
 // Buffers must hold at least 128 and 65537 bytes respectively. Offsets are Unicode scalars.
 // Operations: 1 replace [start,end) with payload; 2 select [start,end);

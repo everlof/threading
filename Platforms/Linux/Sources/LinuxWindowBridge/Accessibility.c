@@ -11,7 +11,8 @@
 
 enum { MAX_VISIBLE_ROWS = 32, MAX_ROW_NAME = 512, MAX_ROW_ID = 64,
        MAX_TERMINAL_TEXT = 64 * 1024, MAX_TERMINAL_RUNS = 128 * 40 + 40,
-       MAX_SESSION_MENU_ROWS = 8, MAX_COMPOSER_TEXT = 64 * 1024,
+       MAX_SESSION_MENU_ROWS = 8, MAX_COMPOSER_MENU_ROWS = 6,
+       MAX_COMPOSER_TEXT = 64 * 1024,
        MAX_COMPOSER_EDITS = 16, MAX_COMPOSER_ID = 128 };
 enum { PROJECT_CONTROL_NONE, PROJECT_CONTROL_CREATE, PROJECT_CONTROL_ACTIONS };
 
@@ -20,7 +21,7 @@ typedef struct {
     GPtrArray *children;
     char *id;
     AtkRectangle bounds;
-    int row, selected, canOpen, retired, enabled, projectControl, actionRow;
+    int row, optionIndex, selected, canOpen, retired, enabled, projectControl, actionRow;
 } AccessibleNode;
 typedef struct { AtkObjectClass parent; } AccessibleNodeClass;
 
@@ -67,7 +68,9 @@ G_DEFINE_TYPE_WITH_CODE(ComposerEditorNode, composer_editor_node, component_node
 static AccessibleNode *app, *frame, *list, *actionsButton, *addProjectButton, *pageTitleButton;
 static AccessibleNode *pageActionsButton, *sessionMenuList;
 static AccessibleNode *placeholder, *placeholderTitle, *placeholderDetail, *placeholderAction;
+static AccessibleNode *composerProjectChip, *composerProviderChip, *composerMenuList;
 static int actionsVisible, addProjectVisible, pageTitleVisible, placeholderVisible, placeholderActionVisible;
+static int composerChipVisible[2], composerMenuVisible, composerMenuKind;
 static ComposerEditorNode *composerEditor;
 static int composerEditorVisible, composerEditorFocused;
 typedef struct {
@@ -78,6 +81,7 @@ typedef struct {
 } ComposerEdit;
 static GQueue *composerEdits;
 static char composerIdentity[MAX_COMPOSER_ID];
+static char composerMenuIdentity[MAX_COMPOSER_ID];
 static uint32_t composerIncarnation = 1, composerEditSerial;
 static int composerPredictedCharacters, composerPredictionValid;
 static int pageActionsVisible, sessionMenuVisible;
@@ -124,6 +128,16 @@ static struct {
         AtkRectangle bounds;
     } rows[MAX_SESSION_MENU_ROWS];
 } sessionMenuPending;
+static struct {
+    char identity[MAX_COMPOSER_ID];
+    int visible, kind, count;
+    AtkRectangle bounds;
+    struct {
+        char id[MAX_ROW_ID], name[MAX_ROW_NAME];
+        int optionIndex, selected, enabled;
+        AtkRectangle bounds;
+    } rows[MAX_COMPOSER_MENU_ROWS];
+} composerMenuPending;
 
 static gint node_child_count(AtkObject *object) {
     return (gint)((AccessibleNode *)object)->children->len;
@@ -160,7 +174,9 @@ static AtkStateSet *node_state(AtkObject *object) {
         atk_state_set_add_state(states, ATK_STATE_ENABLED);
         atk_state_set_add_state(states, ATK_STATE_SENSITIVE);
     }
-    if (node == list || node == sessionMenuList || node == (AccessibleNode *)terminal ||
+    if (node == list || node == sessionMenuList || node == composerMenuList ||
+        node == composerProjectChip || node == composerProviderChip ||
+        node == (AccessibleNode *)terminal ||
         node == (AccessibleNode *)composerEditor ||
         node == actionsButton || node == addProjectButton || node == pageTitleButton ||
         node == pageActionsButton || node == placeholderAction ||
@@ -171,6 +187,11 @@ static AtkStateSet *node_state(AtkObject *object) {
     if (node == (AccessibleNode *)composerEditor && composerEditorVisible && node_mounted(object)) {
         atk_state_set_add_state(states, ATK_STATE_EDITABLE);
         atk_state_set_add_state(states, ATK_STATE_MULTI_LINE);
+    }
+    if (node == composerProjectChip || node == composerProviderChip) {
+        atk_state_set_add_state(states, ATK_STATE_EXPANDABLE);
+        if (composerMenuVisible && composerMenuKind == (node == composerProjectChip ? 1 : 2))
+            atk_state_set_add_state(states, ATK_STATE_EXPANDED);
     }
     if (node_mounted(object)) {
         atk_state_set_add_state(states, ATK_STATE_VISIBLE);
@@ -201,6 +222,7 @@ static void accessible_node_class_init(AccessibleNodeClass *klass) {
 static void accessible_node_init(AccessibleNode *node) {
     node->children = g_ptr_array_new_with_free_func(g_object_unref);
     node->row = -1;
+    node->optionIndex = -1;
     node->actionRow = -1;
     node->enabled = 1;
 }
@@ -258,6 +280,15 @@ static void set_focused(AccessibleNode *next) {
 static void refresh_focus(void) {
     AccessibleNode *next = NULL;
     if (windowFocused && frame && frame->children->len) {
+        if (composerMenuVisible && composerMenuList && composerMenuList->children->len) {
+            next = g_ptr_array_index(composerMenuList->children, 0);
+            for (guint i = 0; i < composerMenuList->children->len; i++) {
+                AccessibleNode *row = g_ptr_array_index(composerMenuList->children, i);
+                if (row->selected) { next = row; break; }
+            }
+            set_focused(next);
+            return;
+        }
         if (sessionMenuVisible && sessionMenuList && sessionMenuList->children->len) {
             next = g_ptr_array_index(sessionMenuList->children, 0);
             for (guint i = 0; i < sessionMenuList->children->len; i++) {
@@ -331,6 +362,14 @@ static const gchar *get_toolkit_version(void) { return "0"; }
 
 static gint action_count(AtkAction *action) {
     AccessibleNode *node = (AccessibleNode *)action;
+    if (node == composerProjectChip || node == composerProviderChip) {
+        const int kind = node == composerProjectChip ? 1 : 2;
+        return placeholderVisible && composerEditorVisible && composerChipVisible[kind - 1] &&
+            node->enabled && node_mounted(ATK_OBJECT(node)) ? 1 : 0;
+    }
+    if (node->row >= 0 && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(composerMenuList))
+        return composerMenuVisible && !node->retired && node->enabled &&
+            node_mounted(ATK_OBJECT(node)) ? 1 : 0;
     if (node == actionsButton) return actionsVisible && node->enabled ? 1 : 0;
     if (node == pageActionsButton) return pageActionsVisible && node->enabled &&
         strcmp(pageActionsIdentity, pageTitleIdentity) == 0 &&
@@ -350,6 +389,9 @@ static gint action_count(AtkAction *action) {
 }
 static const gchar *action_name(AtkAction *action, gint index) {
     AccessibleNode *node = (AccessibleNode *)action;
+    if (node == composerProjectChip || node == composerProviderChip ||
+        (node->row >= 0 && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(composerMenuList)))
+        return index == 0 && action_count(action) ? "press" : NULL;
     if (node == actionsButton || node == addProjectButton || node == pageTitleButton ||
         node == pageActionsButton ||
         node == placeholderAction ||
@@ -362,6 +404,19 @@ static const gchar *action_name(AtkAction *action, gint index) {
 }
 static gboolean action_do(AtkAction *action, gint index) {
     AccessibleNode *node = (AccessibleNode *)action;
+    if (node == composerProjectChip || node == composerProviderChip ||
+        (node->row >= 0 && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(composerMenuList))) {
+        if (index != 0 || !action_count(action) || eventType == UINT32_MAX) return FALSE;
+        SDL_Event event = {0};
+        event.type = eventType;
+        event.user.code = node == composerProjectChip || node == composerProviderChip ? 12 : 13;
+        event.user.data1 = (void *)(intptr_t)(event.user.code == 12
+            ? (node == composerProjectChip ? 1 : 2) : node->row);
+        event.user.data2 = (void *)(uintptr_t)generation;
+        int pushed = SDL_PushEvent(&event);
+        navigation_trace_enqueue(&event, pushed);
+        return pushed == 1;
+    }
     if (node == pageActionsButton ||
         (node->row >= 0 && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(sessionMenuList))) {
         if (index != 0 || !action_count(action) || eventType == UINT32_MAX) return FALSE;
@@ -525,10 +580,13 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
         *height = windowHeight > *y ? windowHeight - *y : 0;
     } else if (object == ATK_OBJECT(actionsButton) || object == ATK_OBJECT(addProjectButton) ||
                object == ATK_OBJECT(pageTitleButton) || object == ATK_OBJECT(pageActionsButton) ||
-               object == ATK_OBJECT(placeholderAction) || object == ATK_OBJECT(composerEditor)) {
+               object == ATK_OBJECT(placeholderAction) || object == ATK_OBJECT(composerEditor) ||
+               object == ATK_OBJECT(composerProjectChip) ||
+               object == ATK_OBJECT(composerProviderChip)) {
         *x = node->bounds.x; *y = node->bounds.y;
         *width = node->bounds.width; *height = node->bounds.height;
-    } else if (object == ATK_OBJECT(list) || object == ATK_OBJECT(sessionMenuList)) {
+    } else if (object == ATK_OBJECT(list) || object == ATK_OBJECT(sessionMenuList) ||
+               object == ATK_OBJECT(composerMenuList)) {
         *x = node->bounds.x; *y = node->bounds.y;
         *width = node->bounds.width; *height = node->bounds.height;
     } else if (node->projectControl && node->actionRow >= 0 &&
@@ -537,13 +595,17 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
         *width = node->bounds.width; *height = node->bounds.height;
     } else if (node->row >= 0 &&
                (atk_object_get_parent(object) == ATK_OBJECT(list) ||
-                atk_object_get_parent(object) == ATK_OBJECT(sessionMenuList))) {
+                atk_object_get_parent(object) == ATK_OBJECT(sessionMenuList) ||
+                atk_object_get_parent(object) == ATK_OBJECT(composerMenuList))) {
         *x = node->bounds.x; *y = node->bounds.y;
         *width = node->bounds.width; *height = node->bounds.height;
     } else return 0;
     if (coordinates == ATK_XY_SCREEN) { *x += originX; *y += originY; }
     else if (coordinates == ATK_XY_PARENT &&
-             (object == ATK_OBJECT(placeholderAction) || object == ATK_OBJECT(composerEditor))) {
+             (object == ATK_OBJECT(placeholderAction) || object == ATK_OBJECT(composerEditor) ||
+              object == ATK_OBJECT(composerProjectChip) ||
+              object == ATK_OBJECT(composerProviderChip) ||
+              object == ATK_OBJECT(composerMenuList))) {
         *x -= tw_workspace_sidebar_width(hostWindow);
     }
     else if (coordinates == ATK_XY_PARENT && node->projectControl) {
@@ -1098,8 +1160,19 @@ void tw_accessibility_open(TWWindow *window) {
     placeholderAction = new_component(ATK_ROLE_PUSH_BUTTON, "New Session");
     placeholderAction->id = g_strdup("linux.placeholder.action");
     atk_object_set_accessible_id(ATK_OBJECT(placeholderAction), placeholderAction->id);
+    composerProjectChip = new_component(ATK_ROLE_COMBO_BOX, "Project");
+    composerProjectChip->id = g_strdup("linux.composer.project");
+    atk_object_set_accessible_id(ATK_OBJECT(composerProjectChip), composerProjectChip->id);
+    composerProviderChip = new_component(ATK_ROLE_COMBO_BOX, "Provider");
+    composerProviderChip->id = g_strdup("linux.composer.provider");
+    atk_object_set_accessible_id(ATK_OBJECT(composerProviderChip), composerProviderChip->id);
+    composerMenuList = new_component(ATK_ROLE_LIST, "Composer choices");
+    composerMenuList->id = g_strdup("linux.composer.choices");
+    atk_object_set_accessible_id(ATK_OBJECT(composerMenuList), composerMenuList->id);
     composerEdits = g_queue_new();
     composerIdentity[0] = '\0';
+    composerMenuIdentity[0] = '\0';
+    composerChipVisible[0] = composerChipVisible[1] = composerMenuVisible = composerMenuKind = 0;
     composerEditor = g_object_new(composer_editor_node_get_type(), NULL);
     atk_object_set_role(ATK_OBJECT(composerEditor), ATK_ROLE_TEXT);
     atk_object_set_name(ATK_OBJECT(composerEditor), "New session brief");
@@ -1141,6 +1214,7 @@ void tw_accessibility_close(void) {
     bridgeReady = 0; activeList = NULL; eventType = UINT32_MAX; windowFocused = 0;
     clear_children(list);
     clear_children(sessionMenuList);
+    clear_children(composerMenuList);
     clear_children(frame);
     clear_children(app);
     g_clear_object(&app);
@@ -1156,9 +1230,14 @@ void tw_accessibility_close(void) {
     g_clear_object(&placeholderTitle);
     g_clear_object(&placeholderDetail);
     g_clear_object(&placeholderAction);
+    g_clear_object(&composerProjectChip);
+    g_clear_object(&composerProviderChip);
+    g_clear_object(&composerMenuList);
     g_clear_object(&composerEditor);
     actionsVisible = addProjectVisible = pageTitleVisible = pageActionsVisible = sessionMenuVisible = 0;
     placeholderVisible = placeholderActionVisible = composerEditorVisible = composerEditorFocused = 0;
+    composerChipVisible[0] = composerChipVisible[1] = composerMenuVisible = composerMenuKind = 0;
+    composerMenuIdentity[0] = '\0';
     pageTitleIdentity[0] = '\0';
     pageActionsIdentity[0] = sessionMenuIdentity[0] = '\0';
     hostWindow = NULL;
@@ -1385,30 +1464,66 @@ int tw_accessibility_session_menu_row_identity(int row, char *identity, int capa
     strcpy(identity, sessionMenuIdentity);
     return 1;
 }
+static int composer_bounds_valid(TWWindow *window, int x, int y, int width, int height) {
+    int originX, originY, windowWidth, windowHeight;
+    tw_window_geometry(window, &originX, &originY, &windowWidth, &windowHeight);
+    const int sidebarWidth = tw_workspace_sidebar_width(window);
+    return sidebarWidth > 0 && x >= sidebarWidth && x < windowWidth &&
+        width > 0 && width <= windowWidth - x && y >= 0 && y < windowHeight &&
+        height > 0 && height <= windowHeight - y;
+}
+static int composer_identity_valid(const char *identity) {
+    return identity && identity[0] &&
+        strnlen(identity, MAX_COMPOSER_ID) < MAX_COMPOSER_ID &&
+        g_utf8_validate(identity, -1, NULL) &&
+        strcmp(identity, composerIdentity) == 0;
+}
 static void rebuild_placeholder_children(void) {
     const int detailVisible = placeholderVisible &&
         atk_object_get_name(ATK_OBJECT(placeholderDetail))[0] != '\0';
     const int editorVisible = placeholderVisible && composerEditorVisible;
-    const guint expected = placeholderVisible
-        ? 1 + detailVisible + editorVisible + placeholderActionVisible : 0;
+    const int projectVisible = placeholderVisible && composerChipVisible[0];
+    const int providerVisible = placeholderVisible && composerChipVisible[1];
+    const int menuVisible = placeholderVisible && composerMenuVisible;
+    const guint expected = placeholderVisible ?
+        1 + detailVisible + projectVisible + providerVisible + editorVisible +
+        placeholderActionVisible + menuVisible : 0;
     int same = placeholder->children->len == expected;
-    if (same && expected) same = g_ptr_array_index(placeholder->children, 0) == placeholderTitle;
-    if (same && detailVisible)
-        same = g_ptr_array_index(placeholder->children, 1) == placeholderDetail;
-    if (same && editorVisible)
-        same = g_ptr_array_index(placeholder->children, 1 + detailVisible) == composerEditor;
-    if (same && placeholderActionVisible)
-        same = g_ptr_array_index(placeholder->children, expected - 1) == placeholderAction;
+    AccessibleNode *ordered[] = {placeholderTitle, placeholderDetail, composerProjectChip,
+        composerProviderChip, (AccessibleNode *)composerEditor, placeholderAction, composerMenuList};
+    const int included[] = {placeholderVisible, detailVisible, projectVisible, providerVisible,
+        editorVisible, placeholderActionVisible, menuVisible};
+    guint index = 0;
+    for (guint i = 0; same && i < G_N_ELEMENTS(ordered); i++)
+        if (included[i]) same = g_ptr_array_index(placeholder->children, index++) == ordered[i];
     if (same) return;
-    if (focused == placeholderAction || focused == (AccessibleNode *)composerEditor) set_focused(NULL);
+    if (focused == placeholderAction || focused == (AccessibleNode *)composerEditor ||
+        focused == composerProjectChip || focused == composerProviderChip ||
+        focused == composerMenuList ||
+        (focused && atk_object_get_parent(ATK_OBJECT(focused)) == ATK_OBJECT(composerMenuList)))
+        set_focused(NULL);
     clear_children(placeholder);
     if (placeholderVisible) {
         add_child(placeholder, placeholderTitle);
         if (detailVisible) add_child(placeholder, placeholderDetail);
+        if (projectVisible) add_child(placeholder, composerProjectChip);
+        if (providerVisible) add_child(placeholder, composerProviderChip);
         if (editorVisible) add_child(placeholder, (AccessibleNode *)composerEditor);
         if (placeholderActionVisible) add_child(placeholder, placeholderAction);
+        if (menuVisible) add_child(placeholder, composerMenuList);
     }
     generation++;
+}
+static void clear_composer_choice_projection(void) {
+    const int expandedKind = composerMenuVisible ? composerMenuKind : 0;
+    if (composerChipVisible[0] || composerChipVisible[1] || composerMenuVisible) generation++;
+    composerChipVisible[0] = composerChipVisible[1] = 0;
+    composerMenuVisible = composerMenuKind = 0;
+    composerMenuIdentity[0] = '\0';
+    if (composerMenuList) clear_children(composerMenuList);
+    if (expandedKind)
+        atk_object_notify_state_change(ATK_OBJECT(expandedKind == 1 ? composerProjectChip : composerProviderChip),
+                                       ATK_STATE_EXPANDED, FALSE);
 }
 void tw_accessibility_placeholder(TWWindow *window, const char *title, const char *detail,
                                    const char *actionLabel, int x, int y, int width, int height) {
@@ -1433,6 +1548,7 @@ void tw_accessibility_placeholder(TWWindow *window, const char *title, const cha
         atk_object_notify_state_change(ATK_OBJECT(composerEditor), ATK_STATE_EDITABLE, FALSE);
         set_composer_text("", 0, 0, 0, 0);
     }
+    if (!visible) clear_composer_choice_projection();
     if (visible) {
         if (strcmp(atk_object_get_name(ATK_OBJECT(placeholderTitle)), title) != 0 ||
             strcmp(atk_object_get_name(ATK_OBJECT(placeholderDetail)), detail) != 0 ||
@@ -1461,6 +1577,7 @@ void tw_accessibility_composer_editor(TWWindow *window, const char *identity,
         composerEditorVisible = composerEditorFocused = 0;
         atk_object_notify_state_change(ATK_OBJECT(composerEditor), ATK_STATE_EDITABLE, FALSE);
         set_composer_text("", 0, 0, 0, 0);
+        clear_composer_choice_projection();
         rebuild_placeholder_children();
         refresh_focus();
         return;
@@ -1479,6 +1596,8 @@ void tw_accessibility_composer_editor(TWWindow *window, const char *identity,
     if (strcmp(composerIdentity, identity) != 0) {
         clear_composer_edits();
         g_strlcpy(composerIdentity, identity, sizeof(composerIdentity));
+        clear_composer_choice_projection();
+        generation++;
     }
     if (g_queue_is_empty(composerEdits)) {
         composerPredictedCharacters = characters;
@@ -1492,6 +1611,158 @@ void tw_accessibility_composer_editor(TWWindow *window, const char *identity,
     rebuild_placeholder_children();
     if (!wasVisible) atk_object_notify_state_change(ATK_OBJECT(composerEditor), ATK_STATE_EDITABLE, TRUE);
     refresh_focus();
+}
+void tw_accessibility_composer_chip(TWWindow *window, const char *identity, int kind,
+                                    const char *label, const char *value,
+                                    int x, int y, int width, int height) {
+    if (!bridgeReady || window != hostWindow || (kind != 1 && kind != 2)) return;
+    AccessibleNode *chip = kind == 1 ? composerProjectChip : composerProviderChip;
+    const int visible = placeholderVisible && composerEditorVisible &&
+        composer_identity_valid(identity) && label && value &&
+        strnlen(label, MAX_ROW_NAME) < MAX_ROW_NAME &&
+        strnlen(value, MAX_ROW_NAME) < MAX_ROW_NAME &&
+        g_utf8_validate(label, -1, NULL) && g_utf8_validate(value, -1, NULL) &&
+        composer_bounds_valid(window, x, y, width, height);
+    if (composerChipVisible[kind - 1] != visible) generation++;
+    composerChipVisible[kind - 1] = visible;
+    if (visible) {
+        char name[MAX_ROW_NAME * 2 + 3];
+        g_snprintf(name, sizeof(name), "%s: %s", label, value);
+        if (strcmp(atk_object_get_name(ATK_OBJECT(chip)), name) != 0) generation++;
+        set_name_if_changed(chip, name);
+        chip->bounds = (AtkRectangle){x, y, width, height};
+    }
+    rebuild_placeholder_children();
+    refresh_focus();
+}
+void tw_accessibility_composer_menu_begin(TWWindow *window, const char *identity, int kind,
+                                          int x, int y, int width, int height) {
+    composerMenuPending.count = composerMenuPending.visible = composerMenuPending.kind = 0;
+    composerMenuPending.identity[0] = '\0';
+    if (!bridgeReady || window != hostWindow || !placeholderVisible ||
+        !composerEditorVisible || (kind != 1 && kind != 2) ||
+        !composerChipVisible[kind - 1] || !composer_identity_valid(identity) ||
+        !composer_bounds_valid(window, x, y, width, height)) return;
+    composerMenuPending.visible = 1;
+    composerMenuPending.kind = kind;
+    composerMenuPending.bounds = (AtkRectangle){x, y, width, height};
+    g_strlcpy(composerMenuPending.identity, identity, sizeof(composerMenuPending.identity));
+}
+int tw_accessibility_composer_menu_add_row(TWWindow *window, int optionIndex,
+                                           const char *id, const char *name,
+                                           int selected, int enabled,
+                                           int x, int y, int width, int height) {
+    if (!bridgeReady) return 0;
+    if (window != hostWindow || !composerMenuPending.visible ||
+        composerMenuPending.count >= MAX_COMPOSER_MENU_ROWS || optionIndex < 0 ||
+        !id || !id[0] || !name ||
+        strnlen(id, MAX_ROW_ID) >= MAX_ROW_ID ||
+        strnlen(name, MAX_ROW_NAME) >= MAX_ROW_NAME ||
+        !g_utf8_validate(id, -1, NULL) || !g_utf8_validate(name, -1, NULL)) return -1;
+    const AtkRectangle menu = composerMenuPending.bounds;
+    if (x < menu.x || y < menu.y || x >= menu.x + menu.width || y >= menu.y + menu.height ||
+        width <= 0 || width > menu.x + menu.width - x ||
+        height <= 0 || height > menu.y + menu.height - y) return -1;
+    const int slot = composerMenuPending.count++;
+    g_strlcpy(composerMenuPending.rows[slot].id, id, MAX_ROW_ID);
+    g_strlcpy(composerMenuPending.rows[slot].name, name, MAX_ROW_NAME);
+    composerMenuPending.rows[slot].optionIndex = optionIndex;
+    composerMenuPending.rows[slot].selected = selected != 0;
+    composerMenuPending.rows[slot].enabled = enabled != 0;
+    composerMenuPending.rows[slot].bounds = (AtkRectangle){x, y, width, height};
+    return 0;
+}
+void tw_accessibility_composer_menu_end(TWWindow *window) {
+    if (!bridgeReady || window != hostWindow) return;
+    const int visible = composerMenuPending.visible && composerMenuPending.count > 0;
+    const int previousKind = composerMenuVisible ? composerMenuKind : 0;
+    int same = visible && composerMenuVisible &&
+        composerMenuKind == composerMenuPending.kind &&
+        strcmp(composerMenuIdentity, composerMenuPending.identity) == 0 &&
+        composerMenuList->children->len == (guint)composerMenuPending.count;
+    for (int i = 0; same && i < composerMenuPending.count; i++) {
+        AccessibleNode *row = g_ptr_array_index(composerMenuList->children, (guint)i);
+        same = row->id && strcmp(row->id, composerMenuPending.rows[i].id) == 0 &&
+            row->row == i && row->optionIndex == composerMenuPending.rows[i].optionIndex;
+    }
+    if (!visible || !same) {
+        if (composerMenuVisible || visible) generation++;
+        clear_children(composerMenuList);
+    }
+    composerMenuVisible = visible;
+    if (visible) {
+        composerMenuKind = composerMenuPending.kind;
+        g_strlcpy(composerMenuIdentity, composerMenuPending.identity, sizeof(composerMenuIdentity));
+        composerMenuList->bounds = composerMenuPending.bounds;
+        set_name_if_changed(composerMenuList, composerMenuKind == 1 ? "Projects" : "Providers");
+        if (!same) {
+            for (int i = 0; i < composerMenuPending.count; i++) {
+                AccessibleNode *row = new_component(ATK_ROLE_LIST_ITEM, composerMenuPending.rows[i].name);
+                row->id = g_strdup(composerMenuPending.rows[i].id);
+                atk_object_set_accessible_id(ATK_OBJECT(row), row->id);
+                row->row = i;
+                row->optionIndex = composerMenuPending.rows[i].optionIndex;
+                row->selected = composerMenuPending.rows[i].selected;
+                row->enabled = composerMenuPending.rows[i].enabled;
+                row->bounds = composerMenuPending.rows[i].bounds;
+                add_child(composerMenuList, row);
+                g_object_unref(row);
+            }
+        } else {
+            for (int i = 0; i < composerMenuPending.count; i++) {
+                AccessibleNode *row = g_ptr_array_index(composerMenuList->children, (guint)i);
+                set_name_if_changed(row, composerMenuPending.rows[i].name);
+                if (row->selected != composerMenuPending.rows[i].selected) {
+                    row->selected = composerMenuPending.rows[i].selected;
+                    atk_object_notify_state_change(ATK_OBJECT(row), ATK_STATE_SELECTED, row->selected);
+                }
+                if (row->enabled != composerMenuPending.rows[i].enabled) {
+                    row->enabled = composerMenuPending.rows[i].enabled;
+                    generation++;
+                    atk_object_notify_state_change(ATK_OBJECT(row), ATK_STATE_ENABLED, row->enabled);
+                    atk_object_notify_state_change(ATK_OBJECT(row), ATK_STATE_SENSITIVE, row->enabled);
+                }
+                row->bounds = composerMenuPending.rows[i].bounds;
+            }
+        }
+    } else {
+        composerMenuKind = 0;
+        composerMenuIdentity[0] = '\0';
+    }
+    const int currentKind = composerMenuVisible ? composerMenuKind : 0;
+    if (previousKind != currentKind) {
+        if (previousKind)
+            atk_object_notify_state_change(ATK_OBJECT(previousKind == 1 ? composerProjectChip : composerProviderChip),
+                                           ATK_STATE_EXPANDED, FALSE);
+        if (currentKind)
+            atk_object_notify_state_change(ATK_OBJECT(currentKind == 1 ? composerProjectChip : composerProviderChip),
+                                           ATK_STATE_EXPANDED, TRUE);
+    }
+    rebuild_placeholder_children();
+    refresh_focus();
+}
+int tw_accessibility_composer_chip_identity(int kind, char *identity, int capacity) {
+    if (!bridgeReady || (kind != 1 && kind != 2) || !identity || capacity < MAX_COMPOSER_ID ||
+        !placeholderVisible || !composerEditorVisible || !composerChipVisible[kind - 1] ||
+        !composerIdentity[0]) return 0;
+    AccessibleNode *chip = kind == 1 ? composerProjectChip : composerProviderChip;
+    if (!node_mounted(ATK_OBJECT(chip))) return 0;
+    strcpy(identity, composerIdentity);
+    return 1;
+}
+int tw_accessibility_composer_menu_row_identity(int slot, int *kind,
+                                                 int *optionIndex, char *id, int capacity) {
+    if (!bridgeReady || !composerMenuVisible || !kind || !optionIndex || !id ||
+        capacity < MAX_ROW_ID || !composerIdentity[0] ||
+        strcmp(composerMenuIdentity, composerIdentity) != 0 ||
+        slot < 0 || (guint)slot >= composerMenuList->children->len) return 0;
+    AccessibleNode *row = g_ptr_array_index(composerMenuList->children, (guint)slot);
+    if (row->retired || !row->enabled || !node_mounted(ATK_OBJECT(row)) ||
+        !row->id || row->optionIndex < 0) return 0;
+    *kind = composerMenuKind;
+    *optionIndex = row->optionIndex;
+    strcpy(id, row->id);
+    return 1;
 }
 int tw_accessibility_composer_edit_pending(TWWindow *window, uint32_t serial,
                                             uint32_t incarnation) {

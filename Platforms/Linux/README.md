@@ -475,14 +475,16 @@ journeys, text shaping, and an accessibility tree. Visible project, agent and te
 shared production content, the idle pane mounts the production placeholder, and command menus use
 production rows. Account rows remain diagnostic;
 a complete production screen is not mounted.
-The right-pane New Session path now mounts the production `PromptTextView` from the shared
-Design source in a scrolling composer. The Linux TextKit shim shapes and edits Unicode text,
+The right-pane New Session path now mounts the production `PromptTextView` and `ChipView` from
+shared Design sources. The Linux host presents project and provider choices in bounded, visible
+production menu rows; project and provider identities, availability, and launch remain host-owned.
+The Linux TextKit shim shapes and edits Unicode text,
 wraps and scrolls, tracks selection and undo, and accepts SDL committed text and IME preedit without sending it
 to the PTY. The host passes a nonempty opening brief through the existing exact-project agent
 launch. `tests/text_editor/run.sh` exercises the editor itself;
 `THREADING_LINUX_COMPOSER_ONLY=1 ./window-smoke.sh` exercises the native X11 window,
-AT-SPI text, screenshot, and agent launch. The shared editor draws the empty placeholder and
-handles Return and Command-Return; the Linux host still owns project selection and launch.
+AT-SPI text and chooser actions, screenshot, and agent launch. The shared editor draws the empty
+placeholder and handles Return and Command-Return.
 `THREADING_LINUX_COMPOSER_IME_ONLY=1 ./window-smoke.sh` checks real IBus Pinyin preedit,
 Escape cancellation, `你好` commit, and exact session launch in the same X11 composer.
 The installed `bundle-smoke.sh` repeats that journey from the packaged binary. AT-SPI publishes

@@ -151,8 +151,19 @@ open class NSView: NSResponder, NSLayoutItem {
     open var needsUpdateConstraints: Bool = true
     open var wantsLayer: Bool = false
     open var wantsUpdateLayer: Bool { false }
+    private var appliedSurface: (fill: NSColor, radius: CGFloat, border: NSColor?)?
+
+    /// Layer-backed controls retain their resolved surface recipe. The Linux raster tree paints
+    /// that recipe before the control's own drawing and children, just as AppKit's backing layer
+    /// sits behind a view's contents.
+    public func setAppliedSurface(fill: NSColor, radius: CGFloat, border: NSColor? = nil) {
+        precondition(radius.isFinite && radius >= 0, "invalid surface radius")
+        appliedSurface = (fill, radius, border)
+        needsDisplay = true
+    }
     open var identifier: NSUserInterfaceItemIdentifier?
     open var toolTip: String?
+    open var alignmentRectInsets: NSEdgeInsets { NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
 
     /// An explicit appearance overrides the inherited one. AppKit calls the hook for each
     /// affected descendant when that effective value changes, including after reparenting.
@@ -499,6 +510,20 @@ open class NSView: NSResponder, NSLayoutItem {
             NSBezierPath(rect: bounds).addClip()
 
             layout()
+            if let appliedSurface {
+                let borderWidth: CGFloat = 1
+                let rect = appliedSurface.border == nil ? bounds
+                    : bounds.insetBy(dx: borderWidth / 2, dy: borderWidth / 2)
+                let corner = min(appliedSurface.radius, max(0, min(rect.width, rect.height) / 2))
+                let surface = NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner)
+                appliedSurface.fill.setFill()
+                surface.fill()
+                if let border = appliedSurface.border {
+                    border.setStroke()
+                    surface.lineWidth = borderWidth
+                    surface.stroke()
+                }
+            }
             draw(bounds)
             for subview in subviews { subview.render(in: context) }
         }
@@ -742,6 +767,14 @@ public struct NSUserInterfaceItemIdentifier: RawRepresentable, Hashable, Sendabl
 }
 
 public enum NSAccessibility {
+    public enum Notification: Sendable { case valueChanged }
+    @MainActor public static var notificationHandler: ((NSView, Notification) -> Void)?
+
+    @MainActor public static func post(element: NSView, notification: Notification) {
+        element.needsDisplay = true
+        notificationHandler?(element, notification)
+    }
+
     public enum Role: String, Hashable, Sendable {
         case staticText
         case textArea
@@ -749,6 +782,7 @@ public enum NSAccessibility {
         case group
         case menu
         case menuItem
+        case popUpButton
     }
 }
 

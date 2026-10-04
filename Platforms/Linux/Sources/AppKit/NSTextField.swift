@@ -11,6 +11,10 @@ public enum NSLineBreakMode: Int, Sendable {
 @MainActor
 public final class NSTextFieldCell {
     weak var owner: NSTextField?
+    /// Linux's Pango label has no private AppKit cell padding: its shaped bounds are its cell.
+    public var cellSize: NSSize { owner?.intrinsicContentSize ?? .zero }
+    public func cellSize(forBounds bounds: NSRect) -> NSSize { cellSize }
+    public func titleRect(forBounds bounds: NSRect) -> NSRect { bounds }
     public var truncatesLastVisibleLine = false {
         didSet {
             owner?.needsDisplay = true

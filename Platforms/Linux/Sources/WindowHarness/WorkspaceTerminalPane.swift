@@ -17,7 +17,7 @@ enum SessionMenuCommand: String, CaseIterable {
 }
 
 @MainActor
-private final class SessionMenuSurface: NSView {
+final class SessionMenuSurface: NSView {
     override func draw(_ dirtyRect: NSRect) {
         ThemedSurface.draw(bounds.insetBy(dx: 0.5, dy: 0.5),
             fill: Design.Surface.elevated, border: Design.Text.tertiary,
