@@ -27,7 +27,7 @@ docker run --rm -i --platform linux/arm64 \
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC
 apt-get update -qq >/dev/null
-apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev libglib2.0-dev >/dev/null
+apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev libglib2.0-dev libgdk-pixbuf-2.0-dev librsvg2-common >/dev/null
 ./package-app.sh
 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --project-row-layout-fixture
 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --session-row-layout-fixture
@@ -74,6 +74,7 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/project_actions_smoke.py:/project_actions_smoke.py:ro" \
   -v "$PWD/tests/project_create_menu_smoke.py:/project_create_menu_smoke.py:ro" \
   -v "$PWD/tests/composer_smoke.py:/composer_smoke.py:ro" \
+  -v "$PWD/tests/composer_account_smoke.py:/composer_account_smoke.py:ro" \
   -v "$PWD/tests/add_project_button_smoke.py:/add_project_button_smoke.py:ro" \
   -v "$PWD/tests/actions_smoke.py:/actions_smoke.py:ro" \
   -v "$PWD/tests/session_actions_smoke.py:/session_actions_smoke.py:ro" \

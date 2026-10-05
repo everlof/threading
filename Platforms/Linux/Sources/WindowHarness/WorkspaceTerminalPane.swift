@@ -166,6 +166,10 @@ final class WorkspaceTerminalPane {
             }
             else { openInAction.setSymbol("folder", accessibility: label) }
             openInAction.toolTip = label
+            // This control starts hidden. Materialize its visible halves before the shim's
+            // first layout solve so GlyphView contributes its intrinsic size to that pass.
+            openInAction.materializeGlyphIfNeeded()
+            openInChooser.materializeGlyphIfNeeded()
         }
         headerNeedsPresentation = true
     }

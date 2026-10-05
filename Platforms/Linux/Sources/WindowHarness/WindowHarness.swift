@@ -669,6 +669,84 @@ struct WindowHarness {
         }
     }
 
+    /// One selected desktop icon is decoded off SDL's thread. A completed miss is distinct
+    /// from work still in flight, so an unavailable icon does not queue itself every frame.
+    private final class OpenInIconGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: LinuxExternalApps.IconPixels??
+
+        func finish(_ pixels: LinuxExternalApps.IconPixels?) {
+            lock.lock(); result = .some(pixels); lock.unlock()
+        }
+
+        func take() -> LinuxExternalApps.IconPixels?? {
+            lock.lock(); defer { lock.unlock() }
+            let ready = result
+            result = nil
+            return ready
+        }
+    }
+
+    /// SDL's owner keeps the small image cache and in-flight request together. The worker sees
+    /// only a Sendable desktop entry and its result gate, never captured window-loop locals.
+    @MainActor private final class OpenInIconState {
+        private struct Pending {
+            let id: String
+            let hint: String
+            let gate: OpenInIconGate
+        }
+
+        private struct Cached {
+            let hint: String
+            let image: NSImage?
+        }
+
+        private var pending: Pending?
+        private var cache: [String: Cached] = [:]
+        private var order: [String] = []
+
+        var isLoading: Bool { pending != nil }
+
+        func selectedImage(for app: LinuxExternalApp) -> NSImage? {
+            guard let hint = app.iconHint else { return nil }
+            if let cached = cache[app.id], cached.hint == hint { return cached.image }
+            guard pending == nil else { return nil }
+            let gate = OpenInIconGate()
+            pending = Pending(id: app.id, hint: hint, gate: gate)
+            DispatchQueue.global(qos: .utility).async {
+                gate.finish(LinuxExternalApps.icon(for: app))
+            }
+            return nil
+        }
+
+        func retainAvailable(_ catalogue: LinuxExternalApps.Catalogue) {
+            cache = cache.filter { id, cached in
+                cached.image != nil && catalogue.apps.contains {
+                    $0.id == id && $0.iconHint == cached.hint
+                }
+            }
+            order.removeAll { cache[$0] == nil }
+        }
+
+        /// Nil means the worker has not finished. A completed missing icon is cached as a miss,
+        /// so a failing desktop entry cannot launch another decode on every render poll.
+        func takeCompleted() -> Bool {
+            guard let pending, let pixels = pending.gate.take() else { return false }
+            self.pending = nil
+            let image = pixels.flatMap { decoded -> NSImage? in
+                guard let image = NSImage(rgba: decoded.rgba, width: decoded.width,
+                                          height: decoded.height) else { return nil }
+                image.isTemplate = decoded.isTemplate
+                return image
+            }
+            cache[pending.id] = Cached(hint: pending.hint, image: image)
+            order.removeAll { $0 == pending.id }
+            order.append(pending.id)
+            if order.count > 4 { cache.removeValue(forKey: order.removeFirst()) }
+            return true
+        }
+    }
+
     /// The GTK dialog and store import run away from SDL's owning thread. Only one bounded
     /// snapshot crosses back to the navigator; closing the window closes a pending dialog.
     private final class FolderImportGate: @unchecked Sendable {
@@ -1709,7 +1787,7 @@ struct WindowHarness {
         }
         var placeholderActionRequested = false
         var composerSubmitRequested = false
-        var composerChoice: (projectID: String, kind: AgentKind)?
+        var composerChoice: (projectID: String, identity: AccountID)?
         var pendingComposerProjectID: String?
         var idlePane = launch.map { _ in
             WorkspacePlaceholderPane(hasProjects: !projects.isEmpty,
@@ -1723,17 +1801,28 @@ struct WindowHarness {
                   projects.indices.contains(projectIndex),
                   projects[projectIndex].id == choice.projectID else { return }
             let projectChoices = projects.map { (id: $0.id, name: $0.name) }
-            var providerChoices: [(id: String, name: String)] = []
-            if agentExecutable != nil {
-                providerChoices.append((id: AgentKind.codex.rawValue, name: AgentKind.codex.displayName))
+            var identityChoices: [ComposerIdentityChoice] = []
+            var identityBindings: [(token: String, identity: AccountID)] = []
+            for (kind, executable, accounts) in [
+                (AgentKind.codex, agentExecutable, codexAccounts),
+                (AgentKind.claude, claudeExecutable, claudeAccounts)
+            ] where executable != nil {
+                let mark = ProviderMarks.image(for: kind, selected: false)
+                for (index, handle) in accounts.enumerated() {
+                    let token = "\(kind.rawValue):\(index)"
+                    let identity = AccountID(provider: kind, handle: handle)
+                    identityBindings.append((token, identity))
+                    identityChoices.append(ComposerIdentityChoice(
+                        id: token, providerName: kind.displayName,
+                        accountName: handle.isStandard ? "" : readableNavigatorText(handle.name),
+                        icon: mark))
+                }
             }
-            if claudeExecutable != nil {
-                providerChoices.append((id: AgentKind.claude.rawValue, name: AgentKind.claude.displayName))
-            }
+            let selectedToken = identityBindings.first { $0.identity == choice.identity }?.token ?? ""
             pane.configureComposerChoices(projects: projectChoices,
                 selectedProjectID: choice.projectID,
-                providers: providerChoices,
-                selectedProviderID: choice.kind.rawValue,
+                identities: identityChoices,
+                selectedIdentityID: selectedToken,
                 onProjectChoice: { projectID in
                     guard let current = composerChoice, pane.isComposing,
                           let index = projectIndexes[projectID], projects.indices.contains(index),
@@ -1741,16 +1830,20 @@ struct WindowHarness {
                     selected = index
                     inlineSelection = .project(projectIndex: index, id: projectID)
                     outlineScrollSelection = true
-                    composerChoice = (projectID, current.kind)
+                    composerChoice = (projectID, current.identity)
                     refreshComposerChoices()
                     dirty = true
                 },
-                onProviderChoice: { providerID in
+                onIdentityChoice: { token in
                     guard let current = composerChoice, pane.isComposing,
-                          let kind = AgentKind(rawValue: providerID),
-                          (kind == .codex ? agentExecutable : claudeExecutable) != nil
+                          let identity = identityBindings.first(where: { $0.token == token })?.identity,
+                          (identity.provider == .codex ? codexAccounts : claudeAccounts)
+                            .contains(identity.handle),
+                          (identity.provider == .codex ? agentExecutable : claudeExecutable) != nil
                     else { return }
-                    composerChoice = (current.projectID, kind)
+                    composerChoice = (current.projectID, identity)
+                    if identity.provider == .codex { codexAccount = identity.handle }
+                    else { claudeAccount = identity.handle }
                     refreshComposerChoices()
                     dirty = true
                 })
@@ -1762,6 +1855,7 @@ struct WindowHarness {
         var pendingOpenInCatalogue: OpenInCatalogueGate?
         var pendingOpenInMenuPage: String?
         var pendingOpenInLaunch: (gate: SelectionGate, appID: String, remember: Bool)?
+        let openInIcons = OpenInIconState()
         let openInPreferenceKey = "externalApp.preferred"
         func preferredOpenInID() -> String? {
             let stored = PreferenceStore.shared.string(forKey: openInPreferenceKey)
@@ -1785,7 +1879,10 @@ struct WindowHarness {
             let choices = openInCatalogue.apps.map {
                 WorkspaceTerminalPane.OpenInChoice(id: $0.id, name: $0.name)
             }
-            pane.configureOpenIn(preferredID: preferredOpenInID(), icon: nil, choices: choices)
+            let preferredID = preferredOpenInID()
+            let selected = openInCatalogue.apps.first { $0.id == preferredID }
+            let icon = selected.flatMap { openInIcons.selectedImage(for: $0) }
+            pane.configureOpenIn(preferredID: preferredID, icon: icon, choices: choices)
         }
         func startOpenInDiscovery() {
             guard pendingOpenInCatalogue == nil else { return }
@@ -2231,11 +2328,12 @@ struct WindowHarness {
             tw_title(window, "Threading terminal - starting")
             dirty = true
         }
-        func beginAgent(_ kind: AgentKind, prompt: String?) throws {
+        func beginAgent(_ kind: AgentKind, prompt: String?,
+                        accountOverride: AccountHandle? = nil) throws {
             guard let launch, !projects.isEmpty else { return }
             let executable = kind == .codex ? agentExecutable : claudeExecutable
             guard let executable else { return }
-            let accountHandle: AccountHandle = kind == .codex ? codexAccount : claudeAccount
+            let accountHandle = accountOverride ?? (kind == .codex ? codexAccount : claudeAccount)
             guard terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
                 tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                 return
@@ -2336,6 +2434,7 @@ struct WindowHarness {
             if let gate = pendingOpenInCatalogue, let catalogue = gate.take() {
                 pendingOpenInCatalogue = nil
                 openInCatalogue = catalogue
+                openInIcons.retainAvailable(catalogue)
                 configureOpenInPane()
                 if let requestedPage = pendingOpenInMenuPage {
                     pendingOpenInMenuPage = nil
@@ -2343,6 +2442,10 @@ struct WindowHarness {
                         pane.toggleOpenInMenu(window: window, paneWidth: terminalWidth)
                     }
                 }
+                dirty = true
+            }
+            if openInIcons.takeCompleted() {
+                configureOpenInPane()
                 dirty = true
             }
             if let pending = pendingOpenInLaunch, let result = pending.gate.take() {
@@ -2368,7 +2471,14 @@ struct WindowHarness {
                     if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         tw_title(window, "Threading composer - write a brief first")
                     } else {
-                        try beginAgent(choice.kind, prompt: prompt)
+                        let accounts = choice.identity.provider == .codex
+                            ? codexAccounts : claudeAccounts
+                        if accounts.contains(choice.identity.handle) {
+                            try beginAgent(choice.identity.provider, prompt: prompt,
+                                           accountOverride: choice.identity.handle)
+                        } else {
+                            tw_title(window, "Threading composer - account no longer available")
+                        }
                     }
                 } else {
                     tw_title(window, "Threading composer - selected project changed")
@@ -2998,6 +3108,7 @@ struct WindowHarness {
                     || restoredRuntimes.values.contains { $0.hasPendingAgentCreation }
                 let pollsRuntime = awaitingCreation || activePane?.needsPolling == true
                     || pendingOpenInCatalogue != nil || pendingOpenInLaunch != nil
+                    || openInIcons.isLoading
                 // A picker without a terminal still owes a deadline update. Sleep until that
                 // expiry (at most one second to recheck wall-clock changes), while the bridge
                 // keeps servicing accessibility without returning to the Swift loop every 33ms.
@@ -3613,7 +3724,10 @@ struct WindowHarness {
                 let kind: AgentKind = event.kind == 13 ? .codex : .claude
                 if let targetID = composerTargetID,
                    targetID == projects[selected].id, let idlePane {
-                    composerChoice = (targetID, kind)
+                    let accounts = kind == .codex ? codexAccounts : claudeAccounts
+                    let preferred = kind == .codex ? codexAccount : claudeAccount
+                    let handle = accounts.contains(preferred) ? preferred : .standard
+                    composerChoice = (targetID, AccountID(provider: kind, handle: handle))
                     idlePane.showComposer(projectName: projects[selected].name,
                         providerName: kind.displayName)
                     refreshComposerChoices()

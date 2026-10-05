@@ -23,6 +23,15 @@ home = root / 'home'
 home.mkdir()
 applications = home / '.local' / 'share' / 'applications'
 applications.mkdir(parents=True)
+icons = home / '.local' / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps'
+icons.mkdir(parents=True)
+red_icon = root / 'fixture-a.png'
+subprocess.run(['convert', '-size', '32x32', 'xc:#e02030', str(red_icon)],
+               check=True, timeout=5)
+(icons / 'threading-fixture-b.svg').write_text(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" '
+    'viewBox="0 0 32 32"><rect x="2" y="2" width="28" height="28" '
+    'fill="#16c83a"/></svg>')
 configuration = home / '.config'
 configuration.mkdir()
 receipts = root / 'opened.jsonl'
@@ -34,10 +43,12 @@ with Path(__file__).with_name('opened.jsonl').open('a') as output:
     output.write(json.dumps({'app': sys.argv[1], 'path': sys.argv[2]}) + '\\n')
 ''')
 for letter in 'ABCDEFGH':
+    icon = str(red_icon) if letter == 'A' else (
+        'threading-fixture-b' if letter == 'B' else 'folder')
     (applications / f'threading-fixture-{letter.lower()}.desktop').write_text(
         '[Desktop Entry]\nType=Application\nName=Fixture ' + letter + '\n'
         'Exec=/usr/bin/python3 ' + str(recorder) + ' ' + letter + ' %f\n'
-        'Icon=folder\nMimeType=inode/directory;\nTerminal=false\n')
+        'Icon=' + icon + '\nMimeType=inode/directory;\nTerminal=false\n')
 (configuration / 'mimeapps.list').write_text(
     '[Default Applications]\n'
     'inode/directory=threading-fixture-a.desktop;\n'
@@ -96,6 +107,20 @@ def capture(name):
     subprocess.run(['import', '-window', window, str(output / name)], check=True, timeout=5)
 
 
+def icon_color_visible(name, bounds, channel):
+    capture(name)
+    crop = f'{bounds.width}x{bounds.height}+{bounds.x}+{bounds.y}'
+    pixels = subprocess.check_output(
+        ['convert', str(output / name), '-crop', crop, '+repage', '-depth', '8', 'RGB:-'],
+        timeout=5)
+    colors = zip(pixels[0::3], pixels[1::3], pixels[2::3])
+    if channel == 'red':
+        return sum(r > 150 and r > g * 1.7 and r > b * 1.7
+                   for r, g, b in colors) >= 20
+    return sum(g > 110 and g > r * 1.5 and g > b * 1.3
+               for r, g, b in colors) >= 20
+
+
 try:
     with log_path.open('w') as log:
         process = subprocess.Popen([binary, '--app', str(store), socket, '/bin/cat'],
@@ -113,7 +138,8 @@ try:
         assert primary_bounds.width > chooser_bounds.width > 0
         assert primary_bounds.x + primary_bounds.width == chooser_bounds.x
         assert primary.get_name().startswith('Open in Fixture A')
-        capture('open-in-header.png')
+        eventually(lambda: icon_color_visible('open-in-header.png', primary_bounds, 'red'),
+                   'absolute PNG app icon painted')
 
         xdo('key', 'super+o')
         first = eventually(lambda: opened() if len(opened()) == 1 else None,
@@ -136,6 +162,8 @@ try:
         primary = child('linux.open-in.primary')
         assert primary.get_name().startswith('Open in Fixture B')
         bounds = primary.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        eventually(lambda: icon_color_visible('open-in-selected-b.png', bounds, 'green'),
+                   'named SVG app icon painted')
         xdo('mousemove', '--window', window,
             str(bounds.x + bounds.width // 2), str(bounds.y + bounds.height // 2),
             'click', '1')

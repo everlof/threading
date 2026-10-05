@@ -4836,8 +4836,10 @@ active page selection, directory validation, app availability, and the last-used
 GIO work runs outside the SDL window thread. The chooser retains at most 64 lightweight app
 choices while mounting at most six shared `ThemedMenuRowView` rows. Keyboard, pointer, and
 AT-SPI actions use the same validated app ID path; Command-O invokes the primary action.
-The host owns launch behavior, so this adds no extension presentation contract. The primary
-button currently uses a folder glyph until Linux resolves each app's icon hint into bitmap art.
+The host owns launch behavior, so this adds no extension presentation contract. A GdkPixbuf
+adapter resolves the selected application's absolute PNG/SVG icon or bounded XDG theme name
+off the window thread. It reads at most 256 KiB, limits source dimensions to 1024 pixels,
+and produces at most 64×64 RGBA pixels. The primary button keeps a folder fallback.
 
 Verification on 2026-10-05: Ubuntu arm64 `WindowHarness` built, and the focused native X11
 smoke exercised the real split button, AT-SPI bounds and actions, default app launch,
@@ -4847,4 +4849,34 @@ overlay accepts the six-row texture and shrinks its viewport for short windows. 
 `out/open-in/open-in-header.png` and
 `out/open-in/open-in-choices.png` from the real 1120×480 window. The adapter's isolated GIO
 contract checks literal directory launch and invalid input. The packaged `.deb` runtime runner
-now includes the same Open In journey; a full installed bundle run remains to be verified.
+includes the same Open In journey.
+The icon follow-up required `libgdk-pixbuf-2.0-0` and `librsvg2-common` in the installed
+package. A focused X11 rerun passed both an absolute red PNG and a named green SVG icon with
+pixel assertions; I inspected `out/open-in/open-in-header.png` and `open-in-selected-b.png`.
+The Linux shim needs to materialize the visible split-button glyphs before layout: a deferred
+glyph built in `draw(_:)` first acquired a zero-sized frame after that pass.
+The rebuilt Ubuntu arm64 `.deb` passed the full non-root installed `bundle-smoke.sh` suite,
+including Open In. I inspected the installed red PNG and green SVG states in
+`out/bundle-smoke/run.UKrYwWt5/restart-out/open-in/`. The package SHA-256 is
+`57e066829c7ce338627f44b8b13883d756ae67792c9a4bcdb38b62086e1dea1d`.
+
+## 160. The Linux composer chooses a provider-qualified account
+
+The Linux New Session pane still has the production two-chip layout. Its second unchanged
+`ChipView` now presents the exact provider and account, with cached provider artwork and
+production `ThemedMenuRowView` choices. The host discovers no more than 32 verified accounts
+per provider; the pane retains at most 64 compact values and mounts only the rows that fit,
+never more than six. Bounded provider-qualified menu tokens map back to portable `AccountID`
+values in the host, where membership and executable availability are revalidated. The chosen
+handle is passed to the existing agent launch route. The host owns account discovery, choice
+identity, launch admission, and session recording; the shared Design controls own presentation.
+This stays inside the existing composer surface rather than adding an extension contract.
+
+Verification on 2026-10-05: the Ubuntu arm64 `WindowHarness` build and focused native X11
+composer-account smoke passed. Eight named Codex accounts were available; keyboard scrolling
+kept the viewport bounded, AT-SPI chose a later row, and the launched child observed the exact
+named `CODEX_HOME`. I inspected `out/composer-account/composer-account.png` from the real
+1120×480 window: the second chip shows the provider mark and selected account. The full
+non-root installed `.deb` suite also passed the composer-account smoke. I inspected its
+`out/bundle-smoke/run.UKrYwWt5/restart-out/composer-account/composer-account.png` from the
+installed product shell.

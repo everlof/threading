@@ -3,10 +3,10 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ./vendor-core.sh --verify
 mkdir -p out
-docker run --rm -i --platform linux/arm64 -e THREADING_LINUX_TERMINAL_STRESS="${THREADING_LINUX_TERMINAL_STRESS:-0}" -e THREADING_LINUX_RESTART_ONLY="${THREADING_LINUX_RESTART_ONLY:-0}" -e THREADING_LINUX_STARTUP_ONLY="${THREADING_LINUX_STARTUP_ONLY:-0}" -e THREADING_LINUX_STARTUP_TRACE="${THREADING_LINUX_STARTUP_TRACE:-0}" -e THREADING_LINUX_AGENT_ONLY="${THREADING_LINUX_AGENT_ONLY:-0}" -e THREADING_LINUX_NAMED_ONLY="${THREADING_LINUX_NAMED_ONLY:-0}" -e THREADING_LINUX_IME_ONLY="${THREADING_LINUX_IME_ONLY:-0}" -e THREADING_LINUX_COMPOSER_IME_ONLY="${THREADING_LINUX_COMPOSER_IME_ONLY:-0}" -e THREADING_LINUX_A11Y_ONLY="${THREADING_LINUX_A11Y_ONLY:-0}" -e THREADING_LINUX_COMPOSER_ONLY="${THREADING_LINUX_COMPOSER_ONLY:-0}" -e THREADING_LINUX_OPEN_IN_ONLY="${THREADING_LINUX_OPEN_IN_ONLY:-0}" -e THREADING_TERMINAL_REFERENCE_RENDERER="${THREADING_TERMINAL_REFERENCE_RENDERER:-0}" -v "$PWD/../..:/repo" -w /repo/Platforms/Linux swift:6.3.2-noble bash -s <<'INNER' 2>&1 | tee out/window-smoke.log
+docker run --rm -i --platform linux/arm64 -e THREADING_LINUX_TERMINAL_STRESS="${THREADING_LINUX_TERMINAL_STRESS:-0}" -e THREADING_LINUX_RESTART_ONLY="${THREADING_LINUX_RESTART_ONLY:-0}" -e THREADING_LINUX_STARTUP_ONLY="${THREADING_LINUX_STARTUP_ONLY:-0}" -e THREADING_LINUX_STARTUP_TRACE="${THREADING_LINUX_STARTUP_TRACE:-0}" -e THREADING_LINUX_AGENT_ONLY="${THREADING_LINUX_AGENT_ONLY:-0}" -e THREADING_LINUX_NAMED_ONLY="${THREADING_LINUX_NAMED_ONLY:-0}" -e THREADING_LINUX_IME_ONLY="${THREADING_LINUX_IME_ONLY:-0}" -e THREADING_LINUX_COMPOSER_IME_ONLY="${THREADING_LINUX_COMPOSER_IME_ONLY:-0}" -e THREADING_LINUX_A11Y_ONLY="${THREADING_LINUX_A11Y_ONLY:-0}" -e THREADING_LINUX_COMPOSER_ONLY="${THREADING_LINUX_COMPOSER_ONLY:-0}" -e THREADING_LINUX_COMPOSER_ACCOUNT_ONLY="${THREADING_LINUX_COMPOSER_ACCOUNT_ONLY:-0}" -e THREADING_LINUX_OPEN_IN_ONLY="${THREADING_LINUX_OPEN_IN_ONLY:-0}" -e THREADING_TERMINAL_REFERENCE_RENDERER="${THREADING_TERMINAL_REFERENCE_RENDERER:-0}" -v "$PWD/../..:/repo" -w /repo/Platforms/Linux swift:6.3.2-noble bash -s <<'INNER' 2>&1 | tee out/window-smoke.log
 set -euo pipefail
 apt-get update -qq >/dev/null
-apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev libglib2.0-dev fonts-dejavu-core fonts-noto-cjk fonts-noto-color-emoji xvfb xdotool xclip imagemagick zenity python3-gi gir1.2-atspi-2.0 dbus-x11 >/dev/null
+apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev libglib2.0-dev libgdk-pixbuf-2.0-dev librsvg2-common fonts-dejavu-core fonts-noto-cjk fonts-noto-color-emoji xvfb xdotool xclip imagemagick zenity python3-gi gir1.2-atspi-2.0 dbus-x11 >/dev/null
 if [[ "$THREADING_LINUX_IME_ONLY" == 1 || "$THREADING_LINUX_COMPOSER_IME_ONLY" == 1 ]]; then
   apt-get install -y -qq ibus ibus-libpinyin dbus-x11 >/dev/null
 fi
@@ -59,6 +59,11 @@ done
 if [[ "$THREADING_LINUX_COMPOSER_ONLY" == 1 ]]; then
   dbus-run-session -- python3 tests/composer_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
     "$daemon" "$fixture/composer.sock" "$fixture" "$PWD/out/composer"
+  exit 0
+fi
+if [[ "$THREADING_LINUX_COMPOSER_ACCOUNT_ONLY" == 1 ]]; then
+  dbus-run-session -- python3 tests/composer_account_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+    "$daemon" "$fixture/composer-account.sock" "$fixture" "$PWD/out/composer-account"
   exit 0
 fi
 if [[ "$THREADING_LINUX_OPEN_IN_ONLY" == 1 ]]; then
@@ -447,6 +452,8 @@ dbus-run-session -- python3 tests/provider_marks_smoke.py "$bin/WindowHarness" "
   "$daemon" "$fixture/pty.sock" "$fixture"
 dbus-run-session -- python3 tests/composer_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$daemon" "$fixture/composer.sock" "$fixture" "$PWD/out/composer"
+dbus-run-session -- python3 tests/composer_account_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$daemon" "$fixture/composer-account.sock" "$fixture" "$PWD/out/composer-account"
 dbus-run-session -- python3 tests/project_count_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$fixture/pty.sock" "$fixture" "$PWD/out/project-count"
 python3 tests/terminal_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture" "$PWD/tests/terminal_attach_child.py"
