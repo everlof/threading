@@ -66,7 +66,8 @@ G_DEFINE_TYPE_WITH_CODE(ComposerEditorNode, composer_editor_node, component_node
                         G_IMPLEMENT_INTERFACE(ATK_TYPE_EDITABLE_TEXT, composer_editable_interface_init))
 
 static AccessibleNode *app, *frame, *list, *actionsButton, *addProjectButton, *pageTitleButton;
-static AccessibleNode *pageActionsButton, *sessionMenuList;
+static AccessibleNode *pageActionsButton, *openInPrimaryButton, *openInChooserButton;
+static AccessibleNode *sessionMenuList;
 static AccessibleNode *placeholder, *placeholderTitle, *placeholderDetail, *placeholderAction;
 static AccessibleNode *composerProjectChip, *composerProviderChip, *composerMenuList;
 static int actionsVisible, addProjectVisible, pageTitleVisible, placeholderVisible, placeholderActionVisible;
@@ -84,9 +85,9 @@ static char composerIdentity[MAX_COMPOSER_ID];
 static char composerMenuIdentity[MAX_COMPOSER_ID];
 static uint32_t composerIncarnation = 1, composerEditSerial;
 static int composerPredictedCharacters, composerPredictionValid;
-static int pageActionsVisible, sessionMenuVisible;
+static int pageActionsVisible, openInVisible, sessionMenuVisible;
 static char pageTitleIdentity[128];
-static char pageActionsIdentity[128], sessionMenuIdentity[128];
+static char pageActionsIdentity[128], openInIdentity[128], sessionMenuIdentity[128];
 static TerminalNode *terminal;
 static AccessibleNode *activeList;
 static AccessibleNode *focused;
@@ -120,6 +121,7 @@ static struct {
 } pending;
 static struct {
     char identity[128];
+    char label[128];
     int visible, count;
     AtkRectangle bounds;
     struct {
@@ -179,7 +181,8 @@ static AtkStateSet *node_state(AtkObject *object) {
         node == (AccessibleNode *)terminal ||
         node == (AccessibleNode *)composerEditor ||
         node == actionsButton || node == addProjectButton || node == pageTitleButton ||
-        node == pageActionsButton || node == placeholderAction ||
+        node == pageActionsButton || node == openInPrimaryButton ||
+        node == openInChooserButton || node == placeholderAction ||
         node->row >= 0 || node->projectControl) {
         atk_state_set_add_state(states, ATK_STATE_FOCUSABLE);
         if (node == focused) atk_state_set_add_state(states, ATK_STATE_FOCUSED);
@@ -322,7 +325,7 @@ static void show_content(AccessibleNode *content) {
     AccessibleNode *rightPane = placeholderVisible ? placeholder : (AccessibleNode *)terminal;
     const guint baseCount = workspace ? 2 + titleVisible : 1;
     const guint count = baseCount + actionsVisible + addProjectVisible
-        + pageActionsVisible + sessionMenuVisible;
+        + pageActionsVisible + 2 * openInVisible + sessionMenuVisible;
     int same = frame->children->len == count
         && g_ptr_array_index(frame->children, 0) == (workspace ? list : content);
     if (same && titleVisible) same = g_ptr_array_index(frame->children, 1) == pageTitleButton;
@@ -333,6 +336,10 @@ static void show_content(AccessibleNode *content) {
     if (same && pageActionsVisible)
         same = g_ptr_array_index(frame->children, baseCount + actionsVisible + addProjectVisible)
             == pageActionsButton;
+    const guint openInIndex = baseCount + actionsVisible + addProjectVisible + pageActionsVisible;
+    if (same && openInVisible)
+        same = g_ptr_array_index(frame->children, openInIndex) == openInPrimaryButton &&
+            g_ptr_array_index(frame->children, openInIndex + 1) == openInChooserButton;
     if (same && sessionMenuVisible)
         same = g_ptr_array_index(frame->children, count - 1) == sessionMenuList;
     if (!same) {
@@ -344,6 +351,10 @@ static void show_content(AccessibleNode *content) {
         if (actionsVisible) add_child(frame, actionsButton);
         if (addProjectVisible) add_child(frame, addProjectButton);
         if (pageActionsVisible) add_child(frame, pageActionsButton);
+        if (openInVisible) {
+            add_child(frame, openInPrimaryButton);
+            add_child(frame, openInChooserButton);
+        }
         if (sessionMenuVisible) add_child(frame, sessionMenuList);
         generation++;
     }
@@ -374,6 +385,10 @@ static gint action_count(AtkAction *action) {
     if (node == pageActionsButton) return pageActionsVisible && node->enabled &&
         strcmp(pageActionsIdentity, pageTitleIdentity) == 0 &&
         node_mounted(ATK_OBJECT(node)) ? 1 : 0;
+    if (node == openInPrimaryButton || node == openInChooserButton)
+        return openInVisible && !sessionMenuVisible && node->enabled &&
+            strcmp(openInIdentity, pageTitleIdentity) == 0 &&
+            node_mounted(ATK_OBJECT(node)) ? 1 : 0;
     if (node == pageTitleButton) return pageTitleVisible && node->enabled &&
         node_mounted(ATK_OBJECT(node)) ? 1 : 0;
     if (node == placeholderAction) return placeholderVisible && placeholderActionVisible &&
@@ -393,7 +408,8 @@ static const gchar *action_name(AtkAction *action, gint index) {
         (node->row >= 0 && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(composerMenuList)))
         return index == 0 && action_count(action) ? "press" : NULL;
     if (node == actionsButton || node == addProjectButton || node == pageTitleButton ||
-        node == pageActionsButton ||
+        node == pageActionsButton || node == openInPrimaryButton ||
+        node == openInChooserButton ||
         node == placeholderAction ||
         node->projectControl)
         return index == 0 && action_count(action) ? "press" : NULL;
@@ -404,6 +420,17 @@ static const gchar *action_name(AtkAction *action, gint index) {
 }
 static gboolean action_do(AtkAction *action, gint index) {
     AccessibleNode *node = (AccessibleNode *)action;
+    if (node == openInPrimaryButton || node == openInChooserButton) {
+        if (index != 0 || !action_count(action) || eventType == UINT32_MAX) return FALSE;
+        SDL_Event event = {0};
+        event.type = eventType;
+        event.user.code = 14;
+        event.user.data1 = (void *)(intptr_t)(node == openInPrimaryButton ? 1 : 2);
+        event.user.data2 = (void *)(uintptr_t)generation;
+        int pushed = SDL_PushEvent(&event);
+        navigation_trace_enqueue(&event, pushed);
+        return pushed == 1;
+    }
     if (node == composerProjectChip || node == composerProviderChip ||
         (node->row >= 0 && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(composerMenuList))) {
         if (index != 0 || !action_count(action) || eventType == UINT32_MAX) return FALSE;
@@ -581,6 +608,8 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
         *height = windowHeight > *y ? windowHeight - *y : 0;
     } else if (object == ATK_OBJECT(actionsButton) || object == ATK_OBJECT(addProjectButton) ||
                object == ATK_OBJECT(pageTitleButton) || object == ATK_OBJECT(pageActionsButton) ||
+               object == ATK_OBJECT(openInPrimaryButton) ||
+               object == ATK_OBJECT(openInChooserButton) ||
                object == ATK_OBJECT(placeholderAction) || object == ATK_OBJECT(composerEditor) ||
                object == ATK_OBJECT(composerProjectChip) ||
                object == ATK_OBJECT(composerProviderChip)) {
@@ -1152,6 +1181,12 @@ void tw_accessibility_open(TWWindow *window) {
     pageActionsButton = new_component(ATK_ROLE_PUSH_BUTTON, "Session actions");
     pageActionsButton->id = g_strdup("linux.page-actions");
     atk_object_set_accessible_id(ATK_OBJECT(pageActionsButton), pageActionsButton->id);
+    openInPrimaryButton = new_component(ATK_ROLE_PUSH_BUTTON, "Open In");
+    openInPrimaryButton->id = g_strdup("linux.open-in.primary");
+    atk_object_set_accessible_id(ATK_OBJECT(openInPrimaryButton), openInPrimaryButton->id);
+    openInChooserButton = new_component(ATK_ROLE_PUSH_BUTTON, "Choose application");
+    openInChooserButton->id = g_strdup("linux.open-in.chooser");
+    atk_object_set_accessible_id(ATK_OBJECT(openInChooserButton), openInChooserButton->id);
     sessionMenuList = new_component(ATK_ROLE_LIST, "Session actions");
     sessionMenuList->id = g_strdup("linux.session-actions");
     atk_object_set_accessible_id(ATK_OBJECT(sessionMenuList), sessionMenuList->id);
@@ -1183,10 +1218,10 @@ void tw_accessibility_open(TWWindow *window) {
                                  ((AccessibleNode *)composerEditor)->id);
     actionsVisible = 0;
     addProjectVisible = 0;
-    pageTitleVisible = pageActionsVisible = sessionMenuVisible = 0;
+    pageTitleVisible = pageActionsVisible = openInVisible = sessionMenuVisible = 0;
     placeholderVisible = placeholderActionVisible = composerEditorVisible = composerEditorFocused = 0;
     pageTitleIdentity[0] = '\0';
-    pageActionsIdentity[0] = sessionMenuIdentity[0] = '\0';
+    pageActionsIdentity[0] = openInIdentity[0] = sessionMenuIdentity[0] = '\0';
     terminal = g_object_new(terminal_node_get_type(), NULL);
     atk_object_set_role(ATK_OBJECT(terminal), ATK_ROLE_TERMINAL);
     atk_object_set_name(ATK_OBJECT(terminal), "Terminal");
@@ -1226,6 +1261,8 @@ void tw_accessibility_close(void) {
     g_clear_object(&addProjectButton);
     g_clear_object(&pageTitleButton);
     g_clear_object(&pageActionsButton);
+    g_clear_object(&openInPrimaryButton);
+    g_clear_object(&openInChooserButton);
     g_clear_object(&sessionMenuList);
     g_clear_object(&placeholder);
     g_clear_object(&placeholderTitle);
@@ -1235,12 +1272,14 @@ void tw_accessibility_close(void) {
     g_clear_object(&composerProviderChip);
     g_clear_object(&composerMenuList);
     g_clear_object(&composerEditor);
-    actionsVisible = addProjectVisible = pageTitleVisible = pageActionsVisible = sessionMenuVisible = 0;
+    actionsVisible = addProjectVisible = pageTitleVisible = pageActionsVisible = 0;
+    openInVisible = sessionMenuVisible = 0;
     placeholderVisible = placeholderActionVisible = composerEditorVisible = composerEditorFocused = 0;
     composerChipVisible[0] = composerChipVisible[1] = composerMenuVisible = composerMenuKind = 0;
     composerMenuIdentity[0] = '\0';
     pageTitleIdentity[0] = '\0';
-    pageActionsIdentity[0] = sessionMenuIdentity[0] = '\0';
+    pageActionsIdentity[0] = openInIdentity[0] = sessionMenuIdentity[0] = '\0';
+    tw_open_in_shortcut_state(hostWindow, NULL, 0);
     hostWindow = NULL;
     generation++;
 }
@@ -1331,9 +1370,10 @@ void tw_accessibility_page_title(TWWindow *window, const char *identity, const c
         x >= sidebarWidth && x < windowWidth && width > 0 && width <= windowWidth - x &&
         y >= 0 && y < topInset && height > 0 && height <= topInset - y;
     if (!visible || strcmp(pageTitleIdentity, identity) != 0) {
-        if (pageActionsVisible || sessionMenuVisible) generation++;
-        pageActionsVisible = sessionMenuVisible = 0;
-        pageActionsIdentity[0] = sessionMenuIdentity[0] = '\0';
+        if (pageActionsVisible || openInVisible || sessionMenuVisible) generation++;
+        pageActionsVisible = openInVisible = sessionMenuVisible = 0;
+        pageActionsIdentity[0] = openInIdentity[0] = sessionMenuIdentity[0] = '\0';
+        tw_open_in_shortcut_state(window, NULL, 0);
         clear_children(sessionMenuList);
     }
     if (pageTitleVisible != visible ||
@@ -1368,11 +1408,86 @@ void tw_accessibility_page_actions(TWWindow *window, const char *identity, const
     } else pageActionsIdentity[0] = '\0';
     show_content(activeList ? list : (AccessibleNode *)terminal);
 }
+void tw_accessibility_open_in(TWWindow *window, const char *identity,
+                              const char *primaryLabel, const char *chooserLabel, int enabled,
+                              int primaryX, int primaryY, int primaryWidth, int primaryHeight,
+                              int chooserX, int chooserY, int chooserWidth, int chooserHeight) {
+    if (!window) return;
+    int originX, originY, windowWidth, windowHeight;
+    tw_window_geometry(window, &originX, &originY, &windowWidth, &windowHeight);
+    const int sidebarWidth = tw_workspace_sidebar_width(window);
+    const int topInset = tw_workspace_terminal_top_inset_value(window);
+    const int primaryValid = primaryX >= sidebarWidth && primaryX < windowWidth &&
+        primaryWidth > 0 && primaryWidth <= windowWidth - primaryX &&
+        primaryY >= 0 && primaryY < topInset && primaryHeight > 0 &&
+        primaryHeight <= topInset - primaryY;
+    const int chooserValid = chooserX >= sidebarWidth && chooserX < windowWidth &&
+        chooserWidth > 0 && chooserWidth <= windowWidth - chooserX &&
+        chooserY >= 0 && chooserY < topInset && chooserHeight > 0 &&
+        chooserHeight <= topInset - chooserY;
+    const int overlap = primaryValid && chooserValid &&
+        primaryX < chooserX + chooserWidth && chooserX < primaryX + primaryWidth &&
+        primaryY < chooserY + chooserHeight && chooserY < primaryY + primaryHeight;
+    const int valid = sidebarWidth > 0 && identity && identity[0] &&
+        primaryLabel && primaryLabel[0] && chooserLabel && chooserLabel[0] &&
+        strnlen(identity, sizeof(openInIdentity)) < sizeof(openInIdentity) &&
+        strnlen(primaryLabel, 512) < 512 && strnlen(chooserLabel, 512) < 512 &&
+        g_utf8_validate(identity, -1, NULL) &&
+        g_utf8_validate(primaryLabel, -1, NULL) &&
+        g_utf8_validate(chooserLabel, -1, NULL) &&
+        primaryValid && chooserValid && !overlap;
+    const int active = valid && (!bridgeReady || (pageTitleVisible &&
+        strcmp(identity, pageTitleIdentity) == 0));
+    tw_open_in_shortcut_state(window, active ? identity : NULL, active && enabled);
+    if (!bridgeReady || window != hostWindow) return;
+    const int visible = valid && pageTitleVisible &&
+        strcmp(identity, pageTitleIdentity) == 0;
+    const int nextEnabled = visible && enabled != 0;
+    if (openInVisible != visible ||
+        (visible && (strcmp(openInIdentity, identity) != 0 ||
+                     strcmp(atk_object_get_name(ATK_OBJECT(openInPrimaryButton)), primaryLabel) != 0 ||
+                     strcmp(atk_object_get_name(ATK_OBJECT(openInChooserButton)), chooserLabel) != 0)) ||
+        openInPrimaryButton->enabled != nextEnabled) generation++;
+    openInVisible = visible;
+    if (visible) {
+        g_strlcpy(openInIdentity, identity, sizeof(openInIdentity));
+        set_name_if_changed(openInPrimaryButton, primaryLabel);
+        set_name_if_changed(openInChooserButton, chooserLabel);
+        openInPrimaryButton->bounds = (AtkRectangle){primaryX, primaryY,
+                                                     primaryWidth, primaryHeight};
+        openInChooserButton->bounds = (AtkRectangle){chooserX, chooserY,
+                                                     chooserWidth, chooserHeight};
+    } else openInIdentity[0] = '\0';
+    if (openInPrimaryButton->enabled != nextEnabled) {
+        openInPrimaryButton->enabled = openInChooserButton->enabled = nextEnabled;
+        atk_object_notify_state_change(ATK_OBJECT(openInPrimaryButton), ATK_STATE_ENABLED,
+                                       nextEnabled);
+        atk_object_notify_state_change(ATK_OBJECT(openInPrimaryButton), ATK_STATE_SENSITIVE,
+                                       nextEnabled);
+        atk_object_notify_state_change(ATK_OBJECT(openInChooserButton), ATK_STATE_ENABLED,
+                                       nextEnabled);
+        atk_object_notify_state_change(ATK_OBJECT(openInChooserButton), ATK_STATE_SENSITIVE,
+                                       nextEnabled);
+    }
+    show_content(activeList ? list : (AccessibleNode *)terminal);
+}
+int tw_accessibility_open_in_identity(int action, char *identity, int capacity) {
+    if (!bridgeReady || !openInVisible || sessionMenuVisible || !identity ||
+        capacity < (int)sizeof(openInIdentity) ||
+        strcmp(openInIdentity, pageTitleIdentity) != 0) return 0;
+    AccessibleNode *button = action == 1 ? openInPrimaryButton :
+        action == 2 ? openInChooserButton : NULL;
+    if (!button || !button->enabled || !node_mounted(ATK_OBJECT(button))) return 0;
+    strcpy(identity, openInIdentity);
+    return 1;
+}
 void tw_accessibility_session_menu_begin(TWWindow *window, const char *identity,
                                          int x, int y, int width, int height) {
     sessionMenuPending.count = 0;
     sessionMenuPending.visible = 0;
     sessionMenuPending.identity[0] = '\0';
+    g_strlcpy(sessionMenuPending.label, "Session actions",
+              sizeof(sessionMenuPending.label));
     if (!bridgeReady || window != hostWindow || !identity || !pageTitleVisible ||
         strcmp(identity, pageTitleIdentity) != 0 ||
         strnlen(identity, sizeof(sessionMenuPending.identity)) >= sizeof(sessionMenuPending.identity)) return;
@@ -1384,6 +1499,11 @@ void tw_accessibility_session_menu_begin(TWWindow *window, const char *identity,
     sessionMenuPending.visible = 1;
     g_strlcpy(sessionMenuPending.identity, identity, sizeof(sessionMenuPending.identity));
     sessionMenuPending.bounds = (AtkRectangle){x, y, width, height};
+}
+void tw_accessibility_session_menu_label(TWWindow *window, const char *label) {
+    if (!bridgeReady || window != hostWindow || !sessionMenuPending.visible || !label) return;
+    if (strcmp(label, "Open In applications") == 0)
+        g_strlcpy(sessionMenuPending.label, label, sizeof(sessionMenuPending.label));
 }
 int tw_accessibility_session_menu_add_row(TWWindow *window, const char *id, const char *name,
                                           int selected, int enabled,
@@ -1408,8 +1528,12 @@ int tw_accessibility_session_menu_add_row(TWWindow *window, const char *id, cons
 void tw_accessibility_session_menu_end(TWWindow *window) {
     if (!bridgeReady || window != hostWindow) return;
     const int visible = sessionMenuPending.visible && sessionMenuPending.count > 0;
+    const char *listID = strcmp(sessionMenuPending.label, "Open In applications") == 0
+        ? "linux.open-in.choices" : "linux.session-actions";
     int same = visible && sessionMenuVisible &&
         strcmp(sessionMenuIdentity, sessionMenuPending.identity) == 0 &&
+        strcmp(atk_object_get_name(ATK_OBJECT(sessionMenuList)), sessionMenuPending.label) == 0 &&
+        strcmp(sessionMenuList->id, listID) == 0 &&
         sessionMenuList->children->len == (guint)sessionMenuPending.count;
     for (int i = 0; same && i < sessionMenuPending.count; i++) {
         AccessibleNode *row = g_ptr_array_index(sessionMenuList->children, (guint)i);
@@ -1422,6 +1546,12 @@ void tw_accessibility_session_menu_end(TWWindow *window) {
     sessionMenuVisible = visible;
     if (visible) {
         g_strlcpy(sessionMenuIdentity, sessionMenuPending.identity, sizeof(sessionMenuIdentity));
+        set_name_if_changed(sessionMenuList, sessionMenuPending.label);
+        if (strcmp(sessionMenuList->id, listID) != 0) {
+            g_free(sessionMenuList->id);
+            sessionMenuList->id = g_strdup(listID);
+            atk_object_set_accessible_id(ATK_OBJECT(sessionMenuList), sessionMenuList->id);
+        }
         sessionMenuList->bounds = sessionMenuPending.bounds;
         if (!same) {
             for (int i = 0; i < sessionMenuPending.count; i++) {

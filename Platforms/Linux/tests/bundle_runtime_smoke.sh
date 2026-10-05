@@ -122,6 +122,8 @@ dbus-run-session -- python3 /workspace_smoke.py "$bin/WindowHarness" "$bin/Linux
   "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
 dbus-run-session -- python3 /session_actions_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$fixture/pty.sock" "$fixture" /evidence/restart-out
+dbus-run-session -- python3 /open_in_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$fixture/pty.sock" "$fixture" /evidence/restart-out/open-in
 dbus-run-session -- python3 /agent_catalogue_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
 dbus-run-session -- python3 /actions_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
