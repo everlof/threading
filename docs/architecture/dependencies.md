@@ -40,6 +40,9 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     signaling frames, trickle candidate limits, channel and byte high-water marks, stream
     multiplexing, listener replacement, reconnect and shutdown. The Mac and iOS apps see only
     loopback TCP endpoints, preserving the existing remote protocol and its authorization.
+    A receive after RESET consults the same bounded retired-stream record used to ignore late
+    frames. It reports `streamClosed`, just as an already waiting receive does; actor scheduling
+    must not turn a known closed socket into an unknown stream.
   - The framework contains standards-based DTLS/SRTP cryptography. Keep the iOS export-compliance
     declaration and the WebRTC legal notice in sync with this dependency; do not revert to a
     system-crypto-only declaration.

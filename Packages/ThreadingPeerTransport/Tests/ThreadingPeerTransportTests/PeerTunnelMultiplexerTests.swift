@@ -108,6 +108,43 @@ final class PeerTunnelMultiplexerTests: XCTestCase {
         await server.close()
     }
 
+    func testReceivingAfterRemoteResetReportsClosedStream() async throws {
+        let pair = await InMemoryMessageTransport.makePair()
+        let client = PeerTunnelMultiplexer(role: .client, transport: pair.left)
+        let server = PeerTunnelMultiplexer(role: .server, transport: pair.right)
+        try await client.start()
+        try await server.start()
+
+        async let firstAccepted = server.acceptStream()
+        async let firstOpened = client.openStream()
+        let serverFirst = try await firstAccepted
+        try await serverFirst.accept()
+        let clientFirst = try await firstOpened
+
+        async let secondAccepted = server.acceptStream()
+        async let secondOpened = client.openStream()
+        let serverSecond = try await secondAccepted
+        try await serverSecond.accept()
+        let clientSecond = try await secondOpened
+
+        await clientFirst.reset()
+        // This payload follows RESET on the ordered transport, so receiving it proves the
+        // remote has removed the first stream before its socket pump calls receive again.
+        let marker = Data("reset-processed".utf8)
+        try await clientSecond.send(marker)
+        let received = try await serverSecond.receive()
+        XCTAssertEqual(received, marker)
+        do {
+            _ = try await serverFirst.receive()
+            XCTFail("Expected a retired stream to remain closed")
+        } catch let error as PeerTunnelError {
+            XCTAssertEqual(error, .streamClosed(serverFirst.id))
+        }
+
+        await client.close()
+        await server.close()
+    }
+
     func testLateFramesForResetStreamDoNotCloseOtherSockets() async throws {
         let pair = await InMemoryMessageTransport.makePair()
         let client = PeerTunnelMultiplexer(role: .client, transport: pair.left)
