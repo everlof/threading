@@ -103,6 +103,11 @@ Escaping completions are part of the boundary. Mark one `@Sendable` when it cros
 actor, propagate that contract to the API that stores it, and make every terminal path complete
 exactly once.
 
+Hosted UI tests use XCTest's async `setUp()` and `tearDown()` hooks for main-actor fixtures.
+The synchronous hooks remain nonisolated even when the test class is `@MainActor`; capturing
+the test instance in `MainActor.assumeIsolated` does not repair that ownership. Async hooks
+let XCTest await the fixture's actor, including cleanup of themed global state between cases.
+
 ## Bounded work and observable failure
 
 Every input-controlled collection needs a named budget: request bytes, frame bytes, buffered

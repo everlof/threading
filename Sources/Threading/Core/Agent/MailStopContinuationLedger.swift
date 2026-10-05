@@ -56,7 +56,7 @@ enum MailStopContinuationLedger {
     private static var generation = 0
 
     /// How a held report is relayed when no evidence arrives. Injected for tests.
-    static var schedule: (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, work in
+    static var schedule: (TimeInterval, @escaping @MainActor @Sendable () -> Void) -> Void = { delay, work in
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { work() } }
     }
 
@@ -102,7 +102,7 @@ enum MailStopContinuationLedger {
     static func absorbsFinish(
         _ report: HookLifecycleReport,
         now: Date = Date(),
-        relay: @escaping @MainActor (HookLifecycleReport) -> Void
+        relay: @escaping @MainActor @Sendable (HookLifecycleReport) -> Void
     ) -> Bool {
         let sessionID = report.sessionID
         guard var entry = entries[sessionID], entry.held == nil else {

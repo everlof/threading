@@ -215,6 +215,7 @@ enum SessionDraftMotion {
 enum MobileKeyboardOverlap {
     /// How far the announced end frame reaches above the window's bottom safe-area inset —
     /// the padding that puts the composer's bottom edge on the keyboard's top edge.
+    @MainActor
     static func target(from notification: Notification) -> CGFloat {
         guard let frame = notification.userInfo?[
             UIResponder.keyboardFrameEndUserInfoKey

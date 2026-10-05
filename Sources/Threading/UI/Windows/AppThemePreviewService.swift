@@ -367,7 +367,7 @@ enum AppThemePreviewService {
             ("Sample Project", true, false),
             ("Design the landing page", false, false),
             ("Fix the login redirect", false, true),
-            (ThemeWording.untitledSessionName(for: NSAppearance.current) ?? L10n.string("New Session"), false, false),
+            (ThemeWording.untitledSessionName(for: NSAppearance.currentDrawing()) ?? L10n.string("New Session"), false, false),
             ("Another Project", true, false),
             ("Profile the importer", false, false)
         ]
@@ -385,7 +385,7 @@ enum AppThemePreviewService {
                 ? Design.Ink.selection.label
                 : (isProject ? Design.Text.secondary : Design.Text.label)
             let mark = GlyphView()
-            let tinted = IdentityMarkInk.isTinted(for: NSAppearance.current)
+            let tinted = IdentityMarkInk.isTinted(for: NSAppearance.currentDrawing())
             mark.slot = NSSize(width: AgentIconDefaults.pointSize, height: AgentIconDefaults.pointSize)
             if isProject {
                 mark.image = GeneratedProjectIcon.image(for: title, tint: tinted ? IdentityMarkInk.ink : nil)
@@ -461,7 +461,7 @@ enum AppThemePreviewService {
         actions.spacing = Design.Spacing.small
 
         let composer = ThemedTextField()
-        composer.placeholderString = ThemeWording.composerPlaceholder(for: NSAppearance.current)
+        composer.placeholderString = ThemeWording.composerPlaceholder(for: NSAppearance.currentDrawing())
             ?? L10n.string("Write a message…")
         let cardStack = NSStackView(views: [heading, body, detail, composer, actions])
         cardStack.orientation = .vertical

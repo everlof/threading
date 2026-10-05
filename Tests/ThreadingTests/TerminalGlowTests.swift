@@ -232,9 +232,9 @@ final class TerminalGlowSessionTests: XCTestCase {
 @MainActor
 final class TerminalGlowFollowsAppThemeTests: XCTestCase {
 
-    override func tearDown() {
+    override func tearDown() async throws {
         AppThemeLibrary.apply(.system)
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testFollowingTheAppThemeDrawsItsVariantsGlow() async throws {

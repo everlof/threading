@@ -725,7 +725,7 @@ final class RemoteSessionConnection: ObservableObject {
 #endif
     }
 
-    deinit {
+    isolated deinit {
         for observer in lifecycleObservers {
             NotificationCenter.default.removeObserver(observer)
         }

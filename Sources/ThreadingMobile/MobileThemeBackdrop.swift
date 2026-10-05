@@ -855,7 +855,9 @@ actor MobileThemeMetalPipelineCache {
 
     enum Failure: Error { case busy, unavailable, missingFunction }
 
-    func texture(_ image: CGImage?, device: MTLDevice) -> MTLTexture? {
+    /// Transfers a fresh shader-read texture after its bytes are populated. The cache keeps
+    /// no alias to this resource; the renderer owns it after the actor returns.
+    func texture(_ image: CGImage?, device: MTLDevice) -> sending MTLTexture? {
         let width = image?.width ?? 1, height = image?.height ?? 1
         guard (1...1_024).contains(width), (1...1_024).contains(height) else { return nil }
         var bytes = Data(count: width * height * 4)

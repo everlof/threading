@@ -13,8 +13,8 @@ final class ClaudeTerminalThemeTests: HostedStoreTestCase {
 
     private var previousSetting = true
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         previousSetting = AppSettings.shared.agentsUseTerminalPalette
         addTeardownBlock { @MainActor [previousSetting] in
             AppSettings.shared.agentsUseTerminalPalette = previousSetting

@@ -42,7 +42,7 @@ final class MailboxHandover {
     var mailbox: MacMailbox = .shared
     var mailboxes: RemoteSessionMailboxes = .shared
     var runner: (any RemoteHostCommandRunning)?
-    var ensurePeered: (RemoteControllerEndpoint) async throws -> HostID = { try await MacMailSync.shared.ensurePeered($0) }
+    var ensurePeered: @MainActor @Sendable (RemoteControllerEndpoint) async throws -> HostID = { try await MacMailSync.shared.ensurePeered($0) }
     var kick: (HostID) -> Void = { MacMailSync.shared.kick(host: $0) }
 
     private let observations = AppEventObservations()

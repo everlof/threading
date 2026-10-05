@@ -9,14 +9,14 @@ final class ProjectAutoHideTests: XCTestCase {
     private var defaults: UserDefaults!
     private var settings: AppSettings!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("auto-hide-\(UUID())")
         suiteName = "ProjectAutoHideTests.\(UUID())"
         defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         settings = AppSettings(defaults: defaults)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         defaults.removePersistentDomain(forName: suiteName)
         try? FileManager.default.removeItem(at: directory)
         settings = nil

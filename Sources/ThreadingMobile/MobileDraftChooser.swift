@@ -25,6 +25,7 @@ struct MobileDraftChoice: Identifiable, Equatable {
 /// effort picker beside it. The chosen row keeps its glyph and takes the accent; the checkmark
 /// sits at the trailing edge where it eats nothing.
 struct MobileDraftChooser: View {
+    @MainActor
     private enum Metrics {
         // Computed accessors, so an InjectionNext session can retune them after launch.
         static var discDiameter: CGFloat { 32 }

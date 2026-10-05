@@ -15,10 +15,10 @@ final class ClaudeKeychainAccessTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private var suites: [String] = []
 
-    override func tearDown() {
+    override func tearDown() async throws {
         for suite in suites { UserDefaults().removePersistentDomain(forName: suite) }
         suites.removeAll()
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Remembering the Refusal

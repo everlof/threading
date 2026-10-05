@@ -10,23 +10,19 @@ final class ThemeReactionsTests: XCTestCase {
 
     private var previousSettings: DesignSettingsReading?
 
-    override func setUp() {
-        super.setUp()
-        MainActor.assumeIsolated {
-            previousSettings = DesignSettings.current
-            DesignSettings.current = StubDesignSettings()
-            Design.Motion.reduceMotionOverrideForTesting = false
-            ThemeParticleHold.seenOverrideForTesting = true
-        }
+    override func setUp() async throws {
+        try await super.setUp()
+        previousSettings = DesignSettings.current
+        DesignSettings.current = StubDesignSettings()
+        Design.Motion.reduceMotionOverrideForTesting = false
+        ThemeParticleHold.seenOverrideForTesting = true
     }
 
-    override func tearDown() {
-        MainActor.assumeIsolated {
-            if let previousSettings { DesignSettings.current = previousSettings }
-            Design.Motion.reduceMotionOverrideForTesting = nil
-            ThemeParticleHold.seenOverrideForTesting = nil
-        }
-        super.tearDown()
+    override func tearDown() async throws {
+        if let previousSettings { DesignSettings.current = previousSettings }
+        Design.Motion.reduceMotionOverrideForTesting = nil
+        ThemeParticleHold.seenOverrideForTesting = nil
+        try await super.tearDown()
     }
 
     private func strength(_ value: Double, activity: Bool = true) {

@@ -10,13 +10,13 @@ final class RemoteSessionMailboxTests: XCTestCase {
 
     private var directory: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("RemoteSessionMailboxTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("host"), withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         try? FileManager.default.removeItem(at: directory)
     }
 
@@ -248,12 +248,12 @@ final class MailAccessTests: XCTestCase {
 
     private var directory: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("MailAccessTests-\(UUID().uuidString)", isDirectory: true)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         try? FileManager.default.removeItem(at: directory)
     }
 
@@ -338,13 +338,13 @@ final class MailboxHandoverTests: XCTestCase {
 
     private var directory: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("MailboxHandoverTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("host"), withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         try? FileManager.default.removeItem(at: directory)
     }
 
@@ -486,19 +486,22 @@ final class MailboxHandoverTests: XCTestCase {
         let unread = try await h1.sendMail(from: sibling, to: onH1, id: UUID(), text: "unread on h1", replyTo: nil, priority: .normal)
 
         let h1Endpoint = hostEndpoint("h1")
-        var h1Up = false
+        @MainActor final class Reachability {
+            var isUp = false
+        }
+        let reachability = Reachability()
         let routing = RoutingOwnerRPCFake(["vps-1": OwnerRPCFake(store: w.remote), "h1": OwnerRPCFake(store: h1)])
         w.mailboxes.runner = routing
         w.handover.runner = routing
         w.handover.ensurePeered = { endpoint in
-            if endpoint.name == "h1" { guard h1Up else { throw RemoteControllerRPC.Failure.transport("down") }; return h1Host }
+            if endpoint.name == "h1" { guard reachability.isUp else { throw RemoteControllerRPC.Failure.transport("down") }; return h1Host }
             return w.remoteHost
         }
         _ = await w.handover.move(session, title: "Deploy", from: .host(h1Endpoint), to: .thisMac)
         _ = await w.handover.move(session, title: "Deploy", from: .thisMac, to: .host(w.endpoint))
         XCTAssertNotNil(w.handover.pending[session]?[h1Endpoint.hostID], "a later move does not drop the old host's mail")
 
-        h1Up = true
+        reachability.isUp = true
         w.handover.currentSide = { _ in .host(w.endpoint) }
         for task in w.handover.retryPending(reachable: h1Endpoint) { _ = await task.value }
         XCTAssertNil(w.handover.pending[session], "moved, so no longer pending")

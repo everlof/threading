@@ -66,7 +66,7 @@ final class TerminalKeyBridge: ObservableObject {
         }
     }
 
-    deinit {
+    isolated deinit {
         if let keyboardObserver {
             NotificationCenter.default.removeObserver(keyboardObserver)
         }

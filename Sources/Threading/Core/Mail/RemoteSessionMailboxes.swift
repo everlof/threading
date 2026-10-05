@@ -52,7 +52,7 @@ final class RemoteSessionMailboxes {
     /// The owner-SSH runner. Injected for tests.
     var runner: any RemoteHostCommandRunning = SystemSSHCommandRunner(maximumOutputBytes: MailTransportLimits.responseBytes)
     /// Ensures the peering the session's mail will travel over. Injected for tests.
-    var ensurePeered: (RemoteControllerEndpoint) async throws -> HostID = { try await MacMailSync.shared.ensurePeered($0) }
+    var ensurePeered: @MainActor @Sendable (RemoteControllerEndpoint) async throws -> HostID = { try await MacMailSync.shared.ensurePeered($0) }
     var mailbox: MacMailbox = .shared
 
     // MARK: - Queries
