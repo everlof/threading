@@ -302,6 +302,17 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 #endif
     var cellDimension: CellDimension
+    private var _textGlow: TerminalTextGlow?
+    public var textGlow: TerminalTextGlow? {
+        get { _textGlow }
+        set {
+            let value = newValue?.normalized
+            guard value != _textGlow else { return }
+            _textGlow = value
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
+        }
+    }
     var caretView: CaretView?
     var _lineSpacing: CGFloat = 1.0
     var terminal: Terminal!

@@ -382,6 +382,30 @@ those services are not independently constructed. The helper separately owns eac
 diagnostics directory until teardown releases the controller, environment, and `EventLog`, then
 removes only that exact directory.
 
+### 2026-10-04 — The cascade takes only the chats its caller named
+
+`ProjectDatabase.removeProject`'s `DELETE FROM project` cascades to every session row naming the
+project, while the decision to remove is made from the caller's graph: the sidebar's confirmation
+counts the chats it can see, and `reclaimAdoptedEmptyProjects` removes an adopted checkout row
+because this graph says it holds nothing. Two chats living in adopted worktree rows vanished
+together on 2026-10-04, and nothing in the journal could say which route had removed them.
+
+- **A removal names its sessions and the store checks them.** `removeProject(holding:)` reads the
+  project's session rows inside its own transaction and throws `unaccountedSessions` when any is
+  missing from the caller's set — which, for a reclaim, is every row. Nothing is written.
+  `StateManager` journals the refusal and returns `.refusedUnaccountedSessions`, which
+  `ProjectStore` answers by restoring its snapshot *without* `recordFailedWritePolicy`: the store
+  is intact and the refusal already did its job, so it must not cost the launch its later edits.
+- **The auxiliary rows leave in the same transaction.** `panel_layout` and `session_attachments`
+  are deliberately not foreign-keyed (see `panelPayload`), so the cascade never reached them,
+  while `removeSessionsAfterProjectDeletion` and `forgetCascadeDeletedPanelLayouts` were written
+  as though it did. Every project removal stranded its chats' rows: 77 sat in one live store.
+  `retainPanels`/`retainAttachments` would prune them, but nothing calls
+  `DisplayPaneController.retainOnly`, so rows stranded before this change are still there.
+- **Every deletion is journalled with its route.** `DeletionJournal` records `Session deleted`
+  and `Project removed` with the ids, the adopted flag and the caller as `#fileID:#line`,
+  captured by default at the store's door so a new route is attributed without being labelled.
+
 ### 2026-08-15 — The same race, one domain further out
 
 `PreferenceStore` redirects a hosted test away from `UserDefaults.standard`, which answers "not
@@ -729,11 +753,13 @@ file follows `RecoverableFileStore` quarantine rather than being replaced silent
 The companion clients use the same contract with a wider key. iOS stores a versioned archive in
 its own `UserDefaults`; the dependency-free browser stores one in same-origin `localStorage`.
 Both length-prefix the paired host identity before the session id so ids cannot collide, persist
-the last host/session route, keep Native and terminal drafts distinct, and remember the iPhone's
-Direct/Compose preference for each terminal. The route's own URL is deliberately absent from that
-key: every advertised address is a route to one paired host. Records containing an unsent draft or
-an explicit terminal input choice are never pruned automatically; position-only records are
-bounded to the 250 most recent. The iOS archive is also capped at 1 MiB and validates state count,
+the last host/session route and keep Native and terminal drafts distinct. The iPhone's
+Direct/Compose choice lives separately in one device-wide `AppStorage` preference, shared by the
+key bar and Settings. The existing Settings key is retained; legacy per-session input fields are
+ignored when decoding, without changing drafts or viewports. The route's own URL is deliberately
+absent from that key: every advertised address is a route to one paired host. Records containing
+an unsent draft are never pruned automatically; position-only records are bounded to the 250
+most recent. The iOS archive is also capped at 1 MiB and validates state count,
 identity, viewport and aggregate draft bytes before decode is accepted and before encode is
 attempted. Every mutation is made against a candidate archive, and that candidate becomes visible
 only after the `UserDefaults` replacement reads back identically; a persistence refusal cannot
@@ -741,6 +767,14 @@ leave the running composer ahead of its durable draft. The device-local terminal
 follows the same candidate-first, bounded rule. No continuity archive is synchronized across
 clients, because merging partial human input, moving another person's viewport or inheriting their
 input preference would turn private continuity into collaboration state.
+
+The terminal's final viewport is captured before its representable detaches, then delivered on
+the next main-actor turn. A synchronous persistence callback from `dismantleUIView` can publish
+`recoveryMessage` while SwiftUI destroys the observing graph, causing an exclusivity crash.
+Ordinary scrolling still reports immediately; the final callback retains values, not the view.
+The connection also withdraws its renderer callbacks immediately but defers its published
+screen reset, and drops that reset if a replacement renderer has already drawn output. Both paths
+are exercised through the real representable teardown in `RemoteTerminalViewportLeaseTests`.
 
 The iPhone terminal Compose editor writes through its binding setter, in the native edit callback.
 SwiftUI `onChange` is not a persistence boundary: Back or a Direct/Compose switch can unmount the

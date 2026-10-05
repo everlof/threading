@@ -14,18 +14,27 @@ final class KeyEquivalentScopeView: NSView {
 
     // MARK: - Properties
 
-    /// Answers `true` when it handled the chord. Only consulted while focus is inside this view.
+    /// Answers `true` when it handled the chord. Only consulted while this scope owns focus.
     var onKeyEquivalent: ((NSEvent) -> Bool)?
 
-    /// Whether the window's first responder is this view or lives inside it. A text field being
-    /// edited hands focus to the window's shared field editor, which is counted by its delegate.
+    /// A related control outside the content tree, such as the tab that selects this pane.
+    /// Weak ownership lets a moved or removed tab stop participating without retaining its strip.
+    weak var additionalKeyboardFocusOwner: NSView?
+
+    /// Whether the window's first responder belongs to this view or its related control.
+    /// Editing a text field hands focus to the shared field editor, counted by its delegate.
     var containsKeyboardFocus: Bool {
         guard let responder = window?.firstResponder else { return false }
+        let focusedView: NSView?
         if let editor = responder as? NSText, let owner = editor.delegate as? NSView {
-            return owner === self || owner.isDescendant(of: self)
+            focusedView = owner
+        } else {
+            focusedView = responder as? NSView
         }
-        guard let view = responder as? NSView else { return false }
-        return view === self || view.isDescendant(of: self)
+        guard let focusedView else { return false }
+        if focusedView === self || focusedView.isDescendant(of: self) { return true }
+        guard let owner = additionalKeyboardFocusOwner, owner.window === window else { return false }
+        return focusedView === owner || focusedView.isDescendant(of: owner)
     }
 
     // MARK: - Key Equivalents

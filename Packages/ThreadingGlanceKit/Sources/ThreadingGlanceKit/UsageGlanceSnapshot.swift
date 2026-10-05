@@ -9,13 +9,38 @@ public struct UsageGlanceSnapshot: Codable, Equatable, Sendable {
     public let hostName: String
     public let capacity: RemoteUsageCapacityDTO
     public let receivedAt: Date
+    /// One opaque accent; WidgetKit retains its backgrounds and readable foregrounds.
+    public let accentHex: String?
 
-    public init(pairingID: String, hostName: String, capacity: RemoteUsageCapacityDTO, receivedAt: Date) {
+    public init(pairingID: String, hostName: String, capacity: RemoteUsageCapacityDTO,
+                receivedAt: Date, accentHex: String? = nil) {
         version = 1
         self.pairingID = pairingID
         self.hostName = RemoteUsageCapacityLimits.label(hostName)
         self.capacity = capacity
         self.receivedAt = receivedAt
+        self.accentHex = Self.normalizedAccent(accentHex)
+    }
+
+    public static func normalizedAccent(_ value: String?) -> String? {
+        guard let value, value.first == "#", value.count == 7 || value.count == 9,
+              value.dropFirst().utf8.allSatisfy({ (48...57).contains($0)
+                  || (65...70).contains($0) || (97...102).contains($0) }) else { return nil }
+        return String(value.prefix(7)).uppercased()
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case version, pairingID, hostName, capacity, receivedAt, accentHex
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decode(Int.self, forKey: .version)
+        pairingID = try values.decode(String.self, forKey: .pairingID)
+        hostName = try values.decode(String.self, forKey: .hostName)
+        capacity = try values.decode(RemoteUsageCapacityDTO.self, forKey: .capacity)
+        receivedAt = try values.decode(Date.self, forKey: .receivedAt)
+        accentHex = Self.normalizedAccent(try? values.decode(String.self, forKey: .accentHex))
     }
 
     public func validate() throws {

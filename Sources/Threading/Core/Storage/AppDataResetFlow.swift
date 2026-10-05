@@ -58,10 +58,11 @@ enum AppDataResetFlow {
             // moving the app's directories aside would leave every one of them behind while
             // telling the user their state had been removed.
             try BrowserCredentialStore().deleteAll()
-            // Trigger-source bearers are app-owned too. The source records themselves live
-            // inside Application Support and are moved aside below; their Keychain secrets do
-            // not, so Reset Everything must erase them explicitly.
+            // Trigger-source bearers and probe secrets are app-owned too. The source records
+            // themselves live inside Application Support and are moved aside below; their
+            // Keychain secrets do not, so Reset Everything must erase them explicitly.
             try TriggerSourceCredentialStore.deleteAll()
+            try TriggerProbeSecretStore.deleteAll()
             // Long-lived sign-in tokens are the third: Threading keeps them because the CLI
             // does not, so nothing but this line would ever remove them.
             try AgentAccountTokenVault.shared.removeAll()

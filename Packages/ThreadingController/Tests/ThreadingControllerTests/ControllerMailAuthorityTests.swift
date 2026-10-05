@@ -30,27 +30,23 @@ struct ControllerMailAuthorityTests {
         let (a, aAddress) = try await wakeable(store, name: "A")
         let (b, bAddress) = try await wakeable(store, name: "B")
         _ = try await store.enqueue(workerID: a, key: "seed", instruction: "start")
-        var current = a, rounds = 0, depths: [Int] = [], chains = Set<UUID>()
-        var refusedAtDepthLimit = false
-        for _ in 0..<12 {
-            let claim = try #require(await store.claim(workerID: current))
+        var current = a, rounds = 0, claimed = 0, depths: [Int] = [], chains = Set<UUID>()
+        for _ in 0..<(MailLimits.chainWakes + 2) {
+            guard let claim = try await store.claim(workerID: current) else { break }
+            claimed += 1
             _ = try await store.inbox(executionID: claim.execution.id, after: 0) // Read, never acknowledged.
-            do {
-                let sent = try await store.sendMail(executionID: claim.execution.id, to: current == a ? bAddress : aAddress,
-                                                    id: UUID(), text: "ping \(rounds)", replyTo: nil, priority: .normal)
-                depths.append(sent.envelope.depth); chains.insert(sent.envelope.chainID)
-            } catch ControllerError.invalidInput("chain_depth") {
-                refusedAtDepthLimit = true
-            }
+            let sent = try await store.sendMail(executionID: claim.execution.id, to: current == a ? bAddress : aAddress,
+                                                id: UUID(), text: "ping \(rounds)", replyTo: nil, priority: .normal)
+            depths.append(sent.envelope.depth); chains.insert(sent.envelope.chainID)
             _ = try await store.finish(executionID: claim.execution.id, destination: "draft", payload: "ok")
             guard let next = try await store.admitMailWakes(after: 0).admitted.first else { break }
             rounds += 1; current = next.workerID
         }
-        #expect(depths == Array(0...MailLimits.maximumDepth))
+        #expect(depths == Array(0...MailLimits.chainWakes))
         #expect(chains.count == 1, "every wake continued the chain of the mail that started it")
-        #expect(refusedAtDepthLimit)
-        #expect(rounds == MailLimits.maximumDepth + 1)
-        _ = b
+        #expect(claimed == MailLimits.chainWakes + 1, "the seed and exactly the allowed wakes ran")
+        #expect(try await store.claim(workerID: a) == nil)
+        #expect(try await store.claim(workerID: b) == nil)
     }
 
     @Test func aBudgetedChainHoldsWakesWhileSpendInItIsUnsettledAndReceiptsCarryTheWakesChain() async throws {

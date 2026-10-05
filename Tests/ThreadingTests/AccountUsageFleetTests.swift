@@ -10,22 +10,45 @@ final class AccountUsageFleetTests: XCTestCase {
             var active = 0
             var peak = 0
             var started = 0
+            var pending: [CheckedContinuation<Void, Never>] = []
+            var releasesAutomatically = false
         }
 
         private let state = OSAllocatedUnfairLock(initialState: State())
+        private let didStart: @Sendable (Int) -> Void
+
+        init(didStart: @escaping @Sendable (Int) -> Void) {
+            self.didStart = didStart
+        }
 
         var peak: Int { state.withLock { $0.peak } }
         var started: Int { state.withLock { $0.started } }
 
         func fetch(_ account: AgentAccount) async throws -> AccountUsage {
-            state.withLock { value in
-                value.active += 1
-                value.started += 1
-                value.peak = max(value.peak, value.active)
-            }
             defer { state.withLock { $0.active -= 1 } }
-            try await Task.sleep(nanoseconds: 20_000_000)
+            await withCheckedContinuation { continuation in
+                let (started, releasesAutomatically) = state.withLock { value in
+                    value.active += 1
+                    value.started += 1
+                    value.peak = max(value.peak, value.active)
+                    if !value.releasesAutomatically { value.pending.append(continuation) }
+                    return (value.started, value.releasesAutomatically)
+                }
+                if releasesAutomatically { continuation.resume() }
+                didStart(started)
+            }
             throw UsageFetchError.noCredential("fixture")
+        }
+
+        func releasePending(releasesAutomatically: Bool = false) -> Int {
+            let pending = state.withLock { value in
+                value.releasesAutomatically = releasesAutomatically
+                let pending = value.pending
+                value.pending.removeAll()
+                return pending
+            }
+            for continuation in pending { continuation.resume() }
+            return pending.count
         }
     }
 
@@ -220,13 +243,22 @@ final class AccountUsageFleetTests: XCTestCase {
 
     func testAllAccountRefreshUsesABoundedProviderWorkPool() async {
         let concurrency = 4
-        let probe = RefreshConcurrencyProbe()
+        let accountCount = 120
+        let waves = (0..<(accountCount / concurrency)).map { index in
+            let started = expectation(description: "refresh wave \(index) admitted")
+            started.expectedFulfillmentCount = concurrency
+            return started
+        }
+        let probe = RefreshConcurrencyProbe { started in
+            waves[(started - 1) / concurrency].fulfill()
+        }
+        defer { _ = probe.releasePending(releasesAutomatically: true) }
         let service = AccountUsageService(
             maximumConcurrentRefreshes: concurrency,
             observesActivity: false,
             fetcher: { try await probe.fetch($0) }
         )
-        let accounts = (0..<120).map { index in
+        let accounts = (0..<accountCount).map { index in
             AgentAccount(
                 provider: .claude,
                 handle: AccountHandle(storedName: "bounded-\(index)"),
@@ -239,6 +271,17 @@ final class AccountUsageFleetTests: XCTestCase {
 
         for account in accounts {
             service.refresh(account, force: true) { settled.fulfill() }
+        }
+
+        // Hold every admitted fetch until its entire wave is present. This proves the limit
+        // without using timed sleeps to manufacture overlap or measuring total throughput.
+        for (index, wave) in waves.enumerated() {
+            await fulfillment(of: [wave], timeout: 10)
+            let expectedStarted = (index + 1) * concurrency
+            XCTAssertEqual(probe.started, expectedStarted)
+            XCTAssertEqual(probe.peak, concurrency)
+            guard probe.started == expectedStarted else { return }
+            XCTAssertEqual(probe.releasePending(), concurrency)
         }
         await fulfillment(of: [settled], timeout: 10)
 

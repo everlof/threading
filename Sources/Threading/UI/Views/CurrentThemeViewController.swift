@@ -13,8 +13,12 @@ final class CurrentThemeViewController: NSViewController {
 
     private let appEvents = AppEventObservations()
     private let colorEditor = CurrentAppThemeColorEditor()
+    private let tuning = CurrentThemeTuningControls()
+    /// The contributing extension's own settings, when the active theme came from one.
+    private let themeOptions = CurrentThemeOptionsSection()
 
     private var displayedThemeID: AppThemeID?
+    private var isShowingAdvisory = false
     private var selectedVariantKind: AppTheme.VariantKind = .light
 
     private weak var sourceSubtitle: NSTextField?
@@ -69,18 +73,36 @@ final class CurrentThemeViewController: NSViewController {
         super.viewDidLoad()
         setupUI()
 
+        tuning.onError = { [weak self] message in self?.showValidation(message) }
+        tuning.onAdvisory = { [weak self] message in self?.showAdvisory(message) }
         colorEditor.onChange = { [weak self] role, color in
             self?.change(color, for: role)
         }
 
-        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+        // A Tune tick repaints the window already; the page itself follows the settle that
+        // ends the drag, rather than repopulating its pickers once per pointer event.
+        appEvents.observe(AppThemeDidChange.self) { [weak self] event in
+            guard !event.isLivePreview else { return }
+            self?.reload(followCurrentAppearance: false)
+        }
+        appEvents.observe(AppearanceActivationDidChange.self) { [weak self] _ in
             self?.reload(followCurrentAppearance: false)
         }
         appEvents.observe(AppThemeLibraryDidChange.self) { [weak self] _ in
             self?.reload(followCurrentAppearance: false)
         }
+        // Enabling, disabling or updating the theme's extension adds, removes or reshapes its
+        // options without the theme itself changing.
+        appEvents.observe(ExtensionSettingsRegistryDidChange.self) { [weak self] _ in
+            self?.themeOptions.show(for: AppThemeLibrary.current)
+        }
 
         reload(followCurrentAppearance: true)
+    }
+
+    override func viewWillDisappear() {
+        tuning.commit()
+        super.viewWillDisappear()
     }
 
     // MARK: - Setup
@@ -89,6 +111,8 @@ final class CurrentThemeViewController: NSViewController {
         let page = SettingsUI.page([
             SettingsUI.heading("Current Theme"),
             SettingsUI.section("Theme", overviewCard()),
+            themeOptions,
+            tuning.section(),
             SettingsUI.section("Colors", colorEditor),
             validationNote,
             SettingsUI.section("Edit with an Agent", agentHelpCard())
@@ -159,6 +183,7 @@ final class CurrentThemeViewController: NSViewController {
     /// Re-reads the active value instead of retaining a copy, because an MCP update keeps the
     /// stable ID and replaces the document beneath it.
     private func reload(followCurrentAppearance: Bool) {
+        guard !AppThemeLibrary.isPublishingLivePreview else { return }
         let theme = AppThemeLibrary.current
         let kinds = inspectableKinds(for: theme)
         let themeChanged = displayedThemeID != theme.id
@@ -168,6 +193,8 @@ final class CurrentThemeViewController: NSViewController {
             selectedVariantKind = kinds.contains(current) ? current : kinds[0]
         }
         displayedThemeID = theme.id
+        tuning.show(theme, kind: selectedVariantKind)
+        themeOptions.show(for: theme)
 
         reloadThemePopUp(theme)
         reloadVariantPopUp(kinds)
@@ -204,23 +231,7 @@ final class CurrentThemeViewController: NSViewController {
     /// out for the *selected* theme in `sourceDescription`, which is where the question "can I
     /// edit this one" is actually answered.
     private func reloadThemePopUp(_ selected: AppTheme) {
-        themePopUp.removeAllItems()
-        for section in AppThemeLibrary.sections {
-            if let title = section.title { themePopUp.addHeader(title) }
-            for theme in section.themes {
-                themePopUp.addItem(
-                    ThemedMenuItem(
-                        title: theme.name,
-                        representedValue: theme.id.rawValue
-                    )
-                )
-            }
-        }
-        themePopUp.selectItem(
-            at: themePopUp.indexOfItem { $0.representedValue as? String == selected.id.rawValue }
-                ?? themePopUp.indexOfFirstItem
-                ?? -1
-        )
+        AppThemePicker.populate(themePopUp, selectedThemeID: selected.id)
     }
 
     private func reloadVariantPopUp(_ kinds: [AppTheme.VariantKind]) {
@@ -330,6 +341,7 @@ final class CurrentThemeViewController: NSViewController {
     }
 
     @objc private func variantChanged(_ sender: ThemedPopUp) {
+        tuning.commit()
         guard let raw = sender.selectedItem?.representedValue as? String,
               let kind = AppTheme.VariantKind(rawValue: raw) else { return }
         selectedVariantKind = kind
@@ -387,9 +399,31 @@ final class CurrentThemeViewController: NSViewController {
     }
 
     private func showValidation(_ message: String) {
+        isShowingAdvisory = false
+        validationNote.textColor = Design.Status.negative
         validationNote.stringValue = message
         validationNote.isHidden = false
         validationNote.setAccessibilityValue(message)
+    }
+
+    /// Sampled image legibility after a released opacity change: advice, not a refusal, so it
+    /// reads in the warning colour and an empty message withdraws it.
+    private func showAdvisory(_ message: String) {
+        guard !message.isEmpty else {
+            if isShowingAdvisory { validationNote.isHidden = true }
+            isShowingAdvisory = false
+            return
+        }
+        isShowingAdvisory = true
+        validationNote.textColor = Design.Status.warning
+        validationNote.stringValue = message
+        validationNote.isHidden = false
+        validationNote.setAccessibilityValue(message)
+    }
+
+    /// The advisory or refusal currently shown under the colours, for tests.
+    var validationMessageForTesting: String? {
+        validationNote.isHidden ? nil : validationNote.stringValue
     }
 }
 

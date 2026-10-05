@@ -48,7 +48,7 @@ struct DeveloperIssueReportDraft: Equatable, Sendable {
     /// The record as a reader opens it: a heading, what kind of report it is and when, then the
     /// whole capture with its screenshot path intact. Markdown because the reader is as likely to
     /// be an agent as a person, and neither of them should need a decoder to triage a folder.
-    func recordMarkdown(createdAt: String) -> String {
+    func recordMarkdown(createdAt: String, attachmentLocations: [URL]? = nil) -> String {
         let heading = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let body = (local?.details ?? details)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -56,9 +56,10 @@ struct DeveloperIssueReportDraft: Equatable, Sendable {
         if !heading.isEmpty { parts.append("# \(heading)") }
         parts.append("\(kind.rawValue) · \(createdAt)")
         if !body.isEmpty { parts.append(body) }
-        if !attachmentURLs.isEmpty {
+        let attachments = attachmentLocations ?? attachmentURLs
+        if !attachments.isEmpty {
             parts.append(
-                "Attachments:\n" + attachmentURLs.map { "- \($0.path)" }.joined(separator: "\n")
+                "Attachments:\n" + attachments.map { "- \($0.path)" }.joined(separator: "\n")
             )
         }
         return parts.joined(separator: "\n\n") + "\n"
@@ -145,7 +146,8 @@ struct MacIssueReportSubmitter {
     func submit(
         trigger: PublicIssueReportTrigger,
         draft: DeveloperIssueReportDraft,
-        screenshot: NSImage? = nil
+        screenshot: NSImage? = nil,
+        reportID: UUID = UUID()
     ) async -> DeveloperIssueReportSubmission {
         let description = draft.description.publicReportPrefix(
             maximumUTF8Bytes: PublicIssueReportPolicy.maximumDescriptionBytes
@@ -154,7 +156,7 @@ struct MacIssueReportSubmitter {
             return .failed(message: L10n.string("Write a title or some details first."))
         }
 
-        MacRemoteDiagnostics.record(.issueReportSubmissionStarted, fields: [
+        MacRemoteDiagnostics.recordInteraction(.issueReportSubmissionStarted, fields: [
             .reason: trigger.rawValue,
             .surface: "developerInbox",
         ])
@@ -163,11 +165,14 @@ struct MacIssueReportSubmitter {
         // it: the bounded package is a *projection* of the report for a service that has an
         // opinion about size, while this is the report. A capture too large to send is still a
         // capture worth keeping.
-        let id = UUID().uuidString.lowercased()
+        let id = reportID.uuidString.lowercased()
         let createdAt = ISO8601DateFormatter().string(from: Date())
         let record = MacIssueReportRecord(
             id: id,
-            markdown: draft.recordMarkdown(createdAt: createdAt),
+            markdown: draft.recordMarkdown(
+                createdAt: createdAt,
+                attachmentLocations: outbox.attachmentLocations(for: id, sources: draft.attachmentURLs)
+            ),
             screenshotURL: draft.local?.screenshotURL,
             attachmentURLs: draft.attachmentURLs
         )
@@ -180,7 +185,7 @@ struct MacIssueReportSubmitter {
             // work done for nothing, and a status line promising a retry would be a lie the
             // configuration can never make true.
             guard await outbox.isDeliveryConfigured else {
-                MacRemoteDiagnostics.record(.issueReportSubmissionDeferred, fields: [
+                MacRemoteDiagnostics.recordInteraction(.issueReportSubmissionDeferred, fields: [
                     .reason: trigger.rawValue,
                     .result: "saved",
                     .surface: "developerInbox",
@@ -206,20 +211,18 @@ struct MacIssueReportSubmitter {
                 screenshotMediaType: preview == nil ? nil : "image/jpeg",
                 imagePreviews: attachmentPreviews.isEmpty ? nil : attachmentPreviews
             )
-            guard PublicIssueReportPolicy.accepts(submission) else {
-                throw MacIssueReportError.invalidPackage
-            }
-
+            // The outbox validates/encodes the package on its actor before queuing it. Repeating
+            // that JSON work here would put it on the UI actor without adding a boundary.
             switch try await outbox.enqueueAndDeliver(submission) {
             case .delivered(let receipt):
-                MacRemoteDiagnostics.record(.issueReportSubmissionSucceeded, fields: [
+                MacRemoteDiagnostics.recordInteraction(.issueReportSubmissionSucceeded, fields: [
                     .reason: trigger.rawValue,
                     .result: "delivered",
                     .surface: "developerInbox",
                 ])
                 return .delivered(reference: receipt.reference)
             case .queued:
-                MacRemoteDiagnostics.record(
+                MacRemoteDiagnostics.recordInteraction(
                     .issueReportSubmissionDeferred,
                     level: .warning,
                     fields: [
@@ -230,7 +233,7 @@ struct MacIssueReportSubmitter {
                 )
                 return .queued
             case .saved(let records):
-                MacRemoteDiagnostics.record(.issueReportSubmissionDeferred, fields: [
+                MacRemoteDiagnostics.recordInteraction(.issueReportSubmissionDeferred, fields: [
                     .reason: trigger.rawValue,
                     .result: "saved",
                     .surface: "developerInbox",
@@ -238,7 +241,7 @@ struct MacIssueReportSubmitter {
                 return .saved(records: records)
             }
         } catch {
-            MacRemoteDiagnostics.record(
+            MacRemoteDiagnostics.recordInteraction(
                 .issueReportSubmissionFailed,
                 level: .error,
                 fields: [
@@ -254,6 +257,14 @@ struct MacIssueReportSubmitter {
                 ?? L10n.string("Threading couldn’t prepare the private report. Nothing was sent.")
             return .failed(message: message)
         }
+    }
+
+    func previousSubmission(for reportID: UUID) async -> DeveloperIssueReportSubmission? {
+        await outbox.previousSubmission(for: reportID.uuidString.lowercased())
+    }
+
+    func recordLocation(for reportID: UUID) -> URL {
+        outbox.recordsLocation.appendingPathComponent(reportID.uuidString.lowercased(), isDirectory: true)
     }
 
     private static func previewJPEG(from image: NSImage) throws -> Data {
@@ -461,6 +472,7 @@ actor MacIssueReportOutbox {
     /// courtesy in a status line rather than a fact anything depends on, and an unbounded
     /// directory walk to make it exact would be the one place this design scans the archive.
     private static let maximumCountedRecords = 999
+    private static let maximumReceiptBytes = 4 * 1_024
 
     private static let recordsDirectoryName = "Outbox"
     private static let pendingDirectoryName = "Pending"
@@ -541,9 +553,8 @@ actor MacIssueReportOutbox {
 
     /// Writes one report to disk and answers how many are now there.
     ///
-    /// Throws only when the report itself cannot be written. A missing capture does not: the
-    /// prose is the report and the picture is evidence beside it, and losing the whole filing
-    /// because a temporary file was swept is the wrong trade.
+    /// Keeps the prose even if a capture has disappeared. Explicit attachments must enter
+    /// custody successfully before a submission can claim they were kept or send their previews.
     @discardableResult
     func save(_ record: MacIssueReportRecord) throws -> Int {
         try prepareDirectories()
@@ -567,19 +578,10 @@ actor MacIssueReportOutbox {
             try? FileManager.default.copyItem(at: source, to: destination)
         }
 
-        for (index, source) in record.attachmentURLs.prefix(
-            PublicIssueReportPolicy.maximumImagePreviewCount
-        ).enumerated() {
-            let name = source.pathExtension.isEmpty
-                ? Self.defaultScreenshotExtension
-                : source.pathExtension
-            let destination = folder
-                .appendingPathComponent(
-                    "\(Self.recordAttachmentName)-\(String(format: "%02d", index + 1))"
-                )
-                .appendingPathExtension(name)
+        let destinations = attachmentLocations(for: record.id, sources: record.attachmentURLs)
+        for (source, destination) in zip(record.attachmentURLs, destinations) {
             try? FileManager.default.removeItem(at: destination)
-            try? FileManager.default.copyItem(at: source, to: destination)
+            try FileManager.default.copyItem(at: source, to: destination)
         }
 
         return recordCount()
@@ -588,6 +590,38 @@ actor MacIssueReportOutbox {
     /// The folder a person is sent to, and an agent is pointed at.
     nonisolated var recordsLocation: URL {
         directory.appendingPathComponent(Self.recordsDirectoryName, isDirectory: true)
+    }
+
+    /// Local report links point at the originals in custody, so deleting a temporary source
+    /// after submission cannot leave the report naming evidence that no longer exists.
+    nonisolated func attachmentLocations(for id: String, sources: [URL]) -> [URL] {
+        sources.prefix(PublicIssueReportPolicy.maximumImagePreviewCount).enumerated().map { index, source in
+            let fileExtension = source.pathExtension.isEmpty
+                ? Self.defaultScreenshotExtension : source.pathExtension
+            return recordsLocation.appendingPathComponent(id, isDirectory: true)
+                .appendingPathComponent("\(Self.recordAttachmentName)-\(String(format: "%02d", index + 1))")
+                .appendingPathExtension(fileExtension)
+        }
+    }
+
+    /// A direct, bounded lookup, never an archive scan. An agent retry reads the first report
+    /// and its most recent durable receipt instead of writing a new record or posting again.
+    func previousSubmission(for id: String) -> DeveloperIssueReportSubmission? {
+        let folder = recordFolder(for: id)
+        guard FileManager.default.fileExists(
+            atPath: folder.appendingPathComponent(Self.recordMarkdownName).path
+        ) else { return nil }
+
+        let receiptURL = folder.appendingPathComponent(Self.recordReceiptName)
+        if let data = try? BoundedFileReader.read(receiptURL, maximumBytes: Self.maximumReceiptBytes),
+           let receipt = try? JSONDecoder().decode(PublicIssueReportReceiptDTO.self, from: data),
+           receipt.reportID == id {
+            return .delivered(reference: receipt.reference)
+        }
+        if let submission = PublicIssueReportPolicy.submission(at: pendingURL(for: id)), submission.id == id {
+            return .queued
+        }
+        return .saved(records: recordCount())
     }
 
     // MARK: - Delivery

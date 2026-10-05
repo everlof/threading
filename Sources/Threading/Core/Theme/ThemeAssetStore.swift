@@ -2,8 +2,8 @@ import AppKit
 
 // MARK: - Theme Asset Store
 
-/// Owns the image files a custom theme references — its sidebar's logo and background, and its
-/// material's backdrop — under Application Support.
+/// Owns the image files a custom theme references — its sidebar's logo and background, its
+/// material's backdrop and its welcome picture — under Application Support.
 ///
 /// A theme document lives in `PreferenceStore` as JSON and stays hand-writable; bytes would
 /// end both. So the document names an asset and this store owns the file — the same split
@@ -47,7 +47,7 @@ enum ThemeAssetStore {
         return directory.appendingPathComponent(themeID.rawValue, isDirectory: true)
     }
 
-    private static func assetURL(named assetName: String, for themeID: AppThemeID) -> URL? {
+    static func assetURL(named assetName: String, for themeID: AppThemeID) -> URL? {
         guard AppThemeID.isSafePathComponent(assetName), let folder = folder(for: themeID) else {
             return nil
         }
@@ -316,11 +316,12 @@ enum ThemeAssetDefaults {
     /// stand on the Dock tile (`SidebarStyle.Brand.dockIcon`), which never upscales a mark; a
     /// material backdrop at 2× of a wide pane — enough that Retina rendering never upsamples,
     /// small enough that a theme cannot smuggle a wallpaper library into Application Support.
+    /// The welcome fills the composer pane, so it is stored at the backdrop's size.
     static func storedPixelSize(for slot: ThemeAssetSlot) -> Int {
         switch slot {
         case .background: return 1024
         case .logo: return 512
-        case .backdrop: return 2048
+        case .backdrop, .welcome: return 2048
         }
     }
 }

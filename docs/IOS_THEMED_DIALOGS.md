@@ -641,6 +641,29 @@ a gradient or observes an animation clock. The recipe crosses the ordinary `mobi
 environment and per-Mac reconnect cache with the palette.
 
 The host owns visibility, scene activation, Reduce Motion, Low Power Mode, touch routing and
-accessibility silence. The shared `ThemeGradientAnimator` installs compositor tracks only while
-the dashboard is presented and its scene is active. A static fallback retains the same authored
-colors. Navigation, keyboard movement and scrolling remain platform behavior.
+accessibility silence. The shared `ThemeGradientAnimator` keeps its compositor tracks whenever
+motion is allowed, and the gradient layer's clock runs only while the screen holds the window's
+lease, is presented and its scene is active. A static fallback retains the same authored colors.
+Navigation, keyboard movement and scrolling remain platform behavior.
+
+**A screen without the lease holds its ground where it stands.** A push puts two screens on
+screen and only one moves. The other stops its drift's clock at the current phase, freezes its
+particle field mid-flight (`MobileThemeParticleState.paused`, the Mac's `ThemeParticleFieldLayer`
+states) and shows its extension surface's last frame; each resumes from that instant. A field
+starts prewarmed, so a screen slides in already full. The still tile is motion-off only (Reduce
+Motion, the Theme motion switch, Low Power Mode): swapping a live field for it at the start of a
+push and back at the end made every particle jump twice per navigation. **Every screen's picture
+and gradient are laid out against the window** and clipped by the view, because the list's
+ground is its collection's background while the composer's runs to the screen's foot; filling
+each view's own bounds drew one picture at two scales. `MobileThemeBackdropTests` pins the hold,
+the resume instant, the motion-off still and the window geometry.
+
+One window has one moving backdrop, so a screen installs one: a sheet whose list already stands
+on `themedSettingsPage` puts a plain ground, not a second backdrop, behind its navigation stack.
+Workload quickens the drift through the gradient layer's clock rather than a new animation, which
+would restart at phase zero. Reduce Transparency and Increase Contrast keep the gradient and drop
+the picture, particles and extension surface. Every transcript row — prose, thinking, notice,
+tool and permission — stands on an opaque plate, because the conversation's backdrop moves
+behind it and a System panel is a translucent wash. Preference changes reach a backdrop through
+`MobileThemeMotionPreferences.didChange`, on main and only when a decoration value changed;
+`UserDefaults.didChangeNotification` arrives on the writer's thread for every key.

@@ -215,6 +215,7 @@ enum SessionDraftMotion {
 enum MobileKeyboardOverlap {
     /// How far the announced end frame reaches above the window's bottom safe-area inset —
     /// the padding that puts the composer's bottom edge on the keyboard's top edge.
+    @MainActor
     static func target(from notification: Notification) -> CGFloat {
         guard let frame = notification.userInfo?[
             UIResponder.keyboardFrameEndUserInfoKey
@@ -256,6 +257,11 @@ private struct SessionDraftComposerScreen: View {
     @EnvironmentObject private var appModel: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    /// The theme's welcome over the empty ground, when it states one (`MobileDraftWelcome`).
+    /// Picked in `onAppear`, after the catalogue's defaults chose the draft's project, so a
+    /// `{project}` line is eligible from the first arrival.
+    @StateObject private var welcome = MobileDraftWelcomeModel()
     let draft: MobileSessionDraft
     /// The draft content remains mounted while it fades over the session it became, but its
     /// toolbar cannot: SwiftUI merges toolbar items from both children in that overlap and drew
@@ -620,10 +626,13 @@ private struct SessionDraftComposerScreen: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             composer
+                .background { promptScrim }
                 .padding(.bottom, keyboardOverlap)
                 .offset(y: keyboardRideOffset)
         }
-        .background(theme.ground)
+        // The welcome's own ground when the theme states one; the material's otherwise. One
+        // backdrop either way, so the screen keeps its single motion lease.
+        .mobileThemeBackdrop(theme, decoration: .forNewChat(theme))
         // The composer follows the keyboard through `keyboardOverlap`, on the keyboard's own
         // duration. Automatic avoidance moved it on a schedule of its own — see the state's
         // comment — so it is switched off rather than doubled.
@@ -637,6 +646,8 @@ private struct SessionDraftComposerScreen: View {
             applyCatalogDefaults()
             configureAttachments()
             hintAnimated = true
+            welcome.arrive(theme.source?.welcome, inputs: welcomeInputs)
+            welcome.setVisible(scenePhase == .active)
 #if DEBUG
             configureDraftMatrixPrompt()
             if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
@@ -683,6 +694,11 @@ private struct SessionDraftComposerScreen: View {
             }
 #endif
         }
+        .modifier(SessionDraftWelcomeLifecycle(
+            model: welcome,
+            welcome: theme.source?.welcome,
+            inputs: welcomeInputs
+        ))
         .onChange(of: projectID) { _, _ in
             // A draft moved to another project takes that project's list, unless the person has
             // already chosen who runs it.
@@ -822,17 +838,24 @@ private struct SessionDraftComposerScreen: View {
     /// The middle of the ground: the surface's glyph, the project as a plain dropdown, and its
     /// branch. No plate and no tile — the glyph is a symbol in the tertiary ink, and the project
     /// is a line of text with a chevron, which is as quiet as a menu can be and still be found.
+    ///
+    /// A theme's welcome stands above the sentence: its mark in the glyph's place, then the
+    /// greeting and caption it picked. The sentence and the branch stay the screen's own.
     private var hint: some View {
         VStack(spacing: MobileDesign.Spacing.small) {
-            Image(systemName: hintSymbol)
-                .font(.system(size: MobileDesign.Size.draftHintGlyph, weight: .light))
-                .foregroundStyle(theme.tertiaryLabel)
-                .symbolEffect(
-                    .bounce,
-                    options: .nonRepeating,
-                    value: reduceMotion ? false : hintAnimated
+            if let stated = theme.source?.welcome {
+                MobileDraftWelcomeHero(
+                    welcome: stated,
+                    theme: theme,
+                    greeting: welcome.greeting(welcomeInputs),
+                    caption: welcome.caption(welcomeInputs),
+                    mood: appModel.dashboardCatalogue?.mascotMood ?? "resting",
+                    glyph: { hintGlyph(side: $0) }
                 )
-                .padding(.bottom, MobileDesign.Spacing.tight)
+            } else {
+                hintGlyph(side: nil)
+                    .padding(.bottom, MobileDesign.Spacing.tight)
+            }
             // "Agent in AnotherTerminal": the role and the project as one sentence, each word a
             // menu. Two menus rather than one format string, so each stays its own control; the
             // joining word is the only piece that is not.
@@ -853,6 +876,44 @@ private struct SessionDraftComposerScreen: View {
             }
         }
         .padding(.horizontal, MobileDesign.Spacing.pane)
+        .background {
+            let opacity = MobileDraftWelcomeScrim.opacity(theme.source?.welcome?.scrim?.hero)
+            if opacity > 0 {
+                MobileDraftWelcomeScrim.Hero(ground: theme.ground, opacity: opacity)
+            }
+        }
+    }
+
+    /// The screen's own mark: the surface's glyph, at the theme's mark size when it states one.
+    private func hintGlyph(side: CGFloat?) -> some View {
+        Image(systemName: hintSymbol)
+            .font(.system(size: side ?? MobileDesign.Size.draftHintGlyph, weight: .light))
+            .foregroundStyle(theme.tertiaryLabel)
+            .symbolEffect(
+                .bounce,
+                options: .nonRepeating,
+                value: reduceMotion ? false : hintAnimated
+            )
+    }
+
+    /// The veil behind the composer, when the theme's welcome states one.
+    @ViewBuilder
+    private var promptScrim: some View {
+        let opacity = MobileDraftWelcomeScrim.opacity(theme.source?.welcome?.scrim?.prompt)
+        if opacity > 0 {
+            MobileDraftWelcomeScrim.Prompt(ground: theme.ground, opacity: opacity)
+        }
+    }
+
+    /// What the welcome's non-clock tokens read: the draft's project, the Mac owner's name when
+    /// the Mac sent one, and the phone's own catalogue.
+    private var welcomeInputs: MobileDraftWelcome.Inputs {
+        MobileDraftWelcome.Inputs(
+            project: selectedProject?.name,
+            user: theme.source?.welcome?.user,
+            working: appModel.dashboardCatalogue?.workingCount ?? 0,
+            waiting: appModel.dashboardCatalogue?.attentionCount ?? 0
+        )
     }
 
     /// A manager's glyph is the Mac's for the role; an agent's is its surface's.
@@ -2293,5 +2354,27 @@ private struct DraftIconMenuLabel: View {
                 alignment: .trailing
             )
             .contentShape(Rectangle())
+    }
+}
+
+/// The welcome's visibility and theme changes, kept out of the draft's long modifier chain.
+/// The first pick is the screen's own `onAppear`, after the draft's project is chosen.
+private struct SessionDraftWelcomeLifecycle: ViewModifier {
+    @ObservedObject var model: MobileDraftWelcomeModel
+    let welcome: RemoteThemeWelcome?
+    let inputs: MobileDraftWelcome.Inputs
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        content
+            .onDisappear { model.setVisible(false) }
+            .onChange(of: scenePhase) { _, phase in
+                // A screen in a backgrounded scene is not read; its minute waits for the return.
+                model.setVisible(phase == .active)
+            }
+            .onChange(of: welcome) { _, stated in
+                // A theme change that alters the pools picks again; one that does not keeps it.
+                model.arrive(stated, inputs: inputs)
+            }
     }
 }

@@ -387,10 +387,14 @@ public struct PTYHostAttach: Codable, Equatable, Sendable {
     public let id: PTYHostSessionIdentity
     /// How much history the watcher says it can hold, or nil for "no statement".
     public let replayBudget: Int?
+    /// False binds lifecycle commands without subscribing to replay or live output.
+    /// Missing preserves the ordinary watcher contract for older clients.
+    public let receivesOutput: Bool?
 
-    public init(id: PTYHostSessionIdentity, replayBudget: Int? = nil) {
+    public init(id: PTYHostSessionIdentity, replayBudget: Int? = nil, receivesOutput: Bool? = nil) {
         self.id = id
         self.replayBudget = replayBudget
+        self.receivesOutput = receivesOutput
     }
 
     /// The stated budget, held to the host's range.

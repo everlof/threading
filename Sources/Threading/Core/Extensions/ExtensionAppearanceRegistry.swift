@@ -67,6 +67,18 @@ final class ExtensionAppearanceRegistry {
 
     private(set) var contributions: [Contribution] = []
     private(set) var activeFontURLs: Set<URL> = []
+    private var themeContributors: [AppThemeID: String] = [:]
+
+    /// Cached inspection metadata only; the remote rendition worker reads the selected files.
+    func phoneFontURLs(families: [String]) -> [URL] {
+        let wanted = Set(families)
+        return Array(Set(contributions.flatMap { contribution in
+            contribution.fontURLs.filter { url in
+                activeFontURLs.contains(url)
+                    && contribution.fontFamilies[url]?.contains(where: wanted.contains) == true
+            }
+        }).sorted { $0.path < $1.path }.prefix(ThemeFontStore.maximumFonts))
+    }
     private var decodedMarks: [AppThemeID: NSImage] = [:]
     private var decodedSidebarAssets: [AppThemeID: [String: NSImage]] = [:]
     private var decodedThemeOrder: [AppThemeID] = []
@@ -80,6 +92,15 @@ final class ExtensionAppearanceRegistry {
 
     func contributorName(forThemeID id: AppThemeID) -> String? {
         contributions.first { $0.themes.contains { $0.id == id } }?.extensionName
+    }
+
+    /// The extension that ships the theme with this id, if an extension does.
+    ///
+    /// Asked by the component registry on every customization lookup — once per row the
+    /// sidebar configures — so it is a dictionary read kept in step with `replace`, not a scan.
+    /// A duplicated copy has a custom id and therefore no contributor.
+    func contributorIdentifier(forThemeID id: AppThemeID) -> String? {
+        themeContributors[id]
     }
 
     /// The app-icon mark a contributed theme ships, if it ships one.
@@ -131,6 +152,12 @@ final class ExtensionAppearanceRegistry {
         let previousMarks = contributions.map(\.iconMarks)
         let previousSidebarAssets = contributions.map(\.sidebarAssets)
         contributions = newContributions
+        themeContributors = Dictionary(
+            newContributions.flatMap { contribution in
+                contribution.themes.map { ($0.id, contribution.extensionIdentifier) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
         updateFontRegistrations()
         decodedMarks = [:]
         decodedSidebarAssets = [:]
@@ -174,7 +201,8 @@ final class ExtensionAppearanceRegistry {
                             ProfileStorage.shared.defaultProfile.fontName].compactMap { $0 })
         for variant in theme?.variants.values.map({ $0 }) ?? [] {
             families.formUnion([variant.material.fontFamily, variant.material.buttonStyle.fontFamily,
-                                variant.material.headingStyle?.fontFamily, variant.sidebar?.brand?.title?.fontFamily]
+                                variant.material.headingStyle?.fontFamily, variant.sidebar?.brand?.title?.fontFamily,
+                                variant.welcome?.greeting?.style?.fontFamily, variant.welcome?.caption?.style?.fontFamily]
                 .compactMap { $0 })
             families.formUnion(variant.material.fontFallbacks)
         }

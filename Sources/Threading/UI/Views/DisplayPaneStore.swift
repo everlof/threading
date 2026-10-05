@@ -426,7 +426,8 @@ final class DisplayPaneStore {
     }
   }
 
-  /// Drops cache ownership after the project's SQLite cascade has already removed panel rows.
+  /// Drops cache ownership after the project's removal transaction has already deleted its
+  /// sessions' panel rows.
   func removeSessionsAfterProjectDeletion(_ sessionIDs: Set<SessionID>) {
     guard !sessionIDs.isEmpty else { return }
     quarantined.subtract(sessionIDs)

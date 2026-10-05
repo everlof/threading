@@ -388,10 +388,22 @@ private final class ExtensionSettingActionTarget: NSObject {
     private let extensionIdentifier: String
     private let field: ExtensionSettingField
     private weak var control: NSControl?
+    /// The same field can be on screen twice — its Settings page and the Current Theme page's
+    /// Theme Options — so a row follows a value changed from the other one. Lives exactly as
+    /// long as the materialized row that retains this target.
+    private let observations = AppEventObservations()
 
     init(extensionIdentifier: String, field: ExtensionSettingField) {
         self.extensionIdentifier = extensionIdentifier
         self.field = field
+        super.init()
+        observations.observe(ExtensionSettingsValuesDidChange.self) { [weak self] _ in
+            // A row mid-change is disabled until its own change settles and restores then; a
+            // field being typed into keeps the person's text.
+            guard let self, let control = self.control, control.isEnabled,
+                  (control as? NSTextField)?.currentEditor() == nil else { return }
+            self.restoreControl()
+        }
     }
 
     func makeControl() -> NSControl {

@@ -175,6 +175,49 @@ final class ConfirmationAlertTests: XCTestCase {
         XCTAssertTrue(running.message.contains("imported again"))
     }
 
+    /// Removing a project deletes the chats in it, and the sheet has to say so. It used to say
+    /// they were "removed from the sidebar", which on a worktree row Threading adopted for a
+    /// checkout move reads as tidying up — and was confirmed as that.
+    func testRemovingAProjectWithChatsSaysTheyAreDeleted() {
+        var project = Project(
+            name: "repo-feature",
+            folderURL: URL(fileURLWithPath: "/tmp/repo-feature")
+        )
+        project.sessions = [AgentSession(kind: .claude, title: "Refactor the parser")]
+
+        let idle = ProjectSidebarViewController.removeProjectConfirmation(
+            for: project,
+            runningCount: 0
+        )
+        XCTAssertTrue(idle.title.contains("its chats"), "the title is what gets read")
+        XCTAssertTrue(idle.message.contains("deleted from Threading"))
+        XCTAssertFalse(idle.message.contains("removed from the sidebar"))
+        XCTAssertTrue(idle.message.contains("imported again"))
+
+        let running = ProjectSidebarViewController.removeProjectConfirmation(
+            for: project,
+            runningCount: 2
+        )
+        XCTAssertTrue(running.message.contains("2 running"))
+        XCTAssertTrue(running.message.contains("deleted from Threading"))
+
+        let alert = ConfirmationAlert.makeAlert(idle)
+        XCTAssertFalse(alert.showsSuppressionButton, "a removal is not switchable off")
+        XCTAssertEqual(alert.buttons.first?.keyEquivalent, "", "Return must not remove")
+    }
+
+    /// A project with no chats loses none, so its sheet keeps the wording that is true for it.
+    func testRemovingAProjectWithoutChatsDoesNotClaimToDeleteAny() {
+        let project = Project(name: "empty", folderURL: URL(fileURLWithPath: "/tmp/empty"))
+        let request = ProjectSidebarViewController.removeProjectConfirmation(
+            for: project,
+            runningCount: 0
+        )
+
+        XCTAssertFalse(request.title.contains("its chats"))
+        XCTAssertFalse(request.message.contains("deleted from Threading"))
+    }
+
     // MARK: - Quitting
 
     /// Quitting is nearer to closing a session than to deleting one — the conversations resume

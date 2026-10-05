@@ -10,12 +10,12 @@ final class MacMailboxTests: XCTestCase {
 
     private var directory: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("MacMailboxTests-\(UUID().uuidString)", isDirectory: true)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         try? FileManager.default.removeItem(at: directory)
     }
 
@@ -314,9 +314,9 @@ final class MacMailDeliveryTests: XCTestCase {
 @MainActor
 final class MailNoticeHookTests: XCTestCase {
 
-    override func tearDown() {
+    override func tearDown() async throws {
         MailStopContinuationLedger.reset()
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testHookOutputMatchesTheControllersShape() throws {
@@ -410,7 +410,7 @@ final class MailNoticeHookTests: XCTestCase {
     func testABlockedStopHoldsTheFinishUntilTheAgentProvesItWentOn() throws {
         let session = SessionID()
         var relayed: [HookLifecycleReport] = []
-        var scheduled: [@MainActor () -> Void] = []
+        var scheduled: [@MainActor @Sendable () -> Void] = []
         MailStopContinuationLedger.schedule = { _, work in scheduled.append(work) }
         defer { MailStopContinuationLedger.schedule = { delay, work in
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { work() } }
@@ -498,7 +498,7 @@ final class MailNoticeHookTests: XCTestCase {
         let session = SessionID()
         let finish = try XCTUnwrap(HookLifecycleReport(sessionID: session, event: .turnFinished, payload: [:]))
         var relayed: [HookLifecycleReport] = []
-        var scheduled: [@MainActor () -> Void] = []
+        var scheduled: [@MainActor @Sendable () -> Void] = []
         MailStopContinuationLedger.schedule = { _, work in scheduled.append(work) }
         defer {
             MailStopContinuationLedger.schedule = { delay, work in
@@ -558,13 +558,13 @@ final class MacMailSyncTests: XCTestCase {
 
     private var directory: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("MacMailSyncTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         try? FileManager.default.removeItem(at: directory)
     }
 

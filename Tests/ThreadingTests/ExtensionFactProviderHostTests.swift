@@ -261,6 +261,54 @@ final class ExtensionFactProviderHostTests: XCTestCase {
         )
     }
 
+    /// A value about no repository — the weather — is published on the application subject
+    /// through the same route, under the same declaration rule, and goes with its generation.
+    func testAnApplicationFactIsPublishedThroughTheRouteAndRevokedWithItsGeneration() throws {
+        let registry = ExtensionFactRegistry()
+        let host = try service(factRegistry: registry)
+        let weather = ExtensionFactKey(id: "weather.summary")
+        let authorization = try authorizeFacts(host, definition: ExtensionFactDefinition(
+            key: weather,
+            displayName: "Weather",
+            valueType: .string,
+            subjectKinds: [.application],
+            usages: [.presentable]
+        ))
+        let token = authorization.connection.bearerToken
+        let sunny = ExtensionFact(
+            key: weather,
+            subject: .application,
+            value: .string("Sunny"),
+            observedAt: .distantFuture
+        )
+
+        XCTAssertEqual(
+            try route(
+                through: host,
+                token: token,
+                body: publication(facts: [sunny], subjects: [.application])
+            ).status,
+            204
+        )
+        XCTAssertEqual(registry.exactFact(weather, for: .application)?.fact.value, .string("Sunny"))
+
+        let onRepository = ExtensionFact(
+            key: weather,
+            subject: subject,
+            value: .string("Rain"),
+            observedAt: .distantFuture
+        )
+        XCTAssertEqual(
+            try route(through: host, token: token, body: publication(facts: [onRepository])).status,
+            422,
+            "a definition naming only the application cannot be published on a repository"
+        )
+        XCTAssertEqual(registry.exactFact(weather, for: .application)?.fact.value, .string("Sunny"))
+
+        host.revoke(extensionIdentifier: "com.example.gitlab", processGeneration: "one")
+        XCTAssertNil(registry.exactFact(weather, for: .application))
+    }
+
     func testProviderPrecedenceIsIndependentOfStartOrderAndRevokeRevealsFallback() throws {
         let registry = ExtensionFactRegistry()
         let host = try service(factRegistry: registry)

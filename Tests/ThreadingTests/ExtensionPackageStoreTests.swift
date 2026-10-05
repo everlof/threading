@@ -1196,8 +1196,8 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertEqual(try result.get(), response)
     }
 
-    func testAppearancePackProjectionKeepsSharedGenerationAndRevokesDepartingRuntime() async throws {
-        let panel = ExtensionPanel(id: "pack-test", title: "Pack Test", root: .status("Ready", role: .neutral))
+    func testAppearanceProjectionKeepsRunningGenerationAndRevokesDepartingRuntime() async throws {
+        let panel = ExtensionPanel(id: "projection-test", title: "Projection Test", root: .status("Ready", role: .neutral))
         let source = try makePackage(panel: panel)
         let store = ExtensionPackageStore(rootURL: temporaryDirectory("appearance-ownership"))
         _ = try store.install(from: source)
@@ -1211,7 +1211,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
         let generation = try XCTUnwrap(manager.extensionPanelInventory.first?.processGeneration)
         manager.adoptAppearanceEnablement([id], startRuntimes: true)
         XCTAssertEqual(manager.extensionPanelInventory.first?.processGeneration, generation)
-        XCTAssertEqual(store.enabledIdentifiers(), [], "pack ownership must not become a manual legacy flag")
+        XCTAssertEqual(store.enabledIdentifiers(), [], "the projection must not become a legacy enablement flag")
         manager.appearancePrepareForRemoval = { _ in throw AppearanceActivationError.persistenceFailed }
         do { _ = try await manager.uninstall(identifier: id); XCTFail("save failure must refuse removal") } catch {}
         XCTAssertEqual(manager.extensionPanelInventory.first?.processGeneration, generation)
@@ -1223,10 +1223,6 @@ final class ExtensionPackageStoreTests: XCTestCase {
         manager.adoptAppearanceEnablement([], startRuntimes: true)
         XCTAssertTrue(manager.extensionPanelInventory.isEmpty)
         XCTAssertEqual(manager.installedExtensions.first?.status, .disabled)
-        manager.appearanceRuntimeAdmission = { _ in "Review changed content" }
-        manager.adoptAppearanceEnablement([id], startRuntimes: true)
-        XCTAssertEqual(manager.installedExtensions.first?.status, .failed("Review changed content"))
-        XCTAssertTrue(manager.extensionPanelInventory.isEmpty)
     }
 
     func testManagerRegistersRoutesAndRemovesExtensionCommands() async throws {

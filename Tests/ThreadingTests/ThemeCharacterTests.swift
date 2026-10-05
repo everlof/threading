@@ -602,7 +602,7 @@ final class ThemeCharacterTests: XCTestCase {
         }
 
         // The schema never offers the fields the parser refuses.
-        let tool = try XCTUnwrap(MCPTools.definitions.first { $0.name == MCPTools.createAppTheme })
+        let tool = MCPTools.appVariantSchema
         let json = try XCTUnwrap(
             JSONSerialization.jsonObject(with: JSONEncoder().encode(tool)) as? [String: Any]
         )
@@ -852,7 +852,7 @@ final class ThemeCharacterTests: XCTestCase {
     }
 
     func testTheVariantSchemaDescribesTheCharacterBlocks() throws {
-        let tool = try XCTUnwrap(MCPTools.definitions.first { $0.name == MCPTools.createAppTheme })
+        let tool = MCPTools.appVariantSchema
         let json = try XCTUnwrap(String(data: try JSONEncoder().encode(tool), encoding: .utf8))
         for key in ["\"sprites\"", "\"moments\"", "\"turn_finished\"", "\"words\"", "\"mascot\"",
                     "\"logo_in_dock\"", "\"alignment\"", "\"celebrating\""] {

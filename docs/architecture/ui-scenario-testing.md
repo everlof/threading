@@ -211,6 +211,9 @@ nonzero when any generated image is changed, new or unbaselined.
 ### Complete and targeted visual passes
 
 The coverage manifest, not a hand-maintained test command, selects the canonical feature states.
+An entry may use `capture.globs` for several precise filename families. Sidebar settings uses
+its numbered-width and auto-hide families; a broad `sidebar-*` also claimed row and edge-reveal
+captures from other entries and made a complete report fail ownership validation.
 Run the full macOS catalogue before merging a broad design-system or layout change. For an isolated
 iteration, select a coverage entry without making partial output look like a complete run:
 
@@ -497,10 +500,17 @@ as ordinary CI coverage.
 
 ### Recurring automations
 
-`AutomationJourneyUITests` opens Automations in the shipping shell, creates a daily task in the
-real editor, saves it paused and verifies the same task after relaunch into the isolated home.
-The editor and its schedule/archive controls have separate sheet captures. This journey starts
-no agent; execution and owner-RPC behavior are covered by the controller and trigger suites.
+`AutomationJourneyUITests` opens the project Automations row in the shipping shell, types a
+new daily task in the project-locked editor, verifies the saved project files, relaunches, reviews
+and activates the same revision, then edits the instruction file and observes a return to review.
+The editor, recurrence/archive controls and restore/change states have named captures.
+
+The workspace companion seeds a portable definition and uncommitted product file, reviews the
+exact host sheet, starts its ordinary project-owned conversation and verifies the provider's
+workspace cwd through the recorded Codex handshake and a root-relative fixture result. The
+DEBUG-only sandbox flag installs the sealed fixture helper for only the bounded newly created
+workspace session; it cannot fall through to a real account's CLI. An outside file edit then
+pauses future runs. No fixture sends mail or changes a production checkout.
 
 ### File change and relaunch recovery
 

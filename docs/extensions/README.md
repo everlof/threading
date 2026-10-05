@@ -136,7 +136,8 @@ The first vertical slice exists:
   same hook the other way up: a fill image or a surface *beneath* the sidebar's rows, with the
   host keeping an opacity ceiling, the cadence, the pointer and the layering.
   `display.backdrop@1` and `composer.backdrop@1` are the same contract beneath the display
-  panel's tabs and content and beneath the new-session composer. A surface may also name one
+  panel's tabs and content and beneath the new-session composer; the composer also tells a
+  Metal surface where its hero and prompt box sit (`uniforms.focus`). A surface may also name one
   package picture as its `texture`, and bind the theme's darkness, accent and ground and the
   app's turn-finished / needs-attention moments as live signals.
 - The `media` node is the only one whose pixels move on their own, and the host draws all of
@@ -204,13 +205,17 @@ documents written in the host's own app-theme vocabulary — the same document T
 a custom theme — and `fonts` entries name `.otf`/`.ttf`/`.ttc` files. Both are read, bounded,
 and validated by the inspector before any extension code runs: a theme faces the same contrast
 and material gates a custom theme faces, its library id is namespaced by the host
-(`ext.<extension>.<theme id>`), and a font must parse to at least one face. While the extension
-is enabled, its themes appear in Settings ▸ Themes labelled by the extension's name, and its
-fonts are registered process-scoped, which makes them appear in the font pickers and resolvable
-by any theme document that names their family — including the extension's own, which is how a
-theme pack styles the whole app with its own face. Disabling the extension removes both; a
-theme that was active falls back to the stock Threading default, and a named-but-gone family
-degrades one resolution rung exactly like an uninstalled font. Font licensing is the package author's responsibility,
+(`ext.<extension>.<theme id>`), and a font must parse to at least one face. Once the package is
+installed and valid, its themes appear in Settings ▸ Themes labelled by the extension's name
+whether or not the extension is enabled — choosing one uses the inspected document and does not
+start the extension's code. Its fonts are registered process-scoped while the extension is
+enabled, while one of its themes is selected, or when a font choice or the selected theme names
+their family; that makes them appear in the font pickers and resolvable by any theme document
+that names the family — including the extension's own, which is how an extension's theme styles
+the whole app with its own face. Disabling the extension keeps its themes; removing it, or an
+update that makes the package invalid, withdraws them, a theme that was active falls back to the
+stock Threading default, and a named-but-gone family degrades one resolution rung exactly like an
+uninstalled font. See [appearance activation](../architecture/appearance-activation.md). Font licensing is the package author's responsibility,
 and the install disclosure names every theme and font family before anything is copied.
 
 **Localization is package-owned presentation data.** A manifest's `localizations` entries pair
@@ -420,6 +425,14 @@ complete `values` patch, and return an `ExtensionSettingsUpdateResponse` with th
 `requestID` and sorted `settingIDs`. If the process rejects or fails the update, Threading restores
 the previous value. A disabled extension receives its latest effective values the next time it
 starts.
+
+A field may instead declare `"appliedBy": "host"`. Threading then applies it itself, through the
+extension's setting-bound surface inputs (`ExtensionSurfaceScalar.setting`), and never sends the
+process a request for it — so a render-only extension can offer options without answering
+anything. Only a toggle, choice or integer may be host-applied; a choice option may state the
+`value` a bound surface reads. When the extension contributes the active app theme, its fields
+also appear under **Theme Options** on the Current Theme page. See
+[`AGENT_AUTHORING.md`](AGENT_AUTHORING.md#fields-the-host-applies).
 
 Settings are not `storage.kv`: the user and host own Settings values, while the extension owns
 its private operational state. The extension cannot access the Settings backing file, even when

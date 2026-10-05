@@ -537,6 +537,61 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        if request.method == "GET", path.hasPrefix(RemoteThemeAsset.routePrefix) {
+            guard let authorization = authorizeREST(request, respond: respond) else { return }
+            let digest = String(path.dropFirst(RemoteThemeAsset.routePrefix.count))
+            guard RemoteThemeAsset.acceptsDigest(digest) else {
+                respond(.respond(RemoteRouter.error(404, "Not Found"))); return
+            }
+            DispatchQueue.main.async {
+                guard self.authorizer?.isCurrent(authorization) == true else {
+                    respond(.respond(RemoteRouter.error(401, "Unauthorized"))); return
+                }
+                guard let asset = self.services.mirrors.themeAssetDescriptor(for: digest),
+                      let source = self.services.mirrors.themeAssetPayload(for: digest) else {
+                    respond(.respond(RemoteRouter.error(404, "Not Found"))); return
+                }
+                guard !asset.requiresOwner || authorization.canReadHostUsage else {
+                    respond(.respond(RemoteRouter.error(403, "Forbidden"))); return
+                }
+                let rangeHeader = request.header("range")
+                let range = rangeHeader.flatMap { RemoteThemeAssetRange(header: $0, total: asset.byteCount) }
+                guard rangeHeader == nil || range != nil,
+                      asset.byteCount <= RemoteThemeAsset.maximumBytes || range != nil else {
+                    respond(.respond(RemoteRouter.error(416, "Range Not Satisfiable"))); return
+                }
+                self.queue.async {
+                    // A font is read from its file here, one bounded range at a time.
+                    guard let payload = source.read(range?.bytes, expectedCount: asset.byteCount) else {
+                        DispatchQueue.main.async { respond(.respond(RemoteRouter.error(404, "Not Found"))) }
+                        return
+                    }
+                    var response: HTTPResponse
+                    if let range {
+                        response = RemoteRouter.byteRange(payload, contentType: asset.mediaType,
+                            range: Int64(range.bytes.lowerBound)..<Int64(range.bytes.upperBound),
+                            totalBytes: Int64(range.total))
+                    } else {
+                        response = RemoteRouter.data(payload, contentType: asset.mediaType, closesConnection: false)
+                    }
+                    response.extraHeaders["Accept-Ranges"] = "bytes"
+                    response.extraHeaders["ETag"] = "\"\(digest)\""
+                    response.extraHeaders["Cache-Control"] = "private, max-age=31536000, immutable"
+                    let prepared = response
+                    DispatchQueue.main.async {
+                        guard self.authorizer?.isCurrent(authorization) == true else {
+                            respond(.respond(RemoteRouter.error(401, "Unauthorized"))); return
+                        }
+                        guard self.services.mirrors.themeAssetDescriptor(for: digest) == asset else {
+                            respond(.respond(RemoteRouter.error(404, "Not Found"))); return
+                        }
+                        respond(.respond(prepared))
+                    }
+                }
+            }
+            return
+        }
+
         // The one REST call: the share and its sessions.
         if request.method == "GET", path == RemoteRouter.apiSessionsPath {
             handleMe(request, respond: respond)

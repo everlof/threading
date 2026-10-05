@@ -114,6 +114,10 @@ final class ProjectSidebarViewController: NSViewController {
     let projectStore: ProjectStore
     let decorateAccountUsage: AccountUsageMenu.Decorator
     let scheduledMessageStore: ScheduledMessageStore
+    private let triggerStore: TriggerStore
+    private var automationCounts: [ProjectID: Int] = [:]
+    private var automationRefreshRunning = false
+    private var automationRefreshPending = false
     let canAskAgentToRename: (SessionID) -> Bool
     let canAskForReportBack: (SessionID) -> Bool
     private let registeredFactChoicesProvider: RegisteredFactChoicesProvider
@@ -463,6 +467,7 @@ final class ProjectSidebarViewController: NSViewController {
     init(
         projectStore: ProjectStore = .shared,
         scheduledMessageStore: ScheduledMessageStore = .shared,
+        triggerStore: TriggerStore = .shared,
         canAskAgentToRename: @escaping (SessionID) -> Bool = { _ in false },
         canAskForReportBack: @escaping (SessionID) -> Bool = { _ in false },
         registeredFactChoicesProvider: @escaping RegisteredFactChoicesProvider = { _, selected in
@@ -481,6 +486,7 @@ final class ProjectSidebarViewController: NSViewController {
         self.extensionBackdropImageResolver = extensionBackdropImageResolver
         self.projectStore = projectStore
         self.scheduledMessageStore = scheduledMessageStore
+        self.triggerStore = triggerStore
         self.canAskAgentToRename = canAskAgentToRename
         self.canAskForReportBack = canAskForReportBack
         self.registeredFactChoicesProvider = registeredFactChoicesProvider
@@ -508,6 +514,7 @@ final class ProjectSidebarViewController: NSViewController {
         setupHeader()
         setupOutlineView()
         observeStoreChanges()
+        requestAutomationProjectRefresh()
         applySidebarSurface()
         if !defersInitialTreeMount {
             mountInitialTreeIfNeeded()
@@ -712,6 +719,9 @@ private extension ProjectSidebarViewController {
     }
 
     private func observeStoreChanges() {
+        appEvents.observe(.triggersDidChange) { [weak self] in
+            self?.requestAutomationProjectRefresh()
+        }
         appEvents.observe(ProjectsDidChange.self) { [weak self] change in
             self?.projectsDidChange(change)
         }
@@ -781,6 +791,24 @@ private extension ProjectSidebarViewController {
         appEvents.observe(SupervisionDidChange.self) { [weak self] event in
             self?.refreshRow(sessionID: event.managerID)
             self?.refreshRow(sessionID: event.childID)
+        }
+    }
+
+    /// One in-flight projection plus one pending refresh coalesces bursts of run/store events.
+    private func requestAutomationProjectRefresh() {
+        automationRefreshPending = true
+        guard !automationRefreshRunning else { return }
+        automationRefreshRunning = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { automationRefreshRunning = false }
+            while automationRefreshPending {
+                automationRefreshPending = false
+                do { try await refreshAutomationProjects() }
+                catch {
+                    ThreadingLogger.session.error("Could not refresh automation navigation: \(error.localizedDescription, privacy: .private(mask: .hash))")
+                }
+            }
         }
     }
 
@@ -1029,6 +1057,19 @@ enum StorageCleanupToast {
 
 extension ProjectSidebarViewController {
 
+    func refreshAutomationProjects() async throws {
+        let counts = try await triggerStore.projectAutomationCounts()
+        guard counts != automationCounts else { return }
+        let changedProjects = Set(counts.keys).union(automationCounts.keys).filter {
+            counts[$0] != automationCounts[$0]
+        }
+        automationCounts = counts
+        // Apply only the affected checkout subtrees; unrelated sessions keep their rows.
+        for projectID in changedProjects where projectNodesByID[projectID] != nil {
+            applyProjectStructureChange(projectID)
+        }
+    }
+
     /// Installs the persisted tree exactly once, after a host that requested deferral has put
     /// its permanent geometry in force. Idempotence lets a host state the lifecycle point
     /// directly without coupling it to whether AppKit happened to load the view earlier.
@@ -1154,7 +1195,8 @@ extension ProjectSidebarViewController {
             optionValues: optionValues,
             factSnapshot: factSnapshot,
             chatPreviewStages: chatPreviewStages,
-            revealingSessionIDs: sessionIDsToReveal()
+            revealingSessionIDs: sessionIDsToReveal(),
+            automationCounts: automationCounts
         )
         treeSpan.end(metadata: ["roots": String(rebuilt.count)])
         #if DEBUG
@@ -1186,6 +1228,7 @@ extension ProjectSidebarViewController {
 
         let selectedSessionID = selectedNode()?.sessionID ?? projectStore.selectedSessionID
         let selectedTerminalID = selectedTerminalNode()?.terminalID
+        let selectedAutomationProjectID = (outlineView.item(atRow: outlineView.selectedRow) as? ProjectAutomationsNode)?.projectID
 
         let previousShape = renderedShape
         // A checkout that moved between branches relabels the heading over rows that did not
@@ -1252,6 +1295,8 @@ extension ProjectSidebarViewController {
 
         if let selectedTerminalID {
             select(terminalID: selectedTerminalID, notifyDelegate: false)
+        } else if let selectedAutomationProjectID {
+            selectAutomations(projectID: selectedAutomationProjectID)
         } else if let selectedSessionID {
             select(sessionID: selectedSessionID, notifyDelegate: false)
         }
@@ -1289,7 +1334,8 @@ extension ProjectSidebarViewController {
                   optionValues: optionValues,
                   factSnapshot: factSnapshot,
                   chatPreviewStage: chatPreviewStage(for: presentedProject.projectID),
-                  revealingSessionIDs: sessionIDsToReveal()
+                  revealingSessionIDs: sessionIDsToReveal(),
+                  automationCounts: automationCounts
               )
         else {
             reload()
@@ -1362,6 +1408,7 @@ extension ProjectSidebarViewController {
     ) {
         let selectedSessionID = selectedNode()?.sessionID
         let selectedTerminalID = selectedTerminalNode()?.terminalID
+        let selectedAutomationProjectID = (outlineView.item(atRow: outlineView.selectedRow) as? ProjectAutomationsNode)?.projectID
         #if DEBUG
         let updateStarted = DispatchTime.now().uptimeNanoseconds
         var measuredUpdate = ProjectSidebarReloadPerformance()
@@ -1381,7 +1428,8 @@ extension ProjectSidebarViewController {
                   optionValues: optionValues,
                   factSnapshot: factSnapshot,
                   chatPreviewStage: chatPreviewStage(for: projectID),
-                  revealingSessionIDs: sessionIDsToReveal(including: revealing)
+                  revealingSessionIDs: sessionIDsToReveal(including: revealing),
+                  automationCounts: automationCounts
               )
         else {
             reload()
@@ -1447,6 +1495,11 @@ extension ProjectSidebarViewController {
         applyStructure(steps: steps, wholesale: false)
         var refreshedRows = IndexSet()
         if let row = projectRow(for: projectID) { refreshedRows.insert(row) }
+        // A retained automation destination can change count without changing tree shape.
+        if let automations = adoptedProject.childNodes.first as? ProjectAutomationsNode {
+            let row = outlineView.row(forItem: automations)
+            if row >= 0 { refreshedRows.insert(row) }
+        }
         // A disclosure row that stayed a row can still have changed what it offers.
         if let disclosure = adoptedProject.chatDisclosureNode {
             let row = outlineView.row(forItem: disclosure)
@@ -1463,6 +1516,8 @@ extension ProjectSidebarViewController {
         }
         if let selectedTerminalID {
             select(terminalID: selectedTerminalID, notifyDelegate: false)
+        } else if let selectedAutomationProjectID {
+            selectAutomations(projectID: selectedAutomationProjectID)
         } else if let selectedSessionID {
             select(sessionID: selectedSessionID, notifyDelegate: false)
         }
@@ -1888,7 +1943,7 @@ extension ProjectSidebarViewController {
                 terminalNodesByID.removeValue(forKey: terminalID)
                 projectNodesByTerminalID.removeValue(forKey: terminalID)
                 ancestorsByTerminalID.removeValue(forKey: terminalID)
-            case .repository, .project, .branch, .registeredFactGroup, .chatDisclosure:
+            case .repository, .project, .branch, .registeredFactGroup, .chatDisclosure, .automations:
                 break
             }
         }
@@ -2386,6 +2441,51 @@ extension ProjectSidebarViewController {
                         + "so it could still be imported again later."
                 ),
             confirmTitle: L10n.string("Delete")
+        )
+    }
+
+    /// Removing a project deletes every chat in it from Threading, and this is where that is
+    /// said. It used to say the chats were "removed from the sidebar", which reads as filing
+    /// them away — on a row Threading adopted for a worktree, which looks like clutter, that
+    /// sentence cost chats nobody meant to delete. A project with no chats keeps the old wording,
+    /// which is true for it. Built separately from being asked, like `deleteConfirmation`.
+    static func removeProjectConfirmation(
+        for project: Project,
+        runningCount: Int
+    ) -> ConfirmationRequest {
+        let deletesChats = !project.sessions.isEmpty
+        let message: String
+        switch (deletesChats, runningCount > 0) {
+        case (true, true):
+            message = L10n.format(
+                "%lld running chats or terminals will be terminated. Its chats are deleted from "
+                    + "Threading, and so are this project's visual baselines. Each agent's "
+                    + "transcript stays on disk, so a chat can be imported again.",
+                Int64(runningCount)
+            )
+        case (true, false):
+            message = L10n.string(
+                "Its chats are deleted from Threading, and so are this project's visual "
+                    + "baselines. Each agent's transcript stays on disk, so a chat can be "
+                    + "imported again."
+            )
+        case (false, true):
+            message = L10n.format(
+                "%lld running chats or terminals will be terminated. Saved conversations are not deleted, but this project's visual baselines are.",
+                Int64(runningCount)
+            )
+        case (false, false):
+            message = L10n.string(
+                "Its chats and terminals are removed from the sidebar. Saved conversations are not deleted, but this project's visual baselines are."
+            )
+        }
+        return ConfirmationRequest(
+            prompt: .removeProject,
+            title: deletesChats
+                ? L10n.format("Remove “%@” and its chats?", project.name)
+                : L10n.format("Remove “%@”?", project.name),
+            message: message,
+            confirmTitle: L10n.string("Remove")
         )
     }
 
@@ -3029,6 +3129,26 @@ extension ProjectSidebarViewController {
         if on { clearSelection() }
     }
 
+    func selectAutomations(projectID: ProjectID) {
+        guard let project = projectNodesByID[projectID] else { return }
+        guard let destination = project.childNodes.first(where: { $0 is ProjectAutomationsNode }) else {
+            cancelPendingSessionPresentation()
+            projectStore.selectedSessionID = nil
+            reveal(projectID: projectID)
+            return
+        }
+        if let group = outlineView.parent(forItem: project) { outlineView.expandItem(group) }
+        outlineView.expandItem(project)
+        let row = outlineView.row(forItem: destination)
+        guard row >= 0 else { return }
+        suppressSelectionCallback = true
+        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        suppressSelectionCallback = false
+        cancelPendingSessionPresentation()
+        projectStore.selectedSessionID = nil
+        scrollSelectionIntoView()
+    }
+
     private func makeSettingsSidebar() -> SettingsSidebar {
         let sidebar = SettingsSidebar(items: SettingsPages.sidebarItems)
         sidebar.onSelect = { [weak self] pageID in
@@ -3251,19 +3371,7 @@ private extension ProjectSidebarViewController {
         }.count
         let runningCount = runningSessionCount + runningTerminalCount
 
-        let request = ConfirmationRequest(
-            prompt: .removeProject,
-            title: L10n.format("Remove “%@”?", project.name),
-            message: runningCount > 0
-                ? L10n.format(
-                    "%lld running chats or terminals will be terminated. Saved conversations are not deleted, but this project's visual baselines are.",
-                    Int64(runningCount)
-                )
-                : L10n.string(
-                    "Its chats and terminals are removed from the sidebar. Saved conversations are not deleted, but this project's visual baselines are."
-                ),
-            confirmTitle: L10n.string("Remove")
-        )
+        let request = Self.removeProjectConfirmation(for: project, runningCount: runningCount)
 
         guard ConfirmationAlert.ask(request) else { return }
 
@@ -4006,6 +4114,13 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             return apply(item, to: cell) ? cell : nil
         }
 
+        if let node = item as? ProjectAutomationsNode {
+            let cell = dequeueCell(NSUserInterfaceItemIdentifier("ProjectAutomationsCell")) { ProjectRowView() }
+            cell.configureAsBranch(named: L10n.string("Automations"), collapsedSessionCount: node.count)
+            cell.onHoverAction = nil
+            cell.setAccessibilityIdentifier("project.automations.\(node.projectID.uuidString)")
+            return cell
+        }
         if item is BranchGroupNode {
             let cell = dequeueCell(SidebarIdentifiers.branchCell) { ProjectRowView() }
             return apply(item, to: cell) ? cell : nil
@@ -4105,6 +4220,13 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             return true
         }
 
+        if let node = item as? ProjectAutomationsNode, let cell = view as? ProjectRowView {
+            cell.configureAsBranch(named: L10n.string("Automations"), collapsedSessionCount: node.count)
+            cell.onHoverAction = nil
+            cell.setAccessibilityIdentifier("project.automations.\(node.projectID.uuidString)")
+            return true
+        }
+
         if let branchNode = item as? BranchGroupNode, let cell = view as? ProjectRowView {
             let hiddenItems = outlineView.isItemExpanded(branchNode)
                 ? 0
@@ -4197,7 +4319,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
         // The disclosure row takes the same hover capsule: the whole row is its press.
         if item is ProjectNode || item is SessionNode || item is TerminalNode
-            || item is ChatDisclosureNode {
+            || item is ChatDisclosureNode || item is ProjectAutomationsNode {
             return SidebarHoverRowView()
         }
 
@@ -4276,7 +4398,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     /// The chat preview's disclosure row selects nothing either: it is a button, and a selection
     /// moving onto it would take the pane away from the chat the user is reading.
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
-        item is SessionNode || item is TerminalNode || item is ProjectNode
+        item is SessionNode || item is TerminalNode || item is ProjectNode || item is ProjectAutomationsNode
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -4288,6 +4410,12 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
         let item = outlineView.item(atRow: outlineView.selectedRow)
 
+        if let node = item as? ProjectAutomationsNode {
+            cancelPendingSessionPresentation()
+            projectStore.selectedSessionID = nil
+            delegate?.projectSidebar(self, didSelectAutomations: node.projectID)
+            return
+        }
         if let node = item as? SessionNode {
             requestSessionPresentation(node.sessionID)
             return
@@ -4541,6 +4669,15 @@ extension ProjectSidebarViewController {
         )))
         entries.append(projectIconEntry(row: row))
         if let projectID {
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Automations"),
+                image: ThemedMenuIcon.symbol("bolt"),
+                representedValue: AppCommands.ID.projectAutomations,
+                onChoose: { [weak self] in
+                    guard let self else { return }
+                    delegate?.projectSidebar(self, didSelectAutomations: projectID)
+                }
+            )))
             entries.append(projectThemeEntry(for: projectID))
             // Beside Theme, not beside Mute below it: presentation, not delivery.
             entries.append(projectSoundEntry(for: projectID))
@@ -5118,6 +5255,7 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didRemoveProject project: Project)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didCloseTerminal terminalID: TerminalID)
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController)
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectAutomations projectID: ProjectID)
     func projectSidebarDidSelectTriggers(_ sidebar: ProjectSidebarViewController)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage pageID: String)
     /// A search result named a setting: open its page and scroll to the row `anchorTitle`
@@ -5204,4 +5342,8 @@ extension ProjectSidebarViewController {
             self.overrideContextRow = nil
         }
     }
+}
+
+extension ProjectSidebarViewControllerDelegate {
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectAutomations projectID: ProjectID) {}
 }

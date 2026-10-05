@@ -1674,6 +1674,41 @@ struct RemoteClient {
         )
     }
 
+    func themeAssetData(_ asset: RemoteThemeAsset) async throws -> Data {
+        try await themeAssetData(asset, session: Self.session)
+    }
+
+    /// A rendition's bytes, in 1 MiB ranges above that size, each range checked against its
+    /// `Content-Range` and length. Digest verification is the caller's (`MobileThemeAssetCache`).
+    /// `session` is a seam for tests; production uses the pinned request session.
+    func themeAssetData(_ asset: RemoteThemeAsset, session: URLSession) async throws -> Data {
+        guard asset.isValid, let url = link.themeAssetURL(digest: asset.digest) else {
+            throw RemoteClientError.invalidResponse
+        }
+        var data = Data(); data.reserveCapacity(asset.byteCount)
+        repeat {
+            try Task.checkCancellation()
+            let range = asset.byteCount > RemoteThemeAsset.maximumBytes
+                ? RemoteThemeAssetRange(start: data.count, total: asset.byteCount) : nil
+            var request = request(url: url)
+            if let range { request.setValue(range.requestHeader, forHTTPHeaderField: "Range") }
+            let (bytes, response) = try await session.bytes(for: request)
+            _ = try validate(data: Data(), response: response, accepted: range == nil ? 200...200 : 206...206)
+            let expected = range?.bytes.count ?? asset.byteCount
+            guard response.expectedContentLength <= Int64(expected),
+                  range == nil || (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Range")
+                    == range?.responseHeader else { throw RemoteClientError.invalidResponse }
+            let start = data.count
+            for try await byte in bytes {
+                guard data.count - start < expected else { throw RemoteClientError.invalidResponse }
+                data.append(byte)
+            }
+            guard data.count - start == expected else { throw RemoteClientError.invalidResponse }
+        } while data.count < asset.byteCount
+        guard data.count == asset.byteCount else { throw RemoteClientError.invalidResponse }
+        return data
+    }
+
     func extensionPanelResourceData(
         sessionID: String,
         extensionIdentifier: String,

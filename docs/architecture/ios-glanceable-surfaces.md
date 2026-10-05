@@ -82,3 +82,23 @@ that is test elapsed time, not a release or end-to-end widget refresh measuremen
 mobile theme and main-actor latency checks passed. The extension installed on iOS 26.5, but the
 Simulator input helper failed to connect and Computer Use permissions were unavailable, so no
 Home/Lock Screen layout acceptance or physical-device protection/provisioning is claimed.
+
+## 2026-10-04 — Pinned theme accent
+
+The snapshot may now carry one normalized opaque `accentHex`; older v1 snapshots still decode.
+The app coalesces theme publication for 150 ms and changes only the pinned active Mac's accent,
+without renewing the observation or freshness dates. Store sequencing fences stale updates.
+WidgetKit full-color widgets use a tint adjusted to the 3:1 contrast floor against the adaptive
+widget ground. Accented and vibrant modes use system colors. Identity, readings, freshness,
+background and foreground semantics remain host-owned; no font, image or shader enters the
+App Group. GlanceKit tests cover tolerant decoding, deduplication, sequence fencing and timestamp
+preservation; mobile builds verify the embedded extension.
+
+On 2026-10-05, the signed Simulator app and embedded extension were installed in a disposable
+iPhone 17 Pro running iOS 26.5. Inspected Home Screen captures show the small and medium widgets
+using the fixture's `#80CBC4` accent for the icon and capacity gauges, with readable system text.
+Changing the Home Screen to Tinted replaces those accents with the system presentation. Evidence
+is in `.build/theme-system-widget-evidence/` (`home-full-color.png`,
+`home-medium-full-color.png`, `home-tinted.png`). This verifies installed Home Screen layout and
+tint ownership; physical-device provisioning/protection, Lock Screen layout and background
+timeline delivery remain separate checks.

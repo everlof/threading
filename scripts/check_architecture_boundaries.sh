@@ -606,6 +606,25 @@ if rg -n --pcre2 '^(?!\s*//).*SettingsUIDefaults\.pageWidth' \
   failed=1
 fi
 
+# SF Mono and the other design-variant system faces are made in exactly one place.
+#
+# UIFoundation drops a design-variant face's descriptor once the last font of that face has been
+# released, and `NSFont.monospacedSystemFont(ofSize:weight:)` — imported as non-optional — then
+# returns nil. In an attribute dictionary that nil aborts the process inside CoreText, which is how
+# `ShortcutRecorderView` crashed the command palette's render test in a third of its runs.
+# `SystemFontFaces` pins every face it vends and makes the call through a signature that admits
+# nil; a direct call anywhere else is a font that can be nil while its type says it cannot.
+#
+# Comment lines are skipped so the notes explaining the seam can name the call it replaced.
+if rg -n --pcre2 '^(?!\s*//).*\b(?:monospacedSystemFont|withDesign)\(' \
+  "${repository_directory}/Sources/Threading" \
+  --glob '*.swift' \
+  --glob '!**/UI/Design/SystemFontFaces.swift'; then
+  echo "architecture-boundary: make design-variant system fonts with SystemFontFaces — AppKit" >&2
+  echo "  returns nil from the direct factories once a face's last font has been released" >&2
+  failed=1
+fi
+
 # The PTY host daemon is describable on one page, and this is what keeps it that way.
 #
 # `threading-ptyd` holds every hosted agent on the machine in one process. Its whole safety

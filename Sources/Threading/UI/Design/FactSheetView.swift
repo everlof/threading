@@ -23,19 +23,38 @@ final class FactSheetView: NSView {
 
     let facts: [Fact]
 
+    /// The measure this sheet was given, or nil when it follows the width its host lays it out
+    /// at.
+    private let fixedWidth: CGFloat?
+    private let labelWidth: CGFloat
+    /// Every wrapping reading line, so a sheet that follows its host can re-measure them.
+    private var readings: [NSTextField] = []
+    private var readingWidth: CGFloat
+
     /// `width` is the sheet's whole measure; the reading column wraps inside what the label
     /// column leaves of it.
-    init(facts: [Fact], width: CGFloat) {
+    convenience init(facts: [Fact], width: CGFloat) {
+        self.init(facts: facts, fixedWidth: width)
+    }
+
+    /// A sheet as wide as the row it is placed in, its readings wrapping to whatever the label
+    /// column leaves. For a page column that narrows with its pane: a sheet stating its own
+    /// width there either overflows a narrow pane or leaves a wide one half used.
+    convenience init(facts: [Fact]) {
+        self.init(facts: facts, fixedWidth: nil)
+    }
+
+    private init(facts: [Fact], fixedWidth: CGFloat?) {
         self.facts = facts
+        self.fixedWidth = fixedWidth
+        let labels = facts.map(Self.makeLabel)
+        labelWidth = ceil(labels.map(\.fittingSize.width).max() ?? 0)
+        readingWidth = max(1, (fixedWidth ?? Design.Size.readableWidth) - labelWidth - Design.Spacing.medium)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
-        let labels = facts.map(Self.makeLabel)
-        let labelWidth = ceil(labels.map(\.fittingSize.width).max() ?? 0)
-        let readingWidth = max(1, width - labelWidth - Design.Spacing.medium)
-
         let rows: [[NSView]] = zip(facts, labels).map { fact, label in
-            [label, Self.makeReading(fact, width: readingWidth)]
+            [label, makeReading(fact)]
         }
         let grid = NSGridView(views: rows)
         grid.translatesAutoresizingMaskIntoConstraints = false
@@ -45,14 +64,17 @@ final class FactSheetView: NSView {
         grid.column(at: 0).xPlacement = .trailing
         grid.column(at: 0).width = labelWidth
         grid.column(at: 1).xPlacement = .leading
-        grid.column(at: 1).width = readingWidth
+        if fixedWidth != nil { grid.column(at: 1).width = readingWidth }
         addSubview(grid)
         NSLayoutConstraint.activate([
             grid.topAnchor.constraint(equalTo: topAnchor),
             grid.bottomAnchor.constraint(equalTo: bottomAnchor),
             grid.leadingAnchor.constraint(equalTo: leadingAnchor),
-            widthAnchor.constraint(equalToConstant: width),
+            grid.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
         ])
+        if let fixedWidth {
+            widthAnchor.constraint(equalToConstant: fixedWidth).isActive = true
+        }
         setAccessibilityElement(false)
     }
 
@@ -67,14 +89,27 @@ final class FactSheetView: NSView {
         return label
     }
 
-    private static func makeReading(_ fact: Fact, width: CGFloat) -> NSView {
+    /// A sheet that follows its host re-wraps its readings at the column it was actually given.
+    /// Changing the measure invalidates each reading's height, which brings layout back here
+    /// once more with the same width, and the guard ends it.
+    override func layout() {
+        super.layout()
+        guard fixedWidth == nil else { return }
+        let available = max(1, bounds.width - labelWidth - Design.Spacing.medium)
+        guard abs(available - readingWidth) >= 0.5 else { return }
+        readingWidth = available
+        for reading in readings { reading.preferredMaxLayoutWidth = available }
+    }
+
+    private func makeReading(_ fact: Fact) -> NSView {
         let value = NSTextField(wrappingLabelWithString: fact.value)
         value.applyFont(.body)
         value.textColor = Design.Text.label
         value.isSelectable = true
-        value.preferredMaxLayoutWidth = width
+        value.preferredMaxLayoutWidth = readingWidth
         value.setAccessibilityLabel(fact.label)
         if let identifier = fact.identifier { value.setAccessibilityIdentifier("fact.\(identifier)") }
+        readings.append(value)
 
         var views: [NSView] = [value]
         if let detail = fact.detail {
@@ -82,10 +117,11 @@ final class FactSheetView: NSView {
             line.applyFont(.detail())
             line.textColor = fact.tone == .caution ? Design.Status.warning : Design.Text.secondary
             line.isSelectable = true
-            line.preferredMaxLayoutWidth = width
+            line.preferredMaxLayoutWidth = readingWidth
             if let identifier = fact.identifier {
                 line.setAccessibilityIdentifier("fact.\(identifier).detail")
             }
+            readings.append(line)
             views.append(line)
         }
         let stack = BaselineStackView(views: views)

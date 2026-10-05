@@ -30,7 +30,11 @@
         "id": { "$ref": "#/$defs/identifier" },
         "title": { "type": "string", "minLength": 1, "maxLength": 120 },
         "description": { "type": "string", "minLength": 1, "maxLength": 500 },
-        "control": { "$ref": "#/$defs/control" }
+        "control": { "$ref": "#/$defs/control" },
+        "appliedBy": {
+          "description": "Who applies a change. Omitted means process: the running extension receives an ExtensionSettingsUpdateRequest and a refusal or timeout rolls the value back. host: Threading applies the value itself through the extension's setting-bound surface inputs, sends no request and awaits no answer. Only a toggle, choice or integer may be host-applied.",
+          "enum": ["process", "host"]
+        }
       }
     },
     "option": {
@@ -39,7 +43,11 @@
       "required": ["id", "title"],
       "properties": {
         "id": { "$ref": "#/$defs/identifier" },
-        "title": { "type": "string", "minLength": 1, "maxLength": 120 }
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "value": {
+          "description": "The number a setting-bound surface input reads while this option is selected. State it on every option of a choice or on none; without it a binding reads the option's zero-based index.",
+          "type": "number"
+        }
       }
     },
     "control": {

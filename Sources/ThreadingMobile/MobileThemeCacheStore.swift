@@ -88,6 +88,11 @@ final class MobileThemeCacheStore {
     }
 
     /// Publishes a new in-memory answer only after the encoded replacement reads back exactly.
+    ///
+    /// A theme's welcome is decoration the reconnect placeholder can do without, and the one
+    /// part of a theme sized by its author's prose. When the archive would outgrow its budget
+    /// the other Macs' welcomes go first, then this one's — never a palette, which is what the
+    /// cache exists to keep.
     @discardableResult
     func remember(_ theme: RemoteThemeDTO, for identity: String) -> Bool {
         guard writesAllowed else { return false }
@@ -99,10 +104,57 @@ final class MobileThemeCacheStore {
         if records.count > Self.maximumRecordCount {
             records.removeLast(records.count - Self.maximumRecordCount)
         }
-        return commit(Archive(version: Self.archiveVersion, records: records))
+        // Encoded once per candidate, and the fitting candidate's bytes are the ones written.
+        let fitting = Self.fittingCandidates(records).lazy.compactMap { candidate in
+            Self.encodedIfFitting(candidate).map { (archive: candidate, data: $0) }
+        }.first
+        guard let fitting else {
+            return commit(Archive(version: Self.archiveVersion, records: records))
+        }
+        // The same theme arriving again whose welcome still does not fit is no change at all.
+        if fitting.archive == archive { return true }
+        return commit(fitting.archive, encoded: fitting.data)
     }
 
-    private func commit(_ candidate: Archive) -> Bool {
+    /// The archive as written, then with older records' welcomes set aside, then with the
+    /// newest's too.
+    private static func fittingCandidates(_ records: [Record]) -> [Archive] {
+        func archive(_ records: [Record]) -> Archive {
+            Archive(version: archiveVersion, records: records)
+        }
+        var candidates = [archive(records)]
+        guard records.contains(where: { $0.theme.welcome != nil }) else { return candidates }
+        let olderPlain = records.enumerated().map { index, record in
+            index == 0 ? record : Record(identity: record.identity, theme: withoutWelcome(record.theme))
+        }
+        if olderPlain != records { candidates.append(archive(olderPlain)) }
+        candidates.append(archive(records.map {
+            Record(identity: $0.identity, theme: withoutWelcome($0.theme))
+        }))
+        return candidates
+    }
+
+    private static func withoutWelcome(_ theme: RemoteThemeDTO) -> RemoteThemeDTO {
+        guard theme.welcome != nil else { return theme }
+        return RemoteThemeDTO(
+            id: theme.id, name: theme.name, mode: theme.mode, colors: theme.colors,
+            material: theme.material, words: theme.words, titleMorph: theme.titleMorph,
+            assets: theme.assets, surface: theme.surface, welcome: nil
+        )
+    }
+
+    /// The candidate's bytes when it validates and fits the archive budget.
+    private static func encodedIfFitting(_ candidate: Archive) -> Data? {
+        guard (try? validate(candidate)) != nil, let data = archiveData(candidate),
+              data.count <= maximumArchiveBytes else { return nil }
+        return data
+    }
+
+    private static func archiveData(_ archive: Archive) -> Data? {
+        try? JSONEncoder().encode(archive)
+    }
+
+    private func commit(_ candidate: Archive, encoded: Data? = nil) -> Bool {
         do {
             try Self.validate(candidate)
         } catch {
@@ -110,7 +162,7 @@ final class MobileThemeCacheStore {
             recoveryMessage = "Saved themes exceeded their safe storage limits and were not changed."
             return false
         }
-        guard let data = try? JSONEncoder().encode(candidate),
+        guard let data = encoded ?? Self.archiveData(candidate),
               data.count <= Self.maximumArchiveBytes else {
             MobileDiagnostics.logFailure(.themeSelection, code: .encode)
             recoveryMessage = "Saved themes exceeded their safe storage limit and were not changed."
@@ -165,6 +217,38 @@ final class MobileThemeCacheStore {
             }
         }
 
+        // The welcome is bounded on the wire (`RemoteThemeWelcome.Limits`); here every string
+        // it carries counts toward the archive's byte budget like the rest of the theme, and a
+        // stored block past the wire's own bounds is not one this build wrote.
+        func validateWelcome(_ welcome: RemoteThemeWelcome) throws {
+            try count(welcome.mark?.rawValue, limit: maximumIdentifierBytes)
+            try count(welcome.user, limit: RemoteThemeWelcome.Limits.maximumUserBytes)
+            if let markSize = welcome.markSize { try validateGeometry(markSize) }
+            for opacity in [welcome.scrim?.hero, welcome.scrim?.prompt].compactMap({ $0 }) {
+                guard opacity.isFinite, (0 ... 1).contains(opacity) else {
+                    throw ValidationError.invalidArchive
+                }
+            }
+            for wording in [welcome.greeting, welcome.caption].compactMap({ $0 }) {
+                guard wording.lines.count <= RemoteThemeWelcome.Limits.maximumLines else {
+                    throw ValidationError.invalidArchive
+                }
+                for line in wording.lines {
+                    try count(line.text, required: true, limit: RemoteThemeWelcome.Limits.maximumLineBytes)
+                }
+                if let style = wording.style {
+                    try count(style.ink, limit: maximumIdentifierBytes)
+                    try count(style.fontFamily)
+                    try count(style.weight?.rawValue, limit: maximumIdentifierBytes)
+                    try count(style.typeface?.rawValue, limit: maximumIdentifierBytes)
+                    if let scale = style.scale { try validateGeometry(scale) }
+                }
+            }
+            for stop in welcome.backdrop?.gradient?.stops ?? [] { try count(stop.color) }
+            for color in welcome.backdrop?.particles?.colors ?? [] { try count(color) }
+            for sprite in welcome.backdrop?.particles?.sprites ?? [] { try count(sprite) }
+        }
+
         for record in archive.records {
             try count(record.identity, required: true, limit: maximumIdentifierBytes)
             try count(record.theme.id, required: true, limit: maximumIdentifierBytes)
@@ -189,7 +273,19 @@ final class MobileThemeCacheStore {
                 try count(words.untitledSession)
             }
 
+            if let welcome = record.theme.welcome {
+                try validateWelcome(welcome)
+            }
+
+            for asset in record.theme.assets ?? [] {
+                try count(asset.slot); try count(asset.digest); try count(asset.mediaType)
+            }
             let material = record.theme.material
+            try count(material.identityMarks)
+            for color in material.particles?.colors ?? [] { try count(color) }
+            for sprite in material.particles?.sprites ?? [] { try count(sprite) }
+            try count(record.theme.titleMorph?.style)
+            try count(record.theme.titleMorph?.characters)
             // A backdrop is optional decoration the renderer checks for itself
             // (`hasValidGeometry`, `ThemeGradientDrift.isValid`) and simply does not draw when it
             // cannot. A Mac on a newer build may state a range this one does not know, and that

@@ -4,6 +4,33 @@ import ThreadingRemoteKit
 @testable import ThreadingMobile
 
 final class RemoteNotificationPresentationPolicyTests: XCTestCase {
+    func testPushEnvironmentFollowsSigningRatherThanOptimization() {
+        XCTAssertEqual(MobilePushEnvironment.resolve("development"), .sandbox)
+        XCTAssertEqual(MobilePushEnvironment.resolve("production"), .production)
+    }
+
+    func testBuiltAppStatesItsAPNSSigningEnvironment() throws {
+        let setting = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "ThreadingAPNSEnvironment") as? String)
+        XCTAssertTrue(["development", "production"].contains(setting), "the build must expand APS_ENVIRONMENT")
+        XCTAssertEqual(MobilePushEnvironment.current, MobilePushEnvironment.resolve(setting))
+    }
+
+    func testARegistrationReturningToAnEarlierSignatureRegistersAgain() {
+        var ledger = RemoteNotificationRegistrationLedger()
+        XCTAssertTrue(ledger.needsRegistration("chime", for: "mac-a"))
+        ledger.record("chime", for: "mac-a")
+        XCTAssertFalse(ledger.needsRegistration("chime", for: "mac-a"))
+        XCTAssertTrue(ledger.needsRegistration("chime", for: "mac-b"), "each Mac registers for itself")
+
+        // Theme edited to no sounds, then back: the Mac now holds the empty receipts.
+        ledger.record("silent", for: "mac-a")
+        XCTAssertTrue(ledger.needsRegistration("chime", for: "mac-a"))
+
+        ledger.record("chime", for: "mac-a")
+        ledger.reset()
+        XCTAssertTrue(ledger.needsRegistration("chime", for: "mac-a"))
+    }
+
     @MainActor
     func testResponsePreviewConsentIsDeviceLocalAndDefaultsOff() throws {
         let firstSuite = "RemoteNotificationPresentationPolicyTests.first.\(UUID().uuidString)"

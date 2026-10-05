@@ -131,7 +131,21 @@ public struct AccountUsage: Equatable, Sendable {
     /// cache costs a file read, an API call costs a network round trip.
     public enum Source: Equatable, Sendable {
         case api
+        /// Claude Code's status-line feed, pushed on every turn.
         case localCache
+        /// The copy of its last API reading the Claude CLI keeps in `.claude.json`, refreshed on
+        /// the CLI's own schedule — days old is ordinary. Told apart from `localCache` because a
+        /// reading that says where it came from has to say the right place: this one was being
+        /// labelled the per-turn feed while it sat frozen for days.
+        case profileSnapshot
+
+        /// A file on this Mac rather than a network round trip, so re-reading it is cheap.
+        public var isLocalFile: Bool {
+            switch self {
+            case .api: return false
+            case .localCache, .profileSnapshot: return true
+            }
+        }
     }
 
     // MARK: - Properties

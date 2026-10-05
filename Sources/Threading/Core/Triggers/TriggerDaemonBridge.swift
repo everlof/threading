@@ -19,6 +19,13 @@ struct TriggerDaemonConfiguration: Codable, Equatable, Sendable {
     var nextScheduleUnixTime: Double? = nil
     /// Approved probe sources, enabled or paused. An unapproved probe is never written here.
     var probes: [TriggerProbeDaemonSource]? = nil
+
+    /// Whether anything here needs the background listener: a connected source, an enabled
+    /// probe or a scheduled automation. The app registers the listener exactly then, and the
+    /// Sources page calls an unregistered listener idle, not broken, when this is false.
+    var needsListener: Bool {
+        !sources.isEmpty || nextScheduleUnixTime != nil || probes?.contains(where: \.enabled) == true
+    }
 }
 
 enum TriggerDaemonLocations {
@@ -111,8 +118,7 @@ enum TriggerDaemonConfigurationStore {
             [.posixPermissions: 0o600],
             ofItemAtPath: TriggerDaemonLocations.configuration.path
         )
-        return !payload.sources.isEmpty || nextScheduleAt != nil
-            || payload.probes?.contains(where: \.enabled) == true
+        return payload.needsListener
     }
 
     /// Asks the daemon for one poll of an approved probe now. The daemon consumes the request on
@@ -137,105 +143,39 @@ extension TriggerProbeRunSpec {
     }
 }
 
-/// Probe secrets in Keychain, one generic password per secret name. Values are written here and
-/// read only by the daemon at poll time; nothing reads one back into the app, a prompt or MCP.
+/// Probe secrets, one login-Keychain item per secret name that the listener may read
+/// (`TriggerSecretStore`). Values are written here and read only by the daemon at poll time;
+/// nothing reads one back into the app, a prompt or MCP.
 enum TriggerProbeSecretStore {
-    private static var accessGroup: String? {
-        #if DEBUG
-        nil
-        #else
-        "SMQ3E8Y57T.codes.threading.triggers"
-        #endif
-    }
-
-    private static func query(_ name: String) -> [String: Any] {
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: TriggerProbeDefaults.secretService,
-            kSecAttrAccount as String: name,
-        ]
-        if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
-        return query
-    }
-
-    static func save(_ value: String, name: String) throws {
+    static func save(_ value: String, name: String, store: TriggerSecretStore = .shared) throws {
         guard SecretName.isValid(name), !value.isEmpty else {
             throw TriggerStore.StoreError.invalidRecord("secret name or value")
         }
-        let data = Data(value.utf8)
-        let updated = SecItemUpdate(query(name) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if updated == errSecSuccess { return }
-        guard updated == errSecItemNotFound else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(updated)) }
-        var insertion = query(name)
-        insertion[kSecValueData as String] = data
-        let added = SecItemAdd(insertion as CFDictionary, nil)
-        guard added == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(added)) }
+        try store.save(value, service: .probeSecret, account: name)
     }
 
     /// Whether a value is stored, without reading it.
     static func exists(_ name: String) -> Bool {
-        var lookup = query(name)
-        lookup[kSecMatchLimit as String] = kSecMatchLimitOne
-        lookup[kSecReturnAttributes as String] = true
-        return SecItemCopyMatching(lookup as CFDictionary, nil) == errSecSuccess
-    }
-}
-
-enum TriggerSourceCredentialStore {
-    private static let service = "codes.threading.trigger-source"
-    private static var accessGroup: String? {
-        #if DEBUG
-        nil
-        #else
-        "SMQ3E8Y57T.codes.threading.triggers"
-        #endif
-    }
-
-    static func save(_ secret: String, reference: String) throws {
-        let data = Data(secret.utf8)
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: reference,
-        ]
-        if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
-        let attributes: [String: Any] = [kSecValueData as String: data]
-        let updated = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if updated == errSecSuccess { return }
-        guard updated == errSecItemNotFound else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(updated))
-        }
-        var insertion = query
-        insertion[kSecValueData as String] = data
-        let added = SecItemAdd(insertion as CFDictionary, nil)
-        guard added == errSecSuccess else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(added))
-        }
+        TriggerSecretStore.shared.exists(service: .probeSecret, account: name)
     }
 
     static func deleteAll() throws {
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-        ]
-        if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
-        }
+        try TriggerSecretStore.shared.deleteAll(service: .probeSecret)
+    }
+}
+
+/// Connected sources' credentials, by `credentialReference`, where the listener may read them.
+enum TriggerSourceCredentialStore {
+    static func save(_ secret: String, reference: String) throws {
+        try TriggerSecretStore.shared.save(secret, service: .sourceCredential, account: reference)
+    }
+
+    static func deleteAll() throws {
+        try TriggerSecretStore.shared.deleteAll(service: .sourceCredential)
     }
 
     static func delete(reference: String) throws {
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: reference,
-        ]
-        if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
-        }
+        try TriggerSecretStore.shared.delete(service: .sourceCredential, account: reference)
     }
 }
 
@@ -396,6 +336,8 @@ final class TriggerDaemonInboxMonitor {
 enum TriggerDaemonRegistrationDefaults {
     static let plistName = "codes.threading.triggerd.plist"
     static let helperName = "threading-triggerd"
+    /// The launchd label in that property list.
+    static let label = "codes.threading.triggerd"
 }
 
 enum TriggerDaemonRegistrationStatus: String, Equatable, Sendable {
@@ -440,6 +382,25 @@ final class TriggerDaemonRegistrationCoordinator {
 
     static func openLoginItemsSettings() {
         SMAppService.openSystemSettingsLoginItems()
+    }
+
+    /// Registers the listener again, which makes launchd start it afresh: for a registration that
+    /// is enabled while its process has stopped reporting. A spawn macOS refuses is not helped by
+    /// this, and the Sources page does not offer it then.
+    func restart() {
+        guard !AutomatedRun.isUnderway, !RecoveryMode.isActive,
+              FileManager.default.isExecutableFile(atPath: Self.helperURL.path) else { return }
+        queue.async {
+            let service = SMAppService.agent(plistName: TriggerDaemonRegistrationDefaults.plistName)
+            do {
+                if service.status == .enabled { try service.unregister() }
+                try service.register()
+            } catch {
+                ThreadingLogger.app.error(
+                    "Trigger daemon restart failed: \(error.localizedDescription, privacy: .private)"
+                )
+            }
+        }
     }
 
     func reconcile(shouldRun: Bool) {

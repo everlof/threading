@@ -2,6 +2,8 @@
 
 Terminal themes, app themes, and the three scopes both resolve through.
 
+For fields, limits, renderers and tests, see the [theme reference](theme-reference.md).
+
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
 Theme selection and extension enablement now share the
@@ -909,9 +911,9 @@ Four rules that were decisions rather than defaults:
 - **The gradient faces the terminal palette's gate.** The sidebar is where every session is
   *found*, so a wash that swallows its labels locks the user out of the app as surely as an
   unreadable terminal. Each stop is composited over the variant's surface and must keep the
-  label at the same 3:1 floor. An image is not gated — its pixels are arbitrary, so its gates
-  are bounds (bytes, opacity) and legibility stays the author's to check by looking; the tool
-  description says a photograph usually wants opacity well below 0.4.
+  label at the same 3:1 floor. Images retain byte/opacity gates; the off-main advisory added
+  on 2026-10-04 also samples their label contrast and suggests an opacity, without rejecting the
+  author's picture.
 - **The navigator well is regional, not another surface role.** Explorer's white, sunken tree
   sits inside silver chrome; making `surface` white would also repaint every panel. An absent
   well preserves the historical transparent list. A stated fill must be opaque and keep the
@@ -1985,9 +1987,10 @@ deletion removing the folder. The read-side `maximumStoredBytes` grew to match, 
 **Gates.** `AppThemeEditing` holds the material's backdrop to the sidebar's rules through one
 shared `validate(_:prefix:subject:kind:label:ground:)`: two to eight stops, positions in 0…1,
 every stop composited over the ground and then the label over that at the 3:1 floor; an image's
-opacity in 0…1 and a non-empty asset name. An image is still not measured — its pixels are
-arbitrary — so its legibility stays the author's to check by looking, and the tool description
-says photographs want opacity well below 0.4. The sidebar's messages are byte-identical to
+opacity in 0…1 and a non-empty asset name. Since 2026-10-04, create/update also report sampled
+image legibility and suggest a lower opacity when needed; the advisory is described below.
+It replaced the fixed "photographs want opacity well below 0.4" rule the tool descriptions used
+to carry, which no description states any more. The sidebar's messages are byte-identical to
 before; only the prefix and the ground differ.
 
 **Tools.** `material.backdrop` rides `create_app_theme`/`update_app_theme` with the sidebar's
@@ -2001,9 +2004,11 @@ the coordinator's authority ratchet (`check_architecture_boundaries.sh`) is a ce
 allowance: the sidebar's helpers had been counted against it since they were written, and moving
 them out left the coordinator fifteen lines *lighter* than before this work.
 
-The image remains Mac-local. The gradient is now projected by `RemoteThemeBridge` to the phone's
-dashboard through `RemoteThemeDTO.Material.backdropGradient`, including the optional drift recipe
-described below. The sidebar's separately authored gradient remains scoped to the Mac sidebar.
+The gradient is projected by `RemoteThemeBridge` through
+`RemoteThemeDTO.Material.backdropGradient`, including optional drift. Since 2026-10-04, bounded
+image renditions travel through the authenticated asset route and both draw on the phone's
+themed screens, as described below. The sidebar's separately authored gradient remains scoped
+to the Mac sidebar.
 
 ### `sidebar.backdrop@1` — content beneath the host's, as a contract
 
@@ -2174,8 +2179,9 @@ animation when its recipe is unchanged. There is no display link, SwiftUI timeli
 network request or session traversal per frame.
 
 The bridge resolves the material gradient in the same appearance as the semantic palette and
-sends at most eight stops, an angle and optional drift. Images and the Mac-only sidebar override
-are not projected. The new wire field is optional: old clients ignore it, old hosts send no
+sends at most eight stops, an angle and optional drift. The Mac-only sidebar gradient override
+is not projected. Image transfer was added on 2026-10-04, described below. The wire field is
+optional: old clients ignore it, old hosts send no
 backdrop, and the existing per-Mac theme cache retains the complete new recipe through reconnect.
 The mobile cache checks its geometry and aggregate color-string budget. Renderers bound the
 stop count before sorting or decoding; invalid optional decoration falls back to the plain ground
@@ -2190,8 +2196,8 @@ and animation owners.
 
 This deliberately expands theme decoration, not interaction policy. The host retains layout,
 scrolling, keyboard/navigation transitions, input, accessibility and power policy. No new
-extension component or arbitrary shader delivery is introduced. Workload-driven effects, image
-transfer and themed interaction presets remain separate future work.
+extension component or arbitrary shader delivery is introduced. Workload-driven effects and image
+transfer were added on 2026-10-04; themed interaction presets remain separate work.
 
 `RemoteThemeGradientTests`, `ThemeGradientMotionTests`, `ThemeBackdropTests`, `ThemeToolTests`,
 `MobileThemeBackdropTests` and the dashboard's 20/1,000-row mount contract cover the shipping
@@ -2436,6 +2442,18 @@ well in the same variant (`remove_navigator_well`). The first Beardie lost its d
 well was inherited from the base theme — while `preview_app_theme`, which drew no well, showed it
 standing there; the preview now stacks ground, mascot, well and rows the way the sidebar does.
 
+**The phone keeps the same plane.** `MobileThemeMascotView` shares the dashboard collection's
+`backgroundView` with the backdrop and stands on the trailing floating pill, so rows scroll over
+it there too. The list's bottom extent grows only by what lifts the last row clear of it, which
+with the floating bar is about 20 points at the very end of the list. It replaced a header strip
+that stood the logo and mascot side by side on an opaque surface under the navigation bar. That
+strip cost a band of every visit, cut the backdrop off at a hard edge, and put a theme's shop-front
+logo under the Mac's name. The logo is no longer projected to the phone, which has no brand row;
+the phone skips a logo an older Mac still names. A project heading's add disc resolves its
+translucent control colour over the dashboard ground before drawing, so the mascot passes behind
+the whole disc and plus together. Poses borrow as on the Mac, attention wearing working's before
+idle's.
+
 **The loop runs in the render server.** A pose's motion is one `CAKeyframeAnimation` repeated
 for ever: the motion in the first `duration / every` of the period, rest for the remainder. A mood
 change is the only main-actor work — swap the picture under a `CATransition` fade, rebuild the
@@ -2671,7 +2689,8 @@ the phone's catalogue revision already moves on every theme change.
 ignores it, an older Mac sends none, an absent slot means the phone's own copy. The bridge sends
 words cleaned the way `ThemeWording` uses them and none for a silent theme or System. The phone
 uses the invitation in place of its rotating task suggestion (never for a manager, who is briefed)
-and the untitled name as the draft's title; it has no working-word line to dress. Theme words
+and the untitled name as the draft's title. Since 2026-10-04, the conversation status also rotates
+working words beside its orb at turn boundaries. Theme words
 never pass through `MobileL10n.string` — the localization lint would rightly flag a dynamic key —
 and the theme cache counts them against its byte budget and caps the list.
 
@@ -2726,9 +2745,10 @@ never rises), the live audio spectrum's bars, and every extension input whose si
 sees it; counts scale as counts, facts (`audio.available`, theme colours, the clock, the account)
 pass through. It never scales a fact the app reports, never starts capture, and leaves ambient
 time-driven motion alone. A slider move reaches mounted logos and mascots at once through the
-motion hold's existing settings fan-out. This is the activity/music half of the effects policy
-proposed in [`customization-packs.md`](../feature-drafts/customization-packs.md); decorative
-motion as a whole remains `playsThemeMotion`.
+motion hold's existing settings fan-out. This is the activity/music half of the personal effects policy
+first proposed beside appearance packs, which were later retired (see the
+[decision record](../decisions/appearance-packs.md)); decorative motion as a whole remains
+`playsThemeMotion`.
 
 ### Tests
 
@@ -2785,10 +2805,12 @@ the variant's palette whole) and the profile's embedded default all carry it.
 standalone terminals included — sets `terminalView.textGlow` on every refresh, so a session moving
 to a palette without one stops glowing.
 
-**The iPhone does not glow, and its wire is unchanged.** `RemoteThemeBridge` builds
-`RemoteTerminalThemeDTO` field by field and does not send the glow; SwiftTerm's UIKit view has no
-renderer for it. `testTheRemotePaletteIsUnchangedByAGlow` holds the DTO a glowing palette produces
-equal to the plain palette's, so no phone, old or new, sees a new key.
+**The iPhone glows too, and a plain palette's wire is unchanged.** `RemoteThemeBridge` sends the
+glow as an optional `glow {radius, opacity}` on `RemoteTerminalThemeDTO`, written only when the
+palette states one, so every palette without a glow encodes as it did and an older phone ignores
+the key. `testTheRemotePaletteProjectsOptionalGlowWithoutChangingColors` holds both halves. The
+phone draws it with SwiftTerm's Metal halo and drops it in Low Power Mode (`performance.md`,
+"Phone glow and portable theme bounds").
 
 ### The tools
 
@@ -2812,8 +2834,9 @@ palette merge there left the coordinator files twenty lines shorter with the glo
 
 ### The renderer: an underlay, not a shadow per run
 
-SwiftTerm's `TerminalView.textGlow` is drawn by the Core Graphics renderer, the one Threading uses;
-Metal ignores it. The first implementation was the obvious one, a zero-offset `setShadow` in the
+SwiftTerm's `TerminalView.textGlow` is drawn by both renderers. This section is the Core Graphics
+one, which every terminal outside a window (previews, contact sheets) uses; a Mac terminal that
+glows in a window switches itself to Metal (below). The first implementation was the obvious one, a zero-offset `setShadow` in the
 run's colour on every glyph run, cleared before decorations. It was correct and measured 7.4–10×
 the frame-draw cost of the same frame without a glow (`docs/architecture/performance.md`, "Terminal
 text glow"): Core Graphics blurs every shadowed operation separately, so a full Retina frame paid
@@ -2867,5 +2890,475 @@ to draw text and each glowing strip to differ from it, and keeps
 neighbouring row gains the run's colour and only with a glow, each run glows in its own colour,
 decorations do not glow, the dirty-region padding, and the exactness rule above.
 
-**Not built:** a Bold Text–style control in the Settings theme editor and in `ThemePreviewView`, a
-glow in `preview_app_theme`'s sample terminal, and an iOS renderer.
+**On the Mac, a glowing terminal in a window draws through Metal.** `EmojiFixedTerminalView`
+selects SwiftTerm's Metal renderer when its palette glows and it is in a window, and returns to
+Core Graphics when the glow is cleared; a terminal outside a window keeps Core Graphics, the
+renderer whose exactness rules are above. Metal blurs one halo per frame on the GPU
+(`MetalGlowHaloLayout`: half resolution once the support reaches four device pixels, coarser
+whenever a texture would pass 2,048 × 2,048, so a pane of any size glows and the pair of halo
+textures stays within 32 MiB; allocated in 128-pixel buckets so a live resize reuses them). A
+terminal that leaves its window releases the halo textures and keeps its renderer, so coming back
+costs one allocation rather than a rebuild. A Metal layer is invisible to `cacheDisplay`, and AppKit
+reports a `cacheDisplay` as drawing to the screen exactly as it does the layer update in which the
+terminal must draw nothing, so a capture says so: `WindowSnapshot` (the inspector and Report a
+Problem) wraps its caching in `TerminalView.drawingForBitmapCapture`, inside which a Metal
+terminal draws the same frame through Core Graphics. Printing and PDF output need no scope. A
+capture taken any other way (the UI-scenario evidence capture among them) still shows a glowing
+terminal empty. `TerminalGlowRendererTests` covers the switch and the snapshot; SwiftTerm's
+`MetalTextGlowTests` the layout bounds, the release and both surfaces' captures, and
+`MetalSurfaceParityTests` that the halo lands only within its reach of the text that cast it, on
+both buffering modes.
+
+**Not built:** a Bold Text–style control in the terminal Settings editor and in `ThemePreviewView`.
+Current Theme tuning and `preview_app_theme` gained glow on 2026-10-04.
+
+## 2026-10-04 — Theme authoring, tuning and phone presentation
+
+`get_app_theme(section:)` provides the complete documentation for one dotted schema block;
+`section: "schema"` lists them. Create/update list only compact top-level variants. The generated
+[field reference](theme-reference.md) covers every schema path, checked by
+`AppThemeSchemaReferenceTests`; validators remain the authority for ranges.
+
+Current Theme's Tune controls validate in-memory preview variants on every change, repaint
+without resource preparation (`AppThemeLibrary.installLivePreview`), and persist through
+`AppThemeLibrary.update` once at release. A drag records the stored document it started from;
+it keeps its preview through unrelated library or activation events, and it ends — writing
+nothing, for the rest of that pointer drag — when another owner applies a theme or replaces the
+stored document. Each tick posts `AppThemeDidChange` with `isLivePreview` true; the release's
+install posts one with it false even when the saved document is the one already on screen, so
+an observer whose work is not frame-cheap (the page's own pickers, the paired-phone broadcast)
+skips ticks and acts on that settle. A glow tick (`LivePreviewScope.terminalPalette`) skips the
+whole-window repaint, because terminals re-read their profile from their own observers, and the
+settle runs it once; every other tick still runs it, because corner radii and the backdrop's
+gradient, picture and particles are re-stated only through `reapplyRecordedSurface` and no
+narrower registry of backdrop surfaces exists to aim at — measured in performance.md. Tracks span what the validator accepts and the
+renderer draws (particle opacity stops at the ambient ceiling; radius tracks share
+`AppThemeMaterialLimits` and lock under a hard bevel), readings carry their unit in the
+person's locale, the title-morph menu sets a scramble alphabet aside rather than stating it on
+another style, and releasing a picture or particle opacity samples legibility off-main and shows
+the advisory under the colours. Built-ins require duplication. The shared
+app-theme picker lists only themes; the appearance packs it briefly offered were retired (see the
+[decision record](../decisions/appearance-packs.md)). Theme animations now leads Motion,
+followed by music, reactions and strength. Sounds stays on Themes, beside a link to Motion.
+
+The preview uses the real terminal frame preparation and glow renderer, `ThemeWording`,
+`IdentityMarkInk` and `WindowTitleBandView`. It executes no extension. An optional `frames: 3` stacks the gradient drift at 0, ⅓ and ⅔ of its authored cycle — fractions
+rather than seconds, which moved a default 24-second drift by 4% across three identical frames.
+Terminal contact sheets now require foreground ink in every normal and bold region, with an
+unfed negative control. The gallery includes a frozen spectrum and facts;
+the non-drawing spectrum viewport observer has an explicit test-backed exemption.
+
+The phone receives optional, tolerant title morph, identity ink, particles and asset metadata.
+Unknown decoration drops without discarding the palette. The shared particle motion recipe is
+in RemoteKit; UIKit supplies the renderer. Ground between opaque cards and conversation bubbles
+uses the same backdrop on dashboard, draft, conversation, workspace, settings and usage. Root
+fallback decoration is frozen. A per-window weak ownership stack grants motion only to the
+visible page; scene, visibility, Reduce Motion, Low Power and the phone-local toggle gate it.
+Workload reaction is computed from the published catalogue once, clamped to 0…1 and scaled by
+the local 0–200% preference. Drift still respects its eight-second minimum cycle.
+
+System typeface hints reach navigation and chrome through native font designs. Conversation
+bodies retain default typography; text-scale mapping remains absent. Named-font transfer is added by the decision below.
+Chat titles use the theme morph and bounded alphabet, with a crossfade for Reduce Motion.
+Working words rotate at turn boundaries. Untitled wording remains presentation, including
+notification titles; it is never persisted as a chat name. Generated marks/chips take theme ink,
+while chosen account colours, emoji and pictures retain their meaning.
+
+`RemoteThemeAssets` immediately invalidates admission on theme change, debounces preparation
+and publishes a generation-fenced manifest. The serial worker hashes sources and caches at
+most 24 renditions, bounded to 1 MB each and 6 MB per theme. The authenticated immutable route
+serves only current manifest digests. The phone verifies bytes before its 32 MB / 128-file disk
+LRU, downloads at most two at once and decodes off the main actor. Backdrops aspect-fill at no
+more than 0.25 opacity. Sprite cells preserve authored tint policy. The dashboard's one fixed
+character slot draws the logo and aggregate mascot mood, with a brief completion pose.
+
+Off-main image legibility sampling warns in create/update results rather than rejecting the
+author's picture. It composites a 64×64 coarse sample against the ground and gradient stops,
+reports the least-legible tenth against the 3:1 label floor and suggests a lower opacity.
+Full-colour ambient sprites are included; tinted sprite ink follows semantic colours, and a
+mascot's reserved slot does not overlap labels. This is advisory sampling, not a proof about
+every pixel or crop.
+
+Window chrome, bevel and period controls remain Mac-only. The decision below carries fonts,
+notification sounds, one reviewed backdrop shader, terminal glow and a widget accent across.
+See the performance note for physical-device glow measurements and the outstanding particle
+energy measurement.
+
+## 2026-10-04 — Completing the optional phone theme paths
+
+The [decision record](../decisions/phone-theme-rendering.md) defines the font-copy scope, reviewed
+shader trust, GPU budget, sound receipts/consent and accent-only widget boundary. Fonts are
+registered with `CTFontManagerRegisterFontsForURL(.process)` so a TTF, OTF or collection uses
+CoreText's file parser without a system installation. A prepared font identity advances the
+SwiftUI theme environment after registration; UIKit titles also observe asset publication.
+
+The host projects the current enabled sidebar Metal overlay, using the same host wrapper and
+scalar ABI as macOS. The shader compiler cache has two active jobs, 32 pending sources and 16
+pipelines. Textures and source stay on workers. One phone backdrop owns the surface, with local
+workload/moment signals, static Reduce Motion presentation, and complete Low Power/hidden stops.
+The Mac still owns the theme choice and extension enablement; appearance packs, which once
+paired them, were retired ([decision record](../decisions/appearance-packs.md)).
+
+SwiftTerm's Metal renderer keeps the foreground sharp and blurs a separate halo beneath ANSI
+cell backgrounds. Halos with at least four device pixels of support use half resolution;
+smaller radii retain full resolution. Turning glow off releases the extra textures and passes.
+Attached Mac and phone terminals select this renderer when glow is requested; the phone's Low
+Power gate restores its previous renderer. Core Graphics previews retain a bounded dirty-span
+underlay cache. Physical iPhone measurements and cache bounds are recorded in performance.md.
+
+The preview's three-frame option uncovered a geometry ownership bug: repainting restated the
+base gradient endpoints before an unchanged animator configuration returned. The animator now
+owns drifting endpoints, so repainting preserves a frozen phase as well as a live animation.
+
+Notification sound names are content-addressed CAF basenames. Only a verified phone installation
+can create a receipt, and only the current theme's matching receipt can reach APNs, subject to
+owner access, preview consent and sound preference. Protocol 4 adds the optional field without
+changing older broker behavior. The pinned usage widget carries one contrast-adjusted accent;
+its semantic content and system rendering modes remain host-owned.
+
+## 2026-10-05 — a theme's extension decorations go with it
+
+An extension that ships a theme is a bundle: its sidebar backdrop or window overlay is that
+theme's look. Until now every enabled extension's component patches rendered under **every** app
+theme — a rain shader over Solarized — and the extension could not even learn which theme was in
+force to stand down by itself. Appearance packs were the workaround (a saved theme plus the
+extensions to enable with it) and are retired; the binding now lives where the decision is made,
+on the patch.
+
+**The shape.** `ExtensionComponentPatch.themeScope` is `.always` (the default, written by
+omission, so an existing publication keeps its wire shape) or `.ownThemes`: the whole patch —
+properties, slots, replacement and hook — applies only while `AppThemeLibrary.current` is one
+of the publishing extension's contributed themes. The manifest's `componentThemeScope:
+"ownThemes"` is a **floor**, not a default: the host applies it to every patch the generation
+publishes, and no patch can widen it. A floor because the manifest is read before any code runs,
+which is the only way the install review can promise "its decorations appear only while one of
+its themes is selected"; a per-patch scope is known only once the process publishes. Both refuse
+an extension with no theme — `manifest.validate()` for the floor, the publication route (422,
+the SDK's own sentence) for a patch — because a scope that can never be satisfied is a bug, not a
+setting.
+
+**Where it is decided.** `ComponentCustomizationRegistry` filters in its lookup, through
+`ComponentThemeScopeOracle` — the selected theme's contributor, read from an index
+`ExtensionAppearanceRegistry` rebuilds in `replace(contributions:)`, so the per-row lookup the
+sidebar does stays a dictionary read and costs nothing at all when no scoped patch is in the
+running. The registry asks on *every* lookup rather than caching, because observers of a theme
+change run in no particular order and the first one to read must already get the right answer;
+the cached contributor exists only to diff. On a settled `AppThemeDidChange` (a Tune tick is
+skipped: it never changes the theme's identity) and on `AppThemeLibraryDidChange` (the
+contributed tier changed — an update, a removal, a launch-time arrival) it re-asks, and when the
+contributor moved posts `ComponentCustomizationDidChange` for exactly the targets of the
+`ownThemes` patches belonging to the old and new contributor. An unscoped patch, or another
+extension's, is never re-rendered by a theme switch. No view learned anything: every plane, hook
+host and slot already refreshed on that event.
+
+**The phone.** `RemoteThemeAssets.surfaceHook` reads the sidebar backdrop through the same
+provider slot, so the projected shader is offered exactly while the Mac draws it, and the
+registry's change for the backdrop target is what re-prepares the phone's asset set.
+
+**A duplicate is the person's own.** Duplicate to Edit gives the copy a custom id, so it has no
+contributor and wears no extension's decorations — it keeps the colours, artwork and fonts it
+copied. That is deliberate: the copy is a theme the person now owns, and an extension's
+decorations follow *its* themes, not resemblances to them. Selecting one of the extension's own
+themes again brings them back.
+
+**What the person is told.** The install review adds a paragraph when the manifest declares the
+floor; the update review says when it narrows or widens (presentation, never an approval —
+an older version without the floor could already publish everywhere); the Extensions page's
+detail gains a Decorations row from the manifest, or from the running generation's scoped
+patches.
+
+| What | Where |
+|---|---|
+| Wire form (omission, matching the pre-field encoding with canonical JSON key order, an older decoder, an unknown scope refused), the manifest floor and its refusals, `validate(for:)`, the generated patch schema | `ExtensionComponentThemeScopeTests` (SDK) |
+| A real contributed theme: the scoped sidebar backdrop drawn with it, absent under a stock theme, back again, absent under a Duplicate to Edit copy and after the contribution is removed; `.always` unchanged; only affected targets posted; a Tune tick ignored; the publication route's refusal and floor; the phone's surface hook; the install and update review text | `ComponentThemeScopeTests` |
+
+## 2026-10-05 — a theme extension's options, without a round trip
+
+A theme's overlay wants simple options — "Perimeter comets: on/off" — and an extension could
+already declare settings, but a change reached it only as an `ExtensionSettingsUpdateRequest` its
+process had to answer and republish after. A render-only Wasm overlay that publishes its hooks once
+and never reads stdin could not react, and worse: an unanswered request is a timeout, which rolls
+the value back *and stops the process* as runtime-uncertain.
+
+**The input.** `ExtensionSurfaceScalar.setting(fieldID, mapping:)` reads one of the publishing
+extension's own fields from the host's settings store: toggle `0`/`1`, choice the option's stated
+`value` (or its index), integer itself, then the binding's mapping —
+`ExtensionScalarMapping.output(for:)`, now the one definition the Mac view, the phone and the
+projection share. The publication route refuses a field the manifest does not declare, or a text
+field, through the SDK's `validateSettingBindings(against:)`; the eight-input budget is unchanged.
+`ExtensionMetalSurfaceView` reads its bound fields once at mount and again only on
+`ExtensionSettingsValuesDidChange`, through `ExtensionManager.surfaceSettingReading`, which answers
+from a per-extension cache of effective values the manager drops on its own writes and on an
+inventory re-read; a frame is a dictionary lookup. A surface whose frames are held for motion
+draws the changed frame at once. A setting is neither reactive nor motion.
+
+**Who applies it.** `ExtensionSettingField.appliedBy` is `process` (by omission, the old
+behaviour) or `host`. A host-applied field is persisted and announced, and no request is sent —
+not on a change, not in the launch sync — so there is nothing to await and nothing to roll back.
+Declared, not inferred from bindings: bindings are runtime publications, while the decision about
+whether the process is a party to a change has to be made from the manifest, even with the
+process not running, and an extension that binds a field *and* handles its requests must keep
+getting them. Only a readable control may be host-applied.
+
+**The phone** never sees a setting: `RemoteThemeAssets` resolves each setting input to the
+constant the Mac reads before projecting the sidebar backdrop, re-projects on a settings change
+when the hook binds one, and `RemoteThemeSurface.isValid` refuses a surface still carrying one.
+
+**Where the person finds them.** Besides the extension's own Settings page, the Current Theme
+page shows a **Theme Options** section (`CurrentThemeOptionsSection`) while the active theme is
+contributed by an enabled extension that declares settings — the same rows
+`ExtensionSettingsRenderer` builds, writing the same store. Rows follow a value changed from the
+other place. The section is rebuilt only when the owner or its declaration changes (bounded by
+one contribution's 128 fields), never on a value change.
+
+| What | Where |
+|---|---|
+| Wire form, `appliedBy` omission, option values all-or-none, readings per control, the shared mapping, binding refusals with paths | `ExtensionSettingBindingContractTests` (SDK) |
+| Uniform resolution and read-once caching, fallback, a host-applied toggle flipping a mounted surface with no request and no stop, a hybrid's requests carrying only process fields, publication refusals, the phone's constant | `ExtensionSettingBindingTests` |
+| Theme Options following the active theme and the extension's enablement; light/dark renders at 420 pt and the settings width | `CurrentThemeOptionsTests` |
+
+## 2026-10-05 — Verification and normal phone installation
+
+The complete Mac plan covered 10,202 tests: 10,116 passed and 86 skipped, with no failures.
+The process guard interrupted the first run during UpdateSheetRenderTests; enumeration of the
+plan identified the unfinished cases, and the remaining 457 ran once without repeating the
+complete plan. The complete mobile simulator target ran 1,002 tests with one skip and no
+failures. After fixing local Release push-environment selection, all 17 notification policy
+tests passed separately. The complete rendered catalogues contain 1,367 Mac and 232 phone
+artifacts in `.build/theme-system-optional-mac-final-verified/report/` and
+`.build/theme-system-optional-ios-complete/report/`. The shader capture waits for a prepared,
+visible surface to complete a frame; its final marker confirms drawing within budget.
+Installed Home Screen widget evidence covers small/medium full-color and system-tinted modes.
+Baselines were not approved. The owner requested simulator testing and normal Release use on
+the physical phone; further device profiling stopped. Particle energy and audible hosted APNs
+delivery remain unverified.
+
+The normal Release app was built with the existing development device profile and matching
+sandbox APNs environment, verified with codesign, installed in place on the owner's iPhone,
+and launched without demo or evidence arguments. Release excludes the DEBUG fixtures; the
+existing bundle identity preserves pairing and app data. Subsequent tests use the simulator.
+
+## 2026-10-05 — the welcome is the theme's
+
+The new-session composer (⌘N) was the one broad pane a theme could not reach. A theme could put
+a picture under the display panel and a mascot at the sidebar's foot, and the first thing a
+person saw on starting work was still the app's mark over the app's "Good evening" on the app's
+ground — in a Matrix theme as in a Beardie one. `AppTheme.Variant.welcome` (`ThemeWelcome`,
+symlinked into ThreadingDesignKit beside the variant) gives the pane to the theme without giving
+it the layout: the prompt still hangs from the pane's foot and the hero (mark over greeting,
+plus an optional caption) still floats centred above it. A theme designs *around* that, as the
+sidebar's mascot designs around the list. How the composer draws it is in `USER_GUIDE.md`; how
+an extension's `composer.backdrop@1` surface is told where the hero and the prompt sit is below
+and, in full, in the extension authoring docs.
+
+| Field | What it is | Absent means |
+|---|---|---|
+| `backdrop` | a `ThemeBackdrop` — gradient, picture, particles — filling the pane beneath the extension plane | the app's plain ground |
+| `mark`, `mark_size` | `app` / `logo` (the sidebar brand picture) / `mascot` (the sidebar mascot, in the window's mood) / `none`; 16–160 points | the app's mark at the app's size |
+| `greeting` | a pool of lines, optional `include_app_lines`, a text style | the app's own greeting, set the app's way |
+| `caption` | the same pool beneath it; the app has no caption of its own | no caption |
+| `scrim` | peak opacities of ground-coloured veils behind the hero and the prompt | no veils |
+
+### The words are the author's, the tokens are the host's
+
+A greeting is a *pool*, not a string: one eligible line is picked by weight on each arrival and
+re-picked when the theme changes. Lines are shown as written in every language — the
+`ThemeWords` rule — and every word a person reads to understand state stays the app's, which is
+why the manager brief and every control are outside the block. What the theme cannot know is
+the moment, so a line names it in `{token}`s the host fills when it is shown
+(`ThemeWelcome.Template`): `time`, `date`, `weekday`, `month`, `day`, `year` (formatted by this
+Mac's locale and calendar), `daypart` (the app's localized word), `project`, `user` (the given
+name), `working` and `waiting` (session counts), `days_until:MM-DD` (0 on the day itself; a
+`02-29` target waits for the next leap year rather than landing on 1 March), and `fact:KEY` — an
+extension's published value, below. `{{` and `}}` are
+literal braces. A line whose token has no value — `{project}` in a composer without one — is
+*ineligible* rather than rendered with a hole, and a line using a clock token is re-rendered on
+the minute while it shows. The tool description and the refusal both list the tokens from
+`Token.names` (`ThemeWelcomeText`), so neither can name one the parser refuses.
+
+A line may carry `when`: `dayparts`, `hours {from, to}` (inclusive, wrapping midnight when
+`from` is after `to`), `weekdays`, `dates [{from, to}]` (`MM-DD`, wrapping the new year) and
+`months`. Every stated facet must hold; any value within one does. `weight` (1–10) is relative
+to the other *eligible* lines, so a Christmas line of weight 10 dominates in late December and
+costs nothing in June. With `include_app_lines` the app's own greeting joins the greeting's pool
+as one more line of weight 1; a caption has no app lines, so the flag is ignored there. With no
+eligible line the greeting falls back to the app's and the caption is absent.
+
+`MonthDay(wireValue:)` was tightened while this landed: `split` drops empty pieces and `Int`
+accepts a sign, so `-12-24`, `12--24` and `+1-1` had parsed as dates nobody wrote. Each half is
+now one or two ASCII digits. A `{days_until}` with no day reports a bad argument rather than an
+unknown token, because the author spelled the name right.
+
+### Gates
+
+`AppThemeEditing` holds the block wherever a theme arrives — tools, Settings, a contributed
+package — with every range generated from `ThemeWelcomeLimits`:
+
+- at most 64 lines per pool, each 1–160 characters, parsing in the token grammar, weight 1–10;
+- hours 0–23, at most 12 date spans of real `MM-DD` days, months 1–12;
+- `mark_size` 16–160, `scale` 0.5–3, `font_family` a name of at most 128 characters, scrims
+  0–0.9;
+- **ink is text.** A stated greeting or caption ink must reach 3:1 against the ground the
+  welcome actually draws: each stop of its own gradient composited over the `ground` role, or
+  that ground when it states no gradient. The backdrop goes through the shared
+  `validate(_:prefix:subject:kind:label:ground:)` with the greeting's ink (or the label) as the
+  text it must keep. Scrims are not counted in the theme's favour — a gate that trusted a veil
+  would pass the greeting the veil misses. A picture's pixels cannot be measured here; it takes
+  the sampled advisory below.
+
+Two gates live at the tool edge rather than in the document, as the material's do: a stated
+`font_family` must be one `Design.Typography.availableFamilies` knows (a family the theme carries
+is registered for the process, so it is in that list), and an enum word is refused with the
+accepted list. A hand-edited document naming a family this Mac lacks is not refused; the
+composer falls back to the typeface, then the app's font.
+
+### The tools
+
+`variants.<kind>.welcome` and `remove_welcome` ride `create_app_theme` / `update_app_theme` in the
+merge-and-`remove_*` idiom, snake case on the wire: `backdrop` (exactly `material.backdrop`'s
+vocabulary, so `remove_gradient`, `remove_image`, a restyle without a `source`, and `remove`),
+`remove_backdrop`; `mark`, `mark_size`, `remove_mark` (which also returns the app's size);
+`greeting` and `caption` with `lines` (replacing the list), `include_app_lines`, `style` (merging
+field by field: `scale`, `weight`, `ink`, `font_family`, `typeface`) and `remove_style`;
+`remove_greeting`, `remove_caption`; `scrim {hero, prompt}` (each veil merging) and
+`remove_scrim`. Stating a field and its removal in one patch is refused. `get_app_theme` returns
+the block in the same shape, so it reads back into a patch unchanged, and
+`get_app_theme(section: "welcome")` documents every field. `AppThemeEditing.makeVariant` takes
+`welcome: BlockChange<ThemeWelcome> = .inherit`, so an update that recolours one role keeps the
+welcome — the trap `replacing` exists for. The welcome counts in the **character** layer of the
+create/update report.
+
+### The picture has a slot of its own
+
+`ThemeAssetSlot.welcome` stores `<variant>-welcome.png` at the material backdrop's 2,048 pixels
+and 8 MiB — a pane is a pane — but in its own file, because a theme may dress the welcome with art
+it would never put under the display panel. It follows `.backdrop` everywhere a backdrop picture
+is handled: the store's per-slot cap, the update path's snapshot and restore of a replaced file,
+`AppThemeLibrary.duplicate` materialising a contributed theme's bytes into the slot, deletion with
+the theme's folder, and `ExtensionBundleLoader` reading a package's `welcome.backdrop.image.asset`
+at inspection (a missing file fails the package). `ThemeImageLegibility` samples it as the
+`welcome.backdrop` region against the welcome's grounds and with the greeting's ink, which raises
+the advisory's ceiling from twenty to thirty 64 × 64 thumbnails per adaptive theme, still off the
+main actor. The phone projection carries the picture as its own `welcome` asset slot (1,290 px on
+the long side), fetched through the authenticated asset route — see "On the iPhone" below.
+
+### Where the hero and the prompt sit
+
+A theme's welcome is drawn around a layout it does not move, and so is an extension's: a Metal
+surface on `composer.backdrop@1` reads `uniforms.focus[0]`, the hero (mark, greeting and
+caption; all zeros while the hero is hidden), and `uniforms.focus[1]`, the prompt box. Each is
+`(x, y, width, height)` in the fragment's `uv` space — origin top-left, y down, 0–1 across the
+surface — with a width of 0 meaning no region; a region may extend past 0–1. Every other
+placement, and the phone's projection of a theme's surface, passes zeros. The layout constants
+live in `ExtensionMetalSource.UniformLayout` (the struct is 80 bytes, `focus` at offset 48), so
+the struct a shader compiles against and the floats a renderer uploads read the same numbers.
+The composer hands the plane its regions in the plane's own coordinates, and each mounted
+surface converts them to `uv` per frame.
+The SDK's wording and a worked shader are in
+[`AGENT_AUTHORING.md`](../extensions/AGENT_AUTHORING.md#beneath-the-display-panel-and-the-composer).
+
+### On the iPhone
+
+The phone's new-chat screen draws the same welcome without the layout moving either: the mark
+stands in the draft's glyph, the greeting and caption above its "Agent in Project" sentence,
+the welcome's ground behind it all and the scrims behind the hero and the composer. The grammar
+is shared rather than mirrored — `Template`, `Context`, `Condition`, `Line` and the weighted pick
+moved to ThreadingRemoteKit as `ThemeWelcomeGrammar`, and `ThemeWelcome` names them through
+nested typealiases, so the Mac's spelling and stored bytes did not change. The Mac projects the
+block resolved (`RemoteThemeWelcome`: inks as colours, only families it can use, the picture as
+the `welcome` asset) and the phone picks and renders lines on its own clock, calendar and locale,
+with its own Swedish-translated daypart words. Two differences are deliberate. The phone has no
+greeting of its own, so where the Mac falls back to `ComposerGreeting` — no eligible line, or the
+app's share of `include_app_lines` — the phone shows none. And `{user}` is the Mac owner's given
+name, sent to the owner's connection only; on a guest's phone those lines are ineligible. A clock
+line is re-rendered on the minute only while the screen is visible. The wire, its bounds and the
+name rule are in [Remote access](../REMOTE_ACCESS.md#the-themes-welcome-on-the-new-chat-screen-2026-10-05);
+the tests are `ThemeWelcomeGrammarTests` and `RemoteThemeWelcomeTests` (RemoteKit),
+`RemoteThemeWelcomeBridgeTests` (Mac) and `MobileDraftWelcomeTests` (phone).
+
+### In the preview
+
+`preview_app_theme` draws the welcome: beneath each appearance's window, a variant that states one
+(an empty block states nothing) gets a new-session band — the composer pane at the sample
+window's width, built from the composer's own components (`ThemeWelcomeGroundView`,
+`ThemeWelcomeScrimView`, `ThemeWelcomeMarkView` with a mascot held at its idle pose, the
+`welcomeGreeting`/`welcomeCaption` roles) around a real `PromptView` hanging from the foot. Its
+words go through `ComposerWelcome.pick` as an arrival's do, but from
+`AppThemePreviewService.WelcomeSample`: a fixed moment (Tuesday 10 March 2026, 09:41 UTC), a
+fixed seed and invented values — project "threading", user "Ada", 2 working, 1 waiting — so a
+theme previews the same words every time and the image names nothing of the user's. The tool's
+text quotes the greeting and caption drawn and the mark shown, so a `logo` that fell back to the
+app's mark says so. The band is drawn with the palette narrowed to its one variant, because type
+roles resolve against the application's appearance and would otherwise set an adaptive theme's
+dark greeting in its light style. With `frames: 3` the bands follow the windows at the same
+three drift phases. A theme without a welcome draws the same bytes it drew before the band
+existed.
+
+### Tokens an extension supplies
+
+`{fact:KEY}` (or `{fact:KEY@VERSION}`, version 1 when omitted) shows a value an installed
+extension publishes — this project's CI, its open reviews, the weather — through the facts channel
+the navigator already reads (`ExtensionHostClient.publishFacts`, `ExtensionFactRegistry`), not a
+second one. The grammar holds the key by the SDK's own type and rules (`ExtensionFactKey`: a
+lowercase contribution identifier of at most 128 bytes, a plain-digit version 1–1,000,000), so a
+theme is refused for a malformed key and never for an absent provider. `Context.facts` carries the
+values *already worded* by the host; a key missing there makes its line ineligible, as `{project}`
+without a project is. A dictionary rather than a lookup closure, because the registry is main-actor
+state and the context is not: the composer reads exactly the keys its lines name
+(`ThemeWelcomeGrammar.factKeys`, bounded by the pool's 64 × 160 characters) before it judges or
+renders them, and the grammar stays a pure function of its inputs.
+
+**Lookup.** `ThemeWelcomeFacts.fact` asks the navigator's resolver for the composer's project —
+exact project subject, then its repository branch, then its repository — and then the new
+`application` subject, where a value about no repository lives; a composer with no project reads
+the application alone. Host-owned project facts resolve exactly, so `{fact:project.branch}` reads
+the checkout's branch. The application subject was added to the SDK rather than borrowed: no
+existing subject named "nothing in particular", and pinning the weather to an arbitrary
+repository would have made it vanish in every other project. It is a provider domain like the
+repository subjects (`isFactProviderDomain`), carries no identity (`{"type":"application"}`), and
+keeps every existing bound — 32 facts per generation per subject, 128 resolved across providers,
+replacement semantics, removal with the generation. Navigator rows never read it. The composer
+reaches the resolver through `ThemeWelcomeFactSource.shared`, installed at the composition root
+beside the navigator's registry; Recovery Mode, held-back extensions and XCTest leave it empty.
+
+**Freshness and change.** No second policy: the registry already drops a provider value 15 minutes
+after `min(observedAt, receivedAt)` and posts `ExtensionFactsDidChange` for the expiry as for a
+publication. The composer observes that notice; when the change can move what the *picked* lines
+read — one of their keys, a `.all`, or a structural join key such as `project.branch` — it renders
+them again on the next main-queue turn (`ComposerWelcomeEnvironment.nextTurn`), once for a burst,
+and never re-picks: a line that became eligible waits for the next arrival, and a shown line whose
+value went falls back to the app's greeting (the caption leaves). Words that name no fact ignore
+every notice and read no fact. `followsClock` stays false for facts.
+
+**Wording.** The host words every value (`ThemeWelcomeFacts.text`): the fact's `label` when the
+provider states one (its own presentation, already through its localization table — the
+navigator's label facet), else a string as published, an integer or number in the locale (two
+decimals at most), a boolean as the catalogue's `yes`/`no` (Swedish `ja`/`nej`), and a date as a
+short time on the day and `d MMM` (plus the year in another year) otherwise — never relative,
+which would need the minute tick fact lines do not take. Every result is one line (runs of
+whitespace and control characters collapse to a space) capped at `maximumLength`, 64 characters,
+with an ellipsis: under half the 160-character line it sits in.
+
+**Elsewhere.** The phone states no facts, so a `{fact:…}` line is ineligible there; facts are not
+projected to it. The preview's sample has none either, so its band shows the next eligible line.
+
+### Left deliberately for later
+
+- Projecting fact values to the phone's new-chat screen.
+- A sample fact value in `preview_app_theme`, so a theme whose lines all read facts previews one.
+
+### Tests
+
+| What | Where |
+|---|---|
+| The grammar's tokens and refusals, doubled braces, the strict `MM-DD`, which tokens follow the clock, rendering from a fixed moment in two locales and a named zone, `days_until` on the day, past the day, across the clock change and to a leap day, `{project}` and `{user}` lines ineligible without a value, hour ranges and date spans wrapping, facets combining, the weighted pick under a seeded generator, the stored form's round trip and defaults, and a block this build cannot read dropping only what it spoils | `ThemeWelcomeTests` |
+| Create, get and update round-tripping the whole block from its own document, every refusal by field, the merge and every `remove_*`, an edit elsewhere keeping it, a refused update restoring the picture, a contributed package's picture through inspection into a duplicate, the advisory measuring with the greeting's ink, the character layer, and the schema's limits | `ThemeWelcomeToolTests` |
+| The focus regions: the compiled struct matching the Swift mirror, regions normalised into top-left `uv` and following the surface, a shader drawing exactly inside the prompt box, zero focus painting nothing, a surface mounted later still told, and no regions at other placements | `ExtensionSurfaceFocusTests` |
+| The preview's new-session band, light and dark: stacked under each window, the sample words picked deterministically past ineligible lines, every mark and its fallback and size, the veils, the drift at three phases, the tool's text quoting what was drawn, and a theme without a welcome (or with an empty one) previewing byte for byte as before | `AppThemePreviewWelcomeTests` |
+| `{fact:KEY}` in the shared grammar: keys by the SDK's rules and every refusal, the host's words filling it, ineligible without a value or with a blank one, the version as part of the key, no clock, the keys a line and a bounded pool name | `ThemeWelcomeGrammarTests` (RemoteKit) |
+| The application subject's wire shape, provider-domain admission, the per-subject bound and refusal of opaque subjects | `ExtensionFactContractTests`, `ExtensionFactPublicationContractTests` (ExtensionKit) |
+| The lookup order (project branch, repository, application; no project reads the application alone; a host project fact resolves), the shared subject's aggregate bound and generation lifetime, expiry at 15 minutes announced as a change, and the wording of strings, labels, numbers, booleans and dates with the 64-character cap | `ThemeWelcomeFactTests` |
+| An application fact through the authenticated publication route, refused on a subject its definition does not name, revoked with its generation | `ExtensionFactProviderHostTests` |
+| The composer rendering a fact line, re-rendering it in place on the next turn once per burst without re-picking, ignoring unrelated keys, following a branch move, falling back when the value goes, and asking for the composer's project | `ComposerWelcomeTests` |
+| The refusal naming `{fact:KEY}` and the key rule; a well-formed fact line accepted without a provider | `ThemeWelcomeToolTests` |
+| A `{fact:…}` line never shown on the phone, while the pool's other lines are | `MobileDraftWelcomeTests` |

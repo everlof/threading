@@ -549,6 +549,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 return try await self.publicIssueReportDiagnostics()
             }
         )
+        mainWindowController.agentToolCoordinator.problemReporter = AgentProblemReportService(
+            submitter: MacIssueReportSubmitter(diagnosticsProvider: {
+                let report = await MacRemoteDiagnostics.report()
+                return await Task.detached(priority: .utility) {
+                    PublicIssueReportDiagnosticsDTO(bounding: report)
+                }.value
+            })
+        )
         self.mainWindowController = mainWindowController
         let navigationSearchIndexStore = NavigationSearchIndexStore(
             projectStore: environment.projectStore
@@ -690,6 +698,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             // Registered before attention alerts so an important activity edge wakes a snoozed
             // session before the alert centre decides whether that same edge may notify.
             SessionSnoozeCenter.shared.start()
+            // Which agent CLIs the login shell can find: the composer's default, its refusal of
+            // an uninstalled runtime, and the install offers all read this one answer.
+            AgentCLIAvailability.shared.startMonitoring()
             // Beside Snooze because it is the same kind of thing — one process timer over
             // persisted deadlines, materializing what was missed while the app was shut. It
             // refuses to start under a hosted test bundle for its own reason: it types.
@@ -776,6 +787,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if plan.startsExtensions {
             let factPipeline = installHostFactPipeline()
             mainWindowController.installWorkspaceNavigatorFactRegistry(factPipeline.registry)
+            // A theme's welcome line may read a fact (`{fact:KEY}`); the composer asks through
+            // this seam, so with extensions held back such lines are simply never eligible.
+            ThemeWelcomeFactSource.shared.resolver = factPipeline.resolver
             ExtensionHostService.shared.installSessionRuntimeShellRootProvider {
                 [weak mainWindowController] sessionID in
                 mainWindowController?.extensionShellRootPid(for: sessionID)
@@ -2215,7 +2229,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     /// Holds the shortcut-change subscription for the process lifetime.
     private let menuEvents = AppEventObservations()
-    private var appearanceMenu: NSMenu?
+    private weak var appearanceShortcutMenu: NSMenu?
+    private var appearanceShortcutCarriers: [NSMenuItem] = []
 
     /// Builds a menu item that takes its shortcut from the command table instead of a literal.
     private func commandItem(_ id: String, action: Selector) -> NSMenuItem {
@@ -2252,7 +2267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     /// The same, for a stated key window, so a test can read the menu bar both ways.
     func applyShortcutBindings(documentIsKey: Bool) {
-        rebuildAppearanceMenu()
+        rebuildAppearanceShortcutCarriers()
         let document = documentIsKey ? MarkdownEditorDefaults.documentShortcuts : [:]
         let claimed = Set(document.values)
         showsDocumentShortcuts = !document.isEmpty
@@ -2312,7 +2327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menuEvents.observe(CommandRegistryDidChange.self) { [weak self] _ in
             self?.rebuildExtensionMenus()
             self?.rebuildPanelCommandsMenu()
-            self?.rebuildAppearanceMenu()
+            self?.rebuildAppearanceShortcutCarriers()
         }
         menuEvents.observe(ProjectScriptsDidChange.self) { [weak self] _ in
             self?.rebuildProjectScriptsMenu()
@@ -2348,29 +2363,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
-    /// Only assigned shortcuts need AppKit carriers. Thousands of searchable theme values do
-    /// not become thousands of menu items on every menu validation pass.
-    private func rebuildAppearanceMenu() {
-        guard let menu = appearanceMenu else { return }
-        menu.removeAllItems()
+    /// Theme and extension commands are found in the palette, so none is shown in the menu bar;
+    /// only an assigned shortcut needs an AppKit carrier, hidden in the View menu the way ⌘1–⌘9
+    /// ride. Thousands of searchable theme values do not become thousands of menu items on every
+    /// menu validation pass.
+    private func rebuildAppearanceShortcutCarriers() {
+        guard let menu = appearanceShortcutMenu else { return }
+        let previous = Set(appearanceShortcutCarriers.map(ObjectIdentifier.init))
+        menu.items = menu.items.filter { !previous.contains(ObjectIdentifier($0)) }
+        appearanceShortcutCarriers.removeAll()
         for id in Array(commandItems.keys) where id.hasPrefix("appearance.") {
             commandItems.removeValue(forKey: id)
         }
-        for command in CommandRegistry.shared.all where command.appearanceTarget != nil {
-            let visible: Bool
-            switch command.appearanceTarget {
-            case .edit(nil): visible = true
-            case .deactivate(let id): visible = appearanceHost.state?.activePackID == id
-            default: visible = false
-            }
-            guard visible || ShortcutOverrideStore.shared.shortcut(for: command) != nil else { continue }
+        for command in CommandRegistry.shared.all where command.appearanceTarget != nil
+            && ShortcutOverrideStore.shared.shortcut(for: command) != nil {
             let item = commandItem(command.id, action: #selector(performHostMenuCommand(_:)))
             item.target = self
-            item.isHidden = !visible
-            item.allowsKeyEquivalentWhenHidden = !visible
+            item.isHidden = true
+            item.allowsKeyEquivalentWhenHidden = true
             menu.addItem(item)
+            appearanceShortcutCarriers.append(item)
         }
     }
+
+    /// The hidden carriers `rebuildAppearanceShortcutCarriers` keeps, for a test to read.
+    var appearanceShortcutCarriersForTesting: [NSMenuItem] { appearanceShortcutCarriers }
 
     func invokePanelCommand(_ id: String) {
         _ = hostCommandPlane.invoke(commandID: id)
@@ -2699,18 +2716,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let menu = NSMenu(title: MenuIdentifiers.viewMenu)
 
         menu.addItem(commandItem(AppCommands.ID.commandPalette, action: #selector(openCommandPalette)))
-        let appearance = NSMenuItem()
-        appearance.title = L10n.string("Appearance")
-        appearance.submenu = NSMenu(title: appearance.title)
-        appearanceMenu = appearance.submenu
-        menu.addItem(appearance)
-        rebuildAppearanceMenu()
         menu.addItem(.separator())
         menu.addItem(commandItem(AppCommands.ID.toggleSidebar, action: #selector(toggleSidebar)))
         for id in [
             AppCommands.ID.showHiddenProjects, AppCommands.ID.hideProject,
             AppCommands.ID.projectRemoteHost, AppCommands.ID.projectDefaultAccounts,
-            AppCommands.ID.triggers
+            AppCommands.ID.triggers, AppCommands.ID.projectAutomations
         ] {
             let item = commandItem(id, action: #selector(performHostMenuCommand(_:)))
             item.target = self
@@ -2838,6 +2849,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         extensionItem.isHidden = true
         menu.addItem(extensionItem)
         viewExtensionItem = extensionItem
+        appearanceShortcutMenu = menu
+        rebuildAppearanceShortcutCarriers()
 
         let item = NSMenuItem()
         item.submenu = menu
@@ -3391,6 +3404,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             guard !CodexModelRefreshService.shared.state.isRunning else {
                 return .unavailable(L10n.string("A model refresh is already running."))
             }
+        case AppCommands.ID.allowClaudeKeychainAccess:
+            guard ClaudeKeychainAccess.shared.isEnabled else {
+                return .unavailable(L10n.string(
+                    "Turn on Live usage from your Claude login in Settings ▸ Privacy first."
+                ))
+            }
         case AppCommands.ID.newManager:
             guard mainWindowController?.currentProjectID != nil else {
                 return .unavailable(L10n.string("Select a project first."))
@@ -3539,20 +3558,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
 
         if let target = command.appearanceTarget {
-            let host = appearanceHost
-            let reason: String?
-            switch target {
-            case .edit(let packID):
-                AppearancePackEditor.present(packID: packID, in: mainWindowController?.window, host: host)
-                reason = nil
-            case .retry(let packID):
-                reason = host.retry(packID)
-            case .toggle(let packID):
-                reason = host.submit(host.state?.activePackID == packID
-                    ? .deactivatePack(packID) : .activatePack(packID))
-            default:
-                reason = target.action.flatMap { host.submit($0) }
-            }
+            let reason = target.action.flatMap { appearanceHost.submit($0) }
             return reason.map { .refused(commandID: id, reason: $0) } ?? .invoked(commandID: id)
         }
 
@@ -3655,6 +3661,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
             window.sidebarViewController.presentDefaultAccounts(for: projectID)
         case AppCommands.ID.triggers: mainWindowController?.showTriggers()
+        case AppCommands.ID.projectAutomations:
+            guard let projectID = mainWindowController?.currentProjectID else {
+                return .refused(commandID: id, reason: L10n.string("Select a project first."))
+            }
+            mainWindowController?.showTriggers(projectID: projectID)
         case AppCommands.ID.currentTheme: mainWindowController?.toggleCurrentTheme()
         case AppCommands.ID.componentGallery: showComponentGalleryImplementation()
         case AppCommands.ID.biggerText: mainWindowController?.increaseFontSize()
@@ -3674,6 +3685,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 let alert = ThemedAlert()
                 alert.messageText = L10n.string("Refresh Models")
                 alert.informativeText = state.message
+                if let window = self?.mainWindowController?.window {
+                    alert.beginSheetModal(for: window) { _ in }
+                } else {
+                    alert.runModal()
+                }
+            }
+        case AppCommands.ID.allowClaudeKeychainAccess:
+            ClaudeKeychainAccess.shared.requestAccessForAllLogins { [weak self] outcome in
+                // A prompt is its own feedback. Only a run that had nobody to ask says so, or
+                // the command would look like it did nothing.
+                guard outcome.granted.isEmpty, outcome.stillWaiting.isEmpty else { return }
+                let alert = ThemedAlert()
+                alert.messageText = L10n.string("Allow Keychain Access for Claude Logins")
+                alert.informativeText = L10n.string(
+                    "Threading can already read every Claude login in your keychain."
+                )
                 if let window = self?.mainWindowController?.window {
                     alert.beginSheetModal(for: window) { _ in }
                 } else {
@@ -4284,6 +4311,8 @@ private enum UIScenarioBootstrap {
         static let stallHUD = "THREADING_UI_SCENARIO_STALL_HUD"
     }
 
+    private static let automationFixtureEvents = AppEventObservations()
+
     private static let markerName = ".threading-ui-scenario-home"
     private static let sessionID = SessionID(
         UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
@@ -4445,6 +4474,23 @@ private enum UIScenarioBootstrap {
             }
         ) else {
             return .refused("could not install the fixture process")
+        }
+        if environment["THREADING_UI_SCENARIO_AUTOMATION_WORKSPACE"] == "1" {
+            // One validated sandbox automation, installed on its ordinary creation event before
+            // runtime launch. The fixture still replaces only the exact new session process.
+            automationFixtureEvents.observe(ProjectsDidChange.self) { _ in
+                for project in ProjectStore.shared.projects.prefix(4) {
+                    for candidate in project.sessions.prefix(4) where candidate.automationWorkspace?.automationID == "workspace-task" {
+                        let id = candidate.id
+                        _ = AgentRuntime.shared.installFixtureLaunchPlan(for: id, provider: { _, _, _ in
+                            let current = ProjectStore.shared.session(withID: id) ?? candidate
+                            let tape = current.resumeState.isResumable ? resumeTape : freshTape
+                            return AgentLaunchPlan(executable: executable.path,
+                                arguments: ["replay", tape.path, "--scenario-root", rootPath], resumeState: current.resumeState)
+                        })
+                    }
+                }
+            }
         }
         return .installed
     }

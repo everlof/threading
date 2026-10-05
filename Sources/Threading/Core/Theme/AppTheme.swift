@@ -178,10 +178,14 @@ public struct AppTheme: Codable, Equatable {
         /// departures board. Absent means the app's own morph.
         public let titleMorph: ThemeTitleMorph?
 
+        /// The new-session composer's welcome — its backdrop, the mark over the greeting, the
+        /// greeting's lines and type. Absent means the app's own.
+        public let welcome: ThemeWelcome?
+
         private enum CodingKeys: String, CodingKey {
             case roles, terminalPalette
             case material, sidebar, chrome, transition
-            case sprites, moments, words, titleMorph
+            case sprites, moments, words, titleMorph, welcome
         }
 
         public init(
@@ -194,7 +198,8 @@ public struct AppTheme: Codable, Equatable {
             sprites: [ThemeSprite] = [],
             moments: ThemeMoments? = nil,
             words: ThemeWords? = nil,
-            titleMorph: ThemeTitleMorph? = nil
+            titleMorph: ThemeTitleMorph? = nil,
+            welcome: ThemeWelcome? = nil
         ) {
             self.roles = roles
             self.terminalPalette = terminalPalette
@@ -206,6 +211,7 @@ public struct AppTheme: Codable, Equatable {
             self.moments = moments
             self.words = words
             self.titleMorph = titleMorph
+            self.welcome = welcome.flatMap { $0.isEmpty ? nil : $0 }
         }
 
         public init(from decoder: Decoder) throws {
@@ -230,6 +236,9 @@ public struct AppTheme: Codable, Equatable {
             words = try container.decodeIfPresent(ThemeWords.self, forKey: .words)
             // A morph this build cannot draw is dropped, not the theme around it.
             titleMorph = try? container.decodeIfPresent(ThemeTitleMorph.self, forKey: .titleMorph)
+            // Decoration, so it decodes tolerantly too; an empty block reads as none.
+            welcome = (try? container.decodeIfPresent(ThemeWelcome.self, forKey: .welcome))
+                .flatMap { $0.isEmpty ? nil : $0 }
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -247,6 +256,7 @@ public struct AppTheme: Codable, Equatable {
             try container.encodeIfPresent(moments, forKey: .moments)
             try container.encodeIfPresent(words, forKey: .words)
             try container.encodeIfPresent(titleMorph, forKey: .titleMorph)
+            try container.encodeIfPresent(welcome, forKey: .welcome)
         }
 
         // MARK: - Rebuilding
@@ -276,7 +286,8 @@ public struct AppTheme: Codable, Equatable {
                 sprites: sprites,
                 moments: moments,
                 words: words,
-                titleMorph: titleMorph
+                titleMorph: titleMorph,
+                welcome: welcome
             )
         }
 
@@ -294,7 +305,8 @@ public struct AppTheme: Codable, Equatable {
                 sprites: sprites,
                 moments: moments,
                 words: words,
-                titleMorph: titleMorph
+                titleMorph: titleMorph,
+                welcome: welcome
             )
         }
 
@@ -309,7 +321,8 @@ public struct AppTheme: Codable, Equatable {
                 sprites: sprites,
                 moments: moments,
                 words: words,
-                titleMorph: titleMorph
+                titleMorph: titleMorph,
+                welcome: welcome
             )
         }
 
@@ -330,7 +343,8 @@ public struct AppTheme: Codable, Equatable {
                 sprites: sprites,
                 moments: moments,
                 words: words,
-                titleMorph: titleMorph
+                titleMorph: titleMorph,
+                welcome: welcome
             )
         }
 
@@ -345,7 +359,24 @@ public struct AppTheme: Codable, Equatable {
                 sprites: sprites,
                 moments: moments,
                 words: words,
-                titleMorph: titleMorph
+                titleMorph: titleMorph,
+                welcome: welcome
+            )
+        }
+
+        public func replacingWelcome(_ welcome: ThemeWelcome?) -> Variant {
+            Variant(
+                roles: roles,
+                terminalPalette: terminalPalette,
+                material: material,
+                sidebar: sidebar,
+                chrome: chrome,
+                transition: transition,
+                sprites: sprites,
+                moments: moments,
+                words: words,
+                titleMorph: titleMorph,
+                welcome: welcome
             )
         }
 
@@ -360,7 +391,8 @@ public struct AppTheme: Codable, Equatable {
                 sprites: sprites,
                 moments: moments,
                 words: words,
-                titleMorph: titleMorph
+                titleMorph: titleMorph,
+                welcome: welcome
             )
         }
     }

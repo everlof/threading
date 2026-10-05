@@ -194,7 +194,9 @@ enum SessionImporter {
 
                     // A recorded cwd is authoritative; its absence leaves the slug directory —
                     // which is derived from this very folder — to vouch for membership.
-                    if let cwd = info.cwd, !belongs(cwd: cwd, folder: folder, worktree: worktree) {
+                    if let cwd = info.cwd,
+                       !belongs(cwd: cwd, folder: folder, worktree: worktree),
+                       !latestCwdBelongs(at: url, folder: folder, worktree: worktree) {
                         return nil
                     }
 
@@ -209,6 +211,29 @@ enum SessionImporter {
             }
         }
         return ScanBatch(sessions: found, failures: failures)
+    }
+
+    /// Whether the newest record's `cwd` belongs, for a transcript whose first one does not.
+    ///
+    /// A conversation resumed in another checkout is filed under that checkout's slug, but the
+    /// file opens with the records it was continued from — the directory it *started* in. So
+    /// the front scan alone rejected exactly the chats a checkout move had carried into a
+    /// sibling worktree, everywhere: their old slug no longer holds the live file, and the new
+    /// one judged it by where it began. Read from the tail and only on that rejection, so an
+    /// ordinary transcript pays nothing; the first `cwd` still admits one that wandered off.
+    static func latestCwdBelongs(at url: URL, folder: String, worktree: String?) -> Bool {
+        var latest: String?
+
+        JSONLReader.forEachRecordFromEnd(at: url, limit: ImportDefaults.activityTailLimit) {
+            record in
+            guard let value = record["cwd"] as? String, !value.isEmpty else { return true }
+
+            latest = value
+            return false
+        }
+
+        guard let latest else { return false }
+        return belongs(cwd: latest, folder: folder, worktree: worktree)
     }
 
     /// A transcript's title and the directory it was launched in.

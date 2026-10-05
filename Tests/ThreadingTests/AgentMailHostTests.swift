@@ -10,13 +10,13 @@ final class RemoteSessionMailboxTests: XCTestCase {
 
     private var directory: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("RemoteSessionMailboxTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("host"), withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         try? FileManager.default.removeItem(at: directory)
     }
 
@@ -286,12 +286,12 @@ final class MailAccessTests: XCTestCase {
 
     private var directory: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("MailAccessTests-\(UUID().uuidString)", isDirectory: true)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         try? FileManager.default.removeItem(at: directory)
     }
 
@@ -376,13 +376,13 @@ final class MailboxHandoverTests: XCTestCase {
 
     private var directory: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("MailboxHandoverTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("host"), withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         try? FileManager.default.removeItem(at: directory)
     }
 
@@ -528,19 +528,22 @@ final class MailboxHandoverTests: XCTestCase {
         let unread = try await h1.sendMail(from: sibling, to: onH1, id: UUID(), text: "unread on h1", replyTo: nil, priority: .normal)
 
         let h1Endpoint = hostEndpoint("h1")
-        var h1Up = false
+        @MainActor final class Reachability {
+            var isUp = false
+        }
+        let reachability = Reachability()
         let routing = RoutingOwnerRPCFake(["vps-1": OwnerRPCFake(store: w.remote), "h1": OwnerRPCFake(store: h1)])
         w.mailboxes.runner = routing
         w.handover.runner = routing
         w.handover.ensurePeered = { endpoint in
-            if endpoint.name == "h1" { guard h1Up else { throw RemoteControllerRPC.Failure.transport("down") }; return h1Host }
+            if endpoint.name == "h1" { guard reachability.isUp else { throw RemoteControllerRPC.Failure.transport("down") }; return h1Host }
             return w.remoteHost
         }
         _ = await w.handover.move(session, title: "Deploy", from: .host(h1Endpoint), to: .thisMac)
         _ = await w.handover.move(session, title: "Deploy", from: .thisMac, to: .host(w.endpoint))
         XCTAssertNotNil(w.handover.pending[session]?[h1Endpoint.hostID], "a later move does not drop the old host's mail")
 
-        h1Up = true
+        reachability.isUp = true
         w.handover.currentSide = { _ in .host(w.endpoint) }
         for task in w.handover.retryPending(reachable: h1Endpoint) { _ = await task.value }
         XCTAssertNil(w.handover.pending[session], "moved, so no longer pending")
@@ -631,10 +634,44 @@ final class MailboxHandoverTests: XCTestCase {
         let w = try await world()
         let session = SessionID()
         _ = try await w.mac.register(session, name: "Deploy")
-        async let first = w.handover.move(session, title: "Deploy", from: .thisMac, to: .host(w.endpoint))
-        async let second = w.handover.move(session, title: "Deploy", from: .host(w.endpoint), to: .thisMac)
-        _ = await (first, second)
+        let entered = expectation(description: "first move reached provisioning")
+        let gate = ProvisionGate(entered: entered)
+        defer { gate.release() }
+        w.mailboxes.ensurePeered = { _ in
+            await gate.wait()
+            return w.remoteHost
+        }
+        let first = Task {
+            await w.handover.move(session, title: "Deploy", from: .thisMac, to: .host(w.endpoint))
+        }
+        // Sibling async-let tasks have no admission order. Hold the first move in provisioning
+        // before asking for the return move, so this exercises the queue rather than scheduling.
+        await fulfillment(of: [entered], timeout: 5)
+        _ = await w.handover.move(session, title: "Deploy", from: .host(w.endpoint), to: .thisMac)
+        gate.release()
+        _ = await first.value
         XCTAssertNil(w.mailboxes.binding(for: session), "the later move ran: the mailbox is back on this Mac")
+    }
+
+    @MainActor
+    private final class ProvisionGate {
+        private let entered: XCTestExpectation
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var isReleased = false
+
+        init(entered: XCTestExpectation) { self.entered = entered }
+
+        func wait() async {
+            entered.fulfill()
+            guard !isReleased else { return }
+            await withCheckedContinuation { continuation = $0 }
+        }
+
+        func release() {
+            isReleased = true
+            continuation?.resume()
+            continuation = nil
+        }
     }
 
     func testConcurrentProvisioningBothGetTheHostMailbox() async throws {

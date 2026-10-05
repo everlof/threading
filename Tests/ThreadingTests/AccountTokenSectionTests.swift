@@ -37,8 +37,8 @@ final class AccountTokenSectionTests: XCTestCase {
     private var store: AgentAccountTokenStore!
     private var vault: AgentAccountTokenVault!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         store = AgentAccountTokenStore(
             keychain: InMemoryKeychainItemAccess(),
             service: "test",

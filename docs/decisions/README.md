@@ -38,6 +38,8 @@ idea that comes back every six months.
 
 | Record | Recommendation |
 |---|---|
+| [Phone theme rendering](phone-theme-rendering.md) — carry fonts, glow, reviewed shaders, sounds and widget accent to paired devices | **Implement** bounded presentation with host-owned consent, lifecycle, rendering and transfer budgets |
+| [Render-only Embedded Swift SDK](render-only-embedded-swift.md) — avoid Foundation's module cost for extensions that only publish a patch | **Prototype** a bounded protocol-only target; the 21 KB compile probe is not yet a compatible SDK |
 | [Revert to this message](revert-to-message.md) — put the files back to where a turn started, and the separate question of rewinding the provider conversation | **Prototype** the workspace-only half; **reject** the conversation-revert claim |
 | [Automatic settling](automatic-settling.md) — an inbox that files a finished chat away by itself | **No-go** on a new lifecycle state; **experiment** with a presentation-only Needs Attention view |
 | [Editable file previews](editable-file-previews.md) — edit a file in Threading instead of leaving for an editor | **Reject** on the Mac; **wait for demand** on a narrow remote-only slice |
@@ -46,6 +48,7 @@ idea that comes back every six months.
 | [A named Cloudflare Tunnel](named-cloudflare-tunnel.md) — a stable hostname for the owner's phone instead of a per-launch Quick Tunnel one | **Reject**: it buys address stability, which a sticky port already buys, by putting a third party that terminates TLS on the owner's daily route and asking every user for a domain |
 | [Compressing the terminal mirror's wire](compressed-terminal-mirror.md) — deflate the mirror's binary frames for cellular joins | **Wait for demand**: bytes stopped being the scarce resource once the replay was bounded; reopen on a measured non-LAN join dominated by transfer |
 | [Bundle-size levers](bundle-size-levers.md) — how small `Threading.app` can be on disk and as a download, and which levers are worth it | **Done**: ship `arm64` only (now in `releasing.md`); **reject** on-demand resources and further stripping; **wait for evidence** on `-Osize`; **wait for demand** on a slimmer WebRTC and Sparkle deltas |
+| [Appearance packs](appearance-packs.md) — one switch for an app theme and up to sixteen extensions, and a portable `.threadingpack` to share it | **Retired** 2026-10-05 after one day: an extension that ships a theme is the bundle and its decorations follow its own themes; reopen on repeated demand to combine independent extensions with an unrelated theme |
 
 ## Measurements these records rest on
 

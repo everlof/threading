@@ -24,7 +24,11 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 
 | Surface | Proposed contract | First authority | Host must retain | Status |
 | --- | --- | --- | --- | --- |
-| Appearance pack editor and activation commands | deliberately host-only; shared themed controls | host appearance service | exact membership/digest review, enablement ownership, capability disclosure, persistence, runtime admission, focus and failure truth | Implemented |
+| Current Theme tuning and theme picker | — | host-only authoring over the public theme document | validated ranges, built-in immutability, live-preview ownership, one durable revision per drag, the explicit theme choice and user choices | Host-only |
+| Current Theme ▸ Theme Options | existing `ExtensionSettingsContribution` fields of the extension contributing the active theme | static settings declaration (no new seam) | the gate (enabled extension that ships the active theme and declares settings), the same host-rendered themed controls and value store as its Settings page, validation, persistence, `appliedBy` routing and rollback | Implemented |
+| Setting-bound surface inputs | `ExtensionSurfaceScalar.setting` on existing Metal surface contracts; field `appliedBy: host` | the publishing extension's own toggle, choice or integer fields | value storage and resolution with no process round trip, publication-time refusal of undeclared/text fields, the eight-input budget, next-frame application, and the constant projected to iPhone instead of the setting | Implemented |
+| Mobile theme backdrop and character header | existing theme data projected through RemoteKit, no extension execution | palette, system typeface, words, morph recipe, identity ink, particles and bounded image renditions | authenticated asset admission, cache/decoder/emitter budgets, layout, navigation, session state and accessibility truth, device-local motion/power gates, one visible animator and one mascot slot | Host-owned presentation |
+| Theme and extension-enablement commands | deliberately host-only; shared themed controls | host appearance service | the theme choice, enablement ownership, persistence, runtime admission, focus and failure truth; appearance packs were retired on 2026-10-05 ([decision](../decisions/appearance-packs.md)) | Implemented |
 | Public browser guest client | deliberately host-only | existing RemoteClient UI with transport adapter | invitation decoding, service origin, membership/device binding, scope, approval, expiry and revocation | Implemented |
 | Chat invitation sheet | deliberately host-only | host form | capability scope, permission approval, route reachability, expiry, credential issuance and revocation | Implemented |
 | Hosted Direct enrollment controls | — | host-only | explicit Internet opt-in, installation-secret custody, service identity removal, device revocation and reachable status | Host-only |
@@ -32,7 +36,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Sidebar workload analyzer | existing theme `material.chart_style: spectrum` | theme-selected host presentation | workload/intensity truth, exact count, effort judgement, accessibility, bounded motion | Implemented |
 | Music spectrum presentation | `audio.*` host signals on existing Metal surface contracts; theme `sidebar.brand.analyzer` | theme-selected host presentation | consent, source identity/selection, system permission, private tap lifetime, local analysis, signal truth/freshness, visibility/motion/power gates and bounded cadence | Implemented |
 | Music-reactive theme controls | — | host-only | explicit audio opt-in, selected source, permission explanation and Retry; themes cannot enable capture | Host-only |
-| Reactions (Motion): activity switch and strength | — | host-only | whether agent activity drives decoration at all, and the person's 0–200 % scale on every theme and extension reaction to activity and music, applied by `ThemeReactions` to reactive readings before any theme or extension mapping (activity off reads as each binding's idle fallback); no theme, pack or extension carries a value for either | Host-only |
+| Reactions (Motion): activity switch and strength | — | host-only | whether agent activity drives decoration at all, and the person's 0–200 % scale on every theme and extension reaction to activity and music, applied by `ThemeReactions` to reactive readings before any theme or extension mapping (activity off reads as each binding's idle fallback); no theme or extension carries a value for either | Host-only |
 | Theme words, title morph, identity ink | theme document: `words.untitled_session`, `title_morph`, `material.identity_marks` | theme-selected copy and presentation from a fixed vocabulary | the untitled name is display-only and never stored; state words stay the app's own; the person's explicit morph style wins; a person's own icon, photo or colour keeps its pixels; Reduce Motion lands names directly | Implemented |
 | Project row | `sidebar.project-row@1` | properties, slot, replacement | selection, DnD, row actions, count, checkout availability mark | Implemented |
 | Project hover card | `sidebar.project-hover-card@1` | hook, replacement | hover, popover, sizing, dismissal | Implemented |
@@ -40,13 +44,14 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Session identity | `sidebar.session-identity@1` | replacement | activity precedence and row shell | Implemented |
 | Sidebar backdrop | `sidebar.backdrop@1` | under-content hook: an overlay whose top is `.proceed`, admitting only a `backdrop` image and a Metal surface | legibility ceiling, frame cadence and the visibility hold, pointer passthrough, reduced motion, accessibility silence, layering beneath the theme's navigator well | Implemented |
 | Display panel backdrop | `display.backdrop@1` | the sidebar backdrop's under-content hook, unchanged | the same five, plus layering above the panel's themed ground and beneath its tab row and content; hosted tab content (browser, review, simulator) stays opaque over it | Implemented |
-| New-session composer backdrop | `composer.backdrop@1` | the sidebar backdrop's under-content hook, unchanged | the same five, plus layering beneath the greeting, chips, prompt box and actions; text input, focus and submission are never re-parented | Implemented |
+| New-session composer backdrop | `composer.backdrop@1` | the sidebar backdrop's under-content hook, unchanged; a Metal surface also reads the hero and prompt-box frames as `uniforms.focus[0]`/`[1]` in `uv` | the same five, plus layering beneath the greeting, chips, prompt box and actions; the layout those regions describe, and their contents (only geometry crosses); text input, focus and submission are never re-parented | Implemented |
 | Custom surface theme and moment signals, surface picture | `theme.*` and `moment.*` host signals; `ExtensionMetalSurface.texture` | scalar readings and one package image on the existing Metal surface contracts | which theme variant applies per appearance and its resolved colours, which events are moments and their edges, the pulse shape, the motion hold, the mood monitor's lifetime, the image read/decode limits and upload, the placeholder | Implemented |
 | Theme particles, logo motion, header band | theme document: `ThemeBackdrop.particles`, `sidebar.brand.motion`, `sidebar.brand.band`, `title.color` | theme-selected host presentation from a fixed vocabulary (styles, shapes, beats) | particle budgets per placement, the ambient opacity ceiling, the visibility hold, Reduce Motion / Theme animations / Low Power Mode, pointer passthrough, accessibility silence, band and title contrast gates | Implemented |
 | Theme arrival transition | theme document: `variants.<kind>.transition` | theme-selected host presentation over each main window | which switches play one (deliberate picks only), timing bounds, the swap moment, finish-the-first on a second pick, pointer passthrough, accessibility silence, every reason to apply at once | Implemented |
 | Theme sprites, pinned pictures | theme document: `variants.<kind>.sprites`, `ThemeParticles.sprites`, `ThemeBackdrop.ImageLayer.alignment` | theme-selected pictures on host-owned particle motion; host-placed images | the per-placement budget shared across every sprite cell, normalised 128-pixel sprites, the ambient opacity ceiling, the visibility hold, Reduce Motion / Theme animations / Low Power Mode, clipping to the region | Implemented |
 | Sidebar mascot | theme document: `sidebar.mascot` | theme-selected pose pictures and looping motions from a fixed vocabulary | the mood itself (`AgentMoodMonitor`), mood ranking and pose borrowing, placement beneath the list with reserved list breathing, pointer passthrough, accessibility silence, the hold (poses still change), stream budgets | Implemented |
 | Theme moments, words, Dock icon | theme document: `variants.<kind>.moments`, `variants.<kind>.words`, `sidebar.logo_in_dock` | theme-selected shower, sound and two copy slots | which events exist and their edges, which events may shower (never a finished turn), one-at-a-time cooldown, the Theme sounds setting, frontmost-only sound and the silence gate, every state word and accessibility label, the Dock plate and the never-upscaled mark | Implemented |
+| New-session composer welcome | theme document: `variants.<kind>.welcome` (backdrop, mark, `mark_size`, greeting, caption, scrim) | theme-selected host presentation from a fixed vocabulary: a backdrop through the shared dressing, one of four marks, `{token}` lines with conditions and weights (a `{fact:KEY}` line shows a scalar an extension publishes through `facts.provide`), a type style, two veil strengths | the layout (prompt at the foot, hero centred above, hidden when the pane is short), the pick-on-arrival rule and the re-pick only when the words change, every token's value and the localized daypart words, a fact's lookup chain, wording, 64-character cap, freshness and in-place re-render (Mac only), the app's own greeting as the fallback, the manager's brief, the on-the-minute re-render that runs only while the composer is seen, the mark's mood source and bounds, the veil reach and ceiling, the extension plane above the theme's backdrop, pointer passthrough and accessibility silence for every decorative layer, the hold | Implemented |
 | App theme preview (`preview_app_theme`) | — | host-only | sample rows instead of the user's data, the one-turn palette swap and restore, still frames for motion | Host-only |
 | Workspace navigator | `ui.workspace-navigation` or the signed native PluginKit navigator contract | complete semantic navigator, optionally augmented with a host-evaluated pipeline; native plugins receive bounded typed rows and visible-row enrichment | shell and menu, user selection and persistence, Native/failback route, declaration and fact validation, evaluation and virtualization, theme and accessibility, source-session activation, change-request truth and credentials, and intent availability, revalidation and execution | Implemented |
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
@@ -72,8 +77,8 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Sentry app diagnostics settings | — | host-only | exact device-local consent, SDK lifecycle, payload sanitizer, sampling and immediate revocation | Host-only |
 | Main-thread stall readout | — | host-only | main-queue watchdog truth, bounded incident and trace recording, local opt-in and disclosure of active semantic spans | Host-only |
 | Session hover card | `sidebar.session-hover-card@1` | hook, replacement | hover, popover, session lifecycle | Implemented |
-| Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival | Implemented |
-| All-account usage fleet | — | host-only | discovery/refresh pacing, current-account identity, migration eligibility/action, bounded scrolling and popover lifecycle | Host-only |
+| Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival, reading-source wording, and the keychain **Allow…** offer with the prompt it starts | Implemented |
+| All-account usage fleet | — | host-only | discovery/refresh pacing, current-account identity, migration eligibility/action, keychain grant offer/action, bounded scrolling and popover lifecycle | Host-only |
 | Usage analytics section switch | — | host-only | selected native analysis, retained chart state, keyboard and accessibility navigation | Host-only |
 | Banked usage reset actions | — | host-only | exact account and credit identity, fresh confirmation, provider idempotency, authoritative post-read, owed-continuation release | Host-only |
 | Curfew surfaces (draft moon button and chip, chat chip, sidebar Curfew fold, strip source, Settings section) | — | host-only | the deadline and its instance identity, hold admission, the wind-down record, interrupt/stop decisions and their receipts, the watched-turn rule, Lift | Host-only |
@@ -95,6 +100,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity and usage truth, refresh, the whole reveal gesture | Implemented |
 | Launch failure surface | — | host-only | the runtime's captured words verbatim, exit classification, retry, the report path's review-before-send rule, repair eligibility and the working-copy boundary | Host-only |
 | Private issue-report form | — | host-only | evidence selection and paste, review/removal, share-safe bounds, original-file custody, backend projection, delivery and outbox receipts | Host-only |
+| Agent problem reporting (`report_problem`) | — | host-only MCP capability | authenticated session identity, worker and rate admission, content/image bounds, original custody, fixed private backend and durable delivery receipts | Host-only |
 | Browser annotation canvas and inline note editor | — | deliberately host-only | page/frame identity, picking, user-authored provenance, draft save/cancel/delete, pending revisions and session delivery, keyboard focus, scroll dispatch and origin authorization | Host-only |
 | Attachment preview body | `attachments.preview@1` | exclusive preview-body replacement, offered rather than owned | turn grouping/collapse and chronology, filter, selection, Open in, reveal, delete, pruning, the too-large refusal, editable annotation receipt/revisions and the inspector rail | Implemented |
 | Background sessions (quit choice, launch band, Advanced list) | — | host-only | which children the daemon holds and their identities, the quit answer and what it stops, registration and its removal rule, the stop's attach-then-kill, bounded survey and viewport | Host-only |
@@ -152,6 +158,11 @@ approved probe, and Delete (a confirmed tombstone that keeps history). Agents re
 through `manage_automation`'s `draftSource`, which writes a paused, unapproved draft; there is no
 tool, extension slot or theme seam that approves or deletes one. The editor's schedule controls
 are the automation editor's (`AutomationScheduleFields`), not a second component.
+
+An automation's own page (`AutomationDetailHeaderView` over the same `AutomationReview` facts)
+is host-only for the same reason as the sheet: its state word, its Run now / Pause / Delete
+actions and its settings are the receipt for what will run. Themes style its controls, labels
+and inks; no slot adds, reorders or relabels an action or a fact.
 
 The two command-line-tool surfaces remain host-only for the same reason as the rows above them,
 one step sharper: both write outside anything Threading owns. One creates and deletes a symlink in
@@ -266,6 +277,16 @@ field already appended to General keeps appearing there; the four new pages decl
 because none is a subject an extension needs a field on — the sidebar's order, a new chat's
 defaults, Threading's own sounds, and what Threading writes into a CLI's configuration are all
 host policy. Opening one of them to extensions is a separate decision with its own entry here.
+
+The Current Theme page's **Theme Options** (2026-10-05) is the same contract shown in a second
+place, not a new seam. When the active app theme comes from an enabled extension that declares
+settings, the page renders that extension's fields with the host controls its Settings page uses,
+writing the same store; the extension declares nothing new and cannot choose to appear there or
+not. The pairing is what earns the placement: options such as a theme overlay's "Perimeter comets"
+shape the theme the person is inspecting. A field declared `appliedBy: host` is applied by
+Threading through the extension's own setting-bound surface inputs, so a render-only extension that
+never reads its requests can offer options without being rolled back or stopped over a request it
+never answers; the phone receives the resolved constant, never the setting.
 
 The mobile terminal key bar is host-only even though its key order, top-or-bottom row placement
 and solo Direct/Compose choice are deliberately customizable by the person using that phone. Its
@@ -496,6 +517,32 @@ behind a live browser or a simulator's pixels and change what they say. The same
 answer for a display-panel or composer backdrop: a sibling contract at another placement, not a
 new vocabulary.
 
+The composer's plane is also the one placement that states **focus regions**: the hero's and the
+prompt box's frames, handed to every Metal surface it mounts and uploaded each frame as
+`ThreadingSurfaceUniforms.focus` in the fragment's `uv` space (`ExtensionMetalSource.UniformLayout`
+fixes the 80-byte layout for the Mac and the phone alike). Only geometry crosses — never the
+greeting's words, the draft or the caret — and the layout stays the host's: a shader can frame the
+prompt, not move it. Every other placement, and the phone, uploads zeros.
+
+### A theme's decorations go with it (2026-10-05)
+
+Every contract above answers *where* an extension may draw; none answered *when*. An extension
+that ships a theme and a backdrop drew that backdrop under every theme the person picked, and
+could not even learn which theme was in force. `ExtensionComponentPatch.themeScope: .ownThemes`
+(and the manifest's binding `componentThemeScope` floor) is the answer, and it is a host
+decision, not a new extension authority: the extension learns nothing about the theme, the
+registry decides at every lookup, and a switch re-renders only the targets whose scoped patches
+came or went. It applies to every contract — slots, properties, replacements and hooks — because
+the question "is this the theme's look or a function?" is the author's to answer per patch, not
+the contract's. A Duplicate to Edit copy is the person's own custom theme and wears no
+extension's decorations; the phone's projected backdrop follows the Mac's answer. The install
+review, the update review and the Extensions page say so when a manifest declares it.
+
+**Gate for a new contract:** nothing to add. Scope is resolved in
+`ComponentCustomizationRegistry`, so a new placement inherits it through
+`ComponentCustomizationHost` or any lookup through the provider slot. A surface that caches a
+resolution outside that path must refresh on `ComponentCustomizationDidChange` like every other.
+
 ## Composer precedent
 
 Both composers wrap their existing native `PromptView` in the generic composition host. A
@@ -508,6 +555,31 @@ native input instance—and therefore its text, callbacks, focus, keyboard behav
 while still allowing useful actions such as templates, context attachment or status. Removal of
 the contributing generation removes only its controls and leaves that same prompt instance in
 place.
+
+### The theme's welcome on the start composer
+
+The start composer is also the one region a **theme** dresses by name besides the sidebar
+(`ThemeWelcome`, see `architecture/themes.md`). It is theme data the host interprets, not an
+extension seam, and it changes nothing above: the prompt instance, its hook and the composer's
+layout stay where they were. The stack, bottom to top, is the theme's welcome backdrop (the
+composer root's own layer, so the extension plane stays the root's first subview), the
+`composer.backdrop@1` plane, the theme's scrims, then the hero, chips, box and actions. A theme
+may choose the mark over the greeting (the app's, its sidebar logo, its sidebar mascot in the
+window's mood, or none), its size, the greeting's and a caption's lines and type, and two veil
+strengths. Threading keeps every value a token reads, when a line is picked and re-picked, the
+app's greeting as the fallback, the manager's brief, the bounds, and the hold; the decorative
+layers take no click and say nothing to accessibility. The greeting and caption remain ordinary
+static text to VoiceOver, in the words shown.
+
+The one place an extension reaches these words is a `{fact:KEY}` token, and it reaches them as
+data, not as presentation. The provider publishes a scalar (and optionally its label) through the
+existing `facts.provide` seam, on a repository, a repository branch or the identity-free
+`application` subject; it gains no new capability and learns nothing about the composer.
+Threading chooses the subject (the project's branch, then its repository, then the application),
+words the value for the person's locale, collapses and caps it at 64 characters, drops it at the
+registry's 15-minute freshness ceiling, and re-renders the line already shown — never re-picks —
+when it changes. A line without a fresh value is ineligible, so a provider cannot blank the hero.
+Facts are not projected to the phone, where such lines are never shown.
 
 ## Conversation-row precedent
 
@@ -606,6 +678,20 @@ Sidebar, chooser, usage, details and notification labels consume the host's comm
 value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
+
+Browser Network Capture extends the host-only Tools page with four fixed opt-in rows. Threading
+owns persistence, exact owner-approved agent proposals, capture generations, origin access,
+payload redaction and process-wide retention bounds. Themes style the existing Settings controls;
+extensions cannot enable capture, answer approval or read network payloads through presentation.
+No new public extension component or data capability is introduced.
+
+The project-scoped **Automations** destination and locked-project automation editor are host-only
+surfaces over one project and its automation definitions. They reuse the global automation
+page's native Design components. Threading owns file admission, identity, local account/source
+binding, activation, exact permissions, checkout ownership, immutable resource snapshots and run
+truth under every theme. Native presentation remains the fallback; no extension can replace the
+editor, supply authority, read local automation data or activate a checkout. This adds no public
+component or extension data capability.
 
 The standalone Markdown editor and its Markdown Settings page are host-only document surfaces.
 The entity is one user-opened or unsaved document, independent of projects and sessions. Threading
@@ -718,4 +804,16 @@ data. Rendering and lifecycle are deliberately host-owned: Threading retains lay
 content, the stop/geometry budget, visibility and power gates, Reduce Motion, accessibility
 silence, hit testing, navigation and exact scroll position. A missing/invalid recipe draws the
 ordinary ground or still gradient. The existing `sidebar.backdrop@1` extension hook remains a
-separate Mac surface and does not grant a phone shader renderer.
+separate authored surface; the 2026-10-04 projection below admits its reviewed backdrop on
+the phone without granting extension execution.
+
+## 2026-10-04 — Portable fonts, backdrop shader, sounds and widget accent
+
+These reuse authored theme and existing reviewed sidebar surface contracts; no public component
+or new extension executable authority is added. The phone's backdrop accepts a bounded source
+projection of the Mac's current enabled reviewed sidebar overlay. Threading keeps extension enablement,
+authorization, source admission, scalar binding, layering, one-visible-surface ownership, shader
+compilation and GPU/power/visibility budgets. Font parsing, process registration, sound conversion,
+verified receipts and notification consent remain host-owned. The usage widget is deliberately
+host-only: it accepts one pinned accent while WidgetKit rendering mode, identity, dates, readings,
+contrast and deep links retain ownership. A theme cannot replace these rules or supply controls.

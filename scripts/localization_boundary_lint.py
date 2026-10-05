@@ -84,6 +84,11 @@ LOCAL_FILE_HELPERS: dict[str, dict[str, tuple[str | int, ...]]] = {
         "withAuthorizedBrowser": ("purpose",),
         "confirmSensitiveBrowserAction": (0,),
     },
+    "Sources/Threading/UI/Triggers/AutomationEditorViewController.swift": {
+        "addSection": (0,),
+        "addRow": (0,),
+        "note": (0,),
+    },
     "Sources/Threading/UI/Extensions/ComponentCustomizationGalleryFixture.swift": {
         "Story": ("title", "detail"),
     },

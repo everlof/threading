@@ -10,11 +10,11 @@ final class UnattendedRunPermissionsTests: XCTestCase {
     private let session = SessionID()
     private let folder = "/Users/david/repo/sonda-automations"
 
-    override func tearDown() {
+    override func tearDown() async throws {
         UnattendedRunPermissions.unregister(session)
         PermissionBroker.present = nil
         PermissionBroker.discard(sessionID: session)
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Helpers

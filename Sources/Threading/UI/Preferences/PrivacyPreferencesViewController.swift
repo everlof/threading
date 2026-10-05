@@ -44,11 +44,14 @@ final class PrivacyPreferencesViewController: NSViewController {
     private let claudeAccounts: () -> [AgentAccount]
     private let keychainAvailability:
         @Sendable (String) -> ClaudeKeychainCredentials.Availability
-    private let keychainGrant: @Sendable (String) -> Bool
+    private let keychainAccess: ClaudeKeychainAccess
     private let prefetchUsage: () -> Void
     private var rows: [SystemPrivacyPermission: PermissionRow] = [:]
     private var shown: [SystemPrivacyPermission: SystemPrivacyStatus] = [:]
     private var keychainToggle: ThemedToggle?
+    /// Beside the toggle only while some login is waiting — the page's answer to its own status
+    /// line, so nobody has to switch live usage off and on again to be asked.
+    private var keychainAllowButton: ThemedButton?
     private var keychainSubtitleField: NSTextField?
     private var shownKeychainSubtitle: String?
     private let activationEvents = AppEventObservations()
@@ -74,14 +77,25 @@ final class PrivacyPreferencesViewController: NSViewController {
         keychainGrant: @escaping @Sendable (String) -> Bool = {
             ClaudeKeychainCredentials.requestAccess(forConfigPath: $0)
         },
-        prefetchUsage: @escaping () -> Void = { AccountUsageMenu.prefetch() }
+        prefetchUsage: @escaping () -> Void = { AccountUsageMenu.prefetch() },
+        refreshGrantedUsage: @escaping (AgentAccount) -> Void = {
+            AccountUsageService.shared.refreshAfterCredentialChange($0)
+        }
     ) {
         self.reader = reader
         self.refreshInterval = refreshInterval
         self.settings = settings
         self.claudeAccounts = claudeAccounts
         self.keychainAvailability = keychainAvailability
-        self.keychainGrant = keychainGrant
+        // The same operation the usage popover, the fleet and the palette command run, built
+        // from this page's injected probes so a test still states every keychain answer.
+        self.keychainAccess = ClaudeKeychainAccess(
+            settings: settings,
+            probe: keychainAvailability,
+            grant: keychainGrant,
+            claudeAccounts: claudeAccounts,
+            refreshUsage: refreshGrantedUsage
+        )
         self.prefetchUsage = prefetchUsage
         super.init(nibName: nil, bundle: nil)
     }
@@ -381,6 +395,21 @@ final class PrivacyPreferencesViewController: NSViewController {
         toggle.setAccessibilityLabel(L10n.string("Live usage from your Claude login"))
         keychainToggle = toggle
 
+        let allow = SettingsUI.button(
+            "Allow…",
+            target: self,
+            action: #selector(keychainAllowClicked)
+        )
+        allow.setAccessibilityLabel(L10n.string("Allow keychain access for waiting logins"))
+        allow.setAccessibilityIdentifier("privacy.keychainAllow")
+        allow.isHidden = true
+        keychainAllowButton = allow
+
+        let controls = NSStackView(views: [allow, toggle])
+        controls.orientation = .horizontal
+        controls.alignment = .centerY
+        controls.spacing = Design.Spacing.medium
+
         var subtitleField: NSTextField?
         let liveUsageRow = SettingsUI.row(
             title: "Live usage from your Claude login",
@@ -395,7 +424,7 @@ final class PrivacyPreferencesViewController: NSViewController {
                     + "this is off, usage comes from caches the CLI leaves on disk, which can be "
                     + "hours old or missing."
             ),
-            control: toggle,
+            control: controls,
             subtitleField: &subtitleField
         )
         keychainSubtitleField = subtitleField
@@ -446,20 +475,21 @@ final class PrivacyPreferencesViewController: NSViewController {
             refreshKeychainStatus()
             return
         }
+        grantWaitingLogins()
+    }
 
-        let accounts = claudeAccounts()
-        let availability = keychainAvailability
-        let grant = keychainGrant
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            for account in accounts
-            where availability(account.configPath) == .needsGrant {
-                _ = grant(account.configPath)
-            }
-            Task { @MainActor [weak self] in
-                self?.refreshKeychainStatus()
-                // The pill should light up with the new source now, not a timer-tick later.
-                self?.prefetchUsage()
-            }
+    /// The status line's own answer: asks again for exactly the logins it named as waiting.
+    @objc private func keychainAllowClicked() {
+        grantWaitingLogins()
+    }
+
+    private func grantWaitingLogins() {
+        keychainAllowButton?.isEnabled = false
+        keychainAccess.requestAccessForAllLogins { [weak self] _ in
+            self?.keychainAllowButton?.isEnabled = true
+            self?.refreshKeychainStatus()
+            // The pill should light up with the new source now, not a timer-tick later.
+            self?.prefetchUsage()
         }
     }
 
@@ -471,18 +501,24 @@ final class PrivacyPreferencesViewController: NSViewController {
         keychainToggle?.state = enabled ? .on : .off
 
         guard enabled else {
+            keychainAllowButton?.isHidden = true
             showKeychainSubtitle(keychainSubtitle(status: L10n.string("Off.")))
             return
         }
 
         let accounts = claudeAccounts()
+        let names = accounts.map(\.displayName)
         let availability = keychainAvailability
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let states = accounts.map { availability($0.configPath) }
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                let logins = zip(names, states).map { (name: $0, availability: $1) }
+                self.keychainAllowButton?.isHidden = !logins.contains {
+                    $0.availability == .needsGrant
+                }
                 self.showKeychainSubtitle(
-                    self.keychainSubtitle(status: Self.keychainStatus(for: states))
+                    self.keychainSubtitle(status: Self.keychainStatus(for: logins))
                 )
             }
         }
@@ -494,26 +530,29 @@ final class PrivacyPreferencesViewController: NSViewController {
         keychainSubtitleField?.stringValue = subtitle
     }
 
-    /// One sentence of truth about where the grant stands, testable as a pure function.
+    /// One sentence of truth about where the grant stands, testable as a pure function. A login
+    /// still waiting is named, because "2 of 4" does not say which two, and the button beside
+    /// the sentence asks for exactly those.
     static func keychainStatus(
-        for states: [ClaudeKeychainCredentials.Availability]
+        for logins: [(name: String, availability: ClaudeKeychainCredentials.Availability)]
     ) -> String {
-        let withItems = states.filter { $0 != .missing }
+        let withItems = logins.filter { $0.availability != .missing }
         guard !withItems.isEmpty else {
             return L10n.string("On — no Claude sign-in found in the keychain.")
         }
 
-        let granted = withItems.filter { $0 == .granted }.count
+        let granted = withItems.filter { $0.availability == .granted }.count
         if granted == withItems.count {
             return L10n.format(
                 "On — reading %lld of %lld logins.", Int64(granted), Int64(withItems.count)
             )
         }
+        let waiting = withItems.filter { $0.availability == .needsGrant }.map(\.name)
         return L10n.format(
-            "On — reading %lld of %lld logins. Toggle off and on to be asked again "
-                + "for the rest.",
+            "On — reading %lld of %lld logins. Waiting for access: %@.",
             Int64(granted),
-            Int64(withItems.count)
+            Int64(withItems.count),
+            ListFormatter.localizedString(byJoining: waiting)
         )
     }
 

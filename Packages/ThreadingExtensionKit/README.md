@@ -121,8 +121,10 @@ process. The provider never receives the consumer token or access to its package
 
 Fact providers use `facts.provide` and repeat their manifest's `factDefinitions` in the live
 registration. `ExtensionHostClient.publishFacts(_:replacing:)` atomically replaces values for
-explicit repository or repository-branch subjects. The bearer supplies provider identity and
-process generation; no opaque project or session identifier is accepted by this capability.
+explicit repository or repository-branch subjects, or for the identity-free `.application`
+subject (a value about no repository, such as the weather, which a theme's welcome greeting can
+show through `{fact:KEY}`). The bearer supplies provider identity and process generation; no
+opaque project or session identifier is accepted by this capability.
 `Examples/GitLabStateExtension` is the data-only reference: it discovers public GitLab merge
 request state through an exact `gitlab.com` brokered-network grant and publishes
 `gitlab.mr.state@1` on canonical repository-branch subjects. It declares no navigator, component,
@@ -192,6 +194,13 @@ provides a compact command/status hook immediately before Threading's `+` button
 tab belonging to the targeted session. Tab identity, selection, close, order, overflow, active
 state, persistence, pane visibility, and the new-tab menu remain host-owned. Targets use the
 sanitized session ID; internal tab UUIDs are not part of the public API.
+
+An extension that also ships an app theme can bind any patch to it with
+`themeScope: .ownThemes`, or every patch at once with the manifest's `componentThemeScope`
+floor: Threading then applies those patches only while one of the extension's own themes is
+selected, and a Duplicate to Edit copy does not count. `.always` is written by omission, so
+existing publications are byte-identical; an `ownThemes` scope from an extension without a theme
+is refused. See "Decorations that belong to your theme" in `AGENT_AUTHORING.md`.
 
 Host data is connected through the same per-generation token but independently capability-gated:
 `host.projects.read`, `host.sessions.read`, `host.repositories.read`, `host.providers.read`,

@@ -22,7 +22,7 @@ final class AudioSpectrumViewportObserver {
         return true
     }
 
-    init(view: NSView, changed: @escaping @MainActor () -> Void) {
+    init(view: NSView, changed: @escaping @MainActor @Sendable () -> Void) {
         var ancestor = view.superview
         while let current = ancestor {
             if let clip = current as? NSClipView {
@@ -35,7 +35,7 @@ final class AudioSpectrumViewportObserver {
         }
     }
 
-    deinit {
+    isolated deinit {
         for token in tokens { NotificationCenter.default.removeObserver(token) }
     }
 }

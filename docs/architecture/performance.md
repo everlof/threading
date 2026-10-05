@@ -4,6 +4,201 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## Toast text bounds — 2026-10-06
+
+Toast prose is externally sized: ordinary receipts carry a short heading and a few sentences,
+while automation results may carry an entire report. The matched 24-paragraph main-window
+fixture rendered a 4,087pt System receipt (4,774pt Cyberpunk, 2,210pt Win98), covering the sidebar
+and placing its title and close control outside the viewport. After bounding the heading to two
+lines and the detail to three, the identical shipping-shell fixture measures 83pt System, 98pt
+Cyberpunk and 70pt Win98 in both appearances. The rendered ellipsis and reachable close control
+are inspected evidence, not inferred from constraints.
+
+Both initial label construction and replacement take at most 512 Unicode scalars plus an
+ellipsis per text field, including waiting-card headings. The scalar bound also covers one
+enormous combining sequence; a character bound would not. Layout and resize therefore measure
+only that fixed preview, while the original request and accessibility announcement retain the
+complete text. The existing one-current/three-waiting queue bounds aggregate view ownership.
+`ToastSizingTests` covers narrow/default/dragged widths, five themes, in-place report replacement,
+resizing, a 1.05MB report and a 150,000-scalar combining sequence. Full-input retention and the
+accessibility announcement remain arrival/update work; they are not performed by layout.
+
+## Attachment scan contention and title discovery — 2026-10-04
+
+The installed Release app's retained stall reports covered 20 recent incidents, with durations
+from about 288 ms to 3.05 s. They cannot identify all 120 reported stalls: retention is bounded,
+and an overlapping operation is not proof that it blocked main. Symbolicated 15- and 30-second
+samples nevertheless exposed two actionable owners. Many cancelled terminal attachment tasks
+were still executing ICU regex backtracking simultaneously. A terminal title callback also
+reached account home-directory discovery synchronously on main. Terminal drawing remained a
+separate visible CPU owner.
+
+The plain-path matcher had no token-start boundary. A long token without a supported extension
+retried its remaining suffix at every character, even when there was nothing to resolve on disk.
+A standalone optimized harness using the production expressions and candidate enumeration
+measured three repetitions of the same 16 KiB rejected token: 4,865.91 ms median / 7,695.61 ms
+maximum before, 1.83 ms / 4.05 ms after adding the boundary. Fixture construction and compilation
+are outside the timed interval; regex initialization precedes this size in both runs. This is a
+matched parser measurement on a heavily loaded Mac, not an end-to-end Release stall reduction.
+The production regression covers a 266,034-byte malformed token followed by real paths, supported
+quoted/markdown/URL/Unicode forms, and the existing 512-candidate limit.
+
+All live terminal observers now share one serial preparation worker. Buffer reads, hashing,
+matching and path resolution stay off main. Each observer retains one active task and one flag
+requesting the latest buffer; cancellation cannot release the active slot until synchronous work
+actually returns. Queued cancelled scans stop before reading. The existing bounded buffer suffix,
+candidate count, containment rules, custody worker and publication generation fence remain in
+force. Unchanged-buffer reuse still skips resolution. Regression tests block the worker while
+1,000 updates arrive and while eight terminals request scans, checking both coalescing and main
+actor progress.
+
+Automatic title refreshes await a serial account-discovery worker and a serial title reader.
+There is one active refresh plus one latest request per session. Claude captures its authoritative
+transcript read request on main and resolves it on the worker; Codex reads its canonical index
+there. Account, transcript and execution-directory checks reject stale results, and chosen-title
+authority still wins. Launch reconciliation collects retained identities without filesystem work
+per row, discovers accounts once and reads each distinct account index once. The 120-session
+regression verifies this batching. Synchronous discovery APIs used by other legacy callers are
+still present; this change does not claim to remove that entire debt.
+
+The Debug production-observer stress fixture passed all seven absent/mixed/outside workloads,
+including both scopes and 1,000/5,000 references. Main scheduling measured 0.009–0.104 ms;
+cold main apply peaked at 4.78 ms. Resolution ran on the worker (23.54–194.80 ms), and every
+unchanged repeat reported zero resolution work. Footprint deltas were 1.0–3.5 MB. These injected
+buffers include a 979 KiB extreme beyond the live terminal's suffix cap; fixture manufacture and
+process bootstrap are outside the reported phases. The existing 1,000/3,500/10,000-row terminal
+read fixtures also passed. These observations were made under heavy system load alongside the
+broader test suite, so they are regression evidence rather than Release interaction promises.
+
+Verification used the six changed source/test files over a stable `b3a354ea5` checkout after
+concurrent theme edits interrupted the working-tree builds. The full fast plan executed 10,075
+tests, skipping 80. Four failure assertions belonged to three other cases: the 120-account usage
+pool timed out and a file-activity fixture's directory cleanup raced; both passed separately
+(0.67 s and 2.75 s). The component-catalogue check still reports missing stories for
+`AudioSpectrumViewportObserver`, `FactSheetView`, `AppearancePackMemberCell` and `AudioSpectrumView`.
+Those design files and their catalogue are unchanged by this work. All 31 scanner/title tests in
+the final focused run passed, including the cleaned-up title fixture with no new concurrency
+warnings. Architecture and main-actor latency ratchets also passed; no policy ceiling was raised.
+
+The final integration run reproduced the usage-pool timeout: 93 of 120 requests had started after
+ten seconds. Its fixture slept for 20 ms in every fetch to create overlap, turning a concurrency
+assertion into a whole-fleet throughput deadline. The fixture now gates each four-request wave
+with continuations, verifies that no fifth request enters before release, and still checks that
+all 120 settle. Its waits detect a stalled wave without assigning a speed requirement to the
+complete fleet; the production worker limit and endpoint pacing are unchanged.
+
+The routine full sweep completed Git, chart and Tools cases but did not finish settings search.
+Its unchanged 2,048-item `SettingsSidebar` fixture remained in the initial
+`layoutSubtreeIfNeeded()` at `SettingsRowLayoutTests.swift:1247`. A five-second sample put every
+main-thread sample in AppKit/CoreAutoLayout's recursive layout-engine installation; footprint was
+1.0 GB. The profiling group was stopped after attribution. Later sweep stages and end-to-end
+captures remain unverified. The isolated harness reused the verified Debug bundle after redundant
+per-mode build setup; fixture selections and compiler configuration were preserved.
+
+The installed app still runs the preceding Release binary during these checks. A fresh installed
+Release capture is required to establish how many owner-visible stalls remain; parser timings and
+Debug worker tests cannot establish that count.
+
+## Theme rendering and phone assets — 2026-10-04
+
+Theme tuning has a fixed set of controls. Pointer updates assemble a validated variant and
+repaint it without asset/font inventory preparation; release persists one revision. Image
+legibility checks sample at most 30 images at 64×64 on a detached worker, never during layout —
+two variants × three regions (material backdrop, sidebar, welcome) × a picture and four sprites.
+
+Extension Metal compilation now runs through asynchronous Metal APIs on a cache actor. A digest
+of the complete wrapped source coalesces identical preparation, with at most two compilations,
+32 pending distinct sources and 16 cached pipelines. Mounts draw nothing until ready and retain
+the existing visibility/power gates. `ExtensionSurfaceTextureTests` compares synchronous
+compilation against the new initializer and verifies shared pipeline identity.
+On this Mac's Debug test host (Xcode 26.5, 2026-10-04), its unique-source probe measured
+172.94 ms for the former synchronous compile-and-pipeline path and 1.04 ms for the new mount.
+A later full-suite run measured 5.86 ms and 0.86 ms respectively; preparation latency varies
+substantially between runs. Both paths use the same wrapped source and blend descriptor.
+This measures avoided main-thread work,
+not a faster compiler; preparation still completes asynchronously before the first shader frame.
+
+Phone particle geometry shares `ThemeParticleMotion` with the Mac. One emitter belongs to the
+visible backdrop; at most 16 cells share an area-scaled live-particle budget capped at 120, with
+lifetime at most 24 seconds. Still decoration is a fixed 240-point tile. There is no per-frame
+session scan, SwiftUI timer or CPU image generation. Workload is computed on catalogue publish.
+Drift stays at least eight seconds per cycle and at most 0.25 travel. Lifecycle, motion, power
+and accessibility gates pause both drift and particles; a held field freezes in place, and the
+still tile is for motion off.
+
+Rendition preparation is serial and off-main: at most 32 descriptors, 1 MB per PNG and 6 MB per
+theme, with 24 source-digest cache entries. Phone downloads are limited to two; decoding and
+the 32 MB / 128-file disk LRU run on an actor. Decoded pictures use a 24 MB / 32-image NSCache.
+A digest shared by several slots decodes for the largest current placement; a later larger
+placement upgrades the cached rendition. Load generations prevent cancelled requests from
+clearing or installing over their replacements.
+Theme archives contain descriptors only. Missing pictures do not delay navigation.
+
+**Real-device frame-time and energy results remain unmeasured:** the Debug build installed and
+launched on an unlocked iPhone 16 Pro (iOS 27.0.1) over the local network. Xcode 26.5's Instruments
+could not attach, and a device-wide Power Profiler + Core Animation FPS recording failed with
+“Cannot record until the device is connected.” No numbers are inferred from that empty trace.
+The matched DEBUG fixture uses `THREADING_MOBILE_DEMO=sessions` and
+`THREADING_MOBILE_THEME=particles-stress` (confetti, density 1, size 24), with
+`particles-stress-off` as the otherwise identical density-zero baseline. Launch arguments
+`-theme.motion.enabled YES -theme.reactions.enabled NO` override preferences for that process.
+The outstanding check is a connected-device power/frame capture, including Low Power,
+background/foreground and Reduce Motion transitions. Simulator tests cannot establish energy
+cost. Optional iOS terminal glow has since shipped on the Metal path; its iPhone 16 Pro frame
+measurement is under [Phone glow and portable theme bounds](#2026-10-04--phone-glow-and-portable-theme-bounds).
+
+The [Embedded Swift investigation](../decisions/render-only-embedded-swift.md) establishes that
+a tiny Foundation-free executable links, not that the full extension SDK can yet use that mode.
+
+## Tune drag ticks and the legibility sampler — 2026-10-05
+
+**Contract.** A Tune drag delivers one preview per coalesced pointer event (at most the display
+rate). Each tick validates one variant, paints it and announces it; nothing scales with the
+catalogue except the repaint walk, which is O(views in every window). Persistence, resource
+preparation, the paired-phone broadcast and the page's own picker rebuild happen once, at the
+release (`AppThemeDidChange.isLivePreview` false). The release's image-legibility check runs
+off-main on at most the tuned variant's backdrop picture and four sprites.
+
+**Fixture.** `ThemeTuneDragPerformanceTests` (opt-in, `TEST_RUNNER_THREADING_STRESS=1
+scripts/test.sh fast -only-testing:ThreadingTests/ThemeTuneDragPerformanceTests`): 12 projects ×
+20 dormant sessions, the main window at 1,560×1,080 with Current Theme in the display pane plus
+three retained Current Theme windows (5 windows, 2,063 views), a custom theme with a drifting
+gradient, a stored picture, snow and glow. 120 ticks per knob through the page's real scrubber
+`onChange`; then the three phases alone on the same documents. Debug, Apple M1 Max (64 GB),
+macOS 26.5, Xcode 26.5, unshown windows (so "layout+display" is the synchronous part only).
+
+| Per tick (median / p90 / max) | Before scoping | After |
+|---|---|---|
+| `panelRadius` tick | 20.10 / 21.91 / 25.60 ms | 20.31 / 22.12 / 23.55 ms (unchanged path) |
+| `pictureOpacity` tick | 19.82 / 20.35 / 21.25 ms | 20.08 / 21.02 / 21.59 ms (unchanged path) |
+| `glowRadius` tick | 19.86 / 20.48 / 21.33 ms | **2.05 / 2.15 / 2.22 ms** |
+| layout + display after a tick | 4.06–4.33 ms median | 3.67–4.33 ms median |
+| release (save + settle) | 11.45–11.60 ms | 12.0 ms; glow 28.9 ms (the owed repaint) |
+
+Attribution, same fixture: `repaintEverything` 16.31 ms median (p90 17.65), posting the preview
+event to every live observer 1.63 ms, `AppThemeEditing.assemble` 0.07 ms. The walk is the tick.
+
+**Decision.** A glow tick takes `LivePreviewScope.terminalPalette`: terminals re-read their profile
+from their own `AppThemeDidChange` observers, so the tick skips the window walk and the settle
+runs it once. Radius and backdrop knobs keep the full walk: corner radii and the backdrop's
+gradient, picture and particles are re-stated only through `reapplyRecordedSurface`, and no
+narrower registry of backdrop surfaces exists. A Debug radius or backdrop tick (~24 ms with its
+layout) misses a 60 Hz frame; Release is unmeasured. The structural next step, if a Release
+trace shows the same, is a registry of `.backdrop` surfaces so backdrop ticks repaint only those —
+an `AppThemeRefresh`/`Design` change, not a debounce.
+
+**Legibility sampler.** The worst case is 20 pictures × 20 opacity steps × 4,096 pixels × 8
+gradient stops, about 80 million `pow` calls. A 4,096-step interpolated table for the sRGB
+transfer function (within 1e-6 of the exact curve, tested) and an opaque label's luminance
+computed once replace them. Optimized (`swiftc -O`) synthetic replica of that worst case:
+exact `pow` 948.6 ms, table 269.9 ms, table + hoisted label **181.4 ms**. In the Debug test host
+the table is not faster (20 PNG pictures at 1,600×800 including decode: 3,176 ms table vs 2,865 ms
+exact) because unoptimized Swift array access dominates there; the stress test asserts both paths
+suggest the same opacity. The welcome block (2026-10-05) adds a third region, raising the cap from
+20 to 30 pictures; scaled linearly the optimized worst case is about 270 ms (not re-measured).
+Either way the work is off-main and runs only on create, update or a
+Tune release.
+
 ## One-year token prompt, 2026-10-03
 
 The production Use Token action reproduced an AppKit exception during attached-panel opening:
@@ -670,6 +865,39 @@ and completed scroll continuity, and covers failed and superseded requests and a
 already displayed period. Geometry and raster tests pin reset gaps, independent fill baselines,
 and containment of out-of-domain ink. The `ios-usage` evidence entry covers the shipping sheet.
 
+### Project automation files and catalogue
+
+A usual project has 1–10 definitions; the stress fixture uses the 500-definition ceiling.
+Discovery and verification run on the serial `TriggerStore` worker. A scan stops at 1,000 immediate
+entries and 32 MiB before admitting definitions; each file and automation also has its own byte
+limit. Runtime visits eight folders per 15-second tick. The project sidebar adds a counted navigation
+value only for projects with saved definitions, constructing its cell when the outline needs it.
+Presence/count queries group in SQLite on the store worker (at most 500 projects), decode no
+instructions/files, coalesce notifications, and update only project subtrees whose count changed. The catalogue admits
+25 data rows per page; a single-project global page retains 29 views including sections and
+pagination. History filters in SQLite before its 25-item keyset page. Deleted binding tombstones
+stay indexed and are excluded from the bounded live ownership scan.
+
+The editor loads account discovery before a bounded 32-login menu. A serial catalog worker reads
+at most 512 model choices; the model's effort menu admits 32 levels. Sign-in probes have their
+own serial worker, so its ten-second child deadline never delays a catalog switch. The 160-entry,
+60-second status cache avoids a child per repeated open. Catalog/account generations discard
+answers from previous selections, and closing the sheet cancels remaining probe requests.
+
+One Debug stress run on 2026-10-05, while other builds were active, measured 1.082 s for initial
+500-definition discovery and snapshot/import, and 0.183 s for unchanged discovery. Manufacturing
+the files took 0.201 s and is excluded from those timings. The shipping global catalogue's awaited
+projection plus layout took 0.137 s for the 25-row page; preparing its 500 database fixtures took
+0.396 s separately. These are single-run observations, not a latency percentile or a main-thread
+blocking measurement. During the file stress run, 214 concurrent main-actor heartbeats had a
+maximum gap of 6.5 ms; the test reports this rather than imposing a machine-dependent deadline.
+
+```bash
+THREADING_AUTOMATION_STRESS=1 scripts/test.sh fast \
+  -only-testing:ThreadingTests/ProjectAutomationFilesTests/testStressDiscoveryBudget \
+  -only-testing:ThreadingTests/AutomationShellRenderTests/testRendersAutomationsInShippingWindow
+```
+
 ## Implementation-time scaling gate
 
 Profiling should confirm an architecture, not be the first time its scaling boundary is named.
@@ -1040,6 +1268,15 @@ after 60 seconds if launch never produces one. The client deadline is deliberate
 host's concrete failure wins. Older clients retain the original full response and older Macs retain
 the phone's compatibility fallback; feature negotiation, rather than version guessing, selects the
 new path.
+
+The startup bound is an absolute `ContinuousClock` deadline recorded when the host accepts the
+transaction. Its expiry task sleeps until that deadline, and both waiter admission and surface
+registration check it synchronously before attaching. A busy main actor can delay the timer's
+callback; it cannot extend the wait or let a late surface attach an expired socket. Expiring the
+transaction cancels its task, so a delayed callback cannot retire a replacement transaction.
+The check is one clock read and dictionary lookup per startup edge; no catalogue scan participates.
+`RemoteViewportLeaseGraceTests.testAStartupDeadlineWinsBeforeItsExpiryTaskCanRun` advances the
+host clock without yielding the actor, making the callback-order race deterministic.
 
 Terminal registration happens at `TerminalSessionDelegate.terminalSessionDidStart`, after the PTY
 has published its running process identity. An earlier attempt from the controller's pre-launch
@@ -2722,6 +2959,36 @@ context alpha), and a retained underlay surface (page faults traded one-for-one 
 **Next, if it matters:** composite in the render server — a sublayer holding a coarse blurred image
 that Core Animation scales and blends on the GPU — or bound the underlay to each row's inked extent
 so blank right-hand margins are neither blurred nor composited.
+
+**Mac Metal glow (2026-10-04).** A Mac terminal that glows in a window now draws through SwiftTerm's
+Metal renderer (`themes.md`, "a palette may glow"); the Core Graphics numbers above remain the cost
+of previews and of any terminal outside a window. Its cost was first measured afterwards, with an
+opt-in headless fixture that renders into an offscreen drawable and reads each command buffer's own
+GPU start and end, so no window or awake display is involved:
+
+```bash
+SWIFTTERM_GLOW_BENCH=1 SWIFTTERM_GLOW_BENCH_ROUNDS=4 \
+  swift test -c release -Xswiftc -enable-testing \
+  --package-path Packages/Vendor/SwiftTerm --filter MetalTextGlowCost
+```
+
+A 1,600 × 1,000-point pane at 2x (3,200 × 2,000 drawable pixels, 200 × 62 cells), every cell a new
+truecolor glyph each frame, configurations interleaved by round, 120 frames each after a warm-up
+round. Release, Apple M1 Max, macOS 26.5, with a load average of 90–220 from unrelated builds — so
+the CPU column is noisy and only the GPU column is leaned on:
+
+| glow | GPU p50 | GPU p95 | render call incl. GPU wait, p50 / p95 |
+|---|---:|---:|---:|
+| off | 0.25 ms | 0.26 ms | 9.9 / 15.4 ms |
+| 3 pt, 0.40 | 1.84 ms | 1.85 ms | 11.6 / 14.8 ms |
+| 6 pt, 0.80 | 1.17 ms | 1.19 ms | 11.0 / 15.5 ms |
+
+A full-pane glowing frame adds about 1–1.6 ms of GPU time at a size where Core Graphics' underlay
+was estimated above at +18 ms of main-thread time. That 3 pt costs more than 6 pt was steady
+(p95 within 1% of p50) and is not explained; the only difference between them is the box kernels,
+three 3 × 3 passes against three 5 × 5, both at half resolution. There is no Metal "before" to compare: Metal drew no glow until this change, so the
+baseline row is the same renderer with the glow off. Bounding the halo textures and bucketing them
+(the phone section below) changes no ordinary-size frame; it was not separately timed.
 
 ## Whole-window resize stress target
 
@@ -5869,3 +6136,66 @@ load's first 64 KiB synchronously with the rest in 64 KiB main-actor slices.
 `MarkdownEditorTests.testLargeSourceTintsInBoundedSlices` measured a 131 KB load at 15.5 ms;
 the 560 KB preview stress fixture's end-to-end time stayed within its previous range
 (131–157 ms), with 110 live preview views.
+
+## 2026-10-04 — Phone glow and portable theme bounds
+
+The shipping SwiftTerm Metal path now blurs a separate foreground halo on the GPU. The normal
+foreground stays at drawable resolution. Support of at least four device pixels selects a
+half-resolution halo; smaller support stays at full resolution. Two private halo textures are
+reused. The bound is on the halo, not the drawable (`MetalGlowHaloLayout`): each texture is at
+most 2,048 × 2,048 halo pixels, so the pair holds at most 32 MiB at any drawable size, and a
+drawable that would need more gets a coarser halo instead of none. (The first version admitted
+drawables up to 16,777,216 pixels and refused larger ones outright, so a 6K full-screen pane —
+about 20 million pixels — lost its glow with no fallback, while full-resolution support could hold
+128 MiB.) Textures are allocated in 128-pixel buckets, so a live resize reuses one pair across
+most frames instead of allocating a pair per frame (`MetalSurfaceParityTests`
+`aGlowingResizeReusesItsHaloTextures`: one pair for a 12-step drag), and a Mac terminal that
+leaves its window releases them. Glow off allocates no halo texture and adds no blur passes.
+Live Mac glow selects Metal; unattached previews retain Core Graphics. Its dirty-span underlay cache is capped
+at 64 entries / 16 MiB and retains source rows to avoid identity reuse. No speedup for that cache
+is claimed from the concurrently loaded CPU benchmark.
+
+Physical-device Debug measurement on David's iPhone 16 Pro (iPhone17,1, iOS 27.0.1), normal power
+and thermal state 0, used the actual full-screen RemoteTerminalView. A 60 Hz display link fed
+alternating dense ANSI foreground text across every column of all 51 visible rows for three
+12-second phases. Two seconds of each phase were warmup; command completion timestamps measured
+the remaining ten seconds, with a bounded 2,048-sample collector. The whole visible grid changed
+on each write. These are completed GPU frames, not a claim about physical scanout acknowledgement.
+
+| Glow | Completed frames/s | GPU p95 |
+|---|---:|---:|
+| Off | 59.56 | 0.374 ms |
+| 3 pt / 0.4 | 59.93 | 2.977 ms |
+| 6 pt / 0.8 | 59.89 | 3.020 ms |
+
+Before the half-resolution change, the same glow phases reached GPU p95 7.686 / 11.081 ms.
+The final command log is `/tmp/threading-theme-optional-device-glow2.log`; the DEBUG fixture is
+`THREADING_THEME_GLOW_BENCH=1`. The phone disables glow in Low Power Mode and restores its
+previous renderer. The Metal pixel test covers visible halo, opaque ANSI-background occlusion
+and exact removal; Core Graphics partial-redraw tests remain in place. This also fixed the
+SwiftPM resource lookup: the current test runner is Bundle.main, so package resources must be
+located beside the loaded .xctest bundle rather than that runner.
+
+The hosted Debug Mac shader fixture compared the former synchronous compile/pipeline work
+with mounting the asynchronous view: 64.916 ms versus 1.052 ms in the final fast run. Compilation
+finishes on the worker before drawing; this is one synthetic source under concurrent host load,
+not an end-to-end extension activation guarantee. `ExtensionSurfaceTextureTests` also proves
+identical requests share preparation.
+
+Portable shader compilation uses two active jobs, 32 pending sources and 16 cached pipelines.
+One visible surface is capped at 24 fps and a 1,290-pixel long side, with two commands in flight.
+Three consecutive GPU durations above 4 ms, or a command error, withdraw the surface until its
+recipe is replaced. Hidden, background and Low Power states stop it. Inputs are prepared outside
+frame callbacks; each frame writes twelve scalar floats. Font/image/source/sound I/O and parsing
+stay on bounded workers; asset transfers have two concurrent requests.
+
+**Particle energy remains unmeasured on hardware.** CoreDevice could install and launch the
+16 Pro benchmark over Wi-Fi, but Instruments listed both available user phones as offline.
+Power Profiler recordings failed waiting for an instrument connection/device boot; the second
+phone also refused the developer-disk-image installation. No energy number is inferred from
+simulator timing, GPU glow timing or an unrelated daily MetricKit payload. The particle cap and
+rendered style evidence are covered; the A7 real-device energy acceptance check remains open.
+
+On 2026-10-05 the owner requested simulator testing and a normal Release installation on the
+iPhone. Further device profiling stopped; the earlier glow measurements remain recorded above.
+Particle energy is still unmeasured and is not inferred from simulator results.

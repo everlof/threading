@@ -377,9 +377,11 @@ items.
 - Declare `services.consume` and every exact `serviceDependencies` authority before calling
   another extension.
 - Declare `facts.provide` and the same static `factDefinitions` in the manifest and registration
-  before calling `publishFacts(_:replacing:)`. Provider subjects are canonical repositories or
-  repository branches, never guessed project, session, or terminal IDs. Each call is a complete
-  replacement for its named subjects; an empty fact list clears those subjects.
+  before calling `publishFacts(_:replacing:)`. Provider subjects are canonical repositories,
+  repository branches, or the identity-free `.application` subject — never guessed project,
+  session, or terminal IDs. Each call is a complete replacement for its named subjects; an empty
+  fact list clears those subjects. A theme's welcome greeting can show a published fact; see
+  [Facts a theme's welcome can show](#facts-a-themes-welcome-can-show).
 - Declare `source-control.read` and the same static `sourceControlProviders` in the manifest and
   registration before serving source-control requests. Use
   `ExtensionHostClient.sourceControlFetch`; do not declare a static network grant for the user's
@@ -865,8 +867,61 @@ Decode `ExtensionSettingsUpdateRequest` before other requests in the serve loop,
 with `validate(against:)`, merge its `values`, apply the new behavior, and return exactly one
 `ExtensionSettingsUpdateResponse` echoing the `requestID` and sorted changed `settingIDs`.
 Threading rolls the UI and persisted value back when the process returns an error or the request
-fails. Settings values belong to the user and remain inaccessible as files; use `storage.kv`
-for extension-owned state instead.
+fails — and a request that goes unanswered past its timeout also **stops the process**, because
+Threading can no longer tell what it applied. Settings values belong to the user and remain
+inaccessible as files; use `storage.kv` for extension-owned state instead.
+
+### Fields the host applies
+
+A field whose only reader is a [setting-bound surface input](#inputs-from-your-own-settings)
+should say so, so that your process is never asked about it:
+
+```swift
+ExtensionSettingField(
+    id: "perimeter-comets",
+    title: "Perimeter comets",
+    description: "Comets run around the window's edge.",
+    control: .toggle(defaultValue: true),
+    appliedBy: .host
+)
+```
+
+```json
+{ "id": "perimeter-comets", "title": "Perimeter comets",
+  "control": { "type": "toggle", "defaultValue": true }, "appliedBy": "host" }
+```
+
+`appliedBy` is per field and defaults to `"process"`, the behaviour above. A `"host"` field is
+Threading's to apply: a change is persisted and reaches every surface input bound to it on the
+next frame, **no `ExtensionSettingsUpdateRequest` is sent** (not at launch, not on a change), no
+answer is awaited, and so nothing is rolled back and the process is never stopped over it. Its
+current value is still in `THREADING_EXTENSION_SETTINGS_JSON` at launch, for reading. Only a
+toggle, choice or integer may be host-applied — the values a surface can read — and inspection
+refuses a host-applied text field.
+
+The flag is declared rather than inferred because bindings are published at runtime and the
+manifest is read before your code runs: Threading has to know whether your process is a party to
+a change even when it is not running, and an extension that binds a field *and* handles requests
+for it must keep receiving them. Mix freely — a hybrid extension keeps `"process"` fields beside
+`"host"` ones, and its requests carry only the former.
+
+A choice option may state the number a bound surface reads while it is selected:
+
+```swift
+.choice(defaultValue: "normal", options: [
+    .init(id: "sparse", title: "Sparse", value: 0.25),
+    .init(id: "normal", title: "Normal", value: 0.5),
+    .init(id: "storm", title: "Storm", value: 1)
+])
+```
+
+State a `value` on every option or on none; without values a bound surface reads the selected
+option's zero-based index. Values are ignored everywhere else.
+
+When your extension also contributes the app theme the person is wearing, its settings appear a
+second time — on the **Current Theme** page, under **Theme Options** — rendered with the same
+controls and writing the same values. Title fields for someone looking at the theme, not for
+someone reading your Settings page.
 
 ## Constructing UI
 
@@ -1182,6 +1237,62 @@ opaque IDs, provider/account IDs, display title, activity, branch, side-chat/arc
 surface mode. Folder paths, git directories, complete remote URLs, credentials, prompts,
 transcript IDs/paths, and login email are never returned.
 
+### Facts a theme's welcome can show
+
+A theme's new-session greeting and caption may name a published fact as `{fact:KEY}` or
+`{fact:KEY@VERSION}` (the version defaults to 1): `"CI is {fact:ci.status}."`,
+`"{fact:weather.summary} outside"`. Nothing new is declared for it — the same `facts.provide`
+definitions and `publishFacts(_:replacing:)` calls a navigator reads are what the welcome reads.
+A value about a repository is published on its repository or branch as usual; a value about no
+repository goes on the `.application` subject:
+
+```swift
+let weather = ExtensionFactDefinition(
+    key: .init(id: "weather.summary"),
+    displayName: "Weather",
+    valueType: .string,
+    subjectKinds: [.application],
+    usages: [.presentable]
+)
+// `weather` is in the manifest's `factDefinitions` and the registration, as every definition is.
+try await host.publishFacts(
+    [ExtensionFact(
+        key: weather.key,
+        subject: .application,
+        value: .string("Sunny, 14 °C"),
+        observedAt: Date()
+    )],
+    replacing: [.application]
+)
+```
+
+- **Where Threading looks.** A composer pointed at a project reads that project's repository
+  branch, then its repository, then `.application`; a composer without a project reads
+  `.application` alone. The nearest fresh value wins.
+- **The application subject** is `ExtensionFactSubject.application`, written
+  `{"type":"application"}`, and names nothing. It is one subject shared by every provider: your
+  generation may state at most 32 facts for it, and all providers together resolve at most 128,
+  so publish a handful. It is otherwise an ordinary subject — a publication naming it replaces
+  your generation's facts there, an empty list clears them, and they go when your process
+  generation stops. Navigator rows never read it. A Threading build older than this subject
+  refuses the whole publication with HTTP 422, so publish application facts in a call of their
+  own rather than beside repository facts.
+- **Freshness.** The host's 15-minute ceiling applies: republish a value you still mean within
+  15 minutes, or the line stops being shown.
+- **The wording is Threading's.** A line shows your fact's `label` when you state one, else its
+  value: a string as published, an integer or number in the person's locale (at most two
+  decimals), a boolean as Threading's localized yes/no, a date as a time today and a short date
+  otherwise. Every value is collapsed to one line and capped at 64 characters with an ellipsis.
+  Write the label to be read inside a sentence ("passing", "3 open"), not as a dashboard cell.
+- **No value, no line.** A line whose fact has no fresh value is not eligible, so Threading shows
+  another line or its own greeting rather than a hole. A publication or expiry re-renders the line
+  already shown, in place; it never picks a different one, so a line that becomes eligible waits
+  for the next new session.
+- **The Mac only.** Facts stay on the Mac: the paired iPhone's new-chat screen never shows a
+  `{fact:…}` line.
+- A theme author's key is checked for shape only (a lowercase contribution identifier of at most
+  128 bytes, an optional `@VERSION` of 1–1,000,000); nothing requires a provider to exist.
+
 ### Resolving provider and account images
 
 Primitive identity extensions use two independent contribution/read pairs:
@@ -1312,15 +1423,33 @@ float4 threadingExtensionFragment(
 );
 ```
 
-The host supplies `ThreadingSurfaceUniforms` with `float2 size`, `float time`, one padding float,
-and `float values[8]`. Values use the declaration order in `ExtensionMetalSurface.inputs`;
+The host declares `ThreadingSurfaceUniforms` above your source and binds it at fragment buffer 0
+(80 bytes; `ExtensionMetalSource.UniformLayout` states the offsets):
+
+```metal
+struct ThreadingSurfaceUniforms {
+    float2 size;      // bytes  0…7:  the drawable in pixels
+    float time;       // bytes  8…11: seconds since the surface was built; 0 under reduced motion
+    float _padding;   // bytes 12…15
+    float values[8];  // bytes 16…47: your inputs in declaration order; unused slots are 0
+    float4 focus[2];  // bytes 48…79: host regions as (x, y, width, height) in uv
+};
+```
+
+Values use the declaration order in `ExtensionMetalSurface.inputs`;
 binding names are documentation and stable source identifiers, not shader reflection. Use
 the live-signal table below; unavailable readings use the binding's fallback. The host owns the `MTKView`, pipeline
 wrapper, command queue, fullscreen geometry, transparency, hit testing, frame cadence and
 reduced-motion behavior. Shader source is limited to 256 KiB at the actual opened-file read (a
-package-size preflight is not trusted) and frame rate to 60 fps. `uv` runs `0…1` from the
-top-left corner. Return straight (not premultiplied) colour; the host blends it over what is
-beneath.
+package-size preflight is not trusted) and frame rate to 60 fps. `uv` runs `0…1` across the
+surface from its top-left corner, x rightward and y downward. Return straight (not
+premultiplied) colour; the host blends it over what is beneath.
+
+`focus` tells a surface where the host's own content sits, in that same `uv` space: each region
+is `(x, y, width, height)` with `(x, y)` its top-left corner, and a width of 0 means the region
+does not exist. Only `composer.backdrop@1` states regions (see
+[Beneath the display panel and the composer](#beneath-the-display-panel-and-the-composer));
+every other placement, and the iPhone's projection of a theme's surface, leaves both zero.
 
 A surface may name one package picture as `texture` — a package-relative `.png`, `.jpg` or
 `.jpeg` under `Resources/`. Stating it changes the function the extension supplies to:
@@ -1435,14 +1564,122 @@ try ThreadingComponentCatalog.displayBackdrop.validate(paper)
 - **`composer.backdrop@1`** sits beneath the new-session composer's greeting, chips, prompt box
   and actions, covering the pane the composer fills. The prompt is being typed into: keep it calm.
 
+The composer's layout stays the host's — the prompt box hangs at the bottom and the hero (the mark
+over the greeting) floats centred above it — but a Metal surface here is told where both are, so
+it can design around them instead of guessing from the pane's size:
+
+- `uniforms.focus[0]` is the **hero**: the mark over the greeting, with the caption beneath it
+  when the theme states one. It is all zeros while the composer hides the hero.
+- `uniforms.focus[1]` is the **prompt box**.
+
+Each is `(x, y, width, height)` in the fragment's `uv` space (top-left origin, y downward, `0…1`
+across the surface); the host restates them whenever the composer lays out, so they follow a
+resized window, and a surface published later receives them as it mounts. A region may reach past
+`0…1` when it extends beyond the surface. Treat a width of 0 as "no region" and draw as though it
+were not there:
+
+```metal
+// Signed distance from uv to a region, measured in surface heights; negative inside.
+float distanceToRegion(float2 uv, float4 region, float aspect) {
+    if (region.z <= 0.0) { return 1.0e6; }
+    float2 q = abs(uv - (region.xy + region.zw * 0.5)) - region.zw * 0.5;
+    q.x *= aspect;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+}
+
+float4 threadingExtensionFragment(float2 uv, constant ThreadingSurfaceUniforms &uniforms) {
+    float aspect = uniforms.size.x / max(uniforms.size.y, 1.0);
+    float nearest = min(distanceToRegion(uv, uniforms.focus[0], aspect),
+                        distanceToRegion(uv, uniforms.focus[1], aspect));
+    float clearance = smoothstep(0.0, 0.08, nearest);   // 0 on the content, 1 away from it
+    float drift = 0.5 + 0.5 * sin(uniforms.time * 0.4 + uv.y * 6.0);
+    return float4(0.30, 0.50, 0.90, 0.35 * drift * clearance);
+}
+```
+
+The regions are geometry, not content: the greeting's words, the prompt's text and the caret never
+reach the extension.
+
 One patch dresses every display panel, or every composer — neither takes an entity. An extension
 may publish to any of the three backdrop placements at once
 (`ThreadingComponentCatalog.backdropPlacements`).
 
+### Decorations that belong to your theme
+
+An extension that ships a theme under `appearance.themes` is a bundle, and its backdrops and
+window overlay are usually *that theme's* look. Without saying so, every patch it publishes is
+drawn under whatever theme the person picks — a rain shader over their Solarized window. Say so
+with `themeScope: .ownThemes`, and Threading applies the patch only while the selected app theme
+is one this extension contributes:
+
+```swift
+let surface = ExtensionNode.customSurface(
+    .metal(ExtensionMetalSurface(
+        shaderResource: "Resources/storm.metal",
+        preferredFramesPerSecond: 24
+    )),
+    accessibilityLabel: nil
+)
+let patches = [
+    ExtensionComponentPatch(
+        id: "storm-sidebar",
+        target: .sidebarBackdrop(),
+        hook: .overlay(base: surface, overlay: .proceed),
+        themeScope: .ownThemes
+    ),
+    ExtensionComponentPatch(
+        id: "storm-window",
+        target: .init(component: .applicationMainWindow, contractVersion: 1),
+        hook: .overlay(base: .proceed, overlay: surface),
+        themeScope: .ownThemes
+    )
+]
+try ExtensionComponentPatchPublication(patches: patches).validate(for: manifest)
+try await ExtensionHostClient().publishComponentPatches(patches)
+```
+
+Publish once; do not republish on a theme change. The extension is never told which theme is in
+force and needs no theme reading for this — the host decides at every lookup, takes the
+decoration down the moment another theme is selected, puts it back when one of yours is, and
+re-renders only the components those patches dress. A paired iPhone's sidebar backdrop follows
+the same answer. The scope covers the whole patch — properties, slots, replacement and hook — so
+leave a patch `.always` (the default) when it is function rather than look, such as a CI status
+beside a session's title.
+
+When *every* patch the extension publishes is decoration, declare it once in the manifest:
+
+```json
+"capabilities": ["ui.components", "ui.rendering.metal", "appearance.themes"],
+"themes": [{ "id": "storm", "resource": "themes/storm.json" }],
+"componentThemeScope": "ownThemes"
+```
+
+The manifest declaration is a floor, not a default: every patch is scoped whatever it states, and
+no patch can widen it. That is what makes it worth declaring — it is read before any code runs,
+so the install review can tell the person "its decorations appear only while one of its themes is
+selected", which a per-patch scope (known only once the process publishes) cannot.
+
+Rules:
+
+- `.ownThemes` needs a theme. `manifest.validate()` refuses a manifest-level `ownThemes` without
+  a `themes` entry or without `ui.components`/`appearance.session-identity`, and Threading refuses
+  a publication carrying an `ownThemes` patch from an extension that declares no theme (422, with
+  the same message as `publication.validate(for:)`).
+- **A duplicated theme is not yours.** Duplicate to Edit makes a custom theme of the person's
+  own, with its own id. It keeps the colours, artwork and fonts, and none of your decorations;
+  they return when one of your themes is selected again.
+- An enabled extension is still required. A contributed theme can be selected while its
+  extension is disabled; with no running generation there is nothing to draw.
+- `.always` is written by omission, so an extension that never states a scope publishes exactly
+  the bytes it did before. A Threading build older than this field ignores the key and draws a
+  scoped patch under every theme, which is what it always did — scoping needs a Threading build
+  that knows `themeScope`, and nothing breaks on one that does not.
+
 ### Live signals a surface may bind
 
-A `customSurface` input may be a constant or a `signal` the host answers at draw time. The host
-refuses a patch that names a signal it cannot answer, so bind only these:
+A `customSurface` input may be a constant, a `signal` the host answers at draw time, or one of
+your own settings ([below](#inputs-from-your-own-settings)). The host refuses a patch that names a
+signal it cannot answer, so bind only these:
 
 | Signal | Range | Meaning |
 |---|---|---|
@@ -1485,6 +1722,78 @@ music-driven movement when readings are missing. The complete safe Wasm example 
 `Packages/ThreadingExtensionKit/Examples/MusicSpectrumExtension`; it uses the existing eight
 input slots and draws beneath an intact sidebar. Ordinary theme documents may instead use
 `sidebar.brand.analyzer: "audio"` for the host's compact native analyzer.
+
+### Inputs from your own settings
+
+A surface input may read one of **your own** settings fields — the person's standing choice,
+answered by Threading from its settings store with no process round trip:
+
+```swift
+// Manifest: a toggle the host applies, so the process never has to answer for it.
+ExtensionSettingField(
+    id: "perimeter-comets",
+    title: "Perimeter comets",
+    control: .toggle(defaultValue: true),
+    appliedBy: .host
+)
+
+// Hook: the toggle drives input 0 of the overlay's shader.
+.metal(ExtensionMetalSurface(
+    shaderResource: "Resources/rain.metal",
+    preferredFramesPerSecond: 24,
+    inputs: [
+        .init(name: "comets", value: .setting("perimeter-comets", mapping: .identity)),
+        .init(name: "dark", value: .signal(.themeDark, mapping: .identity))
+    ]
+))
+```
+
+```json
+{ "name": "comets", "value": { "type": "setting", "setting": "perimeter-comets",
+  "mapping": { "inputMinimum": 0, "inputMaximum": 1, "outputMinimum": 0, "outputMaximum": 1,
+               "curve": "linear", "fallback": 0 } } }
+```
+
+```metal
+float4 threadingExtensionFragment(float2 uv, constant ThreadingSurfaceUniforms &uniforms) {
+    float comets = uniforms.values[0];          // 1 while the toggle is on, 0 when off
+    float4 rain = matrixRain(uv, uniforms.time); // matrixRain/perimeterComets: your own helpers
+    return comets > 0.5 ? max(rain, perimeterComets(uv, uniforms.time)) : rain;
+}
+```
+
+What a binding reads, before its mapping:
+
+| Control | Reading |
+|---|---|
+| `toggle` | `1` on, `0` off. |
+| `choice` | The selected option's `value`, or its zero-based index when the options state none. |
+| `integer` | The value itself — state an `inputMaximum` (and `inputMinimum`) covering its range, since the identity mapping clamps to `0…1`. |
+| `text` | Refused: text has no number. |
+
+The rules:
+
+- **Your own fields only.** The field must be declared in *this* extension's manifest settings and
+  be a toggle, choice or integer. Threading refuses a publication naming any other field
+  (`422`, with the input's path); `patch.validateSettingBindings(against: manifest.settings)` runs
+  the same check before you publish.
+- **The same eight inputs.** A setting binding is one of the eight `values`, like any other.
+- **The next frame.** A change reaches the uniform on the surface's next frame — also while the
+  surface's frames are held for motion — and the value is read once per change, never per frame.
+  A setting is not reactive and not motion: Reduce Motion and the reaction settings leave it
+  alone.
+- **The fallback** is read only when the field cannot be read at all.
+- **On iPhone** a projected sidebar backdrop carries the *constant* the Mac reads at the time,
+  mapped exactly as the Mac maps it; a change re-projects it. The phone never sees your settings.
+
+**The render-only pattern.** An extension that publishes its hooks once and never reads stdin —
+a theme's Wasm overlay, say — can still offer options: declare each field `appliedBy: .host`, bind
+it with `.setting(...)`, and keep the serve loop exactly as simple as before. A change applies
+without your process hearing of it, so there is nothing to answer and nothing to roll back. Bind a
+`"process"` field instead when your code must also react (republish a different patch, change a
+panel); the surface then follows once your process acknowledges the change, and a refusal rolls
+both back. When your extension also ships the active app theme, the person finds these options on
+the Current Theme page as well as in Settings.
 
 Buttons in a selected full-content replacement arrive as
 `ExtensionComponentActionRequest`. Return an `ExtensionActionResponse` with the matching
@@ -1648,6 +1957,9 @@ Before reporting an extension complete:
     choices.
 12. For `settings`, test defaults, launch environment values, every control, a live correlated
     update, process rejection rollback, disable/re-enable persistence, and host-page injection.
+    For an `appliedBy: "host"` field, check that flipping it changes the bound surface while the
+    process receives no request, and call `validateSettingBindings(against:)` on every patch
+    that binds one.
 13. For `services.provide`, test the exact registered version, verified caller ID, success and
     error responses, timeout, and disable/reload revocation. For `services.consume`, test an
     undeclared dependency rejection and unavailable required/optional providers.
@@ -1661,7 +1973,13 @@ Before reporting an extension complete:
     an overlay whose top is `.proceed`, draw low-contrast and low-frequency (content sits on it),
     ask for a cadence at or below 30 fps, and check it under a light and a dark theme with the
     60% ceiling in mind. For a textured surface, check the first frames, drawn before the
-    picture arrives, and a package without the picture.
+    picture arrives, and a package without the picture. When the extension also ships a theme,
+    scope its decorations with `themeScope: .ownThemes` (or the manifest's
+    `componentThemeScope`), call `publication.validate(for: manifest)`, and check each one is
+    drawn with your theme, gone under a stock theme and under a Duplicate to Edit copy, and back
+    with your theme. For a composer surface that reads `uniforms.focus`, check it with the hero
+    hidden (`focus[0]` zero), in a short and a tall window, and under a display or sidebar
+    placement, where both regions are zero.
 17. For `ui.rendering.metal`, review the packaged shader source, test its fallback signal value,
     compile it on a Metal-capable Mac, verify controls below it remain clickable, and verify
     reduced motion freezes animation.

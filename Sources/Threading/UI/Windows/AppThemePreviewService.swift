@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import SwiftTerm
 
 // MARK: - App Theme Preview Service
 
@@ -19,6 +20,13 @@ import ImageIO
 /// recorded or posted. Motion is drawn as its still frame (`ThemeParticleHold.withStillFrames`),
 /// because a live emitter's particles exist only in the render server and no capture here can
 /// see them; a logo's plume is stamped where a running stream would have put it.
+///
+/// **A variant that states a welcome gets a new-session band** beneath its window: the
+/// composer pane as `ThemeWelcome` dresses it, built from the components the composer itself
+/// uses, around a prompt box. Its words are rendered at a fixed moment from invented values and
+/// picked with a fixed seed (`WelcomeSample`), so the band reads the same every time and carries
+/// nothing of the person's. A variant without one draws exactly what it drew before the band
+/// existed.
 @MainActor
 enum AppThemePreviewService {
 
@@ -32,6 +40,72 @@ enum AppThemePreviewService {
         static let scale: CGFloat = 1.5
         /// The mascot's moods drawn small along the pane, above the terminal sample.
         static let moodFigureHeight: CGFloat = 48
+        /// `frames: 3` draws the drift at evenly spaced phases of one authored cycle.
+        static let driftFrameCount = 3
+        static let driftPhases: [Double] = (0..<driftFrameCount).map { Double($0) / Double(driftFrameCount) }
+        /// The new-session band is the composer pane alone, as wide as the sample window and at
+        /// least this tall — taller when a large mark and a scaled greeting need the room, so
+        /// the hero is never the one a short pane hides.
+        static let welcomeMinimumHeight: CGFloat = 340
+    }
+
+    /// The moment and the values a previewed welcome is rendered with — invented, so the band
+    /// names no project, person or session count of the user's, and fixed, so the same theme
+    /// previews the same words every time.
+    enum WelcomeSample {
+        /// Tuesday 10 March 2026, 09:41 UTC: a weekday morning.
+        static let moment = Date(timeIntervalSince1970: 1_773_135_660)
+        /// The same moment, as the tool's result names it.
+        static let momentDescription = "Tuesday 10 March 2026, 09:41 UTC"
+        static let project = "threading"
+        static let user = "Ada"
+        static let working = 2
+        static let waiting = 1
+        /// Every band picks its lines from this seed, so equal pools give equal lines.
+        static let seed: UInt64 = 0x7E1C_0DE5
+
+        static var calendar: Calendar {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = .gmt
+            return calendar
+        }
+
+        /// What a line's tokens read: the moment in the app's own language (the language
+        /// `{daypart}` and the app's greeting are in), and the invented values.
+        static var context: ThemeWelcome.Context {
+            ThemeWelcome.Context(
+                date: moment,
+                calendar: calendar,
+                locale: Locale(identifier: L10n.preferredLanguages.first ?? Locale.current.identifier),
+                project: project,
+                user: user,
+                working: working,
+                waiting: waiting,
+                daypartName: ComposerWelcome.daypartName
+            )
+        }
+    }
+
+    /// One new-session band as drawn, with what a reader — the tool's text, a test — needs to
+    /// know about it without reading pixels.
+    struct WelcomeBand {
+        let kind: AppTheme.VariantKind
+        let image: CGImage
+        /// The greeting and caption as rendered at `WelcomeSample`'s moment.
+        let greeting: String
+        let caption: String?
+        let mark: ThemeWelcomeMarkView.Shown
+        let markSide: CGFloat
+        let veils: [ThemeWelcomeScrimView.Veil]
+        /// Whether the welcome's backdrop dresses the band's ground.
+        let isDressed: Bool
+    }
+
+    /// The whole sample and the welcome bands in it, one per appearance that states a welcome
+    /// (at the first drift phase).
+    struct Rendering {
+        let image: CGImage
+        let welcomes: [WelcomeBand]
     }
 
     // MARK: - Public Methods
@@ -70,16 +144,23 @@ enum AppThemePreviewService {
             completion(.failure("\(theme.name) has no \(arguments.appearance ?? "") variant."))
             return
         }
+        let count = arguments.frames ?? 1
+        guard count == 1 || count == Layout.driftFrameCount else {
+            completion(.failure("frames must be 1 or \(Layout.driftFrameCount).")); return
+        }
 
         // Drawn here, where the views live; encoded on a worker, where PNG compression belongs.
-        guard let image = render(theme, kinds: kinds) else {
+        guard let rendering = rendering(theme, kinds: kinds, frameCount: count) else {
             completion(.failure("The preview could not be drawn."))
             return
         }
+        let image = rendering.image
         let text = "Preview of \(theme.name) (\(theme.id.rawValue)), "
             + kinds.map(\.rawValue).joined(separator: " and ")
             + ", drawn on a sample window — top to bottom in that order. Particles are shown "
             + "as a still frame."
+            + (count == Layout.driftFrameCount ? " Each appearance shows its gradient drift at 0, ⅓ and ⅔ of one cycle." : "")
+            + welcomeSummary(rendering.welcomes, frameCount: count)
         Task {
             let png = await Task.detached(priority: .userInitiated) { pngData(image) }.value
             guard let png else {
@@ -91,16 +172,38 @@ enum AppThemePreviewService {
     }
 
     /// The sample, one band per appearance stacked top to bottom.
-    static func render(_ theme: AppTheme, kinds: [AppTheme.VariantKind]) -> CGImage? {
+    static func render(_ theme: AppTheme, kinds: [AppTheme.VariantKind], frameCount: Int = 1) -> CGImage? {
+        rendering(theme, kinds: kinds, frameCount: frameCount)?.image
+    }
+
+    /// The sample and what its welcome bands show. Per appearance, top to bottom: the window
+    /// at each drift phase, then — when the variant states a welcome — the new-session band at
+    /// the same phases.
+    static func rendering(
+        _ theme: AppTheme,
+        kinds: [AppTheme.VariantKind],
+        frameCount: Int = 1
+    ) -> Rendering? {
+        guard frameCount == 1 || frameCount == Layout.driftFrameCount else { return nil }
         let previous = AppThemePalette.current
         AppThemePalette.set(theme)
         defer { AppThemePalette.set(previous) }
 
-        let frames: [CGImage] = ThemeParticleHold.withStillFrames {
-            kinds.compactMap { kind in
-                guard let appearance = kind.appearance else { return nil }
-                return renderFrame(theme: theme, kind: kind, appearance: appearance)
+        // Phases are fractions of the authored cycle, whatever its length: fixed seconds moved
+        // a default 24-second drift by 4% of a cycle, which reads as three identical frames.
+        // Phase 1 is phase 0 again, so the samples stop a third short of it.
+        let phases = frameCount == Layout.driftFrameCount ? Layout.driftPhases : [0]
+        var welcomes: [WelcomeBand] = []
+        let frames: [CGImage] = kinds.flatMap { kind -> [CGImage] in
+            guard let appearance = kind.appearance else { return [] }
+            let window = phases.compactMap { phase in
+                ThemeParticleHold.withStillFrames(phase: phase) {
+                    renderFrame(theme: theme, kind: kind, appearance: appearance)
+                }
             }
+            let bands = phases.compactMap { phase in welcomeBand(theme, kind: kind, phase: phase) }
+            if let first = bands.first { welcomes.append(first) }
+            return window + bands.map(\.image)
         }
         guard !frames.isEmpty else { return nil }
 
@@ -120,7 +223,37 @@ enum AppThemePreviewService {
             top -= frame.height
             context.draw(frame, in: CGRect(x: 0, y: top, width: frame.width, height: frame.height))
         }
-        return context.makeImage()
+        return context.makeImage().map { Rendering(image: $0, welcomes: welcomes) }
+    }
+
+    /// The new-session composer as `kind`'s welcome dresses it, at drift `phase`, or nil when
+    /// that variant states no welcome.
+    ///
+    /// Drawn with the palette narrowed to that one variant and restored after. The welcome's
+    /// type roles — like every type role — resolve against the application's appearance rather
+    /// than the band's, so under the whole theme the dark band of an adaptive theme would set
+    /// its greeting in the light variant's style whenever the Mac is light.
+    static func welcomeBand(
+        _ theme: AppTheme,
+        kind: AppTheme.VariantKind,
+        phase: Double = 0
+    ) -> WelcomeBand? {
+        guard let variant = theme.variant(kind),
+              let welcome = variant.welcome,
+              !welcome.isEmpty,
+              let appearance = kind.appearance else { return nil }
+        let outer = AppThemePalette.current
+        AppThemePalette.set(AppTheme(
+            id: theme.id,
+            name: theme.name,
+            mode: kind == .dark ? .dark : .light,
+            summary: theme.summary,
+            variants: [kind: variant]
+        ))
+        defer { AppThemePalette.set(outer) }
+        return ThemeParticleHold.withStillFrames(phase: phase) {
+            drawWelcome(welcome, kind: kind, appearance: appearance)
+        }
     }
 
     /// PNG bytes through ImageIO, which is safe off the main actor.
@@ -164,39 +297,235 @@ enum AppThemePreviewService {
                 content.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
                 content.trailingAnchor.constraint(equalTo: host.trailingAnchor)
             ])
+            if let style = WindowChromeAppearance.resolve(for: appearance) {
+                let band = WindowTitleBandView()
+                band.fixtureStyle = style
+                band.fixtureIsKey = true
+                band.setTitle(theme.name)
+                host.addSubview(band)
+                NSLayoutConstraint.activate([
+                    band.topAnchor.constraint(equalTo: host.topAnchor),
+                    band.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                    band.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+                    band.heightAnchor.constraint(equalToConstant: style.bandHeight)
+                ])
+            }
             host.layoutSubtreeIfNeeded()
             repaintTree(host)
             host.layoutSubtreeIfNeeded()
 
-            // The rep AppKit makes for caching this view carries the colour space it actually
-            // draws in; drawing it into the sRGB canvas below converts it properly. A hand-made
-            // device-RGB rep did not: it received display-gamut values under a generic tag, and
-            // a stated #E4000F came out an orange-red.
-            guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
-            host.cacheDisplay(in: host.bounds, to: rep)
-
-            let width = Int(Layout.size.width * Layout.scale)
-            let height = Int(Layout.size.height * Layout.scale)
-            guard let drawn = rep.cgImage,
-                  let context = CGContext(
-                    data: nil,
-                    width: width,
-                    height: height,
-                    bitsPerComponent: 8,
-                    bytesPerRow: 0,
-                    space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
-                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-                  ) else { return }
-            context.interpolationQuality = .high
-            context.draw(drawn, in: CGRect(x: 0, y: 0, width: width, height: height))
-            context.scaleBy(x: Layout.scale, y: Layout.scale)
-
-            stampLogoPlume(in: host, context: context, appearance: appearance)
-            stampMascotPlumes(in: host, context: context)
-            drawTerminal(theme: theme, kind: kind, in: context)
-            result = context.makeImage()
+            result = capture(host) { context in
+                stampLogoPlume(in: host, context: context, appearance: appearance)
+                stampMascotPlumes(in: host, context: context)
+                drawTerminal(theme: theme, kind: kind, in: context)
+            }
         }
         return result
+    }
+
+    /// Draws `host` into an sRGB canvas at the preview's scale, then lets `stamp` draw over it
+    /// in the host's points — what a still capture cannot see for itself.
+    private static func capture(_ host: NSView, stamp: (CGContext) -> Void) -> CGImage? {
+        // The rep AppKit makes for caching this view carries the colour space it actually
+        // draws in; drawing it into the sRGB canvas below converts it properly. A hand-made
+        // device-RGB rep did not: it received display-gamut values under a generic tag, and
+        // a stated #E4000F came out an orange-red.
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
+        host.cacheDisplay(in: host.bounds, to: rep)
+
+        let width = Int(host.bounds.width * Layout.scale)
+        let height = Int(host.bounds.height * Layout.scale)
+        guard let drawn = rep.cgImage,
+              let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(drawn, in: CGRect(x: 0, y: 0, width: width, height: height))
+        context.scaleBy(x: Layout.scale, y: Layout.scale)
+        stamp(context)
+        return context.makeImage()
+    }
+
+    // MARK: - New Session
+
+    /// The composer pane, bottom to top as the composer stacks it: the app's ground, the
+    /// welcome's backdrop (the ground view's own bottom layer), the veils, then the hero —
+    /// mark, greeting, caption — floating centred above a prompt box that hangs from the foot.
+    /// No extension plane: the preview executes no extension.
+    private static func drawWelcome(
+        _ welcome: ThemeWelcome,
+        kind: AppTheme.VariantKind,
+        appearance: NSAppearance
+    ) -> WelcomeBand? {
+        // Picked as the composer picks an arrival's lines, from a fixed moment and seed.
+        let context = WelcomeSample.context
+        var generator = SeededGenerator(state: WelcomeSample.seed)
+        let pick = ComposerWelcome.pick(
+            greeting: welcome.greeting,
+            caption: welcome.caption,
+            at: context,
+            using: &generator
+        )
+        let greetingText = pick.renderedGreeting(at: context)
+        let captionText = pick.renderedCaption(at: context)
+
+        var band: WelcomeBand?
+        appearance.performAsCurrentDrawingAppearance {
+            let width = Layout.size.width
+            let heroWidth = width - Design.Spacing.pane * 2
+
+            let ground = ThemeWelcomeGroundView()
+            ground.translatesAutoresizingMaskIntoConstraints = false
+            ground.appearance = appearance
+            ground.preview = welcome
+            let scrim = ThemeWelcomeScrimView()
+            scrim.preview = welcome
+
+            let mark = ThemeWelcomeMarkView(defaultSide: ComposerDefaults.heroMarkSide)
+            mark.previewSide = ThemeWelcomeAppearance.markSide(welcome, default: ComposerDefaults.heroMarkSide)
+            mark.preview = ThemeWelcomeAppearance.mark(welcome, appearance: appearance)
+            // At rest, as the sidebar sample stands it: the window's mood is the user's sessions.
+            if mark.shown == .mascot {
+                mark.figure.setMood(.idle, fallbackMood: .idle)
+                mark.figure.setWorkingIntensity(0)
+            }
+
+            let greeting = NSTextField(wrappingLabelWithString: greetingText)
+            greeting.applyFont(.welcomeGreeting)
+            greeting.alignment = .center
+            greeting.preferredMaxLayoutWidth = heroWidth
+            greeting.textColor = ThemeWelcomeAppearance.ink(.greeting, of: welcome, appearance: appearance)
+                ?? Design.Text.label
+            let hero = NSStackView(views: [mark, greeting])
+            hero.orientation = .vertical
+            hero.alignment = .centerX
+            hero.spacing = Design.Spacing.inset
+            hero.translatesAutoresizingMaskIntoConstraints = false
+            if let captionText {
+                let caption = NSTextField(wrappingLabelWithString: captionText)
+                caption.applyFont(.welcomeCaption)
+                caption.alignment = .center
+                caption.preferredMaxLayoutWidth = heroWidth
+                caption.textColor = ThemeWelcomeAppearance.ink(.caption, of: welcome, appearance: appearance)
+                    ?? Design.Text.secondary
+                hero.addArrangedSubview(caption)
+                // A caption belongs to its greeting: closer to it than the greeting is to the mark.
+                hero.setCustomSpacing(Design.Spacing.small, after: greeting)
+            }
+
+            let prompt = PromptView()
+            prompt.translatesAutoresizingMaskIntoConstraints = false
+            prompt.placeholder = ThemeWording.composerPlaceholder(for: appearance)
+                ?? ComposerDefaults.promptPlaceholder
+            prompt.minimumHeight = ComposerDefaults.promptHeight
+            prompt.submitPlacement = .outside
+
+            // localization-ignore: sample copy drawn only into the agent's preview image
+            let label = NSTextField(labelWithString: "\(L10n.string("New Session")) · \(kind.rawValue)")
+            label.applyFont(.caption)
+            label.textColor = Design.Text.secondary
+            label.translatesAutoresizingMaskIntoConstraints = false
+
+            // Tall enough that the hero is never the one a short pane hides.
+            let height = max(
+                Layout.welcomeMinimumHeight,
+                (hero.fittingSize.height + ComposerDefaults.heroMinimumClearance * 2
+                    + ComposerDefaults.promptHeight + Design.Spacing.pane).rounded(.up)
+            )
+            let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+            host.wantsLayer = true
+            host.appearance = appearance
+            let fill = ThemedSurfaceView()
+            fill.translatesAutoresizingMaskIntoConstraints = false
+            fill.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+            host.addSubview(fill)
+            host.addSubview(ground)
+            ground.addSubview(scrim)
+            ground.addSubview(label)
+            ground.addSubview(hero)
+            ground.addSubview(prompt)
+            let room = NSLayoutGuide()
+            ground.addLayoutGuide(room)
+            var constraints: [NSLayoutConstraint] = []
+            for view in [fill, ground] {
+                constraints += [
+                    view.topAnchor.constraint(equalTo: host.topAnchor),
+                    view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+                    view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                    view.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+                ]
+            }
+            constraints += [
+                scrim.topAnchor.constraint(equalTo: ground.topAnchor),
+                scrim.bottomAnchor.constraint(equalTo: ground.bottomAnchor),
+                scrim.leadingAnchor.constraint(equalTo: ground.leadingAnchor),
+                scrim.trailingAnchor.constraint(equalTo: ground.trailingAnchor),
+                label.topAnchor.constraint(equalTo: ground.topAnchor, constant: Design.Spacing.medium),
+                label.leadingAnchor.constraint(equalTo: ground.leadingAnchor, constant: Design.Spacing.large),
+                // The column's measure: the pane less its margins, up to the composer's cap.
+                prompt.widthAnchor.constraint(equalToConstant: min(heroWidth, ComposerDefaults.contentWidth)),
+                prompt.centerXAnchor.constraint(equalTo: ground.centerXAnchor),
+                prompt.bottomAnchor.constraint(equalTo: ground.bottomAnchor, constant: -Design.Spacing.pane),
+                room.topAnchor.constraint(equalTo: ground.topAnchor),
+                room.bottomAnchor.constraint(equalTo: prompt.topAnchor),
+                hero.centerXAnchor.constraint(equalTo: ground.centerXAnchor),
+                hero.centerYAnchor.constraint(equalTo: room.centerYAnchor),
+                hero.widthAnchor.constraint(lessThanOrEqualToConstant: heroWidth)
+            ]
+            NSLayoutConstraint.activate(constraints)
+            host.layoutSubtreeIfNeeded()
+            repaintTree(host)
+            host.layoutSubtreeIfNeeded()
+            scrim.heroRegion = scrim.convert(hero.frame, from: ground)
+            scrim.promptRegion = scrim.convert(prompt.frame, from: ground)
+
+            guard let image = capture(host, stamp: { context in
+                stampMascotPlumes(in: host, context: context)
+            }) else { return }
+            band = WelcomeBand(
+                kind: kind,
+                image: image,
+                greeting: greetingText,
+                caption: captionText,
+                mark: mark.shown,
+                markSide: mark.side,
+                veils: scrim.veils,
+                isDressed: ground.isDressed
+            )
+        }
+        return band
+    }
+
+    /// What the tool's text says about the bands, so the agent reads the exact words drawn.
+    private static func welcomeSummary(_ bands: [WelcomeBand], frameCount: Int) -> String {
+        guard !bands.isEmpty else { return "" }
+        let lines = bands.map { band in
+            // The mark in the wire's words, so a stated `logo` drawn as `app` reads as the
+            // fallback it is.
+            let mark: ThemeWelcome.Mark
+            switch band.mark {
+            case .app: mark = .app
+            case .logo: mark = .logo
+            case .mascot: mark = .mascot
+            case .hidden: mark = .hidden
+            }
+            return "\(band.kind.rawValue) greets \"\(band.greeting)\""
+                + (band.caption.map { " over the caption \"\($0)\"" } ?? " with no caption")
+                + ", mark \(mark.rawValue)"
+        }
+        return " Beneath the window of each appearance that states a welcome is its new-session "
+            + "composer (⌘N)"
+            + (frameCount == Layout.driftFrameCount ? ", its drift at the same three phases" : "")
+            + ", its lines picked with a fixed seed and rendered at \(WelcomeSample.momentDescription) "
+            + "with sample values (project \"\(WelcomeSample.project)\", user \"\(WelcomeSample.user)\", "
+            + "\(WelcomeSample.working) working, \(WelcomeSample.waiting) waiting): "
+            + lines.joined(separator: "; ") + "."
     }
 
     /// The sidebar the real window wears, around invented rows.
@@ -338,7 +667,7 @@ enum AppThemePreviewService {
             ("Sample Project", true, false),
             ("Design the landing page", false, false),
             ("Fix the login redirect", false, true),
-            ("Write release notes", false, false),
+            (ThemeWording.untitledSessionName(for: NSAppearance.currentDrawing()) ?? L10n.string("New Session"), false, false),
             ("Another Project", true, false),
             ("Profile the importer", false, false)
         ]
@@ -355,13 +684,32 @@ enum AppThemePreviewService {
             label.textColor = isSelected
                 ? Design.Ink.selection.label
                 : (isProject ? Design.Text.secondary : Design.Text.label)
+            let mark = GlyphView()
+            let tinted = IdentityMarkInk.isTinted(for: NSAppearance.currentDrawing())
+            mark.slot = NSSize(width: AgentIconDefaults.pointSize, height: AgentIconDefaults.pointSize)
+            if isProject {
+                mark.image = GeneratedProjectIcon.image(for: title, tint: tinted ? IdentityMarkInk.ink : nil)
+            } else {
+                let image = AgentKind.claude.icon?.copy() as? NSImage
+                if tinted { image?.isTemplate = true }
+                mark.image = image
+            }
+            mark.tint = tinted
+                ? (isSelected ? Design.Ink.selection.label : IdentityMarkInk.ink)
+                : Design.Text.secondary
+            row.addSubview(mark)
             row.addSubview(label)
             NSLayoutConstraint.activate([
+                mark.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: Design.Spacing.small),
+                mark.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+                mark.widthAnchor.constraint(equalToConstant: AgentIconDefaults.pointSize),
+                mark.heightAnchor.constraint(equalToConstant: AgentIconDefaults.pointSize),
+                label.trailingAnchor.constraint(lessThanOrEqualTo: row.trailingAnchor, constant: -Design.Spacing.small),
                 row.heightAnchor.constraint(equalToConstant: Layout.rowHeight),
                 row.widthAnchor.constraint(equalToConstant: Layout.sidebarWidth - Design.Spacing.medium * 2),
                 label.leadingAnchor.constraint(
-                    equalTo: row.leadingAnchor,
-                    constant: isProject ? Design.Spacing.small : Design.Spacing.large
+                    equalTo: mark.trailingAnchor,
+                    constant: Design.Spacing.small
                 ),
                 label.centerYAnchor.constraint(equalTo: row.centerYAnchor)
             ])
@@ -412,7 +760,10 @@ enum AppThemePreviewService {
         actions.orientation = .horizontal
         actions.spacing = Design.Spacing.small
 
-        let cardStack = NSStackView(views: [heading, body, detail, actions])
+        let composer = ThemedTextField()
+        composer.placeholderString = ThemeWording.composerPlaceholder(for: NSAppearance.currentDrawing())
+            ?? L10n.string("Write a message…")
+        let cardStack = NSStackView(views: [heading, body, detail, composer, actions])
         cardStack.orientation = .vertical
         cardStack.alignment = .leading
         cardStack.spacing = Design.Spacing.small
@@ -432,6 +783,7 @@ enum AppThemePreviewService {
             cardStack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Design.Spacing.inset),
             cardStack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Design.Spacing.inset),
             body.widthAnchor.constraint(equalTo: cardStack.widthAnchor),
+            composer.widthAnchor.constraint(equalTo: cardStack.widthAnchor),
             card.widthAnchor.constraint(equalTo: column.widthAnchor),
             column.topAnchor.constraint(
                 equalTo: pane.topAnchor,
@@ -495,44 +847,32 @@ enum AppThemePreviewService {
             width: Layout.size.width - Layout.sidebarWidth - Design.Spacing.large * 2,
             height: Layout.terminalHeight
         )
-        let path = CGPath(
-            roundedRect: frame,
-            cornerWidth: Design.Spacing.small,
-            cornerHeight: Design.Spacing.small,
-            transform: nil
+        // Capture the terminal itself: caching its parent can produce coloured grounds with
+        // no text. This is the shipping SwiftTerm glow underlay, including ANSI run colours.
+        let terminal = TerminalView(
+            frame: CGRect(origin: .zero, size: frame.size),
+            font: Design.Typography.code()
         )
-        context.saveGState()
-        context.addPath(path)
+        let window = NSWindow(contentRect: terminal.frame, styleMask: [.borderless], backing: .buffered, defer: true)
+        window.contentView = terminal
+        terminal.suspendsRenderingWhenNotVisible = false
+        terminal.installColors(palette.asSwiftTermColors())
+        terminal.nativeForegroundColor = palette.foreground
+        terminal.nativeBoldForegroundColor = palette.boldForeground
+        terminal.nativeBackgroundColor = palette.background
+        terminal.textGlow = palette.glow?.textGlow
+        terminal.feed(text: "\u{1B}[?25l\u{1B}[34m~/sample \u{1B}[32m❯ \u{1B}[0mgit status\r\n"
+            + "\u{1B}[31mmodified: \u{1B}[0mSources/App.swift\r\n"
+            + "\u{1B}[33mwarning: \u{1B}[0m2 files unstaged\r\n"
+            + "\u{1B}[1mBuild succeeded\u{1B}[0m  \u{1B}[90m0 errors\u{1B}[0m")
+        terminal.prepareFrameForSnapshot()
+        guard let bitmap = terminal.bitmapImageRepForCachingDisplay(in: terminal.bounds) else { return }
+        terminal.cacheDisplay(in: terminal.bounds, to: bitmap)
+        terminal.cacheDisplay(in: terminal.bounds, to: bitmap)
         context.setFillColor(palette.background.cgColor)
-        context.fillPath()
-        context.restoreGState()
-
-        let font = Design.Typography.code()
-        let bold = Design.Typography.code(weight: .bold)
-        func run(_ text: String, _ color: NSColor, _ face: NSFont = font) -> NSAttributedString {
-            NSAttributedString(string: text, attributes: [.font: face, .foregroundColor: color])
-        }
-        func line(_ runs: [NSAttributedString]) -> NSAttributedString {
-            let joined = NSMutableAttributedString()
-            runs.forEach { joined.append($0) }
-            return joined
-        }
-        let lines = [
-            line([run("~/sample ", palette.blue), run("❯ ", palette.green), run("git status", palette.foreground)]),
-            line([run("modified: ", palette.red), run("Sources/App.swift", palette.foreground)]),
-            line([run("warning: ", palette.yellow), run("2 files unstaged ", palette.foreground), run("(cyan)", palette.cyan), run(" ", palette.foreground), run("(magenta)", palette.magenta)]),
-            line([run("Build succeeded", palette.boldForeground, bold), run("  0 errors", palette.brightBlack)])
-        ]
-
-        let graphics = NSGraphicsContext(cgContext: context, flipped: false)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = graphics
-        var baseline = frame.maxY - Design.Spacing.inset - 12
-        for text in lines {
-            text.draw(at: CGPoint(x: frame.minX + Design.Spacing.inset, y: baseline))
-            baseline -= 20
-        }
-        NSGraphicsContext.restoreGraphicsState()
+        context.fill(frame)
+        if let image = bitmap.cgImage { context.draw(image, in: frame) }
+        withExtendedLifetime(window) {}
     }
 
     /// Every recorded surface, layer colour and font in the sample restated under the swapped
@@ -556,5 +896,18 @@ enum AppThemePreviewService {
             if let nested = descendant(of: subview, as: type) { return nested }
         }
         return nil
+    }
+
+    /// SplitMix64: a named seed, so a pick is a fact rather than a roll.
+    private struct SeededGenerator: RandomNumberGenerator {
+        var state: UInt64
+
+        mutating func next() -> UInt64 {
+            state &+= 0x9E37_79B9_7F4A_7C15
+            var mixed = state
+            mixed = (mixed ^ (mixed >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            mixed = (mixed ^ (mixed >> 27)) &* 0x94D0_49BB_1331_11EB
+            return mixed ^ (mixed >> 31)
+        }
     }
 }

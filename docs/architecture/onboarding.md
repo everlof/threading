@@ -90,6 +90,32 @@ Cursor's installer have explicit entries, rather than letting Cursor fall throug
 npm command. General Settings ▸ Agent tools keeps provider installation guides available after
 the walkthrough, alongside an explicit installed-version and update check.
 
+**The answer is shared, and the install is a click.** The page no longer runs a probe of its own:
+it reads `AgentCLIAvailability`, the one installed-CLI answer the composer defaults from and
+refuses sends on, so the page cannot call a runtime installed that a chat then fails to start.
+The old page showed five "Not found" rows in warning ink and a command to paste into another
+app, never looked again, and said nothing about one being enough — on a fresh Mac that read as
+five faults. Now each missing row carries **Install…**, a summary line says one agent is all a
+chat needs (in label ink only when none is installed), and the rows update on their own when the
+sheet finishes or the app comes back to the front after an install elsewhere.
+
+**Install** opens `AgentCLIInstallViewController`, a sheet that shows the provider's exact
+command (`AgentCLIInstallRecipe`, the same table the old hint used) and runs nothing until the
+person presses Install. It then runs the command through the login shell (`-l`, so npm and the
+providers' installers resolve as launches will) in an embedded terminal, `TerminalSession`'s
+one-shot mode, whose exit ends the session so the sheet can read the outcome. Background
+installation was rejected: it would download and execute network code nobody watched, and hide
+any prompt the installer prints. Three outcomes are told apart because each needs a different
+next step — found on PATH (done), a native install in `~/.local/bin` the login shell's PATH
+skips (a `~/.zprofile` line, offered for copying, not a reinstall), and an installer that failed
+(its output is right there). The npm-based installers (Codex, Grok, OpenCode) check for `npm`
+first and ask for Node.js instead of failing with a second `command not found`.
+
+The composer opens a fresh draft on `AgentCLIAvailability.preferredRuntime`: the app-wide choice
+unless the probe proved it missing while another runtime is installed, so a Codex-only Mac no
+longer opens every draft on Claude Code. Missing runtimes stay in the identity menu, marked
+"Not installed", because choosing one and pressing Send is now the start of installing it.
+
 The account page is also a complete way in for somebody who has no alternate config homes yet.
 `AccountSetupCardViewController` is shared with Settings ▸ Agents & Accounts and puts the
 supported-agent roster before discovery's result, so the empty state never hides what can be

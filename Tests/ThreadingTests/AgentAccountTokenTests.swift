@@ -135,9 +135,9 @@ final class AgentAccountTokenTests: XCTestCase {
         let vault = makeVault()
         let announced = expectation(forNotification: AgentAccountTokensDidChange.name, object: nil)
         let saved = expectation(description: "saved")
-
+        let expectedToken = token
         vault.save("  \(token)\n", for: alternate.id) { result in
-            XCTAssertEqual(try? result.get().value, self.token)
+            XCTAssertEqual(try? result.get().value, expectedToken)
             saved.fulfill()
         }
         wait(for: [saved, announced], timeout: 5)

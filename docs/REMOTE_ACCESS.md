@@ -1447,12 +1447,35 @@ Resolved semantic colours, light/dark mode, corner radii, border weight and opti
 are sent to both iOS and the browser. Terminal palettes remain session-scoped. A terminal
 session's palette button on iPhone offers **Inherit**, **Follow App Theme**, and the Mac's theme
 library, while session and project overrides still carry their full foreground, background,
-cursor, selection and ANSI colours to the remote terminal. The iPhone keeps native system
-typography rather than trying to transfer a Mac-only font. Application-owned iOS alerts and
+cursor, selection and ANSI colours to the remote terminal. The iPhone maps the theme's system,
+rounded, serif or monospaced typeface hint onto native system families for navigation and chrome.
+Owner-supplied named fonts now travel only to that owner's paired devices, through the private
+asset route. CoreText registers them for the receiving process, with a native fallback until
+registration finishes. Titles and chrome use the supplied face; message bodies and terminal
+fonts keep their own typography. This reverses the earlier native-only chrome decision.
+Application-owned iOS alerts and
 confirmations use the same palette and live updates; their shared component and mandatory
 extension policy are documented in the [iOS theme boundary](IOS_THEMED_DIALOGS.md), together
 with the themed settings chrome, the sheet-crossing rule and what a theme may say about the
 system keyboard.
+
+The theme also supplies title morphs, working words, identity ink, backdrop gradients, particles
+and optional pictures. The phone owns motion, workload reaction strength, Reduce Motion and
+Low Power gates. A pushed page yields backdrop animation to the visible page. Pictures never
+block a screen: `GET /api/theme-assets/<sha256>` uses the same bearer authorization as theme
+delivery and admits only the currently projected theme's digests, rechecking authorization at
+delivery. A theme or variant change retires old digests immediately; an edit of the same theme
+keeps serving the published set until its replacement is prepared, and is announced only when
+the set differs, so a library or customization event or a live-tuning tick never sends phones an
+empty set. Nothing is prepared before a client or a push first asks. PNG renditions carry an immutable ETag,
+are prepared off the main actor, and are bounded to 1 MB each / 6 MB per theme (1,290 px backdrop,
+512 px character art, 128 px sprites). The phone verifies SHA-256, limits downloads to two, and
+keeps a 32 MB / 128-file disk LRU for offline use; only metadata enters the 256 KB theme archive.
+The dashboard's one character is the theme's mascot. It stands on the trailing floating pill in
+the list's ground, so rows scroll over it and it takes no strip of its own; only the list's end
+grows enough for the last row to rise clear of it. A theme's logo stays on the Mac: the phone has
+no brand row, and its title already names the Mac. The mascot never changes session facts or
+input controls.
 
 Pairing and sharing are deliberately different actions:
 
@@ -1749,9 +1772,11 @@ answer rather than two booleans: `direct` sends keystrokes to the PTY,
 `independentComposer` writes in an iOS text area and submits the whole line atomically, and
 `none` offers nothing. A caller reading only one of two booleans eventually offers both surfaces
 or neither. While solo, the key bar switches between Direct and Compose without changing or
-restarting the Mac session. That device-local choice is remembered for the host/session pair;
-**Settings → On this iPhone → Terminal keys** supplies Direct-by-default or Compose-by-default
-only for terminal sessions this phone has not seen before.
+restarting the Mac session. That choice is one device-local `AppStorage` preference shared by all terminals, across hosts
+and app launches. **Settings → On this iPhone → Terminal keys** reads and writes the same key.
+Per-session continuity no longer overrides it; opening a terminal never writes the preference.
+A toggle reads/writes one enum value in O(1), independent of session count, without encoding the
+continuity archive. Collaboration changes only the effective mode, never this saved value.
 
 The mode also waits for the roster. `hello` and the first `inputControl` frame are two messages
 with a render between them, and treating that gap as "roster unknown, keep the safe atomic path"
@@ -2958,3 +2983,77 @@ user may connect and ask, and the phone shows who did.
 The Mac logs each step under the `secret-approval` category of `codes.threading`: a code issued
 or expired, an enrollment accepted or refused and why, each request with its client, the phone
 checking, and the answer. Never a code, a key or a secret; the requester chain is hashed.
+
+### Portable theme assets (2026-10-04)
+
+The [phone rendering decision](decisions/phone-theme-rendering.md) adds owner-only fonts and one
+reviewed, currently enabled sidebar Metal backdrop. No extension executable or enablement state
+travels: the Mac retains activation ownership. Shader source is capped at 256 KiB;
+its optional texture is at most 1,024 pixels. The phone owns visibility, a 24 fps / 1,290-pixel
+surface budget, reaction controls and power gates. Audio is unavailable; three consecutive GPU
+frames over 4 ms withdraw the surface. Terminal glow uses the shared GPU renderer and is disabled
+in Low Power Mode.
+
+Font transfers use at most four 16 MiB files. Closed byte ranges cap each response at 1 MiB,
+with current authorization and theme membership checked again before delivery. A font is read
+from its file one range at a time on the route's queue rather than held in memory, and is
+fingerprinted once per path, size and modification date. Fonts, the shader and the surface recipe
+are owner-only: a collaborator's theme projection omits their descriptors. The phone checks
+size, SHA-256 and declared family before process-scoped URL registration (including collections).
+Registered copies add at most 64 MiB to the 32 MiB general asset cache.
+
+Attention and turn-finished sound renditions are PCM CAF, below 30 seconds and 1 MiB. The phone
+verifies and installs digest-named files in its private Library/Sounds, then reports successful
+receipts. A custom push name requires a current matching asset, owner authorization, that kind's
+sound preference and per-device preview consent. Broker protocol 4 carries this optional name;
+older brokers retain the ordinary default/silence behavior. Theme selection grants no consent.
+The usage widget exports only the pinned Mac's resolved accent, and WidgetKit tinted/vibrant
+modes keep system colors.
+
+### The theme's welcome on the new-chat screen (2026-10-05)
+
+The Mac's composer welcome ([themes](architecture/themes.md#2026-10-05--the-welcome-is-the-themes))
+reaches the phone's new-chat screen as an optional `welcome` block on the resolved app theme
+(`RemoteThemeWelcome`). It is additive in both directions: an older phone ignores the key, an
+older Mac sends none, and an unreadable block decodes as absent without costing the palette.
+
+**What crosses.** The variant in force's mark (`app` / `logo` / `mascot` / `none`) and mark size;
+the greeting and caption pools as the author wrote them — `text`, `when`, `weight`, and the
+greeting's `includesAppLines`; each pool's style with its ink **resolved to a hex colour** for
+the projected variant, its scale and weight, a font family only when the Mac can use that family,
+and a typeface hint; the two scrim opacities; and the backdrop's gradient (with drift) and
+particles in the material's portable recipes. The picture travels as an ordinary theme asset in
+its own slot, `welcome` (1,290 pixels, the backdrop's bounds and opacity), and a welcome's named
+families join the owner-only font transfer behind the material's. Catalogue entries carry no
+welcome; only the theme in force does. Lines are never rendered on the Mac for the phone: the
+phone picks and renders them with the shared grammar (`ThemeWelcomeGrammar`, in
+ThreadingRemoteKit) on its own clock, calendar and locale, with `{project}` the draft's project
+and `{working}` / `{waiting}` from its own catalogue.
+
+**`{user}` is the owner's alone.** The phone knows no person's name. The Mac sends its owner's
+given name in `welcome.user` only on a connection that may read host usage (an owner's), and
+only when some line actually names `{user}`. A guest's projection has no name, so on a guest's
+phone every `{user}` line is ineligible — dropped from the pool exactly as a `{project}` line is
+without a project — rather than rendered with a hole. The name is part of the cached theme on
+the owner's own phone and nowhere else.
+
+**`{fact:KEY}` stays on the Mac.** A line naming an extension's published fact travels as written,
+but no fact value is projected: the phone's context states none, so every such line is ineligible
+there, on owner and guest connections alike. A phone build that predates the token reads it as
+unknown, which is ineligible too.
+
+**Bounds.** Each pool holds at most 64 lines and 128 entries are examined, so lines a newer Mac
+wrote in a shape this build cannot read are skipped one by one without taking the pool. A line
+is 1–160 characters and at most 1 KB; the weight is 1–10; conditions keep the Mac's ranges. Both
+pools share one 32 KB text budget, greeting first. Inks are at most nine bytes, families and the
+name 256 bytes without control characters, the mark 16–160 points, the scale 0.5–3 and each
+scrim 0–0.9; anything outside is absent. The reconnect cache counts every welcome string
+against its existing 192 KB string and 256 KB archive budgets, and when a candidate would not
+fit it sets aside other Macs' welcomes first and then this one's, never a palette.
+
+**On the phone.** The screen keeps its layout and its single backdrop: the welcome's ground
+replaces the material's on this screen only, through the same backdrop view, motion lease, Theme
+motion switch, Reduce Motion, Low Power and Reduce Transparency gates (which drop the picture
+and particles and keep the gradient). The phone has no greeting of its own, so where the Mac
+would fall back to its own line the phone shows none. A clock-reading line is re-rendered on the
+minute only while the screen is visible and its scene active.

@@ -440,6 +440,13 @@ nothing is allocated per watcher, because there are none.
 waiting for it, which stops the child producing the bytes, and a stalled agent is a worse outcome
 than a terminal that has to reattach.
 
+Lifecycle-only attachments state `receivesOutput: false`. They remain bound to one session for
+the same input and kill authority checks, and still receive control frames, but neither replay
+nor live output is queued to them. The CLI and app use this for stopping: ending an agent must not turn
+that command into an output watcher that can lose its acknowledgement under backpressure. A
+missing field keeps legacy clients subscribed. Fan-out selects output recipients once per burst;
+if only lifecycle clients remain, the ring is appended without framing or copying output for them.
+
 Input is bounded the same way and in the other direction: a session with more than
 `maximumPendingInputBytes` (1 MiB) outstanding towards its child has a child that has stopped
 reading, and a larger buffer would only move the failure, so the input is dropped and journalled.

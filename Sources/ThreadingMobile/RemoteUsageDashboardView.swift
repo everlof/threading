@@ -646,7 +646,7 @@ struct RemoteUsageDashboardView: View {
                     scrollProxy.scrollTo(MobileUsageSection.limitHistory, anchor: .top)
                 }
             }
-            .background(theme.ground)
+            .mobileThemeBackdrop(theme)
             .navigationTitle("Usage")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(theme.surface, for: .navigationBar)

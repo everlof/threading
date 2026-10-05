@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingRemoteKit
 
 // MARK: - Theme Title Morph
 
@@ -28,9 +29,7 @@ public struct ThemeTitleMorph: Equatable {
 
     /// The scramble pool, cleaned: whitespace is never a glyph worth cycling through.
     public var scrambleCharacters: [Character]? {
-        guard style == .scramble, let characters else { return nil }
-        let pool = characters.filter { !$0.isWhitespace && !$0.isNewline }
-        return pool.isEmpty ? nil : Array(pool)
+        RemoteThemeDTO.TitleMorph(style: style.rawValue, characters: characters).scrambleCharacters
     }
 }
 
@@ -67,5 +66,5 @@ extension ThemeTitleMorph: Codable {
 public enum ThemeTitleMorphLimits {
     /// Enough for an alphabet and its digits; a scramble picks one at random every tick, so a
     /// longer pool adds nothing a person could see.
-    public static let maximumScrambleCharacters = 96
+    public static let maximumScrambleCharacters = RemoteThemeDTO.TitleMorph.maximumScrambleCharacters
 }

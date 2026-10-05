@@ -225,18 +225,18 @@ struct MobileAgentMarkGlyph: View {
             // A template mark takes the slot's tint the way the symbols beside it do, which is what
             // keeps the monochrome knot visible in both a light and a dark theme.
             Image(asset)
-                .renderingMode(keepsItsOwnColour ? .original : .template)
+                .renderingMode(keepsItsOwnColour && !theme.tintsIdentityMarks ? .original : .template)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(
                     width: MobileDesign.Size.rowMarkGlyph,
                     height: MobileDesign.Size.rowMarkGlyph
                 )
-                .foregroundStyle(tint ?? theme.secondaryLabel)
+                .foregroundStyle(theme.tintsIdentityMarks ? theme.accent : (tint ?? theme.secondaryLabel))
         case .symbol(let name):
             Image(systemName: name)
                 .font(.system(size: MobileDesign.Size.rowMarkGlyph, weight: .medium))
-                .foregroundStyle(tint ?? theme.secondaryLabel)
+                .foregroundStyle(theme.tintsIdentityMarks ? theme.accent : (tint ?? theme.secondaryLabel))
         }
     }
 }

@@ -28,7 +28,14 @@
           "type": "array",
           "items": { "$ref": "#/$defs/slotPatch" }
         },
-        "replacement": { "$ref": "extension-node.schema.json" }
+        "replacement": { "$ref": "extension-node.schema.json" },
+        "hook": { "$ref": "extension-node.schema.json" },
+        "themeScope": {
+          "type": "string",
+          "enum": ["always", "ownThemes"],
+          "default": "always",
+          "description": "'ownThemes' applies the whole patch only while the selected app theme is one the publishing extension contributes. Refused from an extension that contributes no theme. Omitted means 'always'."
+        }
       }
     },
     "target": {

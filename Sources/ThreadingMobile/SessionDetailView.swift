@@ -1423,7 +1423,6 @@ struct TerminalRemoteView: View {
     @State private var clipboardOffersContent = false
     @State private var pendingDirectAttachmentInsertionID: String?
     @State private var selectionQuotes: [RemoteTerminalSelectionQuote] = []
-    @State private var selectedInputPreference: MobileTerminalInputPreference?
     @State private var findQuery = ""
     @State private var findMatchIndex = 0
     @State private var findMatchTotal = 0
@@ -1431,20 +1430,24 @@ struct TerminalRemoteView: View {
     @StateObject private var keyBridge = TerminalKeyBridge()
     @AppStorage(MobileTerminalFontSize.preferenceKey)
     private var terminalFontSize = MobileTerminalFontSize.defaultValue
-    @AppStorage(MobileTerminalInputPreference.defaultPreferenceKey)
-    private var defaultInputPreference = MobileTerminalInputPreference.direct
+    @AppStorage(MobileTerminalInputPreference.preferenceKey)
+    private var savedInputPreference = MobileTerminalInputPreference.direct
 
     init(
         connection: RemoteSessionConnection,
         installsPrincipalTitle: Bool = true,
         // Intentionally no default: every new surface must choose the one cold-loader owner.
         openingLoaderOwner: TerminalOpeningLoaderOwner,
-        isShowingFind: Binding<Bool> = .constant(false)
+        isShowingFind: Binding<Bool> = .constant(false),
+        inputPreferences: UserDefaults = .standard
     ) {
         self.connection = connection
         self.installsPrincipalTitle = installsPrincipalTitle
         self.openingLoaderOwner = openingLoaderOwner
         _isShowingFind = isShowingFind
+        _savedInputPreference = AppStorage(
+            wrappedValue: .direct, MobileTerminalInputPreference.preferenceKey, store: inputPreferences
+        )
     }
 
     private var theme: RemoteThemePalette {
@@ -1509,9 +1512,7 @@ struct TerminalRemoteView: View {
                 return .compose
             }
         #endif
-        return selectedInputPreference
-            ?? terminalContinuity?.terminalInputPreference
-            ?? defaultInputPreference
+        return savedInputPreference
     }
 
     private var inputMode: MobileTerminalInputMode {
@@ -1604,7 +1605,6 @@ struct TerminalRemoteView: View {
                 .environmentObject(keyboards)
                 .mobileTheme(theme)
         }
-        .onAppear(perform: restoreInputPreference)
         .onAppear(perform: configureDirectAttachments)
 #if DEBUG
         .task {
@@ -1898,40 +1898,10 @@ struct TerminalRemoteView: View {
         )
     }
 
-    private func restoreInputPreference() {
-        guard selectedInputPreference == nil else { return }
-        #if DEBUG
-            // Evidence fixtures share one demo session inside a single cloned simulator. The Compose
-            // fixture forces presentation only; persisting it would turn every later Direct fixture
-            // into Compose and make the keyboard-open evidence test the wrong surface.
-            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-compose" {
-                return
-            }
-        #endif
-        if let restored = terminalContinuity?.terminalInputPreference {
-            selectedInputPreference = restored
-        } else {
-            // The computed value already uses this default. Materialize it for future launches
-            // without rewriting identical SwiftUI state and remounting a newly focused terminal.
-            saveInputPreference(defaultInputPreference)
-        }
-    }
-
     private func toggleInputPreference() {
         guard canChooseInputPreference else { return }
         keyBridge.dismissKeyboardForModeSwitch()
-        let next: MobileTerminalInputPreference = inputPreference == .direct ? .compose : .direct
-        selectedInputPreference = next
-        saveInputPreference(next)
-    }
-
-    private func saveInputPreference(_ preference: MobileTerminalInputPreference) {
-        guard let hostID = model.activeHostID else { return }
-        continuity.setTerminalInputPreference(
-            preference,
-            hostID: hostID,
-            sessionID: connection.session.id
-        )
+        savedInputPreference = inputPreference == .direct ? .compose : .direct
     }
 
     private var remainingDirectAttachmentSlots: Int {
@@ -2672,7 +2642,13 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
         view.isScrollEnabled = false
         view.adjustsFontForContentSizeCategory = true
         view.autocapitalizationType = .none
-        view.autocorrectionType = .no
+        // On iPhone, turning autocorrection off removes the keyboard's whole suggestion row, and
+        // with it iOS 27's one-tap paste of whatever was just copied. The chat composers keep
+        // that row, so this line does too; quotes and dashes stay straight because the line is
+        // written into a terminal.
+        view.autocorrectionType = .default
+        view.smartQuotesType = .no
+        view.smartDashesType = .no
         view.returnKeyType = .send
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.accessibilityLabel = MobileL10n.string("Compose on this device…")
@@ -3192,6 +3168,7 @@ private struct ConversationComposer: View {
             }
 
             TextField("Add feedback…", text: $text, axis: .vertical)
+                .mobileContentTypography()
                 .lineLimit(1 ... 6)
                 .submitLabel(.send)
                 .onSubmit(submit)
@@ -3484,6 +3461,7 @@ struct AttentionRequestSheet: View {
 
                 ThemedSettingsSection {
                     TextField("Optional note…", text: $note, axis: .vertical)
+                        .mobileContentTypography()
                         .focused($noteIsFocused)
                         .mobileUIEvidenceKeyboardFocus($noteIsFocused)
                         .lineLimit(2 ... 4)

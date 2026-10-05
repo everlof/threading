@@ -866,7 +866,10 @@ final class PTYHostServer: @unchecked Sendable {
             return
         }
 
-        let replay = session.replay(budget: request.normalizedReplayBudget)
+        let receivesOutput = request.receivesOutput != false
+        let replay: (kind: PTYHostReplay, payloads: [Data]) = receivesOutput
+            ? session.replay(budget: request.normalizedReplayBudget)
+            : (.none, [])
         connection.send(.attached(PTYHostAttached(
             id: session.id,
             pid: session.pid,
@@ -887,7 +890,7 @@ final class PTYHostServer: @unchecked Sendable {
             Field.connection: String(connection.number),
             Field.reason: Self.token(for: replay.kind)
         ])
-        bind(connection, to: session)
+        bind(connection, to: session, receivesOutput: receivesOutput)
 
         // A session that has already ended is still worth attaching to: the watcher is owed the
         // ending, and it is owed it after the history rather than instead of it.
@@ -902,9 +905,14 @@ final class PTYHostServer: @unchecked Sendable {
         }
     }
 
-    private func bind(_ connection: PTYHostConnection, to session: PTYSession) {
+    private func bind(
+        _ connection: PTYHostConnection,
+        to session: PTYSession,
+        receivesOutput: Bool = true
+    ) {
         cancelIdleExpiry(of: session)
         connection.boundSession = session.id
+        connection.receivesOutput = receivesOutput
         session.watchers.append(connection)
         session.detachedAt = nil
         pushForeground(of: session)
@@ -1144,14 +1152,15 @@ final class PTYHostServer: @unchecked Sendable {
     /// attributing an old observation to a new one.
     private func deliver(_ bytes: Data, of session: PTYSession, stream: OutputStreamKind) {
         if stream == .standardOutput { session.append(bytes) }
-        if !session.watchers.isEmpty {
+        let recipients = session.watchers.filter(\.receivesOutput)
+        if !recipients.isEmpty {
             for chunk in Self.chunks(of: bytes) {
                 guard let framed = try? PTYHostFraming.encode(
                     kind: .output,
                     flags: stream.flags,
                     payload: chunk
                 ) else { continue }
-                for watcher in session.watchers { watcher.sendFramed(framed) }
+                for watcher in recipients { watcher.sendFramed(framed) }
             }
         }
         pushForeground(of: session)

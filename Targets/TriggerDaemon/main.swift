@@ -55,6 +55,10 @@ private enum Locations {
         directory?.appendingPathComponent("probe-schedule.json", isDirectory: false)
     }
 
+    static var heartbeatFile: URL? {
+        directory?.appendingPathComponent(TriggerListenerHeartbeat.fileName, isDirectory: false)
+    }
+
     /// One empty file per requested manual poll, named by source id. The app writes them.
     static var pollRequests: URL? {
         directory?.appendingPathComponent("Poll Requests", isDirectory: true)
@@ -132,7 +136,6 @@ private final class CursorStore: @unchecked Sendable {
 private enum DaemonFailure: LocalizedError {
     case noSupportDirectory
     case unsupportedConfiguration
-    case missingCredential
     case invalidResponse
     case server(Int)
 
@@ -140,45 +143,47 @@ private enum DaemonFailure: LocalizedError {
         switch self {
         case .noSupportDirectory: return "Application Support is unavailable."
         case .unsupportedConfiguration: return "The source configuration is unsupported."
-        case .missingCredential: return "The source credential is unavailable."
         case .invalidResponse: return "The source returned an invalid response."
         case .server(let status): return "The source returned HTTP \(status)."
         }
     }
 
-    var requiresAuthentication: Bool {
-        switch self {
-        case .missingCredential, .server(401), .server(403): return true
+    /// An HTTP refusal, or a credential the listener could not read, needs the person.
+    static func requiresAuthentication(_ error: Error) -> Bool {
+        if error is TriggerSecretReadFailure { return true }
+        switch error as? DaemonFailure {
+        case .server(401)?, .server(403)?: return true
         default: return false
         }
     }
 }
 
-private enum CredentialReader {
-    private static var accessGroup: String? {
-        #if DEBUG
-        nil
-        #else
-        "SMQ3E8Y57T.codes.threading.triggers"
-        #endif
+/// Keychain user interaction is off for the whole listener. It runs in the background with no
+/// window, so a secret it may not read must answer with a status the Sources page can show, never
+/// with a dialog naming a helper the person did not knowingly start.
+private enum KeychainPrompts {
+    static func disable() {
+        SecKeychainSetUserInteractionAllowed(false)
     }
+}
 
-    static func read(reference: String) throws -> String {
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "codes.threading.trigger-source",
-            kSecAttrAccount as String: reference,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let value = String(data: data, encoding: .utf8),
-              !value.isEmpty else { throw DaemonFailure.missingCredential }
-        return value
+/// `listener.json`: proof for the app that this process is running, rewritten every
+/// `TriggerListenerHeartbeat.interval`. A failed write is retried on the next beat.
+private enum Heartbeat {
+    static func run() async {
+        let started = Date()
+        while !Task.isCancelled {
+            if let file = Locations.heartbeatFile,
+               let data = try? TriggerListenerHeartbeat(
+                   processIdentifier: ProcessInfo.processInfo.processIdentifier,
+                   startedAt: started,
+                   heartbeatAt: Date()
+               ).encoded() {
+                try? data.write(to: file, options: .atomic)
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+            }
+            try? await Task.sleep(for: .seconds(TriggerListenerHeartbeat.interval))
+        }
     }
 }
 
@@ -295,7 +300,7 @@ private enum SondaSource {
         guard source.enabled, source.sourceType == "sonda" else {
             throw DaemonFailure.unsupportedConfiguration
         }
-        let credential = try CredentialReader.read(reference: source.credentialReference)
+        let credential = try TriggerSecretKeychain.read(.sourceCredential, account: source.credentialReference)
         var components = URLComponents(
             url: source.baseURL.appendingPathComponent(
                 "api/automation/review-required-events",
@@ -320,35 +325,6 @@ private enum SondaSource {
 }
 
 // MARK: - Probe sources
-
-/// Probe secrets by name from Keychain, under the same access group as source credentials.
-private struct KeychainProbeSecrets: TriggerProbeSecretResolving {
-    private static var accessGroup: String? {
-        #if DEBUG
-        nil
-        #else
-        "SMQ3E8Y57T.codes.threading.triggers"
-        #endif
-    }
-
-    func value(forSecret name: String) throws -> String {
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: TriggerProbeDefaults.secretService,
-            kSecAttrAccount as String: name,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        if let accessGroup = Self.accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data,
-              let value = String(data: data, encoding: .utf8), !value.isEmpty else {
-            throw TriggerProbeSecretFailure.unavailable(name)
-        }
-        return value
-    }
-}
 
 /// Opaque probe cursors by source id, committed only after a poll's events are in the inbox.
 /// Synchronous, so the runner's commit step is the durable write itself rather than a value
@@ -422,7 +398,7 @@ private enum ProbeLoop {
     static func run() async {
         let cursors = ProbeCursorStore()
         let schedule = ProbeSchedule()
-        let secrets = KeychainProbeSecrets()
+        let secrets = KeychainTriggerProbeSecrets()
         while !Task.isCancelled {
             let configuration = try? ConfigurationReader.read()
             let probes = configuration?.probes ?? []
@@ -447,7 +423,7 @@ private enum ProbeLoop {
 
     private static func poll(
         _ probe: TriggerProbeDaemonSource, manual: Bool,
-        cursors: ProbeCursorStore, secrets: KeychainProbeSecrets
+        cursors: ProbeCursorStore, secrets: KeychainTriggerProbeSecrets
     ) async -> TriggerProbeHealth {
         let started = Date()
         let outcome: TriggerProbePollOutcome
@@ -494,6 +470,8 @@ private enum TriggerDaemon {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
+        KeychainPrompts.disable()
+        Task.detached(priority: .utility) { await Heartbeat.run() }
         let cursors = CursorStore()
         let sourceBackoff = SourceBackoff()
         var failureDelay: UInt64 = 2
@@ -540,7 +518,7 @@ private enum TriggerDaemon {
                                     }
                                 )
                             } catch {
-                                let authentication = (error as? DaemonFailure)?.requiresAuthentication == true
+                                let authentication = DaemonFailure.requiresAuthentication(error)
                                 outcome = TriggerProbePollOutcome(
                                     health: authentication ? .authenticationRequired : .backingOff,
                                     writtenEvents: 0, committedCursor: nil, lastEventAt: nil,

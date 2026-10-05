@@ -283,6 +283,7 @@ enum TriggerExecutionMode: String, Codable, CaseIterable, Sendable {
 enum TriggerCheckoutPolicy: String, Codable, CaseIterable, Sendable {
     case projectCheckout
     case managedWorktree
+    case automationWorkspace
 }
 
 struct TriggerLimits: Codable, Equatable, Sendable {
@@ -352,6 +353,7 @@ struct TriggerRevision: Codable, Equatable, Sendable {
     /// What an unattended run may do without asking. Nil only on revisions saved before
     /// policies existed, which `effectivePermissions` reads as read-only.
     var permissions: AutomationPermissionPolicy? = nil
+    var projectAutomation: ProjectAutomationRevision? = nil
 }
 
 struct TriggerDefinition: Codable, Equatable, Sendable {

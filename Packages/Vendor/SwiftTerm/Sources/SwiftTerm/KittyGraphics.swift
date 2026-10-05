@@ -5,6 +5,7 @@
 //
 
 import Foundation
+import SwiftTermPOSIX
 #if canImport(Musl)
 // The Swift Static Linux SDK builds against musl, where the C library module
 // is `Musl` and `Glibc` does not exist.
@@ -30,11 +31,6 @@ import PNG
 #endif
 #if canImport(LZ77)
 import LZ77
-#endif
-
-#if !os(Windows)
-@_silgen_name("shm_open")
-private func swiftShmOpen(_ name: UnsafePointer<CChar>, _ oflag: Int32, _ mode: mode_t) -> Int32
 #endif
 
 #if canImport(PNG)
@@ -1433,7 +1429,7 @@ extension Terminal {
             return nil
         }
         var fd: Int32 = -1
-        let openResult = name.withCString { swiftShmOpen($0, O_RDONLY, 0) }
+        let openResult = name.withCString { swiftterm_shm_open($0, O_RDONLY, 0) }
         fd = openResult
         guard fd >= 0 else {
             return nil

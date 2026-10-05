@@ -94,19 +94,9 @@ final class SimulatorScreenViewInspectorTests: XCTestCase {
             requests.append((point, CGPoint(x: x, y: y)))
         }
 
-        let wheel = try XCTUnwrap(CGEvent(
-            scrollWheelEvent2Source: nil,
-            units: .line,
-            wheelCount: 2,
-            wheel1: 3,
-            wheel2: -2,
-            wheel3: 0
-        ))
-        wheel.flags = []
-        // CGEvent uses a top-left global origin; NSEvent exposes the corresponding AppKit point.
-        let screenTop = try XCTUnwrap(NSScreen.main).frame.maxY
-        wheel.location = CGPoint(x: 100, y: screenTop - 200)
-        let event = try XCTUnwrap(NSEvent(cgEvent: wheel))
+        // Delivery supplies a window-local point. A global CGEvent would inherit whichever
+        // physical screen is main during the suite, which is unrelated to this unshown host.
+        let event = SimulatorWheelEventStub(location: view.convert(CGPoint(x: 100, y: 200), to: nil))
         view.scrollWheel(with: event)
         XCTAssertEqual(requests.count, 1)
         XCTAssertEqual(requests.first?.point, CGPoint(x: 0.5, y: 0.5))
@@ -133,4 +123,23 @@ final class SimulatorScreenViewInspectorTests: XCTestCase {
             XCTAssertNotNil(representation.representation(using: .png, properties: [:]))
         }
     }
+}
+
+private final class SimulatorWheelEventStub: NSEvent {
+    private let point: NSPoint
+
+    init(location: NSPoint) {
+        point = location
+        super.init()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var type: NSEvent.EventType { .scrollWheel }
+    override var locationInWindow: NSPoint { point }
+    override var modifierFlags: NSEvent.ModifierFlags { [] }
+    override var hasPreciseScrollingDeltas: Bool { false }
+    override var scrollingDeltaX: CGFloat { -2 }
+    override var scrollingDeltaY: CGFloat { 3 }
 }

@@ -694,11 +694,11 @@ final class SidebarRowRenderTests: XCTestCase {
                 row.configure(with: session, activity: .working)
 
                 let mark = try XCTUnwrap(
-                    row.descendant(identified: "sidebar.session.identity") as? NSImageView
+                    row.descendant(identified: "sidebar.session.identity") as? GlyphView
                 )
                 XCTAssertTrue(try XCTUnwrap(mark.image).isTemplate)
                 XCTAssertEqual(
-                    mark.contentTintColor?.hexString,
+                    mark.tint?.hexString,
                     Design.Ink.selection.label.hexString,
                     "\(theme.name): a refreshed selected Codex mark should use its row's ink"
                 )

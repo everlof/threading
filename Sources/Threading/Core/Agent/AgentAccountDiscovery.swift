@@ -63,6 +63,24 @@ enum AgentAccountDiscovery {
         lifetime: AgentAccountDiscoveryDefaults.cacheLifetime
     )
 
+    private actor DiscoveryWorker {
+        static let shared = DiscoveryWorker()
+
+        func accounts(
+            for provider: AgentKind,
+            records: [AgentAccountLocationRecord],
+            cache: AgentAccountDiscoveryCache
+        ) -> [AgentAccount] {
+            cache.accounts(for: provider) {
+                switch provider {
+                case .claude: return discoverClaudeAccounts(records: records)
+                case .codex: return discoverCodexAccounts(records: records)
+                case .grok, .openCode, .cursor: return []
+                }
+            }
+        }
+    }
+
     // MARK: - Public Methods
 
     /// The accounts a provider *offers*, the default account first.
@@ -87,6 +105,24 @@ enum AgentAccountDiscovery {
         }
 
         return resolvingPresentation(discovered, provider: provider)
+    }
+
+    /// Background readers await real discovery instead of making a cold cache perform a home
+    /// directory walk on main. One worker owns these scans; presentation preferences are still
+    /// resolved on main after the immutable filesystem result arrives.
+    static func allAccountsAfterDiscovery(for provider: AgentKind) async -> [AgentAccount] {
+        guard provider.supportsAccounts else { return [] }
+        let records = AgentAccountLocationRegistry.shared.records(for: provider)
+        let discovered = await DiscoveryWorker.shared.accounts(
+            for: provider, records: records, cache: cache
+        )
+        return resolvingPresentation(discovered, provider: provider)
+    }
+
+    static func discoverAccount(for provider: AgentKind, handle: AccountHandle) async -> AgentAccount? {
+        guard provider.supportsAccounts else { return nil }
+        let discovered = await allAccountsAfterDiscovery(for: provider)
+        return account(for: provider, handle: handle, among: discovered)
     }
 
     private static func resolvingPresentation(_ discovered: [AgentAccount], provider: AgentKind) -> [AgentAccount] {
@@ -117,9 +153,13 @@ enum AgentAccountDiscovery {
     /// feature, in the words Threading uses for a session whose real login has gone missing.
     static func account(for provider: AgentKind, handle: AccountHandle) -> AgentAccount? {
         guard provider.supportsAccounts else { return nil }
-
         let discovered = allAccounts(for: provider)
+        return account(for: provider, handle: handle, among: discovered)
+    }
 
+    static func account(
+        for provider: AgentKind, handle: AccountHandle, among discovered: [AgentAccount]
+    ) -> AgentAccount? {
         if let match = discovered.first(where: { $0.handle == handle }) {
             return match
         }
@@ -127,7 +167,7 @@ enum AgentAccountDiscovery {
         ThreadingLogger.agent.warning(
             "Account \(handle, privacy: .private(mask: .hash)) not found for \(provider.rawValue, privacy: .public); using default"
         )
-        return preferredAccount(for: provider)
+        return preferred(among: discovered)
             ?? discovered.first { $0.isDefault }
             ?? discovered.first
     }

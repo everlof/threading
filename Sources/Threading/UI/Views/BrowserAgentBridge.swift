@@ -550,6 +550,7 @@ struct BrowserNetworkEntry: Equatable {
     let duration: Double?
     let error: String?
     let timestamp: Date
+    var captureID: String? = nil
 
     var isError: Bool {
         status.map { $0 >= 400 } == true || error?.isEmpty == false
@@ -4287,136 +4288,8 @@ enum BrowserAgentScripts {
         })();
         """#
 
-    /// Page-world capture is intentionally metadata-only: no headers, cookies or bodies cross the
-    /// bridge. Fetch/XHR supply status; PerformanceObserver fills in scripts, styles, images, fonts
-    /// and other resource loads without requiring private WebKit APIs.
-    static let networkCapture = #"""
-        (() => {
-          if (globalThis.__threadingNetworkInstalled) return;
-          globalThis.__threadingNetworkInstalled = true;
+    static let networkCapture = BrowserNetworkCaptureScripts.source
 
-          const post = payload => {
-            try { globalThis.webkit?.messageHandlers?.threadingNetwork?.postMessage(payload); }
-            catch (_) {}
-          };
-          const clean = (value, maximum = 2000) =>
-            String(value || '').replace(/\s+/g, ' ').trim().slice(0, maximum);
-          const absolute = value => {
-            try { return new URL(String(value || ''), location.href).href; }
-            catch (_) { return clean(value); }
-          };
-          const sensitiveQueryNames = [
-            'access_token', 'auth', 'code', 'credential', 'key', 'password',
-            'secret', 'session', 'signature', 'token'
-          ];
-          const safeURL = value => {
-            try {
-              const parsed = new URL(String(value || ''), location.href);
-              parsed.username = '';
-              parsed.password = '';
-              parsed.hash = '';
-              for (const name of Array.from(parsed.searchParams.keys())) {
-                const lowered = name.toLowerCase();
-                if (sensitiveQueryNames.some(fragment => lowered.includes(fragment))) {
-                  parsed.searchParams.set(name, '[redacted]');
-                }
-              }
-              return parsed.href.slice(0, 2000);
-            } catch (_) {
-              return clean(value);
-            }
-          };
-          const report = (method, url, kind, status, started, error = null) => post({
-            method: clean(method || 'GET', 24).toUpperCase(),
-            url: safeURL(absolute(url)),
-            kind: clean(kind || 'other', 40).toLowerCase(),
-            status: status !== null && status !== undefined && Number.isFinite(Number(status))
-              ? Number(status) : null,
-            duration: Number.isFinite(started)
-              ? Math.max(0, Math.round((performance.now() - started) * 10) / 10)
-              : null,
-            error: error ? clean(error, 500) : null
-          });
-
-          if (typeof globalThis.fetch === 'function') {
-            const originalFetch = globalThis.fetch.bind(globalThis);
-            globalThis.fetch = async (input, init) => {
-              const started = performance.now();
-              const method = init?.method || input?.method || 'GET';
-              const url = typeof input === 'string' || input instanceof URL
-                ? input : input?.url;
-              try {
-                const response = await originalFetch(input, init);
-                report(method, response.url || url, 'fetch', response.status, started);
-                return response;
-              } catch (error) {
-                report(method, url, 'fetch', null, started, error?.name || 'Request failed');
-                throw error;
-              }
-            };
-          }
-
-          if (globalThis.XMLHttpRequest) {
-            const requests = new WeakMap();
-            const originalOpen = XMLHttpRequest.prototype.open;
-            const originalSend = XMLHttpRequest.prototype.send;
-            XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-              requests.set(this, { method: method || 'GET', url: url });
-              return originalOpen.call(this, method, url, ...rest);
-            };
-            XMLHttpRequest.prototype.send = function(...args) {
-              const state = requests.get(this) || { method: 'GET', url: '' };
-              state.started = performance.now();
-              requests.set(this, state);
-              this.addEventListener('loadend', () => {
-                const failed = this.status === 0 && !this.responseURL
-                  ? 'Request failed or was blocked' : null;
-                report(
-                  state.method, this.responseURL || state.url, 'xhr',
-                  this.status || null, state.started, failed
-                );
-              }, { once: true });
-              return originalSend.apply(this, args);
-            };
-          }
-
-          const reportResource = entry => {
-            if (['fetch', 'xmlhttprequest'].includes(entry.initiatorType)) return;
-            post({
-              method: 'GET',
-              url: safeURL(absolute(entry.name)),
-              kind: clean(entry.initiatorType || 'resource', 40).toLowerCase(),
-              status: Number(entry.responseStatus) || null,
-              duration: Math.max(0, Math.round(Number(entry.duration || 0) * 10) / 10),
-              error: null
-            });
-          };
-          try {
-            new PerformanceObserver(list => list.getEntries().forEach(reportResource))
-              .observe({ type: 'resource', buffered: true });
-          } catch (_) {}
-
-          // Resource load failures do not reliably carry an HTTP status in WebKit's resource
-          // timing entries. Capture the non-bubbling element error in the capture phase so
-          // errors_only can still diagnose missing scripts, styles, images, fonts, and media.
-          addEventListener('error', event => {
-            const target = event.target;
-            if (!target?.tagName || target === globalThis) return;
-            const tag = target.tagName.toLowerCase();
-            const url = target.currentSrc
-              || target.getAttribute?.('src')
-              || target.getAttribute?.('href');
-            if (!url) return;
-            const kind = tag === 'link' && target.relList?.contains('stylesheet')
-              ? 'css'
-              : ({
-                  img: 'img', script: 'script', audio: 'audio', video: 'video',
-                  source: 'media', track: 'media', object: 'object', embed: 'embed'
-                }[tag] || tag);
-            report('GET', url, kind, null, Number.NaN, 'Resource failed to load');
-          }, true);
-        })();
-        """#
 }
 
 enum BrowserAgentDefaults {

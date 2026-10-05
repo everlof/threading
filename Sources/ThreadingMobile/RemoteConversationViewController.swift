@@ -613,6 +613,10 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 
     private func applyTheme() {
         overrideUserInterfaceStyle = theme.colorScheme == .light ? .light : .dark
+        presenceLabel.font = theme.chromeFont(forTextStyle: .caption1)
+        controlLabel.font = theme.chromeFont(forTextStyle: .caption1)
+        requestControlButton.titleLabel?.font = theme.chromeFont(forTextStyle: .caption1)
+        attentionLabel.font = theme.chromeFont(forTextStyle: .caption1)
         view.backgroundColor = theme.uiGround
         bottomStack.backgroundColor = theme.uiGround
         capabilityContainer.backgroundColor = theme.uiGround
@@ -1934,6 +1938,8 @@ private final class RemoteConversationNavigationTitleView: UIControl {
     private let titleLabel = MobileMorphingTitleLabel()
     /// The mark and the phrase, laid out by the one owner both navigation titles share.
     private let statusLine = MobileConnectionStatusLineView()
+    private var workingWords: [String] = []
+    private var workingWordIndex = -1
     private var titleColor = UIColor.label
     private var titleGroundColor = UIColor.systemBackground
     private var statusLabelColor = UIColor.secondaryLabel
@@ -1998,11 +2004,14 @@ private final class RemoteConversationNavigationTitleView: UIControl {
         // Leaving work updates the hidden dot first, then reveals it already settled beside the
         // current phrase. In either direction one mark speaks at a time.
         if isWorking, !statusLine.isWorking {
+            workingWordIndex = (workingWordIndex + 1) % max(workingWords.count, 1)
             orb.prepareForWorking()
             statusLine.isWorking = true
         }
+        let workingWord = workingWords.isEmpty ? nil : workingWords[max(workingWordIndex, 0) % workingWords.count]
+        let shownStatus = isWorking && recovery == nil ? (workingWord ?? status) : status
         statusLine.update(
-            status: status,
+            status: shownStatus,
             color: statusColor,
             textColor: statusLabelColor,
             groundColor: titleGroundColor,
@@ -2027,13 +2036,15 @@ private final class RemoteConversationNavigationTitleView: UIControl {
         isUserInteractionEnabled = recovery != nil
         // The orb is a picture of the same fact, so VoiceOver hears it as a word rather than
         // hearing nothing at all.
-        accessibilityLabel = [title, status, isWorking ? MobileL10n.string("Working…") : nil]
+        accessibilityLabel = [title, shownStatus, isWorking ? MobileL10n.string("Working…") : nil]
             .compactMap { $0 }
             .joined(separator: ", ")
         accessibilityHint = recovery?.title
     }
 
     func applyTheme(_ theme: RemoteThemePalette) {
+        workingWords = Array((theme.source?.words?.working ?? []).filter { !$0.isEmpty }.prefix(16))
+        titleLabel.theme = theme
         titleColor = theme.uiLabel
         titleGroundColor = theme.uiSurface
         statusLabelColor = theme.uiSecondaryLabel

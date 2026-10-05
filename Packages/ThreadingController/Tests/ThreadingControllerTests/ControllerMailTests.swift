@@ -78,21 +78,31 @@ struct ControllerMailTests {
         _ = try await store.finish(executionID: b.execution.id, destination: "draft", payload: "Done")
     }
 
-    @Test func chainDepthCannotBeEscapedByOmittingReplyTo() async throws {
+    @Test func chainFuseCannotBeEscapedByOmittingReplyTo() async throws {
         let (directory, store) = try fixture.fixture()
         defer { try? FileManager.default.removeItem(at: directory) }
         let (a, b, aAddress, bAddress) = try await pair(store)
-        _ = try await store.setMailGrant(recipient: bAddress, sender: "*", expectedRevision: 0, mode: .notify, allowsInterrupt: false)
-        _ = try await store.setMailGrant(recipient: aAddress, sender: "*", expectedRevision: 0, mode: .notify, allowsInterrupt: false)
-        var sender = a, receiver = b, target = bAddress, back = aAddress
-        for depth in 0...MailLimits.maximumDepth {
-            let sent = try await store.sendMail(executionID: sender.execution.id, to: target, id: UUID(), text: "ping \(depth)", replyTo: nil, priority: .normal)
-            #expect(sent.envelope.depth == depth)
-            _ = try await store.acknowledgeMail(executionID: receiver.execution.id, ids: [sent.envelope.id])
-            swap(&sender, &receiver); swap(&target, &back)
+        let seeded = try await fixture.seed(store, worker: WorkerID(), key: "c")
+        let c = try #require(await store.claim(workerID: seeded.workerID))
+        let cAddress = try await store.mailAddress(worker: seeded.workerID)
+        // Three in a ring, so no one sender reaches the send-rate fuse before the chain's.
+        let ring = [(a, aAddress), (b, bAddress), (c, cAddress)]
+        for (_, address) in ring {
+            _ = try await store.setMailGrant(recipient: address, sender: "*", expectedRevision: 0, mode: .notify, allowsInterrupt: false)
         }
-        await #expect(throws: ControllerError.invalidInput("chain_depth")) {
-            try await store.sendMail(executionID: sender.execution.id, to: target, id: UUID(), text: "one too many", replyTo: nil, priority: .normal)
+        var chainID: UUID?
+        for index in 0..<MailLimits.chainMessages {
+            let sender = ring[index % ring.count].0, receiver = ring[(index + 1) % ring.count]
+            let sent = try await store.sendMail(executionID: sender.execution.id, to: receiver.1, id: UUID(), text: "ping \(index)", replyTo: nil, priority: .normal)
+            // Depth only counts: an exchange runs as deep as its chain's message fuse allows.
+            #expect(sent.envelope.depth == index && sent.envelope.chainID == (chainID ?? sent.envelope.chainID))
+            chainID = sent.envelope.chainID
+            _ = try await store.acknowledgeMail(executionID: receiver.0.execution.id, ids: [sent.envelope.id])
+        }
+        let sender = ring[MailLimits.chainMessages % ring.count].0
+        let receiver = ring[(MailLimits.chainMessages + 1) % ring.count].1
+        await #expect(throws: ControllerError.invalidInput("chain_limit")) {
+            try await store.sendMail(executionID: sender.execution.id, to: receiver, id: UUID(), text: "one too many", replyTo: nil, priority: .normal)
         }
     }
 
@@ -220,26 +230,29 @@ struct ControllerMailTests {
         let b = MailAddress(host: host.id, kind: .session, id: UUID())
         let c = MailAddress(host: host.id, kind: .session, id: UUID())
         for (address, name) in [(a, "A"), (b, "B"), (c, "C")] { _ = try await store.registerMailbox(address, name: name) }
-        // Unattended, each answers without reply_to: still one chain, still bounded.
-        var from = a, to = b
-        var last = try await store.sendMail(from: from, to: to, id: UUID(), text: "ping", replyTo: nil, priority: .normal, ownerAdmitted: true)
-        for depth in 1...MailLimits.maximumDepth {
-            _ = try await store.acknowledgeMail(mailbox: to, ids: [last.envelope.id])
-            swap(&from, &to)
+        // Unattended, each answers the next in a ring without reply_to: still one chain, as deep
+        // as it goes, until the chain's message fuse. Three senders stay under the send rate.
+        let ring = [a, b, c]
+        var last = try await store.sendMail(from: a, to: b, id: UUID(), text: "ping", replyTo: nil, priority: .normal, ownerAdmitted: true)
+        for index in 1..<MailLimits.chainMessages {
+            let from = ring[index % ring.count], to = ring[(index + 1) % ring.count]
+            _ = try await store.acknowledgeMail(mailbox: from, ids: [last.envelope.id])
+            let previous = last
             last = try await store.sendMail(from: from, to: to, id: UUID(), text: "pong", replyTo: nil, priority: .normal, ownerAdmitted: true)
-            #expect(last.envelope.depth == depth)
+            #expect(last.envelope.depth == index && last.envelope.chainID == previous.envelope.chainID)
         }
-        _ = try await store.acknowledgeMail(mailbox: to, ids: [last.envelope.id])
+        let looping = last.envelope.recipient
+        _ = try await store.acknowledgeMail(mailbox: looping, ids: [last.envelope.id])
         // Re-acknowledging and sending twice do not escape the bound.
-        _ = try await store.acknowledgeMail(mailbox: to, ids: [last.envelope.id])
+        _ = try await store.acknowledgeMail(mailbox: looping, ids: [last.envelope.id])
         for _ in 0..<2 {
-            await #expect(throws: ControllerError.invalidInput("chain_depth")) {
-                try await store.sendMail(from: to, to: c, id: UUID(), text: "loop", replyTo: nil, priority: .normal, ownerAdmitted: true)
+            await #expect(throws: ControllerError.invalidInput("chain_limit")) {
+                try await store.sendMail(from: looping, to: a, id: UUID(), text: "loop", replyTo: nil, priority: .normal, ownerAdmitted: true)
             }
         }
         // A person starts a new turn in that session: its next message is a new conversation.
-        try await store.resetMailContext(to)
-        let fresh = try await store.sendMail(from: to, to: c, id: UUID(), text: "new topic", replyTo: nil, priority: .normal, ownerAdmitted: true)
+        try await store.resetMailContext(looping)
+        let fresh = try await store.sendMail(from: looping, to: a, id: UUID(), text: "new topic", replyTo: nil, priority: .normal, ownerAdmitted: true)
         #expect(fresh.envelope.depth == 0 && fresh.envelope.chainID != last.envelope.chainID)
     }
 

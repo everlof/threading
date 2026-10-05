@@ -3,6 +3,16 @@
   "title": "Threading iOS UI evidence",
   "platform": "iOS",
   "themeIDs": [
+    "theme-system",
+    "theme-font",
+    "theme-shader",
+    "theme-glow",
+    "particles-fizz",
+    "particles-snow",
+    "particles-sparkle",
+    "particles-confetti",
+    "particles-embers",
+
     "custom",
     "custom-light",
     "fallback",
@@ -19,6 +29,16 @@
     "drift-light"
   ],
   "themeAppearances": {
+    "theme-system": "dark",
+    "theme-font": "dark",
+    "theme-shader": "dark",
+    "theme-glow": "dark",
+    "particles-fizz": "dark",
+    "particles-snow": "dark",
+    "particles-sparkle": "dark",
+    "particles-confetti": "dark",
+    "particles-embers": "dark",
+
     "custom": "dark",
     "custom-light": "light",
     "fallback": "dark",
@@ -35,6 +55,23 @@
     "drift-light": "light"
   },
   "captures": [
+    {"id": "theme-system-font-dashboard", "entryID": "ios-theme-system", "demo": "sessions", "appearance": "dark", "theme": "theme-font"},
+    {"id": "theme-system-font-settings", "entryID": "ios-theme-system", "demo": "settings", "appearance": "dark", "theme": "theme-font"},
+    {"id": "theme-system-shader-dashboard", "entryID": "ios-theme-system", "demo": "sessions", "appearance": "dark", "theme": "theme-shader", "captureMode": "display"},
+    {"id": "theme-system-glow-terminal", "entryID": "ios-theme-system", "demo": "terminal-ansi", "appearance": "dark", "theme": "theme-glow", "captureMode": "display", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
+    {"id": "theme-system-sessions", "entryID": "ios-theme-system", "demo": "sessions", "appearance": "dark", "theme": "theme-system"},
+    {"id": "theme-system-conversation", "entryID": "ios-theme-system", "demo": "conversation", "appearance": "dark", "theme": "theme-system", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
+    {"id": "theme-system-session-draft", "entryID": "ios-theme-system", "demo": "new-session", "appearance": "dark", "theme": "theme-system", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
+    {"id": "theme-system-settings", "entryID": "ios-theme-system", "demo": "settings", "appearance": "dark", "theme": "theme-system"},
+    {"id": "theme-system-collaboration-settings", "entryID": "ios-theme-system", "demo": "collaboration-settings", "appearance": "dark", "theme": "theme-system"},
+    {"id": "theme-system-workspace", "entryID": "ios-theme-system", "demo": "workspace", "appearance": "dark", "theme": "theme-system"},
+    {"id": "theme-system-usage-totals", "entryID": "ios-theme-system", "demo": "usage-totals", "appearance": "dark", "theme": "theme-system"},
+    {"id": "theme-system-particles-fizz", "entryID": "ios-theme-system", "demo": "sessions", "appearance": "dark", "theme": "particles-fizz"},
+    {"id": "theme-system-particles-snow", "entryID": "ios-theme-system", "demo": "sessions", "appearance": "dark", "theme": "particles-snow"},
+    {"id": "theme-system-particles-sparkle", "entryID": "ios-theme-system", "demo": "sessions", "appearance": "dark", "theme": "particles-sparkle"},
+    {"id": "theme-system-particles-confetti", "entryID": "ios-theme-system", "demo": "sessions", "appearance": "dark", "theme": "particles-confetti"},
+    {"id": "theme-system-particles-embers", "entryID": "ios-theme-system", "demo": "sessions", "appearance": "dark", "theme": "particles-embers"},
+
     {"id": "secret-approvals-enroll-custom-dark", "entryID": "ios-secret-approval", "demo": "secret-approvals-enroll", "appearance": "dark", "theme": "custom"},
     {"id": "secret-approvals-enroll-keyboard-open-custom-light", "entryID": "ios-secret-approval", "demo": "secret-approvals-enroll", "appearance": "light", "theme": "custom-light", "keyboardState": "open", "captureMode": "display", "assertions": ["editorFocused", "keyboardShown"]},
     {"id": "secret-approvals-ready-custom-light", "entryID": "ios-secret-approval", "demo": "secret-approvals-ready", "appearance": "light", "theme": "custom-light"},
@@ -291,6 +328,48 @@
     }
   ],
   "entries": [
+    {
+      "id": "ios-theme-system",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Portable theme decoration",
+      "description": "The real dashboard, conversation, draft, workspace, usage and settings wear a drifting theme, with each shared particle style and cached pictures, sprites, logo and mascot.",
+      "states": [
+        "All themed screens",
+        "Five particle styles",
+        "Pictures and sprites",
+        "System typeface hint",
+        "Tinted marks",
+        "Character header",
+        "Paired font chrome",
+        "Reviewed Metal backdrop",
+        "Terminal GPU glow"
+      ],
+      "source": {
+        "path": "scripts/ui-evidence-ios.sh",
+        "command": "capture_fixture"
+      },
+      "capture": {
+        "glob": "ios/theme-system-*.png"
+      },
+      "matrix": {
+        "devices": [
+          "iPhone 17 Pro"
+        ],
+        "appearances": [
+          "Dark"
+        ],
+        "themes": [
+          "theme-system",
+          "particles-fizz",
+          "particles-snow",
+          "particles-sparkle",
+          "particles-confetti",
+          "particles-embers"
+        ]
+      }
+    },
     {
       "id": "ios-secret-approval",
       "kind": "surface", "status": "implemented", "priority": "critical",

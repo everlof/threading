@@ -7,7 +7,7 @@ import { assertExactKeys, bearerToken, json, readJSON } from "./http";
 import { validateIdentifier } from "./protocol";
 import { registeredPushRecipient, revokePushRegistration } from "./push-registrations";
 
-const requestKeys = ["registrationID", "playsSound", "event"];
+const requestKeys = ["registrationID", "playsSound", "soundName", "event"];
 const eventKeys = [
   "type", "id", "kind", "hostID", "sessionID", "title", "body",
   "titleLocalization", "bodyLocalization", "destination", "createdAt",
@@ -103,6 +103,9 @@ export async function handleAPNSPush(request: Request, env: Env): Promise<Respon
   const body = await readJSON(request, 8 * 1024);
   assertExactKeys(body, requestKeys);
   if (typeof body.playsSound !== "boolean") invalid("playsSound is invalid");
+  const soundName = body.soundName;
+  if (soundName !== undefined && (typeof soundName !== "string"
+    || !/^threading-theme-[0-9a-f]{64}\.caf$/u.test(soundName))) invalid("soundName is invalid");
   const event = normalizedEvent(requiredObject(body.event, "event"));
   if (event.hostID !== principal.hostID) {
     throw new HttpError(403, "forbidden", "Notification host does not match credential");
@@ -114,7 +117,7 @@ export async function handleAPNSPush(request: Request, env: Env): Promise<Respon
     env,
   );
 
-  const apnsBody = await encodedAPNSBody(event, body.playsSound);
+  const apnsBody = await encodedAPNSBody(event, body.playsSound, soundName as string | undefined);
   const host = registration.environment === "sandbox"
     ? "api.sandbox.push.apple.com"
     : "api.push.apple.com";
@@ -332,12 +335,12 @@ function optionalLocalization(
   };
 }
 
-async function encodedAPNSBody(event: NotificationEvent, playsSound: boolean): Promise<Uint8Array> {
+async function encodedAPNSBody(event: NotificationEvent, playsSound: boolean, soundName?: string): Promise<Uint8Array> {
   let delivered = event;
-  let encoded = encodeEnvelope(delivered, playsSound);
+  let encoded = encodeEnvelope(delivered, playsSound, soundName);
   if (encoded.byteLength > 4_096) {
     delivered = { ...event, body: truncateUTF8(event.body, 400) };
-    encoded = encodeEnvelope(delivered, playsSound);
+    encoded = encodeEnvelope(delivered, playsSound, soundName);
   }
   if (encoded.byteLength > 4_096) {
     throw new HttpError(413, "pushTooLarge", "Notification does not fit the APNs payload limit");
@@ -345,7 +348,7 @@ async function encodedAPNSBody(event: NotificationEvent, playsSound: boolean): P
   return encoded;
 }
 
-function encodeEnvelope(event: NotificationEvent, playsSound: boolean): Uint8Array {
+function encodeEnvelope(event: NotificationEvent, playsSound: boolean, soundName?: string): Uint8Array {
   return new TextEncoder().encode(JSON.stringify({
     aps: {
       alert: {
@@ -360,7 +363,7 @@ function encodeEnvelope(event: NotificationEvent, playsSound: boolean): Uint8Arr
           "loc-args": event.bodyLocalization.arguments,
         } : {}),
       },
-      ...(playsSound ? { sound: "default" } : {}),
+      ...(playsSound ? { sound: soundName ?? "default" } : {}),
       "thread-id": event.sessionID,
       category: event.kind === "permissionRequest" ? "THREADING_PERMISSION" : "THREADING_SESSION",
     },

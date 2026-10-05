@@ -56,6 +56,38 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         )
     }
 
+    func testValidationAcceptsWorktreeCreatedAfterCachedMiss() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let destination = root.appendingPathComponent("external-worktree")
+        XCTAssertNil(GitInfo.worktreeLocation(for: destination.path))
+        try git(["worktree", "add", "-b", "feature/external", destination.path], in: main)
+
+        let checkout = try makeCoordinator().validate(
+            checkoutPath: destination.path,
+            forSessionID: session.id
+        ).get()
+
+        XCTAssertEqual(checkout.path, destination.resolvingSymlinksInPath().path)
+        XCTAssertEqual(checkout.branch, "feature/external")
+        XCTAssertEqual(checkout.repositoryIdentity, GitInfo.repositoryIdentity(for: main.path))
+    }
+
+    func testValidationRejectsCheckoutReplacedByAnotherRepositoryAfterCachedHit() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let coordinator = makeCoordinator()
+        _ = try coordinator.validate(checkoutPath: sibling.path, forSessionID: session.id).get()
+        try git(["worktree", "remove", sibling.path], in: main)
+        try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
+        try makeRepository(at: sibling, branch: "replacement")
+
+        XCTAssertEqual(failure(coordinator.validate(
+            checkoutPath: sibling.path,
+            forSessionID: session.id
+        )), .differentRepository)
+    }
+
     func testValidationRejectsMissingDetachedCrossRepositoryAndSubdirectory() throws {
         let project = try XCTUnwrap(store.addProject(folderURL: main))
         let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
@@ -1341,6 +1373,8 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         let made = root.appendingPathComponent("made")
         let taken = root.appendingPathComponent("taken")
         try git(["branch", "dev/existing"], in: main)
+        XCTAssertNil(GitInfo.worktreeLocation(for: made.path))
+        XCTAssertNil(GitInfo.worktreeLocation(for: taken.path))
 
         try GitWorktree.create(
             branch: "dev/fresh",
@@ -1362,6 +1396,49 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
             GitInfo.repositoryIdentity(for: main.path),
             "a worktree Threading makes must be a sibling the coordinator will accept"
         )
+    }
+
+    func testCreateSessionWorktreeQueuesMoveAfterCachedMiss() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let branch = "dev/feature/magic-view"
+        let destination = try XCTUnwrap(GitWorktree.suggestedLocation(forBranch: branch, in: project))
+        XCTAssertNil(GitInfo.worktreeLocation(for: destination.path))
+        let coordinator = makeCoordinator()
+        let service = AgentSessionCommandService(
+            projects: store,
+            archiveScheduler: SessionArchiveScheduler(session: { [store] id in
+                store?.session(withID: id)
+            }),
+            usesAgentTitleInSidebar: { true },
+            checkoutCoordinator: coordinator
+        )
+
+        let result = service.createSessionWorktree(.init(
+            branch: branch,
+            authorityBasis: .explicitUserRequest,
+            reason: "User requested a separate checkout"
+        ), for: session.id, approval: true)
+
+        guard case .created(let path, .queued(let move)) = result else {
+            return XCTFail("The created checkout must also queue ownership, got \(result)")
+        }
+        XCTAssertEqual(path, destination.path)
+        XCTAssertEqual(move.checkoutPath, destination.resolvingSymlinksInPath().path)
+        XCTAssertEqual(GitInfo.currentBranch(for: path), branch)
+        XCTAssertEqual(store.project(forSessionID: session.id)?.id, project.id)
+        XCTAssertEqual(store.session(withID: session.id)?.pendingCheckoutMove, move)
+
+        var completed = false
+        coordinator.finishPendingMove(sessionID: session.id) { succeeded in
+            XCTAssertTrue(succeeded)
+            completed = true
+        }
+        XCTAssertTrue(completed)
+        XCTAssertEqual(store.project(forSessionID: session.id)?.folderPath, move.checkoutPath)
+        XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
+        coordinator.runtimeRelaunchDidStart(sessionID: session.id)
+        XCTAssertFalse(coordinator.isHoldingInput(sessionID: session.id))
     }
 
     func testApprovalIsResolvedBeforePendingStateIsWritten() throws {

@@ -140,7 +140,8 @@ struct ExtensionFactSnapshot: Equatable, Sendable {
                 if sessionSubjectSet.contains(cell.subject) { result.insert(id) }
             case .project, .repository, .repositoryBranch:
                 result.formUnion(sourceSessionIDsByInheritedSubject[cell.subject] ?? [])
-            case .terminal:
+            case .terminal, .application:
+                // Navigator rows never inherit an application fact.
                 break
             }
         }
@@ -168,7 +169,7 @@ struct ExtensionFactSnapshot: Equatable, Sendable {
                 repository: repository(for: subject),
                 branch: string(ExtensionHostFactKey.projectBranch, for: subject)
             )
-        case .terminal, .repository, .repositoryBranch:
+        case .terminal, .repository, .repositoryBranch, .application:
             return nil
         }
     }
@@ -504,6 +505,7 @@ private struct ExtensionFactSnapshotOverlay: Equatable, Sendable {
         case .repository(let repository): ["3", repository.host, repository.path]
         case .repositoryBranch(let repository, let branch):
             ["4", repository.host, repository.path, branch]
+        case .application: ["5"]
         }
     }
 }

@@ -125,7 +125,7 @@ final class FileSystemEventStreamTests: XCTestCase {
         let unexpected = expectation(description: "discarded owner receives no initial read")
         unexpected.isInverted = true
         var stream: FileSystemEventStream? = makeStream(backend: backend) { unexpected.fulfill() }
-        weak var owner = stream
+        weak let owner = stream
         stream?.start()
         wait(for: [backend.startEntered], timeout: 5)
         stream = nil

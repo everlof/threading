@@ -907,7 +907,7 @@ enum AppSettingDefinitions {
         identity: .playsThemeMotion,
         persistenceKey: "playsThemeMotion",
         absence: .registered(true),
-        presentations: [row("themes", 2, "App", "Theme animations",
+        presentations: [row("motion", 0, "Theme animations", "Theme animations",
                             ["animation", "motion", "particles", "bubbles", "transition"])]
     )
     static let playsThemeSounds = AppSettingDescriptor<Bool>(
@@ -1513,14 +1513,14 @@ enum AppSettingDefinitions {
         persistenceKey: "workingOrbStyle",
         absence: .registered(MotionPreferencesDefaults.workingOrbStyle.rawValue),
         validation: .allowedStrings(Set(WorkingOrbStyle.allCases.map(\.rawValue))),
-        presentations: [row("motion", 0, "Working", "Working indicator",
+        presentations: [row("motion", 5, "Working", "Working indicator",
                             ["orb", "animation", "spinner"])]
     )
     static let sharesThemeAudio = AppSettingDescriptor<Bool>(
         identity: .sharesThemeAudio,
         persistenceKey: "sharesThemeAudio",
         absence: .registered(false),
-        presentations: [row("motion", 2, "Music", "Music-reactive themes",
+        presentations: [row("motion", 1, "Music", "Music-reactive themes",
                             ["music", "audio", "spectrum", "equalizer", "visualizer"])]
     )
     static let themeAudioSource = AppSettingDescriptor<String>(
@@ -1528,7 +1528,7 @@ enum AppSettingDefinitions {
         persistenceKey: "themeAudioSource",
         absence: .registered(AudioSpectrumSource.systemID),
         validation: .maximumBytes(1_024),
-        presentations: [row("motion", 3, "Music", "Audio source",
+        presentations: [row("motion", 2, "Music", "Audio source",
                             ["music", "audio", "source", "player", "Spotify"])]
     )
     /// Whether decoration answers agent activity at all — streams, rain, pulses, comets. The
@@ -1537,7 +1537,7 @@ enum AppSettingDefinitions {
         identity: .themeReactsToActivity,
         persistenceKey: "themeReactsToActivity",
         absence: .registered(true),
-        presentations: [row("motion", 4, "Reactions", "React to agent activity",
+        presentations: [row("motion", 3, "Reactions", "React to agent activity",
                             ["reaction", "activity", "agents", "working", "particles",
                              "decoration", "motion"])]
     )
@@ -1549,7 +1549,7 @@ enum AppSettingDefinitions {
         absence: .registered(ThemeReactionDefaults.strengthPercent),
         // 0% is a decision — reactions held at rest — not "unset", so the floor is honoured.
         validation: .clampingRange(ThemeReactionDefaults.strengthPercentRange),
-        presentations: [row("motion", 5, "Reactions", "Reaction strength",
+        presentations: [row("motion", 4, "Reactions", "Reaction strength",
                             ["reaction", "strength", "intensity", "music", "activity",
                              "agents", "scale", "equalizer", "particles"])]
     )
@@ -1558,7 +1558,7 @@ enum AppSettingDefinitions {
         persistenceKey: "chatNameMorphStyle",
         absence: .registered(MotionPreferencesDefaults.chatNameMorphStyle.rawValue),
         validation: .allowedStrings(Set(ChatNameMorphStyle.allCases.map(\.rawValue))),
-        presentations: [row("motion", 1, "Chat names", "Chat name transition",
+        presentations: [row("motion", 6, "Chat names", "Chat name transition",
                             ["transition", "animation", "morph"])]
     )
     static let chromeFontFamily = AppSettingDescriptor<String>(
@@ -1656,6 +1656,18 @@ enum AppSettingDefinitions {
     ]
 
     private static let surfaceDefinitions: [AppSettingDefinition] = [
+        surfaced("tools.network.requestHeaders", pageID: "tools", order: 1,
+                  section: "Browser Network Capture", title: "Capture request headers",
+                  "browser", "network", "headers", "bodies", "capture", "development"),
+        surfaced("tools.network.responseHeaders", pageID: "tools", order: 2,
+                  section: "Browser Network Capture", title: "Capture response headers",
+                  "browser", "network", "headers", "bodies", "capture", "development"),
+        surfaced("tools.network.requestBody", pageID: "tools", order: 3,
+                  section: "Browser Network Capture", title: "Capture request bodies",
+                  "browser", "network", "headers", "bodies", "capture", "development"),
+        surfaced("tools.network.responseBody", pageID: "tools", order: 4,
+                  section: "Browser Network Capture", title: "Capture response bodies",
+                  "browser", "network", "headers", "bodies", "capture", "development"),
         surfaced("general.agentTools", pageID: "general", order: 7,
                   section: "Software Updates", title: "Agent tools",
                   "install", "update", "CLI", "TUI", "Claude", "Codex", "model", "version"),
@@ -1664,6 +1676,8 @@ enum AppSettingDefinitions {
         surfaced("themes.appTheme", pageID: "themes", order: 0, section: "App",
                   title: "App theme", "appearance", "chrome", "custom", "duplicate", "edit",
                   "delete"),
+        surfaced("themes.motion", pageID: "themes", order: 2, section: "App",
+                  title: "Motion", "animation", "music", "reaction", "strength"),
         surfaced("themes.classicSkins", pageID: "themes", order: 1, section: "App",
                   title: "Classic skins", "Winamp", "import", "skin"),
         surfaced("profiles.font", pageID: "profiles", order: 0, section: "Text & Colour", title: "Font",

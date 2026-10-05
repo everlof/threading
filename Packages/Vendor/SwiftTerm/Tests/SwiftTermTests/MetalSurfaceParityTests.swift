@@ -28,6 +28,119 @@ struct MetalSurfaceParityTests {
     private static let width = 320
     private static let height = 120
 
+    /// The halo appears, lies only around the text that cast it, stays under opaque cell
+    /// backgrounds, and leaves exactly when the glow does — on both of the renderer's buffering
+    /// paths, which build the halo pass from different vertex data.
+    @Test(arguments: [MetalBufferingMode.perRowPersistent, .perFrameAggregated])
+    func glowAddsForegroundHaloAndOpaqueCellBackgroundsStillCoverIt(mode: MetalBufferingMode) throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let target = MTKView(frame: CGRect(x: 0, y: 0, width: Self.width, height: Self.height), device: device)
+        target.colorPixelFormat = .bgra8Unorm
+        target.framebufferOnly = false
+        target.isPaused = true
+        let view = TerminalView(frame: target.frame)
+        view.metalBufferingMode = mode
+        view.nativeBackgroundColor = .black
+        // Ink at the top left and alone at the bottom right, so a halo scaled, offset or
+        // flipped by a wrong mapping lands where no text is.
+        view.feed(text: "\u{1B}[?25l\u{1B}[38;2;0;255;255mForeground halo\r\n"
+            + "\u{1B}[48;2;0;0;240m          \u{1B}[0m free ink\r\n"
+            + "\u{1B}[999;30H\u{1B}[38;2;255;0;255mfar\u{1B}[0m")
+        let plain = try #require(renderPixels(into: target, terminalView: view))
+        let glow = TerminalTextGlow(radius: 6, opacity: 0.8)
+        view.textGlow = glow
+        let glowing = try #require(renderPixels(into: target, terminalView: view))
+        #expect(plain.count == glowing.count)
+        func isBlueBackground(_ offset: Int) -> Bool {
+            plain[offset] == 240 && plain[offset + 1] == 0 && plain[offset + 2] == 0
+        }
+
+        // Ink: what the plain frame drew that is neither the black ground nor the blue cells.
+        var ink = [Bool](repeating: false, count: Self.width * Self.height)
+        for pixel in ink.indices {
+            let offset = pixel * 4
+            let lit = plain[offset] != 0 || plain[offset + 1] != 0 || plain[offset + 2] != 0
+            ink[pixel] = lit && !isBlueBackground(offset)
+        }
+        #expect(ink.contains(true), "the fixture drew no text")
+        // The halo's reach in drawable pixels at this 1x target: the radius, the box passes'
+        // rounding at half resolution, and one halo pixel of bilinear upsampling.
+        let reach = Int(ceil(glow.radius)) + 3
+        let nearInk = Self.dilate(ink, by: reach)
+
+        var changedCount = 0
+        var stray = 0
+        for pixel in ink.indices {
+            let offset = pixel * 4
+            let blueChanged = plain[offset] != glowing[offset]
+            let greenChanged = plain[offset + 1] != glowing[offset + 1]
+            let redChanged = plain[offset + 2] != glowing[offset + 2]
+            guard blueChanged || greenChanged || redChanged else { continue }
+            changedCount += 1
+            if !nearInk[pixel] { stray += 1 }
+        }
+        #expect(changedCount > 50, "an enabled GPU halo must change pixels outside the original foreground")
+        #expect(stray == 0, "\(stray) changed pixels lie further than \(reach) px from any text: a misplaced halo")
+        let blueBackground = stride(from: 0, to: plain.count, by: 4).filter(isBlueBackground)
+        #expect(blueBackground.count > 100, "the fixture must actually contain opaque ANSI backgrounds")
+        #expect(blueBackground.allSatisfy { offset in (0..<4).allSatisfy { plain[offset + $0] == glowing[offset + $0] } })
+        view.textGlow = nil
+        let removed = try #require(renderPixels(into: target, terminalView: view))
+        #expect(plain == removed)
+        if mode == .perRowPersistent, let path = ProcessInfo.processInfo.environment["THREADING_GLOW_RENDER_OUT"] {
+            let url = URL(fileURLWithPath: path, isDirectory: true)
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            let provider = try #require(CGDataProvider(data: Data(glowing) as CFData))
+            let image = try #require(CGImage(width: Self.width, height: Self.height, bitsPerComponent: 8,
+                bitsPerPixel: 32, bytesPerRow: Self.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
+                provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+            let data = try #require(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]))
+            try data.write(to: url.appendingPathComponent("metal-text-glow.png"))
+        }
+    }
+
+    /// A mask grown by `radius` pixels in every direction (a square, so it bounds a box blur's
+    /// support from above), done separably.
+    private static func dilate(_ mask: [Bool], by radius: Int) -> [Bool] {
+        var rows = [Bool](repeating: false, count: mask.count)
+        for y in 0..<height {
+            for x in 0..<width where mask[y * width + x] {
+                for nx in max(0, x - radius)...min(width - 1, x + radius) { rows[y * width + nx] = true }
+            }
+        }
+        var result = [Bool](repeating: false, count: mask.count)
+        for y in 0..<height {
+            for x in 0..<width where rows[y * width + x] {
+                for ny in max(0, y - radius)...min(height - 1, y + radius) { result[ny * width + x] = true }
+            }
+        }
+        return result
+    }
+
+    /// Resizing a glowing surface by a few pixels at a time — a live resize — reuses one pair
+    /// of halo textures instead of allocating a pair per frame.
+    @Test func aGlowingResizeReusesItsHaloTextures() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let target = MTKView(frame: CGRect(x: 0, y: 0, width: Self.width, height: Self.height), device: device)
+        target.colorPixelFormat = .bgra8Unorm
+        target.framebufferOnly = false
+        target.isPaused = true
+        target.renderContentsScale = 1
+        let view = TerminalView(frame: target.frame)
+        view.textGlow = TerminalTextGlow(radius: 3, opacity: 0.6)
+        view.feed(text: "resize me\r\n")
+        let renderer = try MetalTerminalRenderer(target: target)
+        renderer.waitForCompletionAfterCommit = true
+        // 280–302 × 140–151 drawable pixels: one 384 × 256 bucket at full resolution.
+        for step in 0..<12 {
+            target.renderDrawableSize = CGSize(width: 280 + step * 2, height: 140 + step)
+            #expect(view.renderSnapshotForMetal(renderer: renderer, target: target))
+        }
+        #expect(renderer.glowTextureAllocations == 1, "\(renderer.glowTextureAllocations) pairs for one drag")
+        #expect(renderer.glowTextureBytes > 0)
+    }
+
     /// Renders `content` through `target` and returns the drawable's pixels.
     private func renderPixels(into target: any MetalRenderTarget,
                               terminalView: TerminalView) -> [UInt8]? {
@@ -37,9 +150,11 @@ struct MetalSurfaceParityTests {
         // app-side harness runs this same comparison where the bundle exists.
         target.renderContentsScale = 1
         target.renderDrawableSize = CGSize(width: Self.width, height: Self.height)
-        guard let renderer = try? MetalTerminalRenderer(target: target) else {
-            return nil
-        }
+        // A windowless view takes NSScreen.main's scale (2 on a Retina display, 1 on an external
+        // monitor or with the display asleep); pin it to the 1x drawable, or every cell is laid
+        // out off the drawable and both frames come back as nothing but the clear colour.
+        terminalView.metalScaleFactorOverride = 1
+        guard let renderer = try? MetalTerminalRenderer(target: target) else { return nil }
         renderer.waitForCompletionAfterCommit = true
         renderer.capturesRenderedTexture = true
         guard terminalView.renderSnapshotForMetal(renderer: renderer,
@@ -121,6 +236,12 @@ struct MetalSurfaceParityTests {
 
         #expect(fromMTK.count == fromLayer.count)
         guard fromMTK.count == fromLayer.count else { return }
+        // Two blank frames match trivially; the comparison only means something over real ink.
+        let ground = Array(fromMTK.prefix(4))
+        let drewSomething = stride(from: 0, to: fromMTK.count, by: 4).contains {
+            Array(fromMTK[$0 ..< $0 + 4]) != ground
+        }
+        #expect(drewSomething, "the fixture drew nothing")
 
         var differing = 0
         for index in stride(from: 0, to: fromMTK.count, by: 4) where

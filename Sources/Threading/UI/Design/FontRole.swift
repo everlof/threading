@@ -47,6 +47,12 @@ extension Design {
         /// The sidebar's wordmark, carrying whatever the theme's sidebar brand stated — the
         /// payload is the recipe, so the sweep re-resolves a custom face exactly as authored.
         case wordmark(family: String? = nil, size: CGFloat? = nil, weight: NSFont.Weight = .semibold)
+        /// The new-session composer's greeting, set the way the theme's welcome states it
+        /// (`ThemeWelcome.Wording.style`) — the heading when it states nothing. Named by slot
+        /// rather than carrying the style, so the sweep reads the *next* theme's answer.
+        case welcomeGreeting
+        /// The line beneath the greeting, measured from the body the same way.
+        case welcomeCaption
 
         // Code — monospaced under every typeface.
         case code(weight: NSFont.Weight = .regular)
@@ -87,6 +93,8 @@ extension Design {
                 return Typography.markdownHeading(fromPointSize: base, surface: surface)
             case .wordmark(let family, let size, let weight):
                 return Typography.wordmark(family: family, size: size, weight: weight)
+            case .welcomeGreeting: return Typography.welcomeGreeting()
+            case .welcomeCaption: return Typography.welcomeCaption()
             case .code(let weight): return Typography.code(weight: weight)
             case .inlineCode: return Typography.inlineCode()
             case .previewCode: return Typography.previewCode()
@@ -126,7 +134,8 @@ extension Design {
             case .numericDetail(let weight):
                 return .numericDetail(weight: weight == .regular ? .semibold : weight)
             case .heading, .placeholderTitle, .emphasizedBody, .strongBody, .control, .caption,
-                 .markdownHeading, .wordmark, .inlineCode, .previewCode, .compactCode,
+                 .markdownHeading, .wordmark, .welcomeGreeting, .welcomeCaption,
+                 .inlineCode, .previewCode, .compactCode,
                  .compactToolName, .numericDisplay, .numericBody, .accountEmoji, .emojiPickerCell:
                 return self
             }
@@ -140,7 +149,8 @@ extension Design {
         public var followsTheme: Bool {
             switch self {
             case .heading, .placeholderTitle, .subheading, .body, .emphasizedBody, .strongBody,
-                 .control, .controlRegular, .caption, .detail, .markdownHeading, .wordmark:
+                 .control, .controlRegular, .caption, .detail, .markdownHeading, .wordmark,
+                 .welcomeGreeting, .welcomeCaption:
                 return true
             case .code, .inlineCode, .previewCode, .compactCode, .compactToolName,
                  .numericDisplay, .numericBody, .numericControl, .numericDetail,

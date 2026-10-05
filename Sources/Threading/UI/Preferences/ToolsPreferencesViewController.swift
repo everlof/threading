@@ -28,6 +28,7 @@ final class ToolsPreferencesViewController: NSViewController {
     private var persistentSessionIDs: [SessionID] = []
     private let credentialStore: BrowserCredentialStore
     private let projects: ProjectStore
+    private let networkCaptureSettings: BrowserNetworkCaptureSettings
     private var credentialProvider: BrowserCredentialProvider = .fallback
     private var storedCredentials: [BrowserCredentialIdentity] = []
     private var onePasswordItems: [BrowserCredentialIdentity] = []
@@ -43,6 +44,8 @@ final class ToolsPreferencesViewController: NSViewController {
         case tool(group: Int, tool: Int)
         case groupFooter(Int)
         case browserSignInCaption
+        case browserNetworkCaption
+        case browserNetworkField(BrowserNetworkCaptureField)
         case browserSignInProvider
         case browserSignInOnePasswordEmpty
         case browserSignInOnePasswordIdentity(Int)
@@ -110,13 +113,15 @@ final class ToolsPreferencesViewController: NSViewController {
         browserAccessStore: BrowserAccessStore,
         chromeAutomationProfile: ChromeAutomationProfile = .shared,
         credentialStore: BrowserCredentialStore = BrowserCredentialStore(),
-        projects: ProjectStore = .shared
+        projects: ProjectStore = .shared,
+        networkCaptureSettings: BrowserNetworkCaptureSettings = .shared
     ) {
         groupOverride = groups
         self.browserAccessStore = browserAccessStore
         self.chromeAutomationProfile = chromeAutomationProfile
         self.credentialStore = credentialStore
         self.projects = projects
+        self.networkCaptureSettings = networkCaptureSettings
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -141,6 +146,7 @@ final class ToolsPreferencesViewController: NSViewController {
         appEvents.observe(MCPExternalToolsDidChange.self) { [weak self] _ in
             self?.render()
         }
+        appEvents.observe(BrowserNetworkCaptureDidChange.self) { [weak self] _ in self?.render() }
     }
 
     override func viewDidLayout() {
@@ -217,6 +223,8 @@ final class ToolsPreferencesViewController: NSViewController {
                 }
             }
         }
+        rows.append(.browserNetworkCaption)
+        rows.append(contentsOf: BrowserNetworkCaptureField.allCases.map(PresentationRow.browserNetworkField))
         rows.append(contentsOf: [.browserSignInCaption, .browserSignInProvider])
         switch credentialProvider {
         case .systemAutoFill:
@@ -283,9 +291,17 @@ final class ToolsPreferencesViewController: NSViewController {
         }
         var extensionBounds: [Int: (first: Int, last: Int)] = [:]
         var browserSignInBounds: (first: Int, last: Int)?
+        var browserNetworkBounds: (first: Int, last: Int)?
         var websiteBounds: (first: Int, last: Int)?
         for (rowIndex, row) in presentationRows.enumerated() {
             switch row {
+            case .browserNetworkField:
+                if var bounds = browserNetworkBounds {
+                    bounds.last = rowIndex
+                    browserNetworkBounds = bounds
+                } else {
+                    browserNetworkBounds = (rowIndex, rowIndex)
+                }
             case .browserSignInProvider, .browserSignInOnePasswordEmpty,
                  .browserSignInOnePasswordIdentity, .browserSignInOnePasswordAdd,
                  .browserSignInVaultEmpty, .browserSignInVaultIdentity,
@@ -311,7 +327,7 @@ final class ToolsPreferencesViewController: NSViewController {
                 } else {
                     extensionBounds[sectionIndex] = (rowIndex, rowIndex)
                 }
-            case .note, .group, .tool, .groupFooter, .browserSignInCaption, .chromeAutomation,
+            case .note, .group, .tool, .groupFooter, .browserSignInCaption, .browserNetworkCaption, .chromeAutomation,
                  .websiteAccessCaption, .extensionCaption:
                 break
             }
@@ -320,6 +336,9 @@ final class ToolsPreferencesViewController: NSViewController {
             decorations.append(ThemedTableCardDecoration(
                 rows: browserSignInBounds.first...browserSignInBounds.last
             ))
+        }
+        if let browserNetworkBounds {
+            decorations.append(ThemedTableCardDecoration(rows: browserNetworkBounds.first...browserNetworkBounds.last))
         }
         if let websiteBounds {
             decorations.append(ThemedTableCardDecoration(
@@ -500,6 +519,17 @@ final class ToolsPreferencesViewController: NSViewController {
     /// virtual row does not exist. Match against the footer's actual built anchor, then unfold
     /// only that group and ask the table to vend the destination before reveal searches again.
     private func prepareToRevealSettingsRow(_ title: String) -> Bool {
+        if let field = BrowserNetworkCaptureField.allCases.first(where: {
+            L10n.string($0.title) == title
+        }), let row = presentationRows.firstIndex(where: {
+            if case .browserNetworkField(let value) = $0 { return value == field }
+            return false
+        }) {
+            tableView.scrollRowToVisible(row)
+            _ = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
+            tableView.layoutSubtreeIfNeeded()
+            return true
+        }
         guard SettingsRowAnchor.find(title: title, in: projectFooter()) != nil,
               let groupIndex = displayedGroups.firstIndex(where: {
                 $0.id == MCPToolCatalog.project.id
@@ -593,6 +623,30 @@ final class ToolsPreferencesViewController: NSViewController {
             subtitle: Self.providerExplanation(credentialProvider),
             control: picker
         )
+    }
+
+    private func browserNetworkRow(_ field: BrowserNetworkCaptureField) -> NSView {
+        let toggle = ThemedToggle()
+        toggle.state = networkCaptureSettings.options[field] ? .on : .off
+        toggle.tag = field.rawValue
+        toggle.target = self
+        toggle.action = #selector(networkCaptureToggled(_:))
+        toggle.setAccessibilityLabel(L10n.string(field.title))
+        toggle.setAccessibilityIdentifier("settings.tools.network.\(field.rawValue)")
+        return SettingsUI.row(
+            title: field.title,
+            subtitle: field == .requestBody || field == .responseBody
+                ? "Text payloads up to 8 KiB; captured site data becomes readable to agents."
+                : "Page-visible fetch/XHR headers; sensitive values are redacted.",
+            control: toggle
+        )
+    }
+
+    @objc private func networkCaptureToggled(_ sender: ThemedToggle) {
+        guard let field = BrowserNetworkCaptureField(rawValue: sender.tag) else { return }
+        var options = networkCaptureSettings.options
+        options[field] = sender.state == .on
+        networkCaptureSettings.options = options
     }
 
     private func browserSignInOnePasswordEmptyRow() -> NSView {
@@ -1171,6 +1225,9 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
         if case .extensionCaption = presentationRows[row] {
             return Design.Spacing.small
         }
+        if case .browserNetworkCaption = presentationRows[row] {
+            return Design.Spacing.small
+        }
         if case .browserSignInCaption = presentationRows[row] {
             return Design.Spacing.small
         }
@@ -1184,7 +1241,7 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
         switch row {
         case .tool, .groupFooter:
             return 0
-        case .browserSignInProvider, .browserSignInOnePasswordEmpty,
+        case .browserNetworkField, .browserSignInProvider, .browserSignInOnePasswordEmpty,
              .browserSignInOnePasswordIdentity, .browserSignInOnePasswordAdd,
              .browserSignInVaultEmpty, .browserSignInVaultIdentity,
              .browserSignInVaultAdd, .browserSignInSubmissionExemption:
@@ -1192,7 +1249,7 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
         case .websiteAccessEmpty, .websiteAccessOrigin, .websiteAccessSession,
              .websiteAccessRevokeAll:
             return 0
-        case .note, .group, .browserSignInCaption, .chromeAutomation,
+        case .note, .group, .browserSignInCaption, .browserNetworkCaption, .chromeAutomation,
              .websiteAccessCaption, .extensionCaption:
             return Design.Spacing.large
         case .extensionField(let sectionIndex, let fieldIndex):
@@ -1232,6 +1289,14 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
                 : supervisionFooter()
         case .browserSignInCaption:
             return SettingsUI.caption("Browser Sign-In")
+        case .browserNetworkCaption:
+            return SettingsUI.caption("Browser Network Capture", help: SettingsUI.help(
+                "Browser Network Capture",
+                "These opt-ins apply to all in-app browser tabs. Changes affect future requests without reloading, and clear existing captured payloads.",
+                "Capture covers main-frame fetch/XHR text payloads and page-visible headers. Document/resource bodies, cross-origin frames, binary data and streaming responses are excluded. Agents can inspect the configuration and ask you to approve changes."
+            ))
+        case .browserNetworkField(let field):
+            return browserNetworkRow(field)
         case .browserSignInProvider:
             return browserSignInProviderRow()
         case .browserSignInOnePasswordEmpty:

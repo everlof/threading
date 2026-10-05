@@ -213,7 +213,7 @@ final class AgentAccountTokenVault: @unchecked Sendable {
     /// asked yet, which is different from having no token.
     private var read: [AccountID: AgentAccountToken?] = [:]
 
-    init(store: AgentAccountTokenStore = AgentAccountTokenStore(), now: @escaping @Sendable () -> Date = Date.init) {
+    init(store: AgentAccountTokenStore = AgentAccountTokenStore(), now: @escaping @Sendable () -> Date = { Date() }) {
         self.store = store
         self.now = now
     }

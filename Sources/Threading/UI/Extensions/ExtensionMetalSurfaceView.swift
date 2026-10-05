@@ -34,17 +34,34 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         ExtensionHostSignalContext
     ) -> Double?
 
-    private static let maximumInputs = 8
-    private static let hostVertexFunction = "threadingHostSurfaceVertex"
-    private static let hostFragmentFunction = "threadingHostSurfaceFragment"
+    /// Answers one of the publishing extension's own settings fields as the number a surface
+    /// input reads before its mapping (`ExtensionSettingControl.surfaceReading`), or nil when
+    /// the field cannot be read — the binding then reads its fallback.
+    typealias SettingProvider = @MainActor (_ fieldID: String) -> Double?
+
     /// Where a textured surface's picture and sampler are bound — the ABI the SDK documents.
     private static let imageTextureIndex = 0
     private static let imageSamplerIndex = 0
 
     private let specification: ExtensionMetalSurface
     private let signalProvider: SignalProvider
+    private let settingProvider: SettingProvider
+    /// The setting-bound inputs' readings, read once at mount and again only when an extension
+    /// setting changes — never per frame. A frame resolves a binding with a dictionary lookup.
+    private var settingReadings: [String: Double] = [:]
+    /// Held only by a surface that binds a setting; nil for every other surface.
+    private var settingObservations: AppEventObservations?
     private let commandQueue: MTLCommandQueue
-    private let pipeline: MTLRenderPipelineState
+    private var pipeline: MTLRenderPipelineState?
+    private var preparation: Task<Void, Never>?
+    private var preparationFailure: Error?
+
+    /// Authoring/render fixtures await readiness; ordinary hosts keep the transparent slot
+    /// until compilation finishes and never block their mount on the compiler.
+    func waitForPreparation() async throws {
+        await preparation?.value
+        if let preparationFailure { throw preparationFailure }
+    }
     private let beganAt = ProcessInfo.processInfo.systemUptime
     private let audioDemand: AudioSpectrumDemand?
     private var audioViewportObserver: AudioSpectrumViewportObserver?
@@ -61,6 +78,12 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
     private var imageTexture: MTLTexture?
     /// Whether the package picture — not the placeholder — is what the surface samples.
     private(set) var showsTexture = false
+    /// The host's working regions and the view whose coordinates they are stated in — this view
+    /// itself, or the backdrop plane that hosts it. Held in that space rather than converted
+    /// once, so a surface that layout moves or resizes after the host stated them never draws
+    /// against a stale place: every frame restates them in this view's coordinates.
+    private var focusRegions = ExtensionSurfaceFocus()
+    private weak var focusSpace: NSView?
     /// Whether the view has decided to hold its frames because nobody could see them.
     ///
     /// Separate from `isPaused` so a test can ask *why* the view is paused, and so the
@@ -74,13 +97,15 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         specification: ExtensionMetalSurface,
         source: String,
         maximumFramesPerSecond: Int = ExtensionMetalSurface.maximumFramesPerSecond,
-        signalProvider: @escaping SignalProvider
+        signalProvider: @escaping SignalProvider,
+        settingProvider: @escaping SettingProvider = { _ in nil }
     ) throws {
         guard let device = MTLCreateSystemDefaultDevice(),
               let commandQueue = device.makeCommandQueue() else {
             throw ExtensionMetalSurfaceError.metalUnavailable
         }
         self.specification = specification
+        self.settingProvider = settingProvider
         let boundSignals = specification.inputs.compactMap { input -> ExtensionHostSignal? in
             if case .signal(let signal, _) = input.value { return signal }
             return nil
@@ -105,32 +130,6 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
             imageTexture = nil
         }
 
-        let library = try device.makeLibrary(
-            source: Self.completeSource(
-                extensionSource: source,
-                fragmentFunction: specification.fragmentFunction,
-                isTextured: specification.texture != nil
-            ),
-            options: nil
-        )
-        guard let vertex = library.makeFunction(name: Self.hostVertexFunction),
-              let fragment = library.makeFunction(name: Self.hostFragmentFunction) else {
-            throw ExtensionMetalSurfaceError.missingFunction(
-                specification.fragmentFunction
-            )
-        }
-
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.vertexFunction = vertex
-        descriptor.fragmentFunction = fragment
-        descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        descriptor.colorAttachments[0].isBlendingEnabled = true
-        descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-        descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-        descriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
-        descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
-        pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
-
         super.init(frame: .zero, device: device)
         delegate = self
         colorPixelFormat = .bgra8Unorm
@@ -147,8 +146,47 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         setAccessibilityElement(false)
         signalContext = ExtensionHostSignalContext(appearance: effectiveAppearance)
         if audioDemand != nil { ThemeParticleHold.shared.register(self) }
+        if !specification.boundSettingIDs.isEmpty {
+            refreshSettingReadings()
+            let observations = AppEventObservations()
+            observations.observe(ExtensionSettingsValuesDidChange.self) { [weak self] _ in
+                self?.settingsDidChange()
+            }
+            settingObservations = observations
+        }
+        let completeSource = Self.completeSource(extensionSource: source,
+            fragmentFunction: specification.fragmentFunction, isTextured: specification.texture != nil)
+        preparation = Task { [weak self] in
+            do {
+                let compiled = try await ExtensionMetalPipelineCache.shared.prepare(source: completeSource)
+                guard let self else { return }
+                self.pipeline = compiled.state
+                self.updateVisibilityHold()
+                self.needsDisplay = true
+            } catch {
+                ThreadingLogger.extensions.error(
+                    "Could not compile Metal surface: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+                self?.withdraw(after: error)
+            }
+        }
         updateVisibilityHold()
     }
+
+    /// A shader that will not compile leaves nothing to draw. Before compilation moved off the
+    /// main actor the initializer threw and the host skipped the hook; now the mounted surface
+    /// withdraws itself to the same effect — hidden, paused, and holding no audio-capture or
+    /// moment demand, so a dead surface can never keep the system-audio tap running.
+    private func withdraw(after error: Error) {
+        preparationFailure = error
+        isHidden = true
+        isPaused = true
+        audioDemand?.setActive(false)
+        momentDemand?.setActive(false)
+    }
+
+    /// Whether compilation failed and the surface withdrew itself.
+    var hasWithdrawn: Bool { preparationFailure != nil }
 
     @available(*, unavailable)
     required init(coder: NSCoder) {
@@ -177,8 +215,9 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
             }
         }
         NotificationCenter.default.removeObserver(self)
-        // Moments are wanted only while somebody has mounted this surface in a window.
-        momentDemand?.setActive(window != nil)
+        // Moments are wanted only while somebody has mounted this surface in a window, and only
+        // from a surface that can draw them.
+        momentDemand?.setActive(window != nil && preparationFailure == nil)
         signalContext = ExtensionHostSignalContext(appearance: effectiveAppearance)
         if let window {
             for name in [
@@ -227,9 +266,11 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         isHeldForVisibility = !windowVisible || isHiddenOrHasHiddenAncestor
         let holdsAudioMotion = audioDemand != nil && !ThemeParticleHold.motionAllowed
         let wasPaused = isPaused
-        isPaused = isHeldForVisibility || holdsAudioMotion
+        isPaused = pipeline == nil || isHeldForVisibility || holdsAudioMotion
             || (audioDemand != nil && !AudioSpectrumViewportObserver.intersectsViewport(self))
-        audioDemand?.setActive(!isHeldForVisibility && ThemeParticleHold.motionAllowed
+        // No capture before the pipeline exists: a surface still compiling, or one that failed,
+        // has nothing to draw the reading into.
+        audioDemand?.setActive(pipeline != nil && !isHeldForVisibility && ThemeParticleHold.motionAllowed
                                && ThemeParticleHold.isSeen(self)
                                && AudioSpectrumViewportObserver.intersectsViewport(self))
         if holdsAudioMotion, !isHeldForVisibility, !wasPaused { draw() }
@@ -259,6 +300,24 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         updateVisibilityHold()
     }
 
+    // MARK: - Focus
+
+    /// States the regions the surface should design around, in `space`'s coordinates — this
+    /// view's own when nil. Only an ancestor (or the view itself) is a space the regions can be
+    /// read from; a surface moved out from under the space it was given reads no regions.
+    func setFocus(_ focus: ExtensionSurfaceFocus, in space: NSView? = nil) {
+        focusRegions = focus
+        focusSpace = space ?? self
+    }
+
+    /// The regions in this view's own coordinates, as the next frame uploads them.
+    var focus: ExtensionSurfaceFocus {
+        guard let focusSpace else { return ExtensionSurfaceFocus() }
+        if focusSpace === self { return focusRegions }
+        guard isDescendant(of: focusSpace) else { return ExtensionSurfaceFocus() }
+        return focusRegions.mapped { convert($0, from: focusSpace) }
+    }
+
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
@@ -272,6 +331,7 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
             pass: pass,
             commandBuffer: commandBuffer,
             size: view.drawableSize,
+            focusBounds: bounds,
             time: Design.Motion.reducesMotion
                 ? 0
                 : Float(ProcessInfo.processInfo.systemUptime - beganAt)
@@ -283,7 +343,9 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
     /// Renders the same pipeline into a CPU-readable texture.
     ///
     /// The inspector and extension authoring preview cannot recover an `MTKView` through
-    /// AppKit's `cacheDisplay`, so they use this rather than substituting a fake visual.
+    /// AppKit's `cacheDisplay`, so they use this rather than substituting a fake visual. The
+    /// focus regions are normalized against the view's bounds, as a frame's are; a view that
+    /// has not been laid out is taken to be `size` points across.
     func snapshotImage(size: CGSize, time: Float) -> NSImage? {
         let pixelWidth = max(Int(size.width.rounded(.up)), 1)
         let pixelHeight = max(Int(size.height.rounded(.up)), 1)
@@ -309,6 +371,7 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
             pass: pass,
             commandBuffer: commandBuffer,
             size: CGSize(width: CGFloat(pixelWidth), height: CGFloat(pixelHeight)),
+            focusBounds: bounds.isEmpty ? CGRect(origin: .zero, size: size) : bounds,
             time: time
         ) else { return nil }
 
@@ -360,16 +423,19 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
     private static let snapshotBytesPerPixel = 4
     private static let snapshotBitsPerComponent = 8
 
+    /// `size` is the drawable in pixels (`uniforms.size`); `focusBounds` is the rectangle, in
+    /// this view's coordinates, the focus regions are normalized against.
     private func encode(
         pass: MTLRenderPassDescriptor,
         commandBuffer: MTLCommandBuffer,
         size: CGSize,
+        focusBounds: CGRect,
         time: Float
     ) -> Bool {
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
+        guard let pipeline, let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
             return false
         }
-        var uniforms = uniformFloats(size: size, time: time)
+        var uniforms = uniformFloats(size: size, focusBounds: focusBounds, time: time)
         encoder.setRenderPipelineState(pipeline)
         encoder.setFragmentBytes(
             &uniforms,
@@ -385,22 +451,22 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         return true
     }
 
-    private func uniformFloats(size: CGSize, time: Float) -> [Float] {
+    /// `ThreadingSurfaceUniforms` as the flat floats `ExtensionMetalSource.UniformLayout`
+    /// states: size, time and padding, the declared inputs zero-filled to eight, then the focus
+    /// regions in `uv`.
+    func uniformFloats(size: CGSize, focusBounds: CGRect, time: Float) -> [Float] {
+        typealias Layout = ExtensionMetalSource.UniformLayout
         var result: [Float] = [
             Float(size.width),
             Float(size.height),
             audioDemand != nil && !ThemeParticleHold.motionAllowed ? 0 : time,
             0
         ]
-        result.append(contentsOf: specification.inputs.map { input in
+        result.append(contentsOf: specification.inputs.prefix(Layout.maximumInputs).map { input in
             Float(resolve(input.value))
         })
-        if result.count < 4 + Self.maximumInputs {
-            result.append(contentsOf: repeatElement(
-                Float(0),
-                count: 4 + Self.maximumInputs - result.count
-            ))
-        }
+        result.append(contentsOf: repeatElement(Float(0), count: Layout.focusOffset - result.count))
+        result.append(contentsOf: focus.uniformValues(in: focusBounds, isFlipped: isFlipped))
         return result
     }
 
@@ -432,26 +498,38 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
             // turned off read as no reading, the binding's idle fallback.
             guard let measured = signalProvider(signal, signalContext),
                   let raw = Self.reacted(signal, measured) else { return mapping.fallback }
-            let position = min(max(
-                (raw - mapping.inputMinimum)
-                    / (mapping.inputMaximum - mapping.inputMinimum),
-                0
-            ), 1)
-            let curved: Double
-            switch mapping.curve {
-            case .linear:
-                curved = position
-            case .easeIn:
-                curved = position * position
-            case .easeOut:
-                curved = 1 - (1 - position) * (1 - position)
-            case .easeInOut:
-                curved = position * position * (3 - 2 * position)
-            }
-            return mapping.outputMinimum
-                + curved * (mapping.outputMaximum - mapping.outputMinimum)
+            return mapping.output(for: raw)
+        case .setting(let fieldID, let mapping):
+            // A setting is the person's own standing choice, not a reaction and not motion: it
+            // passes straight to the extension's mapping, from the cached reading.
+            return mapping.output(for: settingReadings[fieldID])
         }
     }
+
+    // MARK: - Settings
+
+    /// Re-reads every setting this surface binds. Called at mount and when an extension setting
+    /// changes; a frame only ever reads the cache this fills.
+    private func refreshSettingReadings() {
+        var readings: [String: Double] = [:]
+        for fieldID in specification.boundSettingIDs {
+            readings[fieldID] = settingProvider(fieldID)
+        }
+        settingReadings = readings
+    }
+
+    /// The new value reaches the uniform on the next frame. A surface whose frames are held for
+    /// motion — not for visibility — draws that frame now, or a changed option would wait for
+    /// the hold to lift.
+    private func settingsDidChange() {
+        let previous = settingReadings
+        refreshSettingReadings()
+        guard settingReadings != previous else { return }
+        if isPaused, pipeline != nil, !isHeldForVisibility, !hasWithdrawn { draw() }
+    }
+
+    /// The readings a frame would use now, for tests.
+    var settingReadingsForTesting: [String: Double] { settingReadings }
 
     private static func isMomentSignal(_ signal: ExtensionHostSignal) -> Bool {
         ExtensionHostSignal.momentSignals.contains(signal)
@@ -462,61 +540,9 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
     /// A textured surface's wrapper takes the picture and its sampler at index 0 and passes them
     /// on as the author's third and fourth arguments; an untextured one keeps the two-argument
     /// call every surface written before textures existed was compiled against.
-    private static func completeSource(
-        extensionSource: String,
-        fragmentFunction: String,
-        isTextured: Bool
-    ) -> String {
-        let fragmentWrapper = isTextured
-            ? """
-            fragment float4 \(hostFragmentFunction)(
-                ThreadingSurfaceVertexOut in [[stage_in]],
-                constant ThreadingSurfaceUniforms &uniforms [[buffer(0)]],
-                texture2d<float> image [[texture(\(imageTextureIndex))]],
-                sampler imageSampler [[sampler(\(imageSamplerIndex))]]
-            ) {
-                return \(fragmentFunction)(in.uv, uniforms, image, imageSampler);
-            }
-            """
-            : """
-            fragment float4 \(hostFragmentFunction)(
-                ThreadingSurfaceVertexOut in [[stage_in]],
-                constant ThreadingSurfaceUniforms &uniforms [[buffer(0)]]
-            ) {
-                return \(fragmentFunction)(in.uv, uniforms);
-            }
-            """
-        return """
-        #include <metal_stdlib>
-        using namespace metal;
-
-        struct ThreadingSurfaceUniforms {
-            float2 size;
-            float time;
-            float _padding;
-            float values[\(maximumInputs)];
-        };
-
-        struct ThreadingSurfaceVertexOut {
-            float4 position [[position]];
-            float2 uv;
-        };
-
-        vertex ThreadingSurfaceVertexOut \(hostVertexFunction)(uint vertexID [[vertex_id]]) {
-            const float2 positions[3] = {
-                float2(-1.0, -1.0),
-                float2( 3.0, -1.0),
-                float2(-1.0,  3.0)
-            };
-            ThreadingSurfaceVertexOut out;
-            out.position = float4(positions[vertexID], 0.0, 1.0);
-            out.uv = positions[vertexID] * float2(0.5, -0.5) + 0.5;
-            return out;
-        }
-
-        \(extensionSource)
-
-        \(fragmentWrapper)
-        """
+    static func completeSource(extensionSource: String, fragmentFunction: String, isTextured: Bool) -> String {
+        ExtensionMetalSource.completeSource(extensionSource: extensionSource,
+            fragmentFunction: fragmentFunction, isTextured: isTextured)
     }
+
 }

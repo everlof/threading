@@ -203,9 +203,12 @@ final class TerminalContainerViewController: NSViewController {
     private var settingsPageCache: [String: NSViewController] = [:]
     private var settingsAISearch: SettingsAISearchViewController?
     private var triggerCenter: TriggerCenterViewController?
+    /// Opens the chat an automation's run started in; the window owns the sidebar selection.
+    var onOpenTriggerSession: ((SessionID) -> Void)?
 
     /// Whether settings is the surface currently on screen, so the window can title the pane.
     var isShowingSettings: Bool { settingsPage != nil }
+    var automationProjectID: ProjectID? { triggerCenter?.projectID }
     var isShowingTriggers: Bool { triggerCenter?.view.superview != nil }
 
     /// The non-session sidebar destination currently shown. These make the toolbar tab derive
@@ -685,7 +688,7 @@ final class TerminalContainerViewController: NSViewController {
 
     /// Shows the authority-bearing trigger workspace as a first-class content destination.
     /// Unlike Settings it uses the full pane width and leaves the project sidebar in place.
-    func showTriggers(store: TriggerStore = .shared) {
+    func showTriggers(store: TriggerStore = .shared, projectID: ProjectID? = nil) {
         consumeComposerHandoff(for: nil)
         detachCurrentChild()
         currentComposerProjectID = nil
@@ -699,6 +702,8 @@ final class TerminalContainerViewController: NSViewController {
         applyPaneBackground(.chrome)
 
         let controller = triggerCenter ?? TriggerCenterViewController(store: store)
+        controller.onOpenSession = { [weak self] sessionID in self?.onOpenTriggerSession?(sessionID) }
+        controller.showProject(projectID)
         triggerCenter = controller
         addChild(controller)
         let content = controller.view
@@ -710,6 +715,10 @@ final class TerminalContainerViewController: NSViewController {
             content.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             content.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+
+        // The destination survives off-screen while Settings can change its theme. Repair
+        // the recorded surfaces and fonts it missed; an unchanged return is O(1).
+        AppThemeRefresh.repaintIfNeeded(content)
     }
 
     /// Shows a settings page centred in the pane, replacing whatever session or composer was on
@@ -2041,7 +2050,7 @@ final class TerminalContainerViewController: NSViewController {
             title: L10n.format("%@ couldn’t start", session.displayTitle),
             summary: failure.summary,
             output: failure.detail,
-            actions: launchFailureActions(failure, sessionID: sessionID)
+            actions: launchFailureActions(failure, sessionID: sessionID, kind: session.kind)
         )
     }
 
@@ -2051,10 +2060,14 @@ final class TerminalContainerViewController: NSViewController {
     /// expired, a CLI mid-upgrade — and the cheapest correct move is to ask again. Reading and
     /// keeping the evidence comes next. Anything that reaches for another process is last, and
     /// only appears when there is something for it to work on.
-    private func launchFailureActions(
+    func launchFailureActions(
         _ failure: SessionLaunchFailure,
-        sessionID: SessionID
+        sessionID: SessionID,
+        kind: AgentKind
     ) -> [LaunchFailureAction] {
+        if failure.knownCause == SessionLaunchDiagnosis.Cause.executableMissing {
+            return missingExecutableActions(failure, sessionID: sessionID, kind: kind)
+        }
         var actions: [LaunchFailureAction] = [
             LaunchFailureAction(
                 title: L10n.string("Try Again"),
@@ -2091,6 +2104,37 @@ final class TerminalContainerViewController: NSViewController {
             )
         }
         return actions
+    }
+
+    /// A missing CLI is the one failure whose cure is known and is not "again": the install comes
+    /// first, and Try Again follows it because that is the click that works once the install
+    /// has. Report a Problem is left off — nothing in Threading failed, and offering it sent
+    /// people to file the absence of a tool they had not installed yet.
+    private func missingExecutableActions(
+        _ failure: SessionLaunchFailure,
+        sessionID: SessionID,
+        kind: AgentKind
+    ) -> [LaunchFailureAction] {
+        [
+            LaunchFailureAction(
+                title: L10n.format("Install %@…", kind.displayName),
+                emphasis: .primary
+            ) { [weak self] in
+                guard let self else { return }
+                AgentCLIInstallViewController.present(kind, from: self) { [weak self] installed in
+                    guard installed else { return }
+                    self?.relaunchAfterFailure(sessionID: sessionID)
+                }
+            },
+            LaunchFailureAction(title: L10n.string("Try Again")) { [weak self] in
+                self?.relaunchAfterFailure(sessionID: sessionID)
+            },
+            LaunchFailureAction(title: L10n.string("Copy Details")) {
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(failure.report, forType: .string)
+            }
+        ]
     }
 
     /// The retry the surface offers, which is the one route allowed past the selection gate.

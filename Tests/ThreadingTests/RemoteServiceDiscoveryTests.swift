@@ -323,7 +323,10 @@ final class RemoteServiceDiscoveryTests: HostedStoreTestCase {
         server.reloadIdentity()
 
         waitUntil("the new fingerprint is announced") {
-            self.server.advertisedService?.advertisement.fingerprint != before
+            guard let fingerprint = self.server.advertisedService?.advertisement.fingerprint else {
+                return false
+            }
+            return fingerprint != before
         }
         let after = try XCTUnwrap(server.advertisedService?.advertisement.fingerprint)
         XCTAssertEqual(after, identityStore.snapshot.fingerprint)

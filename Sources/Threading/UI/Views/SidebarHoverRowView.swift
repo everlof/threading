@@ -81,6 +81,26 @@ final class SidebarHoverRowView:
         return Design.Text.on(ground).label
     }
 
+    /// The face behind a native cell's dynamic marks. The row owns selection and hover,
+    /// including the reduced selection in a background window; a cell's backgroundStyle
+    /// alone cannot distinguish that state from an unselected row.
+    static func contentGround(for cell: NSTableCellView) -> NSColor {
+        let base = Design.Surface.background.composited(over: Design.Surface.ground)
+        if let row = cell.superview as? SidebarHoverRowView {
+            if row.isSelected {
+                let fill = row.fixtureSelectionFill ?? (row.isEmphasized
+                    ? Design.Surface.selectionFill : Design.Surface.selectionFillUnemphasized)
+                return fill.composited(over: base)
+            }
+            if row.isMouseInside {
+                return Design.Text.label.withAlphaComponent(SidebarRowDefaults.hoverHighlightAlpha)
+                    .composited(over: base)
+            }
+        }
+        return cell.backgroundStyle == .emphasized
+            ? Design.Surface.selectionFill.composited(over: base) : base
+    }
+
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
         adoptListSelectionStrength()

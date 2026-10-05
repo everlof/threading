@@ -45,7 +45,7 @@ A picture or live surface beneath the display panel's tabs and content.
 
 ## `composer.backdrop` v1
 
-A picture or live surface beneath the new-session composer's content.
+A picture or live surface beneath the new-session composer's content. A Metal surface reads the hero (mark over greeting) as uniforms.focus[0] and the prompt box as uniforms.focus[1], each (x, y, width, height) in uv; width 0 means absent.
 
 - Context: `application`
 - Replacement: `none`

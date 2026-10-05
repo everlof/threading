@@ -12,21 +12,17 @@ final class ThemeTitleMorphTests: XCTestCase {
     private var previousTheme: AppTheme?
     private var previousSettings: DesignSettingsReading?
 
-    override func setUp() {
-        super.setUp()
-        MainActor.assumeIsolated {
-            previousTheme = AppThemePalette.current
-            previousSettings = DesignSettings.current
-            DesignSettings.current = StubDesignSettings()
-        }
+    override func setUp() async throws {
+        try await super.setUp()
+        previousTheme = AppThemePalette.current
+        previousSettings = DesignSettings.current
+        DesignSettings.current = StubDesignSettings()
     }
 
-    override func tearDown() {
-        MainActor.assumeIsolated {
-            if let previousTheme { AppThemePalette.set(previousTheme) }
-            if let previousSettings { DesignSettings.current = previousSettings }
-        }
-        super.tearDown()
+    override func tearDown() async throws {
+        if let previousTheme { AppThemePalette.set(previousTheme) }
+        if let previousSettings { DesignSettings.current = previousSettings }
+        try await super.tearDown()
     }
 
     // MARK: - Wire form

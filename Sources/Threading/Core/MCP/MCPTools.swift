@@ -592,10 +592,17 @@ struct BrowserNetworkArguments: Codable, Sendable {
   let kind: String?
   let errorsOnly: Bool?
   let clear: Bool?
+  var configuration: Bool? = nil
+  var requestCapture: BrowserNetworkCaptureRequest? = nil
+  var includeDetails: Bool? = nil
+  var requestID: String? = nil
 
   private enum CodingKeys: String, CodingKey {
-    case kind, clear
+    case kind, clear, configuration
     case errorsOnly = "errors_only"
+    case requestCapture = "request_capture"
+    case includeDetails = "include_details"
+    case requestID = "request_id"
   }
 }
 
@@ -921,9 +928,11 @@ struct CreateThemeArguments: Codable, Sendable {
 
 struct AppThemeReferenceArguments: Codable, Sendable {
   let themeID: String?
+  var section: String? = nil
 
   private enum CodingKeys: String, CodingKey {
     case themeID = "theme_id"
+    case section
   }
 }
 
@@ -1855,6 +1864,8 @@ struct AppThemeVariantArguments: Codable, Sendable {
   let removeWords: Bool?
   let titleMorph: AppThemeTitleMorphArguments?
   let removeTitleMorph: Bool?
+  let welcome: AppThemeWelcomeArguments?
+  let removeWelcome: Bool?
 
   /// Defaulted so the call sites (and tests) written before `sidebar` and `chrome` existed
   /// keep reading as they did.
@@ -1873,7 +1884,9 @@ struct AppThemeVariantArguments: Codable, Sendable {
     words: AppThemeWordsArguments? = nil,
     removeWords: Bool? = nil,
     titleMorph: AppThemeTitleMorphArguments? = nil,
-    removeTitleMorph: Bool? = nil
+    removeTitleMorph: Bool? = nil,
+    welcome: AppThemeWelcomeArguments? = nil,
+    removeWelcome: Bool? = nil
   ) {
     self.roles = roles
     self.material = material
@@ -1890,6 +1903,8 @@ struct AppThemeVariantArguments: Codable, Sendable {
     self.removeWords = removeWords
     self.titleMorph = titleMorph
     self.removeTitleMorph = removeTitleMorph
+    self.welcome = welcome
+    self.removeWelcome = removeWelcome
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -1905,6 +1920,8 @@ struct AppThemeVariantArguments: Codable, Sendable {
     case removeWords = "remove_words"
     case titleMorph = "title_morph"
     case removeTitleMorph = "remove_title_morph"
+    case welcome
+    case removeWelcome = "remove_welcome"
   }
 }
 
@@ -1924,6 +1941,185 @@ struct AppThemeTitleMorphArguments: Codable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case style, characters
     case removeCharacters = "remove_characters"
+  }
+}
+
+/// The new-session composer's welcome in a variant. Every stated sub-block merges onto what is
+/// stated — `backdrop` in the material backdrop's idiom, a wording's `lines` replacing its list
+/// and its `style` one field at a time, a scrim one veil at a time — and each `remove_*` gives
+/// that sub-block back to the app.
+struct AppThemeWelcomeArguments: Codable, Sendable {
+  let backdrop: AppThemeBackdropArguments?
+  let removeBackdrop: Bool?
+  let mark: String?
+  let markSize: Double?
+  let removeMark: Bool?
+  let greeting: AppThemeWelcomeWordingArguments?
+  let removeGreeting: Bool?
+  let caption: AppThemeWelcomeWordingArguments?
+  let removeCaption: Bool?
+  let scrim: AppThemeWelcomeScrimArguments?
+  let removeScrim: Bool?
+
+  init(
+    backdrop: AppThemeBackdropArguments? = nil,
+    removeBackdrop: Bool? = nil,
+    mark: String? = nil,
+    markSize: Double? = nil,
+    removeMark: Bool? = nil,
+    greeting: AppThemeWelcomeWordingArguments? = nil,
+    removeGreeting: Bool? = nil,
+    caption: AppThemeWelcomeWordingArguments? = nil,
+    removeCaption: Bool? = nil,
+    scrim: AppThemeWelcomeScrimArguments? = nil,
+    removeScrim: Bool? = nil
+  ) {
+    self.backdrop = backdrop
+    self.removeBackdrop = removeBackdrop
+    self.mark = mark
+    self.markSize = markSize
+    self.removeMark = removeMark
+    self.greeting = greeting
+    self.removeGreeting = removeGreeting
+    self.caption = caption
+    self.removeCaption = removeCaption
+    self.scrim = scrim
+    self.removeScrim = removeScrim
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case backdrop
+    case removeBackdrop = "remove_backdrop"
+    case mark
+    case markSize = "mark_size"
+    case removeMark = "remove_mark"
+    case greeting
+    case removeGreeting = "remove_greeting"
+    case caption
+    case removeCaption = "remove_caption"
+    case scrim
+    case removeScrim = "remove_scrim"
+  }
+}
+
+/// A greeting's or caption's pool of lines and its type. `include_app_lines` is the greeting's
+/// alone; a caption has no app lines to include.
+struct AppThemeWelcomeWordingArguments: Codable, Sendable {
+  let lines: [AppThemeWelcomeLineArguments]?
+  let includeAppLines: Bool?
+  let style: AppThemeWelcomeStyleArguments?
+  let removeStyle: Bool?
+
+  init(
+    lines: [AppThemeWelcomeLineArguments]? = nil,
+    includeAppLines: Bool? = nil,
+    style: AppThemeWelcomeStyleArguments? = nil,
+    removeStyle: Bool? = nil
+  ) {
+    self.lines = lines
+    self.includeAppLines = includeAppLines
+    self.style = style
+    self.removeStyle = removeStyle
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case lines
+    case includeAppLines = "include_app_lines"
+    case style
+    case removeStyle = "remove_style"
+  }
+}
+
+struct AppThemeWelcomeLineArguments: Codable, Sendable {
+  let text: String?
+  let weight: Int?
+  let when: AppThemeWelcomeConditionArguments?
+
+  init(text: String? = nil, weight: Int? = nil, when: AppThemeWelcomeConditionArguments? = nil) {
+    self.text = text
+    self.weight = weight
+    self.when = when
+  }
+}
+
+/// When a line may be shown. Every stated facet must match; within a facet any value does.
+struct AppThemeWelcomeConditionArguments: Codable, Sendable {
+  let dayparts: [String]?
+  let hours: AppThemeWelcomeHoursArguments?
+  let weekdays: [String]?
+  let dates: [AppThemeWelcomeDateSpanArguments]?
+  let months: [Int]?
+
+  init(
+    dayparts: [String]? = nil,
+    hours: AppThemeWelcomeHoursArguments? = nil,
+    weekdays: [String]? = nil,
+    dates: [AppThemeWelcomeDateSpanArguments]? = nil,
+    months: [Int]? = nil
+  ) {
+    self.dayparts = dayparts
+    self.hours = hours
+    self.weekdays = weekdays
+    self.dates = dates
+    self.months = months
+  }
+}
+
+struct AppThemeWelcomeHoursArguments: Codable, Sendable {
+  let from: Int?
+  let to: Int?
+
+  init(from: Int? = nil, to: Int? = nil) {
+    self.from = from
+    self.to = to
+  }
+}
+
+struct AppThemeWelcomeDateSpanArguments: Codable, Sendable {
+  let from: String?
+  let to: String?
+
+  init(from: String? = nil, to: String? = nil) {
+    self.from = from
+    self.to = to
+  }
+}
+
+struct AppThemeWelcomeStyleArguments: Codable, Sendable {
+  let scale: Double?
+  let weight: String?
+  let ink: String?
+  let fontFamily: String?
+  let typeface: String?
+
+  init(
+    scale: Double? = nil,
+    weight: String? = nil,
+    ink: String? = nil,
+    fontFamily: String? = nil,
+    typeface: String? = nil
+  ) {
+    self.scale = scale
+    self.weight = weight
+    self.ink = ink
+    self.fontFamily = fontFamily
+    self.typeface = typeface
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case scale, weight, ink
+    case fontFamily = "font_family"
+    case typeface
+  }
+}
+
+struct AppThemeWelcomeScrimArguments: Codable, Sendable {
+  let hero: Double?
+  let prompt: Double?
+
+  init(hero: Double? = nil, prompt: Double? = nil) {
+    self.hero = hero
+    self.prompt = prompt
   }
 }
 
@@ -1964,10 +2160,11 @@ struct DuplicateAppThemeArguments: Codable, Sendable {
 struct PreviewAppThemeArguments: Codable, Sendable {
   let themeID: String?
   let appearance: String?
+  var frames: Int? = nil
 
   private enum CodingKeys: String, CodingKey {
     case themeID = "theme_id"
-    case appearance
+    case appearance, frames
   }
 }
 
@@ -2744,6 +2941,10 @@ struct MCPToolResult: Encodable, Sendable {
     MCPToolResult(content: [.text(text)], isError: true, structuredContent: nil)
   }
 
+  static func structured(_ text: String, value: MCPJSONValue) -> MCPToolResult {
+    MCPToolResult(content: [.text(text)], isError: false, structuredContent: value)
+  }
+
   static func targeted(
     _ text: String,
     reference: String,
@@ -3235,6 +3436,7 @@ enum MCPTools {
   static let reportTriggerResult = MCPBuiltInTool.reportTriggerResult.rawValue
 
   static let notifyUser = MCPBuiltInTool.notifyUser.rawValue
+  static let reportProblem = MCPBuiltInTool.reportProblem.rawValue
 
   static let listThemes = MCPBuiltInTool.listThemes.rawValue
   static let setTheme = MCPBuiltInTool.setTheme.rawValue
@@ -3272,6 +3474,7 @@ enum MCPTools {
   static let storageTools = names(in: .storage)
   static let triggerTools = names(in: .triggers)
   static let notificationTools = names(in: .notifications)
+  static let issueReportingTools = names(in: .issueReporting)
   static let themeTools = [
     MCPBuiltInTool.listThemes,
     .setTheme,
@@ -3758,6 +3961,61 @@ enum MCPTools {
       )
     ),
     MCPToolDefinition(
+      tool: .reportProblem,
+      name: "report_problem",
+      groupID: "issue-reporting",
+      family: .issueReporting,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false, destructiveHint: false,
+        idempotentHint: true, openWorldHint: true
+      ),
+      title: "Report a Threading problem",
+      detail: "File an observed Threading defect with safe diagnostics and a delivery receipt.",
+      symbol: "exclamationmark.bubble",
+      decodeArguments: { container in
+        try container.decodeIfPresent(ReportProblemArguments.self, forKey: .arguments)
+          ?? ReportProblemArguments()
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.reportProblem(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Report a problem in Threading itself to its developer, like Help > Report a Problem
+        for agents. Use for observed Threading defects, including failed Threading MCP calls;
+        problems in the user's project or another provider belong to their own tracker.
+        Supply a concise title and description, with reproduction, expected and actual behavior
+        when known. Optional evidence is sanitized text you explicitly include, never a request
+        to collect the transcript, raw logs, credentials, or project files. Threading adds its
+        version, build, OS and bounded content-free diagnostics automatically.
+        image_paths optionally attaches up to four user-approved PNG or JPEG images on this Mac,
+        at most 8 MiB each. Do not capture or share a screenshot without the user's permission.
+        Remote-host sessions can report text but cannot attach file paths.
+        The composed report must fit 10240 UTF-8 bytes; oversized input is refused, not truncated.
+        Returns JSON with status (delivered, queued, saved, or failed), report_id, optional
+        reference and record_path, duplicate, and message. Saved means kept locally with no
+        confirmed delivery; queued means durable delivery will retry. Only delivered confirms
+        receipt by the private inbox. Identical content and image bytes in this session and
+        build reuse the first record across retries and app restarts. Do not repeatedly file
+        the same defect. One report runs at a time; at most ten new reports per hour per app run.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "title": MCPPropertySchema(type: .string, description: "Required concise title, up to 80 characters."),
+          "description": MCPPropertySchema(type: .string, description: "Required description of the observed Threading problem."),
+          "reproduction_steps": MCPPropertySchema(type: .string, description: "Steps or the exact Threading tool call that reproduces the failure."),
+          "expected_behavior": MCPPropertySchema(type: .string, description: "What Threading should have done."),
+          "actual_behavior": MCPPropertySchema(type: .string, description: "What Threading did, including the relevant error."),
+          "evidence": MCPPropertySchema(type: .string, description: "Optional relevant, sanitized evidence to share with the developer."),
+          "image_paths": MCPPropertySchema(
+            type: .array, description: "Up to four absolute paths to user-approved PNG/JPEG images on this Mac, at most 8 MiB each.",
+            items: MCPArrayItemSchema(type: .string, description: "Absolute PNG/JPEG image path.")
+          ),
+        ],
+        required: ["title", "description"]
+      )
+    ),
+    MCPToolDefinition(
       tool: .notifyUser,
       name: "notify_user",
       groupID: "notifications",
@@ -4051,7 +4309,9 @@ enum MCPTools {
       description: """
         Open a URL in Threading's browser (a full pane beside this terminal), or run a \
         search if the text is not a URL. The call creates this session's browser tab if \
-        none is open; an empty panel does not mean the browser is unavailable. By default \
+        none is open; an empty panel does not mean the browser is unavailable. Keep the \
+        current pane or window size and any user-selected viewport; do not call \
+        browser_resize as routine browsing setup. By default \
         it waits for the full load event; wait_until can return at commit or \
         DOMContentLoaded for streaming or resource-heavy pages. It reports the current \
         title, address, and semantic snapshot when available. Use this before the other \
@@ -4199,7 +4459,8 @@ enum MCPTools {
         List, create, activate, or close independent browser tabs in this session. Each \
         browser tab keeps its own page, history, pop-ups, responsive viewport, emulated \
         color scheme, CSS media type, custom user agent, console, and network buffers. A \
-        shared context uses Threading's persistent signed-in website data. A private context \
+        shared context shares cookies and website storage only with tabs and sessions in the \
+        same project (persistent on macOS 14+). A private context \
         gets a unique non-persistent data store isolated from shared and other private tabs. \
         Private tabs and their URLs are not restored after app restart. Tab \
         indices are 0-based within the browser-tab list and stable IDs are returned for \
@@ -4441,13 +4702,18 @@ enum MCPTools {
         handler.browserResize(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Give the active browser tab an exact responsive-test viewport without resizing \
-        Threading's window. The user sees the same live page inside a pannable frame, and \
+        Change the active browser tab's CSS-pixel viewport only when the user requests a \
+        size change or a specific responsive or visual test needs exact dimensions. For \
+        ordinary browsing and screenshots, use the current pane or window size and preserve \
+        any user-selected viewport. Do not set or reset sizing as routine setup or screenshot \
+        preparation. This does not resize Threading's window. The user sees the same live \
+        page inside a pannable frame, and \
         page media queries, viewport units, element geometry, interactions, and \
         screenshots all use the requested CSS-pixel dimensions. Setting a viewport opens \
         the Device Toolbar so the fixed dimensions and reset route remain visible. Supply \
-        width and height together, then omit both when responsive testing is finished to \
-        return the page to filling its host.
+        width and height together. After a temporary test, restore the previous sizing \
+        reported by this call, preserving any later user changes; omit both dimensions only \
+        if that previous sizing filled its host. Leave a user-requested size in place.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -5748,7 +6014,8 @@ enum MCPTools {
         handler.browserScreenshot(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Capture the current browser page as PNG. By default the image is returned to you \
+        Capture the current browser page as PNG at its current sizing; taking a screenshot \
+        does not require browser_resize. By default the image is returned to you \
         for visual inspection without changing the panel tab the user is watching. It can \
         capture the viewport, the full document, or one current snapshot element. Prefer \
         a stable ref when isolating an element; the target is scrolled into view and the \
@@ -6115,28 +6382,33 @@ enum MCPTools {
       groupID: "browser",
       family: .browser,
       annotations: MCPToolAnnotations(
-        readOnlyHint: true,
+        readOnlyHint: false,
         destructiveHint: false,
-        idempotentHint: true,
+        idempotentHint: false,
         openWorldHint: true
       ),
       title: "Read network activity",
-      detail: "Inspect redacted request metadata, status codes, and durations.",
+      detail: "Inspect network activity and configurable header/body capture.",
       symbol: "network",
       decodeArguments: { container in
         try container.decodeIfPresent(BrowserNetworkArguments.self, forKey: .arguments)
           ?? BrowserNetworkArguments(kind: nil, errorsOnly: nil, clear: nil)
       },
-      browserTraceDetail: { arguments in "network metadata" },
+      browserTraceDetail: { arguments in arguments.requestCapture != nil ? "request capture settings" : arguments.configuration == true ? "capture configuration" : "network inspection" },
       observesPanel: true,
       executeArguments: { handler, arguments, sessionID, completion in
         handler.browserNetwork(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Read bounded network metadata captured from the current page: method, redacted \
-        URL, resource type, status, and duration. Request and response bodies, headers, \
-        cookies, and credentials are never collected. Use errors_only to focus on failed \
-        fetches and HTTP errors.
+        Read bounded network metadata from the current page. Use configuration=true to \
+        inspect header/body capture settings without a page or origin grant. request_capture \
+        proposes any of request_headers, response_headers, request_body, response_body; \
+        the user must approve changes, which apply to all in-app tabs and future requests. \
+        Settings default to metadata only. include_details=true returns captured page-visible \
+        fetch/XHR headers and bounded text bodies for at most five recent requests; use \
+        request_id from the metadata inventory to inspect one. Sensitive header values and \
+        known filled credentials are redacted. Binary/streaming bodies, cross-origin frames \
+        and document/resource bodies are unavailable. Use errors_only for failed requests.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -6154,6 +6426,25 @@ enum MCPTools {
           "clear": MCPPropertySchema(
             type: .boolean,
             description: "Clear the captured buffer after returning it."
+          ),
+          "configuration": MCPPropertySchema(
+            type: .boolean, description: "Return current capture options and limits without reading a page."
+          ),
+          "request_capture": MCPPropertySchema(
+            type: .object,
+            description: "Ask the user to approve changed capture options; omitted options stay unchanged.",
+            properties: [
+              "request_headers": MCPPropertySchema(type: .boolean, description: "Capture page-visible request headers."),
+              "response_headers": MCPPropertySchema(type: .boolean, description: "Capture page-visible response headers."),
+              "request_body": MCPPropertySchema(type: .boolean, description: "Capture bounded text request bodies."),
+              "response_body": MCPPropertySchema(type: .boolean, description: "Capture bounded text response bodies.")
+            ]
+          ),
+          "include_details": MCPPropertySchema(
+            type: .boolean, description: "Include payloads enabled by the user's capture settings, up to five recent requests."
+          ),
+          "request_id": MCPPropertySchema(
+            type: .string, description: "Inspect one request using its id from browser_network."
           ),
         ],
         required: []
@@ -8081,7 +8372,10 @@ enum MCPTools {
         completion(handler.getAppTheme(arguments))
       },
       description: """
-        Read one complete app-chrome theme document in the same snake-case vocabulary \
+        With section, read authoring documentation instead of a theme: "schema" lists blocks;
+        a path such as "material.backdrop", "sidebar.mascot", "title_morph", "welcome" or
+        "terminal_colors.glow" returns that block's complete fields, limits and guidance.
+        No theme_id is needed for documentation. Without section, read one complete app-chrome theme document in the same snake-case vocabulary \
         accepted by create_app_theme and update_app_theme. Each available light/dark \
         variant includes its authored and resolved roles, material (including any \
         `backdrop` gradient and picture under the app's broad grounds), complete paired \
@@ -8093,9 +8387,13 @@ enum MCPTools {
           "theme_id": MCPPropertySchema(
             type: .string,
             description: "Stable ID from list_app_themes."
+          ),
+          "section": MCPPropertySchema(
+            type: .string,
+            description: "Authoring documentation path, or schema for the block index; omit to inspect a theme."
           )
         ],
-        required: ["theme_id"]
+        required: []
       )
     ),
     MCPToolDefinition(
@@ -8170,48 +8468,15 @@ enum MCPTools {
         Task { @MainActor in completion(await handler.createAppTheme(arguments)) }
       },
       description: """
-        Decide how far the theme goes before calling this. A theme has four layers: \
-        palette (`roles`, `terminal_colors`), material (shape, type and control anatomy), \
-        chrome (the theme's own window frame) and character (sounds, a transition, words, \
-        a mascot). A request that names a world — an operating system, a game, a film, an \
-        era, a mood — wants all four, because colours alone read as the same app \
-        recoloured. A request about colours wants the palette. When the request says no \
-        more than "a theme", ask the person how far to go before creating anything, and \
-        recommend all four. The result reports which layers the theme states. \
-        The palette is two halves: `roles` colour the chrome, and `terminal_colors` colour \
-        the terminal, which is the largest surface in the window and the one agents' TUIs \
-        draw in — Claude draws its whole interface in those sixteen colours by default. \
-        State both halves in every variant; a theme that recolours the chrome and inherits \
-        its base's terminal reads as two themes side by side. \
-        Create a custom app-chrome theme from partial light and/or dark variant patches. \
-        One variant makes a fixed light or dark theme; both variants with appearance \
-        "adaptive" follow macOS automatically. A second variant is optional and can be \
-        added later with update_app_theme. Each variant inherits omitted roles, material, \
-        and terminal colours from the matching base variant (or the base's available \
-        variant when no match exists). The base defaults to the active app theme. The new \
-        theme is applied by default. A variant's optional `sidebar` block dresses the \
-        project sidebar: a gradient or image behind the list, a custom logo, and the \
-        wordmark's text and face — supplied images arrive as a file path or base64 and \
-        are stored with the theme. The material's optional `backdrop` dresses the app's \
-        broad grounds the same way — a gradient and/or picture under the display panel, \
-        the browser, the audit and the settings subpages, beneath any backdrop_pattern — \
-        while cards, controls, the terminal and the sidebar keep their own grounds. A \
-        variant's optional `chrome` block goes further: a \
-        theme stating chrome draws the entire window frame itself — an app-drawn title \
-        band, window buttons and border replace the native macOS titlebar, traffic \
-        lights and rounded corners while the theme is worn. The material's optional \
-        `bevel` turns flat borders into raised/sunken two-tone edges — hard for square \
-        period chrome, soft for rounded clay relief — using the bevel_highlight and \
-        bevel_shadow roles. A theme can also have a character: `sprites` gives its particle \
-        blocks pictures of their own (paw prints, hearts), `sidebar.mascot` stands a \
-        figure at the sidebar's foot that changes pose as agents rest, work, wait and \
-        finish, `moments` answers a finished turn with a sound and a waiting session with \
-        a shower and a sound, `words` gives the status line and composer its voice, and \
-        `sidebar.logo_in_dock` puts the logo on the Dock tile. A variant's \
-        `terminal_colors.glow` gives its paired terminal palette an optional phosphor glow \
-        — a soft halo beneath the text in each run's own colour (radius 0.5–6 points, \
-        opacity 0.05–0.8). Check the result with preview_app_theme, which shows every \
-        mascot mood.
+        Decide how far the theme goes: palette, material, chrome, character. For an unspecified
+        theme, ask the person how far to go. State both halves in every variant: roles and terminal_colors.
+        Create an editable theme from a base (default: current); omitted fields inherit.
+        Set roles AND terminal_colors in each variant for a coherent palette. Use material
+        for shapes/backdrops, chrome for a window frame, sidebar for a mascot/logo, and
+        words/title_morph/moments/welcome (the ⌘N composer) for character. One variant is
+        fixed; adaptive needs both.
+        For every block's fields, limits and examples call get_app_theme(section: path),
+        starting with section: "schema" (e.g. terminal_colors.glow). Applied by default; inspect with preview_app_theme.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -8246,12 +8511,12 @@ enum MCPTools {
               "light": MCPPropertySchema(
                 type: .object,
                 description: "The light appearance patch.",
-                properties: appVariantSchema
+                properties: appVariantListingSchema
               ),
               "dark": MCPPropertySchema(
                 type: .object,
                 description: "The dark appearance patch.",
-                properties: appVariantSchema
+                properties: appVariantListingSchema
               ),
             ]
           ),
@@ -8342,17 +8607,11 @@ enum MCPTools {
         Task { @MainActor in completion(await handler.updateAppTheme(arguments)) }
       },
       description: """
-        Patch an existing custom app-chrome theme in place while keeping its stable ID. \
-        Built-in themes are immutable. Only supplied variants and fields change; this can \
-        add a missing light or dark variant without replacing the existing one. Set \
-        appearance to "adaptive" once both exist to follow macOS. An active theme repaints \
-        live; an inactive theme stays inactive unless `apply` is true. A patch that says \
-        nothing about a variant's `sidebar` or `chrome` block, or its material's \
-        `backdrop`, leaves it exactly as it was; `chrome.remove` is how a theme hands the \
-        window frame back to macOS, `material.remove_backdrop` how it returns the panes \
-        to plain grounds, and either exchange happens live when the theme is the active \
-        one. The result reports which of the four layers — palette, material, chrome, \
-        character — the theme now states.
+        Patch a custom theme, preserving its stable ID and omitted fields. Built-in themes are immutable; they require
+        duplicate_app_theme first. An active theme repaints live; apply opts in an inactive
+        theme. Adaptive requires both variants. Read block fields, removal flags and limits
+        with get_app_theme(section: path), e.g. material.backdrop or terminal_colors.glow.
+        The result reports all four layers. Use preview_app_theme to inspect the result.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -8382,12 +8641,12 @@ enum MCPTools {
               "light": MCPPropertySchema(
                 type: .object,
                 description: "Patch or add the light appearance.",
-                properties: appVariantSchema
+                properties: appVariantListingSchema
               ),
               "dark": MCPPropertySchema(
                 type: .object,
                 description: "Patch or add the dark appearance.",
-                properties: appVariantSchema
+                properties: appVariantListingSchema
               ),
             ]
           ),
@@ -8427,11 +8686,16 @@ enum MCPTools {
       description: """
         See what an app theme looks like: renders it on a sample window — the sidebar with \
         its brand, band and ambient particles, a pane with its backdrop, a card, buttons \
-        and the paired terminal colours — and returns the PNG for you to inspect. Works \
-        for any theme, applied or not, and in both appearances of an adaptive one. Sample \
-        rows stand in for the user's projects, so nothing of theirs is captured. Motion is \
-        shown as a still frame of where particles would be. Use it after create_app_theme \
-        or update_app_theme and before telling the user a theme is finished.
+        and the paired terminal colours — and returns the PNG for you to inspect. A variant \
+        that states a welcome adds a new-session band beneath its window: the welcome's \
+        backdrop, mark at its size, greeting and caption, scrims and a sample prompt box, \
+        with one line picked by a fixed seed and its tokens rendered at a fixed moment from \
+        sample values (project "threading", user "Ada", 2 working, 1 waiting); the result's \
+        text quotes the words drawn. Works for any theme, applied or not, and in both \
+        appearances of an adaptive one. Sample rows stand in for the user's projects, so \
+        nothing of theirs is captured. Motion is shown as a still frame of where particles \
+        would be. Use it after create_app_theme or update_app_theme and before telling the \
+        user a theme is finished.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -8441,8 +8705,13 @@ enum MCPTools {
           ),
           "appearance": MCPPropertySchema(
             type: .string,
-            description: "\"light\", \"dark\", or \"both\" (side by side). Defaults to every "
+            description: "\"light\", \"dark\", or \"both\" (stacked, light first). Defaults to every "
               + "variant the theme has."
+          ),
+          "frames": MCPPropertySchema(
+            type: .integer,
+            description: "1 or 3. Three shows gradient drift at 0, ⅓ and ⅔ of its cycle, the welcome's "
+              + "too; particles stay stamped."
           ),
         ],
         required: []
@@ -9357,7 +9626,7 @@ enum MCPTools {
     )
   }
 
-  private static var appVariantSchema: [String: MCPPropertySchema] {
+  static var appVariantSchema: [String: MCPPropertySchema] {
     [
       "roles": MCPPropertySchema(
         type: .object,
@@ -9468,7 +9737,7 @@ enum MCPTools {
           properties: [
             "name": MCPPropertySchema(
               type: .string,
-              description: "1–24 lowercase letters, digits, - or _."
+              description: "1–\(ThemeSpriteLimits.maximumNameLength) lowercase letters, digits, - or _."
             ),
             "source": MCPPropertySchema(
               type: .object,
@@ -9578,7 +9847,8 @@ enum MCPTools {
           ),
           "characters": MCPPropertySchema(
             type: .string,
-            description: "With style \"scramble\": 1–96 characters the decoder cycles through, "
+            description: "With style \"scramble\": 1–\(ThemeTitleMorphLimits.maximumScrambleCharacters) "
+              + "characters the decoder cycles through, "
               + "as one string, e.g. \"ｱｲｳｴｵｶｷｸ0123456789\". Half-width forms fit a Latin "
               + "name's letter spacing; whitespace is ignored."
           ),
@@ -9596,7 +9866,258 @@ enum MCPTools {
         type: .boolean,
         description: "True returns all of the app's own words."
       ),
+      "welcome": MCPPropertySchema(
+        type: .object,
+        description: """
+          The new-session composer (⌘N) in this variant's hands. The layout stays the app's: \
+          the prompt hangs from the pane's foot and the mark over the greeting floats centred \
+          above it, so design around both. The backdrop fills the pane beneath any \
+          composer.backdrop@1 extension surface, which is told where the two regions sit; \
+          scrims veil them over busy art. Every sub-block merges onto what is stated and each \
+          remove_* gives one back to the app. A manager session's brief and every control keep \
+          the app's own words.
+          """,
+        properties: appWelcomeSchema
+      ),
+      "remove_welcome": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns the whole new-session welcome to the app's own."
+      ),
     ]
+  }
+
+  /// The welcome block: a backdrop in the material's vocabulary, the mark, two pools of lines in
+  /// the token grammar, and the scrims. Ranges come from `ThemeWelcomeLimits`.
+  private static var appWelcomeSchema: [String: MCPPropertySchema] {
+    var backdrop = appMaterialSchema["backdrop"]?.properties ?? [:]
+    backdrop["particles"] = appParticlesSchema(
+      "An ambient field over the welcome's wash and picture, capped at 0.6 opacity; still "
+        + "under Reduce Motion and the Theme animations setting."
+    )
+    backdrop["remove_particles"] = MCPPropertySchema(
+      type: .boolean,
+      description: "True removes the welcome's particles."
+    )
+    backdrop["remove"] = MCPPropertySchema(
+      type: .boolean,
+      description: "True clears the welcome's whole backdrop, like remove_backdrop."
+    )
+    let marks = ThemeWelcome.Mark.allCases.map { "\"\($0.rawValue)\"" }.joined(separator: ", ")
+    return [
+      "backdrop": MCPPropertySchema(
+        type: .object,
+        description: "A gradient, picture and particles filling the composer pane, in "
+          + "material.backdrop's vocabulary; the picture is stored apart from the material's, "
+          + "at up to 2048 pixels and 8 MB. Each gradient stop must keep the greeting's ink "
+          + "(or the label) at 3:1 over the ground. Pictures receive sampled legibility "
+          + "warnings measured with the greeting's ink.",
+        properties: backdrop
+      ),
+      "remove_backdrop": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns the pane to the app's plain ground."
+      ),
+      "mark": MCPPropertySchema(
+        type: .string,
+        description: "What stands above the greeting, one of \(marks): the Threading mark "
+          + "(default), this variant's sidebar logo picture, its sidebar mascot in the mood of "
+          + "the window's sessions, or nothing. logo and mascot draw the app's mark when the "
+          + "variant has none."
+      ),
+      "mark_size": MCPPropertySchema(
+        type: .number,
+        description: "The mark's side, \(ThemeLimitText.span(ThemeWelcomeLimits.markSides)) "
+          + "points. Omit for the app's size."
+      ),
+      "remove_mark": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns the app's mark at the app's size."
+      ),
+      "greeting": appWelcomeWordingSchema(
+        "The heading line. One eligible line is picked by weight each time the composer is "
+          + "arrived at, re-picked when the theme changes and re-rendered on the minute while "
+          + "it shows a clock token. Lines are shown as written in every language. With no "
+          + "eligible line, the app's own greeting is shown.",
+        takesAppLines: true
+      ),
+      "remove_greeting": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns the app's own greeting, set the app's way."
+      ),
+      "caption": appWelcomeWordingSchema(
+        "An optional smaller line beneath the greeting, picked and rendered the same way. The "
+          + "app has none of its own: with no eligible line there is no caption.",
+        takesAppLines: false
+      ),
+      "remove_caption": MCPPropertySchema(
+        type: .boolean,
+        description: "True removes the caption."
+      ),
+      "scrim": MCPPropertySchema(
+        type: .object,
+        description: "Soft veils in the ground colour behind the two regions the person works "
+          + "in, so busy art never sits straight under the greeting or the prompt. Each veil "
+          + "merges on its own.",
+        properties: [
+          "hero": MCPPropertySchema(
+            type: .number,
+            description: "Peak opacity behind the mark and greeting, "
+              + "\(ThemeLimitText.span(ThemeWelcomeLimits.scrimOpacities))."
+          ),
+          "prompt": MCPPropertySchema(
+            type: .number,
+            description: "Peak opacity behind the prompt box, "
+              + "\(ThemeLimitText.span(ThemeWelcomeLimits.scrimOpacities))."
+          ),
+        ]
+      ),
+      "remove_scrim": MCPPropertySchema(
+        type: .boolean,
+        description: "True removes both veils."
+      ),
+    ]
+  }
+
+  /// A greeting's or caption's pool. Only the greeting may keep the app's lines in its pool.
+  private static func appWelcomeWordingSchema(
+    _ description: String,
+    takesAppLines: Bool
+  ) -> MCPPropertySchema {
+    let dayparts = ThemeWelcome.Daypart.allCases.map { "\"\($0.rawValue)\"" }.joined(separator: ", ")
+    let weekdays = ThemeWelcome.Weekday.allCases.map { "\"\($0.rawValue)\"" }.joined(separator: ", ")
+    let weights = ThemeWelcome.TextStyle.Weight.allCases.map { "\"\($0.rawValue)\"" }
+      .joined(separator: ", ")
+    let typefaces = AppTheme.Material.Typeface.allCases.map { "\"\($0.rawValue)\"" }
+      .joined(separator: ", ")
+    var properties: [String: MCPPropertySchema] = [
+      "lines": MCPPropertySchema(
+        type: .array,
+        description: "Up to \(ThemeWelcomeLimits.maximumLines) lines; stating it replaces the list.",
+        items: MCPArrayItemSchema(
+          type: .object,
+          properties: [
+            "text": MCPPropertySchema(
+              type: .string,
+              description: "1–\(ThemeWelcomeLimits.maximumLineLength) characters. "
+                + ThemeWelcomeText.grammar
+                + " A line naming {project} is shown only in a composer with a project; "
+                + "{days_until:MM-DD} is 0 on the day itself. {fact:KEY} (or {fact:KEY@VERSION}) "
+                + "shows a value an installed extension publishes — for the composer's project, "
+                + "its repository branch or repository, else for the whole app — worded by "
+                + "Threading; a line whose fact is missing or stale is not shown, and the "
+                + "iPhone never shows one."
+            ),
+            "weight": MCPPropertySchema(
+              type: .integer,
+              description: "How often the line is picked against the other eligible ones, "
+                + "\(ThemeLimitText.span(ThemeWelcomeLimits.weights)). Default 1."
+            ),
+            "when": MCPPropertySchema(
+              type: .object,
+              description: "When the line may be shown: every stated facet must hold, and any "
+                + "value within one does. Omit for always.",
+              properties: [
+                "dayparts": MCPPropertySchema(
+                  type: .array,
+                  description: "Any of \(dayparts) — the parts of the day the app's own "
+                    + "greeting speaks in.",
+                  items: MCPArrayItemSchema(type: .string)
+                ),
+                "hours": MCPPropertySchema(
+                  type: .object,
+                  description: "An inclusive range of whole hours; from after to wraps "
+                    + "midnight (22 to 4).",
+                  properties: [
+                    "from": MCPPropertySchema(
+                      type: .integer,
+                      description: "The first hour, \(ThemeLimitText.span(ThemeWelcomeLimits.hours))."
+                    ),
+                    "to": MCPPropertySchema(
+                      type: .integer,
+                      description: "The last hour, \(ThemeLimitText.span(ThemeWelcomeLimits.hours)), "
+                        + "inclusive."
+                    ),
+                  ]
+                ),
+                "weekdays": MCPPropertySchema(
+                  type: .array,
+                  description: "Any of \(weekdays).",
+                  items: MCPArrayItemSchema(type: .string)
+                ),
+                "dates": MCPPropertySchema(
+                  type: .array,
+                  description: "Up to \(ThemeWelcomeLimits.maximumDateSpans) spans of days in "
+                    + "any year. from after to wraps the new year (12-28 to 01-03); 02-29 "
+                    + "matches only in a leap year.",
+                  items: MCPArrayItemSchema(
+                    type: .object,
+                    properties: [
+                      "from": MCPPropertySchema(
+                        type: .string,
+                        description: "The first day, MM-DD."
+                      ),
+                      "to": MCPPropertySchema(
+                        type: .string,
+                        description: "The last day, MM-DD, inclusive; omit for one day."
+                      ),
+                    ],
+                    required: ["from"]
+                  )
+                ),
+                "months": MCPPropertySchema(
+                  type: .array,
+                  description: "Months, \(ThemeLimitText.span(ThemeWelcomeLimits.months)).",
+                  items: MCPArrayItemSchema(type: .integer)
+                ),
+              ]
+            ),
+          ],
+          required: ["text"]
+        )
+      ),
+      "style": MCPPropertySchema(
+        type: .object,
+        description: "How the line is set; each field merges, and an omitted one keeps the app's.",
+        properties: [
+          "scale": MCPPropertySchema(
+            type: .number,
+            description: "Size relative to the app's heading (greeting) or body (caption) "
+              + "text, \(ThemeLimitText.span(ThemeWelcomeLimits.greetingScales))."
+          ),
+          "weight": MCPPropertySchema(
+            type: .string,
+            description: "One of \(weights)."
+          ),
+          "ink": MCPPropertySchema(
+            type: .string,
+            description: "A role name (\"accent\", \"label\", …) or #RRGGBB(AA). It must keep "
+              + "3:1 against the welcome's ground: its gradient's stops over the ground, or the "
+              + "ground."
+          ),
+          "font_family": MCPPropertySchema(
+            type: .string,
+            description: "A family this theme carries (add_app_theme_font) or this Mac has "
+              + "installed, at most \(ThemeWelcomeLimits.maximumFontFamilyLength) characters."
+          ),
+          "typeface": MCPPropertySchema(
+            type: .string,
+            description: "The system design used when no family is stated or it is missing: "
+              + "\(typefaces)."
+          ),
+        ]
+      ),
+      "remove_style": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns the line to the app's type."
+      ),
+    ]
+    if takesAppLines {
+      properties["include_app_lines"] = MCPPropertySchema(
+        type: .boolean,
+        description: "True keeps the app's own greeting in the pool as one more line of weight 1."
+      )
+    }
+    return MCPPropertySchema(type: .object, description: description, properties: properties)
   }
 
   /// `{path}` or `{base64}` for a theme picture — one spelling for every slot that takes one.
@@ -9766,9 +10287,8 @@ enum MCPTools {
         description: """
           An image over the gradient (or the plain surface): mode "tile" repeats it \
           at its own size (patterns), "fill" covers the column cropping overflow, \
-          "fit" letterboxes. Legibility is yours to keep here — a photograph under \
-          the list usually wants opacity well below 0.4, while a drawn pattern can \
-          carry 1.
+          "fit" letterboxes. The tools sample the picture under the label and report \
+          an opacity that keeps it legible; inspect real text in both variants too.
           """,
         properties: [
           "source": MCPPropertySchema(
@@ -10027,11 +10547,12 @@ enum MCPTools {
     [
       "panel_radius": MCPPropertySchema(
         type: .number,
-        description: "Panel corner radius, 0–40 points."
+        description: "Panel corner radius, \(ThemeLimitText.span(AppThemeMaterialLimits.panelRadiusRange)) points."
       ),
       "control_radius": MCPPropertySchema(
         type: .number,
-        description: "Nested-control corner radius, 0–24 points."
+        description: "Nested-control corner radius, "
+          + "\(ThemeLimitText.span(AppThemeMaterialLimits.controlRadiusRange)) points."
       ),
       "border_width": MCPPropertySchema(
         type: .number,
@@ -10083,10 +10604,10 @@ enum MCPTools {
           + "backdrop_pattern reaches, drawn beneath the pattern. Cards, controls, the "
           + "terminal and the sidebar do not inherit it; the sidebar states its own "
           + "background in the variant's `sidebar` block, in the same vocabulary. Each "
-          + "gradient stop must keep the theme's label at 3:1 against the ground. A picture "
-          + "is not gated — check it against real text in both variants, and wash "
-          + "photographs well below 0.4 opacity. The gradient, including optional drift, also "
-          + "reaches the iPhone dashboard; pictures remain on the Mac.",
+          + "gradient stop must keep the theme's label at 3:1 against the ground. Pictures "
+          + "receive sampled legibility warnings; inspect real text in both variants. The "
+          + "gradient, drift, picture and particles reach themed iPhone screens; phone "
+          + "pictures aspect-fill at no more than 0.25 opacity.",
         properties: [
           "gradient": MCPPropertySchema(
             type: .object,
@@ -10657,17 +11178,20 @@ enum MCPTools {
   private static var appThemeGradientDriftSchema: MCPPropertySchema {
     MCPPropertySchema(
       type: .object,
-      description: "Optional slow decorative drift, rendered locally on Mac and iPhone. "
+      description: "Optional slow decorative drift, rendered locally on Mac; material.backdrop "
+        + "drift also reaches the iPhone. "
         + "Omit it when replacing a gradient to restore a still wash. Reduce Motion, Low "
         + "Power Mode and hidden surfaces stop the animation. Layout and controls never move.",
       properties: [
         "duration": MCPPropertySchema(
           type: .number,
-          description: "Full cycle in seconds, 8–120; default 24."
+          description: "Full cycle in seconds, \(ThemeLimitText.driftDuration); "
+            + "default \(ThemeLimitText.defaultDriftDuration)."
         ),
         "distance": MCPPropertySchema(
           type: .number,
-          description: "Travel as a fraction of the gradient, 0.02–0.25; default 0.12."
+          description: "Travel as a fraction of the gradient, \(ThemeLimitText.driftDistance); "
+            + "default \(ThemeLimitText.defaultDriftDistance)."
         ),
       ]
     )

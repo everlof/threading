@@ -265,8 +265,14 @@ final class ProjectStore {
         return projects[index]
     }
 
+    /// Removes a project and every chat in it. `caller`/`line` name the route in the deletion
+    /// journal and are captured by default; see `DeletionJournal`.
     @discardableResult
-    func removeProject(id: ProjectID) -> ProjectMutationResult {
+    func removeProject(
+        id: ProjectID,
+        caller: StaticString = #fileID,
+        line: UInt = #line
+    ) -> ProjectMutationResult {
         guard let projectIndex = index(ofProject: id) else { return .targetNotFound }
         let removedProject = projects[projectIndex]
         guard flushPendingRecordSaves() else {
@@ -280,10 +286,18 @@ final class ProjectStore {
             setSelectedSessionWithoutPersistence(nil)
         }
         rebuildLookupIndexes()
-        guard saveProjectRemoval(id, at: projectIndex) else {
+        guard saveProjectRemoval(
+            id,
+            holding: Set(removedProject.sessions.map(\.id)),
+            at: projectIndex
+        ) else {
             notifyChanged()
             return .persistenceRefused
         }
+        DeletionJournal.projectRemoved(
+            removedProject,
+            caller: DeletionJournal.caller(caller, line)
+        )
 
         // Destructive auxiliary cleanup follows the authoritative commit. Doing it first can
         // restore a project whose icon, handoff, audit and scheduled work were already erased
@@ -424,6 +438,7 @@ final class ProjectStore {
         title: String? = nil,
         handoff: ConversationHandoff? = nil,
         managedWorkspace: ManagedWorkspace? = nil,
+        automationWorkspace: AutomationWorkspace? = nil,
         id: SessionID = SessionID()
     ) -> AgentSession? {
         // Starting a chat here is the user choosing this folder, whatever put the row on screen.
@@ -452,6 +467,7 @@ final class ProjectStore {
                 title: title,
                 handoff: handoff,
                 managedWorkspace: managedWorkspace,
+                automationWorkspace: automationWorkspace,
                 id: id
               )
         else { return nil }
@@ -693,6 +709,10 @@ final class ProjectStore {
                     from: source,
                     to: projects[targetIndex].id
                 )
+                NotificationCenter.default.post(SessionProjectDidChange(
+                    sessionID: id,
+                    projectID: projects[targetIndex].id
+                ))
             }
         }
         let destination = SessionCheckoutStoreDestination(
@@ -728,15 +748,17 @@ final class ProjectStore {
     /// Only ever touches rows with the flag, so a folder the user added stays whether or not it
     /// holds chats. A crash between the commit and this leaves one empty row, which is what the
     /// app did on every move before.
+    ///
+    /// "Holds nothing" is this graph's answer, and the cascade obeys the store's: every session
+    /// row naming the project goes with it. The removal therefore names no sessions, and the
+    /// store refuses it if any row still points here, so a graph that has drifted keeps a
+    /// project rather than deleting the chats nobody could see in it.
     @discardableResult
     func reclaimAdoptedEmptyProjects() -> [ProjectID] {
         let reclaimable = projects
             .filter { $0.wasAdoptedForCheckoutMove && $0.holdsNothing && !$0.isTheScratchpad }
             .map(\.id)
-        for id in reclaimable {
-            _ = removeProject(id: id)
-        }
-        return reclaimable
+        return reclaimable.filter { removeProject(id: $0) == .applied }
     }
 
     /// Adopts conversations found on disk, so they can be resumed like any other session.
@@ -1636,8 +1658,14 @@ final class ProjectStore {
             }
     }
 
+    /// Permanently deletes one session. `caller`/`line` name the route in the deletion journal
+    /// and are captured by default; see `DeletionJournal`.
     @discardableResult
-    func removeSession(id sessionID: SessionID) -> ProjectMutationResult {
+    func removeSession(
+        id sessionID: SessionID,
+        caller: StaticString = #fileID,
+        line: UInt = #line
+    ) -> ProjectMutationResult {
         guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
         // Flush standing rows before positions change; an exact write made afterwards must not
         // use the shifted in-memory position and then have the delete transaction shift it again.
@@ -1645,7 +1673,9 @@ final class ProjectStore {
             notifyChanged()
             return .persistenceRefused
         }
-        let projectID = projects[location.projectIndex].id
+        let owningProject = projects[location.projectIndex]
+        let removedSession = owningProject.sessions[location.sessionIndex]
+        let projectID = owningProject.id
         let sessionPosition = location.sessionIndex
         let indexSpan = PerformanceRecorder.shared.begin(
             "sidebar.session-remove.indexes",
@@ -1680,6 +1710,11 @@ final class ProjectStore {
             notifyChanged(sidebarImpact: .projectStructure(projectID))
             return .persistenceRefused
         }
+        DeletionJournal.sessionDeleted(
+            removedSession,
+            from: owningProject,
+            caller: DeletionJournal.caller(caller, line)
+        )
 
         // Archive/Restore never enters this method. Permanent removal collects only refs in
         // Threading's private namespace, and follows the authoritative commit so a refused
@@ -2526,22 +2561,34 @@ final class ProjectStore {
     }
 
     /// The project-delete fast path: one delete/cascade and a positional shift of later projects.
-    private func saveProjectRemoval(_ projectID: ProjectID, at position: Int) -> Bool {
+    private func saveProjectRemoval(
+        _ projectID: ProjectID,
+        holding sessionIDs: Set<SessionID>,
+        at position: Int
+    ) -> Bool {
         guard prepareForImmediateSave("project removal") else {
             restorePersistedSnapshot()
             return false
         }
-        guard stateManager.removeProject(
+        switch stateManager.removeProject(
             id: projectID,
+            holding: sessionIDs,
             at: position,
             selectedSessionID: selectedSessionID
-        ) else {
+        ) {
+        case .committed:
+            recordPersistedSnapshot()
+            return true
+        case .refusedUnaccountedSessions:
+            // The store still holds chats this graph does not, and the cascade would have taken
+            // them. Nothing was written, so the row comes back and later edits stay allowed.
+            restorePersistedSnapshot()
+            return false
+        case .failed:
             recordFailedWritePolicy()
             restorePersistedSnapshot()
             return false
         }
-        recordPersistedSnapshot()
-        return true
     }
 
     /// Applies the store-owned refusal policy before any immediate persistence operation.

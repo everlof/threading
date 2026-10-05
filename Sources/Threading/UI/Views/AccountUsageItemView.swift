@@ -47,12 +47,11 @@ final class AccountUsageItemView: BackdropThemedControl {
     private var isPopoverPinned = false
 
     /// Decides when the popover opens and closes; what it shows stays the pill's business.
-    /// The policy follows the content — `readingPopoverPolicy` while the popover is the
-    /// native reading, `actionablePopoverPolicy` once an extension composes content in —
-    /// and `makeAccountUsagePopover` is where that decision is made.
+    /// Native content can offer keychain access and scroll through provider windows, so the
+    /// pointer must be able to reach it with or without extension content.
     private lazy var popoverScheduler: HoverPopoverScheduler = {
         let scheduler = HoverPopoverScheduler(
-            policy: AccountUsageItemDefaults.readingPopoverPolicy
+            policy: AccountUsageItemDefaults.popoverPolicy
         )
         scheduler.onPresent = { [weak self] in self?.showPopover() }
         scheduler.onDismiss = { [weak self] in
@@ -62,8 +61,7 @@ final class AccountUsageItemView: BackdropThemedControl {
         return scheduler
     }()
 
-    /// The policy currently applied to the hover popover — read by tests asserting that it
-    /// follows the content.
+    /// The shipping hover policy, shared by native and extension-composed content.
     var popoverPolicyForTesting: HoverPopoverScheduler.Policy { popoverScheduler.policy }
 
     /// The rendered foregrounds and the two faces they promise to read on. Kept as the values
@@ -472,12 +470,7 @@ final class AccountUsageItemView: BackdropThemedControl {
 
     /// Builds the account presentation independently from the toolbar hover trigger. The outer
     /// tracking view remains host-owned, so replacing all visual content cannot take over the
-    /// popover's own hover reporting — the policy decides whether that report holds it open.
-    ///
-    /// This is also where the policy is decided: the native reading closes with the pointer,
-    /// but the moment an extension composes content in, the popover may carry actions the
-    /// pointer must be able to reach, so it gains the grace and the hold. Re-decided on every
-    /// build and on every live resolution change, so it always describes what is showing.
+    /// popover's own hover reporting or prevent the pointer from reaching native actions.
     func makeAccountUsagePopover(for account: AgentAccount) -> NSViewController? {
         let target = ExtensionComponentTarget.accountUsagePopover(
             accountID: account.id.rawValue
@@ -485,7 +478,6 @@ final class AccountUsageItemView: BackdropThemedControl {
         let native = usagePopoverContentProvider(account)
         let initialResolution = customizationLookup(target)
         guard native != nil || !initialResolution.isEmpty else { return nil }
-        applyPopoverPolicy(for: initialResolution)
 
         let hoverContainer = HoverTrackingView()
         hoverContainer.onHoverChange = { [weak self] hovering in
@@ -516,7 +508,6 @@ final class AccountUsageItemView: BackdropThemedControl {
             },
             onResolution: { [weak self] resolution in
                 guard let self else { return }
-                applyPopoverPolicy(for: resolution)
                 if !hasNativeContent, resolution.isEmpty {
                     popover?.close()
                     popover = nil
@@ -525,12 +516,6 @@ final class AccountUsageItemView: BackdropThemedControl {
         )
         controller.view.setAccessibilityIdentifier("toolbar.account-usage-popover")
         return controller
-    }
-
-    private func applyPopoverPolicy(for resolution: ComponentCustomizationResolution) {
-        popoverScheduler.policy = resolution.isEmpty
-            ? AccountUsageItemDefaults.readingPopoverPolicy
-            : AccountUsageItemDefaults.actionablePopoverPolicy
     }
 
     private static func nativeUsagePopoverContent(

@@ -163,6 +163,9 @@ enum MobileDesign {
         /// above the home indicator. Taller than the minimum tap target because they are the
         /// page's primary actions and float over content rather than sitting in a chrome row.
         static let floatingBarControl: CGFloat = 52
+        /// The square a theme's mascot is fitted into where it stands on those pills. Also the
+        /// point bound its picture is decoded for, so the two cannot drift apart.
+        static let mascot: CGFloat = 56
         static let toggleTrackWidth: CGFloat = 52
         static let toggleTrackHeight: CGFloat = 32
         static let toggleThumb: CGFloat = 26
@@ -803,6 +806,8 @@ struct MobileConnectionNavigationTitle: View {
 /// custom, inherited, or dynamic System theme.
 struct RemoteThemePalette: Equatable {
     let source: RemoteThemeDTO?
+    // Prepared process font identity makes an asynchronous registration a new environment value.
+    var registeredFontName: String?
 
     init(_ source: RemoteThemeDTO?) {
         self.source = source
@@ -829,6 +834,11 @@ struct RemoteThemePalette: Equatable {
     /// keeps a custom translucent floating role from revealing the content beneath the modal.
     var floatingSurface: Color { Color(uiFloatingSurface) }
     var controlResting: Color { color("control_resting", fallback: "#FFFFFF12") }
+    /// A dashboard heading can scroll across the mascot. Keep its control disc visually
+    /// whole when the authored resting colour is translucent.
+    var dashboardControlResting: Color {
+        Color(uiControlResting.remoteComposited(over: uiGround.withAlphaComponent(1)))
+    }
     var controlHover: Color { color("control_hover", fallback: "#FFFFFF20") }
     var border: Color { color("border", fallback: "#FFFFFF14") }
     var divider: Color { color("divider", fallback: "#FFFFFF0C") }
@@ -858,6 +868,18 @@ struct RemoteThemePalette: Equatable {
         return authored.remoteComposited(over: uiGround)
     }
     var uiControlResting: UIColor { uiColor("control_resting", fallback: "#FFFFFF12") }
+    /// Transcript reading surfaces keep their resolved colour when pictures or particles pass
+    /// behind them. Opacity belongs to the plate, never to the text-bearing subtree.
+    var uiConversationGround: UIColor { uiGround.withAlphaComponent(1) }
+    var uiUserMessageSurface: UIColor { uiControlResting.remoteComposited(over: uiConversationGround) }
+    /// A transcript card (a tool call, a permission request) in the panel role, made opaque.
+    /// System sends `panel` as a faint wash, which let the backdrop's decoration through.
+    var uiConversationPanel: UIColor { uiPanel.remoteComposited(over: uiConversationGround) }
+    var hasBackdropDecoration: Bool {
+        source?.material.backdropGradient?.hasValidGeometry == true
+            || source?.material.particles?.isValid == true
+            || asset("backdrop") != nil || asset("sidebarImage") != nil
+    }
     /// Ink for a monochrome mark on a control plate. The plate may be light even in a dark theme.
     var controlForeground: Color {
         let surface = uiSurface.remoteComposited(over: uiGround)

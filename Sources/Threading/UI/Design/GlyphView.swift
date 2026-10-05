@@ -14,8 +14,8 @@ import AppKit
 /// way `contentTintColor` would, minus the placement it got wrong; non-template artwork (an
 /// application's own icon) keeps its colours.
 ///
-/// Decorative by construction: the control or row around it carries the accessible name, the
-/// same split `SeparatorView` states.
+/// Decorative by default: the control or row around it carries the accessible name. A mark
+/// conveying an additional identity can explicitly opt into accessibility with its own label.
 public final class GlyphView: NSView {
 
     /// The artwork. Natural size is the view's intrinsic size unless `slot` caps it.
@@ -33,6 +33,48 @@ public final class GlyphView: NSView {
     /// first `applyInk`, a template draws as itself, which is never on screen.
     public var tint: NSColor? {
         didSet { needsDisplay = true }
+    }
+
+    /// Opts a dynamic mark into contrast protection against the face it actually sits on.
+    /// The host supplies the ground because a row can paint selection without recording a
+    /// layer fill. Resolve at draw time so selection, appearance and live theme changes cannot
+    /// leave the measurement attached to an old surface. Finished artwork keeps its pixels.
+    public var contrastGround: (() -> NSColor)? {
+        didSet { needsDisplay = true }
+    }
+
+    private struct ContrastResolution {
+        let requested: NSColor
+        let ground: NSColor
+        let floor: CGFloat
+        let ink: NSColor
+    }
+
+    // One entry per visible glyph, not a cache growing with themes or session count.
+    private var contrastResolution: ContrastResolution?
+
+    private static let contrastRenderingMargin: CGFloat = 0.1
+
+    private func legibleTint(_ tint: NSColor) -> NSColor {
+        guard let contrastGround, image?.isTemplate == true,
+              let requested = tint.usingColorSpace(.sRGB),
+              let ground = contrastGround().usingColorSpace(.sRGB) else { return tint }
+        let floor = Design.Accessibility.increasesContrast
+            ? LabelLegibility.Defaults.readingRatio : LabelLegibility.Defaults.glanceRatio
+        if let cached = contrastResolution,
+           cached.requested == requested, cached.ground == ground, cached.floor == floor {
+            return cached.ink
+        }
+        // Keep good authored ink exactly. A repair needs a little headroom for 8-bit raster
+        // rounding; landing exactly on the mathematical floor can draw just below it.
+        let reads = ThemeContrast.ratio(requested.composited(over: ground), ground) >= floor
+        let ink = reads ? requested : LabelLegibility.held(
+            requested, at: floor + Self.contrastRenderingMargin, over: [ground], ceiling: 1
+        )
+        contrastResolution = ContrastResolution(
+            requested: requested, ground: ground, floor: floor, ink: ink
+        )
+        return ink
     }
 
     /// A cap for artwork whose natural size is not ours to choose — an installed app's icon
@@ -135,7 +177,7 @@ public final class GlyphView: NSView {
         // shave another. Inward stays inside the centred rect by construction.
         let aligned = backingAlignedRect(centred, options: .alignAllEdgesInward)
         if let tint {
-            TemplateImageDrawing.draw(image, in: aligned, tint: tint)
+            TemplateImageDrawing.draw(image, in: aligned, tint: legibleTint(tint))
         } else {
             image.draw(in: aligned)
         }

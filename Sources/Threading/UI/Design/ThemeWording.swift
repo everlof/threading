@@ -22,19 +22,29 @@ enum ThemeWording {
 
     /// The theme's invitation for an empty new-session composer, or nil for the app's own.
     static var composerPlaceholder: String? {
-        let stated = words?.composerPlaceholder?.trimmingCharacters(in: .whitespacesAndNewlines)
+        composerPlaceholder(for: NSApp.effectiveAppearance)
+    }
+
+    static func composerPlaceholder(for appearance: NSAppearance) -> String? {
+        let stated = words(for: appearance)?.composerPlaceholder?.trimmingCharacters(in: .whitespacesAndNewlines)
         return stated?.isEmpty == false ? stated : nil
     }
 
     /// The theme's name for a session nothing has named yet, or nil for "New Session".
     static var untitledSessionName: String? {
-        let stated = words?.untitledSession?.trimmingCharacters(in: .whitespacesAndNewlines)
+        untitledSessionName(for: NSApp.effectiveAppearance)
+    }
+
+    static func untitledSessionName(for appearance: NSAppearance) -> String? {
+        let stated = words(for: appearance)?.untitledSession?.trimmingCharacters(in: .whitespacesAndNewlines)
         return stated?.isEmpty == false ? stated : nil
     }
 
-    private static var words: ThemeWords? {
+    private static var words: ThemeWords? { words(for: NSApp.effectiveAppearance) }
+
+    private static func words(for appearance: NSAppearance) -> ThemeWords? {
         let theme = AppThemePalette.current
         guard !theme.isSystem else { return nil }
-        return theme.variant(for: NSApp.effectiveAppearance)?.words
+        return theme.variant(for: appearance)?.words
     }
 }

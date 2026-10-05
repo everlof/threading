@@ -155,6 +155,8 @@ struct SessionWorkspaceView: View {
                 }
             }
         }
+        // The list's `themedSettingsPage` owns this sheet's one backdrop. A second one here
+        // competed for the window's motion lease and could animate behind a frozen list.
         .background(theme.ground)
         .fullScreenCover(item: $browserPresentation) { presentation in
             NavigationStack {
@@ -252,7 +254,7 @@ private struct SessionWorkspaceItemRow: View {
     var body: some View {
         HStack(spacing: MobileDesign.Spacing.medium) {
             Image(systemName: item.symbolName)
-                .font(.title3)
+                .font(theme.chromeSwiftUIFont(.title3))
                 .foregroundStyle(theme.accent)
                 .frame(
                     width: MobileDesign.Size.minimumTapTarget,
@@ -344,10 +346,10 @@ private struct SessionWorkspaceItemRow: View {
     private func itemCopy(title: Text, description: Text) -> some View {
         VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
             title
-                .font(.body.weight(.medium))
+                .font(theme.chromeSwiftUIFont(.body, weight: .medium))
                 .foregroundStyle(theme.label)
             description
-                .font(.caption)
+                .font(theme.chromeSwiftUIFont(.caption))
                 .foregroundStyle(theme.secondaryLabel)
                 .fixedSize(horizontal: false, vertical: true)
         }

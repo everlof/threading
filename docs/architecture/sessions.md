@@ -520,7 +520,9 @@ adopts the preceding turn's refs.
 A session belongs to a checkout through its `Project`, not through its cached branch string.
 `SessionCheckoutCoordinator` is the only operation that changes that ownership. It resolves the
 source and requested destination through `GitInfo.worktreeLocation`, canonicalizes symlinks, and
-compares both repository and worktree identities. Only an existing worktree root with an attached
+compares both repository and worktree identities. These validation reads explicitly refresh the
+discovery memo, including cached misses, so creation or replacement at the same path cannot be
+judged by an earlier display reading. Only an existing worktree root with an attached
 branch in the same repository is eligible. Managed workspaces are excluded on both sides; branch
 names never serve as identity.
 
@@ -892,6 +894,16 @@ refreshes a terminal session's index after a quiet edge in TUI output, and scans
 index once at launch so a rename made while Threading was closed also reaches a dormant row. The
 TUI's human confirmation sentence is never parsed.
 
+Automatic refreshes have one active read and one latest pending request per session. Account
+discovery and title reads use serial workers; Claude's source request is captured on main but
+resolved off-main, preserving live/remote transcript authority. Publication rechecks the account,
+transcript and execution directory, and the stored title's authority still protects a chosen name.
+Launch reconciliation gathers immutable identities, discovers accounts once and reads each
+distinct account index once, rather than performing discovery for each retained row.
+The launch call returns its task when a batch exists, so a caller can observe completed
+publication. Its retained-session test awaits that task; a wall-clock poll of a row also counted
+queueing behind other title reads and failed under a concurrent cold build.
+
 **`ai-title` is written once and then almost never rewritten**, which is the fact the rest of
 this section turns on. Counted across the twelve largest transcripts here: each carries 34–422
 `ai-title` records, and **ten of the twelve hold a single distinct value**. The two that moved
@@ -1133,6 +1145,17 @@ copy Claude's resume finds first. The physical path is remembered per folder, so
 lookup that a catalogue projection makes once per session on the main actor resolves nothing.
 It answers from memory and falls back to the stated spelling. `SessionImporter` scans both
 directories and deduplicates.
+
+**Membership reads the first `cwd`, then the newest.** Every transcript line carries a `cwd`, and
+`SessionImporter` took the first as the authority on which checkout a conversation belongs to. A
+conversation resumed in another checkout breaks that: Claude files the continued conversation
+under the new checkout's slug, but the file opens with the records it was continued from, which
+name the directory it started in. So a chat a checkout move had carried into a sibling worktree
+belonged nowhere — the worktree's project rejected it by its first line, and the original
+checkout's slug no longer held the live file — and a deleted one could not be imported back,
+whatever the delete confirmation promised. `latestCwdBelongs` reads the newest `cwd` from the
+tail, only for a transcript its first `cwd` rejected, so an ordinary import pays nothing; the
+first `cwd` still admits a chat whose agent `cd`'d somewhere else late on.
 
 The *directory* was never the bug: `AgentLauncher.plan` and `ProjectStore.executionProject` both
 hand the transcript seam a `Project` copy whose `folderPath` is `session.workingDirectory(in:)`,

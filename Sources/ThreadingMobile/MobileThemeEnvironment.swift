@@ -60,10 +60,85 @@ extension View {
     /// dark theme, because `preferredColorScheme` did not cross either. Every sheet therefore
     /// re-states the theme instead of assuming it inherits.
     func mobileTheme(_ theme: RemoteThemePalette) -> some View {
-        environment(\.remoteTheme, theme)
+        modifier(MobileThemeEnvironmentModifier(theme: theme))
+    }
+
+    /// Text that belongs to the person or an agent — a transcript snippet, what is typed into
+    /// an editor — keeps the platform's typography. A theme's font and typeface hint dress
+    /// titles and chrome only (`docs/decisions/phone-theme-rendering.md`), yet `mobileTheme`
+    /// states both for everything beneath it, so content steps back out here. `nil` clears the
+    /// root's typeface hint; `.fontDesign(.default)` does not, and leaves an outer design in force.
+    func mobileContentTypography(_ font: Font = .body) -> some View {
+        self.font(font).fontDesign(nil)
+    }
+}
+
+private struct MobileThemeEnvironmentModifier: ViewModifier {
+    let theme: RemoteThemePalette
+    @ObservedObject private var assets = MobileThemeAssets.shared
+
+    func body(content: Content) -> some View {
+        let _ = assets.revision
+        var preparedTheme = theme
+        preparedTheme.registeredFontName = assets.fontName(for: theme.source?.material.fontFamily)
+        return content.environment(\.remoteTheme, preparedTheme)
             .preferredColorScheme(theme.colorScheme)
             .tint(theme.accent)
             .toggleStyle(MobileThemedToggleStyle(theme: theme))
             .foregroundStyle(theme.label)
+            .fontDesign(preparedTheme.registeredFontName == nil ? theme.fontDesign : nil)
+            .font(theme.chromeSwiftUIFont(.body))
+    }
+}
+
+
+extension RemoteThemePalette {
+    var fontDesign: Font.Design {
+        switch source?.material.typeface?.rawValue {
+        case "serif": .serif
+        case "rounded": .rounded
+        case "monospaced": .monospaced
+        default: .default
+        }
+    }
+
+    var systemFontDesign: UIFontDescriptor.SystemDesign {
+        switch source?.material.typeface?.rawValue {
+        case "serif": .serif
+        case "rounded": .rounded
+        case "monospaced": .monospaced
+        default: .default
+        }
+    }
+
+    var tintsIdentityMarks: Bool { source?.material.identityMarks == "tinted" }
+
+    @MainActor func chromeFont(forTextStyle style: UIFont.TextStyle) -> UIFont {
+        let native = UIFont.preferredFont(forTextStyle: style)
+        if let name = registeredFontName ?? MobileThemeAssets.shared.fontName(for: source?.material.fontFamily),
+           let font = UIFont(name: name, size: native.pointSize) { return font }
+        guard let descriptor = native.fontDescriptor.withDesign(systemFontDesign) else { return native }
+        return UIFont(descriptor: descriptor, size: native.pointSize)
+    }
+
+    @MainActor func chromeSwiftUIFont(_ style: Font.TextStyle, weight: Font.Weight? = nil) -> Font {
+        let resolvedWeight = weight ?? (style == .headline ? .semibold : .regular)
+        if let name = registeredFontName ?? MobileThemeAssets.shared.fontName(for: source?.material.fontFamily) {
+            let size: CGFloat = switch style {
+            case .largeTitle: 34
+            case .title: 28
+            case .title2: 22
+            case .title3: 20
+            case .headline, .body: 17
+            case .callout: 16
+            case .subheadline: 15
+            case .footnote: 13
+            case .caption: 12
+            case .caption2: 11
+            @unknown default: 17
+            }
+            return .custom(name, size: size, relativeTo: style).weight(resolvedWeight)
+        }
+        return .system(style, design: fontDesign, weight: resolvedWeight)
     }
 }

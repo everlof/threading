@@ -8,12 +8,26 @@ import AppKit
 /// into the line that replaces it — and a value that gains a line morphs that line in from
 /// nothing rather than having it appear whole.
 ///
-/// Two consequences to know before reaching for it. It splits on newlines and **does not wrap**:
-/// a line wider than its host truncates the way every other morphing title does, so this is for
-/// authored short lines, not prose — `ThemedMultilineTitleLabel` is the wrapping one. And a
-/// block's height is a function of its line *count* alone, never of what the lines say, which is
-/// what lets the count be animated at all. See `setStringValue(_:animated:)`.
+/// Two consequences to know before reaching for it. By default it splits on newlines and **does
+/// not wrap**: a line wider than its host truncates the way every other morphing title does, so
+/// this is for authored short lines, not prose — `ThemedMultilineTitleLabel` is the paragraph
+/// one. A host that has to carry a line it did not write — a theme's greeting — opts into
+/// `Wrapping.words`, which breaks the value into lines *before* they are morphed, at the
+/// `wrapWidth` the host states; the morph still diffs line against line. And a block's height is
+/// a function of its line *count* alone, never of what the lines say, which is what lets the
+/// count be animated at all. See `setStringValue(_:animated:)`.
 final class MorphingMultilineTitleLabel: NSView, ThemedComponent {
+
+    /// How the block meets a line wider than the room it is given.
+    enum Wrapping: Equatable {
+        /// Every authored line is one line, truncating past the block's width. The default, and
+        /// right wherever the breaks are the author's meaning — the manager's three-line brief.
+        case none
+        /// A line wider than `wrapWidth` breaks between words onto the next one, and inside a
+        /// word only when that word alone is wider than the measure. At most `maximumLines` in
+        /// all: the last of them carries the rest of the value and truncates what does not fit.
+        case words(maximumLines: Int)
+    }
 
     // MARK: - Properties
 
@@ -21,8 +35,14 @@ final class MorphingMultilineTitleLabel: NSView, ThemedComponent {
     private var lineLabels: [MorphingTitleLabel] = []
     private var lineHeights: [NSLayoutConstraint] = []
 
-    /// How many leading labels currently carry the value. The rest exist but are out of layout.
-    private var presentedLineCount = 0
+    /// The lines the value is drawn as: its own lines, or the lines wrapping broke them into.
+    /// Exactly the leading labels that carry the value; the rest exist but are out of layout.
+    private(set) var presentedLines: [String] = []
+
+    private var presentedLineCount: Int { presentedLines.count }
+
+    /// The measure a wrapping block breaks at, whole points. Zero until the host knows its room.
+    private var wrapMeasure: CGFloat = 0
 
     /// Held so a line built later is set in the same face as the ones already up, and so a live
     /// theme switch resizes every slot rather than only re-drawing the glyphs in it.
@@ -63,6 +83,34 @@ final class MorphingMultilineTitleLabel: NSView, ThemedComponent {
         didSet {
             guard alignment != oldValue else { return }
             lineLabels.forEach { $0.alignment = alignment }
+        }
+    }
+
+    /// Whether a line wider than `wrapWidth` breaks onto the next one. `.none` by default.
+    var wrapping: Wrapping = .none {
+        didSet {
+            guard wrapping != oldValue else { return }
+            rewrap()
+        }
+    }
+
+    /// The widest a wrapped line may draw, stated by the host from the room it has — the role a
+    /// text field's `preferredMaxLayoutWidth` plays. Read from the host's own geometry, never
+    /// from this block's frame: the block is as wide as its widest line, so wrapping at its own
+    /// width would ratchet narrower with every pass.
+    ///
+    /// Held in whole points and compared before anything else happens, so a host may restate it
+    /// on every layout pass: only a width that moves the measure re-breaks the value, and only
+    /// lines that come out different are laid out again. Ignored under `.none`; zero (the
+    /// default) means the room is not known yet, and the value's own lines stand until it is.
+    var wrapWidth: CGFloat {
+        get { wrapMeasure }
+        set {
+            let whole = max(0, newValue.rounded(.down))
+            guard whole != wrapMeasure else { return }
+            wrapMeasure = whole
+            guard wrapping != .none else { return }
+            rewrap()
         }
     }
 
@@ -127,61 +175,16 @@ final class MorphingMultilineTitleLabel: NSView, ThemedComponent {
     /// one width, so without the floor the second line's morph would resize the first one
     /// mid-flight — and a `MorphingLabel` whose bounds change re-lays its glyphs out where they
     /// will end up, under animations still carrying them there.
+    ///
+    /// A wrapping block breaks the value into its lines here, before any of that: the morph is
+    /// between the lines on screen and the lines the new value wraps to, so a wrapped greeting
+    /// morphs into a one-line one exactly as a two-line value would.
     func setStringValue(_ value: String, animated: Bool) {
         guard value != stringValue else { return }
-
-        let target = value.components(separatedBy: "\n")
-        let previous = presentedLineCount
         stringValue = value
+        // The value is one sentence however it happens to wrap, so it is read as written.
         setAccessibilityLabel(value.replacingOccurrences(of: "\n", with: ". "))
-
-        // The same three conditions `MorphingLabel.setText` applies, asked before the fact: a
-        // block off-window or under Reduce Motion lands its lines directly, and must therefore
-        // not hold layout open for an animation that will never run.
-        let morphs = animated && !Design.Motion.reducesMotion && window != nil
-        let span = max(target.count, previous)
-        ensureLines(count: span)
-
-        transitionGeneration += 1
-        let generation = transitionGeneration
-
-        guard morphs else {
-            presentedLineCount = target.count
-            for (index, label) in lineLabels.enumerated() {
-                label.setStringValue(index < target.count ? target[index] : "", animated: false)
-            }
-            endTransition(generation)
-            return
-        }
-
-        // A morph's duration is a function of both ends of it, so this is asked while each line
-        // still holds the line it is leaving.
-        let settle = (0..<span).reduce(TimeInterval.zero) { longest, index in
-            max(longest, lineLabels[index].morphSettleDuration(
-                to: index < target.count ? target[index] : ""
-            ))
-        }
-
-        holdWidth(across: target)
-        holdHeight(at: previous)
-        for index in 0..<span {
-            lineLabels[index].isHidden = false
-            lineHeights[index].isActive = true
-        }
-        // Resolves the reveal without moving anything: the block is pinned to the height it
-        // already had, so the lines that have just joined take their slots past its bottom edge
-        // rather than pushing it open. They need those bounds before they can animate inside
-        // them — the package refuses to morph a label with none.
-        window?.layoutIfNeeded()
-
-        presentedLineCount = target.count
-        for index in 0..<span {
-            lineLabels[index].setStringValue(
-                index < target.count ? target[index] : "",
-                animated: true
-            )
-        }
-        travelHeight(to: target.count, over: settle, generation: generation)
+        present(layoutLines(of: value), animated: animated)
     }
 
     /// States the ink as a rule to be re-asked rather than a colour to be kept — see
@@ -210,6 +213,82 @@ final class MorphingMultilineTitleLabel: NSView, ThemedComponent {
     var isTravellingForTesting: Bool { heightTravel != nil }
 
     // MARK: - Private Methods
+
+    /// The lines `value` is drawn as under the rule and measure in force.
+    private func layoutLines(of value: String) -> [String] {
+        guard case .words(let maximumLines) = wrapping, wrapMeasure > 0 else {
+            return value.components(separatedBy: "\n")
+        }
+        return MorphingLineBreaker(font: lineFont, width: wrapMeasure)
+            .lines(of: value, maximumLines: maximumLines)
+    }
+
+    /// Lays the value out again after something it is measured against moved — the measure, the
+    /// face, or the rule itself.
+    ///
+    /// Lands directly rather than morphing: a re-break is the same words in a new shape, which a
+    /// text field resizing does not animate either, and a window being resized would otherwise
+    /// start a morph on every step. Nothing happens unless the lines actually come out
+    /// different, so a measure that moves within a line's slack costs one break and no layout.
+    private func rewrap() {
+        guard !presentedLines.isEmpty else { return }
+        let target = layoutLines(of: stringValue)
+        guard target != presentedLines else { return }
+        present(target, animated: false)
+    }
+
+    /// Puts `target` up, morphing each line into the line that takes its place.
+    private func present(_ target: [String], animated: Bool) {
+        let previous = presentedLineCount
+
+        // The same three conditions `MorphingLabel.setText` applies, asked before the fact: a
+        // block off-window or under Reduce Motion lands its lines directly, and must therefore
+        // not hold layout open for an animation that will never run.
+        let morphs = animated && !Design.Motion.reducesMotion && window != nil
+        let span = max(target.count, previous)
+        ensureLines(count: span)
+
+        transitionGeneration += 1
+        let generation = transitionGeneration
+
+        guard morphs else {
+            presentedLines = target
+            for (index, label) in lineLabels.enumerated() {
+                label.setStringValue(index < target.count ? target[index] : "", animated: false)
+            }
+            endTransition(generation)
+            return
+        }
+
+        // A morph's duration is a function of both ends of it, so this is asked while each line
+        // still holds the line it is leaving.
+        let settle = (0..<span).reduce(TimeInterval.zero) { longest, index in
+            max(longest, lineLabels[index].morphSettleDuration(
+                to: index < target.count ? target[index] : ""
+            ))
+        }
+
+        holdWidth(across: target)
+        holdHeight(at: previous)
+        for index in 0..<span {
+            lineLabels[index].isHidden = false
+            lineHeights[index].isActive = true
+        }
+        // Resolves the reveal without moving anything: the block is pinned to the height it
+        // already had, so the lines that have just joined take their slots past its bottom edge
+        // rather than pushing it open. They need those bounds before they can animate inside
+        // them — the package refuses to morph a label with none.
+        window?.layoutIfNeeded()
+
+        presentedLines = target
+        for index in 0..<span {
+            lineLabels[index].setStringValue(
+                index < target.count ? target[index] : "",
+                animated: true
+            )
+        }
+        travelHeight(to: target.count, over: settle, generation: generation)
+    }
 
     /// Builds the labels a value of `count` lines needs, and leaves them out of layout until it
     /// has them.
@@ -259,7 +338,7 @@ final class MorphingMultilineTitleLabel: NSView, ThemedComponent {
     private func holdWidth(across target: [String]) {
         // Any line measures for all of them: they are one block set in one font.
         guard let measure = lineLabels.first else { return }
-        let candidates = target + lineLabels.prefix(presentedLineCount).map(\.stringValue)
+        let candidates = target + presentedLines
         let width = candidates.reduce(CGFloat.zero) { widest, line in
             max(widest, measure.naturalWidth(of: line))
         }
@@ -449,6 +528,177 @@ extension MorphingMultilineTitleLabel: FontRoleApplying {
         for (label, constraint) in zip(lineLabels, lineHeights) {
             label.font = font
             constraint.constant = height
+        }
+        // A wrapped value was broken against the face it is leaving; a larger one may need
+        // another line and a smaller one may give one back.
+        if wrapping != .none { rewrap() }
+    }
+}
+
+// MARK: - Line Breaking
+
+/// Breaks a value into the lines a wrapping `MorphingMultilineTitleLabel` draws it as.
+///
+/// Measured the way LabelMorph sets a line — the same face, ligatures off — so a line this calls
+/// a fit is one the label draws whole. The breaks are Core Text's own word-wrapping suggestion
+/// (`CTTypesetterSuggestLineBreak`), which hangs the space a line breaks at and breaks between
+/// characters only for a word wider than the measure on its own, and the line at the cap is
+/// tail-truncated between characters the way every other morphing title is.
+///
+/// Bounded by what is shown rather than by the value: lines are taken one at a time and the
+/// breaking stops at the cap, where the last line gathers what follows only until it overflows.
+/// A value far longer than the block therefore costs about one line of measuring past the cap.
+struct MorphingLineBreaker {
+
+    private enum Defaults {
+        /// The single character a truncated line ends with — LabelMorph's own, so a line cut
+        /// here reads exactly like one the label cut itself.
+        static let ellipsis = "\u{2026}"
+
+        /// Kept back from the measure when deciding what fits. The label reports its width
+        /// rounded *up* to a whole point, so a line breaking at the measure itself could come
+        /// back a fraction over it — and a block one point wider than its host is squeezed by
+        /// that point, which makes LabelMorph truncate a line this said fitted.
+        static let roundingSlack: CGFloat = 1
+    }
+
+    let font: NSFont
+    let width: CGFloat
+
+    /// The room a line may take, after the slack for the label's rounding.
+    private var limit: CGFloat { width - Defaults.roundingSlack }
+
+    /// Each authored line broken to the measure, at most `maximumLines` in all.
+    func lines(of value: String, maximumLines: Int) -> [String] {
+        var pieces = Pieces(value: value, breaker: self)
+        var lines: [String] = []
+        while lines.count < max(1, maximumLines) - 1, let piece = pieces.next() {
+            lines.append(piece.shown)
+        }
+        guard let last = pieces.next() else { return lines }
+        guard let following = pieces.next() else { return lines + [last.shown] }
+
+        // The line at the cap carries the rest, joined as one run of words: an authored break
+        // past the cap is a space here, since there is no line left for it to start.
+        var rest = last.raw
+        var atAuthoredBreak = last.endsAuthoredLine
+        func append(_ piece: Piece) {
+            guard !piece.raw.isEmpty else {
+                atAuthoredBreak = true
+                return
+            }
+            rest += (atAuthoredBreak && !rest.isEmpty ? " " : "") + piece.raw
+            atAuthoredBreak = piece.endsAuthoredLine
+        }
+        append(following)
+        while advance(of: rest) <= limit, let next = pieces.next() {
+            append(next)
+        }
+        return lines + [truncated(rest)]
+    }
+
+    // MARK: - Private Methods
+
+    /// `text` as one line, or its head with an ellipsis when it is wider than the measure.
+    private func truncated(_ text: String) -> String {
+        let whole = Self.droppingTrailingWhitespace(text)
+        guard advance(of: whole) > limit else { return whole }
+        let budget = limit - advance(of: Defaults.ellipsis)
+        guard budget > 0 else { return Defaults.ellipsis }
+
+        let typesetter = CTTypesetterCreateWithAttributedString(attributed(text))
+        let characters = text as NSString
+        var cut = CTTypesetterSuggestClusterBreak(typesetter, 0, Double(budget))
+        // Core Text's answer knows nothing of the ellipsis' own kerning, so the candidate is
+        // measured and stepped back by whole composed characters until it genuinely fits —
+        // normally not at all.
+        while cut > 0 {
+            let head = Self.droppingTrailingWhitespace(characters.substring(to: cut))
+            if !head.isEmpty, advance(of: head + Defaults.ellipsis) <= limit {
+                return head + Defaults.ellipsis
+            }
+            cut = characters.rangeOfComposedCharacterSequence(at: cut - 1).location
+        }
+        return Defaults.ellipsis
+    }
+
+    private func advance(of text: String) -> CGFloat {
+        guard !text.isEmpty else { return 0 }
+        let line = CTLineCreateWithAttributedString(attributed(text))
+        return CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+    }
+
+    /// LabelMorph's attributes for a line: the face, and no ligatures, since each character is
+    /// a slot of its own there.
+    fileprivate func attributed(_ text: String) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [.font: font, .ligature: 0])
+    }
+
+    fileprivate static func droppingTrailingWhitespace(_ text: String) -> String {
+        var trimmed = Substring(text)
+        while let last = trimmed.last, last.isWhitespace {
+            trimmed.removeLast()
+        }
+        return String(trimmed)
+    }
+
+    /// One line's worth of an authored line.
+    fileprivate struct Piece {
+        /// The characters as written, including the whitespace a break hangs.
+        let raw: String
+        /// Whether the authored line ends here, rather than wrapping on.
+        let endsAuthoredLine: Bool
+
+        /// What the line draws: a wrapped line without the space it broke at, which would
+        /// otherwise push a centred line off centre; an authored line exactly as written.
+        var shown: String {
+            endsAuthoredLine ? raw : MorphingLineBreaker.droppingTrailingWhitespace(raw)
+        }
+    }
+
+    /// The value's lines broken one at a time, so a caller can stop as soon as it has enough.
+    fileprivate struct Pieces {
+        private let authored: [String]
+        private let breaker: MorphingLineBreaker
+        private var index = 0
+        private var current: (text: NSString, typesetter: CTTypesetter)?
+        private var position = 0
+
+        init(value: String, breaker: MorphingLineBreaker) {
+            authored = value.components(separatedBy: "\n")
+            self.breaker = breaker
+        }
+
+        mutating func next() -> Piece? {
+            if current == nil {
+                guard index < authored.count else { return nil }
+                let text = authored[index]
+                index += 1
+                guard !text.isEmpty else { return Piece(raw: "", endsAuthoredLine: true) }
+                current = (
+                    text as NSString,
+                    CTTypesetterCreateWithAttributedString(breaker.attributed(text))
+                )
+                position = 0
+            }
+            guard let line = current else { return nil }
+            let text = line.text
+
+            // Never zero: a measure narrower than a single character still takes that
+            // character, or the value would never be used up.
+            let suggested = CTTypesetterSuggestLineBreak(
+                line.typesetter,
+                position,
+                Double(breaker.limit)
+            )
+            let length = suggested > 0
+                ? suggested
+                : text.rangeOfComposedCharacterSequence(at: position).length
+            let raw = text.substring(with: NSRange(location: position, length: length))
+            position += length
+            let ends = position >= text.length
+            if ends { current = nil }
+            return Piece(raw: raw, endsAuthoredLine: ends)
         }
     }
 }

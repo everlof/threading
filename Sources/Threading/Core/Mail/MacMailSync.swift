@@ -49,7 +49,7 @@ actor MacMailSync {
     private var peered: [RemoteHostID: HostID] = [:]
     private var inFlight: Set<RemoteHostID> = []
     private var timer: Task<Void, Never>?
-    private var endpointsProvider: (@MainActor () -> [Endpoint])?
+    private var endpointsProvider: (@MainActor @Sendable () -> [Endpoint])?
     private var nextHost = 0
 
     // MARK: - Initialization
@@ -63,7 +63,7 @@ actor MacMailSync {
 
     /// Starts the periodic pass. `endpoints` answers on the main actor with the hosts that are
     /// configured and currently connected.
-    func start(endpoints: @escaping @MainActor () -> [Endpoint]) {
+    func start(endpoints: @escaping @MainActor @Sendable () -> [Endpoint]) {
         guard timer == nil else { return }
         endpointsProvider = endpoints
         timer = Task { [weak self] in
@@ -159,7 +159,7 @@ actor MacMailSync {
         }
         if report.issues.isEmpty {
             // The host answered: a mailbox move that could not reach it before can finish now.
-            await MainActor.run { MailboxHandover.shared.retryPending(reachable: endpoint) }
+            _ = await MainActor.run { MailboxHandover.shared.retryPending(reachable: endpoint) }
         }
         if !report.recipients.isEmpty {
             let recipients = report.recipients

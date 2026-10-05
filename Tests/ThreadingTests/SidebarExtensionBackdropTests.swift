@@ -291,7 +291,7 @@ final class SidebarExtensionBackdropTests: HostedStoreTestCase {
 
     /// The contract's ceiling wins over the patch's ask, and a surface nobody can see holds
     /// its frames.
-    func testALiveSurfaceIsClampedToTheContractAndHeldWhileUnseen() throws {
+    func testALiveSurfaceIsClampedToTheContractAndHeldWhileUnseen() async throws {
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw XCTSkip("Metal is unavailable on this test host.")
         }
@@ -313,6 +313,7 @@ final class SidebarExtensionBackdropTests: HostedStoreTestCase {
             maximumFramesPerSecond: cap,
             signalProvider: { _, _ in nil }
         )
+        try await surface.waitForPreparation()
         XCTAssertEqual(surface.preferredFramesPerSecond, cap)
         XCTAssertLessThan(cap, ExtensionMetalSurface.maximumFramesPerSecond)
 

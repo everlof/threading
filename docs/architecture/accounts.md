@@ -19,6 +19,12 @@ excluded: Claude Science data roots
 (`~/.claude-science`, or any root carrying `install-id` + `runtime/` + `orgs/`), which hold
 Claude-shaped state but are not login slots; and aliases that set no config directory.
 
+Background title readers use `allAccountsAfterDiscovery` / `discoverAccount`: main captures the
+bounded registry records, one serial worker performs cold filesystem discovery through the shared
+cache, then main resolves current presentation preferences. Lookup among prepared accounts keeps
+disabled-session routing and the preferred/default fallback without a second scan. The synchronous
+APIs remain for existing callers; a cache lifetime alone is not an off-main guarantee.
+
 `AgentAccountSetupCoordinator` is the only writer of those records. It derives a bounded alternate
 home from a user-facing name, starts `claude auth login` or `codex login` under the corresponding
 environment variable, reads that login's output only for the link described below, then runs
@@ -501,11 +507,23 @@ The toolbar's trailing pill (`AccountUsageItemView`) shows the selected session'
 rate-limit pressure: a ring gauging the peak window beside every window's own value
 (`5h 43% · 7d 73%` — Claude's own status-line vocabulary), monochrome until 75%, orange then
 red past 92%, each value tinted by its own window's severity. Hovering opens the compact current-
-account reading, a plain click pins it, and Option-click opens the pinned, scrollable all-account
+account reading. The hover popup grants a short grace to cross from the pill and stays open while
+the pointer is inside, so native keychain grants and scrollable windows remain reachable even
+without extension content. A plain click pins it, and Option-click opens the pinned, scrollable all-account
 fleet also used at the top of Usage settings. Option is deliberate: Control-click remains the
 platform's secondary-click convention. The fleet shows active windows only and, when the current
 conversation passes `SessionMigration`'s provider/transcript safety checks, offers the existing
 Move to Account operation on eligible destinations; presentation never broadens migration rules.
+
+The single-account popover measures one row before presentation and includes intercell spacing
+in its viewport height, so the popup opens at its final size rather than stretching its header
+after a later fitting pass. It also reconciles short lists against AppKit's laid-out row extent,
+up to the existing height
+ceiling. Short lists therefore have no scroll range or standing scrollbar; large model-window
+inventories keep their bounded, scrollable viewport. Fitting queries at most six rows; the document
+frame cannot provide that measure because it also fills any excess viewport height. Layout visits
+only available rows, never materializing the provider's complete inventory.
+
 `AccountUsageService` caches
 per account and keeps the last good reading through failed refreshes. The credential posture
 mirrors `~/repo/claudex`: read the short-lived tokens the official CLIs already keep, use
@@ -538,6 +556,34 @@ stated reasons, and both were retired by measurement rather than argument
 The token stays in memory only, is never logged, and goes nowhere but the usage endpoint's
 `Authorization` header. A 401 drops it and the next cycle re-reads — the CLI rotates the item
 in place.
+
+**The grant has a door wherever the symptom shows, not only on the Privacy page.** Flipping the
+switch on prompts for every login that exists *then*; a login added later (Add Login, or
+`claude` in a terminal under a new `CLAUDE_CONFIG_DIR`) gets an item whose ACL lists only
+`/usr/bin/security`. Its silent reads fail closed as designed — and that used to be the whole
+story: the fetcher fell through to the CLI's `.claude.json` snapshot, which the CLI refreshes on
+its own schedule, and two logins created on 2026-10-01 sat on their 1–2 October readings for
+days while the popover labelled them "via Claude's status-line feed". The only remedy was the
+status line's "toggle off and on". Now:
+
+- `ClaudeKeychainCredentials` remembers the last answer each item gave (`observedAvailability`,
+  learnt from reads already happening, never from one of its own) and posts
+  `ClaudeKeychainAccessDidChange` when it changes.
+- `ClaudeKeychainAccess` is the one host operation and the one predicate. `offersGrant` is true
+  when the opt-in is on and the item last refused; no provider check is needed because only the
+  Claude fetcher reads these items. The usage popover and the fleet card show **Allow…** beside
+  the reading; the Privacy row names the waiting logins and carries the same button; the palette
+  command `app.allowClaudeKeychainAccess` covers every login; and a verified Claude Add Login
+  (`AgentAccountSetupProvider.didVerifyLogin`) asks at once when the opt-in is on — the one
+  prompt without a button, because the user has just finished a sign-in they started.
+- A login the prompt opened is re-read immediately through
+  `AccountUsageService.refreshAfterCredentialChange`, which waives the per-account floor (the
+  reading on screen is the stale one just acted on) but never an endpoint's 429 `notBefore`.
+- The CLI snapshot is its own `AccountUsage.Source`, `.profileSnapshot`, so the freshness line
+  says "from the Claude CLI's last saved reading" rather than naming the per-turn feed.
+
+The no-surprise-prompt rule is unchanged: background reads still never prompt, and every
+interactive read is the direct consequence of a control that said it would ask.
 
 **Refreshes are paced from three directions** so the usage endpoints cannot be hammered: the
 per-account floor (`minimumRefreshSpacing`) however eagerly the UI asks; a `notBefore` the
@@ -572,8 +618,8 @@ Sources, per provider:
      (Claudex's own recipe, verified against the real cache files). Claude Code pushes
      `rate_limits` into that feed on every turn, so it is fresher than any polling — and reads
      as `source: .localCache`, which shortens the re-read interval from 300s to 30s.
-  3. `<config>/.claude.json` → `cachedUsageUtilization` (`ClaudeUsageProfileCache`), the CLI's
-     own copy of its last API reading. Staler — the CLI refreshes it on its own schedule, not
+  3. `<config>/.claude.json` → `cachedUsageUtilization` (`ClaudeUsageProfileCache`, source
+     `.profileSnapshot`), the CLI's own copy of its last API reading. Staler — the CLI refreshes it on its own schedule, not
      per turn — but it needs neither a credential nor Claudex, so it is what an account with
      neither of the first two still reports.
 

@@ -90,4 +90,39 @@ final class UsageGlanceTests: XCTestCase {
             XCTAssertNil(UsageGlanceRoute(url: URL(string: raw)!))
         }
     }
+
+    func testThemeChangeKeepsTheUsageObservationAndPinnedHost() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = UsageGlanceStore(directory: directory)
+        let original = snapshot()
+        try await store.publish(original, sequence: 1)
+        let changed = try await store.updateAccent("#12ab34FF", pairingID: "mac-1", sequence: 2)
+        XCTAssertTrue(changed)
+        let themed = try await store.read()
+        XCTAssertEqual(themed?.accentHex, "#12AB34")
+        XCTAssertEqual(themed?.receivedAt, original.receivedAt)
+        XCTAssertEqual(themed?.capacity, original.capacity)
+
+        let foreign = try await store.updateAccent("#FF0000", pairingID: "another-mac", sequence: 3)
+        XCTAssertFalse(foreign)
+        let retained = try await store.read()
+        XCTAssertEqual(retained, themed)
+    }
+
+    func testLegacyArchiveAndUnknownAccentKeepTheReading() throws {
+        let original = snapshot()
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original))
+            as? [String: Any])
+        object.removeValue(forKey: "accentHex")
+        let legacy = try JSONDecoder().decode(UsageGlanceSnapshot.self,
+            from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(legacy.capacity, original.capacity)
+        XCTAssertNil(legacy.accentHex)
+        object["accentHex"] = ["new": "format"]
+        let future = try JSONDecoder().decode(UsageGlanceSnapshot.self,
+            from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(future.accentHex)
+        try future.validate()
+    }
 }

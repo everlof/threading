@@ -58,11 +58,16 @@ enum RemoteAccountBridge {
         for account: AgentAccount, surface: AccountAppearanceSurface = .sidebar
     ) -> RemoteSessionAccountDTO {
         let value = account.presentation(in: surface)
+        let tinted = IdentityMarkInk.isTinted(for: NSApp.effectiveAppearance)
+            && value.style.backgroundHex == nil && value.style.foregroundHex == nil
+            && value.imageID == nil && !value.isEmoji
+        let background = tinted ? IdentityMarkInk.tileFill : value.background
+        let foreground = tinted ? IdentityMarkInk.ink : value.foreground
         return RemoteSessionAccountDTO(
             name: value.name, glyph: value.glyph, isEmoji: value.isEmoji,
             hue: value.isEmoji ? nil : Double(AccountBadge.hue(for: account)),
-            backgroundHex: value.isEmoji && AccountAppearance.normalizedHex(value.style.backgroundHex) == nil ? nil : value.background.hexString,
-            foregroundHex: value.foreground.hexString, imageID: value.imageID,
+            backgroundHex: value.isEmoji && AccountAppearance.normalizedHex(value.style.backgroundHex) == nil ? nil : background.hexString,
+            foregroundHex: foreground.hexString, imageID: value.imageID,
             badgeHidden: !value.showsBadge(isDefault: account.isDefault, surface: surface),
             displayLabel: value.visibleName, email: value.email
         )

@@ -83,6 +83,44 @@ final class ExtensionSurfaceTextureTests: XCTestCase {
         try SurfaceSnapshotPixels.maximumAlpha(in: image)
     }
 
+    func testShaderCacheCoalescesPreparationAndMeasuresMountCost() async throws {
+        try requireMetal()
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let specification = ExtensionMetalSurface(shaderResource: "Resources/probe.metal")
+        let source = Self.untexturedSource + "\n// mount measurement \(UUID())"
+        let complete = ExtensionMetalSurfaceView.completeSource(extensionSource: source,
+            fragmentFunction: specification.fragmentFunction, isTextured: false)
+        func compileSynchronously() throws {
+            let library = try device.makeLibrary(source: complete, options: nil)
+            let descriptor = MTLRenderPipelineDescriptor()
+            descriptor.vertexFunction = library.makeFunction(name: "threadingHostSurfaceVertex")
+            descriptor.fragmentFunction = library.makeFunction(name: "threadingHostSurfaceFragment")
+            descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+            descriptor.colorAttachments[0].isBlendingEnabled = true
+            descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+            descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            descriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
+            descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            _ = try device.makeRenderPipelineState(descriptor: descriptor)
+        }
+        let before = ProcessInfo.processInfo.systemUptime
+        try compileSynchronously()
+        let synchronous = ProcessInfo.processInfo.systemUptime - before
+        let mounting = ProcessInfo.processInfo.systemUptime
+        let view = try ExtensionMetalSurfaceView(specification: specification, source: source,
+            signalProvider: { _, _ in nil })
+        let mount = ProcessInfo.processInfo.systemUptime - mounting
+        try await view.waitForPreparation()
+        let cache = ExtensionMetalPipelineCache()
+        async let a = cache.prepare(source: complete)
+        async let b = cache.prepare(source: complete)
+        let (first, second) = try await (a, b)
+        let cached = try await cache.prepare(source: complete)
+        XCTAssertTrue(first.state === second.state)
+        XCTAssertTrue(first.state === cached.state)
+        print("Theme shader cost: synchronous compilation \(synchronous * 1000) ms; mount without compilation \(mount * 1000) ms")
+    }
+
     // MARK: - Pixels
 
     /// The worker's output is straight-alpha sRGB, top row first — the convention the surface's
@@ -160,13 +198,14 @@ final class ExtensionSurfaceTextureTests: XCTestCase {
 
     /// The placeholder first, then the picture: top rows red, bottom rows blue, exactly where
     /// the image put them.
-    func testATexturedSurfaceDrawsThePictureOnceItLands() throws {
+    func testATexturedSurfaceDrawsThePictureOnceItLands() async throws {
         try requireMetal()
         let surface = try ExtensionMetalSurfaceView(
             specification: Self.texturedSpecification,
             source: Self.sampleSource,
             signalProvider: { _, _ in nil }
         )
+        try await surface.waitForPreparation()
         XCTAssertFalse(surface.showsTexture)
         let size = NSSize(width: 8, height: 8)
         let before = try XCTUnwrap(surface.snapshotImage(size: size, time: 0))
@@ -191,18 +230,26 @@ final class ExtensionSurfaceTextureTests: XCTestCase {
 
     /// Stating a texture changes the ABI: a two-argument function no longer compiles against
     /// the wrapper, and a four-argument one does not compile without a texture.
-    func testTheTexturedABIIsTheFourArgumentFunction() throws {
+    func testTheTexturedABIIsTheFourArgumentFunction() async throws {
         try requireMetal()
-        XCTAssertThrowsError(try ExtensionMetalSurfaceView(
+        do {
+            let invalid = try ExtensionMetalSurfaceView(
             specification: Self.texturedSpecification,
             source: Self.untexturedSource,
             signalProvider: { _, _ in nil }
-        ))
-        XCTAssertThrowsError(try ExtensionMetalSurfaceView(
+            )
+            try await invalid.waitForPreparation()
+            XCTFail("The incompatible shader ABI compiled")
+        } catch {}
+        do {
+            let invalid = try ExtensionMetalSurfaceView(
             specification: ExtensionMetalSurface(shaderResource: "Resources/paper.metal"),
             source: Self.sampleSource,
             signalProvider: { _, _ in nil }
-        ))
+            )
+            try await invalid.waitForPreparation()
+            XCTFail("The incompatible shader ABI compiled")
+        } catch {}
         let untextured = try ExtensionMetalSurfaceView(
             specification: ExtensionMetalSurface(
                 shaderResource: "Resources/paper.metal",
@@ -211,6 +258,7 @@ final class ExtensionSurfaceTextureTests: XCTestCase {
             source: Self.untexturedSource,
             signalProvider: { _, _ in nil }
         )
+        try await untextured.waitForPreparation()
         let pixels = try XCTUnwrap(ExtensionSurfaceTexturePixels.prepared(fromImageData:
             Self.png(width: 1, rows: [[Self.blue]])
         ))
@@ -220,7 +268,7 @@ final class ExtensionSurfaceTextureTests: XCTestCase {
 
     /// The renderer's attach step installs what the loader hands back, and a picture that never
     /// arrives leaves the surface drawing on its placeholder rather than skipping the hook.
-    func testTheRendererInstallsALoadedPictureAndDrawsOnWithoutOne() throws {
+    func testTheRendererInstallsALoadedPictureAndDrawsOnWithoutOne() async throws {
         try requireMetal()
         let pixels = try XCTUnwrap(ExtensionSurfaceTexturePixels.prepared(fromImageData:
             Self.png(width: 1, rows: [[Self.red]])
@@ -232,6 +280,7 @@ final class ExtensionSurfaceTextureTests: XCTestCase {
             source: Self.sampleSource,
             signalProvider: { _, _ in nil }
         )
+        try await loaded.waitForPreparation()
         ExtensionCustomSurfaceRenderer.attachTexture(
             "Resources/paper.png",
             to: loaded,
@@ -249,6 +298,7 @@ final class ExtensionSurfaceTextureTests: XCTestCase {
             source: Self.sampleSource,
             signalProvider: { _, _ in nil }
         )
+        try await missing.waitForPreparation()
         ExtensionCustomSurfaceRenderer.attachTexture(
             "Resources/paper.png",
             to: missing,

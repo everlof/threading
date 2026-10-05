@@ -41,7 +41,7 @@ final class ExtensionFactResolver {
                 repository: repository(for: subject),
                 branch: string(ExtensionHostFactKey.projectBranch, for: subject)
             )
-        case .terminal, .repository, .repositoryBranch:
+        case .terminal, .repository, .repositoryBranch, .application:
             return nil
         }
     }

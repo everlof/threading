@@ -630,6 +630,7 @@ final class SessionActivityTracker {
 
     private var bytesSinceQuiet = 0
     private var quietTimer: Timer?
+    private var quietTimerGeneration = 0
     private let quietInterval: TimeInterval
 
     /// A reported Codex `Stop` whose next protocol fact may be an automatic goal continuation.
@@ -1607,21 +1608,28 @@ final class SessionActivityTracker {
     /// Output has stopped once this fires, so the session has finished whatever it was doing.
     private func restartQuietTimer() {
         quietTimer?.invalidate()
+        quietTimerGeneration &+= 1
+        let generation = quietTimerGeneration
         quietTimer = Timer.scheduledTimer(
             withTimeInterval: quietInterval,
             repeats: false
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.finishWorking()
+                self?.finishWorking(timerGeneration: generation)
             }
         }
     }
 
-    private func finishWorking() {
+    private func finishWorking(timerGeneration: Int) {
+        // Invalidating a fired timer cannot cancel the actor task it already queued. A hook,
+        // rollout boundary, or fresh output may have revoked or replaced its authority since.
+        // Check ownership before clearing anything, including a newer timer's byte count.
+        guard timerGeneration == quietTimerGeneration,
+              quietTimer != nil,
+              turnInFlight, !turnWasDeclared else { return }
         quietTimer = nil
         bytesSinceQuiet = 0
 
-        guard turnInFlight else { return }
         turnInFlight = false
         outputInferredContinuationInFlight = false
         reportedTurnID = nil

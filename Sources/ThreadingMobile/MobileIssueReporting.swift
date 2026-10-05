@@ -168,6 +168,8 @@ struct MobileIssueReportView: View {
                                     .allowsHitTesting(false)
                             }
                         }
+                        // The note and its placeholder are the reporter's words, not chrome.
+                        .mobileContentTypography()
                         .onChange(of: reporterNote) { _, value in
                             if value.utf8.count > PublicIssueReportPolicy.maximumDescriptionBytes {
                                 reporterNote = value.publicReportRawPrefix(

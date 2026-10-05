@@ -88,6 +88,33 @@ final class TerminalHostOutputParser: @unchecked Sendable {
 /// emoji's overhang into the next run's cells. Re-syncing with upstream must keep both, or
 /// agent status chips go black-on-black and emoji lose their right half again.
 final class EmojiFixedTerminalView: LocalProcessTerminalView {
+    private var ownsThemeGlowRenderer = false
+
+    /// Glow uses the shared GPU underlay in a live window. Snapshot/preview contexts and
+    /// unsupported devices retain Core Graphics' exact partial-redraw implementation.
+    ///
+    /// Leaving the window keeps the renderer — SwiftTerm releases the halo textures then, so a
+    /// session kept off screen holds none, and coming back is one allocation rather than a
+    /// renderer rebuild. A window snapshot of a Metal terminal must run inside
+    /// `TerminalView.drawingForBitmapCapture` (see `WindowSnapshot`).
+    func setThemeTextGlow(_ glow: TerminalTextGlow?) {
+        textGlow = glow
+        refreshThemeGlowRenderer()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        refreshThemeGlowRenderer()
+    }
+
+    private func refreshThemeGlowRenderer() {
+        guard window != nil else { return }
+        if textGlow != nil, !isUsingMetalRenderer {
+            do { try setUseMetal(true); ownsThemeGlowRenderer = true } catch {}
+        } else if textGlow == nil, ownsThemeGlowRenderer {
+            do { try setUseMetal(false); ownsThemeGlowRenderer = false } catch {}
+        }
+    }
 
     // MARK: - Remote Viewport
 

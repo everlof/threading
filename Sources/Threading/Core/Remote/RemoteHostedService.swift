@@ -62,6 +62,14 @@ enum RemoteNotificationBrokerCompatibility {
     /// The first that knows `secretApproval`. An older one would answer 400, so this Mac does
     /// not send it one at all: the phone still finds the request when the app is open.
     static let secretApprovalVersion = 3
+    /// The first that accepts `soundName`. An older one refuses unknown envelope keys, so it is
+    /// sent none and the phone plays its default sound.
+    static let themeSoundVersion = 4
+
+    static func themeSoundName(_ name: String?, forBrokerVersion version: Int) -> String? {
+        guard version >= themeSoundVersion, let name, RemoteThemeSound.acceptsName(name) else { return nil }
+        return name
+    }
 
     static func delivers(_ kind: RemoteNotificationKind, brokerVersion version: Int) -> Bool {
         kind != .secretApproval || version >= secretApprovalVersion
@@ -797,7 +805,8 @@ final class RemoteHostedServiceController {
     func sendHostedPush(
         event: RemoteNotificationEventDTO,
         registrationID: String,
-        playsSound: Bool
+        playsSound: Bool,
+        soundName: String? = nil
     ) async -> RemoteAPNSDeliveryResult {
         guard let endpoint, !endpoint.isLoopback else {
             return RemoteAPNSDeliveryResult(
@@ -821,6 +830,9 @@ final class RemoteHostedServiceController {
                 payload: RemoteHostedPushEnvelope(
                     registrationID: registrationID,
                     playsSound: playsSound,
+                    soundName: RemoteNotificationBrokerCompatibility.themeSoundName(
+                        soundName, forBrokerVersion: brokerVersion
+                    ),
                     event: RemoteNotificationBrokerCompatibility.payload(event, forBrokerVersion: brokerVersion)
                 )
             )
@@ -1480,6 +1492,7 @@ final class RemoteHostedServiceController {
 private struct RemoteHostedPushEnvelope: Encodable, Sendable {
     let registrationID: String
     let playsSound: Bool
+    let soundName: String?
     let event: RemoteNotificationEventDTO
 }
 

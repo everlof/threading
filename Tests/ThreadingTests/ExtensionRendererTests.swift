@@ -5818,7 +5818,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     let icon = try XCTUnwrap(
       descendants(in: row).first {
         $0.accessibilityIdentifier() == "sidebar.session.identity"
-      } as? NSImageView
+      } as? GlyphView
     )
     XCTAssertEqual(icon.image?.accessibilityDescription, "hammer.fill")
 
@@ -6867,7 +6867,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     XCTAssertFalse(native.isHidden)
   }
 
-  func testUsageRainShaderCompilesAgainstTheHostSurfaceABI() throws {
+  func testUsageRainShaderCompilesAgainstTheHostSurfaceABI() async throws {
     guard MTLCreateSystemDefaultDevice() != nil else {
       throw XCTSkip("Metal is unavailable on this test host.")
     }
@@ -6893,11 +6893,12 @@ final class ExtensionRendererTests: HostedStoreTestCase {
       source: source,
       signalProvider: { _, _ in nil }
     )
+    try await surface.waitForPreparation()
     XCTAssertNil(surface.hitTest(.zero))
     XCTAssertEqual(surface.preferredFramesPerSecond, 60)
   }
 
-  func testRendersUsageRainAcrossTheRealMainWindow() throws {
+  func testRendersUsageRainAcrossTheRealMainWindow() async throws {
     guard MTLCreateSystemDefaultDevice() != nil else {
       throw XCTSkip("Metal is unavailable on this test host.")
     }
@@ -6925,6 +6926,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
       source: source,
       signalProvider: { _, _ in nil }
     )
+    try await surface.waitForPreparation()
 
     let controller = makeMainWindowController()
     let window = try XCTUnwrap(controller.window)
@@ -7080,7 +7082,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     let icon = try XCTUnwrap(
       descendants(in: row).first {
         $0.accessibilityIdentifier() == "sidebar.session.identity"
-      } as? NSImageView
+      } as? GlyphView
     )
     let nativeImage = icon.image
 
@@ -7947,7 +7949,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     )
   }
 
-  func testAccountUsagePopoverPolicyFollowsWhetherExtensionContentIsIn() throws {
+  func testAccountUsagePopoverStaysReachableWithAndWithoutExtensionContent() throws {
     let registry = ComponentCustomizationRegistry()
     let contract = HostComponentContracts.toolbarAccountUsagePopover
     let account = AgentAccount(
@@ -7967,16 +7969,14 @@ final class ExtensionRendererTests: HostedStoreTestCase {
       }
     )
 
-    // The native reading has nothing to reach for: the popover shows exactly while the
-    // pointer is on the pill.
+    // Native content can carry a keychain grant or scrollable windows too.
     XCTAssertNotNil(item.makeAccountUsagePopover(for: account))
     XCTAssertEqual(
       item.popoverPolicyForTesting,
-      AccountUsageItemDefaults.readingPopoverPolicy
+      AccountUsageItemDefaults.popoverPolicy
     )
 
-    // The moment an extension composes content in, it may carry actions, so the popover
-    // gains the gap-crossing grace and holds while the pointer rests on it.
+    // Composing extension actions keeps the same grace and hold.
     let source = ComponentCustomizationSource(
       extensionIdentifier: "com.example.budget",
       processGeneration: "one",
@@ -8007,10 +8007,10 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     XCTAssertNotNil(item.makeAccountUsagePopover(for: account))
     XCTAssertEqual(
       item.popoverPolicyForTesting,
-      AccountUsageItemDefaults.actionablePopoverPolicy
+      AccountUsageItemDefaults.popoverPolicy
     )
 
-    // And back: the extension leaving returns the popover to a plain reading.
+    // Removing the extension must not make native actions unreachable.
     registry.removePatches(
       extensionIdentifier: source.extensionIdentifier,
       processGeneration: source.processGeneration
@@ -8018,7 +8018,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     XCTAssertNotNil(item.makeAccountUsagePopover(for: account))
     XCTAssertEqual(
       item.popoverPolicyForTesting,
-      AccountUsageItemDefaults.readingPopoverPolicy
+      AccountUsageItemDefaults.popoverPolicy
     )
   }
 
@@ -8536,7 +8536,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     let icon = try XCTUnwrap(
       descendants(in: row).first {
         $0.accessibilityIdentifier() == "sidebar.project.identity"
-      } as? NSImageView
+      } as? GlyphView
     )
     let nativeImage = icon.image
 

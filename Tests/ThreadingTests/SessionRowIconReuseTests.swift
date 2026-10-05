@@ -71,10 +71,10 @@ final class SessionRowIconReuseTests: XCTestCase {
         return row
     }
 
-    private func identityImageView(in root: NSView) throws -> NSImageView {
-        func walk(_ node: NSView) -> NSImageView? {
+    private func identityImageView(in root: NSView) throws -> GlyphView {
+        func walk(_ node: NSView) -> GlyphView? {
             if node.accessibilityIdentifier() == "sidebar.session.identity",
-               let found = node as? NSImageView {
+               let found = node as? GlyphView {
                 return found
             }
             for child in node.subviews {

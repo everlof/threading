@@ -65,12 +65,12 @@ struct ThemedSettingsSection<Content: View, Header: View, Footer: View>: View {
             // A settings group is titled the way `MobileSettingsView`'s cards are titled, rather
             // than in UIKit's small uppercase, so the two idioms read as one screen.
             header
-                .font(.headline)
+                .font(theme.chromeSwiftUIFont(.headline))
                 .foregroundStyle(theme.label)
                 .textCase(nil)
         } footer: {
             footer
-                .font(.footnote)
+                .font(theme.chromeSwiftUIFont(.footnote))
                 .foregroundStyle(theme.secondaryLabel)
         }
         .listRowBackground(theme.panel)
@@ -130,7 +130,7 @@ extension View {
     /// would blur through from the content.
     func themedSettingsPage(_ theme: RemoteThemePalette) -> some View {
         scrollContentBackground(.hidden)
-            .background(theme.ground)
+            .mobileThemeBackdrop(theme)
             .toolbarBackground(theme.surface, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
     }

@@ -38,7 +38,7 @@ final class ClaudeUsageProfileCacheTests: XCTestCase {
 
         XCTAssertEqual(usage.windows.map(\.id), ["5h", "7d"])
         XCTAssertEqual(try XCTUnwrap(usage.windows.first?.fraction), 0.07, accuracy: 0.0001)
-        XCTAssertEqual(usage.source, .localCache)
+        XCTAssertEqual(usage.source, .profileSnapshot)
 
         let scoped = try XCTUnwrap(usage.modelWindows.first)
         XCTAssertEqual(usage.modelWindows.count, 1)

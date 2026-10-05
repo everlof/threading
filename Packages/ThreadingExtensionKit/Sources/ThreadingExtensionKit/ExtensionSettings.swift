@@ -23,11 +23,33 @@ public enum ExtensionHostSettingsPage: String, Codable, CaseIterable, Equatable,
 public struct ExtensionSettingOption: Codable, Equatable, Sendable {
     public let id: String
     public let title: String
+    /// The number a setting-bound surface input reads while this option is selected, or nil to
+    /// read the option's zero-based index. A choice states a value on every option or on none,
+    /// so one binding never mixes indices with values. Ignored everywhere else.
+    public let value: Double?
 
-    public init(id: String, title: String) {
+    public init(id: String, title: String, value: Double? = nil) {
         self.id = id
         self.title = title
+        self.value = value
     }
+}
+
+/// Who applies a change to one settings field.
+///
+/// Absent from a manifest means `process`, the behaviour every field had before this existed.
+public enum ExtensionSettingApplier: String, Codable, CaseIterable, Equatable, Sendable {
+    /// The extension's running process applies the change. Threading persists the value, sends
+    /// an `ExtensionSettingsUpdateRequest`, and rolls the value back when the process refuses
+    /// it or does not answer.
+    case process
+    /// Threading applies the value itself, through the extension's setting-bound surface inputs
+    /// (`ExtensionSurfaceScalar.setting`). A change is persisted and takes effect on the next
+    /// frame; no update request is sent and no answer is awaited, so a render-only extension
+    /// that never reads its requests is not rolled back or stopped. The value still arrives in
+    /// the launch environment. Only a toggle, choice or integer — a value a surface can read —
+    /// may be host-applied.
+    case host
 }
 
 /// A semantic settings control rendered by Threading.
@@ -71,6 +93,35 @@ public enum ExtensionSettingControl: Equatable, Sendable {
                 && (value - minimum).isMultiple(of: step)
         default:
             return false
+        }
+    }
+
+    /// Whether a custom surface input may read this control: a toggle, a choice or an integer.
+    /// Text has no number to give a shader.
+    public var isSurfaceReadable: Bool {
+        switch self {
+        case .toggle, .choice, .integer: true
+        case .text: false
+        }
+    }
+
+    /// The number a setting-bound surface input reads for `value`, before its mapping.
+    ///
+    /// A toggle reads `0` or `1`; a choice reads the selected option's stated `value`, or its
+    /// zero-based index when the options state none; an integer reads itself. Nil for text and
+    /// for a value this control does not accept — the binding then reads its fallback.
+    public func surfaceReading(_ value: ExtensionJSONValue) -> Double? {
+        guard accepts(value) else { return nil }
+        switch (self, value) {
+        case (.toggle, .bool(let isOn)):
+            return isOn ? 1 : 0
+        case (.choice(_, let options), .string(let selected)):
+            guard let index = options.firstIndex(where: { $0.id == selected }) else { return nil }
+            return options[index].value ?? Double(index)
+        case (.integer, .integer(let number)):
+            return Double(number)
+        default:
+            return nil
         }
     }
 }
@@ -152,17 +203,51 @@ public struct ExtensionSettingField: Codable, Equatable, Sendable {
     public let title: String
     public let description: String?
     public let control: ExtensionSettingControl
+    /// Who applies a change: the extension's process (the default) or Threading itself through
+    /// setting-bound surface inputs. See `ExtensionSettingApplier`.
+    public let appliedBy: ExtensionSettingApplier
 
     public init(
         id: String,
         title: String,
         description: String? = nil,
-        control: ExtensionSettingControl
+        control: ExtensionSettingControl,
+        appliedBy: ExtensionSettingApplier = .process
     ) {
         self.id = id
         self.title = title
         self.description = description
         self.control = control
+        self.appliedBy = appliedBy
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, description, control, appliedBy
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        control = try container.decode(ExtensionSettingControl.self, forKey: .control)
+        appliedBy = try container.decodeIfPresent(
+            ExtensionSettingApplier.self,
+            forKey: .appliedBy
+        ) ?? .process
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encode(control, forKey: .control)
+        // Absent for the default, so a manifest written before the field existed round-trips
+        // byte for byte and an older host never meets a key it does not know.
+        if appliedBy != .process {
+            try container.encode(appliedBy, forKey: .appliedBy)
+        }
     }
 }
 
@@ -186,6 +271,13 @@ enum ExtensionSettingValidator {
             ))
         }
         issues.append(contentsOf: controlIssues(field.control, path: "\(path).control"))
+        if field.appliedBy == .host, !field.control.isSurfaceReadable {
+            issues.append(.init(
+                path: "\(path).appliedBy",
+                message: "a host-applied field must be a toggle, choice or integer, "
+                    + "the values a surface input can read"
+            ))
+        }
         return issues
     }
 
@@ -234,6 +326,16 @@ enum ExtensionSettingValidator {
                     option.title,
                     path: "\(optionPath).title",
                     maximum: 120
+                ))
+                if let value = option.value, !value.isFinite {
+                    issues.append(.init(path: "\(optionPath).value", message: "must be finite"))
+                }
+            }
+            let valued = options.filter { $0.value != nil }.count
+            if valued > 0, valued < options.count {
+                issues.append(.init(
+                    path: "\(path).options",
+                    message: "must state a value on every option or on none"
                 ))
             }
             if !options.contains(where: { $0.id == defaultValue }) {
@@ -380,6 +482,15 @@ public struct ExtensionSettingsContribution: Codable, Equatable, Sendable {
 
     public func field(id: String) -> ExtensionSettingField? {
         fields.first { $0.id == id }
+    }
+
+    /// The subset of `values` the extension's process applies — what an
+    /// `ExtensionSettingsUpdateRequest` may carry. Host-applied fields are Threading's to apply
+    /// and never reach the process as a request; unknown IDs are kept so validation names them.
+    public func processAppliedValues(
+        _ values: [String: ExtensionJSONValue]
+    ) -> [String: ExtensionJSONValue] {
+        values.filter { field(id: $0.key)?.appliedBy != .host }
     }
 
     public func effectiveValues(

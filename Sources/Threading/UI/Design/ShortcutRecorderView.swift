@@ -139,10 +139,7 @@ final class ShortcutRecorderView: ThemedControl {
 
         let attributes: [NSAttributedString.Key: Any] = [
             .font: Design.Typography.code(),
-            // CoreText's NSString drawing bridge cannot consistently copy a nested dynamic
-            // label colour (the unbound tertiary tier). Resolve it for this draw, not at setup,
-            // so both live theme changes and offscreen rendering keep the same colour contract.
-            .foregroundColor: labelColor.usingColorSpace(.deviceRGB) ?? labelColor,
+            .foregroundColor: labelColor,
             .paragraphStyle: paragraph
         ]
 

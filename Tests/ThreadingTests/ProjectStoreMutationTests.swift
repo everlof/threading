@@ -466,4 +466,34 @@ final class ProjectStoreMutationTests: XCTestCase {
             reopened.project(withID: project.id)?.terminals.first { $0.id == terminal.id }
         )
     }
+
+    /// A reclaim judges "empty" from this graph and the cascade obeys the store. When the two
+    /// disagree — the store holds a chat in an adopted checkout row this graph thinks is empty —
+    /// the reclaim keeps the row and the chat, and a refusal that wrote nothing does not cost
+    /// the rest of the launch its writes.
+    func testReclaimKeepsAnAdoptedProjectTheStoreStillHoldsAChatIn() throws {
+        var adopted = Project(
+            name: "repo-feature",
+            folderURL: directory.appendingPathComponent("repo-feature", isDirectory: true)
+        )
+        adopted.isAdoptedForCheckoutMove = true
+        let otherWriter = try ProjectDatabase(
+            url: directory.appendingPathComponent(SQLiteDefaults.databaseName)
+        )
+        try otherWriter.save(ProjectsState(projects: [adopted], selectedSessionID: nil))
+
+        let manager = StateManager(appSupportDirectory: directory)
+        let store = ProjectStore(stateManager: manager, refusesWrites: false)
+        XCTAssertEqual(store.project(withID: adopted.id)?.sessions.count, 0)
+
+        let unseen = AgentSession(kind: .claude, title: "Still in the store")
+        try otherWriter.saveSession(unseen, in: adopted.id, position: 0)
+
+        XCTAssertEqual(store.reclaimAdoptedEmptyProjects(), [])
+        XCTAssertNotNil(store.project(withID: adopted.id))
+        XCTAssertTrue(store.acceptsDurableMutations)
+
+        let reopened = ProjectStore(stateManager: manager, refusesWrites: false)
+        XCTAssertNotNil(reopened.session(withID: unseen.id), "the chat survived the reclaim")
+    }
 }

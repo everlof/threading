@@ -407,7 +407,7 @@ final class ExtensionBackdropPlacementTests: HostedStoreTestCase {
 
     /// Each placement's ceiling wins over the patch's ask, and a surface nobody can see holds
     /// its frames — through the plane, in a window that is built but never shown.
-    func testALiveSurfaceIsClampedToThePlacementAndHeldWhileUnseen() throws {
+    func testALiveSurfaceIsClampedToThePlacementAndHeldWhileUnseen() async throws {
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw XCTSkip("Metal is unavailable on this test host.")
         }
@@ -454,6 +454,7 @@ final class ExtensionBackdropPlacementTests: HostedStoreTestCase {
             )
             XCTAssertTrue(plane.isDressed, placement.accessibilityIdentifier)
             let surface = try XCTUnwrap(built, placement.accessibilityIdentifier)
+            try await surface.waitForPreparation()
             XCTAssertEqual(surface.preferredFramesPerSecond, placement.maximumFramesPerSecond)
             XCTAssertNil(surface.hitTest(.zero))
 

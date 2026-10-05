@@ -162,6 +162,7 @@ enum MCPToolCatalog {
     authoredTriggers,
     authoredSettings,
     authoredNotifications,
+    authoredIssueReporting,
     authoredAppearance,
     authoredExtensionAuthoring,
   ]
@@ -187,6 +188,7 @@ enum MCPToolCatalog {
   static let triggers = group(id: "triggers")
   static let settings = group(id: "settings-directory")
   static let notifications = group(id: "notifications")
+  static let issueReporting = group(id: "issue-reporting")
   static let appearance = group(id: "appearance")
   static let extensionAuthoring = group(id: "extension-authoring")
 
@@ -203,6 +205,21 @@ enum MCPToolCatalog {
   static var allGroups: [MCPToolGroup] {
     groups + MCPExternalToolRegistry.shared.groups.map(externalGroup)
   }
+
+  private static let authoredIssueReporting = MCPToolGroup(
+    id: "issue-reporting",
+    family: .issueReporting,
+    title: "Issue reporting",
+    summary: "Let agents report observed Threading problems to its private support inbox.",
+    symbol: "exclamationmark.bubble",
+    tools: [],
+    instruction: """
+      report_problem files an observed problem in Threading itself through the same private
+      report outbox as Help > Report a Problem. Describe the reproduction and the exact failure.
+      Include only relevant, sanitized evidence; images require the user's permission to share.
+      Report each problem once and distinguish delivered, queued, and saved locally in your reply.
+      """
+  )
 
   private static let authoredContinuation = MCPToolGroup(
     id: "conversation-continuation",
@@ -321,9 +338,11 @@ enum MCPToolCatalog {
       in-surface pop-up that preserves window.opener, postMessage, and window.close. \
       browser_tabs creates and switches independent pages when a task needs more than one \
       live browsing context; list first and prefer stable tab ids for later activation. Use \
-      browser_resize for an exact responsive-test viewport; it opens the visible Device Toolbar, \
-      and you should omit both dimensions afterwards to return the shared page to the host's \
-      natural size when responsive testing is finished. Use browser_emulate to test \
+      the browser at its current pane or window size for ordinary browsing and screenshots, \
+      preserving any user-selected viewport. Do not set or reset its size as routine setup. \
+      Use browser_resize only when the user requests a size change or a specific responsive \
+      or visual test needs exact dimensions. After a temporary test, restore the previous \
+      sizing reported by that call; leave a user-requested size in place. Use browser_emulate to test \
       prefers-color-scheme in dark or light, set media_type to print for print CSS, or set a \
       custom user_agent for browser and server branching; use auto or an empty user_agent to \
       restore WebKit defaults. Call browser_capabilities before assuming WebKit can override \
@@ -353,8 +372,10 @@ enum MCPToolCatalog {
       pass a ref to isolate one element and omit surrounding page content. Captures stay \
       quiet by default; set show=true only when the screenshot itself is user-facing. \
       browser_console \
-      and browser_network report page errors and failed requests without exposing headers, \
-      cookies, or bodies. Use browser_performance for a bounded current-document timing \
+      and browser_network report page errors and failed requests. browser_capabilities reports \
+      network_capture options; browser_network with configuration=true reports capture settings \
+      and limits. request_capture asks the user to change request/response header/body capture; \
+      include_details=true reads enabled fetch/XHR payloads, with request_id for one request. Use browser_performance for a bounded current-document timing \
       summary and the slowest resources; it is lighter than a raw performance trace and \
       never contacts an external field-data service. Use browser_accessibility_audit while \
       developing or reviewing a page to find deterministic semantic problems such as \
@@ -680,8 +701,9 @@ enum MCPToolCatalog {
       behind the list (images arrive as {path} or {base64} and are stored with the \
       theme), an optional opaque navigator_well with raised/sunken/flat edges, a custom \
       logo in place of the Threading mark, and the wordmark's text, face, size and weight. \
-      Gradient and navigator fills must keep the theme's label readable; image \
-      legibility is yours — wash a photograph well below 0.4 opacity. Absent means the \
+      Gradient and navigator fills must keep the theme's label readable; an image is \
+      sampled after saving and the result warns, with a suggested opacity, when labels \
+      would fall below 3:1 over it. Absent means the \
       default sidebar, and each remove_* field takes one choice back.
 
       A variant's `chrome` block is the deepest a theme reaches: stating it opts the \

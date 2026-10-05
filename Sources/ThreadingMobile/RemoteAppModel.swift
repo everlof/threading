@@ -958,6 +958,7 @@ final class RemoteAppModel: ObservableObject {
         for identity in activeThemeCacheIdentities {
             themeCache.remember(theme, for: identity)
         }
+        if let hostID = activeHostID { usageGlance?.updateAccent(theme.colors["accent"], for: hostID) }
     }
 
     /// Coalesce hot event-stream updates without starving the cache. Snapshot projection and
@@ -1083,7 +1084,8 @@ final class RemoteAppModel: ObservableObject {
             widgetIssue = .hostUpdateNeeded
             return
         }
-        usageGlance?.refresh(pairingID: host.id, hostName: host.name, client: client)
+        usageGlance?.refresh(pairingID: host.id, hostName: host.name, client: client,
+                            accentHex: me?.theme?.colors["accent"])
     }
 
     /// The session menu and identity picker consume the same current account reading as the
@@ -4887,7 +4889,50 @@ final class RemoteAppModel: ObservableObject {
         )
     }
 
-    static let demoCatalogThemes: [RemoteThemeDTO] = [
+#if DEBUG
+    /// Particle-backdrop evidence themes. DEBUG-only: the `theme-system` entry carries
+    /// `MobileThemeAssets.evidenceAssets()`, which a Release build does not contain, and the
+    /// shipped demo catalogue stays the one App Review and marketing captures were taken in.
+    static func demoParticleTheme(
+        _ style: RemoteThemeParticles.Style, assets: Bool = false,
+        density: Double = 0.6, size: Double? = nil
+    ) -> RemoteThemeDTO {
+        let base = demoDriftTheme(light: false)
+        return RemoteThemeDTO(id: assets ? "theme-system" : "particles-" + style.rawValue,
+            name: assets ? "Theme System" : style.rawValue, mode: .dark, colors: base.colors,
+            material: .init(panelRadius: 10, controlRadius: 5, borderWidth: 1,
+                typeface: .monospaced, backdropGradient: base.material.backdropGradient,
+                identityMarks: "tinted", particles: .init(style: style, colors: ["accent"],
+                    density: density, size: size, opacity: 0.4,
+                    sprites: assets ? ["sprite.0"] : nil)),
+            words: .init(working: ["Decoding…", "Charting…"],
+                composerPlaceholder: "Enter a mission", untitledSession: "Uncharted"),
+            titleMorph: .init(style: "scramble", characters: "アイウエオカキクケコ"),
+            assets: assets ? MobileThemeAssets.evidenceAssets() : nil)
+    }
+
+    static func demoOptionalTheme(_ kind: String) -> RemoteThemeDTO {
+        let base = demoDriftTheme(light: false)
+        let surface = kind == "theme-shader" ? MobileThemeAssets.evidenceSurface() : nil
+        let font = kind == "theme-font" ? MobileThemeAssets.evidenceFont : nil
+        let name = kind == "theme-font" ? "Paired font" : (kind == "theme-shader" ? "Rain" : "Drift")
+        return RemoteThemeDTO(id: kind, name: name,
+            mode: .dark, colors: base.colors,
+            material: .init(panelRadius: 10, controlRadius: 5, borderWidth: 1,
+                fontFamily: font?.fontFamily, backdropGradient: base.material.backdropGradient),
+            assets: surface.map { [$0.1] } ?? font.map { [$0] }, surface: surface?.0)
+    }
+
+    private static let demoParticleCatalogThemes: [RemoteThemeDTO] = [
+        demoParticleTheme(.snow, assets: true),
+        demoParticleTheme(.fizz), demoParticleTheme(.snow), demoParticleTheme(.sparkle),
+        demoParticleTheme(.confetti), demoParticleTheme(.embers),
+    ]
+#else
+    private static let demoParticleCatalogThemes: [RemoteThemeDTO] = []
+#endif
+
+    static let demoCatalogThemes: [RemoteThemeDTO] = demoParticleCatalogThemes + [
         demoTheme,
         demoThreadingTheme,
         demoLightTheme,
@@ -4931,7 +4976,7 @@ final class RemoteAppModel: ObservableObject {
         demoDriftTheme(light: true),
     ]
 
-    static let demoTerminalTheme = RemoteTerminalThemeDTO(
+    static var demoTerminalTheme: RemoteTerminalThemeDTO { RemoteTerminalThemeDTO(
         id: "app-cyberpunk-terminal",
         name: "Cyberpunk",
         foreground: "#E6FFF4",
@@ -4944,8 +4989,19 @@ final class RemoteAppModel: ObservableObject {
             "#2E8BFF", "#FF00FF", "#00D4FF", "#B9C6C0",
             "#2E2E5A", "#FF6B93", "#7CFFC4", "#FFD166",
             "#7AB4FF", "#FF7AFF", "#7CE9FF", "#E6FFF4",
-        ]
-    )
+        ],
+        glow: demoTerminalGlow
+    ) }
+
+    /// The `theme-glow` evidence capture's terminal glow; a Release demo never glows.
+    private static var demoTerminalGlow: RemoteTerminalThemeDTO.Glow? {
+#if DEBUG
+        ProcessInfo.processInfo.environment["THREADING_MOBILE_THEME"] == "theme-glow"
+            ? .init(radius: 4, opacity: 0.6) : nil
+#else
+        nil
+#endif
+    }
 
     static let demoThreadingTerminalTheme = RemoteTerminalThemeDTO(
         id: "app-threading-terminal",
@@ -4976,6 +5032,13 @@ final class RemoteAppModel: ObservableObject {
         case "light": return demoLightTheme
         case "threading": return demoThreadingTheme
         case "system-remote": return demoSystemRemoteTheme
+        // A matched physical-device profiling pair. Both use the production backdrop;
+        // only particle density differs, with size at the supported upper bound.
+        case "particles-stress": return demoParticleTheme(.confetti, density: 1, size: 24)
+        case "particles-stress-off": return demoParticleTheme(.confetti, density: 0, size: 24)
+        case "theme-font": return demoOptionalTheme("theme-font")
+        case "theme-shader": return demoOptionalTheme("theme-shader")
+        case "theme-glow": return demoOptionalTheme("theme-glow")
         case let requested?:
             return demoCatalogThemes.first(where: { $0.id == requested }) ?? demoTheme
         case nil: return demoTheme
@@ -5476,7 +5539,7 @@ final class RemoteAppModel: ObservableObject {
                 ),
             ],
             host: RemoteHostDTO(id: "demo-mac", name: "David’s MacBook Pro"),
-            theme: demoTheme,
+            theme: demoRequestedMarketingTheme,
             themeCatalog: .init(
                 // More than one authored theme is part of the picker contract. Keeping the
                 // deterministic demo catalog representative prevents the evidence state from

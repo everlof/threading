@@ -369,6 +369,7 @@ final class ThemeParticleHold {
 
     /// Set only inside `withStillFrames`: a render that must draw fields as their still frame.
     private static var drawsStillFrames = false
+    static private(set) var stillPhase: Double?
 
     /// Whether motion may play at all right now.
     static var motionAllowed: Bool {
@@ -381,10 +382,12 @@ final class ThemeParticleHold {
     /// Runs `body` with every field it builds drawn as its still frame — for a preview or a
     /// render, which cannot capture a live emitter's particles. Scoped to one synchronous body,
     /// so no live field is ever asked to still itself.
-    static func withStillFrames<T>(_ body: () throws -> T) rethrows -> T {
+    static func withStillFrames<T>(phase: Double? = nil, _ body: () throws -> T) rethrows -> T {
         let previous = drawsStillFrames
+        let previousPhase = stillPhase
         drawsStillFrames = true
-        defer { drawsStillFrames = previous }
+        stillPhase = phase
+        defer { drawsStillFrames = previous; stillPhase = previousPhase }
         return try body()
     }
 

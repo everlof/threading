@@ -117,6 +117,7 @@ final class RemoteSessionMirrorRegistry {
     private let terminalHydrationOutputSettleDelay: Duration
     private let terminalHydrationMaximumDelay: Duration
     private let sessionStartupMaximumWait: Duration
+    private let sessionStartupNow: @MainActor () -> ContinuousClock.Instant
     /// Read at every release rather than cached, so a `defaults write` takes effect without a
     /// relaunch and a test can hand this registry milliseconds — or zero, which is the
     /// release-immediately behaviour the grace replaced.
@@ -144,6 +145,9 @@ final class RemoteSessionMirrorRegistry {
             RemoteTerminalHydrationDefaults.outputSettleDelay,
         terminalHydrationMaximumDelay: Duration = RemoteTerminalHydrationDefaults.maximumDelay,
         sessionStartupMaximumWait: Duration = RemoteSessionStartupDefaults.maximumWait,
+        sessionStartupNow: @escaping @MainActor () -> ContinuousClock.Instant = {
+            ContinuousClock.now
+        },
         viewportLeaseGrace: @escaping @MainActor () -> Duration = {
             .seconds(AppSettings.shared.remoteViewportLeaseGraceSeconds)
         },
@@ -161,6 +165,7 @@ final class RemoteSessionMirrorRegistry {
         self.terminalHydrationOutputSettleDelay = terminalHydrationOutputSettleDelay
         self.terminalHydrationMaximumDelay = terminalHydrationMaximumDelay
         self.sessionStartupMaximumWait = sessionStartupMaximumWait
+        self.sessionStartupNow = sessionStartupNow
         self.viewportLeaseGrace = viewportLeaseGrace
         self.catalogueCacheLifetime = catalogueCacheLifetime
         self.catalogueCacheNow = catalogueCacheNow
@@ -170,13 +175,16 @@ final class RemoteSessionMirrorRegistry {
         // reconnect-only preference. Broadcast broadly and resolve per session: assignments can
         // change one terminal, while profile and app-theme changes can affect many.
         appEvents.observe(ProfileDidChange.self) { [weak self] _ in
-            self?.broadcastThemes()
+            self?.themesDidChange()
         }
         appEvents.observe(ThemeAssignmentsDidChange.self) { [weak self] _ in
-            self?.broadcastThemes()
+            self?.themesDidChange()
+        }
+        appEvents.observe(RemoteThemeAssetsDidChange.self) { [weak self] _ in
+            self?.themesDidChange()
         }
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
-            self?.broadcastThemes()
+            self?.themesDidChange()
         }
         // Archiving is an authorization change, not only a sidebar filter. A live runtime may
         // intentionally survive it, so revoke any attached socket as soon as the store changes.
@@ -213,7 +221,7 @@ final class RemoteSessionMirrorRegistry {
         appearanceObservation = NSApplication.shared.observe(\.effectiveAppearance) {
             [weak self] _, _ in
             Task { @MainActor [weak self] in
-                self?.broadcastThemes()
+                self?.themesDidChange()
             }
         }
     }
@@ -400,6 +408,7 @@ final class RemoteSessionMirrorRegistry {
     }
 
     private struct StartingSession {
+        let deadline: ContinuousClock.Instant
         var waiters: [ObjectIdentifier: StartupWaiter] = [:]
         var expiry: Task<Void, Never>?
     }
@@ -521,6 +530,10 @@ final class RemoteSessionMirrorRegistry {
     private var startingSessions: [SessionID: StartingSession] = [:]
     private var startupSessionByConnection: [ObjectIdentifier: SessionID] = [:]
     private var themeEventSubscribers: [ObjectIdentifier: RemoteConnection] = [:]
+    /// Coalesces pointer-rate theme changes into at most one broadcast per interval.
+    private static let themeBroadcastInterval: Duration = .milliseconds(100)
+    private var lastThemeBroadcast: ContinuousClock.Instant?
+    private var pendingThemeBroadcast: Task<Void, Never>?
     private var catalogueStreamIDs: [ObjectIdentifier: String] = [:]
     private var catalogueStreamSequences: [ObjectIdentifier: UInt64] = [:]
     private var pendingConversationBroadcasts: [SessionID: DispatchWorkItem] = [:]
@@ -747,8 +760,8 @@ final class RemoteSessionMirrorRegistry {
             sessions: sessions,
             terminals: terminals,
             host: RemoteAccessCoordinator.shared.hostIdentity(for: authorization),
-            theme: RemoteThemeBridge.appTheme(),
-            themeCatalog: canManageThemes(authorization) ? RemoteThemeBridge.catalog() : nil,
+            theme: RemoteThemeBridge.appTheme(for: authorization),
+            themeCatalog: canManageThemes(authorization) ? RemoteThemeBridge.catalog(for: authorization) : nil,
             archivedSessions: archivedSessions,
             newSessionCatalog: newSessionCatalog,
             features: restFeatures(for: authorization)
@@ -1116,11 +1129,12 @@ final class RemoteSessionMirrorRegistry {
     /// The marker belongs to the host transaction, so a client cannot make an arbitrary dormant
     /// session wait indefinitely merely by opening its socket.
     func noteSessionStarting(_ sessionID: SessionID) {
+        expireOverdueSessionStartup(sessionID)
         guard startingSessions[sessionID] == nil else { return }
-        var starting = StartingSession()
-        let maximumWait = sessionStartupMaximumWait
+        let deadline = sessionStartupNow() + sessionStartupMaximumWait
+        var starting = StartingSession(deadline: deadline)
         starting.expiry = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: maximumWait)
+            try? await Task.sleep(until: deadline, clock: .continuous)
             guard !Task.isCancelled else { return }
             self?.expireSessionStartup(sessionID)
         }
@@ -1137,6 +1151,7 @@ final class RemoteSessionMirrorRegistry {
         authorizationIsCurrent: @escaping () -> Bool,
         didAttach: @escaping () -> Void
     ) -> InitialSessionAttach {
+        expireOverdueSessionStartup(sessionID)
         if attach(connection, to: sessionID, authorization: authorization) {
             didAttach()
             // The surface may have become attachable before its normal readiness callback ran.
@@ -1171,6 +1186,7 @@ final class RemoteSessionMirrorRegistry {
     }
 
     private func attachStartupWaiters(_ sessionID: SessionID) {
+        expireOverdueSessionStartup(sessionID)
         guard var starting = startingSessions[sessionID], !starting.waiters.isEmpty else {
             return
         }
@@ -1204,8 +1220,16 @@ final class RemoteSessionMirrorRegistry {
         if attachedAny { broadcastSessionRow(sessionID) }
     }
 
+    private func expireOverdueSessionStartup(_ sessionID: SessionID) {
+        guard let starting = startingSessions[sessionID], sessionStartupNow() >= starting.deadline else {
+            return
+        }
+        expireSessionStartup(sessionID)
+    }
+
     private func expireSessionStartup(_ sessionID: SessionID) {
         guard let starting = startingSessions.removeValue(forKey: sessionID) else { return }
+        starting.expiry?.cancel()
         for (key, waiter) in starting.waiters {
             startupSessionByConnection[key] = nil
             // Startup exhaustion is terminal for this route, not a healthy-socket action
@@ -1346,7 +1370,7 @@ final class RemoteSessionMirrorRegistry {
             cols: snapshot.grid.cols,
             rows: snapshot.grid.rows,
             title: snapshot.title,
-            theme: RemoteThemeBridge.appTheme(),
+            theme: RemoteThemeBridge.appTheme(for: authorization),
             terminalTheme: RemoteThemeBridge.terminalTheme(for: terminalID),
             // Standalone shells implement the baseline byte stream and viewport protocol only.
             // Chat collaboration, atomic line submission, attention and attachment features all
@@ -1432,7 +1456,7 @@ final class RemoteSessionMirrorRegistry {
             revision: catalogueRevision
         )))
         connection.sendText(encode(RemoteAppThemeUpdateDTO(
-            theme: RemoteThemeBridge.appTheme()
+            theme: RemoteThemeBridge.appTheme(for: connection.authorization)
         )))
     }
 
@@ -1561,7 +1585,7 @@ final class RemoteSessionMirrorRegistry {
             cols: snapshot.grid.cols,
             rows: snapshot.grid.rows,
             title: snapshot.title,
-            theme: RemoteThemeBridge.appTheme(),
+            theme: RemoteThemeBridge.appTheme(for: connection.authorization),
             terminalTheme: RemoteThemeBridge.terminalTheme(for: sessionID),
             features: Self.advertisedFeatures(for: connection.authorization)
         )
@@ -1672,7 +1696,7 @@ final class RemoteSessionMirrorRegistry {
             cols: 0,
             rows: 0,
             title: ProjectStore.shared.session(withID: sessionID)?.presentedTitle ?? "",
-            theme: RemoteThemeBridge.appTheme(),
+            theme: RemoteThemeBridge.appTheme(for: authorization),
             terminalTheme: RemoteThemeBridge.terminalTheme(for: sessionID),
             features: Self.advertisedFeatures(for: authorization)
         )))
@@ -3191,17 +3215,62 @@ final class RemoteSessionMirrorRegistry {
         }
     }
 
-    /// Pushes chrome and the per-session terminal palette to already-open clients.
-    private func broadcastThemes() {
+    func themeAssetPayload(for digest: String) -> RemoteThemeAssetPayload? {
+        RemoteThemeAssets.shared.payload(for: digest)
+    }
+
+    func themeAssetDescriptor(for digest: String) -> RemoteThemeAsset? {
+        RemoteThemeAssets.shared.descriptor(for: digest)
+    }
+
+    /// Live tuning posts a theme change per pointer event; a phone needs the settled chrome, not
+    /// every frame of a drag. `/api/me` is invalidated at once, the first broadcast goes out at
+    /// once, and further changes inside the interval fold into one trailing broadcast.
+    private func themesDidChange() {
         invalidateMeCatalogue()
-        let appMessage = encode(RemoteAppThemeUpdateDTO(theme: RemoteThemeBridge.appTheme()))
+        guard pendingThemeBroadcast == nil else { return }
+        let now = ContinuousClock.now
+        guard let last = lastThemeBroadcast, now - last < Self.themeBroadcastInterval else {
+            broadcastThemes()
+            return
+        }
+        pendingThemeBroadcast = Task { @MainActor [weak self] in
+            try? await Task.sleep(until: last + Self.themeBroadcastInterval, clock: .continuous)
+            guard let self else { return }
+            pendingThemeBroadcast = nil
+            broadcastThemes()
+        }
+    }
+
+    /// Pushes chrome and the per-session terminal palette to already-open clients.
+    ///
+    /// Each connection receives the projection its authorization may use: owner-only assets
+    /// (fonts, the extension surface recipe) are left out for anyone the asset route would
+    /// refuse. With no open client nothing is resolved, so a Mac without a paired device never
+    /// starts theme-asset preparation from here.
+    private func broadcastThemes() {
+        lastThemeBroadcast = ContinuousClock.now
+        invalidateMeCatalogue()
+        var appMessages: [Bool: String] = [:]
         for connection in themeEventSubscribers.values {
-            connection.sendText(appMessage)
+            let owner = RemoteThemeBridge.receivesOwnerAssets(connection.authorization)
+            if appMessages[owner] == nil {
+                appMessages[owner] = encode(RemoteAppThemeUpdateDTO(
+                    theme: RemoteThemeBridge.appTheme(for: connection.authorization)
+                ))
+            }
+            connection.sendText(appMessages[owner]!)
         }
         for (sessionID, mirror) in mirrors where !mirror.subscribers.isEmpty {
-            let message = encode(RemoteThemeBridge.update(for: sessionID))
+            var messages: [Bool: String] = [:]
             for connection in mirror.subscribers.values {
-                connection.sendText(message)
+                let owner = RemoteThemeBridge.receivesOwnerAssets(connection.authorization)
+                if messages[owner] == nil {
+                    messages[owner] = encode(RemoteThemeBridge.update(
+                        for: sessionID, authorization: connection.authorization
+                    ))
+                }
+                connection.sendText(messages[owner]!)
             }
         }
     }

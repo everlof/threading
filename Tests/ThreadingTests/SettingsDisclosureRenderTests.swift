@@ -11,7 +11,7 @@ import XCTest
 /// inside it. Each is checked by looking at a render; the assertions pin only what an image
 /// cannot — that folding actually removes rows, and that the title no longer lives in the
 /// scrolling document.
-final class SettingsDisclosureRenderTests: XCTestCase {
+final class SettingsDisclosureRenderTests: HostedStoreTestCase {
 
     private enum Render {
         static let width = SettingsUIDefaults.pageWidth
@@ -185,13 +185,13 @@ final class SettingsDisclosureRenderTests: XCTestCase {
             descendants(of: page, type: ThemedButton.self).first { $0.title == "Ask Again" }
         )
 
-        XCTAssertEqual(controller.virtualRowCount, 86)
+        XCTAssertEqual(controller.virtualRowCount, 91)
         XCTAssertLessThan(controller.materializedRowCount, controller.virtualRowCount)
         XCTAssertTrue(askAgain.performPrimaryAction())
         host.layoutSubtreeIfNeeded()
 
         XCTAssertEqual(exemptions.grants.count, 79)
-        XCTAssertEqual(controller.virtualRowCount, 85)
+        XCTAssertEqual(controller.virtualRowCount, 90)
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])
         withExtendedLifetime(window) {}
     }
@@ -217,7 +217,7 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         window.contentView?.layoutSubtreeIfNeeded()
 
         XCTAssertTrue(labels(in: page).contains { $0.stringValue == "No test credentials stored" })
-        XCTAssertEqual(controller.virtualRowCount, 7)
+        XCTAssertEqual(controller.virtualRowCount, 12)
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])
         withExtendedLifetime(window) {}
     }
@@ -293,7 +293,7 @@ final class SettingsDisclosureRenderTests: XCTestCase {
     // MARK: - Images
 
     @MainActor
-    func testRendersTheToolsPageCollapsedAndUnfoldedAcrossThemes() throws {
+    func testRendersTheToolsPageCollapsedAndUnfoldedAcrossThemes() async throws {
         let directory = Render.directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { AppThemePalette.set(.system) }
@@ -340,6 +340,65 @@ final class SettingsDisclosureRenderTests: XCTestCase {
 
         print("Rendered \(written) tools pages to \(directory.path)")
         XCTAssertEqual(written, Render.fixtures.count * 2)
+        try await renderNetworkCaptureInProductSettingsShell(directory: directory)
+    }
+
+    @MainActor
+    private func renderNetworkCaptureInProductSettingsShell(directory: URL) async throws {
+        let previous = BrowserNetworkCaptureSettings.shared.options
+        let previousMotion = Design.Motion.reduceMotionOverrideForTesting
+        Design.Motion.reduceMotionOverrideForTesting = true
+        defer {
+            BrowserNetworkCaptureSettings.shared.options = previous
+            Design.Motion.reduceMotionOverrideForTesting = previousMotion
+        }
+        let fixtures: [(String, AppTheme, NSAppearance.Name)] = [
+            ("system", .system, .aqua),
+            ("cyberpunk", AppThemeStyles.cyberpunk, .darkAqua),
+            ("swiss", AppThemeStyles.swissMinimalist, .aqua)
+        ]
+        for (name, theme, appearance) in fixtures {
+            AppThemePalette.set(theme)
+            let shell = makeMainWindowController()
+            let window = try XCTUnwrap(shell.window)
+            window.setContentSize(NSSize(width: 1320, height: 1000))
+            shell.showSettingsPage(id: SettingsPages.toolsID)
+            let content = try XCTUnwrap(window.contentView)
+            content.appearance = NSAppearance(named: appearance)
+            func findTools(_ root: NSViewController) -> ToolsPreferencesViewController? {
+                if let tools = root as? ToolsPreferencesViewController { return tools }
+                return root.children.lazy.compactMap(findTools).first
+            }
+            let tools = try XCTUnwrap(findTools(try XCTUnwrap(window.contentViewController)))
+            for enabled in [false, true] {
+                BrowserNetworkCaptureSettings.shared.options = .init(
+                    requestHeaders: enabled, responseHeaders: enabled,
+                    requestBody: enabled, responseBody: enabled
+                )
+                AppThemeRefresh.repaint(content)
+                content.layoutSubtreeIfNeeded()
+                SettingsRowReveal.reveal(title: L10n.string("Capture request headers"), in: tools.view)
+                let deadline = Date().addingTimeInterval(Design.Motion.revealHold + 1)
+                while !descendants(of: tools.view, type: RevealHighlightView.self).isEmpty,
+                      Date() < deadline {
+                    try await Task.sleep(nanoseconds: 20_000_000)
+                }
+                XCTAssertTrue(descendants(of: tools.view, type: RevealHighlightView.self).isEmpty)
+                content.layoutSubtreeIfNeeded()
+                let toggles = descendants(of: tools.view, type: ThemedToggle.self).filter {
+                    $0.accessibilityIdentifier().hasPrefix("settings.tools.network.")
+                }
+                XCTAssertEqual(toggles.count, 4)
+                XCTAssertTrue(toggles.allSatisfy { $0.state == (enabled ? .on : .off) })
+                XCTAssertEqual(ThemeBoundaryAudit.violations(in: tools.view), [])
+                let rep = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+                content.cacheDisplay(in: content.bounds, to: rep)
+                let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+                try data.write(to: directory.appendingPathComponent(
+                    "tools-network-\(name)-\(enabled ? "enabled" : "metadata").png"
+                ))
+            }
+        }
     }
 
     /// The bare kit pieces — a pinned header over one collapsed and one unfolded card — drawn

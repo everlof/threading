@@ -70,5 +70,9 @@ struct ThreadingMobileHostedRoot: View {
                 guard !model.isEphemeralTerminalWireFixture else { return }
                 Task { await notifications.sync(hosts: hosts) }
             }
+            .onReceive(NotificationCenter.default.publisher(for: MobileThemeAssets.didLoad)) { _ in
+                guard !model.isEphemeralTerminalWireFixture else { return }
+                Task { await notifications.sync(hosts: model.hosts) }
+            }
     }
 }

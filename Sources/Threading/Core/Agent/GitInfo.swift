@@ -49,7 +49,12 @@ enum GitInfo {
     /// hash when the head is detached.
     static func currentBranch(for path: String) -> String? {
         guard let location = worktreeLocation(for: path) else { return nil }
+        return currentBranch(for: location)
+    }
 
+    /// Reads the branch from an already-resolved checkout, preserving its identity across a
+    /// validation instead of consulting the discovery memo again.
+    static func currentBranch(for location: WorktreeLocation) -> String? {
         let headURL = URL(fileURLWithPath: location.worktreeIdentity)
             .appendingPathComponent(GitDefaults.headFile)
         guard let contents = boundedString(at: headURL, maximumBytes: GitDefaults.maximumControlFileBytes)
@@ -148,9 +153,11 @@ enum GitInfo {
     }
 
     /// Resolves a path's worktree and repository, or nil when it is not inside a repository.
-    static func worktreeLocation(for path: String) -> WorktreeLocation? {
+    /// Ownership validation and completed Git mutations refresh discovery: the memo may describe
+    /// a missing checkout before creation, or a different repository formerly at the same path.
+    static func worktreeLocation(for path: String, refresh: Bool = false) -> WorktreeLocation? {
         let key = cacheKey(for: path)
-        if let cached = worktreeLocations.withLock({ $0[key] }) {
+        if !refresh, let cached = worktreeLocations.withLock({ $0[key] }) {
             return cached.value
         }
 

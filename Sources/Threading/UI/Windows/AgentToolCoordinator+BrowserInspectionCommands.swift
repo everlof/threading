@@ -46,6 +46,18 @@ extension AgentToolCoordinator {
         for sessionID: SessionID,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
+        if let request = arguments.requestCapture {
+            BrowserNetworkCapturePresenter.request(
+                request, settings: browserNetworkCaptureSettings, sessionID: sessionID,
+                window: browserPresentationWindow(for: sessionID),
+                decision: browserNetworkCaptureDecision, completion: completion
+            )
+            return
+        }
+        if arguments.configuration == true {
+            completion(BrowserNetworkCaptureCommandService.configuration(browserNetworkCaptureSettings))
+            return
+        }
         withAuthorizedBrowser(for: sessionID, purpose: "inspect network activity from") { browser in
             guard let browser else {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
@@ -54,7 +66,9 @@ extension AgentToolCoordinator {
             completion(.success(browser.scrubFilledSecrets(browser.networkOutput(
                 kind: arguments.kind,
                 errorsOnly: arguments.errorsOnly ?? false,
-                clear: arguments.clear ?? false
+                clear: arguments.clear ?? false,
+                includeDetails: arguments.includeDetails ?? false,
+                requestID: arguments.requestID
             ))))
         }
     }

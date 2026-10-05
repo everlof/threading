@@ -4,9 +4,9 @@ The live browser an agent drives, kept separate from the rendered-document web v
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
-The live browser and the rendered-document web view are deliberately separate. Each live
-`BrowserViewController` uses the persistent website data store and can carry authenticated state;
-agent access therefore goes through an app-level origin grant even though Threading's MCP server
+The live browser and the rendered-document web view are deliberately separate. Each shared
+`BrowserViewController` uses its owning project's website data store and can carry authenticated
+state; agent access therefore goes through an app-level origin grant even though Threading's MCP server
 itself is pre-approved. Localhost is admitted for development. Other origins offer once,
 persistent-host, this-chat/all-websites, or deny choices. The chat-wide choice is explicit,
 persists across app launches, and is revoked with the session on permanent deletion or from
@@ -215,8 +215,27 @@ explicit close control; Back closes it and returns to its live opener when it ha
 Only the active page may add another pop-up, so a hidden opener cannot take the surface back.
 `browser_tabs` manages up to eight independent `BrowserViewController`s per session. Each keeps
 its own page, history, pop-up stack, responsive viewport, color scheme, CSS media type, User-Agent,
-console, and network buffers. A shared context uses the default website data store so signing in
-does not create cookie islands; a private context owns one unique non-persistent store and shares
+console, and network buffers. A shared context uses a named WebKit website data store keyed by
+the owning `ProjectID`, so cookies, caches, local storage, IndexedDB and service workers are shared
+across that project's tabs and sessions, including the panel, drawer, detached windows and audit
+browser. Projects never share website state. The owning project is resolved before controller
+creation, rather than from the currently selected session or execution checkout. A durable chat
+move emits `SessionProjectDidChange` for every changed session, including side chats. Shared
+browsers switch to the destination profile and retire their old documents, pop-ups and page
+diagnostics; they do not replay the old page's request. The source project's website data remains
+in its own profile. Private tabs retain their independent ephemeral stores. WebKit restores
+the same named profile after relaunch on macOS 14+. On macOS 13, which supports only one persistent
+store, project state is shared in memory while a project browser remains alive. A browser without
+a known project receives a unique in-memory store and never the app-wide default. WebKit's
+reserved all-zero profile identifier also uses project-shared memory, avoiding its Objective-C
+exception. Existing global
+website data is not copied into project profiles; users sign in once per project.
+`BrowserWebsiteDataStores` performs O(1) keyed lookups on explicit browser creation, with weak
+store references so it retains no inactive WebKit profiles (normally a handful of active projects;
+stress: 1,000 project identities). No project enumeration or filesystem work is added to layout,
+navigation or streaming callbacks. WebKit owns profile persistence. This isolation is host-owned;
+themes and extension presentations cannot choose a different profile or read website data.
+A private context owns one unique non-persistent store and shares
 no cookies with the signed-in browser or another private tab. Private tabs and even their URLs are
 runtime-only and excluded from panel persistence. The agent addresses tabs by browser-local index
 or stable tab id. The most recently selected browser remains the browser-tool target when an image
@@ -247,10 +266,24 @@ require paired owner scope.
 IndexedDB, and service-worker data only after a separate app-owned confirmation. An origin grant,
 including an "always allow" grant, never implies permission to delete signed-in state. The
 confirmation is bound to the exact tab and document; a page or tab switch cancels before removal.
-A private tab clears its entire unique store. A shared tab filters WebKit's site-level data records
-to the active host or the parent record WebKit grouped it under, and tells the user that related
+Once removal begins, it retains that exact website data store across WebKit's asynchronous record
+fetch, so a concurrent project move cannot retarget clearing to the destination's profile.
+A private tab clears its entire unique store. A shared tab filters site-level data records only
+within its project's profile to the active host or the parent record WebKit grouped it under,
+and tells the user that related
 subdomains may therefore be signed out. Clearing does not implicitly reload or reconstruct the
 current request.
+
+**Browser sizing belongs to the user.** Ordinary browsing, sign-in, page interaction and screenshots
+use the pane or window as sized, preserving any viewport the user selected. Agents must not set a
+standard desktop resolution or reset sizing as routine setup. A size change is appropriate when
+the user requests it or a specific responsive or visual test needs exact dimensions. Temporary
+tests restore the prior sizing, preserving later user changes; a user-requested size remains in
+place. The navigation and screenshot tool descriptions state the default at their entry points,
+and the resize description and receipt state the temporary-test restoration contract. Each resize
+receipt reports whether the prior viewport filled its host or had exact dimensions, so restoration
+does not replace a pre-existing user preset with automatic sizing.
+
 `browser_resize` gives the active browser an exact per-tab CSS-pixel viewport for responsive
 testing. It does not resize Threading's window: the fixed-size `WKWebView` sits in a pannable outer
 scroll view, so media queries, viewport units, semantic geometry, interactions, and screenshots
@@ -276,6 +309,16 @@ selection, input methods and undo. Keeping this as `ThemedTextField.SurfacePrese
 the browser changes only the chrome around AppKit's editor rather than building a second address
 control or shrinking the target when its plate disappears. The responsive strip can move the field
 when controls fold, so its hover is revalidated whenever its tracking area is rebuilt.
+
+Cmd+R is scoped to the browser's page, native chrome, and selected tab header. A tab press keeps
+keyboard focus on `ThemedTabItemView`, which is a sibling of the browser content rather than its
+descendant. Each host therefore assigns that selected chip as the browser scope's additional
+keyboard focus owner. The reference is weak and must belong to the same window; panel, drawer,
+and detached-window rendering update it when the browser moves. Other tabs and composer focus
+keep the app's Rename Session binding. Matching visits only the focused view's ancestry and one
+related control, independent of page size and retained tab/session counts; no event monitor or
+focus transfer is added. Shortcut routing and navigation remain host-owned when a tab header's
+presentation is customized.
 
 `browser_emulate` applies public per-view WebKit conditions to the active tab. `NSAppearance`
 makes `prefers-color-scheme`, matchMedia, rendered pixels, and screenshots agree without changing
@@ -372,8 +415,30 @@ Application Support directory, so Reset Everything moves it aside with the rest 
 state.
 Page-world user scripts capture console/error output and network metadata, because isolated-world
 wrappers cannot see calls made through the page's own `console`, `fetch`, or XHR. Network capture
-never records request or response bodies, headers, cookies, or credentials, and sensitive query
-values are redacted before they can leave the browser controller. A capture-phase resource-error
+defaults to metadata only, and sensitive query values are redacted before they can leave the
+browser controller. `BrowserNetworkCaptureSettings` owns four independent, persistent host-only
+opt-ins for request/response headers and bodies, presented as fixed virtual rows in Settings ▸
+Tools ▸ Browser Network Capture. `browser_capabilities` exposes current options;
+`browser_network(configuration: true)` adds scope, limits and the settings destination.
+`request_capture` proposes a partial change through an owner-confirmed browser permission request.
+Approval applies the exact proposal only if the prior settings remain current. Website access
+alone cannot change capture policy. Themes and extensions cannot choose capture authority.
+
+Capture is limited to main-frame fetch/XHR page-visible headers and bounded text bodies. WebKit
+does not supply document/resource bodies or wire headers; opaque cross-origin frames, binary
+payloads and streaming responses stay excluded. Sensitive headers are masked again at the native
+boundary, and agent output uses the existing filled-secret scrubber. Page-supplied payloads remain
+untrusted data. Response clones preserve the page's original response and are read outside its
+fetch promise, with four concurrent reads, 8 KiB/64-chunk limits and a one-second deadline. XHR
+captures text responses only. Disabling/changing policy updates live pages and future user scripts
+without reloading and clears payloads. A generation check rejects in-flight details from old policy;
+document navigation, buffer clearing and project moves retire the owning tab's payloads.
+`BrowserNetworkPayloadBuffer` has a process-wide 64-record cap (normally 10–20) so the payload
+budget does not multiply by retained chats and tabs. Each record bounds headers and both bodies;
+metadata retains its existing 300-entry cap per tab. `include_details` returns at most five recent
+requests, with a 64 KiB output cap and `request_id` for one request. Payloads are runtime-only;
+authorized tool results follow ordinary execution-audit persistence. Trace and visual-baseline
+diagnostics continue to contain only metadata. A capture-phase resource-error
 listener supplies metadata-only failures for images, scripts, stylesheets, and media that never
 produce a usable Performance Resource Timing entry.
 `browser_performance` complements those event buffers with a bounded, current-document Web

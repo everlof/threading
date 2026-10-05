@@ -38,12 +38,6 @@ reshuffling it is a line move.
 
 ### Now — in active design
 
-- [Customization packs and personal effects controls](customization-packs.md) — Share an
-  individual theme/chrome/extension or a named collection such as Matrix Pack; one portable
-  file, inspected contents, dependency ownership and explicit activation. Global motion,
-  activity reactions, music and sound remain the recipient's choices across every pack.
-  [Theme commands and pack activation](appearance-pack-activation.md) specifies the palette
-  actions, runtime ownership, persistent selection and failure behavior for the same pack model.
 - [Usage-aware accounts](usage-aware-accounts.md) — tell an agent what its budget is, let the user
   rank which logins may be spent automatically, move work to the next best one before a
   weekly window strands it, and keep a drained fleet's anchored windows cycling at reset. It is
@@ -197,6 +191,17 @@ reshuffling it is a line move.
   shipping in public Mac builds, which a Developer ID build cannot do while it needs Sign in
   with Apple. Keeps the 2026-09-13 pricing research, the StoreKit 2 design and the App Store
   Connect checklist from when a subscription-only app was considered and dropped.
+
+### Retired — pointers remain
+
+- [Customization packs and personal effects controls](customization-packs.md) and
+  [Theme commands and pack activation](appearance-pack-activation.md) — **superseded**
+  2026-10-05. Local appearance packs shipped on 2026-10-04 and were retired the next day; the
+  portable `.threadingpack` was rejected in that form. An extension that ships a theme is the
+  bundle, and its decorations follow its own themes. The reasoning and what would reopen it are in
+  the [appearance packs decision record](../decisions/appearance-packs.md); the theme commands and
+  enablement that remain are in [`appearance-activation.md`](../architecture/appearance-activation.md),
+  and the personal effects controls shipped in [`themes.md`](../architecture/themes.md).
 
 ### Shipped — pointers remain
 

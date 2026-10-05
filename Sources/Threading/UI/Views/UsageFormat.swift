@@ -86,6 +86,26 @@ public enum UsageFormat {
         count == 1 ? "1 limit reset banked" : "\(count) limit resets banked"
     }
 
+    /// Where a second-hand reading came from, for the freshness line beside its age — nil for a
+    /// live API read, which needs no qualifier. One wording for the popover and the fleet, so the
+    /// two cannot disagree about the same reading.
+    static func sourceNote(_ source: AccountUsage.Source) -> String? {
+        switch source {
+        case .api: return nil
+        case .localCache: return L10n.string("via Claude's status-line feed")
+        case .profileSnapshot: return L10n.string("from the Claude CLI's last saved reading")
+        }
+    }
+
+    /// The one sentence a usage surface puts beside **Allow…** when a login's keychain item
+    /// refuses Threading. Says what is wrong and what the button will do, so the macOS prompt
+    /// that follows is the consequence of a sentence the user just read.
+    static var keychainGrantNotice: String {
+        L10n.string("Live usage needs keychain access.")
+    }
+
+    static var keychainGrantAction: String { L10n.string("Allow…") }
+
     public static func age(of date: Date, at now: Date = Date()) -> String {
         let minutes = Int(max(0, now.timeIntervalSince(date)) / 60)
         if minutes < 1 { return "just now" }

@@ -97,6 +97,30 @@ final class RemoteViewportLeaseGraceTests: HostedStoreTestCase {
         XCTAssertFalse(fixture.registry.isAttached(phone, to: fixture.sessionID))
     }
 
+    func testAStartupDeadlineWinsBeforeItsExpiryTaskCanRun() throws {
+        var now = ContinuousClock.now
+        let fixture = try makeFixture(grace: .zero, sessionStartupNow: { now })
+        fixture.capability.setAvailable(false, for: .agentSession(fixture.sessionID))
+        let phone = authenticated(deviceID: "delayed-expiry-phone", authorization: Self.ownerInteract)
+        fixture.registry.noteSessionStarting(fixture.sessionID)
+
+        let result = fixture.registry.attachOrWaitForStartup(
+            phone,
+            to: fixture.sessionID,
+            authorization: Self.ownerInteract,
+            authorizationIsCurrent: { true },
+            didAttach: { XCTFail("an overdue waiter attached before its expiry task ran") }
+        )
+        XCTAssertEqual(result, .waitingForStartup)
+
+        // This synchronous actor turn never yields to the expiry task. Readiness must still
+        // honor the elapsed deadline, rather than whichever callback gets main-actor time first.
+        now += .seconds(61)
+        fixture.capability.setAvailable(true, for: .agentSession(fixture.sessionID))
+        XCTAssertNotNil(fixture.registry.beginCapturing(sessionID: fixture.sessionID))
+        XCTAssertFalse(fixture.registry.isAttached(phone, to: fixture.sessionID))
+    }
+
     // MARK: - The rule
 
     /// The case the grace exists for: the phone that went away and came straight back.
@@ -661,7 +685,10 @@ final class RemoteViewportLeaseGraceTests: HostedStoreTestCase {
 
     private func makeFixture(
         grace: Duration,
-        startupWait: Duration = .seconds(60)
+        startupWait: Duration = .seconds(60),
+        sessionStartupNow: @escaping @MainActor () -> ContinuousClock.Instant = {
+            ContinuousClock.now
+        }
     ) throws -> Fixture {
         let store = ProjectStore.shared
         // A folder of its own: `addProject` returns the existing project for a folder it already
@@ -676,6 +703,7 @@ final class RemoteViewportLeaseGraceTests: HostedStoreTestCase {
         let registry = RemoteSessionMirrorRegistry(
             terminalApplication: capability,
             sessionStartupMaximumWait: startupWait,
+            sessionStartupNow: sessionStartupNow,
             viewportLeaseGrace: { grace }
         )
         // Which mode a shared chat starts in is an ordinary user setting, and in Focused mode a

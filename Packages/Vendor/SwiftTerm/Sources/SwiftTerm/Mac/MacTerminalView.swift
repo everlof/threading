@@ -393,6 +393,15 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
         return useMetalRenderer
     }
 
+    /// Prepares the current text snapshot for a synchronous AppKit bitmap capture.
+    /// An offscreen host has no display tick, so feeding text alone cannot make its next
+    /// cacheDisplay draw the new content. This uses the normal frame owner without a timer.
+    public func prepareFrameForSnapshot() {
+        frameTick()
+        layoutSubtreeIfNeeded()
+        frameTick()
+    }
+
     /// Draws one Metal frame immediately when the Metal renderer is active.
     ///
     /// Normal applications do not need this method. It supports deterministic
@@ -404,6 +413,7 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
         // rather than racing it. Rare and main-thread-only, so the wait is not
         // on any hot path.
         withRenderLoopSuspended {
+            guard renderOwner.waitForMetalIdle() else { return }
             guard refreshSnapshotForMetal() else { return }
             if metalView?.needsExternalDrawCall == true {
                 renderOwner.renderMetal()
@@ -1005,6 +1015,9 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
         if window == nil {
 #if canImport(MetalKit)
             stopRenderLoop()
+            // A glowing session kept off screen would otherwise hold its halo textures —
+            // tens of megabytes at a large pane — for as long as it stays away.
+            renderOwner.releaseMetalTransientResources()
 #endif
             stopWindowMouseMovedFallback()
             stopSelectionAutoScrollTimer()
@@ -1243,24 +1256,26 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
     }
 
     private var _textGlow: TerminalTextGlow?
+    let textGlowUnderlayCache = TextGlowUnderlayCache()
 
     /// A soft halo behind text in each run's own colour — a phosphor glow — or
     /// nil for none, which is the default.
     ///
-    /// Drawn by the Core Graphics renderer only; see ``TerminalTextGlow``. A
-    /// radius or opacity of zero is the same as nil, a radius above
-    /// ``TerminalTextGlow/maximumRadius`` is clamped and an opacity above 1 is
-    /// read as 1. While a glow is set, every dirty region is widened by the rows
-    /// a halo can reach, so a changed row also repaints the halo it leaves on
-    /// its neighbours.
+    /// Drawn by both renderers; see ``TerminalTextGlow``. A radius or opacity of
+    /// zero is the same as nil, a radius above ``TerminalTextGlow/maximumRadius``
+    /// is clamped and an opacity above 1 is read as 1. While a glow is set, every
+    /// Core Graphics dirty region is widened by the rows a halo can reach, so a
+    /// changed row also repaints the halo it leaves on its neighbours.
     public var textGlow: TerminalTextGlow? {
         get { _textGlow }
         set {
             let normalized = newValue?.normalized
             guard _textGlow != normalized else { return }
             _textGlow = normalized
-            // The prepared rows do not depend on the glow, so no cache is reset;
-            // every row is repainted because every row's halo changed.
+            // The prepared rows do not depend on the glow, so only the underlays
+            // built for the old one are dropped; every row is repainted because
+            // every row's halo changed.
+            textGlowUnderlayCache.removeAll()
             withTerminal { $0.updateFullScreen() }
             frameDriver.markDirty()
         }
@@ -1779,6 +1794,17 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
     override open func draw (_ dirtyRect: NSRect) {
 #if canImport(MetalKit)
         if metalView != nil {
+            // The Metal surface above this view is the picture, so updating this view's own
+            // layer draws nothing — text drawn here would sit under the GPU's, twice over a
+            // translucent background. A capture cannot read a CAMetalLayer, though, so a
+            // capture draws the same snapshot through Core Graphics. See
+            // `drawingForBitmapCapture(_:)` for why a capture has to say so.
+            guard TerminalView.bitmapCaptureDepth > 0
+                    || !NSGraphicsContext.currentContextDrawingToScreen(),
+                  let currentContext = getCurrentGraphicsContext() else {
+                return
+            }
+            drawTerminalContents (dirtyRect: dirtyRect, context: currentContext, bufferOffset: 0)
             return
         }
 #endif
@@ -1787,6 +1813,25 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
         }
         drawTerminalContents (dirtyRect: dirtyRect, context: currentContext, bufferOffset: 0)
         TerminalView.onFramePresented?()
+    }
+
+    /// Nesting depth of ``drawingForBitmapCapture(_:)``.
+    private static var bitmapCaptureDepth = 0
+
+    /// Runs `body` — typically a `cacheDisplay(in:to:)` over a view tree holding terminals —
+    /// with every Metal-backed terminal drawing its text through Core Graphics.
+    ///
+    /// A Metal terminal's pixels live in a `CAMetalLayer`, which AppKit's view caching cannot
+    /// read, so without this a capture shows an empty terminal. The capture cannot be told
+    /// from an ordinary layer update by its context: AppKit reports `cacheDisplay` as drawing
+    /// to the screen, exactly as it does the layer update in which this view must draw nothing.
+    /// So the host that photographs its views says so. Printing and PDF output are not drawing
+    /// to the screen and are recognised without it. The caret, which Metal draws itself, is not
+    /// in such a capture.
+    public static func drawingForBitmapCapture<Result>(_ body: () throws -> Result) rethrows -> Result {
+        bitmapCaptureDepth += 1
+        defer { bitmapCaptureDepth -= 1 }
+        return try body()
     }
     
     public override func cursorUpdate(with event: NSEvent)

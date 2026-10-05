@@ -598,6 +598,8 @@ final class MobileProjectDefaultAccountsTests: XCTestCase {
     /// both logins in the catalogue's words, and a tap takes it away.
     @MainActor
     func testAStartedChatOpensWithTheReceiptForAMovedLogin() throws {
+        let restoreAccessibility = try MobileAccessibilityTestRuntime.enableAutomation()
+        defer { restoreAccessibility() }
         let model = RemoteAppModel(
             continuity: MobileSessionContinuityStore(defaults: try XCTUnwrap(UserDefaults(
                 suiteName: "MobileProjectDefaultAccountsTests.\(UUID().uuidString)"
@@ -618,13 +620,14 @@ final class MobileProjectDefaultAccountsTests: XCTestCase {
         let window = hostedWindow(rootViewController: UIHostingController(rootView: screen))
         defer { window.isHidden = true }
         let session = try XCTUnwrap(model.me?.sessions.first { $0.agentKind == "claude" })
+        let substitution = RemoteAccountSubstitutionDTO(
+            requestedAccountID: "default",
+            accountID: "keller",
+            reason: .spent,
+            resetsAt: Date().addingTimeInterval(2 * 3_600).timeIntervalSince1970
+        )
         let expected = MobileProjectDefaultAccounts.receipt(
-            for: RemoteAccountSubstitutionDTO(
-                requestedAccountID: "default",
-                accountID: "keller",
-                reason: .spent,
-                resetsAt: Date().addingTimeInterval(2 * 3_600).timeIntervalSince1970
-            ),
+            for: substitution,
             agentID: "claude",
             agents: model.me?.newSessionCatalog?.agents ?? []
         )
@@ -634,12 +637,7 @@ final class MobileProjectDefaultAccountsTests: XCTestCase {
         model.noteDraftStarted(draft, creation: MobileCreatedSession(
             session: session,
             openingStrategy: .awaitCreatedSession,
-            accountSubstitution: RemoteAccountSubstitutionDTO(
-                requestedAccountID: "default",
-                accountID: "keller",
-                reason: .spent,
-                resetsAt: Date().addingTimeInterval(2 * 3_600).timeIntervalSince1970
-            )
+            accountSubstitution: substitution
         ))
         RunLoop.current.run(until: Date().addingTimeInterval(0.6))
         window.layoutIfNeeded()
@@ -654,10 +652,20 @@ final class MobileProjectDefaultAccountsTests: XCTestCase {
         try XCTUnwrap(image.pngData()).write(to: file)
         print("Rendered \(file.path)")
 
-        XCTAssertNotNil(
+        let receipt = try XCTUnwrap(
             accessibleElement(labelled: expected, in: window),
             "the opened chat does not show the receipt"
         )
+        let frame = window.convert(receipt.accessibilityFrame, from: nil)
+        let plate = try XCTUnwrap(pixel(in: image, at: CGPoint(x: frame.minX + 4, y: frame.midY)))
+        let palette = RemoteThemePalette(RemoteAppModel.demoLightTheme)
+        let wash = UIColor(palette.accentMuted).rgba8
+        let ground = palette.uiGround.rgba8
+        let alpha = Double(wash[3]) / 255
+        let expectedPlate = zip(wash.prefix(3), ground.prefix(3)).map {
+            UInt8((Double($0) * alpha + Double($1) * (1 - alpha)).rounded())
+        } + [255]
+        XCTAssertEqual(plate, expectedPlate, accuracy: 3, "receipt stands on its own theme ground")
     }
 
     // MARK: - Fixtures
@@ -665,16 +673,7 @@ final class MobileProjectDefaultAccountsTests: XCTestCase {
     /// The first accessibility element anywhere under `root` whose label is `label`.
     @MainActor
     private func accessibleElement(labelled label: String, in root: NSObject) -> NSObject? {
-        if (root as? UIView)?.isHidden == true { return nil }
-        if root.accessibilityLabel == label { return root }
-        let elements = (root.accessibilityElements as? [NSObject]) ?? []
-        for element in elements {
-            if let found = accessibleElement(labelled: label, in: element) { return found }
-        }
-        for subview in (root as? UIView)?.subviews ?? [] {
-            if let found = accessibleElement(labelled: label, in: subview) { return found }
-        }
-        return nil
+        MobileAccessibilityTestRuntime.element(labelled: label, in: root)
     }
 
     /// Hosts a draft in Strom, whose list names Claude's second login, and counts the pixels of

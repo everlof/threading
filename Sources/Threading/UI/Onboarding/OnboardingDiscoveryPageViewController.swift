@@ -19,7 +19,12 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
     private let accountsProvider: () -> [AgentAccount]
     private let setupController: AccountSetupCardViewController
     private var probeSpinner: ThemedSpinner?
-    private var cliResults: [AgentCLIProbe.Result]?
+    /// The shared installed-CLI answer — the same one the composer defaults from and refuses
+    /// sends on, so this page cannot call a runtime installed that a chat then cannot start.
+    private let availability: AgentCLIAvailability
+    /// Whether a probe has come back since the page appeared, so a shell that could not be read
+    /// says so instead of spinning forever.
+    private var probeFinished = false
     /// The accounts the rows were built from, so a toggle's tag maps back to its account.
     private var shownAccounts: [AgentAccount] = []
     private let appEvents = AppEventObservations()
@@ -29,11 +34,11 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
             AgentAccountDiscovery.allAccounts(for: .claude)
                 + AgentAccountDiscovery.allAccounts(for: .codex)
         },
-        cliResults: [AgentCLIProbe.Result]? = nil,
+        availability: AgentCLIAvailability = .shared,
         setupCoordinator: AgentAccountSetupCoordinator = AgentAccountSetupCoordinator()
     ) {
         self.accountsProvider = accountsProvider
-        self.cliResults = cliResults
+        self.availability = availability
         self.setupController = AccountSetupCardViewController(coordinator: setupCoordinator)
         super.init(nibName: nil, bundle: nil)
     }
@@ -55,6 +60,11 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
         appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
             self?.rebuildAccountRows()
         }
+        // An install finishing in the sheet, or in another terminal before the app came back to
+        // the front, lands here without a button to press.
+        appEvents.observe(AgentCLIAvailabilityDidChange.self) { [weak self] _ in
+            self?.rebuildCLIRows()
+        }
     }
 
     func pageWillAppear() {
@@ -63,11 +73,8 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
             NotificationCenter.default.post(AccountPreferencesDidChange())
         }
 
-        guard cliResults == nil else { return }
-        AgentCLIProbe.resolve(
-            executables: AgentKind.allCases.map(\.executableName)
-        ) { [weak self] results in
-            self?.cliResults = results
+        availability.refresh { [weak self] in
+            self?.probeFinished = true
             self?.rebuildCLIRows()
         }
     }
@@ -263,17 +270,26 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
 
     // MARK: - CLI health
 
+    /// One row per runtime, with the install a click away. The page used to show five "Not
+    /// found" warnings and a command to paste elsewhere, which on a fresh Mac read as five
+    /// faults; one installed agent is all a chat needs, and the summary line says so.
     private func rebuildCLIRows() {
-        guard let results = cliResults else {
-            let spinner = ThemedSpinner()
-            spinner.isAnimating = true
-            probeSpinner = spinner
-            let checking = NSTextField(
-                labelWithString: L10n.string("Checking your shell's PATH…")
-            )
+        guard availability.snapshot != nil else {
+            let text = probeFinished
+                ? L10n.string("Couldn't read your login shell's PATH. Agents are checked again when you start a chat.")
+                : L10n.string("Checking your shell's PATH…")
+            var views: [NSView] = []
+            if !probeFinished {
+                let spinner = ThemedSpinner()
+                spinner.isAnimating = true
+                probeSpinner = spinner
+                views.append(spinner)
+            }
+            let checking = NSTextField(wrappingLabelWithString: text)
             checking.applyFont(.body)
             checking.textColor = Design.Text.secondary
-            let content = NSStackView(views: [spinner, checking])
+            views.append(checking)
+            let content = NSStackView(views: views)
             content.orientation = .horizontal
             content.alignment = .centerY
             content.spacing = Design.Spacing.small
@@ -282,48 +298,65 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
         }
 
         probeSpinner = nil
-        install(SettingsCard(rows: results.map { cliRow(for: $0) }), in: cliCardHost)
+        var rows: [NSView] = []
+        if let summary = cliSummary() {
+            rows.append(SettingsUI.fullRow(summary))
+        }
+        rows += AgentKind.allCases.enumerated().map { cliRow(for: $0.element, at: $0.offset) }
+        install(SettingsCard(rows: rows), in: cliCardHost)
     }
 
-    private func cliRow(for result: AgentCLIProbe.Result) -> NSView {
-        let title = NSTextField(labelWithString: result.executable)
-        title.applyFont(.code())
+    /// Nothing to say when everything is installed; otherwise what a person with none or some
+    /// actually needs to hear.
+    private func cliSummary() -> NSView? {
+        let installed = availability.installedKinds
+        guard installed.count < AgentKind.allCases.count else { return nil }
+        let text = installed.isEmpty
+            ? L10n.string("Threading runs each agent's own command-line tool. Install at least one to start a chat — Install runs its official installer in a terminal you can watch.")
+            : L10n.string("One agent is enough to start chatting. Install the others whenever you like.")
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.applyFont(.body)
+        label.textColor = installed.isEmpty ? Design.Text.label : Design.Text.secondary
+        label.setAccessibilityIdentifier("onboarding.cli.summary")
+        return label
+    }
+
+    private func cliRow(for kind: AgentKind, at index: Int) -> NSView {
+        let title = NSTextField(labelWithString: kind.displayName)
+        title.applyFont(.body)
         title.textColor = Design.Text.label
 
         let detail: NSTextField
-        if let path = result.resolvedPath {
+        let trailing: NSView
+        switch availability.state(for: kind) {
+        case .installed(let path):
             detail = NSTextField(labelWithString: path)
-            detail.applyFont(.caption)
-            detail.textColor = Design.Text.secondary
             detail.lineBreakMode = .byTruncatingMiddle
-        } else {
-            detail = NSTextField(
-                wrappingLabelWithString: L10n.format(
-                    "Not on your shell's PATH, so sessions cannot launch. Install: %@",
-                    OnboardingCLIDefaults.installCommand(for: result.executable)
-                )
-            )
-            detail.applyFont(.caption)
-            detail.textColor = Design.Text.secondary
+            let found = NSTextField(labelWithString: L10n.string("Found"))
+            found.applyFont(.caption)
+            found.textColor = Design.Status.positive
+            trailing = found
+        case .missing, .unknown:
+            detail = NSTextField(wrappingLabelWithString: missingDetail(for: kind))
+            let button = SettingsUI.button("Install…", target: self, action: #selector(installClicked(_:)))
+            button.tag = index
+            button.setAccessibilityLabel(L10n.format("Install %@", kind.displayName))
+            button.setAccessibilityIdentifier("onboarding.cli.install.\(kind.rawValue)")
+            trailing = button
         }
-
-        let status = NSTextField(
-            labelWithString: result.isInstalled
-                ? L10n.string("Found")
-                : L10n.string("Not found")
-        )
-        status.applyFont(.caption)
-        status.textColor = result.isInstalled
-            ? Design.Status.positive
-            : Design.Status.warning
+        // The roster card above sets its row details in `.subheading`; the same role here keeps
+        // the two cards reading as one page.
+        detail.applyFont(.subheading)
+        detail.textColor = Design.Text.secondary
 
         let labels = NSStackView(views: [title, detail])
         labels.orientation = .vertical
         labels.alignment = .leading
         labels.spacing = Design.Spacing.hairline
         labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let content = NSStackView(views: [labels, status])
+        let content = NSStackView(views: [labels, trailing])
         content.orientation = .horizontal
         content.alignment = .centerY
         content.spacing = Design.Spacing.medium
@@ -332,6 +365,25 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
         content.distribution = .fill
 
         return SettingsUI.fullRow(content)
+    }
+
+    /// Why a runtime is not available, in the order the cures go: a PATH fix beats a reinstall,
+    /// and a missing prerequisite is said before the install that would trip on it.
+    private func missingDetail(for kind: AgentKind) -> String {
+        if availability.isInstalledOffPath(kind) {
+            return L10n.string("Installed in ~/.local/bin, which your login shell's PATH doesn't include.")
+        }
+        if !availability.canRunInstaller(for: kind) {
+            return L10n.string("Not installed. Installs with npm, which comes with Node.js.")
+        }
+        return L10n.format("Not installed — %@ isn't on your login shell's PATH.", kind.executableName)
+    }
+
+    @objc private func installClicked(_ sender: ThemedButton) {
+        guard AgentKind.allCases.indices.contains(sender.tag) else { return }
+        AgentCLIInstallViewController.present(AgentKind.allCases[sender.tag], from: self) { [weak self] _ in
+            self?.rebuildCLIRows()
+        }
     }
 
     // MARK: - Card installation
@@ -355,17 +407,7 @@ enum OnboardingCLIDefaults {
     /// The install hint per executable — the `ProjectStatsPopover` shape: what is absent, the
     /// command that fixes it, and the promise that nothing else is needed.
     static func installCommand(for executable: String) -> String {
-        switch executable {
-        case AgentDefaults.codexExecutable:
-            return "npm install -g @openai/codex"
-        case AgentDefaults.grokExecutable:
-            return "npm install -g @xai-official/grok"
-        case AgentDefaults.openCodeExecutable:
-            return "npm install -g opencode-ai"
-        case AgentDefaults.cursorExecutable:
-            return "curl https://cursor.com/install -fsS | bash"
-        default:
-            return "curl -fsSL https://claude.ai/install.sh | bash"
-        }
+        let kind = AgentKind.allCases.first { $0.executableName == executable } ?? .claude
+        return AgentCLIInstallRecipe.recipe(for: kind).command
     }
 }

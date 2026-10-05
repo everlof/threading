@@ -40,6 +40,9 @@ extension AgentToolCoordinator {
     }
 
     func getAppTheme(_ arguments: AppThemeReferenceArguments) -> MCPToolResult {
+        if let section = arguments.section {
+            return MCPTools.appThemeDocumentation(section: section)
+        }
         guard let theme = appTheme(referencedBy: arguments.themeID) else {
             return missingAppTheme(arguments.themeID)
         }
@@ -148,14 +151,15 @@ extension AgentToolCoordinator {
                 startingFrom: base,
                 origin: .base(name: base.name)
             ).text
+            let warnings = await ThemeImageLegibility.warnings(for: theme)
             if arguments.apply ?? true {
                 try await applyAppThemeChoice(theme)
                 return .success(
-                    "Created and applied \(theme.name) (\(theme.id.rawValue)).\n\n\(layers)"
+                    "Created and applied \(theme.name) (\(theme.id.rawValue)).\n\n\(layers)\(warnings)"
                 )
             }
             return .success(
-                "Created \(theme.name) (\(theme.id.rawValue)) without applying it.\n\n\(layers)"
+                "Created \(theme.name) (\(theme.id.rawValue)) without applying it.\n\n\(layers)\(warnings)"
             )
         } catch {
             if !didCreate { ThemeAssetStore.removeAll(for: newID) }
@@ -233,6 +237,9 @@ extension AgentToolCoordinator {
             }
             if patch.material?.backdrop?.image?.source != nil {
                 filesToSnapshot.append(ThemeAssetSlot.backdrop.fileName(for: kind))
+            }
+            if patch.welcome?.backdrop?.image?.source != nil {
+                filesToSnapshot.append(ThemeAssetSlot.welcome.fileName(for: kind))
             }
             for sprite in patch.sprites ?? [] where sprite.source != nil {
                 guard let name = sprite.name?.trimmingCharacters(in: .whitespaces),
@@ -350,8 +357,9 @@ extension AgentToolCoordinator {
                 startingFrom: source,
                 origin: .previous
             ).text
+            let warnings = await ThemeImageLegibility.warnings(for: updated)
             return .success(
-                "Updated \(updated.name) (\(updated.id.rawValue)).\(state)\n\n\(layers)"
+                "Updated \(updated.name) (\(updated.id.rawValue)).\(state)\n\n\(layers)\(warnings)"
             )
         } catch {
             var rollbackFailure: Error?
@@ -528,6 +536,13 @@ extension AgentToolCoordinator {
             remove: patch?.removeTitleMorph,
             base: source?.titleMorph
         )
+        let welcome = try AppThemeToolParsing.welcome(
+            patch?.welcome,
+            remove: patch?.removeWelcome,
+            base: source?.welcome,
+            themeID: themeID,
+            kind: kind
+        )
         return AppThemeEditing.makeVariant(
             named: name,
             from: base,
@@ -541,7 +556,8 @@ extension AgentToolCoordinator {
             sprites: sprites,
             moments: moments,
             words: words,
-            titleMorph: titleMorph
+            titleMorph: titleMorph,
+            welcome: welcome
         )
     }
 
@@ -1543,26 +1559,9 @@ extension AgentToolCoordinator {
             "terminal_palette_id": terminal.id.rawValue,
             "terminal_colors": TerminalPaletteToolParsing.document(terminal)
         ]
-        if let sidebar = variant?.sidebar {
-            document["sidebar"] = AppThemeToolParsing.document(sidebar)
-        }
+        document.merge(AppThemeToolParsing.characterDocument(of: variant)) { _, new in new }
         if let chrome = variant?.chrome {
             document["chrome"] = appThemeChromeDocument(chrome)
-        }
-        if let transition = variant?.transition {
-            document["transition"] = AppThemeToolParsing.document(transition)
-        }
-        if let sprites = variant?.sprites, !sprites.isEmpty {
-            document["sprites"] = AppThemeToolParsing.document(sprites)
-        }
-        if let moments = variant?.moments {
-            document["moments"] = AppThemeToolParsing.document(moments)
-        }
-        if let words = variant?.words {
-            document["words"] = AppThemeToolParsing.document(words)
-        }
-        if let titleMorph = variant?.titleMorph {
-            document["title_morph"] = AppThemeToolParsing.document(titleMorph)
         }
         return document
     }

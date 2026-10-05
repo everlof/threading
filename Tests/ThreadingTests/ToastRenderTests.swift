@@ -13,7 +13,7 @@ import XCTest
 /// or like a paragraph. `ToastTests` pins the behaviour; these pin what the behaviour looks
 /// like.
 @MainActor
-final class ToastRenderTests: XCTestCase {
+final class ToastRenderTests: HostedStoreTestCase {
 
     // MARK: - Configuration
 
@@ -59,6 +59,7 @@ final class ToastRenderTests: XCTestCase {
         /// must remain legible on every material without being confused for the dwell rail. The
         /// update story carries three aligned version rows and its update action at the same real
         /// sidebar width, which is the longest shape the daily five-tool check ordinarily produces.
+        /// The long report must stay a compact preview when an automation supplies paragraphs.
         enum Story: String, CaseIterable {
             case running
             case dormant
@@ -67,7 +68,18 @@ final class ToastRenderTests: XCTestCase {
             case opened
             case cleanup
             case agentUpdates = "agent-updates"
+            case longReport = "long-report"
         }
+
+        /// Automation summaries are provider text, and can be entire reports rather than the
+        /// one-sentence archive reason. Preserve paragraphs and paths from that input shape.
+        static let longReport = String(repeating: """
+            The device failed while compiling its graphics program. The latest event points to
+            the startup capability check in Sources/Renderer/GraphicsSupport.swift. The fix is
+            committed; the next step is to verify the release on the affected device.
+
+
+            """, count: 24)
 
         /// What the cards in an opened deck stand for: three different sessions, one of them
         /// named at a length no 240-point strip can hold, because a card that cannot name its
@@ -155,7 +167,55 @@ final class ToastRenderTests: XCTestCase {
         print("Rendered the dragged-column receipts to \(directory.path)")
     }
 
+    func testRendersLongReportInTheMainWindowSidebar() throws {
+        let previousTheme = AppThemeLibrary.current
+        let previousMotion = Design.Motion.reduceMotionOverrideForTesting
+        Design.Motion.reduceMotionOverrideForTesting = true
+        defer {
+            AppThemeLibrary.apply(previousTheme)
+            Design.Motion.reduceMotionOverrideForTesting = previousMotion
+        }
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let controller = makeMainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1_100, height: 760))
+        let content = try XCTUnwrap(window.contentView)
+        for (themeName, theme) in Render.themes {
+            AppThemePalette.set(theme)
+            for (appearanceName, appearanceID) in Render.appearances {
+                let appearance = try XCTUnwrap(NSAppearance(named: appearanceID))
+                content.appearance = appearance
+                controller.sidebarViewController.presentToast(ToastRequest(
+                    message: "Automation completed",
+                    detail: Render.longReport,
+                    persistsUntilDismissed: true
+                ))
+                AppThemeRefresh.repaint(content)
+                content.layoutSubtreeIfNeeded()
+                let sidebar = controller.sidebarViewController.view
+                let toast = try XCTUnwrap(descendants(in: sidebar).compactMap { $0 as? ToastView }.first)
+                print("Long report toast \(themeName)-\(appearanceName): \(toast.frame.height)pt")
+                XCTAssertLessThan(toast.frame.height, 150, "A report must remain a sidebar receipt")
+                XCTAssertTrue(sidebar.bounds.contains(toast.convert(toast.bounds, to: sidebar)))
+                let bitmap = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+                appearance.performAsCurrentDrawingAppearance {
+                    content.cacheDisplay(in: content.bounds, to: bitmap)
+                }
+                try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
+                    to: directory.appendingPathComponent("toast-shell-long-report-\(themeName)-\(appearanceName).png")
+                )
+            }
+        }
+        _ = controller.sidebarViewController.takePresentedToastsForTransfer()
+        XCTAssertFalse(window.isVisible, "Fast evidence must not order the main window on screen")
+    }
+
     // MARK: - Helpers
+
+    private func descendants(in view: NSView) -> [NSView] {
+        view.subviews.flatMap { [$0] + descendants(in: $0) }
+    }
 
     /// The sidebar's standing destination, built the way `ProjectSidebarViewController` builds
     /// it: borderless, so its ink is its glyph and the footer aligns it by that.
@@ -233,6 +293,8 @@ final class ToastRenderTests: XCTestCase {
                     updateArguments: ["upgrade"]
                 )
             ], runUpdates: { _ in })
+        case .longReport:
+            return ToastRequest(message: "Automation completed", detail: Render.longReport)
         }
     }
 

@@ -17,6 +17,7 @@ let platformExcludes: [String] = excludeAppleSources ? ["Apple", "Mac", "iOS"] :
 #endif
 
 let buildInfoTargets: [Target] = [
+    .target(name: "SwiftTermPOSIX", path: "Sources/SwiftTermPOSIX"),
     .executableTarget(
         name: "SwiftTermBuildInfoGenerator",
         path: "Sources/SwiftTermBuildInfoGenerator"
@@ -29,6 +30,7 @@ let buildInfoTargets: [Target] = [
 ]
 
 let portableGraphicsDependencies: [Target.Dependency] = [
+    "SwiftTermPOSIX",
     .product(
         name: "PNG",
         package: "swift-png",
@@ -70,7 +72,7 @@ let targets: [Target] = [
     ),
     .testTarget(
         name: "SwiftTermTests",
-        dependencies: ["SwiftTerm"],
+        dependencies: ["SwiftTerm", "SwiftTermPOSIX"],
         path: "Tests/SwiftTermTests",
         resources: [
             .copy("Fixtures/xterm-ghostty.infocmp"),
@@ -128,7 +130,7 @@ let targets: [Target] = [
     ),
     .testTarget(
         name: "SwiftTermTests",
-        dependencies: ["SwiftTerm"],
+        dependencies: ["SwiftTerm", "SwiftTermPOSIX"],
         path: "Tests/SwiftTermTests",
         resources: [
             .copy("Fixtures/xterm-ghostty.infocmp"),

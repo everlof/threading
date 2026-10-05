@@ -709,7 +709,7 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   execution. An unacknowledged `interrupt` refuses `work_finish` in the finish transaction.
 - **Chains bound loops.** A message continues the chain of what it replies to, or of the deepest
   mail its execution read, acknowledged or was woken by, so neither omitting `reply_to` nor never
-  calling `mail_ack` escapes the depth limit (4). (Measured before: two workers waking each
+  calling `mail_ack` escapes the chain's message and wake fuses. (Measured before: two workers waking each
   other and reading without acknowledging ping-ponged twelve rounds at depth 0.) A task mail
   started inherits the waking message's chain when it is claimed, so its spend is that chain's
   on its receipt too. The context record's `parent` is the chain id, which makes "executions in
@@ -728,8 +728,12 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   mailbox that moves onto the asker's own host replaces the asker's sent copy rather than
   colliding with it. Wake admission keys on the newest open message that may wake the worker
   and whose chain is within budget, not on whichever message arrived last. Fuses
-  that need no reading: 50 messages and 16 wakes per chain on a host, 20 sends a minute per
-  sender, 1,000 open messages per inbox. Spend limits belong to admission ([usage ledger](../feature-drafts/agent-usage-ledger.md)).
+  that need no reading: 50 messages and 16 wakes per chain on a host, 20 sends a minute
+  per sender, 1,000 open messages per inbox. A chain has no depth limit: the depth a message carries is shown in its
+  header and nothing more. A limit of 4 shipped first and refused ordinary unattended exchanges
+  (ask, answer, follow-up) long before anything looped, while the per-chain count already stops a
+  real loop — every host a cross-host message passes counts it, so a ring of hosts is bounded too.
+  Spend limits belong to admission ([usage ledger](../feature-drafts/agent-usage-ledger.md)).
 - **Notices, not bodies.** `threading-controller agent-notice post-tool-use|stop|session-start` is
   the hook command a recipe installs. It prints one host-authored line naming counts, senders and
   hosts as hook JSON (`hookSpecificOutput.additionalContext`, or `decision: block` once per
@@ -788,7 +792,7 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   moved away and back replaces the `moved` copy it left under the same id.
 
 Validation: `ControllerMailTests` (11 core cases: grants and revocation, busy recipients, notices,
-interrupts and finish, chain depth, ask/reply, wake coalescing, rate fuse, sessions, push/pull
+interrupts and finish, chain fuse, ask/reply, wake coalescing, rate fuse, sessions, push/pull
 idempotence and spoofing, refused questions, v6 upgrade), `ControllerMailAuthorityTests` (unacked
 wake ping-pong bounded in one chain, a budget held by unsettled and admitted spend, forward
 vouching and lapse, replies after revocation, a queued wake withdrawn at claim, no re-wake after a

@@ -203,7 +203,10 @@ public actor PeerTunnelMultiplexer {
     fileprivate func receive(streamID: UInt32) async throws -> Data? {
         try ensureStarted()
         guard var state = streams[streamID] else {
-            throw PeerTunnelError.unknownStream(streamID)
+            // RESET can arrive before the local socket pump asks for its next chunk.
+            let error: PeerTunnelError = retiredStreamIDs.contains(streamID)
+                ? .streamClosed(streamID) : .unknownStream(streamID)
+            throw error
         }
         guard state.phase == .open else { throw PeerTunnelError.streamNotOpen(streamID) }
         if state.inboundHead < state.inboundChunks.count {

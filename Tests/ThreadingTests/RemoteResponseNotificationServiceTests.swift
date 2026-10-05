@@ -1,9 +1,81 @@
 import XCTest
 import ThreadingRemoteKit
+import AppKit
+import AVFoundation
 @testable import Threading
 
 @MainActor
 final class RemoteResponseNotificationServiceTests: HostedStoreTestCase {
+    func testCustomSoundRequiresCurrentAssetDeviceReceiptSoundChoiceAndPreviewConsent() async throws {
+        let previous = AppThemeLibrary.current
+        let custom = try AppThemeLibrary.duplicate(AppThemeStyles.cyberpunk, name: "Phone sound \(UUID())")
+        defer { AppThemeLibrary.installResolved(previous); _ = AppThemeLibrary.delete(custom) }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("attention.caf")
+        let bytes = try await Task.detached {
+            let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: true)!
+            do {
+                var file: AVAudioFile? = try AVAudioFile(forWriting: url, settings: format.settings, commonFormat: .pcmFormatInt16, interleaved: true)
+                let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1_600)!
+                buffer.frameLength = 1_600
+                memset(buffer.int16ChannelData![0], 0, 3_200)
+                try file?.write(from: buffer)
+                file = nil
+            }
+            return try Data(contentsOf: url)
+        }.value
+        let sound = try XCTUnwrap(ThemeAssetStore.storeSound(data: bytes, for: custom.id,
+            event: .needsAttention, variant: .dark, pathExtension: "caf"))
+        let variant = try XCTUnwrap(custom.variant(.dark))
+        let theme = AppTheme(id: custom.id, name: custom.name, mode: .dark, summary: nil,
+            variants: [.dark: variant.replacingCharacter(sprites: variant.sprites,
+                moments: .init(moments: [.needsAttention: .init(sound: sound)]), words: variant.words)])
+        AppThemeLibrary.installResolved(theme)
+        let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        _ = RemoteThemeAssets.shared.manifest(for: theme, appearance: appearance)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while RemoteThemeAssets.shared.manifest(for: theme, appearance: appearance) == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let asset = try XCTUnwrap(RemoteThemeAssets.shared.manifest(for: theme, appearance: appearance)?.first { $0.kind == .sound })
+        let name = try XCTUnwrap(asset.notificationSoundName)
+        let sessionID = try makeSession()
+        let service = RemoteNotificationService(subscriptionStore: InMemoryRemoteNotificationSubscriptionStore())
+        defer { service.reset() }
+        var delivered: XCTestExpectation!
+        var names: [String?] = []
+        var soundChoices: [Bool] = []
+        service.configureHostedThemePushSender(serviceURL: { URL(string: "https://example.test")! }, isAvailable: { true }) { _, _, plays, sound in
+            names.append(sound); soundChoices.append(plays); delivered.fulfill()
+            return .init(statusCode: 200, reason: "Accepted", apnsID: nil)
+        }
+        for (consent, enabled, receipts, expected) in [
+            (true, true, ["sound.needsAttention": name], name as String?),
+            (false, true, ["sound.needsAttention": name], nil),
+            (true, false, ["sound.needsAttention": name], nil),
+            (true, true, [:], nil)
+        ] {
+            delivered = expectation(description: "push \(names.count)")
+            let result = service.register(.init(deviceToken: String(repeating: "ab", count: 32),
+                hostedRegistrationID: "th_push_" + String(repeating: "a", count: 43), environment: .sandbox,
+                enabledKinds: [.permissionRequest], soundEnabledKinds: enabled ? [.permissionRequest] : [],
+                capabilities: [.turnCompletionPreview, .notificationRetraction],
+                includesResponsePreviews: consent, themeSoundNames: receipts), deviceID: "phone",
+                authorization: .init(shareID: "owner", capability: .interact, scope: .allSessions, boundDeviceID: "phone"))
+            XCTAssertEqual(result, .registered(.init(delivery: .push)))
+            service.permissionRequested(sessionID: sessionID, toolName: "Bash", summary: "private")
+            await fulfillment(of: [delivered], timeout: 2)
+            XCTAssertEqual(names.last!, expected)
+            XCTAssertEqual(soundChoices.last, enabled)
+            service.permissionResolved(sessionID: sessionID)
+        }
+        XCTAssertEqual(RemoteThemeAssets.shared.soundName(for: .permissionRequest, confirmed: [asset.slot: name]), name)
+        AppThemeLibrary.installResolved(previous)
+        XCTAssertNil(RemoteThemeAssets.shared.soundName(for: .permissionRequest, confirmed: [asset.slot: name]))
+    }
+
     func testRunningShellAcrossWatchRepliesNotifiesOnlyAfterItsResult() async throws {
         let sessionID = try makeSession()
         let runtime = AgentRuntime.shared

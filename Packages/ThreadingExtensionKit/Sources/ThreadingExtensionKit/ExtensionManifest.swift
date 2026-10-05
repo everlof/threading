@@ -32,6 +32,19 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
     public let fonts: [ExtensionFontContribution]
     public let localizations: [ExtensionLocalizationContribution]
     public let networkGrants: [ExtensionNetworkGrant]
+    /// Stored only when it says something, so a manifest that never declares a scope encodes
+    /// exactly as it did before the key existed.
+    private let declaredComponentThemeScope: ExtensionComponentThemeScope?
+
+    /// A binding floor for every component patch this extension publishes.
+    ///
+    /// `.ownThemes` scopes *all* of them to the extension's own themes, whatever each patch
+    /// states, which is what lets the install review say so before any code runs: a per-patch
+    /// scope is only known once the process publishes. A patch cannot widen it. Requires at
+    /// least one contributed theme and a component capability.
+    public var componentThemeScope: ExtensionComponentThemeScope {
+        declaredComponentThemeScope ?? .always
+    }
 
     public init(
         formatVersion: Int = Self.currentFormatVersion,
@@ -53,7 +66,8 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         themes: [ExtensionThemeContribution] = [],
         fonts: [ExtensionFontContribution] = [],
         localizations: [ExtensionLocalizationContribution] = [],
-        networkGrants: [ExtensionNetworkGrant] = []
+        networkGrants: [ExtensionNetworkGrant] = [],
+        componentThemeScope: ExtensionComponentThemeScope = .always
     ) {
         self.formatVersion = formatVersion
         self.identifier = identifier
@@ -75,6 +89,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         self.fonts = fonts
         self.localizations = localizations
         self.networkGrants = networkGrants
+        declaredComponentThemeScope = componentThemeScope == .always ? nil : componentThemeScope
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -82,6 +97,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         case workspaceNavigators, mcpTools, settings
         case services, factDefinitions, sourceControlProviders, serviceDependencies, companions, themes, fonts
         case localizations, networkGrants
+        case declaredComponentThemeScope = "componentThemeScope"
     }
 
     public init(from decoder: Decoder) throws {
@@ -143,6 +159,11 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
             [ExtensionNetworkGrant].self,
             forKey: .networkGrants
         ) ?? []
+        let scope = try container.decodeIfPresent(
+            ExtensionComponentThemeScope.self,
+            forKey: .declaredComponentThemeScope
+        )
+        declaredComponentThemeScope = scope == .always ? nil : scope
     }
 
     public func validate() throws {
@@ -484,6 +505,21 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
                 path: "capabilities",
                 message: "must contain 'appearance.themes' when themes are declared"
             ))
+        }
+        if componentThemeScope == .ownThemes {
+            if themes.isEmpty {
+                issues.append(.init(
+                    path: "componentThemeScope",
+                    message: ExtensionComponentThemeScope.requiresContributedThemeMessage
+                ))
+            }
+            if capabilities.isDisjoint(with: [.componentCustomization, .sessionIdentityRenderer]) {
+                issues.append(.init(
+                    path: "componentThemeScope",
+                    message: "scopes component patches, so the extension must declare "
+                        + "'ui.components' or 'appearance.session-identity'"
+                ))
+            }
         }
 
         if fonts.count > ExtensionFontContribution.maximumCount {

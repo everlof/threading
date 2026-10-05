@@ -13,22 +13,18 @@ final class IdentityMarkInkTests: XCTestCase {
     private var store: AccountPreferencesStore!
     private let accent = NSColor(hex: "#00FF41")!
 
-    override func setUp() {
-        super.setUp()
-        MainActor.assumeIsolated {
-            previousTheme = AppThemePalette.current
-            UserDefaults.standard.removePersistentDomain(forName: suite)
-            store = AccountPreferencesStore(defaults: UserDefaults(suiteName: suite)!)
-        }
+    override func setUp() async throws {
+        try await super.setUp()
+        previousTheme = AppThemePalette.current
+        UserDefaults.standard.removePersistentDomain(forName: suite)
+        store = AccountPreferencesStore(defaults: UserDefaults(suiteName: suite)!)
     }
 
-    override func tearDown() {
-        MainActor.assumeIsolated {
-            if let previousTheme { AppThemePalette.set(previousTheme) }
-            store = nil
-            UserDefaults.standard.removePersistentDomain(forName: suite)
-        }
-        super.tearDown()
+    override func tearDown() async throws {
+        if let previousTheme { AppThemePalette.set(previousTheme) }
+        store = nil
+        UserDefaults.standard.removePersistentDomain(forName: suite)
+        try await super.tearDown()
     }
 
     private func useTheme(marks: AppTheme.Material.IdentityMarks) throws {

@@ -995,6 +995,67 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertNotNil(try database.attachmentsPayload(for: kept))
     }
 
+    // MARK: - Project Removal
+
+    /// The panel and attachment tables carry no foreign key, so the project's cascade never
+    /// reached them and every removed project left its chats' rows behind. They leave in the
+    /// same transaction now, and only the removed project's.
+    func testRemovingAProjectDeletesItsChatsPanelAndAttachmentRows() throws {
+        let database = try makeDatabase()
+        let removedChat = AgentSession(kind: .claude, title: "Removed")
+        let keptChat = AgentSession(kind: .codex, title: "Kept")
+        let removed = makeProject("alpha", sessions: [removedChat])
+        let kept = makeProject("beta", sessions: [keptChat])
+        try database.save(ProjectsState(projects: [removed, kept], selectedSessionID: nil))
+        for sessionID in [removedChat.id, keptChat.id] {
+            try database.savePanelPayload("panel-\(sessionID.uuidString)", for: sessionID)
+            try database.saveAttachmentsPayload("attachments-\(sessionID.uuidString)", for: sessionID)
+        }
+
+        try database.removeProject(
+            id: removed.id,
+            holding: [removedChat.id],
+            at: 0,
+            selectedSessionID: nil
+        )
+
+        let restored = try database.load().state
+        XCTAssertEqual(restored.projects.map(\.name), ["beta"])
+        XCTAssertNil(try database.panelPayload(for: removedChat.id))
+        XCTAssertNil(try database.attachmentsPayload(for: removedChat.id))
+        XCTAssertNotNil(try database.panelPayload(for: keptChat.id))
+        XCTAssertNotNil(try database.attachmentsPayload(for: keptChat.id))
+    }
+
+    /// The cascade deletes every session row naming the project, whatever the caller's graph
+    /// believes it holds. An adopted checkout row reclaimed as "empty" by a graph that had
+    /// drifted from the store took two live chats with it this way. A removal may only take
+    /// the chats its caller named; anything more is refused and nothing is written.
+    func testAProjectRemovalRefusesToCascadeChatsItsCallerDidNotName() throws {
+        let database = try makeDatabase()
+        let unseen = AgentSession(kind: .claude, title: "Still in the store")
+        let project = makeProject("adopted-checkout", sessions: [unseen])
+        try database.save(ProjectsState(projects: [project], selectedSessionID: nil))
+        try database.saveAttachmentsPayload("attachments", for: unseen.id)
+
+        XCTAssertThrowsError(try database.removeProject(
+            id: project.id,
+            holding: [],
+            at: 0,
+            selectedSessionID: nil
+        )) { error in
+            guard case ProjectDatabaseWriteError.unaccountedSessions(let projectID, let ids) = error
+            else { return XCTFail("expected an unaccounted-sessions refusal, got \(error)") }
+            XCTAssertEqual(projectID, project.id.uuidString)
+            XCTAssertEqual(ids, [unseen.id.uuidString])
+        }
+
+        let restored = try database.load().state
+        XCTAssertEqual(restored.projects.map(\.name), ["adopted-checkout"])
+        XCTAssertEqual(restored.projects.first?.sessions.map(\.id), [unseen.id])
+        XCTAssertNotNil(try database.attachmentsPayload(for: unseen.id))
+    }
+
     // MARK: - Running Sessions at Quit
 
     func testRunningSessionsRoundTripInOrder() throws {

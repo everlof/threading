@@ -14,16 +14,14 @@ final class SidebarTriggersModeTests: XCTestCase {
     private var stateManager: StateManager?
     private var window: NSWindow?
 
-    override func tearDown() {
-        MainActor.assumeIsolated {
-            window?.contentViewController = nil
-            window = nil
-            stateManager?.closeDatabase()
-            stateManager = nil
-            if let directory { try? FileManager.default.removeItem(at: directory) }
-            directory = nil
-        }
-        super.tearDown()
+    override func tearDown() async throws {
+        window?.contentViewController = nil
+        window = nil
+        stateManager?.closeDatabase()
+        stateManager = nil
+        if let directory { try? FileManager.default.removeItem(at: directory) }
+        directory = nil
+        try await super.tearDown()
     }
 
     func testOpeningAutomationsClearsTheSelectedSession() throws {

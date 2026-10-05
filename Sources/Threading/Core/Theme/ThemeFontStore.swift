@@ -132,7 +132,7 @@ enum ThemeFontStore {
 
     // MARK: - Private Methods
 
-    private static func folder(for themeID: AppThemeID) -> URL? {
+    static func folder(for themeID: AppThemeID) -> URL? {
         guard themeID.isSafeAssetDirectoryName else { return nil }
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,

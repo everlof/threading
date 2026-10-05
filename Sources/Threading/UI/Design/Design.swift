@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingRemoteKit
 import CoreText
 
 /// The app's design tokens.
@@ -498,8 +499,7 @@ public enum Design {
                 }
                 if let typeface = headingStyle.typeface {
                     guard typeface != .standard else { return font }
-                    if let descriptor = font.fontDescriptor.withDesign(typeface.systemDesign),
-                       let themed = NSFont(descriptor: descriptor, size: font.pointSize) {
+                    if let themed = SystemFontFaces.designed(font, design: typeface.systemDesign) {
                         return themed
                     }
                 }
@@ -511,8 +511,7 @@ public enum Design {
                 }
                 if let typeface = buttonStyle.typeface {
                     guard typeface != .standard else { return font }
-                    if let descriptor = font.fontDescriptor.withDesign(typeface.systemDesign),
-                       let themed = NSFont(descriptor: descriptor, size: font.pointSize) {
+                    if let themed = SystemFontFaces.designed(font, design: typeface.systemDesign) {
                         return themed
                     }
                 }
@@ -522,11 +521,7 @@ public enum Design {
             }
 
             guard material.typeface != .standard else { return font }
-            guard let descriptor = font.fontDescriptor.withDesign(material.typeface.systemDesign),
-                  let themed = NSFont(descriptor: descriptor, size: font.pointSize) else {
-                return font
-            }
-            return themed
+            return SystemFontFaces.designed(font, design: material.typeface.systemDesign) ?? font
         }
 
         /// Builds a display role before family resolution so its authored weight and slant
@@ -707,33 +702,114 @@ public enum Design {
             return prose(base)
         }
 
+        /// The new-session composer's greeting as the current theme's welcome sets it, and the
+        /// heading exactly when it sets nothing. See `welcomeLine`.
+        public static func welcomeGreeting() -> NSFont {
+            welcomeLine(
+                welcomeStyle(\.greeting),
+                basePointSize: WelcomeLine.headingPointSize,
+                defaultWeight: .semibold,
+                isHeading: true
+            )
+        }
+
+        /// The line beneath the greeting, measured from the body the way the greeting is from
+        /// the heading. The body exactly when the theme states no style for it.
+        public static func welcomeCaption() -> NSFont {
+            welcomeLine(
+                welcomeStyle(\.caption),
+                basePointSize: WelcomeLine.bodyPointSize,
+                defaultWeight: .regular,
+                isHeading: false
+            )
+        }
+
+        /// The point sizes `heading()` and `body()` scale, restated for the welcome's scale.
+        private enum WelcomeLine {
+            static let headingPointSize: CGFloat = 20
+            static let bodyPointSize: CGFloat = 13
+        }
+
+        private static func welcomeStyle(
+            _ slot: KeyPath<ThemeWelcome, ThemeWelcome.Wording?>
+        ) -> ThemeWelcome.TextStyle? {
+            AppThemePalette.current
+                .variant(for: NSApplication.shared.effectiveAppearance)?
+                .welcome?[keyPath: slot]?.style
+        }
+
+        /// A line the theme sets itself: its `scale` times the app role's size, its weight, and
+        /// the first face that answers — the stated family (a font the theme ships or one this
+        /// Mac has), then the user's own override and the stated system design — before the app
+        /// role's own layers.
+        ///
+        /// A stated family outranks the user's override for the wordmark's reason: the welcome
+        /// is the theme's voice, not prose the user reads in their chosen face. A system design
+        /// does not, because it is a class of face rather than a particular one — the same order
+        /// `prose` gives a heading style's typeface.
+        private static func welcomeLine(
+            _ style: ThemeWelcome.TextStyle?,
+            basePointSize: CGFloat,
+            defaultWeight: NSFont.Weight,
+            isHeading: Bool
+        ) -> NSFont {
+            guard let style else { return isHeading ? heading() : body() }
+            let limits = ThemeWelcomeLimits.greetingScales
+            let scale = CGFloat(min(max(style.scale ?? 1, limits.lowerBound), limits.upperBound))
+            let pointSize = scaled(basePointSize) * scale
+            let weight = style.weight?.appKitWeight
+            let system = NSFont.systemFont(ofSize: pointSize, weight: weight ?? defaultWeight)
+
+            if let family = style.fontFamily, !family.isEmpty,
+               let resolved = inFamily(family, like: system) {
+                return resolved
+            }
+            if let typeface = style.typeface {
+                for family in overrideFamilies(for: .chrome) {
+                    if let resolved = inFamily(family, like: system) { return resolved }
+                }
+                guard typeface != .standard else { return system }
+                return SystemFontFaces.designed(system, design: typeface.systemDesign) ?? system
+            }
+            guard isHeading else { return prose(system) }
+            // A stated weight is the theme's, so it wins over the heading style's own; the
+            // style's face still answers.
+            guard weight == nil else {
+                let material = AppThemePalette.current.material(
+                    for: NSApplication.shared.effectiveAppearance
+                )
+                return prose(system, headingStyle: material.headingStyle)
+            }
+            return heading(pointSize: pointSize, defaultWeight: defaultWeight, surface: .chrome)
+        }
+
         /// Tool subjects, paths, diffs, and other code-shaped content. A dense code reader may
         /// choose one bounded, reader-controlled step without inventing a point size of its own.
         public static func code(
             weight: NSFont.Weight = .regular,
             size: Design.CodeTextScale = .standard
         ) -> NSFont {
-            .monospacedSystemFont(ofSize: scaled(11) * size.factor, weight: weight)
+            SystemFontFaces.monospaced(ofSize: scaled(11) * size.factor, weight: weight)
         }
 
         /// Inline code that must share the body's line box.
         public static func inlineCode() -> NSFont {
-            .monospacedSystemFont(ofSize: scaled(12), weight: .regular)
+            SystemFontFaces.monospaced(ofSize: scaled(12), weight: .regular)
         }
 
         /// A code sample inside the compact theme-preview card.
         public static func previewCode() -> NSFont {
-            .monospacedSystemFont(ofSize: scaled(11.5), weight: .regular)
+            SystemFontFaces.monospaced(ofSize: scaled(11.5), weight: .regular)
         }
 
         /// Dense process metadata and compact hexadecimal values.
         public static func compactCode() -> NSFont {
-            .monospacedSystemFont(ofSize: scaled(10), weight: .regular)
+            SystemFontFaces.monospaced(ofSize: scaled(10), weight: .regular)
         }
 
         /// A compact tool identifier; deliberately halfway between code and metadata.
         public static func compactToolName() -> NSFont {
-            .monospacedSystemFont(ofSize: scaled(10.5), weight: .regular)
+            SystemFontFaces.monospaced(ofSize: scaled(10.5), weight: .regular)
         }
 
         /// Numeric labels use fixed-width digits without making the surrounding prose code.
@@ -2770,12 +2846,6 @@ public final class ThemeBackdropDressingLayer: CALayer {
             gradient.isHidden = false
             gradient.colors = stated.colors.map(\.cgColor)
             gradient.locations = stated.locations.map { NSNumber(value: Double($0)) }
-            // CSS angles: 0° flows toward the top, 90° toward the right. The layer's unit
-            // space has its origin at the bottom-left here, so "toward the top" is +y.
-            let radians = stated.angleDegrees * .pi / 180
-            let direction = CGPoint(x: sin(radians) / 2, y: cos(radians) / 2)
-            gradient.startPoint = CGPoint(x: 0.5 - direction.x, y: 0.5 - direction.y)
-            gradient.endPoint = CGPoint(x: 0.5 + direction.x, y: 0.5 + direction.y)
             if let drift = stated.drift, drift.isValid {
                 let observer = motionView ?? ThemeBackdropMotionView(gradient: gradient)
                 if observer.superview !== owner { owner.addSubview(observer) }
@@ -2783,6 +2853,12 @@ public final class ThemeBackdropDressingLayer: CALayer {
                 observer.configure(angleDegrees: Double(stated.angleDegrees), drift: drift)
             } else {
                 stopMotion()
+                // A drifting gradient's animator owns its model endpoints too. Restating
+                // the base points on every repaint erased an unchanged frozen preview phase.
+                let points = ThemeGradientGeometry.endpoints(angleDegrees: Double(stated.angleDegrees),
+                    flipped: false, drift: nil, phase: 0)
+                gradient.startPoint = points.start
+                gradient.endPoint = points.end
             }
         } else {
             stopMotion()

@@ -51,6 +51,12 @@ struct AutomationReview: Equatable {
                                detail: revision.projectID.uuidString, tone: .caution, identifier: "project"))
         }
 
+        if let files = revision.projectAutomation {
+            facts.append(.init(label: L10n.string("Project files"), value: files.automationID,
+                detail: files.fingerprint + "\n" + files.resources.joined(separator: "\n"), identifier: "projectFiles"))
+            facts.append(.init(label: L10n.string("Automation workspace"), value: files.workspacePath,
+                detail: files.resourcesPath, identifier: "automationWorkspace"))
+        }
         facts.append(timing(revision, schedule: schedule, purpose: purpose, context: context))
         if schedule == nil {
             facts.append(.init(

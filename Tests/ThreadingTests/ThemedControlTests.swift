@@ -7895,6 +7895,8 @@ final class ThemedControlTests: HostedStoreTestCase {
         XCTAssertEqual(
             ComponentGalleryViewController.componentNames,
             [
+                "AudioSpectrumView",
+                "FactSheetView",
                 "AnnotationSendBar",
                 "KeyEquivalentScopeView",
                 "AgentActivityBeamView",
@@ -7994,6 +7996,9 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "ThemeLogoView",
                 "ThemeMascotView",
                 "SidebarMascotView",
+                "ThemeWelcomeGroundView",
+                "ThemeWelcomeMarkView",
+                "ThemeWelcomeScrimView",
                 "ThemeSwatchImage",
                 "ThemeSwatchView",
                 "ThemeTransitionOverlayView",
@@ -8105,7 +8110,10 @@ final class ThemedControlTests: HostedStoreTestCase {
         // its zero-size lifecycle observer drive the drift SidebarBackdropView's story shows
         // under a drifting theme (ThemeGradientMotionTests). The moment presenter plays that same
         // overlay for an app event and owns only the cooldown (ThemeCharacterTests).
+        // The audio viewport observer owns only clip notifications, not pixels; the spectrum
+        // story shows its consumer and AudioSpectrumPresentationTests covers clipping demand.
         let nonvisualModels: Set<String> = [
+            "AudioSpectrumViewportObserver",
             "SimulatorTouchOverlayModel",
             "ThemeParticleHold",
             "ThemeTransitionPresenter",

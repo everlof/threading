@@ -436,10 +436,10 @@ struct MobileConnectionProgressCard: View {
                 LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.pane) {
                     VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
                         Text("Connection progress")
-                            .font(.title2.bold())
+                            .font(theme.chromeSwiftUIFont(.title2, weight: .bold))
                             .foregroundStyle(theme.label)
                         Text("Choose a connection step and see it in the dashboard card, the navigation bar, or both.")
-                            .font(.subheadline)
+                            .font(theme.chromeSwiftUIFont(.subheadline))
                             .foregroundStyle(theme.secondaryLabel)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -465,7 +465,7 @@ struct MobileConnectionProgressCard: View {
                     if surface != .navigation {
                         VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
                             Text("Dashboard body")
-                                .font(.headline)
+                                .font(theme.chromeSwiftUIFont(.headline))
                                 .foregroundStyle(theme.label)
                                 .padding(.horizontal, MobileDesign.Spacing.inset)
                             MobileConnectionProgressCard(
@@ -475,7 +475,7 @@ struct MobileConnectionProgressCard: View {
                         }
                     } else {
                         Text("The navigation component is shown above. Choose another state to check its wording and transition.")
-                            .font(.footnote)
+                            .font(theme.chromeSwiftUIFont(.footnote))
                             .foregroundStyle(theme.secondaryLabel)
                             .padding(.horizontal, MobileDesign.Spacing.inset)
                     }
@@ -787,6 +787,10 @@ private struct DashboardUIKitRowConfiguration {
 private struct MobileDashboardCollection: UIViewControllerRepresentable {
     let model: DashboardCollectionModel
     let theme: RemoteThemePalette
+    var workingCount: Int = 0
+    var attentionCount: Int = 0
+    var mascotMood = MobileThemeMascotView.restingMood
+    var mascotFoot = NSDirectionalEdgeInsets.zero
     let bottomContentInset: CGFloat
     let content: @MainActor (DashboardCollectionItemID) -> AnyView
     let rowConfiguration: @MainActor (String) -> DashboardUIKitRowConfiguration?
@@ -807,6 +811,8 @@ private struct MobileDashboardCollection: UIViewControllerRepresentable {
         _ controller: MobileDashboardCollectionViewController,
         context _: Context
     ) {
+        controller.setWorkingCount(workingCount)
+        controller.setAttentionCount(attentionCount)
         controller.update(
             sections: model.sections,
             theme: theme,
@@ -816,6 +822,8 @@ private struct MobileDashboardCollection: UIViewControllerRepresentable {
             refresh: refresh,
             previewChange: model.previewChange
         )
+        // After the theme, so a finished turn is celebrated in the pictures now in force.
+        controller.setMascot(mood: mascotMood, foot: mascotFoot)
     }
 }
 
@@ -836,6 +844,10 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
     private var presentedSections: [DashboardCollectionSection]
     private var theme: RemoteThemePalette
     private let themeBackdrop = MobileThemeBackdropView()
+    private let themeMascot = MobileThemeMascotView()
+    /// Where the mascot stands, measured from the safe area: the floating bar's geometry,
+    /// which the SwiftUI page that draws the bar states.
+    private var mascotFoot = NSDirectionalEdgeInsets.zero
     private var bottomContentInset: CGFloat
     private var content: @MainActor (DashboardCollectionItemID) -> AnyView
     private var rowConfiguration: @MainActor (String) -> DashboardUIKitRowConfiguration?
@@ -869,7 +881,16 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
         view.delegate = self
         view.alwaysBounceVertical = true
         view.backgroundColor = .clear
-        view.backgroundView = themeBackdrop
+        // One stationary ground: the backdrop, and the mascot standing on it. Rows scroll over
+        // both, so the mascot costs the list no strip of its own.
+        let ground = UIView()
+        ground.isUserInteractionEnabled = false
+        for layer in [themeBackdrop, themeMascot] as [UIView] {
+            layer.frame = ground.bounds
+            layer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            ground.addSubview(layer)
+        }
+        view.backgroundView = ground
         view.contentInset = UIEdgeInsets(
             top: MobileDesign.Spacing.large,
             left: 0,
@@ -915,11 +936,23 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
         refreshTask?.cancel()
     }
 
+    func setWorkingCount(_ count: Int) { themeBackdrop.workingCount = count }
+    func setAttentionCount(_ count: Int) { themeBackdrop.attentionCount = count }
+
+    func setMascot(mood: String, foot: NSDirectionalEdgeInsets) {
+        themeMascot.mood = mood
+        guard foot != mascotFoot else { return }
+        mascotFoot = foot
+        placeMascot()
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = theme.uiGround
         themeBackdrop.apply(theme)
+        themeMascot.apply(theme)
         view.addSubview(collectionView)
+        placeMascot()
         NSLayoutConstraint.activate([
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -958,6 +991,23 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
         themeBackdrop.isPresentationActive = false
     }
 
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        placeMascot()
+    }
+
+    /// The floating bar rides the safe area, so the mascot standing on it does too.
+    private func placeMascot() {
+        guard isViewLoaded else { return }
+        let safe = view.safeAreaInsets
+        let trailing = view.effectiveUserInterfaceLayoutDirection == .rightToLeft ? safe.left : safe.right
+        themeMascot.foot = NSDirectionalEdgeInsets(
+            top: 0, leading: 0,
+            bottom: safe.bottom + mascotFoot.bottom,
+            trailing: trailing + mascotFoot.trailing
+        )
+    }
+
     func update(
         sections: [DashboardCollectionSection],
         theme: RemoteThemePalette,
@@ -982,6 +1032,7 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
 
         guard isViewLoaded else { return }
         themeBackdrop.apply(theme)
+        themeMascot.apply(theme)
         collectionView.refreshControl?.tintColor = theme.uiAccent
         if bottomInsetChanged {
             collectionView.contentInset.bottom = bottomContentInset
@@ -1685,8 +1736,9 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
     }
 
     private func applyFonts() {
-        metadataLabel.font = UIFont.preferredFont(forTextStyle: .caption2)
-        ageLabel.font = UIFont.preferredFont(forTextStyle: .caption2)
+        let theme = configuration?.theme ?? RemoteThemePalette(nil)
+        metadataLabel.font = theme.chromeFont(forTextStyle: .caption2)
+        ageLabel.font = theme.chromeFont(forTextStyle: .caption2)
         accountGlyph.font = UIFont.systemFont(
             ofSize: configuration.flatMap { config in
                 guard case .chat(let session) = config.row.item else { return nil }
@@ -1705,6 +1757,7 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         let theme = configuration.theme
         dividerView.backgroundColor = theme.uiDivider
         dividerView.isHidden = !configuration.row.hasDivider
+        titleView.theme = theme
         titleView.configure(
             title: configuration.row.item.title,
             textStyle: .subheadline,
@@ -1878,14 +1931,14 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         switch identity.mark {
         case .brand(let asset, let keepsItsOwnColour):
             markImageView.image = UIImage(named: asset)?.withRenderingMode(
-                keepsItsOwnColour ? .alwaysOriginal : .alwaysTemplate
+                keepsItsOwnColour && !theme.tintsIdentityMarks ? .alwaysOriginal : .alwaysTemplate
             )
-            markImageView.tintColor = keepsItsOwnColour ? nil : theme.uiSecondaryLabel
+            markImageView.tintColor = theme.tintsIdentityMarks ? theme.uiAccent : (keepsItsOwnColour ? nil : theme.uiSecondaryLabel)
         case .symbol(let name):
             markImageView.image = UIImage(systemName: name)?.withConfiguration(
                 UIImage.SymbolConfiguration(pointSize: MobileDesign.Size.rowMarkGlyph, weight: .medium)
             )
-            markImageView.tintColor = theme.uiSecondaryLabel
+            markImageView.tintColor = theme.tintsIdentityMarks ? theme.uiAccent : theme.uiSecondaryLabel
         }
         markImageView.alpha = dimmed ? MobileDesign.Opacity.dormantMark : 1
     }
@@ -1895,7 +1948,7 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         markImageView.image = UIImage(systemName: MobileTerminalMark.symbolName)?.withConfiguration(
             UIImage.SymbolConfiguration(pointSize: MobileDesign.Size.rowMarkGlyph, weight: .medium)
         )
-        markImageView.tintColor = theme.uiSecondaryLabel
+        markImageView.tintColor = theme.tintsIdentityMarks ? theme.uiAccent : theme.uiSecondaryLabel
         markImageView.alpha = dimmed ? MobileDesign.Opacity.dormantMark : 1
     }
 
@@ -2002,7 +2055,7 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         }
         result.addAttribute(
             .font,
-            value: UIFont.preferredFont(forTextStyle: .caption2),
+            value: theme.chromeFont(forTextStyle: .caption2),
             range: NSRange(location: 0, length: result.length)
         )
         return result
@@ -2544,6 +2597,8 @@ enum MobileDashboardHighlightProbe {
 struct MobileDashboardCollectionPerformanceMetrics: Equatable {
     let backdropLayerCount: Int
     let showsBackdropGradient: Bool
+    /// The collection's stationary ground holds exactly the backdrop and, above it, the mascot.
+    let groundStacksMascotOverBackdrop: Bool
     let snapshotItemCount: Int
     let hostedContentCount: Int
     let mountedCellCount: Int
@@ -3045,6 +3100,8 @@ private extension MobileDashboardCollectionViewController {
         return MobileDashboardCollectionPerformanceMetrics(
             backdropLayerCount: themeBackdrop.layer.sublayers?.count ?? 0,
             showsBackdropGradient: themeBackdrop.showsGradient,
+            groundStacksMascotOverBackdrop: collectionView.backgroundView?.subviews
+                .map { ObjectIdentifier($0) } == [ObjectIdentifier(themeBackdrop), ObjectIdentifier(themeMascot)],
             snapshotItemCount: dataSource.snapshot().numberOfItems,
             hostedContentCount: hostedContentCount,
             mountedCellCount: collectionView.visibleCells.count,
@@ -3356,6 +3413,14 @@ struct SessionDashboard: View {
         return MobileDashboardCollection(
             model: collectionModel,
             theme: theme,
+            workingCount: model.dashboardCatalogue?.workingCount ?? 0,
+            attentionCount: model.dashboardCatalogue?.attentionCount ?? 0,
+            mascotMood: model.dashboardCatalogue?.mascotMood ?? MobileThemeMascotView.restingMood,
+            mascotFoot: NSDirectionalEdgeInsets(
+                top: 0, leading: 0,
+                bottom: dashboardMascotFootInset,
+                trailing: Self.floatingBarMargin
+            ),
             bottomContentInset: dashboardCollectionBottomInset,
             content: { item in
                 dashboardCollectionContent(item, model: collectionModel)
@@ -3374,10 +3439,22 @@ struct SessionDashboard: View {
     /// strip—the bottom-bar regression the overlay avoids.
     private var dashboardCollectionBottomInset: CGFloat {
         let breathingRoom = MobileDesign.Spacing.pane + MobileDesign.Spacing.medium
-        guard showsDashboardFloatingBar else { return breathingRoom }
-        return breathingRoom
-            + MobileDesign.Size.floatingBarControl
-            + 2 * MobileDesign.Spacing.small
+        let controls = showsDashboardFloatingBar
+            ? MobileDesign.Size.floatingBarControl + 2 * MobileDesign.Spacing.small
+            : 0
+        // Rows pass over the mascot; only the last one needs to be able to rise clear of it.
+        let mascot = MobileThemeMascotView.stands(in: theme)
+            ? dashboardMascotFootInset + MobileDesign.Size.mascot + MobileDesign.Spacing.small
+            : 0
+        return max(breathingRoom + controls, mascot)
+    }
+
+    /// How far above the safe area the theme's mascot stands: on the top edge of the floating
+    /// pills, or at the foot itself when there are none.
+    private var dashboardMascotFootInset: CGFloat {
+        showsDashboardFloatingBar
+            ? MobileDesign.Size.floatingBarControl + MobileDesign.Spacing.small
+            : MobileDesign.Spacing.small
     }
 
     private var showsDashboardFloatingBar: Bool {
@@ -3804,13 +3881,13 @@ struct SessionDashboard: View {
             Image(systemName: "sparkles")
                 .foregroundStyle(theme.accent)
             Text("This is the demo. Nothing here is connected.")
-                .font(.footnote)
+                .font(theme.chromeSwiftUIFont(.footnote))
                 .foregroundStyle(theme.secondaryLabel)
             Spacer()
             Button("End Demo") {
                 model.endDemo()
             }
-            .font(.footnote.weight(.semibold))
+            .font(theme.chromeSwiftUIFont(.footnote, weight: .semibold))
             .buttonStyle(.plain)
             .foregroundStyle(theme.accent)
         }
@@ -4075,6 +4152,10 @@ struct SessionDashboard: View {
         }
     }
 
+    /// The floating bar's inset from the safe area's sides. The theme's mascot stands on its
+    /// trailing pill, so it keeps the same margin.
+    private static let floatingBarMargin = MobileDesign.Spacing.large
+
     /// Search and the chat starter, floating at the page's bottom edge.
     ///
     /// Both lived in the navigation bar for a while, which crowded the Mac's name out of its
@@ -4094,7 +4175,7 @@ struct SessionDashboard: View {
                             Text(MobileL10n.string("Search"))
                             Spacer(minLength: 0)
                         }
-                        .font(.body)
+                        .font(theme.chromeSwiftUIFont(.body))
                         .foregroundStyle(theme.secondaryLabel)
                         .padding(.horizontal, MobileDesign.Spacing.large)
                         .frame(
@@ -4124,7 +4205,7 @@ struct SessionDashboard: View {
                             Image(systemName: "plus")
                             Text(MobileL10n.string("New"))
                         }
-                        .font(.headline)
+                        .font(theme.chromeSwiftUIFont(.headline))
                         .foregroundStyle(theme.accentForeground)
                         .padding(.horizontal, MobileDesign.Spacing.large)
                         .frame(minHeight: MobileDesign.Size.floatingBarControl)
@@ -4138,7 +4219,7 @@ struct SessionDashboard: View {
                     )
                 }
             }
-            .padding(.horizontal, MobileDesign.Spacing.large)
+            .padding(.horizontal, Self.floatingBarMargin)
             .padding(.top, MobileDesign.Spacing.small)
             .padding(.bottom, MobileDesign.Spacing.small)
         }
@@ -4437,16 +4518,16 @@ struct SessionDashboard: View {
         return ThemedRowGroup {
             HStack(alignment: .top, spacing: MobileDesign.Spacing.medium) {
                 Image(systemName: recoveryCardSymbol(for: failure.cause))
-                    .font(.title3.weight(.semibold))
+                    .font(theme.chromeSwiftUIFont(.title3, weight: .semibold))
                     .foregroundStyle(theme.warning)
                     .frame(width: MobileDesign.Size.minimumTapTarget)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
                     Text(presentation.title)
-                        .font(.headline)
+                        .font(theme.chromeSwiftUIFont(.headline))
                         .foregroundStyle(theme.label)
                     Text(presentation.message)
-                        .font(.subheadline)
+                        .font(theme.chromeSwiftUIFont(.subheadline))
                         .foregroundStyle(theme.secondaryLabel)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -4478,7 +4559,7 @@ struct SessionDashboard: View {
                 ThemedRowDivider()
                 VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
                     Text(MobileL10n.string("Saved identity"))
-                        .font(.caption.weight(.semibold))
+                        .font(theme.chromeSwiftUIFont(.caption, weight: .semibold))
                         .foregroundStyle(theme.secondaryLabel)
                     Text(identityCode)
                         .font(.footnote.monospaced())
@@ -4490,7 +4571,7 @@ struct SessionDashboard: View {
                     Text(MobileL10n.string(
                         "Compare this code with Identity Code in Threading → Settings → Remote Access on the Mac before scanning again."
                     ))
-                    .font(.footnote)
+                    .font(theme.chromeSwiftUIFont(.footnote))
                     .foregroundStyle(theme.secondaryLabel)
                     .fixedSize(horizontal: false, vertical: true)
                 }
@@ -4543,7 +4624,7 @@ struct SessionDashboard: View {
             ThemedRowDivider()
             Button(action: reportConnectionIssue) {
                 Label(MobileL10n.string("Report a problem"), systemImage: "exclamationmark.bubble")
-                    .font(.subheadline.weight(.semibold))
+                    .font(theme.chromeSwiftUIFont(.subheadline, weight: .semibold))
                     .frame(
                         maxWidth: .infinity,
                         minHeight: MobileDesign.Size.minimumTapTarget
@@ -4561,10 +4642,10 @@ struct SessionDashboard: View {
     private func connectionFact(_ title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
             Text(title)
-                .font(.caption)
+                .font(theme.chromeSwiftUIFont(.caption))
                 .foregroundStyle(theme.tertiaryLabel)
             Text(value)
-                .font(.subheadline.weight(.medium))
+                .font(theme.chromeSwiftUIFont(.subheadline, weight: .medium))
                 .foregroundStyle(theme.label)
         }
         .accessibilityElement(children: .combine)
@@ -4754,7 +4835,7 @@ struct NewSessionButton: View {
                     width: MobileDesign.Size.compactControl,
                     height: MobileDesign.Size.compactControl
                 )
-                .background(theme.controlResting, in: Circle())
+                .background(theme.dashboardControlResting, in: Circle())
                 .contentShape(Circle())
         }
         .onAppear { MobileButtonFeedback.shared.prepare() }
@@ -4768,7 +4849,7 @@ private struct DashboardTypeHeader: View {
 
     var body: some View {
         Label(type.title, systemImage: type.symbol)
-            .font(.headline)
+            .font(theme.chromeSwiftUIFont(.headline))
             .foregroundStyle(theme.label)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -4795,7 +4876,7 @@ private struct DashboardProjectHeader: View {
                 toggleExpanded()
             } label: {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.body.weight(.semibold))
+                    .font(theme.chromeSwiftUIFont(.body, weight: .semibold))
                     .foregroundStyle(theme.secondaryLabel)
                     .frame(
                         width: MobileDesign.Size.minimumTapTarget,
@@ -4813,12 +4894,17 @@ private struct DashboardProjectHeader: View {
                 MobileNavigationRoute.searchProject(id: $0, name: projectName)
             } ?? .project(projectName)) {
                 HStack(spacing: MobileDesign.Spacing.tight) {
-                    Label(title, systemImage: isHidden ? "eye.slash" : "folder")
-                        .font(.headline)
+                    Label {
+                        Text(title)
+                    } icon: {
+                        Image(systemName: isHidden ? "eye.slash" : "folder")
+                            .foregroundStyle(theme.tintsIdentityMarks ? theme.accent : theme.label)
+                    }
+                        .font(theme.chromeSwiftUIFont(.headline))
                         .foregroundStyle(theme.label)
                         .lineLimit(1)
                     Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
+                        .font(theme.chromeSwiftUIFont(.caption, weight: .semibold))
                         .foregroundStyle(theme.tertiaryLabel)
                 }
                 .frame(minHeight: MobileDesign.Size.minimumTapTarget)
@@ -5257,7 +5343,7 @@ private struct DashboardRow<Mark: View, Caption: View, Trailing: View>: View {
                 HStack(spacing: MobileDesign.Spacing.tight) {
                     caption()
                 }
-                .font(.caption2)
+                .font(theme.chromeSwiftUIFont(.caption2))
                 .lineLimit(1)
             }
 
@@ -5324,7 +5410,7 @@ private struct DashboardAge: View {
 
     var body: some View {
         Text(MobileSessionAgeFormat.string(since: date))
-            .font(.caption2)
+            .font(theme.chromeSwiftUIFont(.caption2))
             .foregroundStyle(theme.tertiaryLabel)
             .fixedSize()
     }
@@ -5525,7 +5611,7 @@ private struct SessionRow: View {
         } trailing: {
             if session.isPinned {
                 Image(systemName: "pin.fill")
-                    .font(.caption2)
+                    .font(theme.chromeSwiftUIFont(.caption2))
                     .foregroundStyle(theme.accent)
                     .accessibilityLabel(MobileL10n.string("Pinned"))
             }

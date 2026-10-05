@@ -63,8 +63,8 @@ only peer; that is a topology, not a protocol.
 1. **Sending is storing.** `send_message` succeeds when the message is durably accepted into the
    sender host's outbox (same host: straight into the recipient's inbox). Whether the recipient is
    running, busy, dormant or on another host changes *when* it is delivered, never *whether* the
-   send is refused. Refusals are reserved for authority (no grant), bounds (quota, depth, size)
-   and unknown addresses.
+   send is refused. Refusals are reserved for authority (no grant), bounds (quota, size) and
+   unknown addresses.
 2. **A message is addressed to a mailbox, not a process.** Addresses are
    `<host>/session/<threading-id>` and `<host>/worker/<worker-uuid>`. A host mints a stable host
    UUID and a display name once; it never changes with hostname or IP. `person:`/`group:`
@@ -90,8 +90,9 @@ only peer; that is a topology, not a protocol.
 7. **A message carries information, never authority.** It cannot grant tools, change a recipe,
    pick a destination, answer a person's question, widen a grant or confer manager scope.
 8. **Loops are bounded mechanically.** Every message carries a chain ID and depth; a reply or a
-   message sent by work a message woke is one deeper (a session, which has no execution, continues a
-   chain only by replying); sends past depth 4 are refused; a `wake`
+   message sent by work a message woke is one deeper and stays in the chain; the chain's message
+   count is the fuse, and depth is only shown (a depth limit of 4 shipped first and refused ordinary
+   exchanges — see [`autonomous-controller.md`](../architecture/autonomous-controller.md)); a `wake`
    never targets a mailbox already in the chain unless answering its `ask`. Spend is bounded where
    it happens — at admission — and message counts only as a loop fuse (see [Bounds](#bounds)).
 9. **Everything is visible.** The Mac shows each session's inbox/outbox; a delivered message is
@@ -359,7 +360,7 @@ is unaffected.
 
 - **Core** (scratch databases, no model): idempotent accept with conflicting replay refused;
   grant checked in the accept transaction and revocation effective on the next send; finish
-  refused with an unacknowledged interrupt; ack from a stale execution fenced; depth limit and
+  refused with an unacknowledged interrupt; ack from a stale execution fenced; chain fuse and
   in-chain wake refused; coalesced wake surviving restart.
 - **Transport**: two stores over a real `mail-rpc` process pair — lost push response replayed
   without duplication; a peer claiming a sender on another host refused; pull pagination across

@@ -6,6 +6,7 @@ import os
 import CoreText
 import Metal
 import MetalKit
+import MetalPerformanceShaders
 #if os(macOS)
 import AppKit
 #else
@@ -15,6 +16,77 @@ import UIKit
 struct GlyphKey: Hashable {
     let rasterFontToken: UInt32
     let glyph: CGGlyph
+}
+
+/// Where one frame's GPU text halo is drawn and blurred.
+///
+/// A halo is low-frequency artwork, so it is blurred below the drawable's resolution: half when
+/// its support is at least four device pixels, full otherwise, and coarser again when even that
+/// would exceed `maximumTexturePixels`. The bound is on the halo, not the drawable — a 6K
+/// full-screen pane glows like any other, at a resolution that fits. The foreground itself is
+/// always drawn at the drawable's full resolution.
+///
+/// Textures are allocated in `bucket`-pixel steps, rounded up, so a live resize reuses one pair
+/// across most frames instead of allocating a pair per frame. The used region is the drawable
+/// mapped exactly by `resolution`; `pixelWidth`/`pixelHeight` are the whole pixels it touches.
+struct MetalGlowHaloLayout: Equatable {
+    /// Allocation step for each texture dimension, in halo pixels.
+    static let bucket = 128
+    /// 2,048 × 2,048: at four bytes a pixel one texture is at most 16 MiB and the pair 32 MiB,
+    /// whatever the drawable's size.
+    static let maximumTexturePixels = 4_194_304
+    static let maximumTextureDimension = 8_192
+
+    /// Halo pixels per drawable pixel.
+    let resolution: CGFloat
+    /// The drawable's extent in halo pixels; what the ink pass's viewport covers.
+    let usedWidth: CGFloat
+    let usedHeight: CGFloat
+    /// Whole halo pixels the used extent touches; the blur passes' clip.
+    let pixelWidth: Int
+    let pixelHeight: Int
+    /// The allocated size of each of the two textures.
+    let textureWidth: Int
+    let textureHeight: Int
+    /// The blur's support in halo pixels; the box passes' half-widths sum to it.
+    let radiusPixels: Int
+
+    init?(drawableSize: CGSize, glowRadius: CGFloat, scale: CGFloat) {
+        guard drawableSize.width >= 1, drawableSize.height >= 1,
+              drawableSize.width.isFinite, drawableSize.height.isFinite,
+              glowRadius > 0, glowRadius.isFinite, scale.isFinite else { return nil }
+        let deviceRadius = glowRadius * max(scale, 1)
+        var resolution: CGFloat = deviceRadius >= 4 ? 0.5 : 1
+        func rounded(_ value: Int) -> Int {
+            (value + Self.bucket - 1) / Self.bucket * Self.bucket
+        }
+        // Each step lands within a bucket of the bound; a few always suffice.
+        for _ in 0..<8 {
+            let width = rounded(Int(ceil(drawableSize.width * resolution)))
+            let height = rounded(Int(ceil(drawableSize.height * resolution)))
+            if width * height <= Self.maximumTexturePixels,
+               max(width, height) <= Self.maximumTextureDimension { break }
+            let byArea = (CGFloat(Self.maximumTexturePixels) / CGFloat(width * height)).squareRoot()
+            let byDimension = CGFloat(Self.maximumTextureDimension) / CGFloat(max(width, height))
+            resolution *= min(byArea, byDimension, 0.97)
+        }
+        let usedWidth = drawableSize.width * resolution
+        let usedHeight = drawableSize.height * resolution
+        let pixelWidth = max(1, Int(ceil(usedWidth)))
+        let pixelHeight = max(1, Int(ceil(usedHeight)))
+        let textureWidth = rounded(pixelWidth)
+        let textureHeight = rounded(pixelHeight)
+        guard textureWidth * textureHeight <= Self.maximumTexturePixels,
+              max(textureWidth, textureHeight) <= Self.maximumTextureDimension else { return nil }
+        self.resolution = resolution
+        self.usedWidth = usedWidth
+        self.usedHeight = usedHeight
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        self.textureWidth = textureWidth
+        self.textureHeight = textureHeight
+        radiusPixels = max(1, Int((deviceRadius * resolution).rounded()))
+    }
 }
 
 private struct CoreTextFontIdentity: Hashable {
@@ -856,6 +928,18 @@ final class MetalTerminalRenderer {
     private let cellTextPipeline: MTLRenderPipelineState
     private let cellTextGrayPipeline: MTLRenderPipelineState
     private let cellColorPipeline: MTLRenderPipelineState
+    private let glowPipeline: MTLRenderPipelineState
+    private var glowTextures: [MTLTexture] = []
+    private var glowBoxes: [MPSImageBox] = []
+    private var glowRadiusPixels = 0
+    /// The extent, in halo pixels from the origin, beyond which the second halo texture is
+    /// known to hold zeros, or nil when nothing is known. The blur passes write only the frame's
+    /// used region, so a read past it must find nothing there — see `encodeGlow`.
+    private var glowSecondTextureExtent: (width: Int, height: Int)?
+    /// Halo texture pairs allocated over this renderer's life. Read by tests.
+    private(set) var glowTextureAllocations = 0
+    /// Bytes held by the halo textures now. Read by tests.
+    var glowTextureBytes: Int { glowTextures.reduce(0) { $0 + $1.allocatedSize } }
     private let sampler: MTLSamplerState
     private let textureLoader: MTKTextureLoader
     private let bufferPool: BufferPool
@@ -1053,6 +1137,11 @@ final class MetalTerminalRenderer {
         self.cellTextPipeline = cellTextPipeline
         self.cellTextGrayPipeline = cellTextGrayPipeline
         self.cellColorPipeline = cellColorPipeline
+        guard let glowPipeline = Self.makeTextPipeline(device: device, library: library,
+            pixelFormat: pixelFormat, vertexName: "terminal_glow_vertex", fragmentName: "terminal_glow_fragment") else {
+            throw MetalError.pipelineCreationFailed("glow")
+        }
+        self.glowPipeline = glowPipeline
         let samplerDesc = MTLSamplerDescriptor()
         samplerDesc.minFilter = .linear
         samplerDesc.magFilter = .linear
@@ -1206,8 +1295,16 @@ final class MetalTerminalRenderer {
             os_signpost(.begin, log: MetalTerminalRenderer.profileLog, name: "Metal.Encode", signpostID: encodeID)
         }
 #endif
-        guard let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: passDescriptor) else {
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            frameSemaphore.signal(); return
+        }
+        bufferPool.beginFrame()
+        let viewport = SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
+        let halo = renderContext.textGlow.flatMap {
+            encodeGlow($0, data: drawData, size: drawableSize, scale: scale, command: commandBuffer, viewport: viewport)
+        }
+        if renderContext.textGlow == nil { releaseGlowResources() }
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: passDescriptor) else {
 #if canImport(os)
             if MetalTerminalRenderer.profileEnabled {
                 os_signpost(.end, log: MetalTerminalRenderer.profileLog, name: "Metal.Encode", signpostID: encodeID)
@@ -1218,8 +1315,9 @@ final class MetalTerminalRenderer {
         }
         let frameSemaphore = self.frameSemaphore
         let redrawState = redrawState
-        commandBuffer.addCompletedHandler { _ in
+        commandBuffer.addCompletedHandler { command in
             frameSemaphore.signal()
+            TerminalView.onFrameGPUCompleted?(command.gpuEndTime - command.gpuStartTime)
             // Fires on a Metal thread the moment the frame is done, which is
             // the closest thing to "the glyph is on screen" available without
             // a display-link correlation.
@@ -1228,8 +1326,17 @@ final class MetalTerminalRenderer {
                 redrawState.requestRedraw()
             }
         }
-        bufferPool.beginFrame()
-        let viewport = SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
+        if let halo, let glow = renderContext.textGlow {
+            encoder.setRenderPipelineState(glowPipeline)
+            encoder.setFragmentTexture(halo.texture, index: 0)
+            encoder.setFragmentSamplerState(sampler, index: 0)
+            // Opacity, then the share of the bucketed texture this frame's halo occupies.
+            var parameters = SIMD4<Float>(Float(glow.opacity),
+                                          Float(halo.layout.usedWidth / CGFloat(halo.layout.textureWidth)),
+                                          Float(halo.layout.usedHeight / CGFloat(halo.layout.textureHeight)), 0)
+            encoder.setFragmentBytes(&parameters, length: MemoryLayout<SIMD4<Float>>.size, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        }
 
         if let frame = drawData.frame {
             drawFrameData(frame, encoder: encoder, viewport: viewport)
@@ -3240,6 +3347,106 @@ final class MetalTerminalRenderer {
         drawImageBatches(frame.otherImageDraws, encoder: encoder, viewport: viewport)
     }
 
+    /// Drops the halo textures and their blur kernels. The next glowing frame allocates again;
+    /// a terminal that leaves its window calls this so a session kept off screen holds none.
+    func releaseGlowResources() {
+        glowTextures = []
+        glowBoxes = []
+        glowRadiusPixels = 0
+        glowSecondTextureExtent = nil
+    }
+
+    /// Draws the frame's lit content into the halo texture and blurs it, returning the texture
+    /// holding the result and where in it the frame lies.
+    ///
+    /// Two textures are reused on this ordered command queue, sized by `MetalGlowHaloLayout`:
+    /// bounded whatever the drawable, and rounded up to a bucket so a live resize reuses them
+    /// rather than allocating a pair every frame. Only the layout's used region is drawn and
+    /// blurred. The first texture is cleared whole by its render pass; the second is cleared
+    /// whenever it may hold ink beyond this frame's region — once allocated, or after the region
+    /// shrinks — so a blur pass or the composite reading past the region's edge finds
+    /// transparency there, the edge a texture of exactly the region's size would have.
+    /// Backgrounds, image placements, decorations and the caret never enter the underlay.
+    private func encodeGlow(_ glow: TerminalTextGlow, data: DrawData, size: CGSize, scale: CGFloat,
+                            command: MTLCommandBuffer, viewport: SIMD2<Float>)
+        -> (texture: MTLTexture, layout: MetalGlowHaloLayout)? {
+        guard let layout = MetalGlowHaloLayout(drawableSize: size, glowRadius: glow.radius, scale: scale) else {
+            releaseGlowResources()
+            return nil
+        }
+        if glowTextures.first?.width != layout.textureWidth || glowTextures.first?.height != layout.textureHeight {
+            glowTextures = []
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm,
+                width: layout.textureWidth, height: layout.textureHeight, mipmapped: false)
+            descriptor.usage = [.renderTarget, .shaderRead, .shaderWrite]
+            descriptor.storageMode = .private
+            guard let a = device.makeTexture(descriptor: descriptor), let b = device.makeTexture(descriptor: descriptor) else {
+                releaseGlowResources()
+                return nil
+            }
+            glowTextures = [a, b]
+            glowTextureAllocations += 1
+            // A new private texture's contents are undefined.
+            glowSecondTextureExtent = nil
+        }
+        let radius = layout.radiusPixels
+        if radius != glowRadiusPixels || glowBoxes.isEmpty {
+            glowRadiusPixels = radius
+            glowBoxes = [radius / 3, (radius + 1) / 3, (radius + 2) / 3].filter { $0 > 0 }.map {
+                let box = MPSImageBox(device: device, kernelWidth: 2 * $0 + 1, kernelHeight: 2 * $0 + 1)
+                box.edgeMode = .zero
+                return box
+            }
+        }
+        let region = MTLRegionMake2D(0, 0, layout.pixelWidth, layout.pixelHeight)
+        // The second pass reads the second texture, and the composite's filtering reads one
+        // texel past the region of whichever holds the result. Steady state needs no clear:
+        // the region is the same every frame, and the passes never write beyond it.
+        let extent = glowSecondTextureExtent
+        if !glowBoxes.isEmpty,
+           extent == nil || extent!.width > layout.pixelWidth || extent!.height > layout.pixelHeight {
+            let clear = MTLRenderPassDescriptor()
+            clear.colorAttachments[0].texture = glowTextures[1]
+            clear.colorAttachments[0].loadAction = .clear
+            clear.colorAttachments[0].storeAction = .store
+            clear.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
+            guard let encoder = command.makeRenderCommandEncoder(descriptor: clear) else { return nil }
+            encoder.endEncoding()
+            glowSecondTextureExtent = (0, 0)
+        }
+        if let known = glowSecondTextureExtent {
+            glowSecondTextureExtent = (max(known.width, layout.pixelWidth), max(known.height, layout.pixelHeight))
+        }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = glowTextures[0]
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
+        guard let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { return nil }
+        encoder.setViewport(MTLViewport(originX: 0, originY: 0,
+            width: Double(layout.usedWidth), height: Double(layout.usedHeight), znear: 0, zfar: 1))
+        if let frame = data.frame {
+            drawCellBuffer(frame.powerlineJoinCells, pipeline: cellColorPipeline, texture: nil, encoder: encoder, viewport: viewport)
+            drawCellBuffer(frame.glyphCellsGray, pipeline: cellTextGrayPipeline, texture: grayscaleAtlas.texture, encoder: encoder, viewport: viewport)
+            drawCellBuffer(frame.glyphCellsColor, pipeline: cellTextPipeline, texture: colorAtlas.texture, encoder: encoder, viewport: viewport)
+        } else {
+            drawVertexBuffers(rows: data.rows, bufferKey: \.powerlineJoinBuffer, countKey: \.powerlineJoinCount,
+                pipeline: cellColorPipeline, texture: nil, encoder: encoder, viewport: viewport)
+            drawVertexBuffers(rows: data.rows, bufferKey: \.glyphGrayBuffer, countKey: \.glyphGrayCount,
+                pipeline: cellTextGrayPipeline, texture: grayscaleAtlas.texture, encoder: encoder, viewport: viewport)
+            drawVertexBuffers(rows: data.rows, bufferKey: \.glyphColorBuffer, countKey: \.glyphColorCount,
+                pipeline: cellTextPipeline, texture: colorAtlas.texture, encoder: encoder, viewport: viewport)
+        }
+        encoder.endEncoding()
+        var source = 0
+        for box in glowBoxes {
+            box.clipRect = region
+            box.encode(commandBuffer: command, sourceTexture: glowTextures[source], destinationTexture: glowTextures[1 - source])
+            source = 1 - source
+        }
+        return (glowTextures[source], layout)
+    }
+
     private func drawImageBatches(_ draws: [ImageDraw], encoder: MTLRenderCommandEncoder, viewport: SIMD2<Float>) {
         guard !draws.isEmpty else {
             return
@@ -4127,6 +4334,8 @@ final class MetalTerminalRenderer {
 
     private static func requiredShaderFunctions() -> [String] {
         return [
+            "terminal_glow_vertex",
+            "terminal_glow_fragment",
             "terminal_text_vertex",
             "terminal_cell_text_vertex",
             "terminal_text_fragment",
@@ -4191,13 +4400,12 @@ final class MetalTerminalRenderer {
            let resourceBundle = Bundle(url: url) {
             bundles.append(resourceBundle)
         }
-        // `swift test` places package resource bundles beside the `.xctest`
-        // bundle rather than inside it.
-        let siblingURL = Bundle.main.bundleURL
-            .deletingLastPathComponent()
-            .appendingPathComponent(bundleName)
-        if let resourceBundle = Bundle(url: siblingURL) {
-            bundles.append(resourceBundle)
+        // SwiftPM's test runner can be Bundle.main. Locate the loaded test bundle instead
+        // of assuming that runner lives beside its package resources.
+        let testBundles = Bundle.allBundles.filter { $0.bundleURL.pathExtension == "xctest" }
+        for owner in [Bundle.main] + testBundles {
+            let siblingURL = owner.bundleURL.deletingLastPathComponent().appendingPathComponent(bundleName)
+            if let resourceBundle = Bundle(url: siblingURL) { bundles.append(resourceBundle) }
         }
         #endif
         bundles.append(Bundle(for: MetalTerminalRenderer.self))

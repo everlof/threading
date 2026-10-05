@@ -3,6 +3,101 @@ import SwiftTerm
 import SwiftUI
 import UIKit
 
+#if DEBUG
+/// A physical-device acceptance run in the shipping terminal view. Fixed 60-Hz dense writes,
+/// one bounded sample set per phase, and actual completed GPU frames (no simulator inference).
+@MainActor
+private final class MobileThemeGlowBenchmark: NSObject {
+    private weak var view: RemoteTerminalView?
+    private var link: CADisplayLink?
+    private var phase = -1
+    private var began = 0.0
+    private var frames = 0
+    private var scripts: [[UInt8]] = []
+    private let samples = MobileThemeGPUFrameSamples()
+    private var previous: (@Sendable (Double) -> Void)?
+    private let phases: [TerminalTextGlow?] = [nil, .init(radius: 3, opacity: 0.4), .init(radius: 6, opacity: 0.8)]
+
+    init(view: RemoteTerminalView) { self.view = view }
+
+    func start() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, let view, view.window != nil else { return }
+            do { try view.setUseMetal(true) } catch { print("THEME_GLOW_BENCH unavailable: \(error)"); return }
+            let dimensions = view.terminalDimensions
+            let rows = min(dimensions.rows, 120), cols = min(dimensions.cols, 240)
+            for variant in 0..<2 {
+                var text = "\u{1B}[?25l\u{1B}[0m"
+                for row in 1...max(rows, 1) {
+                    text += "\u{1B}[\(row);1H\u{1B}[38;5;\(34 + (row + variant) % 16)m"
+                    text += String(repeating: variant == 0 ? "ABCDEFGH01234567" : "76543210HGFEDCBA", count: max(cols / 16 + 1, 1)).prefix(max(cols, 1))
+                }
+                scripts.append(Array(text.utf8))
+            }
+            previous = TerminalView.onFrameGPUCompleted
+            let samples = samples, previous = previous
+            TerminalView.onFrameGPUCompleted = { seconds in samples.record(seconds); previous?(seconds) }
+            let display = CADisplayLink(target: self, selector: #selector(tick(_:)))
+            display.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
+            link = display
+            display.add(to: .main, forMode: .common)
+            nextPhase()
+        }
+    }
+
+    @objc private func tick(_ display: CADisplayLink) {
+        guard let view, view.window != nil else { finish(); return }
+        let elapsed = CACurrentMediaTime() - began
+        if elapsed >= 12 {
+            let readings = samples.take()
+            let sorted = readings.sorted()
+            let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count - 1) * 0.95))] * 1_000
+            print(String(format: "THEME_GLOW_BENCH phase=%d elapsed=%.3f writes=%d completed=%d fps=%.2f gpu_p95_ms=%.3f low_power=%d thermal=%d",
+                phase, elapsed, frames, sorted.count, Double(sorted.count) / max(elapsed - 2, 1), p95,
+                ProcessInfo.processInfo.isLowPowerModeEnabled ? 1 : 0, ProcessInfo.processInfo.thermalState.rawValue))
+            nextPhase()
+            return
+        }
+        // Ignore two seconds of warmup per phase, including the initial glyph atlas fills.
+        samples.setEnabled(elapsed >= 2)
+        view.feed(byteArray: scripts[frames % scripts.count][...])
+        frames += 1
+    }
+
+    private func nextPhase() {
+        phase += 1
+        guard phase < phases.count, let view else { finish(); return }
+        _ = samples.take()
+        samples.setEnabled(false)
+        view.textGlow = phases[phase]
+        began = CACurrentMediaTime(); frames = 0
+    }
+
+    private func finish() {
+        link?.invalidate(); link = nil
+        TerminalView.onFrameGPUCompleted = previous
+        view?.refreshThemeGlow()
+        print("THEME_GLOW_BENCH complete")
+    }
+}
+
+private final class MobileThemeGPUFrameSamples: @unchecked Sendable {
+    private let lock = NSLock()
+    private var enabled = false
+    private var values: [Double] = []
+    func setEnabled(_ value: Bool) { lock.lock(); enabled = value; lock.unlock() }
+    func record(_ seconds: Double) {
+        lock.lock(); defer { lock.unlock() }
+        if enabled && seconds.isFinite && seconds > 0 && values.count < 2_048 { values.append(seconds) }
+    }
+    func take() -> [Double] {
+        lock.lock(); defer { lock.unlock() }
+        let result = values; values.removeAll(keepingCapacity: true); return result
+    }
+}
+#endif
+
 struct TerminalViewRepresentable: UIViewRepresentable {
     typealias UIViewType = RemoteTerminalLayoutView
 
@@ -126,7 +221,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
     static func dismantleUIView(_ uiView: RemoteTerminalLayoutView, coordinator: Coordinator) {
         let terminalView = uiView.terminalView
         uiView.cancelPendingLayout()
-        coordinator.captureViewport()
+        coordinator.captureViewport(afterDismantling: true)
         coordinator.unbindRenderer(from: terminalView)
         coordinator.detach()
         // SwiftTerm 2 keeps a display driver and renderer graph per view. This representable is
@@ -373,13 +468,20 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             layoutView?.setScrollToEndPresented(shouldPresent, animated: animated)
         }
 
-        func captureViewport() {
+        func captureViewport(afterDismantling: Bool = false) {
             guard let view = terminalView else { return }
             let maximum = max(0, view.contentSize.height - view.bounds.height)
             let progress = maximum > 0
                 ? Double(min(max(view.contentOffset.y / maximum, 0), 1))
                 : 1
-            onScrollProgress(progress)
+            let report = onScrollProgress
+            if afterDismantling {
+                // Capture geometry before detach, but let SwiftUI finish destroying its graph
+                // before persistence can publish a recovery-state change to that same graph.
+                Task { @MainActor in report(progress) }
+            } else {
+                report(progress)
+            }
         }
 
         /// Only the phone-owned grid is a viewport request. During authentication the Mac's
@@ -804,6 +906,14 @@ final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        refreshThemeGlow()
+#if DEBUG
+        if window != nil, themeBenchmark == nil,
+           ProcessInfo.processInfo.environment["THREADING_THEME_GLOW_BENCH"] == "1" {
+            themeBenchmark = MobileThemeGlowBenchmark(view: self)
+            themeBenchmark?.start()
+        }
+#endif
         if window == nil { inputLatencyProbe.cancel(result: "unmounted") }
     }
 
@@ -813,6 +923,11 @@ final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
     /// very first application apart from an applied nil, whose fallback colours count too.
     private(set) var appliedTheme: RemoteTerminalThemeDTO?
     private(set) var hasAppliedTheme = false
+    private let glowObservers = KeyboardObserverBag()
+    private var ownsGlowRenderer = false
+#if DEBUG
+    private var themeBenchmark: MobileThemeGlowBenchmark?
+#endif
 #if DEBUG
     private(set) var themeApplicationCount = 0
 #endif
@@ -904,9 +1019,32 @@ final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
     func noteAppliedTheme(_ theme: RemoteTerminalThemeDTO?) {
         appliedTheme = theme
         hasAppliedTheme = true
+        if glowObservers.tokens.isEmpty {
+            glowObservers.tokens.append(NotificationCenter.default.addObserver(
+                forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.refreshThemeGlow() }
+            })
+        }
+        refreshThemeGlow()
 #if DEBUG
         themeApplicationCount += 1
 #endif
+    }
+
+    func refreshThemeGlow(lowPower: Bool = ProcessInfo.processInfo.isLowPowerModeEnabled) {
+        let glow = lowPower ? nil : appliedTheme?.glow.flatMap {
+            $0.isValid && $0.radius > 0 && $0.opacity > 0
+                ? TerminalTextGlow(radius: CGFloat($0.radius), opacity: CGFloat($0.opacity)) : nil
+        }
+        textGlow = glow
+        guard window != nil else { return }
+        if glow != nil, !isUsingMetalRenderer {
+            do { try setUseMetal(true); ownsGlowRenderer = true }
+            catch { textGlow = nil }
+        } else if glow == nil, ownsGlowRenderer {
+            do { try setUseMetal(false); ownsGlowRenderer = false } catch {}
+        }
     }
 
     func beginFontPinch() {

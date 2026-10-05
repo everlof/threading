@@ -1,5 +1,6 @@
 #if !os(iOS) && !os(Windows)
 import Dispatch
+import Foundation
 import Testing
 @testable import SwiftTerm
 
@@ -76,17 +77,21 @@ final class HeadlessTerminalTests {
         let reference = Locked<HeadlessTerminal?>(headless)
         let titleSequence = Array("\u{1b}]2;blocked title\u{7}".utf8)
 
-        DispatchQueue.global().async {
+        // Dedicated threads keep this lock-order test independent of the global pool,
+        // which other parallel process tests can occupy while waiting for their children.
+        let parsingThread = Thread {
             let headless = reference.withLock { $0 }
             headless?.dataReceived(slice: titleSequence[...])
         }
+        parsingThread.start()
         #expect(delegate.entered.wait(timeout: .now() + 2) == .success)
 
-        DispatchQueue.global().async {
+        let terminationThread = Thread {
             terminationAttempted.signal()
             guard let headless = reference.withLock({ $0 }) else { return }
             headless.processTerminated(headless.process, exitCode: 0)
         }
+        terminationThread.start()
         #expect(terminationAttempted.wait(timeout: .now() + 2) == .success)
         #expect(ended.wait(timeout: .now() + 0.05) == .timedOut)
 

@@ -78,7 +78,13 @@ struct UsageProvider: AppIntentTimelineProvider {
 /// Lock Screen ink and margins. The feature draws through GlanceDesign's semantic tokens.
 struct UsageWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    @Environment(\.colorScheme) private var colorScheme
     let entry: UsageEntry
+
+    private var accent: Color {
+        GlanceDesign.accent(hex: entry.snapshot?.accentHex, mode: renderingMode, colorScheme: colorScheme)
+    }
 
     var body: some View {
         Group {
@@ -94,6 +100,7 @@ struct UsageWidgetView: View {
             }
         }
         .widgetURL(entry.route)
+        .tint(accent)
         .containerBackground(GlanceDesign.background, for: .widget)
     }
 
@@ -162,7 +169,7 @@ struct UsageWidgetView: View {
                         .foregroundStyle(GlanceDesign.secondary).lineLimit(1)
                 }
                 Spacer(minLength: GlanceDesign.Spacing.small)
-                Image(systemName: "chart.pie").foregroundStyle(GlanceDesign.accent)
+                Image(systemName: "chart.pie").foregroundStyle(accent)
                     .widgetAccentable()
             }
             if family == .systemMedium {
@@ -187,7 +194,7 @@ struct UsageWidgetView: View {
         VStack(alignment: .leading, spacing: GlanceDesign.Spacing.tight) {
             capacityLine(account, window)
             if freshness(account, window).showsCapacity {
-                ProgressView(value: remaining(window)).tint(GlanceDesign.accent)
+                ProgressView(value: remaining(window)).tint(accent)
                     .widgetAccentable().accessibilityHidden(true)
             }
             if showsStatus {

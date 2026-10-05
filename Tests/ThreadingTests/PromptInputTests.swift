@@ -68,6 +68,22 @@ final class PromptInputTests: XCTestCase {
         )
     }
 
+    /// Layer colors belong to the view's appearance, which can differ from XCTest's ambient
+    /// drawing appearance after another fixture rendered a dark window.
+    private func assertSurfaceColors(
+        of prompt: PromptView,
+        background: @autoclosure () -> NSColor,
+        border: @autoclosure () -> NSColor,
+        _ message: String = "",
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        prompt.effectiveAppearance.performAsCurrentDrawingAppearance {
+            XCTAssertEqual(prompt.layer?.backgroundColor, background().cgColor, message, file: file, line: line)
+            XCTAssertEqual(prompt.layer?.borderColor, border().cgColor, message, file: file, line: line)
+        }
+    }
+
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
     }
@@ -271,13 +287,13 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(prompt.stringValue, path)
     }
 
-    func testImagePreviewsAreOptInForAgentMessageComposers() throws {
+    func testImagePreviewsAreOptInForAgentMessageComposers() async throws {
         let imageURL = try makeImageFile(named: "plain prompt image.png")
         defer { try? FileManager.default.removeItem(at: imageURL) }
 
         let prompt = PromptView()
         prompt.attachFiles(at: [imageURL.path])
-        waitForAttachmentPreparation(prompt)
+        try await waitForAttachmentPreparation(prompt)
 
         let quotedPath = "\"\(imageURL.path)\""
         XCTAssertEqual(prompt.stringValue, quotedPath)
@@ -329,31 +345,28 @@ final class PromptInputTests: XCTestCase {
 
         XCTAssertEqual(prompt.draggingEntered(drag), .copy)
         XCTAssertEqual(prompt.layer?.borderWidth, Design.Accessibility.focusRingWidth)
-        XCTAssertEqual(prompt.layer?.borderColor, Design.Surface.accent.cgColor)
-        XCTAssertEqual(prompt.layer?.backgroundColor, Design.Surface.fieldDropTarget.cgColor)
+        assertSurfaceColors(of: prompt, background: Design.Surface.fieldDropTarget, border: Design.Surface.accent)
 
         prompt.reapplyRecordedSurfaceForTesting()
-        XCTAssertEqual(
-            prompt.layer?.backgroundColor,
-            Design.Surface.fieldDropTarget.cgColor,
+        assertSurfaceColors(
+            of: prompt,
+            background: Design.Surface.fieldDropTarget,
+            border: Design.Surface.accent,
             "a theme refresh discarded the drop state's well"
         )
 
         prompt.draggingExited(drag)
         XCTAssertEqual(prompt.layer?.borderWidth, Design.Radius.border)
-        XCTAssertEqual(prompt.layer?.borderColor, Design.Surface.border.cgColor)
-        XCTAssertEqual(prompt.layer?.backgroundColor, Design.Surface.field.cgColor)
+        assertSurfaceColors(of: prompt, background: Design.Surface.field, border: Design.Surface.border)
 
         // Over the editor the *text view* is the drag destination; the box must still light.
         XCTAssertEqual(textView.draggingEntered(drag), .copy)
-        XCTAssertEqual(prompt.layer?.borderColor, Design.Surface.accent.cgColor)
-        XCTAssertEqual(prompt.layer?.backgroundColor, Design.Surface.fieldDropTarget.cgColor)
+        assertSurfaceColors(of: prompt, background: Design.Surface.fieldDropTarget, border: Design.Surface.accent)
 
         // A release or a cancel ends the drag without ever exiting; the accent well may not
         // outlive the gesture it was describing.
         textView.draggingEnded(drag)
-        XCTAssertEqual(prompt.layer?.borderColor, Design.Surface.border.cgColor)
-        XCTAssertEqual(prompt.layer?.backgroundColor, Design.Surface.field.cgColor)
+        assertSurfaceColors(of: prompt, background: Design.Surface.field, border: Design.Surface.border)
     }
 
     /// A plain-text drag is one the *editor* will take and the attachment affordance must not
@@ -368,15 +381,13 @@ final class PromptInputTests: XCTestCase {
         let drag = DropFixture(writing: { $0.setString("not an attachment", forType: .string) })
 
         _ = textView.draggingEntered(drag)
-        XCTAssertEqual(prompt.layer?.backgroundColor, Design.Surface.field.cgColor)
-        XCTAssertEqual(prompt.layer?.borderColor, Design.Surface.border.cgColor)
+        assertSurfaceColors(of: prompt, background: Design.Surface.field, border: Design.Surface.border)
 
         XCTAssertEqual(prompt.draggingEntered(drag), [])
-        XCTAssertEqual(prompt.layer?.backgroundColor, Design.Surface.field.cgColor)
-        XCTAssertEqual(prompt.layer?.borderColor, Design.Surface.border.cgColor)
+        assertSurfaceColors(of: prompt, background: Design.Surface.field, border: Design.Surface.border)
     }
 
-    func testImagesBecomeRemovablePreviewsAndOnlyJoinTheSubmittedValue() throws {
+    func testImagesBecomeRemovablePreviewsAndOnlyJoinTheSubmittedValue() async throws {
         let imageURL = try makeImageFile()
         defer { try? FileManager.default.removeItem(at: imageURL) }
 
@@ -384,7 +395,7 @@ final class PromptInputTests: XCTestCase {
         prompt.showsImageAttachments = true
         prompt.stringValue = "Compare this layout"
         prompt.attachFiles(at: [imageURL.path])
-        waitForAttachmentPreparation(prompt)
+        try await waitForAttachmentPreparation(prompt)
 
         XCTAssertEqual(prompt.stringValue, "Compare this layout")
         XCTAssertEqual(prompt.attachmentPaths, [imageURL.path])
@@ -412,7 +423,7 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(prompt.submissionValue, "Compare this layout")
     }
 
-    func testAHostCanRejectImageOverflowWithoutTurningPathsIntoProse() throws {
+    func testAHostCanRejectImageOverflowWithoutTurningPathsIntoProse() async throws {
         let first = try makeImageFile(named: "first report image.png")
         let second = try makeImageFile(named: "second report image.png")
         defer {
@@ -428,14 +439,14 @@ final class PromptInputTests: XCTestCase {
         prompt.onImageAttachmentRejection = { rejection = $0 }
 
         prompt.attachFiles(at: [first.path, second.path])
-        waitForAttachmentPreparation(prompt)
+        try await waitForAttachmentPreparation(prompt)
 
         XCTAssertEqual(prompt.attachmentPaths, [first.path])
         XCTAssertEqual(prompt.stringValue, "", "a rejected local path leaked into report prose")
         XCTAssertEqual(rejection, .overLimit(maximum: 1, rejected: 1))
     }
 
-    func testImagePreviewRefusesAFileThatGrowsPastItsDecodePolicy() throws {
+    func testImagePreviewRefusesAFileThatGrowsPastItsDecodePolicy() async throws {
         let imageURL = try makeImageFile(named: "oversized-preview.png")
         defer { try? FileManager.default.removeItem(at: imageURL) }
         let handle = try FileHandle(forWritingTo: imageURL)
@@ -447,7 +458,7 @@ final class PromptInputTests: XCTestCase {
         let prompt = PromptView()
         prompt.showsImageAttachments = true
         prompt.attachFiles(at: [imageURL.path])
-        waitForAttachmentPreparation(prompt)
+        try await waitForAttachmentPreparation(prompt)
 
         XCTAssertTrue(prompt.attachmentPaths.isEmpty)
         XCTAssertEqual(
@@ -457,7 +468,7 @@ final class PromptInputTests: XCTestCase {
         )
     }
 
-    func testImagePreviewOpensTheInWindowMediaInspector() throws {
+    func testImagePreviewOpensTheInWindowMediaInspector() async throws {
         let imageURL = try makeImageFile(
             named: "quick look.png",
             size: NSSize(width: 600, height: 400)
@@ -469,7 +480,7 @@ final class PromptInputTests: XCTestCase {
         let window = makeWindow(hosting: prompt)
         defer { MediaInspectorPresenter.dismiss(in: window) }
         prompt.attachFiles(at: [imageURL.path])
-        waitForAttachmentPreparation(prompt)
+        try await waitForAttachmentPreparation(prompt)
 
         let thumbnail = try XCTUnwrap(
             descendants(of: prompt).first {
@@ -497,7 +508,7 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(inspector.collectionThumbnailCount, 0)
     }
 
-    func testImagePreviewContextMenuOffersStandardFileActions() throws {
+    func testImagePreviewContextMenuOffersStandardFileActions() async throws {
         let imageURL = try makeImageFile(named: "context menu.png")
         defer { try? FileManager.default.removeItem(at: imageURL) }
 
@@ -505,7 +516,7 @@ final class PromptInputTests: XCTestCase {
         prompt.showsImageAttachments = true
         let window = makeWindow(hosting: prompt)
         prompt.attachFiles(at: [imageURL.path])
-        waitForAttachmentPreparation(prompt)
+        try await waitForAttachmentPreparation(prompt)
 
         let thumbnail = try XCTUnwrap(
             descendants(of: prompt).first {
@@ -556,7 +567,7 @@ final class PromptInputTests: XCTestCase {
     /// screenshot is recognised by its pixels — and says it can be played, because at 80 points
     /// a poster and a screenshot are the same picture. Pressing it opens the lightbox with the
     /// movie in the player, not as a still.
-    func testMoviesBecomePosterThumbnailsThatOpenInThePlayer() throws {
+    func testMoviesBecomePosterThumbnailsThatOpenInThePlayer() async throws {
         let movieURL = try makeMovieFile()
         defer { try? FileManager.default.removeItem(at: movieURL) }
 
@@ -567,7 +578,7 @@ final class PromptInputTests: XCTestCase {
         defer { MediaInspectorPresenter.dismiss(in: window) }
         prompt.stringValue = "What happens at the end of this"
         prompt.attachFiles(at: [movieURL.path])
-        waitForAttachmentPreparation(prompt)
+        try await waitForAttachmentPreparation(prompt)
 
         XCTAssertEqual(
             prompt.stringValue,
@@ -615,14 +626,14 @@ final class PromptInputTests: XCTestCase {
     /// Every composer took only pictures before this, and the report form still does: a movie
     /// stays a literal path — or a stated refusal — unless the host asked for movies. And a name
     /// is only a claim: a `.mov` the decoder cannot open falls back to a path the same way.
-    func testAMovieStaysAPathUnlessTheComposerTakesMoviesAndTheDecoderAgrees() throws {
+    func testAMovieStaysAPathUnlessTheComposerTakesMoviesAndTheDecoderAgrees() async throws {
         let movieURL = try makeMovieFile()
         defer { try? FileManager.default.removeItem(at: movieURL) }
 
         let pictures = PromptView()
         pictures.showsImageAttachments = true
         pictures.attachFiles(at: [movieURL.path])
-        waitForAttachmentPreparation(pictures)
+        try await waitForAttachmentPreparation(pictures)
         XCTAssertTrue(pictures.attachmentPaths.isEmpty)
         XCTAssertEqual(pictures.stringValue, PromptAttachment.quotedPath(movieURL.path))
 
@@ -632,7 +643,7 @@ final class PromptInputTests: XCTestCase {
         var rejection: PromptView.ImageAttachmentRejection?
         report.onImageAttachmentRejection = { rejection = $0 }
         report.attachFiles(at: [movieURL.path])
-        waitForAttachmentPreparation(report)
+        try await waitForAttachmentPreparation(report)
         XCTAssertTrue(report.attachmentPaths.isEmpty)
         XCTAssertEqual(report.stringValue, "", "a rejected movie's path leaked into report prose")
         XCTAssertEqual(rejection, .unreadable(count: 1))
@@ -645,14 +656,14 @@ final class PromptInputTests: XCTestCase {
         movies.showsImageAttachments = true
         movies.showsMovieAttachments = true
         movies.attachFiles(at: [impostor.path])
-        waitForAttachmentPreparation(movies)
+        try await waitForAttachmentPreparation(movies)
         XCTAssertTrue(movies.attachmentPaths.isEmpty, "a file that is not a movie became a thumbnail")
         XCTAssertEqual(movies.stringValue, PromptAttachment.quotedPath(impostor.path))
     }
 
     /// A movie's menu is the image's without the two actions that need a picture: there is no
     /// still to comment on, and the frame worth copying is the one the lightbox stops on.
-    func testAMovieThumbnailOffersNoPictureToCopyAndNothingToCommentOn() throws {
+    func testAMovieThumbnailOffersNoPictureToCopyAndNothingToCommentOn() async throws {
         let movieURL = try makeMovieFile()
         defer { try? FileManager.default.removeItem(at: movieURL) }
 
@@ -662,7 +673,7 @@ final class PromptInputTests: XCTestCase {
         prompt.onRequestImageComment = { _ in XCTFail("a movie offered a comment") }
         let window = makeWindow(hosting: prompt)
         prompt.attachFiles(at: [movieURL.path])
-        waitForAttachmentPreparation(prompt)
+        try await waitForAttachmentPreparation(prompt)
 
         let thumbnail = try XCTUnwrap(
             descendants(of: prompt).first {
@@ -691,7 +702,7 @@ final class PromptInputTests: XCTestCase {
         XCTAssertTrue(prompt.attachmentPaths.isEmpty)
     }
 
-    func testChatImagePreviewCanRequestAnAttachmentComment() throws {
+    func testChatImagePreviewCanRequestAnAttachmentComment() async throws {
         let imageURL = try makeImageFile(named: "comment target.png")
         defer { try? FileManager.default.removeItem(at: imageURL) }
 
@@ -701,7 +712,7 @@ final class PromptInputTests: XCTestCase {
         prompt.onRequestImageComment = { commentedPaths.append($0) }
         let window = makeWindow(hosting: prompt)
         prompt.attachFiles(at: [imageURL.path])
-        waitForAttachmentPreparation(prompt)
+        try await waitForAttachmentPreparation(prompt)
 
         let thumbnail = try XCTUnwrap(
             descendants(of: prompt).first {
@@ -718,14 +729,14 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(commentedPaths, [imageURL.path])
     }
 
-    func testAnImageAloneCanBeSubmitted() throws {
+    func testAnImageAloneCanBeSubmitted() async throws {
         let imageURL = try makeImageFile(named: "image only.png")
         defer { try? FileManager.default.removeItem(at: imageURL) }
 
         let prompt = PromptView()
         prompt.showsImageAttachments = true
         prompt.attachFiles(at: [imageURL.path])
-        waitForAttachmentPreparation(prompt)
+        try await waitForAttachmentPreparation(prompt)
         var submitted: String?
         prompt.onSubmit = { submitted = $0 }
 
@@ -739,7 +750,7 @@ final class PromptInputTests: XCTestCase {
 
     /// The first-message screen and the only follow-up screen Threading owns both host the same
     /// prompt boundary, so previews cannot quietly land on one while the other keeps paths.
-    func testFirstMessageAndNativeReplyComposersBothShowImagePreviews() throws {
+    func testFirstMessageAndNativeReplyComposersBothShowImagePreviews() async throws {
         let imageURL = try makeImageFile(named: "both composers.png")
         defer { try? FileManager.default.removeItem(at: imageURL) }
 
@@ -769,7 +780,7 @@ final class PromptInputTests: XCTestCase {
 
         for prompt in prompts {
             prompt.attachFiles(at: [imageURL.path])
-            waitForAttachmentPreparation(prompt)
+            try await waitForAttachmentPreparation(prompt)
             XCTAssertEqual(prompt.stringValue, "")
             XCTAssertEqual(prompt.attachmentPaths, [imageURL.path])
             XCTAssertTrue(
@@ -1112,7 +1123,7 @@ final class PromptInputTests: XCTestCase {
     /// Removing an attachment hands the editor back, and that is not the user asking for the
     /// caret: it stays mid-sentence rather than jumping to the end the way arriving at a
     /// composer does.
-    func testRemovingAnAttachmentLeavesTheCaretWhereItWas() throws {
+    func testRemovingAnAttachmentLeavesTheCaretWhereItWas() async throws {
         let imageURL = try makeImageFile(named: "caret.png")
         defer { try? FileManager.default.removeItem(at: imageURL) }
 
@@ -1123,7 +1134,7 @@ final class PromptInputTests: XCTestCase {
 
         prompt.stringValue = "fixa testet"
         prompt.attachFiles(at: [imageURL.path])
-        waitForAttachmentPreparation(prompt)
+        try await waitForAttachmentPreparation(prompt)
         textView.setSelectedRange(NSRange(location: 4, length: 0))
 
         let remove = try XCTUnwrap(
@@ -2392,18 +2403,23 @@ final class PromptInputTests: XCTestCase {
     /// submit, because a draft cannot be sent while a file it owns is still being classified.
     /// A file that turns out to be undecodable resolves the same way — into literal text — so
     /// waiting is what both outcomes have in common, and asserting either one before this
-    /// returns is asserting on a half-built composer.
+    /// returns is asserting on a half-built composer. Yield the main actor while waiting:
+    /// pumping a nested run loop does not guarantee its preparation task gets executor time.
     private func waitForAttachmentPreparation(
         _ prompt: PromptView,
-        timeout: TimeInterval = 5
-    ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        while prompt.isPreparingAttachments, Date() < deadline {
-            RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.005)))
+        timeout: Duration = .seconds(5),
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while prompt.isPreparingAttachments, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
         }
         XCTAssertFalse(
             prompt.isPreparingAttachments,
-            "the composer never finished preparing its attachments"
+            "the composer never finished preparing its attachments",
+            file: file,
+            line: line
         )
     }
 }

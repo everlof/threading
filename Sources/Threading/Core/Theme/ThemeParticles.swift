@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingRemoteKit
 
 // MARK: - Theme Ink
 
@@ -136,43 +137,9 @@ public struct ThemeParticles: Equatable {
 
     // MARK: - Style
 
-    public enum Style: String, Codable, CaseIterable {
-        /// Rising from below and quickening as it goes, the way carbonation does.
-        case fizz
-        /// Falling from above, swaying.
-        case snow
-        /// Twinkling in place: each spark swells and fades where it was born.
-        case sparkle
-        /// Thrown up, tumbling, and falling back under gravity.
-        case confetti
-        /// Drifting up slowly, flickering out before they arrive.
-        case embers
+    public typealias Style = RemoteThemeParticles.Style
+    public typealias Shape = RemoteThemeParticles.Shape
 
-        public var defaultShape: Shape {
-            switch self {
-            case .fizz: return .bubble
-            case .snow: return .flake
-            case .sparkle: return .spark
-            case .confetti: return .ribbon
-            case .embers: return .dot
-            }
-        }
-    }
-
-    // MARK: - Shape
-
-    public enum Shape: String, Codable, CaseIterable {
-        /// A ring with a highlight — a bubble in a glass.
-        case bubble
-        /// A soft round dot.
-        case dot
-        /// A four-pointed star.
-        case spark
-        /// A six-armed snowflake.
-        case flake
-        /// A small strip of paper.
-        case ribbon
-    }
 }
 
 extension ThemeParticles: Codable {

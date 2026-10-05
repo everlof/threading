@@ -521,6 +521,55 @@ final class ThemeToolTests: XCTestCase {
     /// The whole loop an agent actually runs: create a theme whose sidebar carries a gradient,
     /// an image (stored from bytes), and a brand; read it back in the same vocabulary; take
     /// the block away again. The asset dies with the theme.
+    /// W10 end to end: the sidebar picture is read back from the theme's stored asset, sampled
+    /// over the sidebar's own ground, and the suggested opacity is one the check then accepts.
+    func testCreateAndUpdateReportSidebarImageLegibilityFromTheStoredAsset() async throws {
+        let name = "Legibility Tool Theme \(UUID().uuidString)"
+        let white = NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in
+            NSColor.white.setFill()
+            rect.fill()
+            return true
+        }
+        let png = try XCTUnwrap(
+            NSBitmapImageRep(data: try XCTUnwrap(white.tiffRepresentation))?
+                .representation(using: .png, properties: [:])
+        )
+        let createJSON = """
+            {"name": "\(name)", "base_id": "\(AppThemeStyles.cyberpunk.id.rawValue)", "apply": false,
+             "variants": {"dark": {"sidebar": {"image": {"source": {"base64": "\(png.base64EncodedString())"},
+             "mode": "fill", "opacity": 1}}}}}
+            """
+        let created = await coordinator().createAppTheme(
+            try JSONDecoder().decode(CreateAppThemeArguments.self, from: Data(createJSON.utf8))
+        )
+        XCTAssertFalse(created.isError, created.text)
+        let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
+        defer {
+            if let latest = AppThemeLibrary.theme(withID: theme.id) { _ = AppThemeLibrary.delete(latest) }
+        }
+        let asset = try XCTUnwrap(theme.variant(.dark)?.sidebar?.background?.image?.asset)
+        let stored = try XCTUnwrap(ThemeAssetStore.assetURL(named: asset, for: theme.id))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stored.path), "sampled from the store, not the request")
+        XCTAssertTrue(created.text.contains("Image legibility warnings:"), created.text)
+        XCTAssertTrue(created.text.contains("dark.sidebar.background: labels reach"), created.text)
+
+        let pattern = try NSRegularExpression(pattern: "try opacity ≤ ([0-9]+\\.[0-9]+)")
+        let text = created.text as NSString
+        let match = try XCTUnwrap(pattern.firstMatch(in: created.text, range: NSRange(location: 0, length: text.length)))
+        let suggested = try XCTUnwrap(Double(text.substring(with: match.range(at: 1))))
+        XCTAssertLessThan(suggested, 1)
+
+        let updateJSON = """
+            {"theme_id": "\(theme.id.rawValue)",
+             "variants": {"dark": {"sidebar": {"image": {"opacity": \(suggested)}}}}}
+            """
+        let updated = await coordinator().updateAppTheme(
+            try JSONDecoder().decode(UpdateAppThemeArguments.self, from: Data(updateJSON.utf8))
+        )
+        XCTAssertFalse(updated.isError, updated.text)
+        XCTAssertFalse(updated.text.contains("Image legibility warnings"), updated.text)
+    }
+
     func testAgentCanDressReadAndUndressTheSidebar() async throws {
         let name = "Sidebar Tool Theme \(UUID().uuidString)"
         let kind = AppThemeStyles.cyberpunk.availableVariants[0]
@@ -776,13 +825,9 @@ final class ThemeToolTests: XCTestCase {
 
     /// The material schema an agent reads describes the backdrop it can send.
     func testTheMaterialSchemaDescribesTheBackdrop() throws {
-        let schema = try schema(for: MCPTools.createAppTheme)
-        let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])
-        let properties = try XCTUnwrap(input["properties"] as? [String: Any])
-        let variants = try XCTUnwrap(properties["variants"] as? [String: Any])
-        let variantProperties = try XCTUnwrap(variants["properties"] as? [String: Any])
-        let dark = try XCTUnwrap(variantProperties["dark"] as? [String: Any])
-        let darkProperties = try XCTUnwrap(dark["properties"] as? [String: Any])
+        let darkProperties = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(MCPTools.appVariantSchema)) as? [String: Any]
+        )
         let material = try XCTUnwrap(darkProperties["material"] as? [String: Any])
         let materialProperties = try XCTUnwrap(material["properties"] as? [String: Any])
         let backdrop = try XCTUnwrap(
@@ -946,13 +991,9 @@ final class ThemeToolTests: XCTestCase {
     }
 
     func testTheVariantSchemaDescribesTheSidebarBlock() throws {
-        let schema = try schema(for: MCPTools.createAppTheme)
-        let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])
-        let properties = try XCTUnwrap(input["properties"] as? [String: Any])
-        let variants = try XCTUnwrap(properties["variants"] as? [String: Any])
-        let variantProperties = try XCTUnwrap(variants["properties"] as? [String: Any])
-        let dark = try XCTUnwrap(variantProperties["dark"] as? [String: Any])
-        let darkProperties = try XCTUnwrap(dark["properties"] as? [String: Any])
+        let darkProperties = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(MCPTools.appVariantSchema)) as? [String: Any]
+        )
         let sidebar = try XCTUnwrap(
             darkProperties["sidebar"] as? [String: Any],
             "the variant schema does not describe the sidebar block"
@@ -1251,13 +1292,9 @@ final class ThemeToolTests: XCTestCase {
     }
 
     func testTheVariantSchemaDescribesTheChromeBlock() throws {
-        let schema = try schema(for: MCPTools.createAppTheme)
-        let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])
-        let properties = try XCTUnwrap(input["properties"] as? [String: Any])
-        let variants = try XCTUnwrap(properties["variants"] as? [String: Any])
-        let variantProperties = try XCTUnwrap(variants["properties"] as? [String: Any])
-        let light = try XCTUnwrap(variantProperties["light"] as? [String: Any])
-        let lightProperties = try XCTUnwrap(light["properties"] as? [String: Any])
+        let lightProperties = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(MCPTools.appVariantSchema)) as? [String: Any]
+        )
         let chrome = try XCTUnwrap(
             lightProperties["chrome"] as? [String: Any],
             "the variant schema does not describe the chrome block"
@@ -1661,13 +1698,9 @@ final class ThemeToolTests: XCTestCase {
     }
 
     func testVariantSchemaDescribesTheCompleteChromeVocabulary() throws {
-        let schema = try schema(for: MCPTools.createAppTheme)
-        let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])
-        let properties = try XCTUnwrap(input["properties"] as? [String: Any])
-        let variants = try XCTUnwrap(properties["variants"] as? [String: Any])
-        let variantProperties = try XCTUnwrap(variants["properties"] as? [String: Any])
-        let light = try XCTUnwrap(variantProperties["light"] as? [String: Any])
-        let lightProperties = try XCTUnwrap(light["properties"] as? [String: Any])
+        let lightProperties = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(MCPTools.appVariantSchema)) as? [String: Any]
+        )
         let chrome = try XCTUnwrap(lightProperties["chrome"] as? [String: Any])
         let chromeProperties = try XCTUnwrap(chrome["properties"] as? [String: Any])
         let title = try XCTUnwrap(chromeProperties["title_bar"] as? [String: Any])
@@ -1765,13 +1798,9 @@ final class ThemeToolTests: XCTestCase {
     }
 
     func testAppThemeSchemaDescribesEverySemanticRole() throws {
-        let schema = try schema(for: MCPTools.updateAppTheme)
-        let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])
-        let properties = try XCTUnwrap(input["properties"] as? [String: Any])
-        let variants = try XCTUnwrap(properties["variants"] as? [String: Any])
-        let variantProperties = try XCTUnwrap(variants["properties"] as? [String: Any])
-        let dark = try XCTUnwrap(variantProperties["dark"] as? [String: Any])
-        let darkProperties = try XCTUnwrap(dark["properties"] as? [String: Any])
+        let darkProperties = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(MCPTools.appVariantSchema)) as? [String: Any]
+        )
         let roles = try XCTUnwrap(darkProperties["roles"] as? [String: Any])
         let palette = try XCTUnwrap(roles["properties"] as? [String: Any])
 
@@ -1782,13 +1811,9 @@ final class ThemeToolTests: XCTestCase {
     }
 
     func testAppThemeMaterialSchemaExposesDirectedShadows() throws {
-        let schema = try schema(for: MCPTools.updateAppTheme)
-        let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])
-        let properties = try XCTUnwrap(input["properties"] as? [String: Any])
-        let variants = try XCTUnwrap(properties["variants"] as? [String: Any])
-        let variantProperties = try XCTUnwrap(variants["properties"] as? [String: Any])
-        let light = try XCTUnwrap(variantProperties["light"] as? [String: Any])
-        let lightProperties = try XCTUnwrap(light["properties"] as? [String: Any])
+        let lightProperties = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(MCPTools.appVariantSchema)) as? [String: Any]
+        )
         let material = try XCTUnwrap(lightProperties["material"] as? [String: Any])
         let materialProperties = try XCTUnwrap(material["properties"] as? [String: Any])
         let glow = try XCTUnwrap(materialProperties["glow"] as? [String: Any])

@@ -90,7 +90,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     var onCustomizationAction: ((ComponentCustomizationAction) -> Void)?
     private var sessionID: SessionID?
 
-    private let iconView = NSImageView()
+    private let iconView = GlyphView()
 
     /// The account's chip, overlaid on the mark's bottom-trailing corner. Deliberately not
     /// an arranged subview: the stack would give it a slot of its own, when the whole point
@@ -115,14 +115,14 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// rather than being communicated only by the row's position.
     /// Inserted into the arranged content only for a pinned session. Most rows are unpinned, so
     /// resolving this SF Symbol (and carrying an empty arranged slot) belongs behind that state.
-    private var pinnedIndicator: NSImageView?
-    private var managerIndicator: NSImageView?
+    private var pinnedIndicator: GlyphView?
+    private var managerIndicator: GlyphView?
     /// Says that this chat behaves differently from the ones around it — it continues at its
     /// reset, or it says nothing when it finishes. Materialized on the same terms as the pin,
     /// and for the same reason: nearly every row carries no override, and absent content must
     /// not become part of mounting and scrolling. See `RowConductSummary`.
-    private var conductIndicator: NSImageView?
-    private var executionHostIndicator: NSImageView?
+    private var conductIndicator: GlyphView?
+    private var executionHostIndicator: GlyphView?
     private let nativeIdentityContent = NSView()
     private lazy var afterTitleSlot = NSStackView()
     private lazy var identityContentContainer = ComponentContentContainer(
@@ -305,14 +305,14 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     // MARK: - Setup
 
     private func setupViews() {
-        iconView.imageScaling = .scaleProportionallyDown
-        // The slot is wider than the symbol so a 12pt emoji fits unclipped; the symbol
-        // keeps its own point size rather than growing to fill.
-        iconView.symbolConfiguration = NSImage.SymbolConfiguration(
-            pointSize: SidebarRowDefaults.iconSize,
-            weight: .regular
+        iconView.slot = NSSize(
+            width: SidebarRowDefaults.iconSlotWidth,
+            height: SidebarRowDefaults.iconSlotWidth
         )
+        iconView.contrastGround = { [weak self] in self?.rowGround() ?? Design.Surface.background }
         iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.setAccessibilityElement(true)
+        iconView.setAccessibilityRole(.image)
         iconView.setAccessibilityIdentifier("sidebar.session.identity")
 
         titleLabel.applyFont(.controlRegular)
@@ -552,12 +552,12 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             return
         }
 
-        let indicator = NSImageView()
-        indicator.holdSymbol(
+        let indicator = GlyphView()
+        indicator.contrastGround = { [weak self] in self?.rowGround() ?? Design.Surface.background }
+        indicator.setSymbol(
             SidebarRowDefaults.pinnedSymbol,
             slot: Design.Size.inlineButtonGlyph
         )
-        indicator.imageScaling = .scaleProportionallyDown
         indicator.translatesAutoresizingMaskIntoConstraints = false
         indicator.setContentHuggingPriority(.required, for: .horizontal)
         indicator.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -565,7 +565,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         indicator.setAccessibilityRole(.image)
         indicator.setAccessibilityLabel(SidebarRowDefaults.pinnedAccessibilityLabel)
         indicator.setAccessibilityIdentifier("sidebar.session.pinned")
-        indicator.contentTintColor = backgroundStyle == .emphasized
+        indicator.tint = backgroundStyle == .emphasized
             ? Design.Ink.selection.label
             : Design.Surface.accent
 
@@ -587,9 +587,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             return
         }
 
-        let indicator = NSImageView()
-        indicator.holdSymbol("person.3", slot: Design.Size.inlineButtonGlyph)
-        indicator.imageScaling = .scaleProportionallyDown
+        let indicator = GlyphView()
+        indicator.contrastGround = { [weak self] in self?.rowGround() ?? Design.Surface.background }
+        indicator.setSymbol("person.3", slot: Design.Size.inlineButtonGlyph)
         indicator.translatesAutoresizingMaskIntoConstraints = false
         indicator.setContentHuggingPriority(.required, for: .horizontal)
         indicator.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -628,9 +628,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             return
         }
 
-        let indicator = NSImageView()
-        indicator.holdSymbol(RemoteExecutionHostMark.symbol, slot: Design.Size.inlineButtonGlyph)
-        indicator.imageScaling = .scaleProportionallyDown
+        let indicator = GlyphView()
+        indicator.contrastGround = { [weak self] in self?.rowGround() ?? Design.Surface.background }
+        indicator.setSymbol(RemoteExecutionHostMark.symbol, slot: Design.Size.inlineButtonGlyph)
         indicator.translatesAutoresizingMaskIntoConstraints = false
         indicator.setContentHuggingPriority(.required, for: .horizontal)
         indicator.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -639,7 +639,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         indicator.setAccessibilityLabel(label)
         indicator.setAccessibilityIdentifier(RemoteExecutionHostMark.sessionMarkIdentifier)
         indicator.toolTip = label
-        indicator.contentTintColor = backgroundStyle == .emphasized
+        indicator.tint = backgroundStyle == .emphasized
             ? Design.Ink.selection.secondary
             : Design.Text.secondary
 
@@ -671,13 +671,12 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             return
         }
 
-        let indicator = NSImageView()
-        indicator.image = Design.Symbol.image(
+        let indicator = GlyphView()
+        indicator.contrastGround = { [weak self] in self?.rowGround() ?? Design.Surface.background }
+        indicator.setSymbol(
             RowConductDefaults.symbol,
-            slot: Design.Size.inlineButtonGlyph,
-            pointSize: Design.Symbol.control
+            slot: Design.Size.inlineButtonGlyph
         )
-        indicator.imageScaling = .scaleProportionallyDown
         indicator.translatesAutoresizingMaskIntoConstraints = false
         indicator.setContentHuggingPriority(.required, for: .horizontal)
         indicator.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -686,7 +685,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         indicator.setAccessibilityLabel(RowConductStrings.markLabel)
         indicator.setAccessibilityIdentifier(RowConductDefaults.sessionIdentifier)
         indicator.toolTip = summary.sentence
-        indicator.contentTintColor = backgroundStyle == .emphasized
+        indicator.tint = backgroundStyle == .emphasized
             ? Design.Ink.selection.secondary
             : Design.Text.secondary
 
@@ -1272,13 +1271,13 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             // Same agent, same lineage, no extension in the way: the mark and its plate stand.
             setIconImage(platedAgentMark)
         } else {
-            let builtInProviderImage = provider.icon
+            let builtInProviderImage = providerImage(provider)
             let image: NSImage?
             let knownMarkTone: CGFloat?
             if isSideChat {
-                image = NSImage(
-                    systemSymbolName: SidebarRowDefaults.sideChatSymbol,
-                    accessibilityDescription: SidebarRowDefaults.sideChatAccessibilityLabel
+                image = rowSymbol(
+                    SidebarRowDefaults.sideChatSymbol,
+                    accessibility: SidebarRowDefaults.sideChatAccessibilityLabel
                 )
                 knownMarkTone = nil
             } else if let resolution = extensionResolution {
@@ -1292,7 +1291,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
                 image = builtInProviderImage
                 knownMarkTone = provider.brandIconTone
             }
-            agentMark = image.map(slotSized)
+            agentMark = image
             agentMarkTone = knownMarkTone
             agentMarkIdentity = extensionResolution == nil ? identity : nil
             platedAgentMark = plated(agentMark)
@@ -1303,9 +1302,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
                 ? SidebarRowDefaults.sideChatAccessibilityLabel
                 : provider.displayName
         )
-        iconView.contentTintColor = isDormant ? Design.Text.tertiary : restingMarkTint()
-
-        let dimsThroughAlpha = agentMark.map { !$0.isTemplate } ?? false
+        let dimsThroughAlpha = platedAgentMark.map { !$0.isTemplate } ?? false
         iconView.alphaValue = (isDormant && dimsThroughAlpha) ? AgentIconDefaults.dormantAlpha : 1
 
         let builtInChip = NativeSidebarParity.host(
@@ -1368,19 +1365,20 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// appearance flip only stood in for it when the two themes disagreed about light and dark —
     /// see `ThemeDerivedContent`.
     func rederiveThemedContent() {
-        // Unlike the buttons, NSImageView keeps the tint object it was handed. Re-ask the
+        // Unlike the buttons, the glyph keeps the tint object it was handed. Re-ask the
         // current theme whenever the sweep reaches this retained/reused row.
         applyTextColors()
         renameUntitledForTheme()
         guard let agentMark else { return }
         platedAgentMark = plated(agentMark)
         setIconImage(platedAgentMark)
+        iconView.alphaValue = isDormant && platedAgentMark?.isTemplate == false
+            ? AgentIconDefaults.dormantAlpha : 1
         nativeIcon = iconView.image
+        nativeIconAlpha = iconView.alphaValue
     }
 
-    /// Hands the view an image only when it is not the one it already shows. `NSImageView`
-    /// treats every assignment as new content — for a catalogue-backed mark that is a walk of
-    /// its renditions — so the same object, assigned again, is not free.
+    /// Keep the held image on activity updates rather than invalidating its layout and render.
     private func setIconImage(_ image: NSImage?) {
         guard iconView.image !== image else { return }
         iconView.image = image
@@ -1393,8 +1391,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// left alone a non-template mark drew 15pt beside the 13pt symbols, and *shrank* the
     /// moment a plate composed it smaller. Sized here once, gaining a plate moves nothing.
     ///
-    /// Symbols pass through unharmed: the view's `symbolConfiguration` states their point
-    /// size and wins over the image's own — a resized symbol copy renders identically.
+    /// Only artwork goes through this resize. Symbols carry their optical configuration and
+    /// keep their natural size; the glyph's 16pt slot contains them just as the image cell did.
     private func slotSized(_ image: NSImage) -> NSImage {
         let side = max(image.size.width, image.size.height)
         guard side > SidebarRowDefaults.iconSize,
@@ -1406,6 +1404,17 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             height: image.size.height * scale
         )
         return sized
+    }
+
+    private func rowSymbol(_ name: String, accessibility: String?) -> NSImage? {
+        NSImage(systemSymbolName: name, accessibilityDescription: accessibility)?.withSymbolConfiguration(
+            Design.Symbol.configuration(SidebarRowDefaults.iconSize, weight: .regular)
+        )
+    }
+
+    private func providerImage(_ provider: AgentKind) -> NSImage? {
+        provider.brandIcon.map(slotSized)
+            ?? rowSymbol(provider.symbolName, accessibility: provider.displayName)
     }
 
     /// A live, unselected row's mark ink: the theme's accent when it inks identity marks
@@ -1441,14 +1450,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// What the mark is actually drawn on: the sidebar's surface, with the selection fill
     /// composited onto it where there is one.
     ///
-    /// Only the *emphasized* fill is asked about, because that is the only one the row can
-    /// tell apart — AppKit reports `.normal` both for an unselected row and for a selected one
-    /// in an unfocused sidebar, and that second fill is the accent held far down, which moves
-    /// the ground too little to lose a mark in it.
+    /// Ask the containing row so an inactive selection is not mistaken for the ordinary sidebar.
     private func rowGround() -> NSColor {
-        let base = Design.Surface.background
-        guard backgroundStyle == .emphasized else { return base }
-        return base.composited(under: Design.Surface.accent)
+        SidebarHoverRowView.contentGround(for: self)
     }
 
     private func resolveIdentityImage(
@@ -1457,7 +1461,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     ) -> NSImage? {
         switch reference {
         case .systemSymbol(let name):
-            return NSImage(systemSymbolName: name, accessibilityDescription: name)
+            return rowSymbol(name, accessibility: name)
 
         case .extensionResource(let relativePath):
             guard let url = NativeSidebarParity.host(
@@ -1469,12 +1473,12 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             ) else {
                 return nil
             }
-            return ExtensionImageResourceLoader.image(at: url)
+            return ExtensionImageResourceLoader.image(at: url).map(slotSized)
 
         case .hostAsset(let assetID):
             if let providerID = ExtensionIdentityAssetID.providerID(from: assetID),
                let provider = AgentKind(rawValue: providerID) {
-                return provider.icon
+                return providerImage(provider)
             }
             if let accountID = ExtensionIdentityAssetID.accountID(from: assetID),
                let parsed = AccountID(rawValue: accountID),
@@ -1514,7 +1518,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         appliedCustomizationProperties = properties
         toolTip = nativeToolTip
         setIconImage(nativeIcon)
-        iconView.contentTintColor = nativeIconTint
+        iconView.tint = nativeIconTint
         iconView.alphaValue = nativeIconAlpha
 
         // The title is resolved before it is set, not set twice: an extension's override
@@ -1533,6 +1537,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         if case .image(let reference) = properties[.identityImage],
            let image = resolveCustomizationImage(reference) {
             setIconImage(image)
+            iconView.alphaValue = isDormant && !image.isTemplate ? AgentIconDefaults.dormantAlpha : 1
         }
     }
 
@@ -1542,7 +1547,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     ) -> NSImage? {
         switch reference {
         case .systemSymbol(let name):
-            return NSImage(systemSymbolName: name, accessibilityDescription: nil)
+            return rowSymbol(name, accessibility: nil)
         case .hostAsset(let identifier):
             switch identifier {
             case "session.provider-image":
@@ -1585,20 +1590,23 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         let iconTint = backgroundStyle == .emphasized
             ? Design.Ink.selection.label
             : (isDormant ? Design.Text.tertiary : restingMarkTint())
-        iconView.contentTintColor = iconTint
+        iconView.tint = iconTint
         // `applyCustomizationProperties` restores the native icon before applying an optional
         // replacement. Keep that snapshot on the row's current ground: caching it only in
         // `applyAgentIcon` captured the ordinary sidebar tint, so the next activity refresh of a
         // selected Codex row restored white over an orange selection after this method had
         // correctly chosen black.
         nativeIconTint = iconTint
-        pinnedIndicator?.contentTintColor = backgroundStyle == .emphasized
+        pinnedIndicator?.tint = backgroundStyle == .emphasized
             ? Design.Ink.selection.label
             : Design.Surface.accent
-        managerIndicator?.contentTintColor = backgroundStyle == .emphasized
+        conductIndicator?.tint = backgroundStyle == .emphasized
             ? Design.Ink.selection.secondary
             : Design.Text.secondary
-        executionHostIndicator?.contentTintColor = backgroundStyle == .emphasized
+        managerIndicator?.tint = backgroundStyle == .emphasized
+            ? Design.Ink.selection.secondary
+            : Design.Text.secondary
+        executionHostIndicator?.tint = backgroundStyle == .emphasized
             ? Design.Ink.selection.secondary
             : Design.Text.secondary
         attentionOverlayLabel?.textColor = backgroundStyle == .emphasized

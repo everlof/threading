@@ -3,6 +3,7 @@
 //
 import Testing
 import Foundation
+import SwiftTermPOSIX
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -14,11 +15,6 @@ import Musl
 @testable import SwiftTerm
 
 final class KittyTransmissionTests {
-    #if !os(Windows)
-    @_silgen_name("shm_open")
-    private static func swiftShmOpen(_ name: UnsafePointer<CChar>, _ oflag: Int32, _ mode: mode_t) -> Int32
-    #endif
-
     private func makeTerminal(trustedTemporaryDirectory: URL? = nil) -> Terminal {
         let graphics = KittyGraphicsConfiguration(
             localMediaPolicy: .all,
@@ -51,11 +47,17 @@ final class KittyTransmissionTests {
 
     #if !os(Windows)
     private static func createSharedMemory(name: String, bytes: [UInt8]) -> (ok: Bool, errorCode: Int32) {
-        let fd = name.withCString { KittyTransmissionTests.swiftShmOpen($0, O_CREAT | O_EXCL | O_RDWR, 0o600) }
+        let fd = name.withCString { swiftterm_shm_open($0, O_CREAT | O_EXCL | O_RDWR, 0o600) }
         guard fd >= 0 else {
             return (false, errno)
         }
         defer { close(fd) }
+
+        var metadata = stat()
+        guard fstat(fd, &metadata) == 0, metadata.st_mode & 0o777 == 0o600 else {
+            _ = name.withCString { shm_unlink($0) }
+            return (false, EACCES)
+        }
 
         guard ftruncate(fd, off_t(bytes.count)) == 0 else {
             _ = name.withCString { shm_unlink($0) }
@@ -233,7 +235,7 @@ final class KittyTransmissionTests {
             t.kittyGraphicsState.imagesById[1] != nil,
             "response: \(delegate.sentData.last.map { String(decoding: $0, as: UTF8.self) } ?? "none")")
 
-        let reopen = name.withCString { KittyTransmissionTests.swiftShmOpen($0, O_RDONLY, 0) }
+        let reopen = name.withCString { swiftterm_shm_open($0, O_RDONLY, 0) }
         #expect(reopen < 0)
     }
 

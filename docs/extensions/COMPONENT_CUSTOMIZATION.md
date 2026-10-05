@@ -312,6 +312,9 @@ Rules differ by patch kind:
 - around-hooks compose in the user's extension order. Each hook receives the already composed
   next view, so disabling one generation removes only that layer and reconnects the chain;
 - host-owned behavior and protected properties cannot be replaced;
+- a patch scoped to its extension's own themes takes part in none of the above while another
+  theme is selected — it is absent, not overridden, so the remaining chain is exactly what it
+  would be without that extension;
 - user per-entity presentation choices retain the precedence defined in `HOST_SURFACES.md`.
 
 Settings must show conflicts before activation. Enabling a second full renderer offers to make it
@@ -586,6 +589,21 @@ the durable extension surface.
   until it lands (and for good when it cannot be read), and passes `texture2d<float>` and a
   linear clamp sampler as the fragment function's third and fourth arguments; an untextured
   surface keeps the two-argument ABI.
+
+### Phase 18 — decorations that follow their theme
+
+- [x] Add `ExtensionComponentPatch.themeScope` (`.always`, written by omission, or
+  `.ownThemes`) and the manifest's binding `componentThemeScope` floor. `ownThemes` applies the
+  whole patch only while the selected app theme is one the publishing extension contributes; a
+  Duplicate to Edit copy is a custom theme and does not count.
+- [x] Filter in `ComponentCustomizationRegistry` lookups, asking `ComponentThemeScopeOracle`
+  (the selected theme's contributor, an indexed `ExtensionAppearanceRegistry` read) on every
+  lookup, and on a settled `AppThemeDidChange` or `AppThemeLibraryDidChange` post
+  `ComponentCustomizationDidChange` for exactly the targets whose scoped patches came or went.
+  The phone's projected sidebar backdrop reads the same resolution.
+- [x] Refuse `ownThemes` from an extension that contributes no theme — at manifest validation
+  for the floor, at publication (422) for a patch — and say in the install review, the update
+  review and the Extensions page when an extension's decorations follow its themes.
 
 ## Expected intrusion
 

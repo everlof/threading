@@ -1,8 +1,274 @@
 import SwiftUI
 import ThreadingRemoteKit
+import ThreadingExtensionKit
+import SwiftTerm
+import MetalKit
 import UIKit
 import XCTest
 @testable import ThreadingMobile
+
+@MainActor
+final class MobileOptionalThemeRenderingTests: XCTestCase {
+    func testReviewedShaderPreparesAndStopsForFrozenHiddenAndOverBudgetStates() async throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
+        defer { MobileThemeMetalSurface.forgetWithdrawnShadersForTesting() }
+        let (recipe, _) = MobileThemeAssets.evidenceSurface()
+        let surface = try XCTUnwrap(MobileThemeMetalSurface(recipe: recipe, source: MobileThemeAssets.evidenceSurfaceSource))
+        surface.frame = CGRect(x: 0, y: 0, width: 430, height: 932)
+        surface.layoutIfNeeded()
+        XCTAssertLessThanOrEqual(max(surface.drawableSize.width, surface.drawableSize.height), 1_290)
+        XCTAssertEqual(surface.preferredFramesPerSecond, 24)
+        XCTAssertNil(surface.hitTest(.zero, with: nil))
+        surface.setPresentation(visible: true, moving: true)
+        await surface.waitForPreparation()
+        XCTAssertFalse(surface.isPaused, "the reviewed fragment must compile through the shared wrapper")
+        surface.setPresentation(visible: true, moving: false)
+        XCTAssertTrue(surface.isPaused)
+        XCTAssertFalse(surface.isHidden)
+        surface.setPresentation(visible: false, moving: true)
+        XCTAssertTrue(surface.isPaused)
+        XCTAssertTrue(surface.isHidden)
+        surface.setPresentation(visible: true, moving: true)
+        surface.recordGPUTime(0.005)
+        surface.recordGPUTime(0.001)
+        surface.recordGPUTime(0.005)
+        surface.recordGPUTime(0.005)
+        XCTAssertFalse(surface.exceedsFrameBudget, "isolated slow frames do not permanently withdraw a surface")
+        surface.recordGPUTime(0.005)
+        XCTAssertTrue(surface.exceedsFrameBudget)
+        XCTAssertTrue(surface.isPaused)
+        XCTAssertTrue(surface.isHidden)
+        surface.setPresentation(visible: true, moving: true)
+        XCTAssertTrue(surface.isPaused, "only replacing the recipe can restore an over-budget shader")
+    }
+
+    /// Every pushed page and sheet builds its own surface. A shader withdrawn for its GPU cost
+    /// stays withdrawn on all of them, including one already built, until its source changes.
+    func testAWithdrawnShaderStaysWithdrawnOnEveryLaterScreen() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
+        defer { MobileThemeMetalSurface.forgetWithdrawnShadersForTesting() }
+        let (recipe, _) = MobileThemeAssets.evidenceSurface()
+        let source = MobileThemeAssets.evidenceSurfaceSource
+        let covered = try XCTUnwrap(MobileThemeMetalSurface(recipe: recipe, source: source))
+        let first = try XCTUnwrap(MobileThemeMetalSurface(recipe: recipe, source: source))
+        for _ in 0..<3 { first.recordGPUTime(0.005) }
+        XCTAssertTrue(first.exceedsFrameBudget)
+
+        XCTAssertNil(MobileThemeMetalSurface(recipe: recipe, source: source),
+                     "the next screen must not rebuild a withdrawn shader")
+        covered.setPresentation(visible: true, moving: true)
+        XCTAssertTrue(covered.isHidden, "a screen uncovered by a pop must not resume it either")
+
+        let replaced = RemoteThemeSurface(
+            sourceDigest: String(repeating: "ab", count: 32), specification: recipe.specification
+        )
+        XCTAssertNotNil(MobileThemeMetalSurface(recipe: replaced, source: source),
+                        "a changed source is a new shader and may be tried again")
+    }
+
+    /// With activity reactions off the Mac reads a reactive binding as no reading, so it falls
+    /// back to its idle value. The phone used to feed zero, which the mapping then moved.
+    func testReactiveBindingsReadTheirFallbackWithReactionsOff() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
+        let defaults = UserDefaults.standard
+        let keys = [MobileThemeMotionPreferences.reactionsKey, MobileThemeMotionPreferences.strengthKey]
+        let previous = keys.map { defaults.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, previous) {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        let (evidence, _) = MobileThemeAssets.evidenceSurface()
+        let recipe = RemoteThemeSurface(sourceDigest: evidence.sourceDigest, specification: .init(
+            shaderResource: "usage-rain.metal", preferredFramesPerSecond: 24,
+            inputs: [
+                .init(name: "count", value: .signal(.workloadWorkingCount,
+                    mapping: .init(inputMinimum: 0, inputMaximum: 4, fallback: 0.7))),
+                .init(name: "intensity", value: .signal(.workloadIntensity, mapping: .init(fallback: 0.3))),
+            ]
+        ))
+        let surface = try XCTUnwrap(MobileThemeMetalSurface(
+            recipe: recipe, source: MobileThemeAssets.evidenceSurfaceSource
+        ))
+        let theme = RemoteThemePalette(nil)
+
+        defaults.set(false, forKey: keys[0])
+        surface.configure(theme: theme, workingCount: 3, texture: nil)
+        XCTAssertEqual(Array(surface.inputUniformsForTesting.prefix(2)), [0.7, 0.3])
+        // The phone binds the whole shared struct, and states no focus regions in it.
+        XCTAssertEqual(surface.uniformByteCountForTesting, ExtensionMetalSource.UniformLayout.byteCount)
+        XCTAssertEqual(surface.focusUniformsForTesting, [Float](repeating: 0, count: 8))
+
+        defaults.set(true, forKey: keys[0])
+        defaults.set(100, forKey: keys[1])
+        surface.configure(theme: theme, workingCount: 3, texture: nil)
+        XCTAssertEqual(surface.inputUniformsForTesting[0], 0.75, accuracy: 0.0001)
+        XCTAssertEqual(Double(surface.inputUniformsForTesting[1]),
+                       MobileThemeMotionPreferences.reaction(workingCount: 3), accuracy: 0.0001)
+    }
+
+    /// The time-of-day binding is read per frame, against the day's real length.
+    func testDayClockFollowsTheClockAcrossMidnight() throws {
+        var clock = MobileThemeDayClock()
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: Date())
+        let noon = try XCTUnwrap(calendar.date(byAdding: .hour, value: 12, to: start))
+        let length = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: start)).timeIntervalSince(start)
+        XCTAssertEqual(clock.fraction(at: noon), noon.timeIntervalSince(start) / length, accuracy: 0.0001)
+        let nextMorning = try XCTUnwrap(calendar.date(byAdding: .hour, value: 30, to: start))
+        XCTAssertLessThan(clock.fraction(at: nextMorning), 0.5, "a new day starts the fraction again")
+    }
+
+    func testTerminalGlowUsesMetalAndLowPowerRetiresItsAdditionalPasses() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
+        let view = RemoteTerminalView(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let window = UIWindow(frame: view.bounds)
+        window.addSubview(view)
+        let theme = RemoteTerminalThemeDTO(id: "glow", name: "Glow", foreground: "#00FF80",
+            background: "#101010", cursor: "#FFFFFF", selection: "#224422",
+            ansi: Array(repeating: "#00FF80", count: 16), glow: .init(radius: 4, opacity: 0.6))
+        view.noteAppliedTheme(theme)
+        view.refreshThemeGlow(lowPower: false)
+        XCTAssertEqual(view.textGlow, TerminalTextGlow(radius: 4, opacity: 0.6))
+        XCTAssertTrue(view.isUsingMetalRenderer)
+        view.refreshThemeGlow(lowPower: true)
+        XCTAssertNil(view.textGlow)
+        XCTAssertFalse(view.isUsingMetalRenderer)
+        view.refreshThemeGlow(lowPower: false)
+        XCTAssertTrue(view.isUsingMetalRenderer)
+        view.noteAppliedTheme(nil)
+        XCTAssertNil(view.textGlow)
+        XCTAssertFalse(view.isUsingMetalRenderer)
+        view.removeFromSuperview()
+    }
+}
+
+@MainActor
+final class MobileThemeIdentityInkTests: XCTestCase {
+    func testTranscriptReadingSurfacesStayOpaqueOverThemeDecoration() {
+        let theme = RemoteThemePalette(.init(id: "reading", name: "Reading", mode: .dark,
+            colors: ["ground": "#101020", "control_resting": "#FFFFFF12"],
+            material: .init(panelRadius: 8, controlRadius: 4, borderWidth: 1)))
+        XCTAssertEqual(theme.uiConversationGround.cgColor.alpha, 1)
+        XCTAssertEqual(theme.uiUserMessageSurface.cgColor.alpha, 1)
+        XCTAssertNotEqual(theme.uiUserMessageSurface, theme.uiControlResting)
+    }
+
+    /// Thinking, notice, tool and permission rows stand on the moving backdrop too. A System
+    /// theme's panel is a faint wash, so each row's plate must be opaque whatever the role says.
+    func testEveryTranscriptRowStandsOnAnOpaquePlateOverADecoratedGround() throws {
+        let decorated = RemoteThemePalette(.init(id: "wash", name: "Wash", mode: .dark,
+            colors: ["ground": "#101020", "panel": "#FFFFFF10"],
+            material: .init(panelRadius: 9, controlRadius: 4, borderWidth: 1,
+                backdropGradient: .init(stops: [.init(color: "#101020", position: 0),
+                                                .init(color: "#304050", position: 1)],
+                                        angleDegrees: 135, drift: nil))))
+        XCTAssertTrue(decorated.hasBackdropDecoration)
+        let thinking = RemoteExpandableMessageView(
+            title: "Reasoning", text: "Because", isExpanded: true, theme: decorated, toggle: {}
+        )
+        let notice = RemoteNoticeMessageView(
+            row: .init(id: "notice", kind: .notice, text: "Heads up"), theme: decorated
+        )
+        let tool = RemoteToolMessageView(
+            row: .init(id: "tool", kind: .tool, toolName: "Bash", summary: "ls"),
+            isExpanded: false, theme: decorated, toggle: {}
+        )
+        let permission = RemoteConversationPermissionCell(frame: CGRect(x: 0, y: 0, width: 390, height: 200))
+        permission.configure(
+            permission: .init(id: "permission", toolName: "Bash", summary: "rm -rf build"),
+            theme: decorated, decide: { _ in }
+        )
+        let permissionPanel = try XCTUnwrap(permission.contentView.subviews.first)
+        for (name, view) in [("thinking", thinking as UIView), ("notice", notice),
+                             ("tool", tool), ("permission", permissionPanel)] {
+            XCTAssertEqual(view.backgroundColor?.cgColor.alpha, 1, "\(name) lets the backdrop through")
+        }
+        XCTAssertEqual(thinking.layer.cornerRadius, 9, "a reading plate over decoration is a card")
+        XCTAssertEqual(notice.layer.cornerRadius, 9)
+
+        let plain = RemoteThemePalette(.init(id: "plain", name: "Plain", mode: .dark,
+            colors: ["ground": "#101020"], material: .init(panelRadius: 9, controlRadius: 4, borderWidth: 1)))
+        let plainNotice = RemoteNoticeMessageView(
+            row: .init(id: "notice", kind: .notice, text: "Heads up"), theme: plain
+        )
+        XCTAssertEqual(plainNotice.layer.cornerRadius, 0, "over a plain ground the plate is the ground")
+        XCTAssertEqual(plainNotice.backgroundColor, plain.uiConversationGround)
+    }
+
+    /// A theme's font and typeface reach titles and chrome only. Content steps back out of the
+    /// root's statement: under a monospaced theme, content text is proportional again.
+    func testContentTypographyStepsOutOfTheThemesTypeface() throws {
+        let theme = RemoteThemePalette(.init(id: "mono", name: "Mono", mode: .dark,
+            colors: ["ground": "#000000", "label": "#FFFFFF"],
+            material: .init(panelRadius: 8, controlRadius: 4, borderWidth: 1, typeface: .monospaced)))
+        func inkRatio(content: Bool) throws -> Double {
+            func width(_ text: String) throws -> Int {
+                let line = Text(verbatim: text).fixedSize()
+                let view = Group {
+                    if content { line.mobileContentTypography() } else { line }
+                }.mobileTheme(theme)
+                let renderer = ImageRenderer(content: view)
+                renderer.scale = 2
+                return try XCTUnwrap(renderer.cgImage).width
+            }
+            return Double(try width("iiiiiiii")) / Double(try width("WWWWWWWW"))
+        }
+        XCTAssertGreaterThan(try inkRatio(content: false), 0.85, "chrome takes the monospaced hint")
+        XCTAssertLessThan(try inkRatio(content: true), 0.6, "content keeps the platform's typography")
+    }
+
+    func testSystemTypefaceHintUsesTheNativeChromeFontDesign() {
+        let theme = RemoteThemePalette(.init(id: "mono", name: "Mono", mode: .dark,
+            colors: [:], material: .init(panelRadius: 8, controlRadius: 4, borderWidth: 1,
+                                        typeface: .monospaced)))
+        let font = theme.chromeFont(forTextStyle: .caption1)
+        let narrowWidth = ("iiii" as NSString).size(withAttributes: [.font: font]).width
+        let wideWidth = ("WWWW" as NSString).size(withAttributes: [.font: font]).width
+        // Preferred text-style descriptors can omit traitMonoSpace even for SF Mono.
+        // Measure the glyphs the label actually draws instead of that advisory flag.
+        XCTAssertEqual(narrowWidth, wideWidth, accuracy: 0.01, font.fontName)
+        XCTAssertEqual(font.pointSize, UIFont.preferredFont(forTextStyle: .caption1).pointSize)
+    }
+
+    func testClaudeMarkTakesThemeInkAndResolvedAccountChoicesKeepTheirPixels() throws {
+        func palette(_ tinted: Bool) -> RemoteThemePalette {
+            RemoteThemePalette(.init(id: "ink", name: "Ink", mode: .dark,
+                colors: ["accent": "#00FF00", "panel": "#101010"],
+                material: .init(panelRadius: 8, controlRadius: 4, borderWidth: 1,
+                                identityMarks: tinted ? "tinted" : "natural")))
+        }
+        let greenMark = try render(MobileAgentMarkGlyph(identity: .claude).mobileTheme(palette(true)))
+        let naturalMark = try render(MobileAgentMarkGlyph(identity: .claude).mobileTheme(palette(false)))
+        XCTAssertGreaterThan(try greenPixels(greenMark), 30)
+        XCTAssertEqual(try greenPixels(naturalMark), 0)
+        func chip(_ color: String) -> RemoteSessionAccountDTO {
+            .init(name: "Account", glyph: "D", isEmoji: false, hue: nil,
+                  backgroundHex: color, foregroundHex: "#FFFFFF", badgeHidden: false)
+        }
+        let generated = try render(MobileAccountChip(account: chip("#00FF00")).mobileTheme(palette(true)))
+        let chosen = try render(MobileAccountChip(account: chip("#FF0000")).mobileTheme(palette(true)))
+        XCTAssertGreaterThan(try greenPixels(generated), 10)
+        XCTAssertEqual(try greenPixels(chosen), 0)
+    }
+
+    private func render<V: View>(_ view: V) throws -> CGImage {
+        let renderer = ImageRenderer(content: view.padding(4))
+        renderer.scale = 3
+        return try XCTUnwrap(renderer.cgImage)
+    }
+
+    private func greenPixels(_ image: CGImage) throws -> Int {
+        let context = try XCTUnwrap(CGContext(data: nil, width: image.width, height: image.height,
+            bitsPerComponent: 8, bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let bytes = try XCTUnwrap(context.data?.assumingMemoryBound(to: UInt8.self))
+        return stride(from: 0, to: image.width * image.height * 4, by: 4).filter {
+            bytes[$0 + 1] > 160 && bytes[$0] < 80 && bytes[$0 + 2] < 80 && bytes[$0 + 3] > 200
+        }.count
+    }
+}
 
 @MainActor
 final class MobileThemeBackdropTests: XCTestCase {
@@ -78,6 +344,370 @@ final class MobileThemeBackdropTests: XCTestCase {
         backdrop.apply(theme(drift: .init(), count: 1000))
         XCTAssertFalse(backdrop.showsGradient)
         XCTAssertEqual(backdrop.layer.sublayers?.count, 1)
+    }
+
+    func testNavigationHandsOneBackdropLeaseBackOnPop() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let first = MobileThemeBackdropView(frame: window.bounds)
+        let second = MobileThemeBackdropView(frame: window.bounds)
+        for view in [first, second] {
+            view.permitsMotion = { true }; view.sceneIsActive = { _ in true }
+            window.addSubview(view); view.apply(theme(drift: .init()))
+        }
+        first.isPresentationActive = true
+        XCTAssertTrue(first.isAnimating)
+        second.isPresentationActive = true
+        XCTAssertFalse(first.isAnimating)
+        XCTAssertTrue(second.isAnimating)
+        second.isPresentationActive = false
+        XCTAssertTrue(first.isAnimating)
+        XCTAssertFalse(second.isAnimating)
+        first.removeFromSuperview()
+        XCTAssertFalse(first.isAnimating)
+    }
+
+    /// Work quickens the drift through the layer's clock. Restating the animation with a new
+    /// duration restarted it at phase zero, so the gradient snapped when a session began work.
+    func testWorkloadQuickensTheDriftWithoutRestartingIt() throws {
+        let defaults = UserDefaults.standard
+        let keys = [MobileThemeMotionPreferences.reactionsKey, MobileThemeMotionPreferences.strengthKey]
+        let previous = keys.map { defaults.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, previous) {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.set(true, forKey: keys[0])
+        defaults.set(200, forKey: keys[1])
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let backdrop = MobileThemeBackdropView(frame: window.bounds)
+        backdrop.permitsMotion = { true }; backdrop.sceneIsActive = { _ in true }
+        window.addSubview(backdrop)
+        defer { backdrop.removeFromSuperview() }
+        backdrop.isPresentationActive = true
+        backdrop.apply(theme(drift: .init(duration: 12)))
+        let gradient = try XCTUnwrap(backdrop.layer.sublayers?.first as? CAGradientLayer)
+        let running = try XCTUnwrap(gradient.animation(forKey: ThemeGradientAnimator.animationKey))
+        let before = gradient.convertTime(CACurrentMediaTime(), from: nil)
+
+        backdrop.workingCount = 3
+
+        XCTAssertTrue(gradient.animation(forKey: ThemeGradientAnimator.animationKey) === running,
+                      "the running keyframes continue rather than restarting at phase zero")
+        XCTAssertEqual(gradient.convertTime(CACurrentMediaTime(), from: nil), before, accuracy: 0.05,
+                       "the layer's clock continues from the same instant")
+        XCTAssertEqual(Double(gradient.speed), 1.5, accuracy: 0.0001,
+                       "full reaction would double a 12 s drift, but it stops at the 8 s floor")
+        backdrop.workingCount = 0
+        XCTAssertEqual(gradient.speed, 1)
+        XCTAssertTrue(gradient.animation(forKey: ThemeGradientAnimator.animationKey) === running)
+    }
+
+    /// Reduce Transparency and Increase Contrast keep the authored gradient and drop what is
+    /// drawn over it.
+    func testAccessibilityGroundDropsParticlesAndKeepsTheGradient() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let backdrop = MobileThemeBackdropView(frame: window.bounds)
+        backdrop.permitsMotion = { true }; backdrop.sceneIsActive = { _ in true }
+        var plain = false
+        backdrop.prefersPlainGround = { plain }
+        window.addSubview(backdrop)
+        defer { backdrop.removeFromSuperview() }
+        backdrop.isPresentationActive = true
+        backdrop.apply(RemoteThemePalette(RemoteThemeDTO(
+            id: "plain-ground", name: "Plain ground", mode: .dark,
+            colors: ["accent": "#00FF88", "ground": "#101010"],
+            material: .init(panelRadius: 8, controlRadius: 4, borderWidth: 1,
+                backdropGradient: .init(stops: [.init(color: "#101020", position: 0),
+                                                .init(color: "#203040", position: 1)],
+                                        angleDegrees: 135, drift: .init()),
+                particles: .init(style: .snow, density: 1, speed: 1)))))
+        func emitters() -> Int { backdrop.layer.sublayers?.filter { $0 is CAEmitterLayer }.count ?? 0 }
+        XCTAssertEqual(emitters(), 1)
+
+        plain = true
+        NotificationCenter.default.post(name: UIAccessibility.reduceTransparencyStatusDidChangeNotification, object: nil)
+        XCTAssertEqual(emitters(), 0)
+        XCTAssertTrue(backdrop.showsGradient)
+        XCTAssertTrue(backdrop.isAnimating, "transparency is not motion; the drift continues")
+
+        plain = false
+        NotificationCenter.default.post(name: UIAccessibility.darkerSystemColorsStatusDidChangeNotification, object: nil)
+        XCTAssertEqual(emitters(), 1)
+    }
+
+    /// The motion switch may be written from any thread; only a change to a decoration value
+    /// reaches the backdrop, and it arrives on the main actor.
+    func testPreferenceWritesReachTheBackdropOnMainAndOnlyWhenTheyChange() async throws {
+        let defaults = UserDefaults.standard
+        let key = MobileThemeMotionPreferences.motionKey
+        let previous = defaults.object(forKey: key)
+        defer { if let previous { defaults.set(previous, forKey: key) } else { defaults.removeObject(forKey: key) } }
+        defaults.set(true, forKey: key)
+        try await Task.sleep(for: .milliseconds(50))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let backdrop = MobileThemeBackdropView(frame: window.bounds)
+        backdrop.permitsMotion = { MobileThemeMotionPreferences.motionEnabled }
+        backdrop.sceneIsActive = { _ in true }
+        window.addSubview(backdrop)
+        defer { backdrop.removeFromSuperview() }
+        backdrop.isPresentationActive = true
+        backdrop.apply(theme(drift: .init()))
+        XCTAssertTrue(backdrop.isAnimating)
+
+        let unrelated = expectation(forNotification: MobileThemeMotionPreferences.didChange, object: nil)
+        unrelated.isInverted = true
+        await Task.detached { UserDefaults.standard.set(UUID().uuidString, forKey: "unrelated-test-key") }.value
+        await Task.detached { UserDefaults.standard.removeObject(forKey: "unrelated-test-key") }.value
+        await fulfillment(of: [unrelated], timeout: 0.2)
+
+        let changed = expectation(forNotification: MobileThemeMotionPreferences.didChange, object: nil) { _ in
+            Thread.isMainThread
+        }
+        await Task.detached { UserDefaults.standard.set(false, forKey: key) }.value
+        await fulfillment(of: [changed], timeout: 2)
+        XCTAssertFalse(backdrop.isAnimating)
+    }
+
+    /// The Workspace sheet over a pushed page: one backdrop in the sheet, and it is the one that
+    /// moves. A second, outer backdrop competed for the window's lease and could animate behind
+    /// the list while the list's own stood still.
+    func testWorkspaceSheetOverAPushedStackMovesOnlyItsVisibleBackdrop() throws {
+        let motionKey = MobileThemeMotionPreferences.motionKey
+        let previous = UserDefaults.standard.object(forKey: motionKey)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: motionKey) }
+            else { UserDefaults.standard.removeObject(forKey: motionKey) }
+        }
+        UserDefaults.standard.set(true, forKey: motionKey)
+        guard !UIAccessibility.isReduceMotionEnabled, !ProcessInfo.processInfo.isLowPowerModeEnabled else {
+            throw XCTSkip("system motion is held on this device")
+        }
+        let theme = theme(drift: .init())
+        let model = WorkspaceSheetFixture()
+        let controller = UIHostingController(rootView: WorkspaceSheetHost(model: model, theme: theme))
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        func backdrops(in view: UIView) -> [MobileThemeBackdropView] {
+            ((view as? MobileThemeBackdropView).map { [$0] } ?? []) + view.subviews.flatMap(backdrops(in:))
+        }
+        func settle(until condition: () -> Bool) {
+            let deadline = Date().addingTimeInterval(3)
+            while !condition(), Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        }
+
+        settle { backdrops(in: window).contains(where: \.isAnimating) }
+        let root = try XCTUnwrap(backdrops(in: window).first(where: \.isAnimating))
+        model.path = ["pushed"]
+        settle { backdrops(in: window).contains { $0 !== root && $0.isAnimating } }
+        let pushed = try XCTUnwrap(backdrops(in: window).first { $0 !== root && $0.isAnimating },
+                                   "the pushed page owns the lease")
+        XCTAssertFalse(root.isAnimating, "the covered page gives it up")
+
+        model.showsSheet = true
+        settle { controller.presentedViewController != nil }
+        let sheet = try XCTUnwrap(controller.presentedViewController)
+        settle { backdrops(in: sheet.view).contains(where: \.isAnimating) }
+        let inSheet = backdrops(in: sheet.view)
+        XCTAssertEqual(inSheet.count, 1, "the Workspace sheet has exactly one backdrop")
+        XCTAssertEqual(inSheet.first?.isAnimating, true, "and it is the one that moves")
+        XCTAssertTrue(sheet.view.window === window)
+        XCTAssertEqual(backdrops(in: window).filter(\.isAnimating).count, 1,
+                       "one decorative motion in the window")
+
+        XCTAssertFalse(pushed.isAnimating, "the sheet covers the pushed page")
+
+        model.showsSheet = false
+        settle { controller.presentedViewController == nil && pushed.isAnimating }
+        XCTAssertTrue(pushed.isAnimating, "dismissing hands the lease back")
+    }
+
+    func testExtensionBackdropSwitchWithholdsTheShaderRequest() throws {
+        let key = MobileThemeMotionPreferences.extensionBackdropsKey
+        let previous = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        let (surface, source) = MobileThemeAssets.evidenceSurface()
+        let texture = RemoteThemeAsset(slot: MobileThemeMotionPreferences.surfaceTextureSlot,
+            digest: String(repeating: "cd", count: 32), byteCount: 64, mediaType: "image/png",
+            pixelWidth: 4, pixelHeight: 4)
+        let picture = RemoteThemeAsset(slot: "backdrop", digest: String(repeating: "ef", count: 32),
+            byteCount: 64, mediaType: "image/png", pixelWidth: 4, pixelHeight: 4)
+        let theme = RemoteThemeDTO(id: "shader", name: "Shader", mode: .dark, colors: [:],
+            material: .init(panelRadius: 8, controlRadius: 4, borderWidth: 1),
+            assets: [source, texture, picture], surface: surface)
+        XCTAssertNotNil(theme.surface)
+
+        UserDefaults.standard.removeObject(forKey: key)
+        XCTAssertTrue(MobileThemeMotionPreferences.extensionBackdropsEnabled, "on by default")
+        XCTAssertEqual(MobileThemeMotionPreferences.assetRequest(for: theme), theme)
+
+        UserDefaults.standard.set(false, forKey: key)
+        let request = try XCTUnwrap(MobileThemeMotionPreferences.assetRequest(for: theme))
+        XCTAssertNil(request.surface)
+        XCTAssertEqual(request.assets?.map(\.slot), ["backdrop"], "neither the shader nor its texture is fetched")
+        XCTAssertEqual(request.colors, theme.colors)
+    }
+
+    func testEveryParticleStyleHasBoundedCellsAndAStillUnderReducedMotion() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let backdrop = MobileThemeBackdropView(frame: window.bounds)
+        backdrop.permitsMotion = { true }; backdrop.sceneIsActive = { _ in true }
+        window.addSubview(backdrop); backdrop.isPresentationActive = true
+        for style in RemoteThemeParticles.Style.allCases {
+            let source = RemoteThemeDTO(id: "particles", name: "Particles", mode: .dark,
+                colors: ["accent": "#00FF88", "ground": "#101010"],
+                material: .init(panelRadius: 8, controlRadius: 4, borderWidth: 1,
+                    particles: .init(style: style, density: 1, speed: 3)))
+            backdrop.apply(RemoteThemePalette(source))
+            let emitter = try XCTUnwrap(backdrop.layer.sublayers?.compactMap { $0 as? CAEmitterLayer }.first)
+            let cells = try XCTUnwrap(emitter.emitterCells)
+            XCTAssertEqual(cells.count, 1)
+            XCTAssertNotNil(cells.first?.contents)
+            XCTAssertLessThanOrEqual(cells.reduce(Float(0)) {
+                $0 + $1.birthRate * ($1.lifetime + $1.lifetimeRange)
+            }, 120.001)
+            XCTAssertTrue(cells.allSatisfy { $0.lifetime + $0.lifetimeRange <= 24 })
+            backdrop.permitsMotion = { false }; backdrop.refreshMotion()
+            XCTAssertTrue(emitter.isHidden)
+            XCTAssertEqual(emitter.speed, 0)
+            XCTAssertEqual(backdrop.layer.sublayers?.last?.isHidden, false)
+            backdrop.permitsMotion = { true }; backdrop.refreshMotion()
+            XCTAssertFalse(emitter.isHidden)
+        }
+    }
+
+    func testPhoneReactionsAreClampedAndOffByDefault() {
+        let defaults = UserDefaults.standard
+        let keys = [MobileThemeMotionPreferences.reactionsKey, MobileThemeMotionPreferences.strengthKey]
+        let previous = keys.map { defaults.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, previous) {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.set(false, forKey: keys[0])
+        defaults.set(200, forKey: keys[1])
+        XCTAssertEqual(MobileThemeMotionPreferences.reaction(workingCount: 3), 0)
+        defaults.set(true, forKey: keys[0])
+        XCTAssertEqual(MobileThemeMotionPreferences.reaction(workingCount: 3), 1)
+        defaults.set(0, forKey: keys[1])
+        XCTAssertEqual(MobileThemeMotionPreferences.reaction(workingCount: 3), 0)
+    }
+
+    /// A push puts two screens on screen and only one holds the lease. The other used to swap its
+    /// live particles for the still tile and snap its drift to phase zero, and swap back when the
+    /// slide ended: every coin on the ground jumped twice per push and twice per pop. A screen
+    /// without the lease now holds its ground where it stands, and resumes from that instant.
+    ///
+    /// The window is shown: Core Animation drops the animations of a layer tree it commits for
+    /// no display, so an unshown window would lose the held drift for a reason no phone has.
+    func testAScreenWithoutTheLeaseHoldsItsGroundAndResumesWhereItStood() throws {
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let list = MobileThemeBackdropView(frame: window.bounds)
+        let composer = MobileThemeBackdropView(frame: window.bounds)
+        for view in [list, composer] {
+            view.permitsMotion = { true }; view.sceneIsActive = { _ in true }
+            window.rootViewController?.view.addSubview(view)
+            view.apply(theme(drift: .init(), particles: true))
+        }
+        defer { list.removeFromSuperview(); composer.removeFromSuperview() }
+        let gradient = list.groundLayersForTesting.gradient
+        let emitter = list.particleEmitterForTesting
+
+        XCTAssertEqual(composer.particleState, .paused,
+                       "a screen not yet presented is already full, held — not the still tile")
+        list.isPresentationActive = true
+        XCTAssertEqual(list.particleState, .running)
+        XCTAssertTrue(list.isAnimating)
+
+        composer.isPresentationActive = true
+        XCTAssertEqual(list.particleState, .paused, "the covered list freezes its field mid-flight")
+        XCTAssertFalse(emitter.isHidden, "and keeps showing it")
+        XCTAssertFalse(list.isAnimating)
+        XCTAssertNotNil(gradient.animation(forKey: ThemeGradientAnimator.animationKey),
+                        "the drift keeps its keyframes, so it keeps its phase")
+        let heldField = emitter.convertTime(CACurrentMediaTime(), from: nil)
+        let heldDrift = gradient.convertTime(CACurrentMediaTime(), from: nil)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        let fieldAfterHold = emitter.convertTime(CACurrentMediaTime(), from: nil)
+        let driftAfterHold = gradient.convertTime(CACurrentMediaTime(), from: nil)
+        XCTAssertEqual(fieldAfterHold, heldField, accuracy: 0.001)
+        XCTAssertEqual(driftAfterHold, heldDrift, accuracy: 0.001)
+
+        composer.isPresentationActive = false
+        // Read before asserting: recording a failure takes long enough to move a running clock.
+        let resumedField = emitter.convertTime(CACurrentMediaTime(), from: nil)
+        let resumedDrift = gradient.convertTime(CACurrentMediaTime(), from: nil)
+        XCTAssertEqual(resumedField, heldField, accuracy: 0.05,
+                       "resuming continues from the held instant instead of leaping the time it was held")
+        XCTAssertEqual(resumedDrift, heldDrift, accuracy: 0.05)
+        XCTAssertEqual(list.particleState, .running)
+        XCTAssertTrue(list.isAnimating, "the drift held across the hold resumes rather than being dropped")
+    }
+
+    /// The still tile is what motion-off looks like, and only that.
+    func testTheStillTileIsForMotionOffOnly() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let backdrop = MobileThemeBackdropView(frame: window.bounds)
+        var allowed = true
+        backdrop.permitsMotion = { allowed }; backdrop.sceneIsActive = { _ in true }
+        window.addSubview(backdrop)
+        defer { backdrop.removeFromSuperview() }
+        backdrop.isPresentationActive = true
+        backdrop.apply(theme(drift: .init(), particles: true))
+        XCTAssertEqual(backdrop.particleState, .running)
+
+        allowed = false
+        backdrop.refreshMotion()
+        XCTAssertEqual(backdrop.particleState, .still)
+        XCTAssertTrue(backdrop.particleEmitterForTesting.isHidden)
+
+        allowed = true
+        backdrop.refreshMotion()
+        XCTAssertEqual(backdrop.particleState, .running, "motion back on starts a full field again")
+    }
+
+    /// The list's ground is its collection view's background and the composer's runs to the
+    /// screen's foot, so filling each view's own bounds drew the same picture at two scales.
+    /// Both lay the picture and the gradient out against the window and only clip them.
+    func testEveryScreenLaysItsGroundOutAgainstTheWindow() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let list = MobileThemeBackdropView(frame: CGRect(x: 0, y: 116, width: 390, height: 694))
+        let composer = MobileThemeBackdropView(frame: window.bounds)
+        for view in [list, composer] {
+            window.addSubview(view)
+            view.apply(theme(drift: nil))
+            view.layoutIfNeeded()
+            let ground = view.groundLayersForTesting
+            XCTAssertEqual(view.convert(ground.gradient.frame, to: window), window.bounds)
+            XCTAssertEqual(view.convert(ground.picture.frame, to: window), window.bounds)
+            XCTAssertTrue(view.clipsToBounds)
+            view.removeFromSuperview()
+        }
+    }
+
+    private func theme(drift: ThemeGradientDrift?, count: Int = 2, particles: Bool) -> RemoteThemePalette {
+        let base = theme(drift: drift, count: count)
+        guard let source = base.source else { return base }
+        return RemoteThemePalette(RemoteThemeDTO(
+            id: source.id, name: source.name, mode: source.mode, colors: source.colors.merging(["accent": "#FF8A1F"]) { $1 },
+            material: .init(panelRadius: 10, controlRadius: 5, borderWidth: 1,
+                backdropGradient: source.material.backdropGradient,
+                particles: particles ? .init(style: .snow, density: 1, speed: 1) : nil)
+        ))
     }
 
     private func theme(drift: ThemeGradientDrift?, count: Int = 2) -> RemoteThemePalette {
@@ -306,12 +936,14 @@ final class MobileRootBackdropTests: XCTestCase {
     /// keyboard. A background attached to that content stops at the same height, exposing the
     /// hosting view below. The root backdrop must keep painting independently of that short view.
     func testBackdropPaintsBelowKeyboardSizedNavigationContent() throws {
-        let ground = UIColor(red: 31 / 255, green: 31 / 255, blue: 31 / 255, alpha: 1)
-        let root = MobileRootBackdrop(ground: Color(uiColor: ground)) {
+        let theme = RemoteThemePalette(.init(id: "root-ground", name: "Root ground", mode: .dark,
+            colors: ["ground": "#1F1F1F"],
+            material: .init(panelRadius: 8, controlRadius: 4, borderWidth: 1)))
+        let root = MobileRootBackdrop {
             Color.clear
                 .frame(maxWidth: .infinity)
                 .frame(height: 520)
-        }
+        }.mobileTheme(theme)
         let controller = UIHostingController(rootView: root)
         controller.view.backgroundColor = .black
         let window = hostedWindow(rootViewController: controller)
@@ -595,16 +1227,65 @@ final class MobileMorphingTitleTests: XCTestCase {
         XCTAssertTrue(title.isAnimatingTitleForTesting)
     }
 
-    func testReduceMotionLandsAChangedChatNameWithoutAnimation() {
+    /// Reduce Motion keeps a rename visible but quiet: a brief crossfade in place, never a
+    /// shape morph or a scramble. LabelMorph builds the morph in layout, so lay out first.
+    func testReduceMotionCrossfadesAChangedChatName() {
         let (window, title) = mountedTitle()
         defer { window.isHidden = true }
 
         configure(title, text: "First chat", reducesMotion: false)
         window.layoutIfNeeded()
         configure(title, text: "Renamed chat", reducesMotion: true)
+        window.layoutIfNeeded()
 
         XCTAssertEqual(title.stringValue, "Renamed chat")
-        XCTAssertFalse(title.isAnimatingTitleForTesting)
+        assertCrossfades(title)
+    }
+
+    /// The phone's Theme motion switch holds a chat name to the same crossfade, even where a
+    /// theme states a scramble.
+    func testThemeMotionOffCrossfadesAChangedChatName() {
+        let key = MobileThemeMotionPreferences.motionKey
+        let previous = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        UserDefaults.standard.set(false, forKey: key)
+        let (window, title) = mountedTitle()
+        defer { window.isHidden = true }
+        title.theme = scrambleTheme("アイウエオ")
+
+        configure(title, text: "First chat", reducesMotion: false)
+        window.layoutIfNeeded()
+        configure(title, text: "Renamed chat", reducesMotion: false)
+        window.layoutIfNeeded()
+
+        XCTAssertNil(title.scrambleAlphabetForTesting)
+        assertCrossfades(title)
+    }
+
+    /// A theme's scramble decodes a rename from the theme's own alphabet, whitespace dropped.
+    func testAThemesScrambleAlphabetDecodesARename() {
+        let key = MobileThemeMotionPreferences.motionKey
+        let previous = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        UserDefaults.standard.set(true, forKey: key)
+        guard !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+        let (window, title) = mountedTitle()
+        defer { window.isHidden = true }
+        title.theme = scrambleTheme("ア イ\nウ")
+
+        configure(title, text: "First chat", reducesMotion: false)
+        window.layoutIfNeeded()
+        configure(title, text: "Renamed chat", reducesMotion: false)
+        window.layoutIfNeeded()
+
+        XCTAssertEqual(title.scrambleAlphabetForTesting, ["ア", "イ", "ウ"])
+        XCTAssertFalse(animations(in: title.layer, key: "morph.in.opacity", as: CABasicAnimation.self).isEmpty)
     }
 
     func testAConnectionStatusScrollsAsOneLineUnderTheSharedPulse() {
@@ -1055,6 +1736,25 @@ final class MobileMorphingTitleTests: XCTestCase {
         }
 
         XCTAssertGreaterThan(upperInk, lowerInk, "P's bowl belongs above its stem on UIKit")
+    }
+
+    private func assertCrossfades(_ title: MobileMorphingTitleLabel,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        let fades = animations(in: title.layer, key: "morph.in", as: CABasicAnimation.self)
+            + animations(in: title.layer, key: "morph.out", as: CABasicAnimation.self)
+        XCTAssertFalse(fades.isEmpty, "the rename crossfades", file: file, line: line)
+        XCTAssertTrue(fades.allSatisfy { $0.keyPath == "opacity" && $0.duration <= 0.18 + 0.0001 },
+                      file: file, line: line)
+        XCTAssertTrue(animations(in: title.layer, key: "morph.path", as: CABasicAnimation.self).isEmpty,
+                      "no glyph shape morph", file: file, line: line)
+    }
+
+    private func scrambleTheme(_ characters: String) -> RemoteThemePalette {
+        RemoteThemePalette(RemoteThemeDTO(
+            id: "scramble", name: "Scramble", mode: .dark, colors: [:],
+            material: .init(panelRadius: 8, controlRadius: 4, borderWidth: 1),
+            titleMorph: .init(style: "scramble", characters: characters)
+        ))
     }
 
     private func mountedTitle() -> (UIWindow, MobileMorphingTitleLabel) {
@@ -1509,5 +2209,146 @@ final class ComposerChromeRenderTests: XCTestCase {
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         context.draw(cropped, in: CGRect(x: 0, y: 0, width: 1, height: 1))
         return bytes
+    }
+}
+
+/// A navigation stack with a pushed page and the session Workspace as a sheet over it — the
+/// shape that put two backdrops in one sheet.
+@MainActor
+private final class WorkspaceSheetFixture: ObservableObject {
+    @Published var path: [String] = []
+    @Published var showsSheet = false
+}
+
+private struct WorkspaceSheetHost: View {
+    @ObservedObject var model: WorkspaceSheetFixture
+    let theme: RemoteThemePalette
+
+    var body: some View {
+        NavigationStack(path: $model.path) {
+            Color.clear
+                .mobileThemeBackdrop(theme)
+                .navigationDestination(for: String.self) { _ in
+                    Color.clear.mobileThemeBackdrop(theme)
+                }
+        }
+        .sheet(isPresented: $model.showsSheet) {
+            SessionWorkspaceView(
+                session: RemoteSessionSummaryDTO(
+                    id: "workspace-fixture", title: "Workspace", agentKind: "codex",
+                    surface: .conversation, state: .idle, projectName: "Fixture"
+                ),
+                client: RemoteClient(link: DemoExperience.link),
+                activity: MobileWorkspaceActivity(sessionID: "workspace-fixture"),
+                loadsRemotely: false
+            )
+            .mobileTheme(theme)
+        }
+        .mobileTheme(theme)
+    }
+}
+
+@MainActor
+final class MobileThemeMascotTests: XCTestCase {
+    private var digests: [String] = []
+
+    override func tearDown() async throws {
+        for digest in digests { MobileThemeAssets.shared.images.removeObject(forKey: digest as NSString) }
+        digests = []
+        try await super.tearDown()
+    }
+
+    func testPoseFollowsTheCatalogueMoodAndBorrowsLikeTheMac() {
+        let idle = pose("mascot.idle")
+        let working = pose("mascot.working")
+        let celebrating = pose("mascot.celebrating")
+        let mascot = MobileThemeMascotView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        mascot.apply(theme([idle, working, celebrating]))
+
+        XCTAssertTrue(shown(mascot) === image(idle), "resting has no pose of its own and wears idle's")
+        mascot.mood = "working"
+        XCTAssertTrue(shown(mascot) === image(working))
+        mascot.mood = "attention"
+        XCTAssertTrue(shown(mascot) === image(working), "attention wears working's pose before idle's")
+        mascot.mood = "working"
+        mascot.mood = "idle"
+        XCTAssertTrue(shown(mascot) === image(idle), "without motion a finished turn is not celebrated")
+    }
+
+    func testFigureStandsOnTheTrailingPillAndMirrorsForRightToLeft() throws {
+        let wide = pose("mascot.idle", size: CGSize(width: 128, height: 64))
+        let mascot = MobileThemeMascotView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        mascot.foot = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 94, trailing: 20)
+        mascot.apply(theme([wide]))
+        mascot.layoutIfNeeded()
+
+        let side = MobileDesign.Size.mascot
+        let standing = CGRect(x: 390 - 20 - side, y: 844 - 94 - side / 2, width: side, height: side / 2)
+        XCTAssertEqual(mascot.figureForTesting.frame, standing, "fitted to the square, feet on the pill")
+        XCTAssertFalse(mascot.isUserInteractionEnabled)
+        XCTAssertNil(mascot.hitTest(CGPoint(x: standing.midX, y: standing.midY), with: nil))
+        XCTAssertTrue(mascot.accessibilityElementsHidden)
+
+        let rendered = UIGraphicsImageRenderer(bounds: mascot.bounds).image { mascot.layer.render(in: $0.cgContext) }
+        XCTAssertEqual(try alpha(in: rendered, at: CGPoint(x: standing.midX, y: standing.midY)), 255)
+        XCTAssertEqual(try alpha(in: rendered, at: CGPoint(x: 20, y: 20)), 0, "the rest of the ground is the backdrop's")
+
+        mascot.semanticContentAttribute = .forceRightToLeft
+        mascot.setNeedsLayout()
+        mascot.layoutIfNeeded()
+        XCTAssertEqual(mascot.figureForTesting.frame.minX, 20)
+    }
+
+    func testAThemeSwitchStandsOrClearsTheFigure() {
+        let idle = pose("mascot.idle")
+        let plain = RemoteThemePalette(nil)
+        XCTAssertFalse(MobileThemeMascotView.stands(in: plain))
+        XCTAssertTrue(MobileThemeMascotView.stands(in: theme([idle])))
+        XCTAssertFalse(MobileThemeMascotView.stands(in: theme([pose("mascot.working")])),
+            "the list reserves room only for a set the Mac would accept")
+
+        let mascot = MobileThemeMascotView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        mascot.apply(theme([idle]))
+        XCTAssertNotNil(mascot.figureForTesting.image)
+        mascot.apply(plain)
+        XCTAssertNil(mascot.figureForTesting.image)
+    }
+
+    // MARK: - Fixtures
+
+    /// A pose picture in the shared cache, the way a finished download leaves it.
+    private func pose(_ slot: String, size: CGSize = CGSize(width: 64, height: 64)) -> RemoteThemeAsset {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let picture = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.systemGreen.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+        let digest = (0..<4).map { _ in String(format: "%016llx", UInt64.random(in: .min ... .max)) }.joined()
+        MobileThemeAssets.shared.images.setObject(picture, forKey: digest as NSString)
+        digests.append(digest)
+        return RemoteThemeAsset(slot: slot, digest: digest, byteCount: 1,
+            pixelWidth: Int(size.width), pixelHeight: Int(size.height))
+    }
+
+    private func theme(_ assets: [RemoteThemeAsset]) -> RemoteThemePalette {
+        RemoteThemePalette(RemoteThemeDTO(id: "mascot-\(assets.map(\.digest).joined())", name: "Mascot",
+            mode: .dark, colors: [:], material: .init(panelRadius: 8, controlRadius: 4, borderWidth: 1),
+            assets: assets))
+    }
+
+    private func image(_ asset: RemoteThemeAsset) -> UIImage? { MobileThemeAssets.shared.image(asset) }
+    private func shown(_ mascot: MobileThemeMascotView) -> UIImage? { mascot.figureForTesting.image }
+
+    private func alpha(in image: UIImage, at point: CGPoint) throws -> UInt8 {
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let context = try XCTUnwrap(CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8,
+            bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let x = point.x * image.scale
+        let y = point.y * image.scale
+        context.draw(cgImage, in: CGRect(x: -x, y: y - CGFloat(cgImage.height) + 1,
+            width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
+        return try XCTUnwrap(context.data?.assumingMemoryBound(to: UInt8.self))[3]
     }
 }

@@ -72,6 +72,10 @@ final class DisplayTabBar: NSView {
         strip.insertionIndex(forWindowPoint: point)
     }
 
+    func keyboardFocusOwner(for id: UUID) -> NSView? {
+        strip.chipView(for: id)
+    }
+
     // MARK: - Views
 
     private let strip = ThemedTabStripView(inkSource: .chrome)

@@ -123,7 +123,8 @@ final class GitTurnBaselineStore {
         self.maximumTotal = max(1, maximumTotal)
         self.checkoutCoordinatorProvider = checkoutCoordinatorProvider
         self.contextProvider = contextProvider ?? { sessionID in
-            guard let project = ProjectStore.shared.project(forSessionID: sessionID),
+            guard ProjectStore.shared.session(withID: sessionID)?.automationWorkspace == nil,
+                  let project = ProjectStore.shared.project(forSessionID: sessionID),
                   let execution = ProjectStore.shared.executionProject(forSessionID: sessionID),
                   let location = GitInfo.worktreeLocation(for: execution.folderPath) else {
                 return nil

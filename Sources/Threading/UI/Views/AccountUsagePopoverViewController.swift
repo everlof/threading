@@ -26,6 +26,26 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
     private let planLabel = NSTextField(labelWithString: "")
     private let limitLegend = UsageLimitLegendView()
     private let footerLabel = NSTextField(labelWithString: "")
+    private let keychainAccess: ClaudeKeychainAccess
+    /// Said beside the stale reading it explains, so the cure sits where the symptom is.
+    private let grantNotice = NSTextField(wrappingLabelWithString: "")
+    private lazy var grantButton: ThemedButton = {
+        let button = ThemedButton(
+            title: UsageFormat.keychainGrantAction,
+            target: self,
+            action: #selector(grantClicked)
+        )
+        button.emphasis = .secondary
+        button.setAccessibilityIdentifier("usage.keychainGrant")
+        return button
+    }()
+    private lazy var grantRow: NSStackView = {
+        let row = NSStackView(views: [grantNotice, grantButton])
+        row.orientation = .vertical
+        row.alignment = .leading
+        row.spacing = Design.Spacing.tight
+        return row
+    }()
     private let appEvents = AppEventObservations()
 
     private lazy var tableView: ThemedTableView = {
@@ -50,6 +70,7 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
     private lazy var scrollView: ThemedScrollView = {
         let scroll = ThemedScrollView()
         scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.automaticallyAdjustsContentInsets = false
         scroll.documentView = tableView
@@ -71,10 +92,12 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
         limitsProvider: @escaping LimitsProvider = {
             CustomLimitSettings.shared.rules(for: $0)
         },
-        nowProvider: @escaping () -> Date = Date.init
+        nowProvider: @escaping () -> Date = Date.init,
+        keychainAccess: ClaudeKeychainAccess = .shared
     ) {
         self.account = account
         self.isEmbedded = isEmbedded
+        self.keychainAccess = keychainAccess
         self.readingProvider = readingProvider ?? { AccountUsageService.shared.reading(for: $0) }
         self.limitsProvider = limitsProvider
         self.nowProvider = nowProvider
@@ -124,12 +147,19 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
         footerLabel.lineBreakMode = .byWordWrapping
         footerLabel.maximumNumberOfLines = 0
 
+        grantNotice.applyFont(.caption)
+        grantNotice.textColor = Design.Text.secondary
+        grantNotice.maximumNumberOfLines = 0
+        grantNotice.stringValue = UsageFormat.keychainGrantNotice
+
         contentStack.addArrangedSubview(header)
         contentStack.addArrangedSubview(scrollView)
         contentStack.addArrangedSubview(limitLegend)
         contentStack.setCustomSpacing(Design.Spacing.tight, after: limitLegend)
         contentStack.addArrangedSubview(footerLabel)
-        for arranged in [header, scrollView, limitLegend, footerLabel] {
+        contentStack.addArrangedSubview(grantRow)
+        grantNotice.widthAnchor.constraint(equalTo: grantRow.widthAnchor).isActive = true
+        for arranged in [header, scrollView, limitLegend, footerLabel, grantRow] {
             arranged.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
         }
         windowListHeight.isActive = true
@@ -172,6 +202,10 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
         appEvents.observe(AccountUsageDidChange.self) { [weak self] event in
             self?.usageDidChange(event)
         }
+        appEvents.observe(ClaudeKeychainAccessDidChange.self) { [weak self] event in
+            guard let self, event.configPath == account.configPath else { return }
+            render()
+        }
     }
 
     override func viewDidLayout() {
@@ -183,9 +217,30 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
                 (cell as? ThemedVirtualTableCell)?.setColumnWidth(width)
             }
         }
+        fitWindowListToDocument()
     }
 
     // MARK: - Private Methods
+
+    private func measuredWindowHeight() -> CGFloat? {
+        guard let window = windows.first else { return nil }
+        let row = UsageWindowRow(window: window, now: renderedAt, limits: limits)
+        row.appearance = view.effectiveAppearance
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.widthAnchor.constraint(equalToConstant: UsagePopoverDefaults.contentWidth).isActive = true
+        return row.fittingSize.height
+    }
+
+    private func fitWindowListToDocument() {
+        guard !windows.isEmpty,
+              windows.count <= UsagePopoverDefaults.maximumFittedWindowCount else { return }
+        let rowExtent = tableView.rect(ofRow: windows.count - 1).maxY
+        let height = min(rowExtent, UsagePopoverDefaults.maximumWindowListHeight)
+        guard height > 0, windowListHeight.constant != height else { return }
+        // Row rectangles include intercell spacing. The document frame also fills its viewport,
+        // so using that frame would retain any excess height from the initial estimate.
+        windowListHeight.constant = height
+    }
 
     private func usageDidChange(_ event: AccountUsageDidChange) {
         guard event.accountID == account.id else { return }
@@ -203,6 +258,7 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
         planLabel.stringValue = usage?.planLabel ?? ""
         planLabel.isHidden = planLabel.stringValue.isEmpty
         footerLabel.stringValue = footerText(reading: reading, now: renderedAt)
+        grantRow.isHidden = !keychainAccess.offersGrant(for: account)
 
         // Provider-scoped model windows have no product cardinality ceiling. Keep all of their
         // value identities so the user can reach every limit, but let AppKit own the native
@@ -214,10 +270,14 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
             rules: limits,
             at: renderedAt
         )
+        // Measure one row before the popover asks for its fitting size. The row's fixed three-
+        // line anatomy follows live typography and bar metrics without constructing the list.
+        let rowHeight = measuredWindowHeight() ?? UsagePopoverDefaults.estimatedWindowHeight
+        tableView.rowHeight = rowHeight
         tableView.reloadData()
         scrollView.isHidden = windows.isEmpty
         windowListHeight.constant = min(
-            CGFloat(windows.count) * UsagePopoverDefaults.estimatedWindowHeight,
+            CGFloat(windows.count) * (rowHeight + tableView.intercellSpacing.height),
             UsagePopoverDefaults.maximumWindowListHeight
         )
         scrollView.contentView.scroll(to: origin)
@@ -251,14 +311,18 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
     /// value observed an hour ago should say so rather than posing as live.
     private func footerText(reading: AccountUsageReading, now: Date) -> String {
         if let usage = reading.usage {
-            var text = L10n.format("Updated %@", UsageFormat.age(of: usage.observedAt, at: now))
-            if usage.source == .localCache {
-                text += L10n.string(" · via Claude's status-line feed")
-            }
-            return text
+            let parts = [
+                L10n.format("Updated %@", UsageFormat.age(of: usage.observedAt, at: now)),
+                UsageFormat.sourceNote(usage.source)
+            ]
+            return parts.compactMap { $0 }.joined(separator: " · ")
         }
 
         return reading.error?.message ?? L10n.string("Fetching usage…")
+    }
+
+    @objc private func grantClicked() {
+        keychainAccess.requestAccess(for: [account])
     }
 
     // MARK: - Testing
@@ -277,6 +341,8 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
 
     var windowScrollOriginForTesting: NSPoint { scrollView.contentView.bounds.origin }
     var showsLimitLegendForTesting: Bool { !limitLegend.isHidden }
+    var offersKeychainGrantForTesting: Bool { !grantRow.isHidden }
+    var footerTextForTesting: String { footerLabel.stringValue }
 
     func scrollWindowToVisibleForTesting(_ row: Int) {
         guard windows.indices.contains(row) else { return }
@@ -293,4 +359,5 @@ enum UsagePopoverDefaults {
     static let width = contentWidth + 2 * Design.Spacing.inset
     static let estimatedWindowHeight: CGFloat = 52
     static let maximumWindowListHeight: CGFloat = 312
+    static let maximumFittedWindowCount = Int(maximumWindowListHeight / estimatedWindowHeight)
 }

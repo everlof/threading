@@ -36,6 +36,9 @@ final class PTYHostConnection: @unchecked Sendable {
     /// The session this connection speaks for, or nil while it is unbound.
     var boundSession: PTYHostSessionIdentity?
 
+    /// A lifecycle command is bound for authority but does not need the terminal's byte stream.
+    var receivesOutput = true
+
     /// True once `hello` has been exchanged. Anything before it closes the connection: the
     /// version gate is the first thing that happens, so nothing else can happen before it.
     var hasGreeted = false
@@ -124,7 +127,7 @@ final class PTYHostConnection: @unchecked Sendable {
     /// framing rather than one per watcher — which is what makes fan-out O(watchers) in copies
     /// rather than in encodings.
     func sendFramed(_ framed: Data) {
-        guard !isClosed else { return }
+        guard !isClosed, receivesOutput else { return }
         enqueue(framed)
     }
 

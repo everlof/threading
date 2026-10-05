@@ -42,6 +42,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         case serviceDependencies
         case capabilities
         case navigatorIntents
+        case decorations
         case companions
         case actions
     }
@@ -717,18 +718,13 @@ final class ExtensionsPreferencesViewController: NSViewController {
         }()
         toggle.setAccessibilityIdentifier("settings.extensions.enabled.\(item.identifier)")
         toggle.setAccessibilityLabel(item.name)
-        if let pack = AppearanceActivationHost.shared.state?.activePack,
-           pack.extensionIDs.contains(item.identifier) {
-            toggle.toolTip = L10n.format("Also deactivates %@ Pack", pack.name)
-            toggle.setAccessibilityHelp(toggle.toolTip)
-        }
         remember(toggle, action: .toggle, identifier: item.identifier)
 
         let version = item.version.map {
             L10n.format("Version %@ · %@", $0, item.identifier)
         }
             ?? item.identifier
-        var subtitle: String
+        let subtitle: String
         if item.navigatorIntents.isEmpty {
             subtitle = version
         } else {
@@ -737,10 +733,6 @@ final class ExtensionsPreferencesViewController: NSViewController {
                 .map(\.presentationName)
                 .joined(separator: ", ")
             subtitle = version + "\n" + L10n.format("Navigator actions: %@", verbs)
-        }
-
-        if let reason = AppearanceActivationHost.shared.enablementDetail(identifier: item.identifier) {
-            subtitle += "\n" + reason
         }
         let identifier = item.identifier
         let status = shortStatus(item.status)
@@ -853,9 +845,29 @@ final class ExtensionsPreferencesViewController: NSViewController {
         if !item.serviceDependencies.isEmpty { rows.append(.serviceDependencies) }
         if !item.capabilities.isEmpty { rows.append(.capabilities) }
         if !item.navigatorIntents.isEmpty { rows.append(.navigatorIntents) }
+        if decorationScopeSummary(for: item) != nil { rows.append(.decorations) }
         if !item.companions.isEmpty { rows.append(.companions) }
         rows.append(.actions)
         return rows
+    }
+
+    /// Says that an extension's decorations follow its own themes — bound by its manifest, or
+    /// stated by the patches its running generation published. Nil when neither is true.
+    private func decorationScopeSummary(for item: InstalledExtensionSnapshot) -> String? {
+        if item.componentThemeScope == .ownThemes {
+            return L10n.string("Shown only with its own themes; a duplicated copy doesn’t carry them")
+        }
+        guard let counts = componentRegistry?.themeScopedPatchCounts(
+            extensionIdentifier: item.identifier
+        ), counts.scoped > 0 else { return nil }
+        guard counts.scoped < counts.total else {
+            return L10n.string("Shown only with its own themes; a duplicated copy doesn’t carry them")
+        }
+        return L10n.format(
+            "%lld of %lld shown only with its own themes",
+            Int64(counts.scoped),
+            Int64(counts.total)
+        )
     }
 
     private func localizedName(_ profile: ExtensionProfile) -> String {
@@ -1516,6 +1528,12 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
             return SettingsUI.row(
                 title: L10n.string("Navigator actions"),
                 subtitle: item.navigatorIntents.map(\.presentation).joined(separator: "\n"),
+                localizes: false
+            )
+        case .decorations:
+            return SettingsUI.row(
+                title: L10n.string("Decorations"),
+                subtitle: decorationScopeSummary(for: item) ?? "",
                 localizes: false
             )
         case .companions:

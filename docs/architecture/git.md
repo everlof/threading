@@ -41,6 +41,14 @@ sidebar's grouping key. **`worktreeIdentity` is the durable key for "which check
 branch is only ever a display value.** A submodule keeps its own identity under `/modules/`,
 correctly — it is a separate repository that happens to live inside another.
 
+Checkout discovery memoizes both locations and misses for ordinary display reads. That memo is
+not an ownership authority: a path can be observed before Git finishes creating its `.git` entry,
+or a checkout can be replaced at the same path. Worktree creation refreshes its destination after
+Git succeeds, and checkout-move validation refreshes both source and destination on every request
+and settlement. Refresh resolves those paths directly and replaces their memo entries; it does
+not clear the whole cache or make sidebar reads perform repeated discovery. Branch validation
+reads `HEAD` through the freshly resolved worktree identity.
+
 Every repository is a **root row** in the sidebar, with its added checkouts beneath it, at one
 checkout exactly as at five. The checkouts are labelled by branch, since the repository name is
 already shown above them. A quiet `[checkout path]` follows the branch on the same line,
@@ -201,6 +209,12 @@ constant reconfigures of a working session's row, dismissing only on exit or reu
 different session.
 
 ## Git Review
+
+Repository file discovery has its own serial utility queue. The Activity atlas and file browser
+must not wait behind a full patch read in another checkout. `GitRepositoryAdmissionTests` holds a
+real review inside a filesystem-monitor hook and proves that a second checkout's roster still
+arrives before the hook is released. This adds one bounded worker, not one process per row or
+checkout; the Git output cap and child deadline still apply.
 
 A per-session **Review** tab in the display pane (`GitReviewViewController`, hosted as
 `DisplayTab.Body.review` — the browser's live-view-controller shape, reused). View menu ▸

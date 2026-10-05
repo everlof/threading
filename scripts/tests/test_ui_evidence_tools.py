@@ -118,6 +118,19 @@ class UIEvidenceToolsTests(unittest.TestCase):
             text=True,
         )
 
+    def test_disjoint_globs_keep_sidebar_settings_out_of_other_sidebar_entries(self) -> None:
+        document = json.loads(self.manifest.read_text())
+        document["entries"][0]["capture"] = {
+            "globs": ["sidebar-[0-9]*.png", "sidebar-auto-hide-*.png"]
+        }
+        self.manifest.write_text(json.dumps(document))
+        for name in ["sidebar-420-dark.png", "sidebar-auto-hide-dark.png", "sidebar-row-dark.png"]:
+            write_rgba_png(self.current / name, [(0, 0, 0, 255)], bit_depth=8, compression=1)
+        _, _, entries = report_generator.load_manifest(self.manifest)
+        artifacts = report_generator.load_glob_artifacts(entries[0], self.current)
+        self.assertEqual([artifact.current.name for artifact in artifacts],
+                         ["sidebar-420-dark.png", "sidebar-auto-hide-dark.png"])
+
     def test_exact_compare_uses_decoded_16_bit_pixels(self) -> None:
         pixels = [(0, 1, 65_535, 65_535), (4_096, 8_192, 16_384, 32_768)]
         write_rgba_png(self.current / "shot.png", pixels, bit_depth=16, compression=1)

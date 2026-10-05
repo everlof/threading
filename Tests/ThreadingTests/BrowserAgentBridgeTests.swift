@@ -1598,7 +1598,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
     @MainActor
     func testBrowserTabsCreateActivateListAndCloseIndependentControllers() throws {
         let sessionID = SessionID()
-        let pane = DisplayPaneController()
+        let projectID = ProjectID()
+        let pane = DisplayPaneController(browserFactory: { context, _ in
+            BrowserViewController(contextKind: context, projectID: projectID)
+        })
         let coordinator = AgentToolCoordinator(
             displayPaneController: pane,
             visibleSessionID: { nil },
@@ -1633,7 +1636,12 @@ final class BrowserAgentBridgeTests: XCTestCase {
         let secondBrowser = try XCTUnwrap(browserTabs[1].browser)
         XCTAssertEqual(firstBrowser.contextKind, .shared)
         XCTAssertEqual(secondBrowser.contextKind, .private)
-        XCTAssertTrue(firstBrowser.websiteDataStore.isPersistent)
+        if #available(macOS 14.0, *) {
+            XCTAssertTrue(firstBrowser.websiteDataStore.isPersistent)
+            XCTAssertEqual(firstBrowser.websiteDataStore.identifier, projectID.rawValue)
+        } else {
+            XCTAssertFalse(firstBrowser.websiteDataStore.isPersistent)
+        }
         XCTAssertFalse(secondBrowser.websiteDataStore.isPersistent)
         XCTAssertFalse(firstBrowser.websiteDataStore === secondBrowser.websiteDataStore)
 
@@ -2109,6 +2117,32 @@ final class BrowserAgentBridgeTests: XCTestCase {
         XCTAssertEqual(toolbar.widthField.stringValue, "430")
         XCTAssertEqual(toolbar.heightField.stringValue, "932")
         XCTAssertEqual(toolbar.presetPopUp.indexOfSelectedItem, 8)
+    }
+
+    @MainActor
+    func testAgentViewportChangesReportPriorSizingForTemporaryTestRestoration() async {
+        let browser = BrowserViewController(contextKind: .private)
+        XCTAssertNil(browser.responsiveViewport)
+
+        let fromHost = await browser.agentSetResponsiveViewport(width: 390, height: 844)
+        XCTAssertTrue(fromHost.ok, fromHost.message)
+        XCTAssertTrue(fromHost.message.contains("Previous sizing: fill host"), fromHost.message)
+        XCTAssertEqual(browser.responsiveViewport, CGSize(width: 390, height: 844))
+
+        // A user-selected preset must be restored as a preset, rather than cleared to fill host.
+        browser.setResponsiveViewport(width: 1_024, height: 768)
+        let fromPreset = await browser.agentSetResponsiveViewport(width: 390, height: 844)
+        XCTAssertTrue(fromPreset.ok, fromPreset.message)
+        XCTAssertTrue(fromPreset.message.contains("Previous sizing: 1024×768 CSS pixels"), fromPreset.message)
+
+        let restored = await browser.agentSetResponsiveViewport(width: 1_024, height: 768)
+        XCTAssertTrue(restored.ok, restored.message)
+        XCTAssertEqual(browser.responsiveViewport, CGSize(width: 1_024, height: 768))
+
+        let reset = await browser.agentSetResponsiveViewport(width: nil, height: nil)
+        XCTAssertTrue(reset.ok, reset.message)
+        XCTAssertTrue(reset.message.contains("Previous sizing: 1024×768 CSS pixels"), reset.message)
+        XCTAssertNil(browser.responsiveViewport)
     }
 
     @MainActor
@@ -2619,9 +2653,222 @@ final class BrowserAgentBridgeTests: XCTestCase {
 @MainActor
 final class BrowserAgentBridgeIntegrationTests: XCTestCase {
 
+    func testNetworkHeaderBodyCaptureIsOptInLiveAndDoesNotConsumePageResponses() async throws {
+        let suite = "BrowserNetworkWebKit-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = BrowserNetworkCaptureSettings(defaults: defaults)
+        let server = try BrowserLoopbackHTTPServer(pages: [
+            "/capture": "<!doctype html><title>Network capture</title><p id='result'></p>",
+            "/api": #"{"message":"response-marker","password":"server-private"}"#,
+            "/large": String(repeating: "body-marker", count: 4_000)
+        ])
+        defer { server.stop() }
+        let browser = BrowserViewController(networkCaptureSettings: settings)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = browser
+        window.orderFront(nil)
+        defer { window.close() }
+        let loaded = await performNavigation(browser, to: server.url(host: "localhost", path: "/capture").absoluteString)
+        XCTAssertTrue(loaded.0, loaded.1)
+        let request = #"""
+            fetch('/api', {method:'POST', headers:{'X-Debug':'header-marker', 'Authorization':'private-token'},
+              body:JSON.stringify({message:'request-marker', password:'client-private', auth:{password:'nested-private'}})})
+              .then(r=>r.text()).then(text=>document.getElementById('result').textContent=text);
+            true;
+            """#
+        _ = try await browser.evaluate(request)
+        try await waitForNetwork(browser, containing: "/api")
+        let disabled = browser.networkOutput(kind: "fetch", errorsOnly: false, clear: true, includeDetails: true)
+        XCTAssertFalse(disabled.contains("request-marker"))
+        XCTAssertFalse(disabled.contains("response-marker"))
+
+        settings.options = .init(requestHeaders: true, responseHeaders: true, requestBody: true, responseBody: true)
+        _ = try await browser.evaluate(request)
+        let deadline = Date().addingTimeInterval(3)
+        var details = ""
+        while Date() < deadline {
+            details = browser.networkOutput(kind: "fetch", errorsOnly: false, clear: false, includeDetails: true)
+            if details.contains("response-marker") { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(details.contains("header-marker"), details)
+        XCTAssertTrue(details.contains("content-type"), details)
+        XCTAssertTrue(details.contains("request-marker"), details)
+        XCTAssertTrue(details.contains("response-marker"), details)
+        XCTAssertFalse(details.contains("private-token"), details)
+        XCTAssertFalse(details.contains("client-private"), details)
+        XCTAssertFalse(details.contains("nested-private"), details)
+        XCTAssertFalse(details.contains("server-private"), details)
+        let pageResult = try await browser.evaluate("document.getElementById('result').textContent") as? String
+        XCTAssertTrue(pageResult?.contains("response-marker") == true, "Capture consumed the page's response")
+        let id = try XCTUnwrap(browser.capturedNetworkEntries.last(where: { $0.kind == "fetch" })?.captureID)
+        let single = browser.networkOutput(kind: nil, errorsOnly: false, clear: false, includeDetails: true, requestID: id)
+        XCTAssertTrue(single.contains("request-marker"))
+
+        _ = try await browser.evaluate("fetch('/large').then(r=>r.text()).then(text=>document.getElementById('result').textContent=String(text.length)); true;")
+        let largeDeadline = Date().addingTimeInterval(3)
+        var largeDetails = ""
+        while Date() < largeDeadline {
+            let largeID = browser.capturedNetworkEntries.last(where: { $0.url.contains("/large") })?.captureID
+            if let largeID {
+                largeDetails = browser.networkOutput(kind: "fetch", errorsOnly: false, clear: false, includeDetails: true, requestID: largeID)
+            }
+            if largeDetails.contains("[truncated]") { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(largeDetails.contains("[truncated]"), largeDetails)
+        XCTAssertLessThan(largeDetails.utf8.count, 10_000)
+        let originalLength = try await browser.evaluate("document.getElementById('result').textContent") as? String
+        XCTAssertEqual(originalLength, "44000", "The page must receive its complete large response")
+
+        let foreignServer = try BrowserLoopbackHTTPServer(pages: [
+            "/foreign-frame": "<!doctype html><script>fetch('/foreign-api').then(r=>r.text());</script>",
+            "/foreign-api": "foreign-body-private"
+        ])
+        defer { foreignServer.stop() }
+        let frameURL = foreignServer.url(host: "localhost", path: "/foreign-frame").absoluteString
+        _ = try await browser.evaluate("const frame=document.createElement('iframe'); frame.src='\(frameURL)'; document.body.append(frame); true;")
+        try await waitForNetwork(browser, containing: "/foreign-api")
+        let frameDetails = browser.networkOutput(kind: "fetch", errorsOnly: false, clear: false, includeDetails: true)
+        XCTAssertFalse(frameDetails.contains("foreign-body-private"), frameDetails)
+
+        _ = try await browser.evaluate("const xhr=new XMLHttpRequest(); xhr.open('POST','/api'); xhr.setRequestHeader('X-Debug','xhr-header'); xhr.send('xhr-body'); true;")
+        let xhrDeadline = Date().addingTimeInterval(3)
+        var xhrDetails = ""
+        while Date() < xhrDeadline {
+            xhrDetails = browser.networkOutput(kind: "xhr", errorsOnly: false, clear: false, includeDetails: true)
+            if xhrDetails.contains("response-marker") { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(xhrDetails.contains("xhr-header"), xhrDetails)
+        XCTAssertTrue(xhrDetails.contains("xhr-body"), xhrDetails)
+        XCTAssertTrue(xhrDetails.contains("response-marker"), xhrDetails)
+        settings.options = .init(responseBody: true)
+        _ = try await browser.evaluate(request)
+        let partialDeadline = Date().addingTimeInterval(3)
+        var partial = ""
+        while Date() < partialDeadline {
+            partial = browser.networkOutput(kind: "fetch", errorsOnly: false, clear: false, includeDetails: true)
+            if partial.contains("response-marker") { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(partial.contains("response-marker"), partial)
+        XCTAssertFalse(partial.contains("request-marker"), partial)
+        XCTAssertFalse(partial.contains("header-marker"), partial)
+        settings.options = .metadataOnly
+        let revoked = browser.networkOutput(kind: nil, errorsOnly: false, clear: false, includeDetails: true)
+        XCTAssertFalse(revoked.contains("request-marker"))
+        XCTAssertFalse(revoked.contains("response-marker"))
+        _ = try await browser.evaluate(request)
+        try await waitForNetwork(browser, containing: "/api")
+        let future = browser.networkOutput(kind: nil, errorsOnly: false, clear: false, includeDetails: true)
+        XCTAssertFalse(future.contains("response-marker"))
+    }
+
+    func testCookiesAndLocalStorageAreSharedOnlyWithinTheProject() async throws {
+        let server = try BrowserLoopbackHTTPServer(pages: [
+            "/project-storage": "<!doctype html><title>Project storage fixture</title><p>Storage</p>"
+        ])
+        defer { server.stop() }
+        let projectID = ProjectID()
+        let first = BrowserViewController(projectID: projectID)
+        let sibling = BrowserViewController(projectID: projectID)
+        let otherProjectID = ProjectID()
+        let other = BrowserViewController(projectID: otherProjectID)
+        let privateTab = BrowserViewController(contextKind: .private, projectID: projectID)
+        let movingSessionID = SessionID()
+        first.annotationSessionID = movingSessionID
+        privateTab.annotationSessionID = movingSessionID
+        let browsers = [first, sibling, other, privateTab]
+        let windows = browsers.map { browser in
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+                styleMask: [.titled], backing: .buffered, defer: false
+            )
+            window.isReleasedWhenClosed = false
+            window.animationBehavior = .none
+            window.contentViewController = browser
+            window.orderFront(nil)
+            return window
+        }
+        defer { windows.forEach { $0.close() } }
+        let url = server.url(host: "localhost", path: "/project-storage")
+        for browser in browsers {
+            let loaded = await performNavigation(browser, to: url.absoluteString)
+            XCTAssertTrue(loaded.0, loaded.1)
+        }
+        _ = try await first.evaluate("""
+            localStorage.setItem('project-state', 'first');
+            document.cookie = 'project-cookie=first; path=/';
+            """
+        )
+        // Reload through WebKit: this observes shared website state, not controller metadata.
+        for browser in [sibling, other, privateTab] {
+            let loaded = await performNavigation(browser, to: url.absoluteString)
+            XCTAssertTrue(loaded.0, loaded.1)
+        }
+        let sharedState = try await sibling.evaluate("localStorage.getItem('project-state')") as? String
+        XCTAssertEqual(sharedState, "first")
+        let sharedCookie = try await sibling.evaluate("document.cookie") as? String
+        XCTAssertEqual(sharedCookie, "project-cookie=first")
+        for browser in [other, privateTab] {
+            let state = try await browser.evaluate("localStorage.getItem('project-state')")
+            XCTAssertTrue(state == nil || state is NSNull)
+            let cookies = try await browser.evaluate("document.cookie") as? String
+            XCTAssertEqual(cookies, "")
+        }
+        _ = try await other.evaluate("""
+            localStorage.setItem('project-state', 'other');
+            document.cookie = 'project-cookie=other; path=/';
+            """
+        )
+        let sourceStore = first.websiteDataStore
+        NotificationCenter.default.post(SessionProjectDidChange(
+            sessionID: movingSessionID, projectID: otherProjectID
+        ))
+        XCTAssertNil(first.currentURL, "A moved chat must retire its source project's page")
+        XCTAssertFalse(first.websiteDataStore === sourceStore)
+        XCTAssertTrue(first.websiteDataStore === other.websiteDataStore)
+        XCTAssertNotNil(privateTab.currentURL, "Private tabs keep their independent context")
+        let movedLoaded = await performNavigation(first, to: url.absoluteString)
+        XCTAssertTrue(movedLoaded.0, movedLoaded.1)
+        let destinationState = try await first.evaluate("localStorage.getItem('project-state')") as? String
+        XCTAssertEqual(destinationState, "other")
+        let origin = try XCTUnwrap(BrowserOrigin(url: url))
+        _ = await clearSiteData(in: sibling, origin: origin)
+        let loaded = await performNavigation(sibling, to: url.absoluteString)
+        XCTAssertTrue(loaded.0, loaded.1)
+        let clearedState = try await sibling.evaluate("localStorage.getItem('project-state')")
+        XCTAssertTrue(clearedState == nil || clearedState is NSNull)
+        let retainedState = try await other.evaluate("localStorage.getItem('project-state')") as? String
+        XCTAssertEqual(retainedState, "other")
+        let retainedCookie = try await other.evaluate("document.cookie") as? String
+        XCTAssertEqual(retainedCookie, "project-cookie=other")
+        _ = try await sibling.evaluate("document.cookie = 'project-cookie=race; path=/'")
+        let siblingSessionID = SessionID()
+        sibling.annotationSessionID = siblingSessionID
+        await withCheckedContinuation { continuation in
+            sibling.clearSiteData(for: origin) { _ in continuation.resume() }
+            NotificationCenter.default.post(SessionProjectDidChange(
+                sessionID: siblingSessionID, projectID: otherProjectID
+            ))
+        }
+        let clearedSourceCookie = await cookie(named: "project-cookie", in: sourceStore)
+        XCTAssertNil(clearedSourceCookie)
+        let cookieAfterClearRace = try await other.evaluate("document.cookie") as? String
+        XCTAssertEqual(cookieAfterClearRace, "project-cookie=other")
+        let storageAfterClearRace = try await other.evaluate("localStorage.getItem('project-state')") as? String
+        XCTAssertEqual(storageAfterClearRace, "other")
+        _ = await clearSiteData(in: other, origin: origin)
+    }
+
     func testPrivateContextsAreEphemeralAndIsolatedFromEveryOtherTab() async throws {
-        let sharedA = BrowserViewController(contextKind: .shared)
-        let sharedB = BrowserViewController(contextKind: .shared)
+        let projectID = ProjectID()
+        let sharedA = BrowserViewController(contextKind: .shared, projectID: projectID)
+        let sharedB = BrowserViewController(contextKind: .shared, projectID: projectID)
         let privateA = BrowserViewController(contextKind: .private)
         let privateB = BrowserViewController(contextKind: .private)
         _ = sharedA.view
@@ -2629,8 +2876,13 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         _ = privateA.view
         _ = privateB.view
 
-        XCTAssertTrue(sharedA.websiteDataStore.isPersistent)
-        XCTAssertTrue(sharedB.websiteDataStore.isPersistent)
+        if #available(macOS 14.0, *) {
+            XCTAssertTrue(sharedA.websiteDataStore.isPersistent)
+            XCTAssertTrue(sharedB.websiteDataStore.isPersistent)
+        } else {
+            XCTAssertFalse(sharedA.websiteDataStore.isPersistent)
+            XCTAssertFalse(sharedB.websiteDataStore.isPersistent)
+        }
         XCTAssertFalse(privateA.websiteDataStore.isPersistent)
         XCTAssertFalse(privateB.websiteDataStore.isPersistent)
         XCTAssertTrue(sharedA.websiteDataStore === sharedB.websiteDataStore)
@@ -3078,9 +3330,10 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         var suggestedSelections: [[URL]] = []
         var savePanelWasAgentRequested = false
         var savePanelMessage = ""
-        let pane = DisplayPaneController(browserFactory: { context in
+        let pane = DisplayPaneController(browserFactory: { context, projectID in
             BrowserViewController(
                 contextKind: context,
+                projectID: projectID,
                 openPanelProvider: { _, suggestions, message, decide in
                     openPanelMessages.append(message)
                     suggestedSelections.append(suggestions)

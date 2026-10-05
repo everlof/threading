@@ -40,6 +40,9 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     signaling frames, trickle candidate limits, channel and byte high-water marks, stream
     multiplexing, listener replacement, reconnect and shutdown. The Mac and iOS apps see only
     loopback TCP endpoints, preserving the existing remote protocol and its authorization.
+    A receive after RESET consults the same bounded retired-stream record used to ignore late
+    frames. It reports `streamClosed`, just as an already waiting receive does; actor scheduling
+    must not turn a known closed socket into an unknown stream.
   - The framework contains standards-based DTLS/SRTP cryptography. Keep the iOS export-compliance
     declaration and the WebRTC legal notice in sync with this dependency; do not revert to a
     system-crypto-only declaration.
@@ -84,6 +87,21 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     `main` at `58224a7`. The vendored source tree matches that revision; Git metadata, build
     output and ignored generated cache artifacts are not copied into the application repository.
   - **This is our fork** - feel free to modify SwiftTerm source code directly to implement features or fix bugs. The iOS folder is excluded on macOS builds.
+  - **Shared-memory calls cross a fixed C seam.** Darwin declares `shm_open` variadically, so
+    a Swift `@_silgen_name` declaration with a fixed mode argument does not follow its C varargs
+    ABI. That created Kitty test images with incorrect permissions and refused the subsequent
+    read. `SwiftTermPOSIX` owns the fixed C wrapper on every platform; the shared-memory fixture
+    checks the exact owner-only permissions as well as image delivery and unlinking.
+  - **A forced Metal frame waits for the previous GPU frame.** `drawMetalFrameNow` suspends the
+    CPU render loop and uses the renderer's bounded idle wait before submitting its snapshot.
+    Suspending the loop alone leaves the GPU's frame permit occupied, so a terminal remounted
+    immediately after releasing its glow could silently skip the requested reallocation.
+  - **BiDi cache identities outlive their keys.** A bare buffer address can be reused after a
+    terminal is released, letting a new Arabic row inherit an old Hebrew row's unshaped layout.
+    Paragraph keys retain `BufferRef`, which retains no scrollback, and both cache levels retain
+    their immutable font identity. The existing 256-entry ceilings still bound them. Alternating
+    short-lived Hebrew/Arabic terminals reproduces the old failure; a separate assertion proves
+    the cache does not retain the buffer itself.
   - **Use upstream's implementation when it has one.** This reconciliation removes our former
     copies of colour-scheme reporting, hidden-normal-buffer reflow, output-stable selection and
     local-process lifecycle/draining. Those are now upstream code, not downstream seams. The
@@ -116,6 +134,10 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     public alongside `mouseMode` so a mirrored session can *state* both to a second renderer —
     see [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md), where the ring cannot be relied on to carry
     the arming sequence.
+    Mac mouse fixtures observe callbacks through `DispatchQueue.main`, including each bounded
+    poll of a deferred semantic click. Yielding only actor jobs can leave the coalescing timer
+    behind a busy actor queue and report a false timeout in the full package suite. The queue
+    barrier preserves the existing one-second bounds and waits for the actual callback owner.
   - **The accessory-key encoder seam is ours.** `Terminal.encodedFunctionalKey` exposes the same
     DECCKM- and kitty-aware functional-key encoder used by SwiftTerm's own keyboard paths. The
     app's customizable touch caps know both touch-down and touch-up, so when a TUI requests event
@@ -591,7 +613,9 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     elements — and whose `rendersStatically` pins the internal frozen-time environment. That
     pin now also *pauses* the driving `TimelineView` (t and fade are both constants there),
     so the Reduce Motion mode is a genuinely static picture rather than 60 identical frames
-    a second. AppKit's recursive `cacheDisplay` does not preserve a transparent
+    a second. `BorderBeam` preserves an inherited frozen time rather than overriding it with
+    nil; otherwise the package's 40-frame Metal matrix captures the hidden pre-appearance fade
+    and paints no beam. AppKit's recursive `cacheDisplay` does not preserve a transparent
     `NSHostingView` root: it rasterizes the centre white even though the live compositor is
     correct. `BorderBeamHostView.withCachedDisplayFallback` is therefore the explicit
     offscreen-render contract. It hides only the live shader host for the synchronous draw and

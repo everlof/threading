@@ -36,9 +36,8 @@ final class HoverPopoverScheduler {
         )
     }
 
-    /// Mutable because a site's right answers can follow its content: the usage pill is a
-    /// plain reading until an extension composes actionable content into its popover, and a
-    /// surface that closes as you reach for its button cannot be operated. A change applies
+    /// Mutable because a site's right answers can follow its content: a surface that closes
+    /// as you reach for its button cannot be operated. A change applies
     /// from the next scheduling decision; work already pending keeps the timing it was
     /// scheduled under.
     var policy: Policy

@@ -92,7 +92,7 @@ final class WorkspaceControlPlane {
         /// Stores a message the target's surface could not take now as agent mail in its
         /// mailbox, and answers whether it was stored. The default stores nothing, so a plane
         /// built without a mailbox keeps the old refusals exactly.
-        var storeAsMail: (
+        var storeAsMail: @MainActor (
             _ text: String,
             _ target: SessionID,
             _ caller: SessionID,

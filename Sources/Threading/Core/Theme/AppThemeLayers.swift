@@ -19,8 +19,8 @@ enum AppThemeLayer: String, CaseIterable, Sendable {
     case material
     /// The window frame, drawn by the theme instead of macOS.
     case chrome
-    /// Personality: sounds, the switch-in transition, the theme's own words, sprites, the mascot
-    /// and the brand row's logo, wordmark and motion.
+    /// Personality: sounds, the switch-in transition, the theme's own words, the new-session
+    /// welcome, sprites, the mascot and the brand row's logo, wordmark and motion.
     case character
 
     /// What the layer is, in the words an agent reads in a tool result.
@@ -29,7 +29,7 @@ enum AppThemeLayer: String, CaseIterable, Sendable {
         case .palette: return "colours"
         case .material: return "shape, type and controls"
         case .chrome: return "the theme's own window frame"
-        case .character: return "sounds, a transition, words, a mascot"
+        case .character: return "sounds, a transition, words, a welcome, a mascot"
         }
     }
 
@@ -51,6 +51,7 @@ enum AppThemeLayer: String, CaseIterable, Sendable {
                 || variant.moments != nil
                 || variant.words != nil
                 || variant.titleMorph != nil
+                || variant.welcome != nil
                 || !variant.sprites.isEmpty
                 || variant.sidebar?.mascot != nil
                 || brand.map { $0.logo != .mark || $0.title != nil || $0.motion != nil || $0.dockIcon }
@@ -77,6 +78,7 @@ enum AppThemeLayer: String, CaseIterable, Sendable {
                 && before.moments == after.moments
                 && before.words == after.words
                 && before.titleMorph == after.titleMorph
+                && before.welcome == after.welcome
                 && before.sprites == after.sprites
                 && before.sidebar?.mascot == after.sidebar?.mascot
                 && was?.logo == now?.logo

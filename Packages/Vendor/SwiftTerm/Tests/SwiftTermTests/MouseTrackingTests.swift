@@ -39,7 +39,8 @@ struct MouseTrackingTests {
     @MainActor private func waitForSemanticClick(in view: TerminalView) async {
         let deadline = ContinuousClock.now + .seconds(1)
         while view.semanticClickPendingForTesting, ContinuousClock.now < deadline {
-            await Task.yield()
+            // The coalescing timer lives on DispatchQueue.main, not the actor's job queue.
+            await waitForTerminalViewCallbacks()
         }
         #expect(!view.semanticClickPendingForTesting, "The semantic click did not finish")
     }
@@ -53,7 +54,7 @@ struct MouseTrackingTests {
     @MainActor private func waitForSentData(from delegate: MouseMotionCapturingDelegate) async {
         let deadline = ContinuousClock.now + .seconds(1)
         while delegate.sentData.isEmpty, ContinuousClock.now < deadline {
-            await Task.yield()
+            await waitForTerminalViewCallbacks()
         }
     }
 

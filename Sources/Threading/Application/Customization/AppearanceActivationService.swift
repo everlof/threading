@@ -1,50 +1,15 @@
 import Foundation
 
 struct AppearanceActivationInventory: Sendable {
-    struct Runtime: Sendable {
-        enum Status: Equatable, Sendable {
-            case stopped
-            case starting
-            case running
-            case failed(String)
-        }
-
+    struct InstalledExtension: Sendable {
         let name: String
-        let contentDigest: String?
+        /// Why the extension cannot be enabled right now (invalid, mid-update), or nil.
         let unavailableReason: String?
-        let requiredExtensionIDs: Set<String>
-        let status: Status
-        var capabilitySummary: String? = nil
     }
 
     let themeIDs: Set<String>
-    let extensions: [String: Runtime]
+    let extensions: [String: InstalledExtension]
     var extensionsSuppressed = false
-
-    func validate(_ pack: AppearancePack, manualExtensionIDs: Set<String>) throws {
-        guard !extensionsSuppressed else { throw AppearanceActivationError.suppressed }
-        guard themeIDs.contains(pack.themeID) else { throw AppearanceActivationError.themeUnavailable }
-        let desired = manualExtensionIDs.union(pack.extensionIDs)
-        for member in pack.extensions {
-            guard let runtime = extensions[member.identifier], runtime.unavailableReason == nil else {
-                throw AppearanceActivationError.extensionUnavailable(
-                    extensions[member.identifier]?.name ?? member.identifier
-                )
-            }
-            guard runtime.contentDigest == member.contentDigest else {
-                throw AppearanceActivationError.reviewRequired(runtime.name)
-            }
-            for prerequisite in runtime.requiredExtensionIDs.sorted() {
-                guard desired.contains(prerequisite),
-                      extensions[prerequisite]?.unavailableReason == nil,
-                      extensions[prerequisite] != nil else {
-                    throw AppearanceActivationError.prerequisiteUnavailable(
-                        extensions[prerequisite]?.name ?? prerequisite
-                    )
-                }
-            }
-        }
-    }
 }
 
 protocol AppearanceActivationPersisting: Sendable {
@@ -119,21 +84,12 @@ final class AppearanceActivationService {
         switch action {
         case .selectTheme(let id):
             guard snapshot.themeIDs.contains(id) else { throw AppearanceActivationError.themeUnavailable }
-        case .activatePack(let id):
-            guard let pack = state.packs.first(where: { $0.id == id }) else { throw AppearanceActivationError.packUnavailable }
-            try snapshot.validate(pack, manualExtensionIDs: state.manuallyEnabledExtensionIDs)
-        case .savePack(let pack):
-            try pack.validate()
-            guard state.packs.count < AppearancePack.maximumCount || state.packs.contains(where: { $0.id == pack.id }) else {
-                throw AppearanceActivationError.invalidState
-            }
-            try snapshot.validate(pack, manualExtensionIDs: state.manuallyEnabledExtensionIDs)
         case .setExtensionEnabled(let id, true):
             guard !snapshot.extensionsSuppressed else { throw AppearanceActivationError.suppressed }
-            guard let runtime = snapshot.extensions[id], runtime.unavailableReason == nil else {
+            guard let installed = snapshot.extensions[id], installed.unavailableReason == nil else {
                 throw AppearanceActivationError.extensionUnavailable(snapshot.extensions[id]?.name ?? id)
             }
-        case .deactivatePack, .removePack, .setExtensionEnabled(_, false), .reconcileInventory:
+        case .setExtensionEnabled(_, false), .reconcileInventory:
             break
         }
     }

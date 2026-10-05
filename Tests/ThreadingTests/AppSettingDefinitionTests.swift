@@ -545,9 +545,9 @@ final class AppSettingDefinitionTests: XCTestCase {
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
 #if DEBUG || THREADING_INTERNAL
-        XCTAssertEqual(authoredRows.count, 102)
+        XCTAssertEqual(authoredRows.count, 107)
 #else
-        XCTAssertEqual(authoredRows.count, 101)
+        XCTAssertEqual(authoredRows.count, 106)
 #endif
         XCTAssertEqual(
             // Markdown associations are OS-owned actions, not persisted AppSettings.
@@ -610,7 +610,7 @@ final class AppSettingDefinitionTests: XCTestCase {
             "When writing a prompt, press Return to", "Reset Shortcuts"
         ])
         XCTAssertEqual(actual["themes"], [
-            "App theme", "Classic skins", "Theme animations", "Theme sounds", "Text size",
+            "App theme", "Classic skins", "Motion", "Theme sounds", "Text size",
             "App font", "Conversation font"
         ])
         XCTAssertEqual(actual["profiles"], [
@@ -618,10 +618,13 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Agents use the theme's colours", "Lines kept", "Copy selected text to the clipboard",
             "Convert dropped images agents can't open"
         ])
-        XCTAssertEqual(actual["motion"], ["Working indicator", "Chat name transition",
-                                         "Music-reactive themes", "Audio source",
-                                         "React to agent activity", "Reaction strength"])
-        XCTAssertEqual(actual["tools"], ["Agents may move chats between checkouts"])
+        XCTAssertEqual(actual["motion"], ["Theme animations", "Music-reactive themes", "Audio source",
+                                         "React to agent activity", "Reaction strength",
+                                         "Working indicator", "Chat name transition"])
+        XCTAssertEqual(actual["tools"], [
+            "Agents may move chats between checkouts", "Capture request headers",
+            "Capture response headers", "Capture request bodies", "Capture response bodies"
+        ])
         XCTAssertEqual(actual["usage-windows"], [
             "Open a window before I start", "I start at", "I stop at", "Days",
             "If the window has not reset", "When a session hits its usage limit"

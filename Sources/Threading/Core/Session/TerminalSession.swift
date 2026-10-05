@@ -375,7 +375,7 @@ final class TerminalSession: NSObject {
         terminalView.caretColor = profile.theme.cursor
         // The palette's phosphor glow, or none. Set on every refresh, so a session moving to a
         // palette without one stops glowing; SwiftTerm repaints only when the value changes.
-        terminalView.textGlow = profile.theme.glow?.textGlow
+        terminalView.setThemeTextGlow(profile.theme.glow?.textGlow)
 
         // Apply cursor style
         let swiftTermStyle = swiftTermCursorStyle(from: profile.cursorStyle, blink: profile.cursorBlink)
@@ -491,6 +491,34 @@ final class TerminalSession: NSObject {
     /// the visible PTY, then replaces itself with the person's configured shell.
     func startShell(initialDirectory: URL, running initialCommand: ShellCommand) {
         startShell(initialDirectory: initialDirectory, initialCommand: initialCommand)
+    }
+
+    /// Runs one host-built command through the person's login shell and ends with it: no shell
+    /// is resumed afterwards, so the command's own exit is `didTerminateWithExitCode`.
+    ///
+    /// For a run whose outcome the host has to read — the agent CLI install sheet re-checks the
+    /// PATH the moment the installer exits. `startShell(initialDirectory:running:)` resumes an
+    /// interactive shell after its command, which is right for a project terminal and leaves
+    /// nothing to wait for here. `-l` matters: npm and the providers' installers are found on the
+    /// login shell's PATH, the same one launches use.
+    /// `source` is shell source the host authored (an installer's pipe included); it travels
+    /// as the single `-c` word, quoted once here.
+    func startOneShot(source: String, in directory: URL, loginShell: String) {
+        guard !isRunning, !terminalView.process.running, !terminalView.process.windingDown
+        else { return }
+
+        var shell = ShellCommand(word: loginShell)
+        shell.append(word: "-l")
+        shell.append(word: "-c")
+        shell.append(word: source)
+        let launch = ShellCommand.executing(shell, in: directory.path)
+        terminalView.startProcess(
+            executable: "/bin/sh",
+            args: ["-c", launch.source],
+            environment: buildEnvironment(),
+            execName: (loginShell as NSString).lastPathComponent
+        )
+        finishProcessStart()
     }
 
     private func startShell(initialDirectory: URL?, initialCommand: ShellCommand?) {

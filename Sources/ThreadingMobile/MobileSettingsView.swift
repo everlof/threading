@@ -8,6 +8,10 @@ struct MobileSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(MobileSessionAccountBadgePreference.key)
     private var showsAccountBadge = MobileSessionAccountBadgePreference.defaultValue
+    @AppStorage(MobileThemeMotionPreferences.motionKey) private var themeMotion = true
+    @AppStorage(MobileThemeMotionPreferences.reactionsKey) private var themeReactions = false
+    @AppStorage(MobileThemeMotionPreferences.strengthKey) private var reactionStrength = 100.0
+    @AppStorage(MobileThemeMotionPreferences.extensionBackdropsKey) private var extensionBackdrops = true
     @ObservedObject private var sentryDiagnostics = MobileSentryDiagnosticsStatus.shared
     var body: some View {
         NavigationStack {
@@ -52,6 +56,29 @@ struct MobileSettingsView: View {
                                 MacAppearanceSettingsView()
                             }
                         }
+
+                        ThemedRowDivider()
+                        SettingsToggleRow(symbol: "sparkles", title: "Theme motion", detail: nil, isOn: $themeMotion)
+                        ThemedRowDivider()
+                        SettingsToggleRow(symbol: "waveform", title: "Workload reactions", detail: nil, isOn: $themeReactions)
+                        ThemedRowDivider()
+                        VStack(alignment: .leading) {
+                            Text("Reaction strength")
+                            Slider(value: $reactionStrength, in: 0...200, step: 10)
+                                .accessibilityLabel(Text("Reaction strength"))
+                            Text(reactionStrength / 100, format: .percent.precision(.fractionLength(0)))
+                                .foregroundStyle(theme.secondaryLabel)
+                        }
+                        .padding(MobileDesign.Spacing.inset)
+                        .disabled(!themeReactions)
+
+                        ThemedRowDivider()
+                        SettingsToggleRow(
+                            symbol: "cube.transparent",
+                            title: "Extension backdrops",
+                            detail: "Show the Mac’s extension backdrop on this iPhone",
+                            isOn: $extensionBackdrops
+                        )
 
                         ThemedRowDivider()
                         SettingsToggleRow(
@@ -161,7 +188,7 @@ struct MobileSettingsView: View {
 #endif
 
                     Text("These iPhone preferences are available before you connect a Mac.")
-                        .font(.footnote)
+                        .font(theme.chromeSwiftUIFont(.footnote))
                         .foregroundStyle(theme.secondaryLabel)
                         .padding(.horizontal, MobileDesign.Spacing.tight)
                 }
@@ -169,7 +196,7 @@ struct MobileSettingsView: View {
                 .padding(.top, MobileDesign.Spacing.medium)
                 .padding(.bottom, MobileDesign.Spacing.pane)
             }
-            .background(theme.ground)
+            .mobileThemeBackdrop(theme)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(theme.surface, for: .navigationBar)
@@ -204,13 +231,13 @@ struct MobileSettingsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
             Text(title)
-                .font(.headline)
+                .font(theme.chromeSwiftUIFont(.headline))
                 .foregroundStyle(theme.label)
                 .padding(.horizontal, MobileDesign.Spacing.inset)
             ThemedRowGroup(content: content)
             if let footer {
                 Text(footer)
-                    .font(.footnote)
+                    .font(theme.chromeSwiftUIFont(.footnote))
                     .foregroundStyle(theme.secondaryLabel)
                     .padding(.horizontal, MobileDesign.Spacing.inset)
             }
@@ -301,7 +328,7 @@ private struct PairedMacRow: View {
             Spacer(minLength: MobileDesign.Spacing.small)
             if mac.isActive {
                 Image(systemName: "checkmark")
-                    .font(.caption.weight(.semibold))
+                    .font(theme.chromeSwiftUIFont(.caption, weight: .semibold))
                     .foregroundStyle(theme.accent)
                     .accessibilityLabel(MobileL10n.string("Connected"))
             }
@@ -342,7 +369,7 @@ private struct SettingsRow: View {
                     .foregroundStyle(theme.label)
                 if let detail {
                     Text(detail)
-                        .font(.caption)
+                        .font(theme.chromeSwiftUIFont(.caption))
                         .foregroundStyle(theme.secondaryLabel)
                         .lineLimit(1)
                 }
@@ -367,7 +394,7 @@ private struct SettingsNavigationRow<Destination: View>: View {
                 SettingsRow(symbol: symbol, title: title, detail: detail)
                 Spacer(minLength: MobileDesign.Spacing.small)
                 Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
+                    .font(theme.chromeSwiftUIFont(.caption, weight: .semibold))
                     .foregroundStyle(theme.tertiaryLabel)
             }
             .padding(.horizontal, MobileDesign.Spacing.inset)
@@ -418,13 +445,13 @@ struct CollaborationSettingsView: View {
                     composer so two people cannot mix keystrokes in one TUI line.
                     """
                 ))
-                .font(.footnote)
+                .font(theme.chromeSwiftUIFont(.footnote))
                 .foregroundStyle(theme.secondaryLabel)
                 .padding(.horizontal, MobileDesign.Spacing.inset)
             }
             .padding(MobileDesign.Spacing.inset)
         }
-        .background(theme.ground)
+        .mobileThemeBackdrop(theme)
         .navigationTitle("Collaboration")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -473,7 +500,7 @@ struct MacAppearanceSettingsView: View {
             if let errorMessage {
                 ThemedSettingsSection {
                     Label(errorMessage, systemImage: "exclamationmark.triangle")
-                        .font(.footnote)
+                        .font(theme.chromeSwiftUIFont(.footnote))
                         .foregroundStyle(theme.negative)
                 }
             }
@@ -519,7 +546,7 @@ struct MobileAppIconSettingsView: View {
                         MobileL10n.string("Your Mac uses %@", recommendation.displayName),
                         systemImage: "laptopcomputer"
                     )
-                    .font(.subheadline)
+                    .font(theme.chromeSwiftUIFont(.subheadline))
                     .foregroundStyle(theme.secondaryLabel)
                     .padding(MobileDesign.Spacing.medium)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -559,7 +586,7 @@ struct MobileAppIconSettingsView: View {
                                 }
 
                                 Text(choice.displayName)
-                                    .font(.caption.weight(.medium))
+                                    .font(theme.chromeSwiftUIFont(.caption, weight: .medium))
                                     .foregroundStyle(theme.label)
                                     .multilineTextAlignment(.center)
                                     .lineLimit(2)
@@ -578,18 +605,18 @@ struct MobileAppIconSettingsView: View {
 
                 if let errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.triangle")
-                        .font(.footnote)
+                        .font(theme.chromeSwiftUIFont(.footnote))
                         .foregroundStyle(theme.negative)
                 }
 
                 Text("iOS asks for confirmation when you change an app icon. Threading never changes it automatically.")
-                    .font(.footnote)
+                    .font(theme.chromeSwiftUIFont(.footnote))
                     .foregroundStyle(theme.secondaryLabel)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(MobileDesign.Spacing.large)
         }
-        .background(theme.ground)
+        .mobileThemeBackdrop(theme)
         .navigationTitle("App icon")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { selectedIconName = UIApplication.shared.alternateIconName }

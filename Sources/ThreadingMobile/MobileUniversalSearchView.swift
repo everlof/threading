@@ -249,7 +249,7 @@ struct MobileUniversalSearchView: View {
                     .lineLimit(1)
                 if let snippet = hit.snippet, !snippet.text.isEmpty {
                     highlightedText(snippet)
-                        .font(.subheadline)
+                        .mobileContentTypography(.subheadline)
                         .foregroundStyle(theme.secondaryLabel)
                         .lineLimit(2)
                 }

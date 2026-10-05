@@ -4,27 +4,78 @@ import XCTest
 @testable import Threading
 
 @MainActor
-final class BrowserReloadShortcutTests: XCTestCase {
+final class BrowserReloadShortcutTests: HostedStoreTestCase {
+    private enum Host: CaseIterable { case panel, drawer, detached }
+
     /// ⌘R belongs to Rename Session in the menu; the browser takes it only while it holds focus.
     func testCommandRReloadsOnlyWhileTheBrowserHasFocus() throws {
+        for host in Host.allCases {
+            try assertReloadShortcut(in: host, throughApplication: false)
+        }
+    }
+
+    func testApplicationDispatchReloadsBeforeRenameMenuWithBrowserFocus() throws {
+        for host in Host.allCases {
+            try assertReloadShortcut(in: host, throughApplication: true)
+        }
+    }
+
+    private func assertReloadShortcut(in kind: Host, throughApplication: Bool) throws {
         let pages = ReloadCountingPageHandler()
         let browser = BrowserViewController(urlSchemeHandlers: ["threading-reload": pages])
-        let origin = NSPoint(x: -10_000, y: -10_000)
-        let window = NSWindow(
-            contentRect: NSRect(origin: origin, size: NSSize(width: 480, height: 360)),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
+        let sessionID = SessionID()
+        let host: NSViewController
+        switch kind {
+        case .panel:
+            let panel = DisplayPaneController(browserFactory: { _, _ in browser })
+            _ = panel.view
+            panel.showSessionTabs(sessionID)
+            XCTAssertTrue(panel.addBrowserTab(for: sessionID) === browser)
+            host = panel
+        case .drawer:
+            let drawer = DrawerHostViewController(
+                directoryProvider: { _ in nil },
+                browserFactory: { _, _ in browser },
+                loadPanel: { _ in nil },
+                persistDrawer: { _, _, _, _ in }
+            )
+            _ = drawer.view
+            drawer.showSession(sessionID)
+            XCTAssertTrue(drawer.addBrowserTab(for: sessionID) === browser)
+            host = drawer
+        case .detached:
+            let detached = DetachedBrowserHostViewController(
+                sessionID: sessionID, browserFactory: { _, _ in browser }
+            )
+            _ = detached.view
+            XCTAssertTrue(detached.addBrowserTab() === browser)
+            host = detached
+        }
+        let origin = throughApplication ? NSPoint(x: 120, y: 120) : NSPoint(x: -10_000, y: -10_000)
+        let rect = NSRect(origin: origin, size: NSSize(width: 480, height: 360))
+        let window: NSWindow = throughApplication
+            ? ReloadShortcutKeyPanel(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            : NSWindow(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.contentViewController = browser
+        window.contentViewController = host
+        NSLayoutConstraint.activate([
+            host.view.widthAnchor.constraint(equalToConstant: 480),
+            host.view.heightAnchor.constraint(equalToConstant: 360)
+        ])
         window.setFrameOrigin(origin)
-        window.orderFront(nil)
         defer {
             browser.webView.stopLoading()
+            window.makeFirstResponder(nil)
             window.orderOut(nil)
             window.contentViewController = nil
         }
+        if throughApplication {
+            window.makeKeyAndOrderFront(nil)
+            try XCTSkipUnless(pollUntil { window.isKeyWindow }, "the host cannot grant keyboard focus")
+        } else {
+            window.orderFront(nil)
+        }
+        host.view.layoutSubtreeIfNeeded()
 
         let loaded = expectation(description: "page loaded")
         browser.navigate(to: "threading-reload://fixture/page") { success, message in
@@ -47,15 +98,55 @@ final class BrowserReloadShortcutTests: XCTestCase {
             charactersIgnoringModifiers: "r", isARepeat: false, keyCode: 15
         ))
 
-        XCTAssertTrue(window.makeFirstResponder(nil))
-        XCTAssertFalse(
-            window.performKeyEquivalent(with: commandR),
-            "without focus the chord continues to the menu's Rename Session"
+        let renameTarget = ReloadShortcutRenameTarget()
+        let menu = NSMenu()
+        let projectItem = NSMenuItem(title: "Project", action: nil, keyEquivalent: "")
+        let projectMenu = NSMenu(title: "Project")
+        let renameItem = NSMenuItem(
+            title: "Rename Session", action: #selector(ReloadShortcutRenameTarget.rename), keyEquivalent: "r"
         )
+        renameItem.keyEquivalentModifierMask = .command
+        renameItem.target = renameTarget
+        projectMenu.addItem(renameItem)
+        projectItem.submenu = projectMenu
+        menu.addItem(projectItem)
+        let previousMenu = NSApp.mainMenu
+        NSApp.mainMenu = menu
+        defer { NSApp.mainMenu = previousMenu }
 
-        XCTAssertTrue(window.makeFirstResponder(browser.webView))
-        XCTAssertTrue(window.performKeyEquivalent(with: commandR))
-        XCTAssertTrue(pollUntil { pages.requestCount == 2 }, "⌘R in the focused browser reloads the page")
+        XCTAssertTrue(window.makeFirstResponder(nil))
+        if throughApplication {
+            NSApp.sendEvent(commandR)
+            XCTAssertEqual(renameTarget.count, 1, "without browser focus the menu must receive Rename Session")
+        } else {
+            XCTAssertFalse(window.performKeyEquivalent(with: commandR))
+        }
+
+        let tab = try XCTUnwrap(browser.tabShortcutFocusOwner as? ThemedTabItemView)
+        XCTAssertFalse(tab.isDescendant(of: browser.view), "the shipping tab is outside browser content")
+        host.view.layoutSubtreeIfNeeded()
+        browser.view.layoutSubtreeIfNeeded()
+        browser.viewDidLayout()
+        let pagePoint = browser.webView.convert(NSPoint(
+            x: browser.webView.bounds.midX, y: browser.webView.bounds.midY
+        ), to: browser.webView.superview)
+        let pageContent = try XCTUnwrap(browser.webView.hitTest(pagePoint),
+            "\(kind) page bounds \(browser.webView.bounds), frame \(browser.webView.frame), hit point \(pagePoint)")
+        let responders: [NSView] = [tab, pageContent, browser.webView, chrome.addressField]
+        for (index, responder) in responders.enumerated() {
+            XCTAssertTrue(pollUntil { !browser.webView.isLoading })
+            XCTAssertTrue(window.makeFirstResponder(responder))
+            if throughApplication {
+                XCTAssertTrue(window.isKeyWindow)
+                NSApp.sendEvent(commandR)
+            } else {
+                XCTAssertTrue(window.performKeyEquivalent(with: commandR))
+            }
+            XCTAssertTrue(pollUntil { pages.requestCount == index + 2 },
+                          "⌘R with \(type(of: responder)) focus in \(kind) must reload the page")
+            XCTAssertEqual(renameTarget.count, throughApplication ? 1 : 0,
+                           "focused browser reload must precede the menu binding")
+        }
     }
 
     private func pollUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) -> Bool {
@@ -70,6 +161,16 @@ final class BrowserReloadShortcutTests: XCTestCase {
         if let match = root as? T { return match }
         return root.subviews.lazy.compactMap { self.descendant(type, in: $0) }.first
     }
+}
+
+private final class ReloadShortcutKeyPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
+@MainActor
+private final class ReloadShortcutRenameTarget: NSObject {
+    private(set) var count = 0
+    @objc func rename() { count += 1 }
 }
 
 private final class ReloadCountingPageHandler: NSObject, WKURLSchemeHandler {

@@ -71,6 +71,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "removeRemoteHost",
             "grantBrowserOriginAccess",
             "approveSensitiveBrowserAction",
+            "approveBrowserNetworkCapture",
             "approveToolPermission",
             "approveSessionCheckoutMove",
             "installUnsignedExtension",

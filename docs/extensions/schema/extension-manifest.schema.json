@@ -169,7 +169,7 @@
       "type": "array",
       "maxItems": 16,
       "default": [],
-      "description": "App-theme documents offered to the host's theme library while the extension is enabled. Requires the appearance.themes capability. Each resource is a package-relative JSON file in the host's app-theme vocabulary (the document Threading stores for a custom theme); the host reads, validates, and namespaces it (ext.<extension>.<id>) at inspection time, before any extension code runs.",
+      "description": "App-theme documents offered to the host's theme library while the extension is installed (disabling it keeps them; removal or an invalid package withdraws them). Requires the appearance.themes capability. Each resource is a package-relative JSON file in the host's app-theme vocabulary (the document Threading stores for a custom theme); the host reads, validates, and namespaces it (ext.<extension>.<id>) at inspection time, before any extension code runs.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -184,11 +184,17 @@
         }
       }
     },
+    "componentThemeScope": {
+      "type": "string",
+      "enum": ["always", "ownThemes"],
+      "default": "always",
+      "description": "A binding floor for every component patch the extension publishes. 'ownThemes' applies them only while the selected app theme is one this extension contributes under 'themes' (a Duplicate to Edit copy is a custom theme and does not count), and is shown in the install review. Requires at least one theme and the ui.components or appearance.session-identity capability. A patch cannot widen it. Omit for 'always'."
+    },
     "fonts": {
       "type": "array",
       "maxItems": 16,
       "default": [],
-      "description": "Font files (.otf, .ttf, .ttc) registered process-scoped for Threading's own chrome while the extension is enabled. Requires the appearance.fonts capability. Family names come from the files themselves; the host parses each file at inspection time and names every family in the install disclosure. Licensing of a bundled font is the package author's responsibility.",
+      "description": "Font files (.otf, .ttf, .ttc) registered process-scoped for Threading's own chrome while the extension is installed (disabling it keeps them; removal or an invalid package withdraws them). Requires the appearance.fonts capability. Family names come from the files themselves; the host parses each file at inspection time and names every family in the install disclosure. Licensing of a bundled font is the package author's responsibility.",
       "items": {
         "type": "object",
         "additionalProperties": false,
