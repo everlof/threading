@@ -593,7 +593,7 @@ final class BrowserAnnotationEditingTests: XCTestCase {
     /// and is skipped from `fast` for exactly that reason.
     private func fixture(width: CGFloat, keyPanel: Bool = false) throws -> (BrowserViewController, DetachedBrowserHostViewController, NSWindow) {
         let browser = BrowserViewController(urlSchemeHandlers: ["threading-annotation": AnnotationPageHandler()])
-        let host = DetachedBrowserHostViewController(sessionID: SessionID(), browserFactory: { _ in browser })
+        let host = DetachedBrowserHostViewController(sessionID: SessionID(), browserFactory: { _, _ in browser })
         let origin = keyPanel ? NSPoint(x: 120, y: 120) : NSPoint(x: -10_000, y: -10_000)
         let rect = NSRect(origin: origin, size: NSSize(width: width, height: 520))
         let window: NSWindow = keyPanel

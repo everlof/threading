@@ -1598,7 +1598,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
     @MainActor
     func testBrowserTabsCreateActivateListAndCloseIndependentControllers() throws {
         let sessionID = SessionID()
-        let pane = DisplayPaneController()
+        let projectID = ProjectID()
+        let pane = DisplayPaneController(browserFactory: { context, _ in
+            BrowserViewController(contextKind: context, projectID: projectID)
+        })
         let coordinator = AgentToolCoordinator(
             displayPaneController: pane,
             visibleSessionID: { nil },
@@ -1633,7 +1636,12 @@ final class BrowserAgentBridgeTests: XCTestCase {
         let secondBrowser = try XCTUnwrap(browserTabs[1].browser)
         XCTAssertEqual(firstBrowser.contextKind, .shared)
         XCTAssertEqual(secondBrowser.contextKind, .private)
-        XCTAssertTrue(firstBrowser.websiteDataStore.isPersistent)
+        if #available(macOS 14.0, *) {
+            XCTAssertTrue(firstBrowser.websiteDataStore.isPersistent)
+            XCTAssertEqual(firstBrowser.websiteDataStore.identifier, projectID.rawValue)
+        } else {
+            XCTAssertFalse(firstBrowser.websiteDataStore.isPersistent)
+        }
         XCTAssertFalse(secondBrowser.websiteDataStore.isPersistent)
         XCTAssertFalse(firstBrowser.websiteDataStore === secondBrowser.websiteDataStore)
 
@@ -2645,9 +2653,107 @@ final class BrowserAgentBridgeTests: XCTestCase {
 @MainActor
 final class BrowserAgentBridgeIntegrationTests: XCTestCase {
 
+    func testCookiesAndLocalStorageAreSharedOnlyWithinTheProject() async throws {
+        let server = try BrowserLoopbackHTTPServer(pages: [
+            "/project-storage": "<!doctype html><title>Project storage fixture</title><p>Storage</p>"
+        ])
+        defer { server.stop() }
+        let projectID = ProjectID()
+        let first = BrowserViewController(projectID: projectID)
+        let sibling = BrowserViewController(projectID: projectID)
+        let otherProjectID = ProjectID()
+        let other = BrowserViewController(projectID: otherProjectID)
+        let privateTab = BrowserViewController(contextKind: .private, projectID: projectID)
+        let movingSessionID = SessionID()
+        first.annotationSessionID = movingSessionID
+        privateTab.annotationSessionID = movingSessionID
+        let browsers = [first, sibling, other, privateTab]
+        let windows = browsers.map { browser in
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+                styleMask: [.titled], backing: .buffered, defer: false
+            )
+            window.isReleasedWhenClosed = false
+            window.animationBehavior = .none
+            window.contentViewController = browser
+            window.orderFront(nil)
+            return window
+        }
+        defer { windows.forEach { $0.close() } }
+        let url = server.url(host: "localhost", path: "/project-storage")
+        for browser in browsers {
+            let loaded = await performNavigation(browser, to: url.absoluteString)
+            XCTAssertTrue(loaded.0, loaded.1)
+        }
+        _ = try await first.evaluate("""
+            localStorage.setItem('project-state', 'first');
+            document.cookie = 'project-cookie=first; path=/';
+            """
+        )
+        // Reload through WebKit: this observes shared website state, not controller metadata.
+        for browser in [sibling, other, privateTab] {
+            let loaded = await performNavigation(browser, to: url.absoluteString)
+            XCTAssertTrue(loaded.0, loaded.1)
+        }
+        let sharedState = try await sibling.evaluate("localStorage.getItem('project-state')") as? String
+        XCTAssertEqual(sharedState, "first")
+        let sharedCookie = try await sibling.evaluate("document.cookie") as? String
+        XCTAssertEqual(sharedCookie, "project-cookie=first")
+        for browser in [other, privateTab] {
+            let state = try await browser.evaluate("localStorage.getItem('project-state')")
+            XCTAssertTrue(state == nil || state is NSNull)
+            let cookies = try await browser.evaluate("document.cookie") as? String
+            XCTAssertEqual(cookies, "")
+        }
+        _ = try await other.evaluate("""
+            localStorage.setItem('project-state', 'other');
+            document.cookie = 'project-cookie=other; path=/';
+            """
+        )
+        let sourceStore = first.websiteDataStore
+        NotificationCenter.default.post(SessionProjectDidChange(
+            sessionID: movingSessionID, projectID: otherProjectID
+        ))
+        XCTAssertNil(first.currentURL, "A moved chat must retire its source project's page")
+        XCTAssertFalse(first.websiteDataStore === sourceStore)
+        XCTAssertTrue(first.websiteDataStore === other.websiteDataStore)
+        XCTAssertNotNil(privateTab.currentURL, "Private tabs keep their independent context")
+        let movedLoaded = await performNavigation(first, to: url.absoluteString)
+        XCTAssertTrue(movedLoaded.0, movedLoaded.1)
+        let destinationState = try await first.evaluate("localStorage.getItem('project-state')") as? String
+        XCTAssertEqual(destinationState, "other")
+        let origin = try XCTUnwrap(BrowserOrigin(url: url))
+        _ = await clearSiteData(in: sibling, origin: origin)
+        let loaded = await performNavigation(sibling, to: url.absoluteString)
+        XCTAssertTrue(loaded.0, loaded.1)
+        let clearedState = try await sibling.evaluate("localStorage.getItem('project-state')")
+        XCTAssertTrue(clearedState == nil || clearedState is NSNull)
+        let retainedState = try await other.evaluate("localStorage.getItem('project-state')") as? String
+        XCTAssertEqual(retainedState, "other")
+        let retainedCookie = try await other.evaluate("document.cookie") as? String
+        XCTAssertEqual(retainedCookie, "project-cookie=other")
+        _ = try await sibling.evaluate("document.cookie = 'project-cookie=race; path=/'")
+        let siblingSessionID = SessionID()
+        sibling.annotationSessionID = siblingSessionID
+        await withCheckedContinuation { continuation in
+            sibling.clearSiteData(for: origin) { _ in continuation.resume() }
+            NotificationCenter.default.post(SessionProjectDidChange(
+                sessionID: siblingSessionID, projectID: otherProjectID
+            ))
+        }
+        let clearedSourceCookie = await cookie(named: "project-cookie", in: sourceStore)
+        XCTAssertNil(clearedSourceCookie)
+        let cookieAfterClearRace = try await other.evaluate("document.cookie") as? String
+        XCTAssertEqual(cookieAfterClearRace, "project-cookie=other")
+        let storageAfterClearRace = try await other.evaluate("localStorage.getItem('project-state')") as? String
+        XCTAssertEqual(storageAfterClearRace, "other")
+        _ = await clearSiteData(in: other, origin: origin)
+    }
+
     func testPrivateContextsAreEphemeralAndIsolatedFromEveryOtherTab() async throws {
-        let sharedA = BrowserViewController(contextKind: .shared)
-        let sharedB = BrowserViewController(contextKind: .shared)
+        let projectID = ProjectID()
+        let sharedA = BrowserViewController(contextKind: .shared, projectID: projectID)
+        let sharedB = BrowserViewController(contextKind: .shared, projectID: projectID)
         let privateA = BrowserViewController(contextKind: .private)
         let privateB = BrowserViewController(contextKind: .private)
         _ = sharedA.view
@@ -2655,8 +2761,13 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         _ = privateA.view
         _ = privateB.view
 
-        XCTAssertTrue(sharedA.websiteDataStore.isPersistent)
-        XCTAssertTrue(sharedB.websiteDataStore.isPersistent)
+        if #available(macOS 14.0, *) {
+            XCTAssertTrue(sharedA.websiteDataStore.isPersistent)
+            XCTAssertTrue(sharedB.websiteDataStore.isPersistent)
+        } else {
+            XCTAssertFalse(sharedA.websiteDataStore.isPersistent)
+            XCTAssertFalse(sharedB.websiteDataStore.isPersistent)
+        }
         XCTAssertFalse(privateA.websiteDataStore.isPersistent)
         XCTAssertFalse(privateB.websiteDataStore.isPersistent)
         XCTAssertTrue(sharedA.websiteDataStore === sharedB.websiteDataStore)
@@ -3104,9 +3215,10 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         var suggestedSelections: [[URL]] = []
         var savePanelWasAgentRequested = false
         var savePanelMessage = ""
-        let pane = DisplayPaneController(browserFactory: { context in
+        let pane = DisplayPaneController(browserFactory: { context, projectID in
             BrowserViewController(
                 contextKind: context,
+                projectID: projectID,
                 openPanelProvider: { _, suggestions, message, decide in
                     openPanelMessages.append(message)
                     suggestedSelections.append(suggestions)

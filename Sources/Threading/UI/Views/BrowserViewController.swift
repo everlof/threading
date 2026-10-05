@@ -618,7 +618,8 @@ final class BrowserViewController: NSViewController {
     private let openPanelProvider: BrowserOpenPanelProvider?
     private let savePanelProvider: BrowserSavePanelProvider?
     let contextKind: BrowserContextKind
-    let websiteDataStore: WKWebsiteDataStore
+    private(set) var websiteDataStore: WKWebsiteDataStore
+    private var websiteDataProjectID: ProjectID?
     var agentTraceRecording = false
     var agentTraceStartedAt: Date?
     var agentTraceEvents: [BrowserTraceEvent] = []
@@ -650,6 +651,7 @@ final class BrowserViewController: NSViewController {
     init(
         urlSchemeHandlers: [String: WKURLSchemeHandler] = [:],
         contextKind: BrowserContextKind = .shared,
+        projectID: ProjectID? = nil,
         openPanelProvider: BrowserOpenPanelProvider? = nil,
         savePanelProvider: BrowserSavePanelProvider? = nil
     ) {
@@ -657,8 +659,56 @@ final class BrowserViewController: NSViewController {
         self.contextKind = contextKind
         self.openPanelProvider = openPanelProvider
         self.savePanelProvider = savePanelProvider
-        websiteDataStore = contextKind == .shared ? .default() : .nonPersistent()
+        websiteDataProjectID = projectID
+        websiteDataStore = BrowserWebsiteDataStores.store(for: contextKind, projectID: projectID)
         super.init(nibName: nil, bundle: nil)
+        appEvents.observe(SessionProjectDidChange.self) { [weak self] event in
+            guard let self, self.annotationSessionID == event.sessionID else { return }
+            self.changeWebsiteDataProject(to: event.projectID)
+        }
+    }
+
+    /// An open document cannot move to another WebKit profile. Retire it instead of letting the
+    /// destination project's agent keep reading the source project's authenticated browser.
+    private func changeWebsiteDataProject(to projectID: ProjectID) {
+        guard contextKind == .shared, websiteDataProjectID != projectID else { return }
+        websiteDataProjectID = projectID
+        websiteDataStore = BrowserWebsiteDataStores.store(for: .shared, projectID: projectID)
+        restoredURL = nil
+        guard isViewLoaded else {
+            onPageChange?()
+            return
+        }
+
+        finishLoad(false, "The browser's project changed. Navigate again in the new project.")
+        setAnnotationMode(false)
+        baselineOverlayView.layoutShifts = []
+        hideBaselineOverlay()
+        hideFindBar()
+        annotationCaptureTasks.values.forEach { $0.cancel() }
+        annotationCaptureTasks.removeAll()
+        annotationTargetRevision &+= 1
+        annotationsByPage.removeAll()
+        pendingAnnotations.removeAll()
+        sentAnnotationNotes.removeAll()
+        annotationDraft = nil
+        consoleMessages.removeAll()
+        networkEntries.removeAll()
+        for page in webViewStack {
+            page.stopLoading()
+            page.navigationDelegate = nil
+            page.uiDelegate = nil
+            page.configuration.userContentController.removeAllScriptMessageHandlers()
+            page.removeFromSuperview()
+        }
+        documentSequences.removeAll()
+        passwordFocusedFrameTokens.removeAll()
+        annotationViewportOffsets.removeAll()
+        annotationAnchorPositions.removeAll()
+        capturedAnnotationAnchorTokens.removeAll()
+        let replacement = makePrimaryWebView()
+        webViewStack = [replacement]
+        activateWebView(replacement)
     }
 
     @available(*, unavailable)
@@ -697,8 +747,8 @@ final class BrowserViewController: NSViewController {
 
     private func makePrimaryWebView() -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        // Shared contexts carry the user's authenticated state. A private context receives its
-        // own non-persistent store at controller creation and cannot see another tab's cookies.
+        // Shared contexts carry the owning project's authenticated state. A private context
+        // receives its own non-persistent store and cannot see another tab's cookies.
         configuration.websiteDataStore = websiteDataStore
         // Popup-capable sign-in and account-linking flows often call window.open from a page
         // handler. Threading contains those windows inside this surface and caps their depth.
@@ -1233,8 +1283,10 @@ final class BrowserViewController: NSViewController {
         completion: @escaping (BrowserSiteDataClearReport) -> Void
     ) {
         let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
+        // A project move may replace the controller's store while WebKit fetches records.
+        let store = websiteDataStore
         if contextKind == .private {
-            websiteDataStore.removeData(
+            store.removeData(
                 ofTypes: dataTypes,
                 modifiedSince: .distantPast
             ) {
@@ -1243,8 +1295,8 @@ final class BrowserViewController: NSViewController {
             return
         }
 
-        websiteDataStore.fetchDataRecords(ofTypes: dataTypes) { [weak self] records in
-            guard let self else {
+        store.fetchDataRecords(ofTypes: dataTypes) { [weak self] records in
+            guard self != nil else {
                 completion(BrowserSiteDataClearReport(recordsRemoved: 0, context: .shared))
                 return
             }
@@ -1255,7 +1307,7 @@ final class BrowserViewController: NSViewController {
                 completion(BrowserSiteDataClearReport(recordsRemoved: 0, context: .shared))
                 return
             }
-            self.websiteDataStore.removeData(ofTypes: dataTypes, for: matching) {
+            store.removeData(ofTypes: dataTypes, for: matching) {
                 completion(BrowserSiteDataClearReport(
                     recordsRemoved: matching.count,
                     context: .shared

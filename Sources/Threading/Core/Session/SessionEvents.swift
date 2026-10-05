@@ -1,6 +1,13 @@
 import Foundation
 import ThreadingRemoteKit
 
+/// Published after durable project ownership changes, before retained surfaces can be reused.
+struct SessionProjectDidChange: AppEvent {
+    static let name = Notification.Name("sessionProjectDidChange")
+    let sessionID: SessionID
+    let projectID: ProjectID
+}
+
 struct TerminalSessionDidEnd: AppEvent {
     static let name = Notification.Name("terminalSessionDidEnd")
     let sessionID: SessionID

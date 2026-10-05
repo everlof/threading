@@ -24,7 +24,7 @@ final class DrawerHostViewController: NSViewController {
     /// the one place that can ask a running agent over OSC 7.
     private let directoryProvider: (SessionID) -> URL?
 
-    private let browserFactory: @MainActor (BrowserContextKind) -> BrowserViewController
+    private let browserFactory: @MainActor (BrowserContextKind, ProjectID?) -> BrowserViewController
 
     private var statesBySession: [SessionID: TabListState] = [:]
     private var restoredSessions: Set<SessionID> = []
@@ -114,8 +114,8 @@ final class DrawerHostViewController: NSViewController {
 
     init(
         directoryProvider: @escaping (SessionID) -> URL?,
-        browserFactory: @escaping @MainActor (BrowserContextKind) -> BrowserViewController = {
-            BrowserViewController(contextKind: $0)
+        browserFactory: @escaping @MainActor (BrowserContextKind, ProjectID?) -> BrowserViewController = {
+            BrowserViewController(contextKind: $0, projectID: $1)
         },
         loadPanel: @escaping LoadPanel = { DisplayPaneStore.shared.loadLayout(for: $0) },
         persistDrawer: @escaping PersistDrawer = { tabs, activeID, open, sessionID in
@@ -390,7 +390,8 @@ final class DrawerHostViewController: NSViewController {
         for sessionID: SessionID,
         contextKind: BrowserContextKind = .shared
     ) -> BrowserViewController {
-        let controller = browserFactory(contextKind)
+        let projectID = ProjectStore.shared.project(forSessionID: sessionID)?.id
+        let controller = browserFactory(contextKind, projectID)
         addChild(controller)
         controller.baselineSessionID = sessionID
         controller.annotationSessionID = sessionID

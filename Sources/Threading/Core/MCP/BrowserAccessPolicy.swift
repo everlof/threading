@@ -1,6 +1,6 @@
 import Foundation
 
-/// Chooses whether a live browser participates in Threading's signed-in browser state.
+/// Chooses whether a live browser participates in its project's signed-in browser state.
 ///
 /// A private context owns one non-persistent WebKit data store. It is deliberately per tab rather
 /// than shared between all private tabs, so "private" also means isolated from another agent test.

@@ -4,9 +4,9 @@ The live browser an agent drives, kept separate from the rendered-document web v
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
-The live browser and the rendered-document web view are deliberately separate. Each live
-`BrowserViewController` uses the persistent website data store and can carry authenticated state;
-agent access therefore goes through an app-level origin grant even though Threading's MCP server
+The live browser and the rendered-document web view are deliberately separate. Each shared
+`BrowserViewController` uses its owning project's website data store and can carry authenticated
+state; agent access therefore goes through an app-level origin grant even though Threading's MCP server
 itself is pre-approved. Localhost is admitted for development. Other origins offer once,
 persistent-host, this-chat/all-websites, or deny choices. The chat-wide choice is explicit,
 persists across app launches, and is revoked with the session on permanent deletion or from
@@ -215,8 +215,27 @@ explicit close control; Back closes it and returns to its live opener when it ha
 Only the active page may add another pop-up, so a hidden opener cannot take the surface back.
 `browser_tabs` manages up to eight independent `BrowserViewController`s per session. Each keeps
 its own page, history, pop-up stack, responsive viewport, color scheme, CSS media type, User-Agent,
-console, and network buffers. A shared context uses the default website data store so signing in
-does not create cookie islands; a private context owns one unique non-persistent store and shares
+console, and network buffers. A shared context uses a named WebKit website data store keyed by
+the owning `ProjectID`, so cookies, caches, local storage, IndexedDB and service workers are shared
+across that project's tabs and sessions, including the panel, drawer, detached windows and audit
+browser. Projects never share website state. The owning project is resolved before controller
+creation, rather than from the currently selected session or execution checkout. A durable chat
+move emits `SessionProjectDidChange` for every changed session, including side chats. Shared
+browsers switch to the destination profile and retire their old documents, pop-ups and page
+diagnostics; they do not replay the old page's request. The source project's website data remains
+in its own profile. Private tabs retain their independent ephemeral stores. WebKit restores
+the same named profile after relaunch on macOS 14+. On macOS 13, which supports only one persistent
+store, project state is shared in memory while a project browser remains alive. A browser without
+a known project receives a unique in-memory store and never the app-wide default. WebKit's
+reserved all-zero profile identifier also uses project-shared memory, avoiding its Objective-C
+exception. Existing global
+website data is not copied into project profiles; users sign in once per project.
+`BrowserWebsiteDataStores` performs O(1) keyed lookups on explicit browser creation, with weak
+store references so it retains no inactive WebKit profiles (normally a handful of active projects;
+stress: 1,000 project identities). No project enumeration or filesystem work is added to layout,
+navigation or streaming callbacks. WebKit owns profile persistence. This isolation is host-owned;
+themes and extension presentations cannot choose a different profile or read website data.
+A private context owns one unique non-persistent store and shares
 no cookies with the signed-in browser or another private tab. Private tabs and even their URLs are
 runtime-only and excluded from panel persistence. The agent addresses tabs by browser-local index
 or stable tab id. The most recently selected browser remains the browser-tool target when an image
@@ -247,8 +266,11 @@ require paired owner scope.
 IndexedDB, and service-worker data only after a separate app-owned confirmation. An origin grant,
 including an "always allow" grant, never implies permission to delete signed-in state. The
 confirmation is bound to the exact tab and document; a page or tab switch cancels before removal.
-A private tab clears its entire unique store. A shared tab filters WebKit's site-level data records
-to the active host or the parent record WebKit grouped it under, and tells the user that related
+Once removal begins, it retains that exact website data store across WebKit's asynchronous record
+fetch, so a concurrent project move cannot retarget clearing to the destination's profile.
+A private tab clears its entire unique store. A shared tab filters site-level data records only
+within its project's profile to the active host or the parent record WebKit grouped it under,
+and tells the user that related
 subdomains may therefore be signed out. Clearing does not implicitly reload or reconstruct the
 current request.
 

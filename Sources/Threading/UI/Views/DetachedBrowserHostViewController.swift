@@ -24,7 +24,7 @@ final class DetachedBrowserHostViewController: NSViewController {
     let sessionID: SessionID
     let windowID: UUID
 
-    private let browserFactory: @MainActor (BrowserContextKind) -> BrowserViewController
+    private let browserFactory: @MainActor (BrowserContextKind, ProjectID?) -> BrowserViewController
 
     private var tabs = TabListState()
     private weak var installedController: NSViewController?
@@ -86,8 +86,8 @@ final class DetachedBrowserHostViewController: NSViewController {
     init(
         sessionID: SessionID,
         windowID: UUID = UUID(),
-        browserFactory: @escaping @MainActor (BrowserContextKind) -> BrowserViewController = {
-            BrowserViewController(contextKind: $0)
+        browserFactory: @escaping @MainActor (BrowserContextKind, ProjectID?) -> BrowserViewController = {
+            BrowserViewController(contextKind: $0, projectID: $1)
         }
     ) {
         self.sessionID = sessionID
@@ -306,7 +306,8 @@ final class DetachedBrowserHostViewController: NSViewController {
     // MARK: - Private
 
     private func makeBrowser(contextKind: BrowserContextKind) -> BrowserViewController {
-        let controller = browserFactory(contextKind)
+        let projectID = ProjectStore.shared.project(forSessionID: sessionID)?.id
+        let controller = browserFactory(contextKind, projectID)
         addChild(controller)
         controller.annotationSessionID = sessionID
         controller.onPageChange = pageHook

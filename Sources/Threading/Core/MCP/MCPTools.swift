@@ -4204,7 +4204,8 @@ enum MCPTools {
         List, create, activate, or close independent browser tabs in this session. Each \
         browser tab keeps its own page, history, pop-ups, responsive viewport, emulated \
         color scheme, CSS media type, custom user agent, console, and network buffers. A \
-        shared context uses Threading's persistent signed-in website data. A private context \
+        shared context shares cookies and website storage only with tabs and sessions in the \
+        same project (persistent on macOS 14+). A private context \
         gets a unique non-persistent data store isolated from shared and other private tabs. \
         Private tabs and their URLs are not restored after app restart. Tab \
         indices are 0-based within the browser-tab list and stable IDs are returned for \

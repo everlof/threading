@@ -4253,6 +4253,15 @@ When exact browser or device conditions exceed the visible WebKit browser, the s
 Playwright tool can run a fresh Chromium, Firefox, or WebKit context without importing the live
 tab's cookies or credentials.
 
+Ordinary browser tabs share cookies, sign-ins, caches and website storage across chats within the
+same project. Each project has its own profile, also used by browsers in the drawer, detached
+windows and execution audit. Profiles survive app restarts on macOS 14 and later; on macOS 13,
+shared data lasts while a browser for that project remains open. Existing app-wide sign-ins are
+not copied into these profiles, so sign in once per project after upgrading. Private tabs keep
+their own separate, temporary storage.
+Moving a chat to another project switches its ordinary browsers to that project's profile and
+clears their open pages. Navigate again to continue browsing; the old project's sign-ins stay there.
+
 Use **Annotate Page** to place numbered notes directly over what you are reviewing. While the mode
 is on the browser frames itself in the accent colour and shows an **Annotating** badge in its
 bottom-left corner, so it is obvious that a click will leave a note rather than follow a link — press

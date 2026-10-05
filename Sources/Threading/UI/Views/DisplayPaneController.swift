@@ -275,7 +275,7 @@ final class DisplayPaneController: NSViewController {
   /// The plane an extension may dress through `display.backdrop@1`: above the pane's themed
   /// ground and beneath its tab row and content — see `setupBackdrop`.
   private(set) var extensionBackdrop: ExtensionBackdropPlaneView?
-  private let browserFactory: @MainActor (BrowserContextKind) -> BrowserViewController
+  private let browserFactory: @MainActor (BrowserContextKind, ProjectID?) -> BrowserViewController
   private let simulatorControl: any SimulatorControlling
   private let simulatorLeaseManager: any SimulatorLeaseManaging
   private let simulatorStreamCoordinator: any SimulatorLiveStreamCoordinating
@@ -364,8 +364,8 @@ final class DisplayPaneController: NSViewController {
     customizationLookup: @escaping ComponentCustomizationHost.Lookup = {
       ComponentCustomizationProviderSlot.shared.customization(for: $0)
     },
-    browserFactory: @escaping @MainActor (BrowserContextKind) -> BrowserViewController = {
-      BrowserViewController(contextKind: $0)
+    browserFactory: @escaping @MainActor (BrowserContextKind, ProjectID?) -> BrowserViewController = {
+      BrowserViewController(contextKind: $0, projectID: $1)
     },
     simulatorControl: any SimulatorControlling = SimctlSimulatorControl(),
     simulatorStreamCoordinator: any SimulatorLiveStreamCoordinating = SimulatorLiveStreamCoordinator.shared,
@@ -1031,7 +1031,8 @@ final class DisplayPaneController: NSViewController {
     for sessionID: SessionID,
     contextKind: BrowserContextKind = .shared
   ) -> BrowserViewController {
-    let controller = browserFactory(contextKind)
+    let projectID = ProjectStore.shared.project(forSessionID: sessionID)?.id
+    let controller = browserFactory(contextKind, projectID)
     addChild(controller)
     controller.baselineSessionID = sessionID
     controller.annotationSessionID = sessionID
@@ -1047,7 +1048,8 @@ final class DisplayPaneController: NSViewController {
     for sessionID: SessionID,
     mode: ExecutionAuditViewController.Mode = .audit
   ) -> ExecutionAuditViewController {
-    let browser = browserFactory(.shared)
+    let projectID = ProjectStore.shared.project(forSessionID: sessionID)?.id
+    let browser = browserFactory(.shared, projectID)
     let controller = ExecutionAuditViewController(
       sessionID: sessionID,
       browser: browser,

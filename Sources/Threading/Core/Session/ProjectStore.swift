@@ -707,6 +707,10 @@ final class ProjectStore {
                     from: source,
                     to: projects[targetIndex].id
                 )
+                NotificationCenter.default.post(SessionProjectDidChange(
+                    sessionID: id,
+                    projectID: projects[targetIndex].id
+                ))
             }
         }
         let destination = SessionCheckoutStoreDestination(
