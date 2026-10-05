@@ -69,6 +69,8 @@ extension SessionCoordinator {
                 usesNativeUI: dispatch.revision.agentKind.supportsNativeUI,
                 permissionMode: dispatch.revision.executionMode == .taskLocalEdits ? .acceptEdits : .plan,
                 managedWorkspacePlan: managedPlan,
+                automationWorkspace: dispatch.revision.checkoutPolicy == .automationWorkspace
+                    ? dispatch.revision.projectAutomation.map { AutomationWorkspace(automationID: $0.automationID, checkoutPath: $0.checkoutPath) } : nil,
                 role: .chat,
                 curfew: .at(runtimeDeadline)
             )

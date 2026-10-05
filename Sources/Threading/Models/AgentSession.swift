@@ -736,6 +736,7 @@ struct AgentSession: Codable, Identifiable {
 
   /// An execution directory owned for this session alone. Nil is the ordinary path: launch in
   /// the Project folder exactly as Threading always has.
+  var automationWorkspace: AutomationWorkspace?
   var managedWorkspace: ManagedWorkspace?
 
   /// A validated ownership change waiting behind this conversation's current turn fence.
@@ -856,6 +857,7 @@ struct AgentSession: Codable, Identifiable {
     case limitRecoveryPolicy
     case curfewRule, curfewState
     case managedWorkspace
+    case automationWorkspace
     case pendingCheckoutMove
   }
 
@@ -1226,6 +1228,7 @@ struct AgentSession: Codable, Identifiable {
       SessionCurfewState.self,
       forKey: .curfewState
     )
+    automationWorkspace = try container.decodeIfPresent(AutomationWorkspace.self, forKey: .automationWorkspace)
     managedWorkspace = try container.decodeIfPresent(
       ManagedWorkspace.self,
       forKey: .managedWorkspace
@@ -1289,6 +1292,7 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(curfewRule, forKey: .curfewRule)
     try container.encodeIfPresent(curfewState, forKey: .curfewState)
     try container.encodeIfPresent(managedWorkspace, forKey: .managedWorkspace)
+    try container.encodeIfPresent(automationWorkspace, forKey: .automationWorkspace)
     try container.encodeIfPresent(pendingCheckoutMove, forKey: .pendingCheckoutMove)
   }
 
@@ -1298,7 +1302,7 @@ struct AgentSession: Codable, Identifiable {
   /// persistence; substituting the directory only at execution seams prevents a temporary
   /// worktree from becoming a second sidebar project.
   func workingDirectory(in project: Project) -> String {
-    managedWorkspace?.executionPath ?? project.folderPath
+    automationWorkspace?.executionPath ?? managedWorkspace?.executionPath ?? project.folderPath
   }
 
   /// Records one archive state as the value both Threading and the provider now hold.

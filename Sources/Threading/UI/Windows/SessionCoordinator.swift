@@ -1437,7 +1437,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         let sessionID = plan.reservedSessionID ?? SessionID()
         let sessionName = SessionNaming.promptTitle(from: title)
         if let existing = environment.projectStore.session(withID: sessionID) {
-            guard !existing.hasLaunched, !existing.isArchived else { return nil }
+            guard existing.automationWorkspace == plan.automationWorkspace,
+                  !existing.hasLaunched, !existing.isArchived else { return nil }
 
             // A failed first launch may already have provisioned the workspace. Reuse it on an
             // explicit retry instead of creating a second checkout for the same conversation.
@@ -1487,6 +1488,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             permissionMode: plan.permissionMode,
             title: sessionName,
             managedWorkspace: workspace,
+            automationWorkspace: plan.automationWorkspace,
             id: sessionID
         )
         if session == nil, let workspace {

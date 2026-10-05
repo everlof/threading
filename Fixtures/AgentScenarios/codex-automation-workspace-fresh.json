@@ -1,0 +1,84 @@
+{
+  "id": "codex-automation-workspace-fresh",
+  "provenance": {
+    "protocolVersion": "app-server-1",
+    "providerVersion": "0.147.0",
+    "recordedAt": "2026-08-11T08:44:00Z"
+  },
+  "provider": "codex",
+  "steps": [
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":1,\"method\":\"initialize\"}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":1,\"result\":{\"userAgent\":\"threading-ui-fixture/1\"}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"method\":\"initialized\"}"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":2,\"method\":\"thread/start\"}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":2,\"result\":{\"thread\":{\"id\":\"fixture-thread-automation\",\"name\":\"Update status fixture\",\"model\":\"gpt-5.6\"}}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":3,\"method\":\"skills/list\",\"params\":{\"cwds\":[\"${SCENARIO_ROOT}/project/.threading/local/automations/workspace-task\"]}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":3,\"result\":{\"data\":[{\"cwd\":\"${SCENARIO_ROOT}/project/.threading/local/automations/workspace-task\",\"skills\":[],\"errors\":[]}]}}\n"
+    },
+    {
+      "kind": "expectHost",
+      "channel": "stdin",
+      "payload": "{\"id\":4,\"method\":\"turn/start\",\"params\":{\"threadId\":\"fixture-thread-automation\"}}"
+    },
+    {
+      "kind": "emitAgent",
+      "channel": "stdout",
+      "payload": "{\"id\":4,\"result\":{\"turn\":{\"id\":\"fixture-automation-turn\",\"status\":\"inProgress\"}}}\n"
+    },
+    {
+      "kind": "emitAgent",
+      "channel": "stdout",
+      "payload": "{\"method\":\"turn/started\",\"params\":{\"threadId\":\"fixture-thread-automation\",\"turn\":{\"id\":\"fixture-automation-turn\",\"status\":\"inProgress\"}}}\n"
+    },
+    {
+      "kind": "writeFixtureFile",
+      "path": "project/.threading/local/automations/workspace-task/runs/started.txt",
+      "contents": "Verified the host-supplied automation working directory.\n"
+    },
+    {
+      "kind": "emitAgent",
+      "channel": "stdout",
+      "payload": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"fixture-thread-automation\",\"turnId\":\"fixture-automation-turn\",\"item\":{\"id\":\"fixture-automation-message\",\"type\":\"agentMessage\",\"text\":\"Automation workspace verified.\"}}}\n"
+    },
+    {
+      "kind": "emitAgent",
+      "channel": "stdout",
+      "payload": "{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"fixture-thread-automation\",\"turn\":{\"id\":\"fixture-automation-turn\",\"status\":\"completed\",\"durationMs\":1000}}}\n"
+    },
+    {
+      "kind": "exit",
+      "status": 0,
+      "afterMilliseconds": 100
+    }
+  ],
+  "title": "Codex checks the project automation working directory",
+  "transport": "codex-app-server",
+  "version": 1
+}

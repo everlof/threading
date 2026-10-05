@@ -18,7 +18,7 @@ actor TriggerStore {
 
     static let shared = TriggerStore()
 
-    private static let schemaVersion = 3
+    private static let schemaVersion = 4
     private let database: SQLiteDatabase?
     private let openingError: Error?
     private let publishesDaemonConfiguration: Bool
@@ -53,6 +53,8 @@ actor TriggerStore {
                     try opened.execute(Self.version2)
                 case 3:
                     try opened.execute("CREATE TABLE automation_due (id TEXT PRIMARY KEY, due REAL NOT NULL); CREATE INDEX automation_due_time ON automation_due(due,id); CREATE INDEX trigger_run_trigger ON trigger_run(trigger_id); CREATE INDEX trigger_run_trigger_state ON trigger_run(trigger_id,state);")
+                case 4:
+                    try opened.execute("CREATE TABLE project_automation_binding (trigger_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, checkout_path TEXT NOT NULL, automation_id TEXT NOT NULL, repository_identity TEXT NOT NULL, data BLOB NOT NULL, UNIQUE(checkout_path,automation_id)); CREATE INDEX project_automation_project ON project_automation_binding(project_id); CREATE INDEX trigger_revision_project ON trigger_revision(project_id);")
                 default:
                     throw SQLiteDatabase.Failure.syntheticStep(
                         "No trigger migration to schema version \(version)"
@@ -177,11 +179,13 @@ actor TriggerStore {
     }
 
     func activate(triggerID: TriggerID, revisionID: TriggerRevisionID, at date: Date = Date()) throws {
+        try verifyProjectAutomation(triggerID)
         let database = try readyDatabase()
         guard var pair = try trigger(id: triggerID), pair.revision.id == revisionID else {
             throw StoreError.missing
         }
         if pair.definition.enabled, pair.definition.activeRevisionID == revisionID, pair.definition.draftRevisionID == nil { return }
+        try transferProjectAutomationOwnership(triggerID)
         pair.definition.enabled = true
         pair.definition.activeRevisionID = revisionID
         pair.definition.draftRevisionID = nil
@@ -202,6 +206,10 @@ actor TriggerStore {
 
     func setEnabled(_ enabled: Bool, triggerID: TriggerID, expectedRevision: TriggerRevisionID? = nil, at date: Date = Date()) throws {
         guard var pair = try trigger(id: triggerID), expectedRevision == nil || expectedRevision == pair.revision.id else { throw StoreError.missing }
+        if enabled {
+            try verifyProjectAutomation(triggerID)
+            try transferProjectAutomationOwnership(triggerID)
+        }
         if pair.definition.enabled == enabled { return }
         pair.definition.enabled = enabled
         pair.definition.updatedAt = date
@@ -389,13 +397,25 @@ actor TriggerStore {
     }
 
     struct RunPage: Encodable, Sendable { let items: [TriggerRun]; let next: Int64? }
-    func runPage(triggerID: TriggerID? = nil, before: Int64? = nil) throws -> RunPage {
+    func runPage(triggerID: TriggerID? = nil, projectID: ProjectID? = nil, before: Int64? = nil) throws -> RunPage {
+        let projectParameter: Int32 = triggerID == nil ? 2 : 3
+        // A file binding owns its complete trigger history, including revisions created before
+        // explicit adoption. Database-only records retain their frozen revision's project.
+        let projectFilter = """
+             AND (trigger_id IN (SELECT trigger_id FROM project_automation_binding WHERE project_id=?\(projectParameter))
+             OR trigger_revision_id IN (SELECT revisions.id FROM trigger_revision revisions
+                 WHERE revisions.project_id=?\(projectParameter) AND NOT EXISTS (
+                     SELECT 1 FROM project_automation_binding bindings WHERE bindings.trigger_id=revisions.trigger_id)))
+            """
         let sql = "SELECT rowid,data FROM trigger_run WHERE rowid<?"
-            + (triggerID == nil ? "" : " AND trigger_id=?") + " ORDER BY rowid DESC LIMIT 26"
+            + (triggerID == nil ? "" : " AND trigger_id=?")
+            + (projectID == nil ? "" : projectFilter)
+            + " ORDER BY rowid DESC LIMIT 26"
         let statement = try readyDatabase().prepare(sql)
         defer { statement.finalize() }
         _ = statement.bind(1, before ?? Int64.max)
         if let triggerID { _ = statement.bind(2, triggerID.uuidString) }
+        if let projectID { _ = statement.bind(projectParameter, projectID.uuidString) }
         var items: [TriggerRun] = []
         var last: Int64?
         while try statement.step() {
@@ -645,6 +665,214 @@ actor TriggerStore {
         NotificationCenter.default.post(name: .triggersDidChange, object: nil)
     }
 
+    // MARK: Project-owned files
+
+    func projectAutomationConfigurationFolder(checkout: String, id: String? = nil) throws -> URL {
+        try ProjectAutomationFiles.configurationFolder(checkout: checkout, id: id)
+    }
+
+    func projectAutomationBinding(_ id: TriggerID) throws -> ProjectAutomationBinding? {
+        let query = try readyDatabase().prepare("SELECT data FROM project_automation_binding WHERE trigger_id=?")
+        defer { query.finalize() }
+        _ = query.bind(1, id.uuidString)
+        guard try query.step(), let data = query.data(0) else { return nil }
+        return try decoder.decode(ProjectAutomationBinding.self, from: data)
+    }
+
+    func projectAutomationBindings(projectID: ProjectID? = nil) throws -> [ProjectAutomationBinding] {
+        let query = try readyDatabase().prepare("""
+            SELECT bindings.data FROM project_automation_binding bindings
+            JOIN trigger_definition definitions ON definitions.id=bindings.trigger_id
+            WHERE COALESCE(definitions.draft_revision_id,definitions.active_revision_id) IS NOT NULL
+            """ + (projectID == nil ? "" : " AND bindings.project_id=?") + " LIMIT 500")
+        defer { query.finalize() }
+        if let projectID { _ = query.bind(1, projectID.uuidString) }
+        var bindings: [ProjectAutomationBinding] = []
+        while try query.step() {
+            guard let data = query.data(0) else { throw StoreError.invalidRecord("project binding") }
+            bindings.append(try decoder.decode(ProjectAutomationBinding.self, from: data))
+        }
+        return bindings
+    }
+
+    private func projectAutomationBinding(checkout: String, automationID: String) throws -> ProjectAutomationBinding? {
+        let query = try readyDatabase().prepare("SELECT data FROM project_automation_binding WHERE checkout_path=? AND automation_id=?")
+        defer { query.finalize() }
+        _ = query.bind(1, checkout).bind(2, automationID)
+        guard try query.step(), let data = query.data(0) else { return nil }
+        return try decoder.decode(ProjectAutomationBinding.self, from: data)
+    }
+
+    private func writeProjectBinding(_ binding: ProjectAutomationBinding) throws {
+        try readyDatabase().prepare("INSERT INTO project_automation_binding(trigger_id,project_id,checkout_path,automation_id,repository_identity,data) VALUES(?,?,?,?,?,?) ON CONFLICT(trigger_id) DO UPDATE SET data=excluded.data")
+            .bind(1, binding.triggerID.uuidString).bind(2, binding.projectID.uuidString)
+            .bind(3, binding.checkoutPath).bind(4, binding.automationID).bind(5, binding.repositoryIdentity)
+            .bind(6, encoder.encode(binding)).run()
+    }
+
+    /// Bounded synchronous file work on this serial actor, never on the main actor.
+    /// Invalid new files stay visible as discovery diagnostics; existing records retain history.
+    func discoverProjectAutomations(projectID: ProjectID, checkout: String) throws -> [ProjectAutomationFiles.Entry] {
+        let bindings = try projectAutomationBindings(projectID: projectID)
+        let entries: [ProjectAutomationFiles.Entry]
+        do { entries = try ProjectAutomationFiles.discover(checkout: checkout) }
+        catch {
+            for binding in bindings { try blockProjectAutomation(binding, reason: error.localizedDescription) }
+            throw error
+        }
+        let discoveredIDs = Set(entries.map(\.id))
+        let bindingsByID = Dictionary(uniqueKeysWithValues: bindings.filter { $0.checkoutPath == checkout }.map { ($0.automationID, $0) })
+        for binding in bindings where !discoveredIDs.contains(binding.automationID) {
+            try blockProjectAutomation(binding, reason: "The project automation directory is missing.")
+        }
+        for entry in entries {
+            // An indexed lookup retains deletion tombstones without materializing unbounded
+            // deleted history in the 500-live-definition catalogue or ownership scan.
+            let binding = try bindingsByID[entry.id] ?? projectAutomationBinding(checkout: checkout, automationID: entry.id)
+            guard let snapshot = entry.snapshot else {
+                if let binding { try blockProjectAutomation(binding, reason: entry.diagnostic ?? "Invalid project files.") }
+                continue
+            }
+            if binding?.fingerprint == snapshot.fingerprint, binding?.diagnostic == nil { continue }
+            // Deletion is a tombstone until the project files are removed; never rediscover it.
+            if let binding, try trigger(id: binding.triggerID) == nil { continue }
+            _ = try importProjectAutomation(snapshot, projectID: projectID, checkout: checkout, binding: binding)
+        }
+        return entries
+    }
+
+    private func blockProjectAutomation(_ original: ProjectAutomationBinding, reason: String) throws {
+        var binding = original
+        let diagnostic = String(reason.prefix(1_024))
+        if binding.diagnostic == diagnostic { return }
+        binding.diagnostic = diagnostic
+        try setEnabled(false, triggerID: binding.triggerID)
+        try writeProjectBinding(binding)
+        changed()
+    }
+
+    private func importProjectAutomation(_ snapshot: ProjectAutomationFiles.Snapshot, projectID: ProjectID,
+                                         checkout: String, binding: ProjectAutomationBinding?, id: TriggerID? = nil) throws -> TriggerRevision {
+        let triggerID = binding?.triggerID ?? id ?? TriggerID()
+        let existing = try trigger(id: triggerID)
+        let frozen = try ProjectAutomationFiles.revision(snapshot: snapshot, checkout: checkout)
+        let file = snapshot.definition
+        var config = AutomationConfiguration(projectID: projectID)
+        config.name = file.name
+        config.instructions = ProjectAutomationFiles.resolve(snapshot.instructions, project: checkout,
+            workspace: frozen.workspacePath, resources: frozen.resourcesPath)
+        config.agent = file.agent
+        config.account = binding == nil ? existing?.revision.accountHandleName : binding?.account
+        config.model = file.model
+        config.reasoningEffort = file.reasoningEffort
+        config.executionMode = file.executionMode
+        config.checkoutPolicy = file.checkoutPolicy
+        config.maximumRuntimeMinutes = file.maximumRuntimeMinutes
+        config.options = file.options
+        config.sourceID = binding?.sourceName == file.source ? binding?.sourceID : nil
+        config.eventKind = file.eventKind
+        config.conditions = file.conditions
+        config.permissions = try ProjectAutomationFiles.resolvedPermissions(file.permissions, project: checkout,
+            workspace: frozen.workspacePath, resources: frozen.resourcesPath)
+        let local = ProjectAutomationBinding(triggerID: triggerID, projectID: projectID, automationID: file.id,
+            checkoutPath: checkout, repositoryIdentity: GitInfo.repositoryIdentity(for: checkout) ?? checkout,
+            fingerprint: snapshot.fingerprint, account: config.account, sourceID: config.sourceID, sourceName: file.source, diagnostic: nil)
+        return try configureAutomation(config, id: triggerID, expectedRevision: existing?.revision.id,
+            proposedBy: nil, projectAutomation: frozen, projectBinding: local)
+    }
+
+    /// Shared by the editor and manage_automation. Existing database-only definitions stay local.
+    func saveProjectAutomation(_ config: AutomationConfiguration, id: TriggerID, expectedRevision: TriggerRevisionID?,
+                               checkout: String, automationID: String? = nil) throws -> TriggerRevision {
+        let existing = try trigger(id: id)
+        guard existing?.revision.id == expectedRevision else { throw ProjectAutomationFiles.Failure.conflict }
+        let binding = try projectAutomationBinding(id)
+        let stableID = binding?.automationID ?? automationID ?? id.uuidString.lowercased()
+        let previous = binding == nil ? nil : try ProjectAutomationFiles.read(checkout: checkout, id: stableID)
+        guard previous?.fingerprint == binding?.fingerprint else { throw ProjectAutomationFiles.Failure.conflict }
+        let sourceName = try config.sourceID.flatMap { try source(id: $0)?.displayName }
+        var portable = ProjectAutomation(id: stableID, configuration: config, source: sourceName)
+        portable.instructions = previous?.definition.instructions ?? "instructions.md"
+        portable.resources = previous?.definition.resources ?? []
+        let frozen = existing?.revision.projectAutomation
+        let resources = try frozen?.resourcesPath ?? ProjectAutomationFiles.folder(checkout: checkout, id: stableID).path
+        let workspace = frozen?.workspacePath ?? AutomationWorkspace(automationID: stableID, checkoutPath: checkout).executionPath
+        let instructions = ProjectAutomationFiles.portable(config.instructions, project: checkout, workspace: workspace, resources: resources)
+        portable.permissions.rules = portable.permissions.rules?.map {
+            ProjectAutomationFiles.portable($0, project: checkout, workspace: workspace, resources: resources)
+        }
+        let snapshot = try ProjectAutomationFiles.save(portable, instructions: instructions, checkout: checkout,
+            expectedFingerprint: binding?.fingerprint)
+        var local = binding ?? ProjectAutomationBinding(triggerID: id, projectID: config.projectID, automationID: stableID,
+            checkoutPath: checkout, repositoryIdentity: GitInfo.repositoryIdentity(for: checkout) ?? checkout,
+            fingerprint: snapshot.fingerprint, account: nil, sourceID: nil, diagnostic: nil)
+        local.account = config.account
+        local.sourceID = config.sourceID
+        local.sourceName = portable.source
+        return try importProjectAutomation(snapshot, projectID: config.projectID, checkout: checkout, binding: local, id: id)
+    }
+
+    /// Explicit host-only adoption used by the Sonda move. No second definition or schedule;
+    /// the old immutable revisions and receipts remain under the existing trigger identity.
+    func adoptProjectAutomation(_ id: TriggerID, expectedRevision: TriggerRevisionID, projectID: ProjectID,
+                                checkout: String, automationID: String) throws -> TriggerRevision {
+        guard let pair = try trigger(id: id), pair.revision.id == expectedRevision,
+              try projectAutomationBinding(id) == nil, try activeRunCount(triggerID: id) == 0 else {
+            throw StoreError.invalidRecord("adoption requires the current local revision and no active run")
+        }
+        let snapshot = try ProjectAutomationFiles.read(checkout: checkout, id: automationID)
+        let binding = ProjectAutomationBinding(triggerID: id, projectID: projectID, automationID: automationID,
+            checkoutPath: checkout, repositoryIdentity: GitInfo.repositoryIdentity(for: checkout) ?? checkout,
+            fingerprint: snapshot.fingerprint, account: pair.revision.accountHandleName,
+            sourceID: snapshot.definition.options.schedule == nil ? pair.revision.sourceInstallationID : nil,
+            sourceName: snapshot.definition.source, diagnostic: nil)
+        return try importProjectAutomation(snapshot, projectID: projectID, checkout: checkout, binding: binding)
+    }
+
+    /// Run-start verification does not depend on polling or a watcher notification.
+    private func verifyProjectAutomation(_ id: TriggerID, revisionID: TriggerRevisionID? = nil) throws {
+        guard let binding = try projectAutomationBinding(id) else { return }
+        do {
+            let snapshot = try ProjectAutomationFiles.read(checkout: binding.checkoutPath, id: binding.automationID)
+            guard snapshot.fingerprint == binding.fingerprint, binding.diagnostic == nil,
+                  let pair = try trigger(id: id), revisionID == nil || revisionID == pair.revision.id,
+                  pair.revision.projectAutomation?.fingerprint == snapshot.fingerprint else { throw ProjectAutomationFiles.Failure.conflict }
+            guard snapshot.definition.options.schedule != nil || binding.sourceID != nil else {
+                throw ProjectAutomationFiles.Failure.invalid("choose a local source in the editor before activating")
+            }
+            _ = try ProjectAutomationFiles.revision(snapshot: snapshot, checkout: binding.checkoutPath)
+        } catch {
+            try blockProjectAutomation(binding, reason: error.localizedDescription)
+            throw error
+        }
+    }
+
+    func removeProjectAutomation(_ id: TriggerID, expectedRevision: TriggerRevisionID) throws {
+        guard let pair = try trigger(id: id), pair.revision.id == expectedRevision,
+              try activeRunCount(triggerID: id) == 0 else { throw StoreError.invalidRecord("stale revision or active run") }
+        if let binding = try projectAutomationBinding(id) {
+            try ProjectAutomationFiles.remove(checkout: binding.checkoutPath, id: binding.automationID, fingerprint: binding.fingerprint)
+        }
+        try removeAutomation(id, expectedRevision: expectedRevision)
+    }
+
+    private func transferProjectAutomationOwnership(_ id: TriggerID) throws {
+        guard let binding = try projectAutomationBinding(id) else { return }
+        for other in try projectAutomationBindings() where other.triggerID != id
+            && other.automationID == binding.automationID && other.repositoryIdentity == binding.repositoryIdentity {
+            try setEnabled(false, triggerID: other.triggerID)
+        }
+    }
+
+    func projectAutomationOwner(_ id: TriggerID) throws -> String? {
+        guard let binding = try projectAutomationBinding(id) else { return nil }
+        for other in try projectAutomationBindings() where other.triggerID != id
+            && other.automationID == binding.automationID && other.repositoryIdentity == binding.repositoryIdentity {
+            if try trigger(id: other.triggerID)?.definition.enabled == true { return other.checkoutPath }
+        }
+        return nil
+    }
+
     private static func defaultURL() throws -> URL {
         let fileManager = FileManager.default
         let directory: URL
@@ -860,7 +1088,7 @@ actor TriggerStore {
 extension TriggerStore {
     func configureAutomation(_ config: AutomationConfiguration, id: TriggerID,
                              expectedRevision: TriggerRevisionID?, proposedBy: SessionID?,
-                             now: Date = Date()) throws -> TriggerRevision {
+                             now: Date = Date(), projectAutomation: ProjectAutomationRevision? = nil, projectBinding: ProjectAutomationBinding? = nil) throws -> TriggerRevision {
         let existing = try trigger(id: id)
         guard existing?.revision.id == expectedRevision,
               !config.instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -868,7 +1096,10 @@ extension TriggerStore {
             throw StoreError.invalidRecord("stale revision or unsupported configuration")
         }
         if config.options.schedule == nil {
-            guard let sourceID = config.sourceID, try source(id: sourceID) != nil,
+            let hasSource: Bool
+            if let sourceID = config.sourceID { hasSource = try source(id: sourceID) != nil }
+            else { hasSource = false }
+            guard projectAutomation != nil || hasSource,
                   let kind = config.eventKind, !kind.isEmpty else {
                 throw StoreError.invalidRecord("event source and kind are required")
             }
@@ -895,12 +1126,17 @@ extension TriggerStore {
             proposedBySessionID: proposedBy, createdAt: now)
         revision.automation = config.options
         revision.permissions = config.permissions ?? .readOnly
+        revision.projectAutomation = projectAutomation
+        guard config.checkoutPolicy != .automationWorkspace || (projectAutomation != nil && config.executionMode.isTask) else {
+            throw StoreError.invalidRecord("automation workspace requires a project-owned direct task")
+        }
         try validate(definition, revision: revision)
         let database = try readyDatabase()
         // The draft and the schedule it replaces commit together: a caller never sees a saved
         // revision reported as a failure, which an agent would answer by saving it again.
         try database.transaction {
             try writeDraft(definition, revision: revision)
+            if let projectBinding { try writeProjectBinding(projectBinding) }
             try resetSchedule(id, at: now)
         }
         changed()
@@ -994,6 +1230,7 @@ extension TriggerStore {
         var dispatches: [TriggerDispatch] = []
         for (raw, moment) in due {
             do {
+                if let id = TriggerID(uuidString: raw) { try verifyProjectAutomation(id) }
                 let dispatch = try database.transaction { try admitScheduled(raw, moment: moment, now: now) }
                 if let dispatch, dispatch.run.state == .received { dispatches.append(dispatch) }
             } catch {
@@ -1034,6 +1271,7 @@ extension TriggerStore {
 
     func runAutomationNow(_ id: TriggerID, expectedRevision: TriggerRevisionID, requestKey: String,
                           now: Date = Date()) throws -> TriggerDispatch {
+        try verifyProjectAutomation(id)
         guard !requestKey.isEmpty, requestKey.utf8.count <= 160,
               let pair = try trigger(id: id), pair.revision.id == expectedRevision else {
             throw StoreError.invalidRecord("current revision and a bounded request key are required")
@@ -1078,6 +1316,17 @@ extension TriggerStore {
     /// to that session here, before anything is launched in it, so the first tool call of an
     /// unattended run is already answered by its revision and never by a card nobody watches.
     func claimDispatch(_ runID: TriggerRunID) async throws -> TriggerRun? {
+        if let pending = try run(id: runID) {
+            do { try verifyProjectAutomation(pending.triggerID, revisionID: pending.triggerRevisionID) }
+            catch {
+                var blocked = pending
+                blocked.state = .needsAttention
+                blocked.settledAt = Date()
+                blocked.boundedDiagnostic = String(error.localizedDescription.prefix(1_024))
+                try updateRun(blocked)
+                return nil
+            }
+        }
         guard let claimed = try reserveDispatchSession(runID),
               let sessionID = claimed.sessionID,
               let revision = try revision(id: claimed.triggerRevisionID) else { return nil }

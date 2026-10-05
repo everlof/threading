@@ -161,6 +161,41 @@ final class SidebarRowAnimationTests: XCTestCase {
 
     // MARK: - Arriving
 
+    func testProjectStructureChangeKeepsTheAutomationDestinationSelected() throws {
+        let fixture = makeSidebar()
+        let project = fixture.projects[0]
+        let session = try XCTUnwrap(project.sessions.first)
+        fixture.controller.selectAutomations(projectID: project.id)
+        XCTAssertEqual(fixture.controller.selectedRowKey, .automations(project.id))
+
+        fixture.store.update(sessionID: session.id) { $0.branch = "automation-result" }
+
+        XCTAssertEqual(fixture.controller.selectedRowKey, .automations(project.id))
+        XCTAssertNil(fixture.store.selectedSessionID)
+    }
+
+    func testWholeTreeRegroupingKeepsTheAutomationDestinationSelected() throws {
+        let defaults = UserDefaults.standard
+        let key = "groupsSessionsByBranch"
+        let previous = defaults.object(forKey: key)
+        defer {
+            if let previous { defaults.set(previous, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+        defaults.set(false, forKey: key)
+        let fixture = makeSidebar()
+        let project = fixture.projects[0]
+        let session = try XCTUnwrap(project.sessions.first)
+        fixture.store.update(sessionID: session.id) { $0.branch = "automation-result" }
+        fixture.controller.selectAutomations(projectID: project.id)
+
+        defaults.set(true, forKey: key)
+        fixture.controller.reload()
+
+        XCTAssertEqual(fixture.controller.selectedRowKey, .automations(project.id))
+        XCTAssertNil(fixture.store.selectedSessionID)
+    }
+
     func testAnArrivingRowFadesInWhileTheRowsBelowSlideDown() throws {
         let fixture = makeSidebar(projects: 2, sessionsEach: 2)
         let below = SidebarNodeKey.project(fixture.projects[1].id)
@@ -530,7 +565,7 @@ final class SidebarRowAnimationTests: XCTestCase {
         let orderAfter = fixture.controller.presentedRowKeys
         XCTAssertNotEqual(orderBefore, orderAfter)
         XCTAssertEqual(Set(orderBefore), Set(orderAfter), "rearranging changed which rows exist")
-        XCTAssertEqual(orderAfter.dropFirst().first, .session(hoisted.id))
+        XCTAssertEqual(orderAfter.dropFirst(2).first, .session(hoisted.id))
 
         let viewsAfter = rowViews(fixture.controller)
         for (key, view) in viewsBefore {
@@ -720,6 +755,7 @@ final class SidebarRowAnimationTests: XCTestCase {
             var expected: [SidebarNodeKey] = []
             for project in store.projects {
                 expected.append(.project(project.id))
+                expected.append(.automations(project.id))
                 expected.append(
                     contentsOf: project.sessions
                         .filter { !$0.isArchived }
@@ -777,7 +813,7 @@ final class SidebarRowAnimationTests: XCTestCase {
         settle()
 
         let expected = store.projects.flatMap { project in
-            [SidebarNodeKey.project(project.id)]
+            [SidebarNodeKey.project(project.id), .automations(project.id)]
                 + project.sessions.filter { !$0.isArchived }.map { SidebarNodeKey.session($0.id) }
         }
         XCTAssertEqual(Set(fixture.controller.presentedRowKeys), Set(expected))

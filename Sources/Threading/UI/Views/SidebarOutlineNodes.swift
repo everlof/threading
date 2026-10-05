@@ -23,6 +23,7 @@ enum SidebarNodeKey: Hashable {
     /// The "Show 5 more" row closing a project's chat preview. One per project, so the project
     /// is its whole identity: the row stays the same row while what it offers changes.
     case chatDisclosure(ProjectID)
+    case automations(ProjectID)
 
     /// The project and branch behind a branch heading, or nil for every other row. Lets a
     /// caller ask what a key *is* without a `switch` whose other four cases say nothing.
@@ -128,6 +129,17 @@ extension ProjectNode: SidebarOutlineNode {
         terminalNodes = rebuilt.terminalNodes.map(substituting.callAsFunction)
         childNodes = rebuilt.childNodes.map(substituting.callAsFunction)
     }
+}
+
+/// Navigation only: the outline creates a view only while its project is expanded.
+final class ProjectAutomationsNode: NSObject, SidebarOutlineNode {
+    let projectID: ProjectID
+    init(projectID: ProjectID) { self.projectID = projectID }
+    var sidebarKey: SidebarNodeKey { .automations(projectID) }
+    var sidebarChildren: [NSObject] { [] }
+    var sidebarOutlineChildCount: Int { 0 }
+    func sidebarOutlineChild(at index: Int) -> NSObject { preconditionFailure("Automations has no children") }
+    func adoptContent(of rebuilt: any SidebarOutlineNode, substituting: SidebarNodeSubstitution) {}
 }
 
 /// Reference-typed wrapper for a session row.
@@ -742,6 +754,7 @@ enum SidebarTreeBuilder {
             checkoutBranch: checkoutBranch,
             factSnapshot: factSnapshot
         )
+        node.childNodes.insert(ProjectAutomationsNode(projectID: projectID), at: 0)
         if let preview = shown.preview {
             node.childNodes.append(ChatDisclosureNode(projectID: projectID, preview: preview))
         }

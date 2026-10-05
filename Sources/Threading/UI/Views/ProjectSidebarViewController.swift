@@ -1186,6 +1186,7 @@ extension ProjectSidebarViewController {
 
         let selectedSessionID = selectedNode()?.sessionID ?? projectStore.selectedSessionID
         let selectedTerminalID = selectedTerminalNode()?.terminalID
+        let selectedAutomationProjectID = (outlineView.item(atRow: outlineView.selectedRow) as? ProjectAutomationsNode)?.projectID
 
         let previousShape = renderedShape
         // A checkout that moved between branches relabels the heading over rows that did not
@@ -1252,6 +1253,8 @@ extension ProjectSidebarViewController {
 
         if let selectedTerminalID {
             select(terminalID: selectedTerminalID, notifyDelegate: false)
+        } else if let selectedAutomationProjectID {
+            selectAutomations(projectID: selectedAutomationProjectID)
         } else if let selectedSessionID {
             select(sessionID: selectedSessionID, notifyDelegate: false)
         }
@@ -1362,6 +1365,7 @@ extension ProjectSidebarViewController {
     ) {
         let selectedSessionID = selectedNode()?.sessionID
         let selectedTerminalID = selectedTerminalNode()?.terminalID
+        let selectedAutomationProjectID = (outlineView.item(atRow: outlineView.selectedRow) as? ProjectAutomationsNode)?.projectID
         #if DEBUG
         let updateStarted = DispatchTime.now().uptimeNanoseconds
         var measuredUpdate = ProjectSidebarReloadPerformance()
@@ -1463,6 +1467,8 @@ extension ProjectSidebarViewController {
         }
         if let selectedTerminalID {
             select(terminalID: selectedTerminalID, notifyDelegate: false)
+        } else if let selectedAutomationProjectID {
+            selectAutomations(projectID: selectedAutomationProjectID)
         } else if let selectedSessionID {
             select(sessionID: selectedSessionID, notifyDelegate: false)
         }
@@ -1888,7 +1894,7 @@ extension ProjectSidebarViewController {
                 terminalNodesByID.removeValue(forKey: terminalID)
                 projectNodesByTerminalID.removeValue(forKey: terminalID)
                 ancestorsByTerminalID.removeValue(forKey: terminalID)
-            case .repository, .project, .branch, .registeredFactGroup, .chatDisclosure:
+            case .repository, .project, .branch, .registeredFactGroup, .chatDisclosure, .automations:
                 break
             }
         }
@@ -3074,6 +3080,21 @@ extension ProjectSidebarViewController {
         if on { clearSelection() }
     }
 
+    func selectAutomations(projectID: ProjectID) {
+        guard let project = projectNodesByID[projectID],
+              let destination = project.childNodes.first(where: { $0 is ProjectAutomationsNode }) else { return }
+        if let group = outlineView.parent(forItem: project) { outlineView.expandItem(group) }
+        outlineView.expandItem(project)
+        let row = outlineView.row(forItem: destination)
+        guard row >= 0 else { return }
+        suppressSelectionCallback = true
+        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        suppressSelectionCallback = false
+        cancelPendingSessionPresentation()
+        projectStore.selectedSessionID = nil
+        scrollSelectionIntoView()
+    }
+
     private func makeSettingsSidebar() -> SettingsSidebar {
         let sidebar = SettingsSidebar(items: SettingsPages.sidebarItems)
         sidebar.onSelect = { [weak self] pageID in
@@ -4039,6 +4060,13 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             return apply(item, to: cell) ? cell : nil
         }
 
+        if let node = item as? ProjectAutomationsNode {
+            let cell = dequeueCell(NSUserInterfaceItemIdentifier("ProjectAutomationsCell")) { ProjectRowView() }
+            cell.configureAsBranch(named: L10n.string("Automations"), collapsedSessionCount: 0)
+            cell.onHoverAction = nil
+            cell.setAccessibilityIdentifier("project.automations.\(node.projectID.uuidString)")
+            return cell
+        }
         if item is BranchGroupNode {
             let cell = dequeueCell(SidebarIdentifiers.branchCell) { ProjectRowView() }
             return apply(item, to: cell) ? cell : nil
@@ -4138,6 +4166,13 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             return true
         }
 
+        if let node = item as? ProjectAutomationsNode, let cell = view as? ProjectRowView {
+            cell.configureAsBranch(named: L10n.string("Automations"), collapsedSessionCount: 0)
+            cell.onHoverAction = nil
+            cell.setAccessibilityIdentifier("project.automations.\(node.projectID.uuidString)")
+            return true
+        }
+
         if let branchNode = item as? BranchGroupNode, let cell = view as? ProjectRowView {
             let hiddenItems = outlineView.isItemExpanded(branchNode)
                 ? 0
@@ -4230,7 +4265,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
         // The disclosure row takes the same hover capsule: the whole row is its press.
         if item is ProjectNode || item is SessionNode || item is TerminalNode
-            || item is ChatDisclosureNode {
+            || item is ChatDisclosureNode || item is ProjectAutomationsNode {
             return SidebarHoverRowView()
         }
 
@@ -4309,7 +4344,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     /// The chat preview's disclosure row selects nothing either: it is a button, and a selection
     /// moving onto it would take the pane away from the chat the user is reading.
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
-        item is SessionNode || item is TerminalNode || item is ProjectNode
+        item is SessionNode || item is TerminalNode || item is ProjectNode || item is ProjectAutomationsNode
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -4321,6 +4356,12 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
         let item = outlineView.item(atRow: outlineView.selectedRow)
 
+        if let node = item as? ProjectAutomationsNode {
+            cancelPendingSessionPresentation()
+            projectStore.selectedSessionID = nil
+            delegate?.projectSidebar(self, didSelectAutomations: node.projectID)
+            return
+        }
         if let node = item as? SessionNode {
             requestSessionPresentation(node.sessionID)
             return
@@ -5151,6 +5192,7 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didRemoveProject project: Project)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didCloseTerminal terminalID: TerminalID)
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController)
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectAutomations projectID: ProjectID)
     func projectSidebarDidSelectTriggers(_ sidebar: ProjectSidebarViewController)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage pageID: String)
     /// A search result named a setting: open its page and scroll to the row `anchorTitle`
@@ -5237,4 +5279,8 @@ extension ProjectSidebarViewController {
             self.overrideContextRow = nil
         }
     }
+}
+
+extension ProjectSidebarViewControllerDelegate {
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectAutomations projectID: ProjectID) {}
 }

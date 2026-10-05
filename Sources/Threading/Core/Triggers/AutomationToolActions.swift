@@ -73,7 +73,17 @@ enum AutomationToolActions {
                         hostName: host.displayName, approve: approve)))
                 } else {
                     try requireKnownProject(arguments.configuration) { projects.project(withID: $0) != nil }
-                    completion(.success(try await AutomationCommands.execute(arguments, proposedBy: sessionID, approve: approve)))
+                    var resolved = arguments
+                    if let config = arguments.configuration {
+                        let existing = arguments.id.flatMap(TriggerID.init(uuidString:))
+                        let alreadySaved: Bool
+                        if let existing { alreadySaved = try await TriggerStore.shared.trigger(id: existing) != nil }
+                        else { alreadySaved = false }
+                        if !alreadySaved {
+                            resolved.folder = projects.project(withID: config.projectID)?.folderPath
+                        }
+                    }
+                    completion(.success(try await AutomationCommands.execute(resolved, proposedBy: sessionID, approve: approve)))
                 }
             } catch { completion(.failure(error.localizedDescription)) }
         }

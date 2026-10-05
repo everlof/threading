@@ -296,7 +296,7 @@ final class SessionExecutionLocusTracker {
         requiresLifecycleCapability: Bool = true
     ) -> String? {
         guard let session = projects.session(withID: sessionID),
-              session.managedWorkspace == nil,
+              session.managedWorkspace == nil, session.automationWorkspace == nil,
               (!requiresLifecycleCapability
                 || session.kind.supports(.lifecycleReportedWorkingDirectory)),
               let project = projects.project(forSessionID: sessionID) else { return nil }

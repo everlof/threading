@@ -842,6 +842,31 @@ and completed scroll continuity, and covers failed and superseded requests and a
 already displayed period. Geometry and raster tests pin reset gaps, independent fill baselines,
 and containment of out-of-domain ink. The `ios-usage` evidence entry covers the shipping sheet.
 
+### Project automation files and catalogue
+
+A usual project has 1–10 definitions; the stress fixture uses the 500-definition ceiling.
+Discovery and verification run on the serial `TriggerStore` worker. A scan stops at 1,000 immediate
+entries and 32 MiB before admitting definitions; each file and automation also has its own byte
+limit. Runtime visits eight folders per 15-second tick. The project sidebar adds one navigation
+value per project and constructs its cell only when the outline needs it. The catalogue admits
+25 data rows per page; a single-project global page retains 29 views including sections and
+pagination. History filters in SQLite before its 25-item keyset page. Deleted binding tombstones
+stay indexed and are excluded from the bounded live ownership scan.
+
+One Debug stress run on 2026-10-05, while other builds were active, measured 1.082 s for initial
+500-definition discovery and snapshot/import, and 0.183 s for unchanged discovery. Manufacturing
+the files took 0.201 s and is excluded from those timings. The shipping global catalogue's awaited
+projection plus layout took 0.137 s for the 25-row page; preparing its 500 database fixtures took
+0.396 s separately. These are single-run observations, not a latency percentile or a main-thread
+blocking measurement. During the file stress run, 214 concurrent main-actor heartbeats had a
+maximum gap of 6.5 ms; the test reports this rather than imposing a machine-dependent deadline.
+
+```bash
+THREADING_AUTOMATION_STRESS=1 scripts/test.sh fast \
+  -only-testing:ThreadingTests/ProjectAutomationFilesTests/testStressDiscoveryBudget \
+  -only-testing:ThreadingTests/AutomationShellRenderTests/testRendersAutomationsInShippingWindow
+```
+
 ## Implementation-time scaling gate
 
 Profiling should confirm an architecture, not be the first time its scaling boundary is named.

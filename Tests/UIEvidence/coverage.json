@@ -215,7 +215,10 @@
         "Healthy background source",
         "Source pause control",
         "Recurring task and next run",
-        "Remote controller connection"
+        "Remote controller connection",
+        "Project empty state",
+        "Project file revision and workspace",
+        "Missing project instructions"
       ],
       "matrix": {
         "themes": [
@@ -235,7 +238,8 @@
         "path": "Tests/ThreadingTests/TriggerCenterRenderTests.swift",
         "tests": [
           "ThreadingTests/TriggerCenterRenderTests/testRendersConfigurationActivityAndSources",
-          "ThreadingTests/AutomationShellRenderTests/testRendersAutomationsInShippingWindow"
+          "ThreadingTests/AutomationShellRenderTests/testRendersAutomationsInShippingWindow",
+          "ThreadingTests/ProjectAutomationShellTests/testRendersProjectAutomationsInShippingShell"
         ]
       },
       "capture": {

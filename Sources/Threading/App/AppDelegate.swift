@@ -2713,7 +2713,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         for id in [
             AppCommands.ID.showHiddenProjects, AppCommands.ID.hideProject,
             AppCommands.ID.projectRemoteHost, AppCommands.ID.projectDefaultAccounts,
-            AppCommands.ID.triggers
+            AppCommands.ID.triggers, AppCommands.ID.projectAutomations
         ] {
             let item = commandItem(id, action: #selector(performHostMenuCommand(_:)))
             item.target = self
@@ -3664,6 +3664,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
             window.sidebarViewController.presentDefaultAccounts(for: projectID)
         case AppCommands.ID.triggers: mainWindowController?.showTriggers()
+        case AppCommands.ID.projectAutomations:
+            guard let projectID = mainWindowController?.currentProjectID else {
+                return .refused(commandID: id, reason: L10n.string("Select a project first."))
+            }
+            mainWindowController?.showTriggers(projectID: projectID)
         case AppCommands.ID.currentTheme: mainWindowController?.toggleCurrentTheme()
         case AppCommands.ID.componentGallery: showComponentGalleryImplementation()
         case AppCommands.ID.biggerText: mainWindowController?.increaseFontSize()
@@ -4309,6 +4314,8 @@ private enum UIScenarioBootstrap {
         static let stallHUD = "THREADING_UI_SCENARIO_STALL_HUD"
     }
 
+    private static let automationFixtureEvents = AppEventObservations()
+
     private static let markerName = ".threading-ui-scenario-home"
     private static let sessionID = SessionID(
         UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
@@ -4470,6 +4477,23 @@ private enum UIScenarioBootstrap {
             }
         ) else {
             return .refused("could not install the fixture process")
+        }
+        if environment["THREADING_UI_SCENARIO_AUTOMATION_WORKSPACE"] == "1" {
+            // One validated sandbox automation, installed on its ordinary creation event before
+            // runtime launch. The fixture still replaces only the exact new session process.
+            automationFixtureEvents.observe(ProjectsDidChange.self) { _ in
+                for project in ProjectStore.shared.projects.prefix(4) {
+                    for candidate in project.sessions.prefix(4) where candidate.automationWorkspace?.automationID == "workspace-task" {
+                        let id = candidate.id
+                        _ = AgentRuntime.shared.installFixtureLaunchPlan(for: id, provider: { _, _, _ in
+                            let current = ProjectStore.shared.session(withID: id) ?? candidate
+                            let tape = current.resumeState.isResumable ? resumeTape : freshTape
+                            return AgentLaunchPlan(executable: executable.path,
+                                arguments: ["replay", tape.path, "--scenario-root", rootPath], resumeState: current.resumeState)
+                        })
+                    }
+                }
+            }
         }
         return .installed
     }

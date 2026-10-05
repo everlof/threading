@@ -438,6 +438,7 @@ final class ProjectStore {
         title: String? = nil,
         handoff: ConversationHandoff? = nil,
         managedWorkspace: ManagedWorkspace? = nil,
+        automationWorkspace: AutomationWorkspace? = nil,
         id: SessionID = SessionID()
     ) -> AgentSession? {
         // Starting a chat here is the user choosing this folder, whatever put the row on screen.
@@ -466,6 +467,7 @@ final class ProjectStore {
                 title: title,
                 handoff: handoff,
                 managedWorkspace: managedWorkspace,
+                automationWorkspace: automationWorkspace,
                 id: id
               )
         else { return nil }

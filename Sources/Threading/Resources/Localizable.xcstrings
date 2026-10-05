@@ -1560,6 +1560,23 @@
         }
       }
     },
+    "%@ · Automations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Automations"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Automationer"
+          }
+        }
+      }
+    },
     "%@ · Not installed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9976,6 +9993,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Automatisering behöver åtgärdas"
+          }
+        }
+      }
+    },
+    "Automation workspace" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automation workspace"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automationsarbetsmapp"
           }
         }
       }
@@ -37073,6 +37107,23 @@
         }
       }
     },
+    "Open configuration folder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open configuration folder"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna konfigurationsmapp"
+          }
+        }
+      }
+    },
     "Open each surface, switch the theme while it is visible, and dismiss it with Escape." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39870,6 +39921,23 @@
         }
       }
     },
+    "Project Automations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Project Automations"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projektets automationer"
+          }
+        }
+      }
+    },
     "Project Extensions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39983,6 +40051,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Projektfil"
+          }
+        }
+      }
+    },
+    "Project files" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Project files"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projektfiler"
           }
         }
       }
@@ -45911,6 +45996,40 @@
         }
       }
     },
+    "Saved in project" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved in project"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparad i projektet"
+          }
+        }
+      }
+    },
+    "Saved locally on this Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved locally on this Mac"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparad lokalt på denna Mac"
+          }
+        }
+      }
+    },
     "Saved recording" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46171,6 +46290,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Schemalägg meddelande"
+          }
+        }
+      }
+    },
+    "Schedule owned by %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Schedule owned by %@"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Schemat ägs av %@"
           }
         }
       }
@@ -54653,6 +54789,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Automatiseringen avslutades utan att rapportera ett resultat."
+          }
+        }
+      }
+    },
+    "The automation was not activated" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The automation was not activated"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automationen aktiverades inte"
           }
         }
       }

@@ -26,6 +26,7 @@ struct NavigationHistory: Equatable {
         case settings(String)
         case settingsAISearch
         case triggers
+        case projectAutomations(ProjectID)
     }
 
     private(set) var backStack: [Page] = []

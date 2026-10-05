@@ -614,6 +614,14 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+The project-scoped **Automations** destination and locked-project automation editor are host-only
+surfaces over one project and its automation definitions. They reuse the global automation
+page's native Design components. Threading owns file admission, identity, local account/source
+binding, activation, exact permissions, checkout ownership, immutable resource snapshots and run
+truth under every theme. Native presentation remains the fallback; no extension can replace the
+editor, supply authority, read local automation data or activate a checkout. This adds no public
+component or extension data capability.
+
 The standalone Markdown editor and its Markdown Settings page are host-only document surfaces.
 The entity is one user-opened or unsaved document, independent of projects and sessions. Threading
 owns source, file identity, undo/dirty state, UTF-8 and size validation, conflict-checked saves,

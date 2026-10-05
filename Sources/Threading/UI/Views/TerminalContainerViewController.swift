@@ -208,6 +208,7 @@ final class TerminalContainerViewController: NSViewController {
 
     /// Whether settings is the surface currently on screen, so the window can title the pane.
     var isShowingSettings: Bool { settingsPage != nil }
+    var automationProjectID: ProjectID? { triggerCenter?.projectID }
     var isShowingTriggers: Bool { triggerCenter?.view.superview != nil }
 
     /// The non-session sidebar destination currently shown. These make the toolbar tab derive
@@ -687,7 +688,7 @@ final class TerminalContainerViewController: NSViewController {
 
     /// Shows the authority-bearing trigger workspace as a first-class content destination.
     /// Unlike Settings it uses the full pane width and leaves the project sidebar in place.
-    func showTriggers(store: TriggerStore = .shared) {
+    func showTriggers(store: TriggerStore = .shared, projectID: ProjectID? = nil) {
         consumeComposerHandoff(for: nil)
         detachCurrentChild()
         currentComposerProjectID = nil
@@ -702,6 +703,7 @@ final class TerminalContainerViewController: NSViewController {
 
         let controller = triggerCenter ?? TriggerCenterViewController(store: store)
         controller.onOpenSession = { [weak self] sessionID in self?.onOpenTriggerSession?(sessionID) }
+        controller.showProject(projectID)
         triggerCenter = controller
         addChild(controller)
         let content = controller.view

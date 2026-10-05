@@ -549,7 +549,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         if let currentTerminalID {
             return environment.projectStore.homeProject(forTerminalID: currentTerminalID)?.id
         }
-        return containerViewController.currentComposerProjectID
+        return containerViewController.currentComposerProjectID ?? containerViewController.automationProjectID
     }
 
     /// The checkout the visible page is about — what "Open in" opens, and what the Finder
@@ -3651,7 +3651,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             sidebarViewController.reveal(terminalID: terminalID)
         case let .project(projectID):
             sidebarViewController.reveal(projectID: projectID)
-        case .repository, .branch, .registeredFactGroup, .chatDisclosure:
+        case .repository, .branch, .registeredFactGroup, .chatDisclosure, .automations:
             return false
         }
 
@@ -3917,7 +3917,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// What the pane is showing now, as a page — a session, a project's composer, or nothing.
     /// Settings is not one of the answers: it is what the caller is about to replace.
     private func currentPage() -> NavigationHistory.Page? {
-        if containerViewController.isShowingTriggers { return .triggers }
+        if containerViewController.isShowingTriggers {
+            return containerViewController.automationProjectID.map(NavigationHistory.Page.projectAutomations) ?? .triggers
+        }
         if let sessionID = containerViewController.currentSessionID {
             return .session(sessionID)
         }
@@ -3950,6 +3952,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         case .settingsAISearch:
             showSettingsAISearchSurface()
 
+        case .projectAutomations(let projectID):
+            showTriggers(projectID: projectID)
         case .triggers:
             showTriggers()
         }
@@ -4604,6 +4608,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 syncDisplayPane(to: nil)
                 recordVisit(.composer(projectID))
 
+            case .projectAutomations(let projectID):
+                showTriggers(projectID: projectID)
             case .triggers:
                 showTriggers()
 
@@ -5425,7 +5431,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
                 return !sessionIDs.contains(sessionID)
             case let .terminal(terminalID):
                 return !terminalIDs.contains(terminalID)
-            case let .composer(projectID):
+            case let .composer(projectID), let .projectAutomations(projectID):
                 return projectID != project.id
             case .settings, .settingsAISearch, .triggers:
                 return true
@@ -5459,17 +5465,22 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         showTriggers()
     }
 
-    func showTriggers() {
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectAutomations projectID: ProjectID) {
+        showTriggers(projectID: projectID)
+    }
+
+    func showTriggers(projectID: ProjectID? = nil) {
         window?.makeKeyAndOrderFront(nil)
         if containerViewController.isShowingSettings {
             sidebarViewController.setSettingsMode(false)
             workspaceSidebarViewController.setSettingsOverride(false)
         }
-        sidebarViewController.setTriggersMode(true)
-        containerViewController.showTriggers()
+        sidebarViewController.setTriggersMode(projectID == nil)
+        if let projectID { sidebarViewController.selectAutomations(projectID: projectID) }
+        containerViewController.showTriggers(projectID: projectID)
         syncDisplayPane(to: nil)
         updateSessionTitleItem()
-        recordVisit(.triggers)
+        recordVisit(projectID.map(NavigationHistory.Page.projectAutomations) ?? .triggers)
     }
 
     func projectSidebar(

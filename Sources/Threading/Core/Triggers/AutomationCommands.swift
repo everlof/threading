@@ -110,8 +110,14 @@ enum AutomationCommands {
         case "configure":
             guard let config = args.configuration else { throw TriggerStore.StoreError.invalidRecord("configuration required") }
             let actualID = id ?? TriggerID()
-            let revision = try await store.configureAutomation(config, id: actualID,
-                expectedRevision: expected, proposedBy: proposedBy)
+            let binding = try await store.projectAutomationBinding(actualID)
+            let revision: TriggerRevision
+            if let folder = binding?.checkoutPath ?? args.folder {
+                revision = try await store.saveProjectAutomation(config, id: actualID, expectedRevision: expected, checkout: folder)
+            } else {
+                revision = try await store.configureAutomation(config, id: actualID,
+                    expectedRevision: expected, proposedBy: proposedBy)
+            }
             return try json(AutomationSnapshot(id: actualID, revision: revision.id, enabled: false,
                 configuration: config, nextRunAt: nil))
         case "enable", "pause", "delete", "run":
@@ -130,7 +136,7 @@ enum AutomationCommands {
             switch args.operation {
             case "enable": try await store.activate(triggerID: id, revisionID: expected)
             case "pause": try await store.setEnabled(false, triggerID: id, expectedRevision: expected)
-            case "delete": try await store.removeAutomation(id, expectedRevision: expected)
+            case "delete": try await store.removeProjectAutomation(id, expectedRevision: expected)
             default:
                 guard let key = args.requestKey else { throw TriggerStore.StoreError.invalidRecord("requestKey required for retry-safe run") }
                 let dispatch = try await store.runAutomationNow(id, expectedRevision: expected, requestKey: key)

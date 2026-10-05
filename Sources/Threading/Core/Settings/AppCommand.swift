@@ -228,6 +228,7 @@ enum AppCommands {
         static let projectRemoteHost = "project.remoteHost"
         static let projectDefaultAccounts = "project.defaultAccounts"
         static let triggers = "view.triggers"
+        static let projectAutomations = "view.project-automations"
         static let currentTheme = "view.currentTheme"
         static let componentGallery = "view.componentGallery"
         static let biggerText = "view.biggerText"
@@ -444,6 +445,8 @@ enum AppCommands {
         AppCommand(id: ID.projectRemoteHost, group: .view, title: "Remote Host…",
                    defaultShortcut: nil, isEditable: true, scope: .project),
         AppCommand(id: ID.projectDefaultAccounts, group: .view, title: "Default Accounts…",
+                   defaultShortcut: nil, isEditable: true, scope: .project),
+        AppCommand(id: ID.projectAutomations, group: .view, title: "Project Automations",
                    defaultShortcut: nil, isEditable: true, scope: .project),
         AppCommand(id: ID.triggers, group: .view, title: "Automations",
                    defaultShortcut: nil, isEditable: true),

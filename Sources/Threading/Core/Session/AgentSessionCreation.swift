@@ -15,8 +15,10 @@ enum AgentSessionCreation {
         title: String? = nil,
         handoff: ConversationHandoff? = nil,
         managedWorkspace: ManagedWorkspace? = nil,
+        automationWorkspace: AutomationWorkspace? = nil,
         id: SessionID = SessionID()
     ) -> AgentSession? {
+        guard managedWorkspace == nil || automationWorkspace == nil else { return nil }
         guard let configuration = AgentSessionConfiguration(
             kind: kind,
             reasoningEffort: reasoningEffort,
@@ -37,6 +39,7 @@ enum AgentSessionCreation {
             id: id
         )
         session.managedWorkspace = managedWorkspace
+        session.automationWorkspace = automationWorkspace
         session.fastMode = fastMode
         session.branch = managedWorkspace?.targetBranch
         session.permissionMode = permissionMode

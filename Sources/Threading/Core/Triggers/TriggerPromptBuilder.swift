@@ -34,12 +34,23 @@ enum TriggerPromptBuilder {
         let encoded = (try? encoder.encode(evidence))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
 
+        let files = dispatch.revision.projectAutomation.map { revision in
+            """
+            Project: \(revision.checkoutPath)
+            Automation workspace: \(revision.workspacePath)
+            Verified resource snapshot (use these copies): \(revision.resourcesPath)
+            Declared resources: \(revision.resources.joined(separator: ", "))
+            Content fingerprint: \(revision.fingerprint)
+            """
+        } ?? ""
         if dispatch.revision.executionMode.isTask {
             return """
             Run the saved Threading automation “\(triggerName)”.
             Permissions: \(dispatch.revision.executionMode == .taskLocalEdits ? "local edits and tests" : "read-only").
             Do not push, publish, deploy, or change other automations. If you need a decision,
             report needsHuman. Never report success while work or checks remain unfinished.
+
+            \(files)
 
             Saved instructions:
             \(dispatch.revision.instructions)
@@ -58,6 +69,8 @@ enum TriggerPromptBuilder {
             You are assessing a Threading trigger run named “\(triggerName)”. This first stage is \
             read-only: inspect the project and the evidence, but do not edit files, run destructive \
             commands, push, open a change request, deploy, or write back to the source.
+
+            \(files)
 
             Host-authored instructions:
             \(dispatch.revision.instructions)

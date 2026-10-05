@@ -58,7 +58,7 @@ final class AutomationShellRenderTests: HostedStoreTestCase {
         try await center.prepareEvidencePage(index: 0)
         window.contentView?.layoutSubtreeIfNeeded()
         let mount = ProcessInfo.processInfo.systemUptime - mountStart
-        XCTAssertLessThanOrEqual(center.drawnRowCount, 27, "Catalogue growth must not materialize more than one page")
+        XCTAssertLessThanOrEqual(center.drawnRowCount, 29, "One project's catalogue must retain at most 25 data rows plus its section and pagination chrome")
         print("AUTOMATION_STRESS definitions=500 prepare_s=\(preparation) projection_and_layout_s=\(mount) rows=\(center.drawnRowCount)")
     }
 }

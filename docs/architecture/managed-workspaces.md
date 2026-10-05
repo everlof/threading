@@ -9,6 +9,14 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index. Also read
 
 ## Product contract
 
+Project automation tasks have a separate `AutomationWorkspace` connection. It names the owning
+checkout and a validated automation ID, with execution under
+`.threading/local/automations/<id>/`. `AgentSession.workingDirectory(in:)` gives this explicit
+connection priority and persists it for resume. It cannot coexist with `ManagedWorkspace`,
+cannot follow or move to another checkout, and does not capture product Git turn checkpoints.
+Logical project ownership is unchanged. It does not create, merge or dispose of a Git worktree;
+the existing worktree lifecycle below applies only to `ManagedWorkspace`.
+
 Managed workspaces are **off unless the draft explicitly enables one**. While off, the
 composer contains only the opt-in checkbox: its delivery controls do not merely hide, they are
 absent from the view hierarchy. A nil `ManagedWorkspacePlan` is therefore the UI state, stored

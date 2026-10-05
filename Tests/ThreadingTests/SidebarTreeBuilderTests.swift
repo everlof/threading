@@ -493,7 +493,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
             factSnapshot: snapshot
         )
         let groupedProject = try XCTUnwrap(grouped.first as? ProjectNode)
-        let group = try XCTUnwrap(groupedProject.childNodes.first as? RegisteredFactGroupNode)
+        let group = try XCTUnwrap(groupedProject.childNodes.dropFirst().first as? RegisteredFactGroupNode)
         XCTAssertEqual(group.title, "Unknown")
         XCTAssertEqual(group.sessionNodes.map(\.sessionID), [alpha.id, bravo.id])
 
@@ -569,6 +569,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 controller.presentedRowKeys,
                 [
                     .project(stored.id),
+                    .automations(stored.id),
                     .registeredFactGroup(stored.id, key, .string("a")),
                     .session(alpha.id),
                     .registeredFactGroup(stored.id, key, .string("b")),
@@ -610,6 +611,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 controller.presentedRowKeys,
                 [
                     .project(stored.id),
+                    .automations(stored.id),
                     .registeredFactGroup(stored.id, key, .string("c")),
                     .session(alpha.id),
                     .registeredFactGroup(stored.id, key, .string("d")),
@@ -649,11 +651,11 @@ final class SidebarTreeBuilderTests: XCTestCase {
         controller.mountInitialTreeIfNeeded()
         controller.view.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(controller.outlineRowCount, 2)
+        XCTAssertEqual(controller.outlineRowCount, 3)
         XCTAssertGreaterThan(controller.instantiatedRowCount, 0)
 
         controller.mountInitialTreeIfNeeded()
-        XCTAssertEqual(controller.outlineRowCount, 2, "a repeated lifecycle signal remounted the tree")
+        XCTAssertEqual(controller.outlineRowCount, 3, "a repeated lifecycle signal remounted the tree")
     }
 
     /// Suppressing the viewport during the atomic first mount must not change disclosure
@@ -694,6 +696,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
             Set(controller.presentedRowKeys),
             Set([
                 .project(stored.id),
+                .automations(stored.id),
                 .branch(stored.id, "main"),
                 .session(parent.id),
                 .session(child.id),
@@ -773,7 +776,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
             controller.view.frame = NSRect(x: 0, y: 0, width: 320, height: 720)
             controller.view.layoutSubtreeIfNeeded()
 
-            XCTAssertEqual(controller.outlineRowCount, 4)
+            XCTAssertEqual(controller.outlineRowCount, 5)
         }
     }
 
@@ -804,8 +807,8 @@ final class SidebarTreeBuilderTests: XCTestCase {
             XCTAssertEqual(
                 controller.presentedRowKeys,
                 [
-                    .project(firstProject.id), .session(earlier.id), .session(later.id),
-                    .project(secondProject.id), .session(untouched.id)
+                    .project(firstProject.id), .automations(firstProject.id), .session(earlier.id), .session(later.id),
+                    .project(secondProject.id), .automations(secondProject.id), .session(untouched.id)
                 ]
             )
 
@@ -814,8 +817,8 @@ final class SidebarTreeBuilderTests: XCTestCase {
             XCTAssertEqual(
                 controller.presentedRowKeys,
                 [
-                    .project(firstProject.id), .session(later.id), .session(earlier.id),
-                    .project(secondProject.id), .session(untouched.id)
+                    .project(firstProject.id), .automations(firstProject.id), .session(later.id), .session(earlier.id),
+                    .project(secondProject.id), .automations(secondProject.id), .session(untouched.id)
                 ]
             )
         }
@@ -850,7 +853,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
 
                     XCTAssertEqual(
                         controller.presentedRowKeys,
-                        [.project(stored.id), .session(standing.id), .session(added.id)]
+                        [.project(stored.id), .automations(stored.id), .session(standing.id), .session(added.id)]
                     )
                     #if DEBUG
                     XCTAssertEqual(controller.lastProjectStructurePerformance.treeNanoseconds, 0)
@@ -904,6 +907,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
                         [
                             .repository(try repositoryIdentity(of: directory)),
                             .project(stored.id),
+                            .automations(stored.id),
                             .session(standing.id),
                             .session(added.id)
                         ]
@@ -961,6 +965,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
                         [
                             .repository(try repositoryIdentity(of: directory)),
                             .project(stored.id),
+                            .automations(stored.id),
                             .branch(stored.id, "main"),
                             .session(first.id),
                             .session(second.id),
@@ -1004,7 +1009,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
 
                     XCTAssertEqual(
                         controller.presentedRowKeys,
-                        [.project(stored.id), .session(standing.id), .terminal(added.id)]
+                        [.project(stored.id), .automations(stored.id), .session(standing.id), .terminal(added.id)]
                     )
                     #if DEBUG
                     XCTAssertEqual(controller.lastProjectStructurePerformance.treeNanoseconds, 0)
@@ -1053,6 +1058,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
                         [
                             .repository(try repositoryIdentity(of: directory)),
                             .project(stored.id),
+                            .automations(stored.id),
                             .session(standing.id),
                             .terminal(added.id)
                         ]
@@ -1337,7 +1343,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
             )
             let node = try XCTUnwrap(roots.first as? ProjectNode)
 
-            XCTAssertTrue(node.childNodes.first is BranchGroupNode, "the group left its place")
+            XCTAssertTrue(node.childNodes.dropFirst().first is BranchGroupNode, "the group left its place")
             XCTAssertEqual((node.childNodes.last as? SessionNode)?.sessionID, middle.id)
         }
     }
@@ -1352,7 +1358,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
             from: [project("p", sessions: [chat], terminals: [shell])]
         )
         let projectNode = try XCTUnwrap(roots.first as? ProjectNode)
-        let branch = try XCTUnwrap(projectNode.childNodes.first as? BranchGroupNode)
+        let branch = try XCTUnwrap(projectNode.childNodes.dropFirst().first as? BranchGroupNode)
 
         XCTAssertEqual(branch.branch, "feature")
         XCTAssertEqual(branch.sessionNodes.map(\.sessionID), [chat.id])
@@ -1596,6 +1602,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
                     XCTAssertEqual(
                         sidebarKeys(in: node.childNodes),
                         [
+                            .automations(node.projectID),
                             .session(first.id), .session(second.id),
                             .terminal(firstTerminal.id), .terminal(secondTerminal.id),
                         ]
@@ -1624,6 +1631,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 XCTAssertEqual(
                     sidebarKeys(in: node.childNodes),
                     [
+                        .automations(node.projectID),
                         .terminal(firstTerminal.id), .terminal(secondTerminal.id),
                         .session(first.id), .session(second.id),
                     ]
@@ -1640,7 +1648,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 from: [project("p", sessions: [chat], terminals: [shell])]
             )
             let projectNode = try XCTUnwrap(roots.first as? ProjectNode)
-            let branch = try XCTUnwrap(projectNode.childNodes.first as? BranchGroupNode)
+            let branch = try XCTUnwrap(projectNode.childNodes.dropFirst().first as? BranchGroupNode)
 
             XCTAssertEqual(
                 sidebarKeys(in: branch.childNodes),

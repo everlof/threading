@@ -201,8 +201,8 @@ final class SidebarCompactTreeTests: XCTestCase {
         let controller = makeSidebar(compact: true)
         let rows = builtRows(controller)
         XCTAssertEqual(
-            rows.count, 10,
-            "two project rows, two branch headings, and six sessions"
+            rows.count, 12,
+            "two project rows, two automation destinations, two branch headings, and six sessions"
         )
 
         for (_, cell) in rows {

@@ -29,6 +29,7 @@ actor TriggerRuntime {
     private let store: TriggerStore
     private let engine: TriggerEngine
     private var didStart = false
+    private var discoveryOffset = 0
     private var queueTimer: Task<Void, Never>?
 
     init(store: TriggerStore = .shared, engine: TriggerEngine? = nil) {
@@ -39,6 +40,7 @@ actor TriggerRuntime {
     func start() async {
         guard !didStart else { return }
         didStart = true
+        await discoverProjects()
         // The daemon's file is a projection; failing to write it must not also stop recovery and
         // the schedule sweep below. The listener's registration is left as it was.
         do {
@@ -62,6 +64,7 @@ actor TriggerRuntime {
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .seconds(15))
                     guard !Task.isCancelled else { return }
+                    await self.discoverProjects()
                     try? await self.publish(try await self.store.scheduledDispatches())
                     try? await self.releaseQueue()
                 }
@@ -71,6 +74,17 @@ actor TriggerRuntime {
                 "Trigger recovery failed: \(error.localizedDescription, privacy: .private)"
             )
         }
+    }
+
+    /// Eight project folders per tick. No hidden project's views are built during discovery.
+    private func discoverProjects() async {
+        let offset = discoveryOffset
+        let page = await MainActor.run {
+            let projects = ProjectStore.shared.projects
+            return (Array(projects.dropFirst(offset).prefix(8).filter { $0.executionHost == nil }.map { ($0.id, $0.folderPath) }), projects.count)
+        }
+        discoveryOffset = offset + 8 < page.1 ? offset + 8 : 0
+        for (id, path) in page.0 { _ = try? await store.discoverProjectAutomations(projectID: id, checkout: path) }
     }
 
     func drainDaemonInbox() async {

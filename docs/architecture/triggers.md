@@ -270,6 +270,70 @@ daemon reading the spec's run fields as `TriggerProbeRunSpec` (same JSON shape).
 - `Models/AutomationPermissionPolicy.swift` — the unattended permission policy and its rule grammar
 - `Core/Agent/UnattendedRunPermissions.swift` — per-session registration and the broker's decisions
 
+## Project-owned automations
+
+The expanded project has an **Automations** navigation row, including for an empty project.
+It reuses `TriggerCenterViewController` with a project filter and locked project in the editor.
+The global catalogue groups its bounded page by project; Sources and Remote stay global.
+Both destinations and the editor remain host-only: Threading owns identity, local login/source
+bindings, activation, permission resolution, immutable revisions and execution truth.
+
+`ProjectAutomation` is the independent version-1 file contract at
+`.threading/automations/<id>/automation.json`. Its ID is a lowercase directory name, stable within
+the project. Instructions and declared resources are relative regular files, without traversal
+or symlinks. The file carries scheduling, agent/model, execution and checkout choices, permission
+rules, runtime and archive behavior. It contains no project UUID, login, installation UUID,
+secret or activation. Event sources are named references and are bound locally in the editor.
+The existing `.threading.json` project-script contract is unchanged.
+
+The only host substitutions are `{{project}}`, `{{workspace}}` and `{{resources}}`. They resolve
+to the current checkout, its ignored local automation folder, and the verified resource snapshot.
+This is explicit reference resolution, never environment or shell expansion. Portable permission
+strings become validated `AutomationPermissionRule` values only after that resolution; the
+approval sheet shows those exact rules and paths with the complete content fingerprint.
+
+Trigger schema 4 stores `project_automation_binding` separately from the portable files. It maps
+project/checkout/automation ID to the existing trigger identity, content fingerprint and local
+login/source choices. Discovery creates paused drafts. Changed files create a new immutable draft
+and remove the due schedule; invalid or missing files preserve the old record with a visible
+blocking reason. Activation, run-now and dispatch re-read the files rather than depending on
+a watcher. A dispatch rejected at run start gets a durable attention receipt. Worktrees
+share the Git repository identity: explicit activation pauses the other checkout's schedule for
+the same automation ID, and other checkouts state which checkout owns it.
+
+`ProjectAutomationFiles` runs only on the serial `TriggerStore` background actor. Each scan
+examines at most 1,000 immediate entries, materializes at most 500 definitions and admits at most
+32 MiB per project. Individual files are at most 1 MiB, one definition at most 8 MiB, instructions
+32 KiB and resources 32. Runtime scans eight project folders per 15-second tick; opening a project
+also scans it. Hidden projects create no automation views. The catalogue builds 25 data rows per
+page and history uses a database project filter plus the existing keyset cursor. The local binding
+owns the trigger's complete history after adoption, including earlier frozen revisions. Deleted
+bindings remain indexed tombstones and do not fill the bounded live catalogue or ownership scan.
+
+Save is shared by the editor and `manage_automation`: it validates the expected revision and
+fingerprint, prepares a bounded complete directory, and atomically swaps it with `renameatx_np`.
+A cooperating-writer lock in the ignored local folder and a final fingerprint check reject stale saves. Undeclared authored
+files are retained within a separate 128-entry/8-MiB write bound. No staging or commit happens.
+Existing database-only automations retain their local storage and are labelled accordingly.
+
+The ignored `.threading/local/automations/<id>/` contains state, reports, data and verified
+`revisions/<fingerprint>/` snapshots. A run reads the snapshot reviewed for its revision, so
+an outside edit pauses future work without changing a running task's scripts. A damaged local
+snapshot blocks execution too. `.threading/.gitignore` ignores `/local/`.
+
+`automationWorkspace` is available only for project-owned direct tasks. `ScheduledSessionPlan`
+and `AgentSession.automationWorkspace` persist the explicit connection, and central
+`workingDirectory(in:)` routes launches and resumes there while logical project ownership stays
+with the original project. This is not a Git worktree. A dirty product checkout is allowed;
+ordinary edit-capable checkout/worktree runs retain their previous policy. Checkout following,
+manual checkout moves and product Git turn checkpoints exclude these sessions.
+
+Restoring Git discovers the definitions again as drafts. Local account/source mapping must be
+reviewed and activated on the new host. History, sent receipts, processing windows, reports and
+other local state return only from their separate backups. The Sonda move is explicit adoption
+of its existing trigger identity, left paused; no general migration UI or remote-controller
+format change is introduced.
+
 The cross-process Keychain access group is a signed-Release contract. Unsigned/ad-hoc Debug builds
 can compile and render the feature but cannot prove ServiceManagement registration or credential
 sharing; validate those two behaviors on a signed build.

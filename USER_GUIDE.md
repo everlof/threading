@@ -101,6 +101,33 @@ when creating a session. See [Accounts](#accounts).
 
 ### Automations
 
+Every expanded project has an **Automations** row. It opens that project's list even when empty.
+Create and edit there with the project locked. Save writes versionable project files; Review &
+Activate approves the exact files and local permissions. Pause, Run now and Open configuration
+folder are available on the automation's page. The global Automations page groups definitions by
+project and keeps Sources and Remote.
+
+Project files live in `.threading/automations/<id>/`: `automation.json` (format version 1),
+`instructions.md` and declared scripts/templates. IDs use lowercase letters, numbers, `-` and
+`_`; references are relative files without `..` or symlinks. The host references `{{project}}`,
+`{{workspace}}` and `{{resources}}` name the checkout, local automation data and verified scripts.
+For shell arguments containing spaces, quote the reference in your instruction or permission rule.
+
+**Automation workspace** runs a direct task in `.threading/local/automations/<id>/`, while its
+chat belongs to the original project. It can run with uncommitted product work. Tasks editing the
+product checkout still use its ordinary checkout or managed-worktree policy. File changes pause
+future runs until you review and activate the new revision; missing/invalid files show a blocking
+reason. Running tasks keep the scripts from their verified revision. Other worktrees show the
+checkout that owns the schedule. Activating there explicitly transfers that ownership.
+
+Version `.threading/automations/` and `.threading/.gitignore`. The latter ignores `/local/`.
+Before resetting a computer, copy `.threading/local/` separately: processing state, sent receipts,
+reports and data are not in Git. Close Threading before copying its app data for run and chat
+history, and back up the agent's conversation archives for resuming provider sessions. Git restore
+discovers drafts; restore the agent login, SSH access and separate
+provider secrets, choose any local event source, then review and activate. Existing database-only
+automations continue working and are labelled **Saved locally on this Mac**.
+
 **Automations** in the sidebar runs saved tasks on a schedule or when a connected event arrives.
 Choose **New automation**, give the task a name and instructions, select its project, agent and
 permissions, and choose daily, selected weekdays, weekly or an interval. The named time zone
@@ -127,8 +154,8 @@ of the agent's turn. Its result remains in **Activity**. Failures and requests f
 stay visible. Deleting an automation stops future scheduling and preserves its history.
 
 Tasks can be read-only or permit local edits and tests. Event rules also retain **Assess only**
-and **Assess, then fix if straightforward**. Local edits use a clean project checkout or an
-isolated worktree. Automation permission does not include pushing, deployment or source write-back.
+and **Assess, then fix if straightforward**. Tasks changing product files use a clean project
+checkout or an isolated worktree. Automation permission does not include pushing, deployment or source write-back.
 **Sources** connects the Sonda review-required feed with a scoped API key held in Keychain.
 
 **Probe sources** on the same page run your own programs on a schedule — an IMAP check, a feed

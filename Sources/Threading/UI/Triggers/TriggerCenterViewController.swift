@@ -23,6 +23,10 @@ final class TriggerCenterViewController: NSViewController {
         static let pageSize = 25
     }
 
+    private(set) var projectID: ProjectID?
+    private var discoveryErrors: [ProjectAutomationFiles.Entry] = []
+    private let titleLabel = NSTextField(labelWithString: "")
+    private var fileDiagnostics: [TriggerID: String] = [:]
     private let store: TriggerStore
     private let pages = ThemedSegmentedControl()
     private let primaryAction = ThemedButton()
@@ -59,8 +63,54 @@ final class TriggerCenterViewController: NSViewController {
         reload()
     }
 
+    func showProject(_ id: ProjectID?) {
+        guard projectID != id || !isViewLoaded else { return }
+        projectID = id
+        page = .triggers
+        detailID = nil
+        pageOffset = 0
+        historyCursors = [Int64.max]
+        discoveryErrors = []
+        if isViewLoaded {
+            pages.configure(titles: pageTitles)
+            pages.selectedIndex = 0
+            titleLabel.stringValue = id.flatMap { ProjectStore.shared.project(withID: $0)?.name }.map { L10n.format("%@ · Automations", $0) } ?? L10n.string("Automations")
+            reload()
+        }
+    }
+
+    private func catalogue() async throws -> [Pair] {
+        if let id = projectID, let project = ProjectStore.shared.project(withID: id) {
+            discoveryErrors = try await store.discoverProjectAutomations(projectID: id, checkout: project.folderPath).filter { $0.snapshot == nil }
+        }
+        let pairs = try await store.triggers().filter { projectID == nil || $0.revision.projectID == projectID }
+            .sorted { left, right in
+                let leftName = ProjectStore.shared.project(withID: left.revision.projectID)?.name ?? ""
+                let rightName = ProjectStore.shared.project(withID: right.revision.projectID)?.name ?? ""
+                return leftName == rightName ? left.definition.name < right.definition.name : leftName < rightName
+            }
+        let importedIDs = Set(pairs.compactMap { $0.revision.projectAutomation?.automationID })
+        discoveryErrors.removeAll { importedIDs.contains($0.id) }
+        fileDiagnostics = [:]
+        for pair in pairs.dropFirst(pageOffset).prefix(Layout.pageSize) {
+            if let binding = try await store.projectAutomationBinding(pair.definition.id) {
+                fileDiagnostics[pair.definition.id] = binding.diagnostic
+                if let owner = try await store.projectAutomationOwner(pair.definition.id) {
+                    fileDiagnostics[pair.definition.id] = L10n.format("Schedule owned by %@", owner)
+                }
+            }
+        }
+        return pairs
+    }
+
+    private var pageTitles: [String] {
+        [L10n.string("Automations"), L10n.string("Activity")]
+            + (projectID == nil ? [L10n.string("Sources"), L10n.string("Remote")] : [])
+    }
+
     private func build() {
-        let title = NSTextField(labelWithString: L10n.string("Automations"))
+        let title = titleLabel
+        title.stringValue = projectID.flatMap { ProjectStore.shared.project(withID: $0)?.name }.map { L10n.format("%@ · Automations", $0) } ?? L10n.string("Automations")
         title.applyFont(.heading)
         title.textColor = Design.Text.label
 
@@ -75,12 +125,7 @@ final class TriggerCenterViewController: NSViewController {
         status.textColor = Design.Text.tertiary
         status.alignment = .natural
 
-        pages.configure(titles: [
-            L10n.string("Automations"),
-            L10n.string("Activity"),
-            L10n.string("Sources"),
-            L10n.string("Remote"),
-        ])
+        pages.configure(titles: pageTitles)
         pages.onSelect = { [weak self] index in
             guard let self, let page = Page(rawValue: index) else { return }
             self.page = page
@@ -166,7 +211,7 @@ final class TriggerCenterViewController: NSViewController {
             do {
                 switch page {
                 case .triggers:
-                    let pairs = try await store.triggers()
+                    let pairs = try await catalogue()
                     if let detail = try await loadDetail(in: pairs) {
                         guard !Task.isCancelled else { return }
                         renderDetail(detail)
@@ -177,8 +222,8 @@ final class TriggerCenterViewController: NSViewController {
                     }
                 case .remote: renderRemote()
                 case .activity:
-                    let result = try await store.runPage(before: historyCursors.last)
-                    let pairs = try await store.triggers()
+                    let result = try await store.runPage(projectID: projectID, before: historyCursors.last)
+                    let pairs = try await catalogue()
                     guard !Task.isCancelled else { return }
                     nextHistoryCursor = result.next
                     renderRuns(result.items, triggers: pairs)
@@ -228,10 +273,10 @@ final class TriggerCenterViewController: NSViewController {
         switch page {
         case .remote: renderRemote()
         case .triggers:
-            let pairs = try await store.triggers()
+            let pairs = try await catalogue()
             renderTriggers(pairs, readings: try await loadReadings(pairs))
         case .activity:
-            let result = try await store.runPage()
+            let result = try await store.runPage(projectID: projectID)
             nextHistoryCursor = result.next
             renderRuns(result.items, triggers: try await store.triggers())
         case .sources:
@@ -311,17 +356,31 @@ final class TriggerCenterViewController: NSViewController {
 
     private func renderTriggers(_ pairs: [Pair], readings: Readings) {
         list.clear()
-        status.stringValue = pairs.isEmpty
+        status.stringValue = pairs.isEmpty && discoveryErrors.isEmpty
             ? L10n.string("No automations")
-            : L10n.format("%lld configured", Int64(pairs.count))
+            : L10n.format("%lld configured", Int64(pairs.count + discoveryErrors.count))
         list.addSection(L10n.string("Configured automations"))
-        guard !pairs.isEmpty else {
+        if let projectID, let project = ProjectStore.shared.project(withID: projectID) {
+            list.addRow(TriggerCenterRowView(title: L10n.string("Project files"),
+                detail: ".threading/automations/", actionTitle: L10n.string("Open configuration folder"),
+                onAction: { [weak self] in self?.openConfigurationFolder(checkout: project.folderPath) },
+                secondaryActionTitle: nil, onSecondaryAction: nil))
+        }
+        for entry in discoveryErrors.dropFirst(max(0, pageOffset - pairs.count)).prefix(max(0, Layout.pageSize - pairs.dropFirst(pageOffset).prefix(Layout.pageSize).count)) {
+            list.addNote("\(entry.id): \(entry.diagnostic ?? "")")
+        }
+        if pairs.isEmpty && discoveryErrors.isEmpty {
             list.addNote(L10n.string(
                 "Create an automation here or ask an agent to set one up. Choose a schedule, task, and what happens after success."
             ))
             return
         }
+        var group: ProjectID?
         for pair in pairs.dropFirst(pageOffset).prefix(Layout.pageSize) {
+            if projectID == nil, group != pair.revision.projectID {
+                group = pair.revision.projectID
+                list.addSection(ProjectStore.shared.project(withID: pair.revision.projectID)?.name ?? L10n.string("Unknown project"))
+            }
             let summary = AutomationSummary.make(
                 definition: pair.definition,
                 revision: pair.revision,
@@ -331,7 +390,7 @@ final class TriggerCenterViewController: NSViewController {
             list.addRow(TriggerCenterRowView(
                 title: pair.definition.name,
                 status: .init(words: summary.stateWords, tone: summary.stateTone),
-                detail: summary.timingAndMode + "\n" + summary.runs,
+                detail: fileDiagnostics[pair.definition.id] ?? (summary.timingAndMode + "\n" + summary.runs),
                 actionTitle: summary.stateActionTitle,
                 onAction: { [weak self] in self?.act(on: pair) },
                 secondaryActionTitle: L10n.string("Details"),
@@ -339,9 +398,9 @@ final class TriggerCenterViewController: NSViewController {
                 identifier: "automation.row.\(pair.definition.id.uuidString)"
             ))
         }
-        if pageOffset > 0 || pageOffset + Layout.pageSize < pairs.count {
+        if pageOffset > 0 || pageOffset + Layout.pageSize < pairs.count + discoveryErrors.count {
             list.addRow(TriggerCenterRowView(title: L10n.string("More automations"), detail: "",
-                actionTitle: pageOffset + Layout.pageSize < pairs.count ? L10n.string("Next") : nil,
+                actionTitle: pageOffset + Layout.pageSize < pairs.count + discoveryErrors.count ? L10n.string("Next") : nil,
                 onAction: { [weak self] in self?.pageOffset += Layout.pageSize; self?.reload() },
                 secondaryActionTitle: pageOffset > 0 ? L10n.string("Previous") : nil,
                 onSecondaryAction: { [weak self] in
@@ -376,6 +435,13 @@ final class TriggerCenterViewController: NSViewController {
         header.onDelete = { [weak self] in self?.deleteAutomation(pair) }
         list.addRow(header)
 
+        if let diagnostic = fileDiagnostics[pair.definition.id] { list.addNote(diagnostic) }
+        if let files = pair.revision.projectAutomation {
+            list.addRow(TriggerCenterRowView(title: L10n.string("Saved in project"), detail: files.automationID,
+                actionTitle: L10n.string("Open configuration folder"),
+                onAction: { [weak self] in self?.openConfigurationFolder(checkout: files.checkoutPath, id: files.automationID) },
+                secondaryActionTitle: nil, onSecondaryAction: nil))
+        } else { list.addNote(L10n.string("Saved locally on this Mac")) }
         list.addSection(L10n.string("Settings"))
         list.addRow(FactSheetView(facts: detail.review.facts))
 
@@ -730,16 +796,18 @@ final class TriggerCenterViewController: NSViewController {
     }
 
     private func editAutomation(_ pair: (definition: TriggerDefinition, revision: TriggerRevision)?) {
-        let config = pair.map { AutomationConfiguration(definition: $0.definition, revision: $0.revision) }
+        let config = pair.map { AutomationConfiguration(definition: $0.definition, revision: $0.revision) } ?? projectID.map { AutomationConfiguration(projectID: $0) }
         let automationID = pair?.definition.id ?? TriggerID()
         Task { @MainActor in
         let sources = ((try? await store.sources()) ?? []).filter { !$0.isDeleted }
         let editor = AutomationEditorViewController(configuration: config, sources: sources)
+        editor.lockedProjectID = projectID ?? pair?.revision.projectAutomation.map { _ in pair!.revision.projectID }
         editor.availableHeight = view.window.map { $0.contentLayoutRect.height - Design.Spacing.pane * 2 }
         editor.onSave = { [weak self] config, _ in
             guard let self, let config else { return }
             _ = try await AutomationCommands.execute(.init(operation: "configure", id: automationID.uuidString,
-                expectedRevision: pair?.revision.id.uuidString, configuration: config), store: store)
+                expectedRevision: pair?.revision.id.uuidString, configuration: config,
+                folder: pair == nil ? ProjectStore.shared.project(withID: config.projectID)?.folderPath : nil), store: store)
             reload()
         }
         presentAsSheet(editor)
@@ -932,6 +1000,18 @@ final class TriggerCenterViewController: NSViewController {
         presentFailure(L10n.string("The source was not connected"), detail: detail)
     }
 
+    private func openConfigurationFolder(checkout: String, id: String? = nil) {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let folder = try await store.projectAutomationConfigurationFolder(checkout: checkout, id: id)
+                NSWorkspace.shared.open(folder)
+            } catch {
+                presentFailure(L10n.string("Open configuration folder"), detail: error.localizedDescription)
+            }
+        }
+    }
+
     private func presentFailure(_ title: String, detail: String) {
         let alert = ThemedAlert()
         alert.alertStyle = .warning
@@ -998,7 +1078,7 @@ final class TriggerCenterViewController: NSViewController {
     private func act(
         on pair: (definition: TriggerDefinition, revision: TriggerRevision)
     ) {
-        if pair.definition.draftRevisionID == pair.revision.id {
+        if pair.definition.draftRevisionID == pair.revision.id || (pair.revision.projectAutomation != nil && !pair.definition.enabled) {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let sourceName = pair.revision.automation?.schedule == nil
@@ -1018,10 +1098,10 @@ final class TriggerCenterViewController: NSViewController {
                 ConfirmationAlert.ask(request, in: self.view.window) { [weak self] approved in
                     guard approved else { return }
                     Task { @MainActor in
-                        try? await self?.store.activate(
-                            triggerID: pair.definition.id,
-                            revisionID: pair.revision.id
-                        )
+                        guard let self else { return }
+                        do {
+                            try await self.store.activate(triggerID: pair.definition.id, revisionID: pair.revision.id)
+                        } catch { self.presentFailure(L10n.string("The automation was not activated"), detail: error.localizedDescription) }
                     }
                 }
             }
@@ -1054,6 +1134,7 @@ extension TriggerCheckoutPolicy {
         switch self {
         case .projectCheckout: return L10n.string("Existing project checkout")
         case .managedWorktree: return L10n.string("Isolated managed worktree")
+        case .automationWorkspace: return L10n.string("Automation workspace")
         }
     }
 }

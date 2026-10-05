@@ -35,6 +35,7 @@ final class AutomationEditorViewController: NSViewController {
     private let agents = AgentKind.allCases.filter { $0.supportsNativeUI && $0.supportsPermissionModes }
     private let modes = TriggerExecutionMode.allCases
     private let remoteMode: Bool
+    var lockedProjectID: ProjectID?
 
     init(configuration: AutomationConfiguration? = nil, remoteSpec: ControllerAutomationSpec? = nil, remote: Bool = false, sources: [TriggerSourceInstallation] = [], workers: [ControllerWorker] = [], projects: [Project]? = nil) {
         self.workers = workers
@@ -112,7 +113,7 @@ final class AutomationEditorViewController: NSViewController {
         scroll.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scroll)
 
-        let isNew = configuration == nil && remoteSpec == nil
+        let isNew = (configuration == nil || configuration?.name.isEmpty == true) && remoteSpec == nil
         let heading = NSTextField(labelWithString: isNew ? L10n.string("New Automation") : L10n.string("Edit Automation"))
         heading.applyFont(.heading)
         heading.textColor = Design.Text.label
@@ -152,6 +153,7 @@ final class AutomationEditorViewController: NSViewController {
                 if let index = projects.firstIndex(where: { $0.id == id }) { target.selectItem(at: index) }
                 else { target.addItem(withTitle: L10n.string("Unavailable project")); target.selectItem(at: projects.count) }
             }
+            target.isEnabled = lockedProjectID == nil
             addRow("Project", target, width: Layout.choiceWidth, to: form)
         }
         addRow("Instructions", instructions, width: Layout.controlWidth, to: form)
@@ -204,7 +206,8 @@ final class AutomationEditorViewController: NSViewController {
             addRow("Permissions", mode, width: Layout.choiceWidth, to: form)
             checkout.addItem(withTitle: L10n.string("Existing project checkout"))
             checkout.addItem(withTitle: L10n.string("Isolated managed worktree"))
-            checkout.selectItem(at: configuration?.checkoutPolicy == .managedWorktree ? 1 : 0)
+            checkout.addItem(withTitle: L10n.string("Automation workspace"))
+            checkout.selectItem(at: configuration?.checkoutPolicy == .automationWorkspace ? 2 : configuration?.checkoutPolicy == .managedWorktree ? 1 : 0)
             addRow("Checkout", checkout, width: Layout.choiceWidth, to: form)
             // Unattended runs never ask, so what they may do is decided here and approved with
             // the revision. Remote workers own their permissions and are not offered this.
@@ -384,7 +387,7 @@ final class AutomationEditorViewController: NSViewController {
         config.name = name.stringValue; config.projectID = projects[target.indexOfSelectedItem].id
         config.instructions = instructions.textView.string; config.agent = agents[agent.indexOfSelectedItem]
         config.executionMode = modes[mode.indexOfSelectedItem]
-        config.checkoutPolicy = checkout.indexOfSelectedItem == 1 ? .managedWorktree : .projectCheckout
+        config.checkoutPolicy = checkout.indexOfSelectedItem == 2 ? .automationWorkspace : checkout.indexOfSelectedItem == 1 ? .managedWorktree : .projectCheckout
         config.maximumRuntimeMinutes = maximum
         config.account = account.stringValue.isEmpty ? nil : account.stringValue
         config.model = model.stringValue.isEmpty ? nil : model.stringValue
