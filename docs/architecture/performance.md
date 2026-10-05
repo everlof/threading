@@ -61,6 +61,13 @@ Those design files and their catalogue are unchanged by this work. All 31 scanne
 the final focused run passed, including the cleaned-up title fixture with no new concurrency
 warnings. Architecture and main-actor latency ratchets also passed; no policy ceiling was raised.
 
+The final integration run reproduced the usage-pool timeout: 93 of 120 requests had started after
+ten seconds. Its fixture slept for 20 ms in every fetch to create overlap, turning a concurrency
+assertion into a whole-fleet throughput deadline. The fixture now gates each four-request wave
+with continuations, verifies that no fifth request enters before release, and still checks that
+all 120 settle. Its waits detect a stalled wave without assigning a speed requirement to the
+complete fleet; the production worker limit and endpoint pacing are unchanged.
+
 The routine full sweep completed Git, chart and Tools cases but did not finish settings search.
 Its unchanged 2,048-item `SettingsSidebar` fixture remained in the initial
 `layoutSubtreeIfNeeded()` at `SettingsRowLayoutTests.swift:1247`. A five-second sample put every
