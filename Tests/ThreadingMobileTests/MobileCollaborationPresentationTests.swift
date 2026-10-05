@@ -1,8 +1,64 @@
+import Darwin
 import SwiftUI
 import ThreadingRemoteKit
 import UIKit
 import XCTest
 @testable import ThreadingMobile
+
+/// Hosted tests have no UI automation agent to enable SwiftUI's accessibility graph. Keep this
+/// runtime switch in the test bundle and restore it after each inspection. AccessibilitySnapshot
+/// uses the same runtime seam: https://github.com/cashapp/AccessibilitySnapshot/blob/main/Sources/AccessibilitySnapshot/Parser/ObjC/ASAccessibilityEnabler.m
+@MainActor
+enum MobileAccessibilityTestRuntime {
+    private enum Failure: Error {
+        case runtimeUnavailable
+    }
+
+    static func enableAutomation() throws -> @MainActor () -> Void {
+        let simulatorRoot = ProcessInfo.processInfo.environment["IPHONE_SIMULATOR_ROOT"] ?? ""
+        guard let library = dlopen(simulatorRoot + "/usr/lib/libAccessibility.dylib", RTLD_LAZY | RTLD_LOCAL) else {
+            throw Failure.runtimeUnavailable
+        }
+        guard let readSymbol = dlsym(library, "_AXSAutomationEnabled"),
+              let writeSymbol = dlsym(library, "_AXSSetAutomationEnabled") else {
+            dlclose(library)
+            throw Failure.runtimeUnavailable
+        }
+        let read = unsafeBitCast(readSymbol, to: (@convention(c) () -> Int32).self)
+        let write = unsafeBitCast(writeSymbol, to: (@convention(c) (Int32) -> Void).self)
+        let original = read()
+        write(1)
+        return {
+            write(original)
+            dlclose(library)
+        }
+    }
+
+    static func element(labelled label: String, in root: NSObject) -> NSObject? {
+        var pending = [root]
+        var visited = Set<ObjectIdentifier>()
+        while let element = pending.popLast() {
+            guard visited.insert(ObjectIdentifier(element)).inserted,
+                  (element as? UIView)?.isHidden != true else { continue }
+            if element.accessibilityLabel == label { return element }
+            // Accessible leaves are atomic even when automation can vend their backing views.
+            guard !element.isAccessibilityElement else { continue }
+            let children = (element.automationElements as? [NSObject])
+                ?? (element.accessibilityElements as? [NSObject]) ?? []
+            pending.append(contentsOf: children)
+            if children.isEmpty {
+                let count = element.accessibilityElementCount()
+                if count > 0, count != NSNotFound {
+                    pending.append(contentsOf: (0..<count).compactMap {
+                        element.accessibilityElement(at: $0) as? NSObject
+                    })
+                }
+            }
+            pending.append(contentsOf: (element as? UIView)?.subviews ?? [])
+        }
+        return nil
+    }
+}
 
 final class MobileCollaborationPresentationTests: XCTestCase {
     func testOwnerOnlyStateHidesControlAndUsesTheDirectPreference() {
@@ -184,6 +240,8 @@ final class MobileCollaborationPresentationTests: XCTestCase {
 
     @MainActor
     func testTerminalToggleIsSharedAcrossSessionsAndSurvivesRecreation() throws {
+        let restoreAccessibility = try MobileAccessibilityTestRuntime.enableAutomation()
+        defer { restoreAccessibility() }
         let suiteName = "MobileCollaborationPresentationTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -234,15 +292,7 @@ final class MobileCollaborationPresentationTests: XCTestCase {
             window.layoutIfNeeded()
         }
         func element(_ label: String, in root: NSObject) -> NSObject? {
-            if (root as? UIView)?.isHidden == true { return nil }
-            if root.accessibilityLabel == MobileL10n.string(label) { return root }
-            for child in (root.accessibilityElements as? [NSObject]) ?? [] {
-                if let found = element(label, in: child) { return found }
-            }
-            for child in (root as? UIView)?.subviews ?? [] {
-                if let found = element(label, in: child) { return found }
-            }
-            return nil
+            MobileAccessibilityTestRuntime.element(labelled: MobileL10n.string(label), in: root)
         }
         func toggle(_ label: String) throws {
             let button = try XCTUnwrap(element(label, in: window))

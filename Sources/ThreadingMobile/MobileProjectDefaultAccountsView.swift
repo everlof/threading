@@ -329,6 +329,8 @@ struct MobileAccountSubstitutionReceipt: View {
             .padding(.horizontal, MobileDesign.Spacing.inset)
             .padding(.vertical, MobileDesign.Spacing.small)
             .background(theme.accentMuted)
+            // The receipt floats above terminal pixels, which can differ from the app ground.
+            .background(theme.ground)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
