@@ -480,6 +480,12 @@ The right-pane New Session path now mounts the production `PromptTextView`, `Chi
 production shortcut cue, and is disabled for an empty or provisional IME draft. The Linux host
 presents project and provider choices in bounded, visible
 production menu rows; project and provider identities, availability, and launch remain host-owned.
+The terminal header also mounts the unchanged production `SplitIconButtonView` for Open In.
+GIO discovers directory handlers, and the Linux host launches the selected handler with the
+active checkout path after revalidation. The chooser mounts at most six production menu rows
+while retaining up to 64 app choices. Run
+`THREADING_LINUX_OPEN_IN_ONLY=1 ./window-smoke.sh` for the native X11 and AT-SPI journey.
+The primary button currently shows a folder glyph rather than the selected app icon.
 The Linux TextKit shim shapes and edits Unicode text,
 wraps and scrolls, tracks selection and undo, and accepts SDL committed text and IME preedit without sending it
 to the PTY. The host passes a nonempty opening brief through the existing exact-project agent

@@ -652,6 +652,23 @@ struct WindowHarness {
         }
     }
 
+    /// GIO may read the desktop registry; publish one immutable result back to SDL's owner.
+    private final class OpenInCatalogueGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: LinuxExternalApps.Catalogue?
+
+        func finish(_ catalogue: LinuxExternalApps.Catalogue) {
+            lock.lock(); result = catalogue; lock.unlock()
+        }
+
+        func take() -> LinuxExternalApps.Catalogue? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
     /// The GTK dialog and store import run away from SDL's owning thread. Only one bounded
     /// snapshot crosses back to the navigator; closing the window closes a pending dialog.
     private final class FolderImportGate: @unchecked Sendable {
@@ -1741,6 +1758,84 @@ struct WindowHarness {
         var activePane: WorkspaceTerminalPane?
         var activePageTarget: NavigatorOutlineItem?
         var pendingPageReveal: NavigatorOutlineItem?
+        var openInCatalogue = LinuxExternalApps.Catalogue(apps: [], defaultID: nil)
+        var pendingOpenInCatalogue: OpenInCatalogueGate?
+        var pendingOpenInMenuPage: String?
+        var pendingOpenInLaunch: (gate: SelectionGate, appID: String, remember: Bool)?
+        let openInPreferenceKey = "externalApp.preferred"
+        func preferredOpenInID() -> String? {
+            let stored = PreferenceStore.shared.string(forKey: openInPreferenceKey)
+            if let stored, openInCatalogue.apps.contains(where: { $0.id == stored }) {
+                return stored
+            }
+            if let fallback = openInCatalogue.defaultID,
+               openInCatalogue.apps.contains(where: { $0.id == fallback }) {
+                return fallback
+            }
+            return openInCatalogue.apps.first?.id
+        }
+        func configureOpenInPane() {
+            guard let pane = activePane else { return }
+            guard let target = activePageTarget, target.id == pane.pageIdentity,
+                  let index = projectIndexes[target.projectID], projects.indices.contains(index),
+                  projects[index].id == target.projectID else {
+                pane.configureOpenIn(preferredID: nil, icon: nil, choices: [])
+                return
+            }
+            let choices = openInCatalogue.apps.map {
+                WorkspaceTerminalPane.OpenInChoice(id: $0.id, name: $0.name)
+            }
+            pane.configureOpenIn(preferredID: preferredOpenInID(), icon: nil, choices: choices)
+        }
+        func startOpenInDiscovery() {
+            guard pendingOpenInCatalogue == nil else { return }
+            let gate = OpenInCatalogueGate()
+            pendingOpenInCatalogue = gate
+            DispatchQueue.global(qos: .userInitiated).async {
+                gate.finish(LinuxExternalApps.discover())
+            }
+        }
+        func launchOpenIn(_ appID: String, remember: Bool) {
+            guard pendingOpenInLaunch == nil, let pane = activePane,
+                  let target = activePageTarget, pane.pageIdentity == target.id,
+                  let index = projectIndexes[target.projectID], projects.indices.contains(index),
+                  projects[index].id == target.projectID,
+                  openInCatalogue.apps.contains(where: { $0.id == appID }) else {
+                print("OPEN_IN_REFUSED stale page or app"); fflush(nil)
+                return
+            }
+            let directory = projects[index].path
+            let gate = SelectionGate()
+            pendingOpenInLaunch = (gate, appID, remember)
+            DispatchQueue.global(qos: .userInitiated).async {
+                gate.finish(Result {
+                    guard let folder = ProjectDirectory.existing(at: directory) else {
+                        throw LinuxExternalApps.LaunchFailure(message: "The checkout no longer exists.")
+                    }
+                    try LinuxExternalApps.launch(appID: appID, directory: folder.path)
+                })
+            }
+        }
+        func drainOpenInRequests(_ pane: WorkspaceTerminalPane) {
+            if let appID = pane.takeOpenInPressRequest() {
+                launchOpenIn(appID, remember: false)
+            }
+            if pane.takeOpenInChooserToggleRequest() {
+                if pane.hasOpenInMenu {
+                    pane.toggleOpenInMenu(window: window, paneWidth: terminalWidth)
+                } else if pendingOpenInMenuPage == pane.pageIdentity {
+                    pendingOpenInMenuPage = nil
+                } else {
+                    pendingOpenInMenuPage = pane.pageIdentity
+                    startOpenInDiscovery()
+                }
+            }
+            if let appID = pane.takeOpenInChoiceRequest() {
+                launchOpenIn(appID, remember: true)
+                pane.dismissMenu(window: window)
+            }
+        }
+        startOpenInDiscovery()
         var sidebarFocused = true
         var navigatorTitle = "Threading Linux window experiment"
         var hasSplitPane: Bool { idlePane != nil || activePane != nil }
@@ -2029,6 +2124,7 @@ struct WindowHarness {
                     invokeSessionMenuCommand(command)
                     pane.dismissMenu(window: window)
                 }
+                drainOpenInRequests(pane)
                 dirty = true
                 return true
             }
@@ -2070,6 +2166,7 @@ struct WindowHarness {
                     pane.toggleMenu(window: window, paneWidth: terminalWidth)
                     dirty = true
                 }
+                if let pane = activePane { drainOpenInRequests(pane) }
                 if let target = pendingPageReveal {
                     pendingPageReveal = nil
                     guard let projectIndex = projectIndexes[target.projectID],
@@ -2114,6 +2211,7 @@ struct WindowHarness {
                 onReveal: { pendingPageReveal = pageTarget })
             activePane?.setThemeAppearance()
             activePageTarget = pageTarget
+            configureOpenInPane()
             tw_workspace_placeholder_mode(window, 0)
             sidebarFocused = false
             contentWindow.makeFirstResponder(nil)
@@ -2235,6 +2333,33 @@ struct WindowHarness {
                     projectID: projects[selected].id, id: id, projectIndex: selected, childIndex: row))
         }
         while true {
+            if let gate = pendingOpenInCatalogue, let catalogue = gate.take() {
+                pendingOpenInCatalogue = nil
+                openInCatalogue = catalogue
+                configureOpenInPane()
+                if let requestedPage = pendingOpenInMenuPage {
+                    pendingOpenInMenuPage = nil
+                    if let pane = activePane, pane.pageIdentity == requestedPage {
+                        pane.toggleOpenInMenu(window: window, paneWidth: terminalWidth)
+                    }
+                }
+                dirty = true
+            }
+            if let pending = pendingOpenInLaunch, let result = pending.gate.take() {
+                pendingOpenInLaunch = nil
+                switch result {
+                case .success:
+                    if pending.remember {
+                        PreferenceStore.shared.set(pending.appID, forKey: openInPreferenceKey)
+                        configureOpenInPane()
+                    }
+                    print("OPEN_IN_OPENED \(pending.appID)")
+                case .failure(let error):
+                    print("OPEN_IN_REFUSED \(error.localizedDescription)")
+                }
+                fflush(nil)
+                dirty = true
+            }
             if composerSubmitRequested {
                 composerSubmitRequested = false
                 if let choice = composerChoice, let idlePane, idlePane.isComposing,
@@ -2872,6 +2997,7 @@ struct WindowHarness {
                 let awaitingCreation = terminals.values.contains { $0.hasPendingTerminalCreation }
                     || restoredRuntimes.values.contains { $0.hasPendingAgentCreation }
                 let pollsRuntime = awaitingCreation || activePane?.needsPolling == true
+                    || pendingOpenInCatalogue != nil || pendingOpenInLaunch != nil
                 // A picker without a terminal still owes a deadline update. Sleep until that
                 // expiry (at most one second to recheck wall-clock changes), while the bridge
                 // keeps servicing accessibility without returning to the Swift loop every 33ms.
@@ -2900,14 +3026,26 @@ struct WindowHarness {
             }
             if event.kind == 45 { continue }
             if event.kind == 44 {
-                LinuxTheme.setDark(!LinuxTheme.isDark)
-                navigatorRoot.setThemeAppearance()
-                headerTitle.textColor = navigatorRoot.headerInk.label
-                idlePane?.setThemeAppearance()
-                activePane?.setThemeAppearance()
-                dirty = true
-                print("THEME_APPEARANCE \(LinuxTheme.isDark ? "dark" : "light")")
-                fflush(nil)
+                if event.action == 0 {
+                    LinuxTheme.setDark(!LinuxTheme.isDark)
+                    navigatorRoot.setThemeAppearance()
+                    headerTitle.textColor = navigatorRoot.headerInk.label
+                    idlePane?.setThemeAppearance()
+                    activePane?.setThemeAppearance()
+                    dirty = true
+                    print("THEME_APPEARANCE \(LinuxTheme.isDark ? "dark" : "light")")
+                    fflush(nil)
+                } else if let pane = activePane {
+                    var identityEvent = event
+                    let identity = String(validatingCString: tw_event_text(&identityEvent)) ?? ""
+                    if identity == pane.pageIdentity {
+                        focusSidebar(false)
+                        if event.action == 1 { _ = pane.pressOpenInAction() }
+                        if event.action == 2 { _ = pane.pressOpenInChooser() }
+                        drainOpenInRequests(pane)
+                        dirty = true
+                    }
+                }
                 continue
             }
             if let button = dismissedActionGesture {

@@ -4826,3 +4826,25 @@ It also exercised project/provider choices and multiline Unicode editing. I insp
 1120×480 `out/composer/composer.png`: the full Start Session title, shortcut cue, editor and
 focus state are visible. Theme-boundary and main-actor-latency scripts passed. The packaged
 `.deb` suite and floating button behavior were not rerun for this checkpoint.
+
+## 159. Linux mounts the production Open In split control
+
+The terminal header now mounts the unchanged production `SplitIconButtonView`. A Linux GIO
+adapter discovers desktop applications registered for directories and launches the selected
+application with a `GFile` for the active project's checkout. The host keeps project identity,
+active page selection, directory validation, app availability, and the last-used preference.
+GIO work runs outside the SDL window thread. The chooser retains at most 64 lightweight app
+choices while mounting at most six shared `ThemedMenuRowView` rows. Keyboard, pointer, and
+AT-SPI actions use the same validated app ID path; Command-O invokes the primary action.
+The host owns launch behavior, so this adds no extension presentation contract. The primary
+button currently uses a folder glyph until Linux resolves each app's icon hint into bitmap art.
+
+Verification on 2026-10-05: Ubuntu arm64 `WindowHarness` built, and the focused native X11
+smoke exercised the real split button, AT-SPI bounds and actions, default app launch,
+an eight-app chooser with six mounted rows and PageDown selection, last-used primary action,
+exact checkout path with shell metacharacters, and refusal after the checkout moved. The
+overlay accepts the six-row texture and shrinks its viewport for short windows. I inspected
+`out/open-in/open-in-header.png` and
+`out/open-in/open-in-choices.png` from the real 1120×480 window. The adapter's isolated GIO
+contract checks literal directory launch and invalid input. The packaged `.deb` runtime runner
+now includes the same Open In journey; a full installed bundle run remains to be verified.

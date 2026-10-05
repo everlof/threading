@@ -22,6 +22,8 @@ struct TWWindow {
     int placeholderTracking, placeholderHovered;
     SDL_Rect actionsBounds;
     int actionsVisible, actionsEnabled, actionsTracking, actionsState;
+    char openInIdentity[128];
+    int openInEnabled;
     int navigatorPointerRoute, navigatorTracking, navigatorHovered, navigatorSuppressLeftUp;
     int width, height, terminal, projectNavigation, suppressActivation, explicitSurfaceUpdate;
     int composing;
@@ -88,6 +90,17 @@ static void tw_reset_text_input(TWWindow *w, int active) {
     if (active) SDL_StartTextInput();
 }
 const char *tw_error(void) { return SDL_GetError(); }
+void tw_open_in_shortcut_state(TWWindow *w, const char *identity, int enabled) {
+    if (!w) return;
+    const size_t length = identity ? strnlen(identity, sizeof(w->openInIdentity)) : 0;
+    if (!identity || !length || length >= sizeof(w->openInIdentity) || !enabled) {
+        w->openInIdentity[0] = '\0';
+        w->openInEnabled = 0;
+        return;
+    }
+    memcpy(w->openInIdentity, identity, length + 1);
+    w->openInEnabled = 1;
+}
 static double tw_startup_milliseconds(void) {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
@@ -266,7 +279,7 @@ int tw_present_terminal_header(TWWindow *w, const uint8_t *rgba, int width, int 
 int tw_present_session_menu(TWWindow *w, const uint8_t *rgba, int width, int height,
                             int x, int y) {
     if (!w || !w->sidebarWidth || w->placeholderMode || !rgba ||
-        width < 1 || width > 512 || height < 1 || height > 320) return -1;
+        width < 1 || width > 512 || height < 1 || height > 512) return -1;
     int windowWidth, windowHeight;
     SDL_GetWindowSize(w->window, &windowWidth, &windowHeight);
     const int paneWidth = windowWidth - w->sidebarWidth;
@@ -359,6 +372,7 @@ int tw_workspace_sidebar_focused(TWWindow *w) { return w && w->sidebarWidth && w
 int tw_workspace_reset_terminal(TWWindow *w) {
     if (!w || !w->sidebarWidth) return -1;
     if (w->sessionMenuTexture) tw_hide_session_menu(w);
+    tw_open_in_shortcut_state(w, NULL, 0);
     tw_accessibility_page_title(w, NULL, NULL, 0, 0, 0, 0);
     w->terminalButtons = 0;
     SDL_DestroyTexture(w->terminalTexture);
@@ -411,6 +425,7 @@ int tw_workspace_editor_focused(TWWindow *w) { return w && w->editorFocused; }
 void tw_workspace_placeholder_mode(TWWindow *w, int enabled) {
     if (!w || !w->sidebarWidth || w->placeholderMode == (enabled != 0)) return;
     if (w->sessionMenuTexture) tw_hide_session_menu(w);
+    tw_open_in_shortcut_state(w, NULL, 0);
     if (w->terminalHeaderTracking || w->placeholderTracking) SDL_CaptureMouse(SDL_FALSE);
     w->terminalHeaderTracking = w->terminalHeaderHovered = 0;
     w->placeholderTracking = w->placeholderHovered = 0;
@@ -448,6 +463,7 @@ void tw_workspace_mode(TWWindow *w, int sidebarWidth, int sidebarFocused) {
         return;
     }
     if (w->sessionMenuTexture) tw_hide_session_menu(w);
+    tw_open_in_shortcut_state(w, NULL, 0);
     w->sidebarWidth = sidebarWidth;
     w->terminalButtons = 0;
     if (w->terminalHeaderTracking) SDL_CaptureMouse(SDL_FALSE);
@@ -590,6 +606,28 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             if (e.type == SDL_KEYUP) w->suppressActivation = 0;
             continue;
         }
+        // The workspace's Open shortcut belongs to its mounted page. Consume both key
+        // phases before the PTY route; Ctrl+O remains ordinary terminal input on Linux.
+        if (w->sidebarWidth && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
+            e.key.keysym.sym == SDLK_o && (e.key.keysym.mod & KMOD_GUI) &&
+            !(e.key.keysym.mod & (KMOD_CTRL | KMOD_ALT | KMOD_SHIFT))) {
+            if (e.type == SDL_KEYUP) {
+                if (w->suppressActivation == SDLK_o) w->suppressActivation = 0;
+                continue;
+            }
+            if (e.key.repeat) continue;
+            w->suppressActivation = SDLK_o;
+            if (e.key.keysym.scancode >= 0 && e.key.keysym.scancode < SDL_NUM_SCANCODES)
+                w->suppressedKeyups[e.key.keysym.scancode] = 1;
+            if (!w->sessionMenuTexture && w->terminal && !w->sidebarFocused &&
+                !w->editorFocused && w->openInEnabled) {
+                out->kind = 44;
+                out->action = 1;
+                memcpy(out->text, w->openInIdentity, strlen(w->openInIdentity) + 1);
+                return 1;
+            }
+            continue;
+        }
         // Navigation-owned key releases remain navigation-owned even when their press opened
         // a terminal or moved focus. Never send the other pane a lone Enter/arrow/Tab release.
         if ((w->sidebarWidth || w->actionsVisible) && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
@@ -649,8 +687,17 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 }
                 continue;
             }
-            if (e.type == SDL_MOUSEWHEEL || e.type == SDL_TEXTINPUT ||
-                e.type == SDL_TEXTEDITING) continue;
+            if (e.type == SDL_MOUSEWHEEL) {
+                const long long vertical = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED
+                    ? -(long long)e.wheel.y : (long long)e.wheel.y;
+                if (!vertical) continue;
+                out->kind = 41;
+                out->action = vertical > 0 ? 12 : 13;
+                const long long magnitude = vertical > 0 ? vertical : -vertical;
+                out->key = magnitude > 6 ? 6 : magnitude;
+                return 1;
+            }
+            if (e.type == SDL_TEXTINPUT || e.type == SDL_TEXTEDITING) continue;
             if (e.type == SDL_TEXTEDITING_EXT) { SDL_free(e.editExt.text); continue; }
             if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) {
                 if (e.type == SDL_KEYUP || e.key.repeat) continue;
@@ -661,6 +708,8 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 case SDLK_ESCAPE: action = 6; break;
                 case SDLK_UP: action = 7; break;
                 case SDLK_DOWN: action = 8; break;
+                case SDLK_PAGEUP: action = 10; break;
+                case SDLK_PAGEDOWN: action = 11; break;
                 case SDLK_RETURN: case SDLK_KP_ENTER: action = 9; break;
                 default: break;
                 }
@@ -842,6 +891,12 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 if (!w->sessionMenuTexture ||
                     !tw_accessibility_session_menu_row_identity(row, out->text, sizeof(out->text))) continue;
                 out->kind = 43; out->key = row; out->action = 1;
+            } else if (e.user.code == 14) {
+                const int action = (int)(intptr_t)e.user.data1;
+                if (w->sessionMenuTexture ||
+                    !tw_accessibility_open_in_identity(action, out->text,
+                                                       sizeof(out->text))) continue;
+                out->kind = 44; out->action = action;
             } else if (e.user.code == 12 && w->placeholderMode) {
                 const int kind = (int)(intptr_t)e.user.data1;
                 if (!tw_accessibility_composer_chip_identity(kind, out->text,

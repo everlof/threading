@@ -1,5 +1,26 @@
 #pragma once
 #include <stdint.h>
+
+// The Linux desktop handler adapter is synchronous. Call it from a bounded worker, never from
+// SDL's owning thread. IDs are real desktop app IDs; iconHint is a file path or themed icon name.
+#define TW_EXTERNAL_APP_LIMIT 64
+#define TW_EXTERNAL_APP_ID_CAPACITY 256
+#define TW_EXTERNAL_APP_NAME_CAPACITY 256
+#define TW_EXTERNAL_APP_ICON_CAPACITY 512
+typedef struct {
+    char id[TW_EXTERNAL_APP_ID_CAPACITY];
+    char name[TW_EXTERNAL_APP_NAME_CAPACITY];
+    char iconHint[TW_EXTERNAL_APP_ICON_CAPACITY];
+} TWExternalApp;
+// Returns the number of directory MIME handlers copied, or -1 for invalid arguments.
+// The system default is first when present. defaultID is empty when no default exists.
+int tw_external_apps_discover(TWExternalApp *apps, int capacity,
+                              char *defaultID, int defaultCapacity);
+// Revalidates the desktop ID against current directory handlers and opens one existing absolute
+// directory via GIO. Returns 0 on success; a nonzero result writes a bounded error string.
+int tw_external_app_launch(const char *appID, const char *directory,
+                           char *error, int errorCapacity);
+
 typedef struct TWWindow TWWindow;
 // 1 repaint/resize, 2 project click (action=1 for AT-SPI select, key=validated visible slot),
 // 3/4 project navigation, 5 window quit. For 3/4, action=0 is an arrow key and action=1
@@ -36,10 +57,14 @@ typedef struct TWWindow TWWindow;
 // Coordinates are right-pane-local x and window-local y; action matches kind27.
 // Kind40 presses the mounted idle placeholder's action button through AT-SPI or keyboard.
 // Kind41 owns an open right-pane session menu: actions 0 motion, 1 down, 2 drag, 3 up,
-// 4 outside press/dismiss, 6 Escape, 7 Up, 8 Down, 9 Enter. Pointer coordinates are
-// menu-local pixels and never enter the terminal. Kind42 is its header Actions button's
+// 4 outside press/dismiss, 6 Escape, 7 Up, 8 Down, 9 Enter, 10/11 PageUp/PageDown,
+// 12/13 wheel up/down (key is 1...6 ticks). Pointer coordinates are menu-local pixels
+// and never enter the terminal. Kind42 is its header Actions button's
 // AT-SPI press. Kind43 is an AT-SPI menu-row press: key is the bounded visible slot and
 // text is the exact page identity, which the host must revalidate before executing.
+// Kind44 action0 switches preview appearance. Actions 1/2 press the Open In primary/
+// chooser halves via AT-SPI; action1 also comes from Super+O when the pane is focused.
+// text is the exact page identity, which the host revalidates before opening anything.
 // Kind45 reports native window focus (action=1 gained, 0 lost). A focus loss that also
 // cancels an active gesture retains that gesture's event kind; query tw_window_has_focus
 // after every event so the host sees both changes in the same turn.
@@ -146,8 +171,23 @@ void tw_accessibility_page_title(TWWindow *, const char *identity, const char *n
                                  int x, int y, int width, int height);
 void tw_accessibility_page_actions(TWWindow *, const char *identity, const char *label,
                                    int x, int y, int width, int height);
+// Mount the shared Open In split control only for the active page. NULL identity unmounts
+// both halves. Each label and exact window-pixel half bounds are published separately;
+// disabled controls remain visible without press actions.
+void tw_accessibility_open_in(TWWindow *, const char *identity,
+                              const char *primaryLabel, const char *chooserLabel, int enabled,
+                              int primaryX, int primaryY, int primaryWidth, int primaryHeight,
+                              int chooserX, int chooserY, int chooserWidth, int chooserHeight);
+// Internal event validation: action 1 is primary and 2 is chooser. On success copies
+// the active page identity to a buffer of at least 128 bytes.
+int tw_accessibility_open_in_identity(int action, char *identity, int capacity);
+// Internal native-shortcut state, also maintained when the AT-SPI bus is absent.
+void tw_open_in_shortcut_state(TWWindow *, const char *identity, int enabled);
 void tw_accessibility_session_menu_begin(TWWindow *, const char *identity,
                                          int x, int y, int width, int height);
+// Call between begin and rows to identify the Open In app-choice overlay. Existing
+// callers keep the Session actions label and accessible ID by default.
+void tw_accessibility_session_menu_label(TWWindow *, const char *label);
 int tw_accessibility_session_menu_add_row(TWWindow *, const char *id, const char *name,
                                           int selected, int enabled,
                                           int x, int y, int width, int height);

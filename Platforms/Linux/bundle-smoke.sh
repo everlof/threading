@@ -27,7 +27,7 @@ docker run --rm -i --platform linux/arm64 \
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC
 apt-get update -qq >/dev/null
-apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev >/dev/null
+apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev libglib2.0-dev >/dev/null
 ./package-app.sh
 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --project-row-layout-fixture
 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --session-row-layout-fixture
@@ -77,6 +77,7 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/add_project_button_smoke.py:/add_project_button_smoke.py:ro" \
   -v "$PWD/tests/actions_smoke.py:/actions_smoke.py:ro" \
   -v "$PWD/tests/session_actions_smoke.py:/session_actions_smoke.py:ro" \
+  -v "$PWD/tests/open_in_smoke.py:/open_in_smoke.py:ro" \
   -v "$PWD/tests/actions_mark_contract.py:/actions_mark_contract.py:ro" \
   -v "$PWD/tests/saved_terminal_child.py:/saved_terminal_child.py:ro" \
   -v "$PWD/tests/saved_terminal_refusal_smoke.py:/saved_terminal_refusal_smoke.py:ro" \

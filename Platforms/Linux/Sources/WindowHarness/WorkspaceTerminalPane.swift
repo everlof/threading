@@ -30,22 +30,48 @@ final class SessionMenuSurface: NSView {
 @MainActor
 final class WorkspaceTerminalPane {
     static var headerPixelHeight: Int { Int((PaneHeaderView.bandHeight * 2).rounded()) }
+    private static let visibleMenuRows = 6
+    private var menuVisibleRows = 6
+
+    struct OpenInChoice: Equatable {
+        let id: String
+        let name: String
+    }
+
+    private enum MenuContent: Equatable { case sessionActions, openIn }
 
     let session: GraphicalTerminal
     private let headerWindow = NSWindow(backingScaleFactor: 2)
     private let headerRoot = NSView(frame: .zero)
     private let pageTitle = PageTitleView(symbolName: "terminal", inkSource: .backdrop)
+    private let openInAction = ThemedIconButton(
+        symbolName: "folder", accessibility: "Open in external app",
+        glyphMaterialization: .deferred)
+    private let openInChooser = ThemedIconButton(
+        symbolName: "chevron.down", accessibility: "Choose an app to open in",
+        target: .splitMenu, glyphMaterialization: .deferred)
+    private lazy var openInControl = SplitIconButtonView(
+        action: openInAction, chevron: openInChooser)
     let pageIdentity: String
     private let menuWindow = NSWindow(backingScaleFactor: 2)
     private let menuRoot = SessionMenuSurface(frame: .zero)
     private var menuRows: [ThemedMenuRowView] = []
+    private var menuPlan: ThemedMenuRowPlan?
+    private var menuFirstVisible = 0
     private var menuOrigin = (x: 0, y: 0)
     private var menuSize = (width: 0, height: 0)
     private var menuSelected = 0
+    private var menuContent: MenuContent = .sessionActions
     private var menuOpen = false
     private var menuNeedsPresentation = false
     private(set) var menuToggleRequested = false
     private(set) var chosenMenuCommand: SessionMenuCommand?
+    private var openInChoices: [OpenInChoice] = []
+    private var presentedOpenInChoices: [OpenInChoice] = []
+    private var preferredOpenInID: String?
+    private var requestedOpenInID: String?
+    private var chosenOpenInID: String?
+    private var openInChooserToggleRequested = false
     private var headerNeedsPresentation = true
     private var headerWidth = 0
     private var nextFrame: UInt64 = 0
@@ -57,6 +83,7 @@ final class WorkspaceTerminalPane {
     var needsPolling: Bool { failure == nil }
     var hasSessionActions: Bool { !pageTitle.actionsAnchor.isHidden }
     var hasOpenMenu: Bool { menuOpen }
+    var hasOpenInMenu: Bool { menuOpen && menuContent == .openIn }
 
     init(_ session: GraphicalTerminal, pageName: String, pageIdentity: String,
          icon: NSImage? = nil,
@@ -69,7 +96,16 @@ final class WorkspaceTerminalPane {
         pageTitle.onReveal = onReveal
         pageTitle.actionsAnchor.isHidden = !showsSessionActions
         pageTitle.onActions = { [weak self] _ in self?.menuToggleRequested = true }
-        let header = PaneHeaderView(leading: [pageTitle], margin: .paneEdge)
+        openInAction.onPress = { [weak self] in
+            guard let self else { return }
+            self.requestedOpenInID = self.preferredOpenInID
+        }
+        openInChooser.toolTip = "Choose an app to open in"
+        openInChooser.presentsMenu = true
+        openInChooser.onPress = { [weak self] in self?.openInChooserToggleRequested = true }
+        openInControl.isHidden = true
+        let header = PaneHeaderView(leading: [pageTitle], trailing: [openInControl],
+                                    margin: .paneEdge)
         headerRoot.addSubview(header)
         NSLayoutConstraint.activate([
             header.leadingAnchor.constraint(equalTo: headerRoot.leadingAnchor),
@@ -88,6 +124,7 @@ final class WorkspaceTerminalPane {
         let appearance = LinuxTheme.appearance
         headerRoot.appearance = appearance
         menuRoot.appearance = appearance
+        openInControl.invalidateBackdropInk()
         let ansiRoles = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
                          "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue",
                          "brightMagenta", "brightCyan", "brightWhite"]
@@ -105,6 +142,57 @@ final class WorkspaceTerminalPane {
             UInt32((max(0, min(1, value)) * 255).rounded())
         }
         return channel(red) << 16 | channel(green) << 8 | channel(blue)
+    }
+
+    /// Desktop discovery and launch authority belong to the host. Keep its bounded catalogue as
+    /// values; only six production row views exist at once in the chooser viewport.
+    func configureOpenIn(preferredID: String?, icon: NSImage?, choices: [OpenInChoice]) {
+        openInChoices = Array(choices.prefix(64)).filter {
+            !$0.id.isEmpty && $0.id.utf8.count < 128 && !$0.id.utf8.contains(0)
+                && !$0.name.isEmpty && $0.name.utf8.count <= 400
+                && !$0.name.utf8.contains(0)
+        }
+        let preferred = openInChoices.first(where: { $0.id == preferredID })
+            ?? openInChoices.first
+        preferredOpenInID = preferred?.id
+        let available = preferred != nil
+        openInControl.isHidden = !available
+        openInAction.isEnabled = available
+        openInChooser.isEnabled = available
+        if let preferred {
+            let label = "Open in \(preferred.name)"
+            if preferred.id == preferredID, let icon {
+                openInAction.setImage(icon, accessibility: label)
+            }
+            else { openInAction.setSymbol("folder", accessibility: label) }
+            openInAction.toolTip = label
+        }
+        headerNeedsPresentation = true
+    }
+
+    func pressOpenInAction() -> Bool {
+        guard preferredOpenInID != nil else { return false }
+        return openInAction.accessibilityPerformPress()
+    }
+
+    func pressOpenInChooser() -> Bool {
+        guard !openInChoices.isEmpty else { return false }
+        return openInChooser.accessibilityPerformPress()
+    }
+
+    func takeOpenInPressRequest() -> String? {
+        defer { requestedOpenInID = nil }
+        return requestedOpenInID
+    }
+
+    func takeOpenInChooserToggleRequest() -> Bool {
+        defer { openInChooserToggleRequested = false }
+        return openInChooserToggleRequested
+    }
+
+    func takeOpenInChoiceRequest() -> String? {
+        defer { chosenOpenInID = nil }
+        return chosenOpenInID
     }
 
     func handleHeader(_ input: TWEvent) {
@@ -140,43 +228,98 @@ final class WorkspaceTerminalPane {
     }
 
     func toggleMenu(window: OpaquePointer, paneWidth: Int) {
-        if menuOpen { dismissMenu(window: window); return }
-        guard hasSessionActions, paneWidth >= 280 else { return }
-        let commands = SessionMenuCommand.allCases
-        let entries = commands.map {
-            ThemedMenuEntry.item(ThemedMenuItem(title: $0.title, representedValue: $0.rawValue))
+        if menuOpen {
+            let wasSessionMenu = menuContent == .sessionActions
+            dismissMenu(window: window)
+            if wasSessionMenu { return }
         }
-        let plan = ThemedMenuRowPlan(entries: entries)
+        guard hasSessionActions, paneWidth >= 280 else { return }
+        openMenu(.sessionActions, paneWidth: paneWidth)
+    }
+
+    func toggleOpenInMenu(window: OpaquePointer, paneWidth: Int) {
+        if menuOpen {
+            let wasOpenInMenu = menuContent == .openIn
+            dismissMenu(window: window)
+            if wasOpenInMenu { return }
+        }
+        guard !openInChoices.isEmpty, paneWidth >= 280 else { return }
+        openMenu(.openIn, paneWidth: paneWidth)
+    }
+
+    private func openMenu(_ content: MenuContent, paneWidth: Int) {
+        menuVisibleRows = Self.visibleMenuRows
+        menuContent = content
+        chosenMenuCommand = nil
+        chosenOpenInID = nil
+        let entries: [ThemedMenuEntry]
+        let selectedEntryIndex: Int?
+        switch content {
+        case .sessionActions:
+            entries = SessionMenuCommand.allCases.map {
+                .item(ThemedMenuItem(title: $0.title, representedValue: $0.rawValue))
+            }
+            selectedEntryIndex = nil
+        case .openIn:
+            presentedOpenInChoices = openInChoices
+            entries = presentedOpenInChoices.map {
+                .item(ThemedMenuItem(title: $0.name, representedValue: $0.id))
+            }
+            selectedEntryIndex = presentedOpenInChoices.firstIndex { $0.id == preferredOpenInID }
+        }
+        menuPlan = ThemedMenuRowPlan(entries: entries, selectedEntryIndex: selectedEntryIndex)
+        menuSelected = selectedEntryIndex ?? 0
+        menuFirstVisible = min(menuSelected, max(0, entries.count - menuVisibleRows))
         let menuWidth = min(CGFloat(228), CGFloat(paneWidth) / 2 - 8)
+        menuSize.width = Int(menuWidth * 2)
+        rebuildVisibleMenuRows()
+        headerWindow.layoutIfNeeded()
+        let x: Int
+        switch content {
+        case .sessionActions:
+            let anchor = pageTitle.actionsAnchor.convert(pageTitle.actionsAnchor.bounds,
+                                                          to: headerRoot)
+            x = Int((anchor.minX * 2).rounded())
+            pageTitle.actionsAnchor.isSelected = true
+        case .openIn:
+            let anchor = openInChooser.convert(openInChooser.bounds, to: headerRoot)
+            x = Int((anchor.maxX * 2).rounded()) - menuSize.width
+            openInChooser.isSelected = true
+        }
+        menuOrigin = (max(0, min(paneWidth - menuSize.width, x)), Self.headerPixelHeight)
+        headerNeedsPresentation = true
+        menuOpen = true
+        menuNeedsPresentation = true
+    }
+
+    private func rebuildVisibleMenuRows() {
+        guard let plan = menuPlan else { return }
+        let last = min(plan.heights.count, menuFirstVisible + menuVisibleRows)
+        let visible = menuFirstVisible..<last
         let padding: CGFloat = 6
-        let menuHeight = plan.heights.reduce(0, +) + padding * 2
-        menuSize = (Int(menuWidth * 2), Int(menuHeight * 2))
+        let menuHeight = visible.reduce(2 * padding) { $0 + plan.heights[$1] }
+        menuSize.height = Int(menuHeight * 2)
+        let menuWidth = CGFloat(menuSize.width) / 2
         menuRoot.frame = NSRect(x: 0, y: 0, width: menuWidth, height: menuHeight)
         for row in menuRows { row.removeFromSuperview() }
         menuRows.removeAll(keepingCapacity: true)
         var top = padding
-        for index in commands.indices {
+        for index in visible {
             guard let row = plan.row(at: index) else { continue }
             let rowHeight = plan.heights[index]
             row.frame = NSRect(x: padding, y: menuHeight - top - rowHeight,
                                width: menuWidth - padding * 2, height: rowHeight)
             row.onChoose = { [weak self] selected, _ in
-                self?.chosenMenuCommand = commands[selected]
+                self?.recordMenuSelection(at: selected)
             }
             row.onHighlight = { [weak self] selected in self?.highlightMenuRow(selected) }
             menuRoot.addSubview(row)
             menuRows.append(row)
             top += rowHeight
         }
-        menuSelected = 0
-        highlightMenuRow(0)
-        headerWindow.layoutIfNeeded()
-        let anchor = pageTitle.actionsAnchor.convert(pageTitle.actionsAnchor.bounds, to: headerRoot)
-        let x = Int((anchor.minX * 2).rounded())
-        menuOrigin = (max(0, min(paneWidth - menuSize.width, x)), Self.headerPixelHeight)
-        pageTitle.actionsAnchor.isSelected = true
-        headerNeedsPresentation = true
-        menuOpen = true
+        for row in menuRows {
+            row.isKeyboardHighlighted = row.entryIndex == menuSelected
+        }
         menuNeedsPresentation = true
     }
 
@@ -184,19 +327,40 @@ final class WorkspaceTerminalPane {
         guard menuOpen else { return }
         menuOpen = false
         menuNeedsPresentation = false
-        pageTitle.actionsAnchor.isSelected = false
+        switch menuContent {
+        case .sessionActions: pageTitle.actionsAnchor.isSelected = false
+        case .openIn: openInChooser.isSelected = false
+        }
         headerNeedsPresentation = true
         menuWindow.cancelPointerGesture()
         tw_hide_session_menu(window)
     }
 
     private func highlightMenuRow(_ index: Int) {
-        guard menuRows.indices.contains(index) else { return }
+        guard menuOpen, let plan = menuPlan, plan.heights.indices.contains(index) else { return }
         menuSelected = index
-        for (slot, row) in menuRows.enumerated() {
-            row.isKeyboardHighlighted = slot == index
+        if index < menuFirstVisible {
+            menuFirstVisible = index
+            rebuildVisibleMenuRows()
+        } else if index >= menuFirstVisible + menuRows.count {
+            menuFirstVisible = index - menuVisibleRows + 1
+            rebuildVisibleMenuRows()
+        } else {
+            for row in menuRows {
+                row.isKeyboardHighlighted = row.entryIndex == index
+            }
         }
         menuNeedsPresentation = true
+    }
+
+    private func recordMenuSelection(at index: Int) {
+        guard menuOpen, let plan = menuPlan, plan.heights.indices.contains(index) else { return }
+        switch menuContent {
+        case .sessionActions:
+            chosenMenuCommand = SessionMenuCommand.allCases[index]
+        case .openIn:
+            chosenOpenInID = presentedOpenInChoices[index].id
+        }
     }
 
     func handleMenu(_ input: TWEvent, window: OpaquePointer) {
@@ -207,9 +371,20 @@ final class WorkspaceTerminalPane {
         case 7:
             highlightMenuRow(max(0, menuSelected - 1))
         case 8:
-            highlightMenuRow(min(menuRows.count - 1, menuSelected + 1))
+            highlightMenuRow(min((menuPlan?.heights.count ?? 1) - 1, menuSelected + 1))
         case 9:
-            chosenMenuCommand = SessionMenuCommand.allCases[menuSelected]
+            recordMenuSelection(at: menuSelected)
+        case 10, 12:
+            if menuContent == .openIn {
+                let step = input.action == 10 ? menuVisibleRows : max(1, Int(input.key))
+                highlightMenuRow(max(0, menuSelected - step))
+            }
+        case 11, 13:
+            if menuContent == .openIn {
+                let step = input.action == 11 ? menuVisibleRows : max(1, Int(input.key))
+                highlightMenuRow(min((menuPlan?.heights.count ?? 1) - 1,
+                                     menuSelected + step))
+            }
         default:
             let eventType: NSEvent.EventType
             switch input.action {
@@ -227,8 +402,8 @@ final class WorkspaceTerminalPane {
 
     func chooseMenuRow(_ slot: Int, identity: String) {
         guard menuOpen, identity == pageIdentity,
-              SessionMenuCommand.allCases.indices.contains(slot) else { return }
-        chosenMenuCommand = SessionMenuCommand.allCases[slot]
+              menuRows.indices.contains(slot) else { return }
+        recordMenuSelection(at: menuRows[slot].entryIndex)
     }
 
     private func presentMenu(window: OpaquePointer, originX: Int) throws {
@@ -247,14 +422,24 @@ final class WorkspaceTerminalPane {
                 Int32(originX + menuOrigin.x), Int32(menuOrigin.y),
                 Int32(menuSize.width), Int32(menuSize.height))
         }
-        for (slot, row) in menuRows.enumerated() {
+        if menuContent == .openIn {
+            tw_accessibility_session_menu_label(window, "Open In applications")
+        }
+        for row in menuRows {
             let bounds = row.convert(row.bounds, to: menuRoot)
             let x = originX + menuOrigin.x + Int((bounds.minX * 2).rounded())
             let y = menuOrigin.y + Int(((menuRoot.bounds.height - bounds.maxY) * 2).rounded())
-            _ = SessionMenuCommand.allCases[slot].rawValue.withCString { identifier in
+            let rowID: String
+            switch menuContent {
+            case .sessionActions: rowID = SessionMenuCommand.allCases[row.entryIndex].rawValue
+            // ATK row IDs are bounded display tokens. The real desktop ID stays in the
+            // pane-side choice snapshot and is resolved only after a validated row press.
+            case .openIn: rowID = "open-in.choice.\(row.entryIndex)"
+            }
+            _ = rowID.withCString { identifier in
                 row.item.title.withCString { name in
                     tw_accessibility_session_menu_add_row(window, identifier, name,
-                        slot == menuSelected ? 1 : 0, 1, Int32(x), Int32(y),
+                        row.entryIndex == menuSelected ? 1 : 0, 1, Int32(x), Int32(y),
                         Int32((bounds.width * 2).rounded()), Int32((bounds.height * 2).rounded()))
                 }
             }
@@ -268,7 +453,10 @@ final class WorkspaceTerminalPane {
         headerWidth = width
         headerRoot.frame = NSRect(x: 0, y: 0, width: CGFloat(width) / 2,
                                   height: PaneHeaderView.bandHeight)
-        pageTitle.maxWidth = max(0, headerRoot.bounds.width - 2 * PaneHeaderView.contentInset)
+        let openInWidth = Design.Size.toolbarButtonWidth + Design.Size.splitMenuWidth
+            + PaneHeaderView.itemSpacing
+        pageTitle.maxWidth = max(0, headerRoot.bounds.width
+            - 2 * PaneHeaderView.contentInset - openInWidth)
         let bitmap = Bitmap(width: width, height: Self.headerPixelHeight,
                             background: LinuxTheme.components("terminal.background"))
         headerRoot.render(in: NSGraphicsContext(bitmap: bitmap, scale: 2))
@@ -304,6 +492,30 @@ final class WorkspaceTerminalPane {
         } else {
             tw_accessibility_page_actions(window, nil, nil, 0, 0, 0, 0)
         }
+        if preferredOpenInID != nil {
+            let primary = openInAction.convert(openInAction.bounds, to: headerRoot)
+            let chooser = openInChooser.convert(openInChooser.bounds, to: headerRoot)
+            let primaryTop = Int((primary.maxY * 2).rounded(.up))
+            let chooserTop = Int((chooser.maxY * 2).rounded(.up))
+            pageIdentity.withCString { identity in
+                (openInAction.accessibilityTitle() ?? "Open in external app").withCString { label in
+                    (openInChooser.accessibilityTitle() ?? "Choose an app to open in")
+                        .withCString { chooserLabel in
+                            tw_accessibility_open_in(window, identity, label, chooserLabel, 1,
+                                Int32(originX + Int((primary.minX * 2).rounded(.down))),
+                                Int32(Self.headerPixelHeight - primaryTop),
+                                Int32((primary.width * 2).rounded()),
+                                Int32((primary.height * 2).rounded()),
+                                Int32(originX + Int((chooser.minX * 2).rounded(.down))),
+                                Int32(Self.headerPixelHeight - chooserTop),
+                                Int32((chooser.width * 2).rounded()),
+                                Int32((chooser.height * 2).rounded()))
+                        }
+                }
+            }
+        } else {
+            tw_accessibility_open_in(window, nil, nil, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        }
     }
 
     func focus(_ focused: Bool, window: OpaquePointer) {
@@ -330,6 +542,27 @@ final class WorkspaceTerminalPane {
     func refresh(window: OpaquePointer, width: Int, height: Int, originX: Int,
                  focused: Bool) throws {
         if menuOpen && headerWidth != width { dismissMenu(window: window) }
+        if menuOpen, let plan = menuPlan {
+            let available = CGFloat(max(0, height - Self.headerPixelHeight)) / 2
+            var rows = 0
+            var used: CGFloat = 12
+            for rowHeight in plan.heights.prefix(Self.visibleMenuRows) {
+                guard used + rowHeight <= available else { break }
+                used += rowHeight
+                rows += 1
+            }
+            if rows == 0 {
+                dismissMenu(window: window)
+            } else if rows != menuVisibleRows {
+                menuVisibleRows = rows
+                menuFirstVisible = min(menuFirstVisible, max(0, plan.heights.count - rows))
+                if menuSelected < menuFirstVisible { menuFirstVisible = menuSelected }
+                if menuSelected >= menuFirstVisible + rows {
+                    menuFirstVisible = menuSelected - rows + 1
+                }
+                rebuildVisibleMenuRows()
+            }
+        }
         let contentHeight = max(1, height - Self.headerPixelHeight)
         tw_workspace_terminal_top_inset(window, Int32(Self.headerPixelHeight))
         try presentHeader(window: window, width: width, originX: originX)

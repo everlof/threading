@@ -1,0 +1,5 @@
+module CGIO [system] {
+    header "shim.h"
+    link "gio-2.0"
+    export *
+}
