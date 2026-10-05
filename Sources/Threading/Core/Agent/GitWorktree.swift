@@ -92,6 +92,9 @@ enum GitWorktree {
             throw error
         }
 
+        // A background discovery may have observed this path before Git wrote its .git entry.
+        // Publish the completed checkout before a caller records or validates ownership.
+        _ = GitInfo.worktreeLocation(for: destination.path, refresh: true)
         ThreadingLogger.git.info(
             "Worktree creation completed project=\(project.id.uuidString, privacy: .public) branch=\(branch, privacy: .private(mask: .hash)) destination=\(destination.path, privacy: .private(mask: .hash))"
         )

@@ -173,7 +173,10 @@ final class SessionCheckoutCoordinator {
         // identity is enough to finish that exact move after the old worktree is removed;
         // it must not authorize a fresh request or a different destination.
         let pending = session.pendingCheckoutMove
-        let sourceRepositoryIdentity = GitInfo.worktreeLocation(for: canonicalSourcePath)?.repositoryIdentity
+        let sourceRepositoryIdentity = GitInfo.worktreeLocation(
+            for: canonicalSourcePath,
+            refresh: true
+        )?.repositoryIdentity
             ?? (pending?.checkoutPath == requestedPath
                 && !fileManager.fileExists(atPath: canonicalSourcePath)
                 && sourceProject.lastKnownRepositoryIdentity == pending?.repositoryIdentity
@@ -189,7 +192,7 @@ final class SessionCheckoutCoordinator {
             return .failure(.targetMissing)
         }
         guard isDirectory.boolValue else { return .failure(.targetNotDirectory) }
-        guard let target = GitInfo.worktreeLocation(for: requested.path) else {
+        guard let target = GitInfo.worktreeLocation(for: requested.path, refresh: true) else {
             return .failure(.targetNotCheckout)
         }
         guard target.root.standardizedFileURL.resolvingSymlinksInPath().path == requested.path else {
@@ -199,7 +202,7 @@ final class SessionCheckoutCoordinator {
             return .failure(.differentRepository)
         }
         guard !isManagedWorkspace(target.root) else { return .failure(.managedWorkspace) }
-        guard let branch = GitInfo.currentBranch(for: target.root.path) else {
+        guard let branch = GitInfo.currentBranch(for: target) else {
             return .failure(.detachedHead)
         }
         return .success(ValidatedSessionCheckout(

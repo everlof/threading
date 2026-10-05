@@ -41,6 +41,14 @@ sidebar's grouping key. **`worktreeIdentity` is the durable key for "which check
 branch is only ever a display value.** A submodule keeps its own identity under `/modules/`,
 correctly — it is a separate repository that happens to live inside another.
 
+Checkout discovery memoizes both locations and misses for ordinary display reads. That memo is
+not an ownership authority: a path can be observed before Git finishes creating its `.git` entry,
+or a checkout can be replaced at the same path. Worktree creation refreshes its destination after
+Git succeeds, and checkout-move validation refreshes both source and destination on every request
+and settlement. Refresh resolves those paths directly and replaces their memo entries; it does
+not clear the whole cache or make sidebar reads perform repeated discovery. Branch validation
+reads `HEAD` through the freshly resolved worktree identity.
+
 Every repository is a **root row** in the sidebar, with its added checkouts beneath it, at one
 checkout exactly as at five. The checkouts are labelled by branch, since the repository name is
 already shown above them. A quiet `[checkout path]` follows the branch on the same line,

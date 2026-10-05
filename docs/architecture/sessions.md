@@ -520,7 +520,9 @@ adopts the preceding turn's refs.
 A session belongs to a checkout through its `Project`, not through its cached branch string.
 `SessionCheckoutCoordinator` is the only operation that changes that ownership. It resolves the
 source and requested destination through `GitInfo.worktreeLocation`, canonicalizes symlinks, and
-compares both repository and worktree identities. Only an existing worktree root with an attached
+compares both repository and worktree identities. These validation reads explicitly refresh the
+discovery memo, including cached misses, so creation or replacement at the same path cannot be
+judged by an earlier display reading. Only an existing worktree root with an attached
 branch in the same repository is eligible. Managed workspaces are excluded on both sides; branch
 names never serve as identity.
 
