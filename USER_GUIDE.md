@@ -6634,6 +6634,7 @@ previews** consent. Until the sound is installed, or when the hosted service has
 updated, notifications retain their ordinary sound choice. Your usage widget takes its accent
 from the Mac pinned for widgets; tinted Home Screens and vibrant Lock Screens use system colors.
 
-Agents can request `preview_app_theme` with `frames: 3` to compare motion at 0, 0.5 and 1 second.
+Agents can request `preview_app_theme` with `frames: 3` to compare gradient drift at 0, ⅓ and ⅔
+of its authored cycle. Particles remain stamped for a stable comparison.
 The app-theme picker offers a matching saved appearance pack beneath its theme when that pack
 explicitly includes the theme.

@@ -93,3 +93,12 @@ widget ground. Accented and vibrant modes use system colors. Identity, readings,
 background and foreground semantics remain host-owned; no font, image or shader enters the
 App Group. GlanceKit tests cover tolerant decoding, deduplication, sequence fencing and timestamp
 preservation; mobile builds verify the embedded extension.
+
+On 2026-10-05, the signed Simulator app and embedded extension were installed in a disposable
+iPhone 17 Pro running iOS 26.5. Inspected Home Screen captures show the small and medium widgets
+using the fixture's `#80CBC4` accent for the icon and capacity gauges, with readable system text.
+Changing the Home Screen to Tinted replaces those accents with the system presentation. Evidence
+is in `.build/theme-system-widget-evidence/` (`home-full-color.png`,
+`home-medium-full-color.png`, `home-tinted.png`). This verifies installed Home Screen layout and
+tint ownership; physical-device provisioning/protection, Lock Screen layout and background
+timeline delivery remain separate checks.

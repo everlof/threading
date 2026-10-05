@@ -32,8 +32,10 @@ final class AppThemeSchemaReferenceTests: XCTestCase {
         let data = try JSONEncoder().encode(entries)
         // This bounded export feeds scripts/generate_theme_reference.py when the vocabulary
         // changes. Ordinary tests only read the checked-in reference.
-        if let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
-            try data.write(to: URL(fileURLWithPath: output).appendingPathComponent("theme-schema.json"))
+        if let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"], !output.isEmpty {
+            let directory = URL(fileURLWithPath: output, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(to: directory.appendingPathComponent("theme-schema.json"))
         }
         let reference = try Self.reference()
         for (path, entry) in entries {
