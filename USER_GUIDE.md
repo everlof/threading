@@ -4225,6 +4225,11 @@ over deliberately rather than detected.
 **View ▸ Browser** (Cmd+Shift+B) opens a real browser tab belonging to the current session.
 You can also ask the agent to browse a site before opening the tab yourself; its first navigation
 creates the tab.
+
+Agents use the current pane or window size for browsing and ordinary screenshots, keeping any
+viewport you selected. They change dimensions when you ask or for a specific responsive or visual
+test, then restore the prior sizing after a temporary test.
+
 It has an address bar, history controls, persistent cookies, responsive viewport testing, and the
 Web Inspector. Its overflow menu includes find in page, print, visible-page screenshots, 50–200%
 zoom, recent downloads, current-site data clearing, and browser settings. The responsive toolbar

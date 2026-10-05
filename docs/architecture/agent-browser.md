@@ -251,6 +251,17 @@ A private tab clears its entire unique store. A shared tab filters WebKit's site
 to the active host or the parent record WebKit grouped it under, and tells the user that related
 subdomains may therefore be signed out. Clearing does not implicitly reload or reconstruct the
 current request.
+
+**Browser sizing belongs to the user.** Ordinary browsing, sign-in, page interaction and screenshots
+use the pane or window as sized, preserving any viewport the user selected. Agents must not set a
+standard desktop resolution or reset sizing as routine setup. A size change is appropriate when
+the user requests it or a specific responsive or visual test needs exact dimensions. Temporary
+tests restore the prior sizing, preserving later user changes; a user-requested size remains in
+place. The navigation and screenshot tool descriptions state the default at their entry points,
+and the resize description and receipt state the temporary-test restoration contract. Each resize
+receipt reports whether the prior viewport filled its host or had exact dimensions, so restoration
+does not replace a pre-existing user preset with automatic sizing.
+
 `browser_resize` gives the active browser an exact per-tab CSS-pixel viewport for responsive
 testing. It does not resize Threading's window: the fixed-size `WKWebView` sits in a pannable outer
 scroll view, so media queries, viewport units, semantic geometry, interactions, and screenshots

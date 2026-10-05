@@ -1460,15 +1460,26 @@ final class BrowserViewController: NSViewController {
         width: Int?,
         height: Int?
     ) async -> BrowserActionOutcome {
-        let message: String
+        let previousSizing: String
+        if let viewport = agentViewportSize {
+            previousSizing = "\(Int(viewport.width))×\(Int(viewport.height)) CSS pixels"
+        } else {
+            previousSizing = "fill host (width and height omitted)"
+        }
+        let changeDescription: String
         if let width, let height {
-            message = """
+            changeDescription = """
                 Set the active browser viewport to \(width)×\(height) CSS pixels and opened the \
-                Device Toolbar. Reset the viewport when responsive testing is finished.
+                Device Toolbar.
                 """
         } else {
-            message = "Reset the active browser viewport to fill its host and hid the Device Toolbar."
+            changeDescription = "Reset the active browser viewport to fill its host and hid the Device Toolbar."
         }
+        let message = """
+            \(changeDescription) Previous sizing: \(previousSizing). If starting a temporary \
+            test, keep this sizing to restore afterwards, preserving later user changes. Leave a user-requested \
+            size in place.
+            """
         return await performGuardedAgentBrowserMutation(message: message) {
             presentAgentResponsiveViewport(width: width, height: height)
         }

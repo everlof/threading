@@ -2112,6 +2112,32 @@ final class BrowserAgentBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func testAgentViewportChangesReportPriorSizingForTemporaryTestRestoration() async {
+        let browser = BrowserViewController(contextKind: .private)
+        XCTAssertNil(browser.responsiveViewport)
+
+        let fromHost = await browser.agentSetResponsiveViewport(width: 390, height: 844)
+        XCTAssertTrue(fromHost.ok, fromHost.message)
+        XCTAssertTrue(fromHost.message.contains("Previous sizing: fill host"), fromHost.message)
+        XCTAssertEqual(browser.responsiveViewport, CGSize(width: 390, height: 844))
+
+        // A user-selected preset must be restored as a preset, rather than cleared to fill host.
+        browser.setResponsiveViewport(width: 1_024, height: 768)
+        let fromPreset = await browser.agentSetResponsiveViewport(width: 390, height: 844)
+        XCTAssertTrue(fromPreset.ok, fromPreset.message)
+        XCTAssertTrue(fromPreset.message.contains("Previous sizing: 1024×768 CSS pixels"), fromPreset.message)
+
+        let restored = await browser.agentSetResponsiveViewport(width: 1_024, height: 768)
+        XCTAssertTrue(restored.ok, restored.message)
+        XCTAssertEqual(browser.responsiveViewport, CGSize(width: 1_024, height: 768))
+
+        let reset = await browser.agentSetResponsiveViewport(width: nil, height: nil)
+        XCTAssertTrue(reset.ok, reset.message)
+        XCTAssertTrue(reset.message.contains("Previous sizing: 1024×768 CSS pixels"), reset.message)
+        XCTAssertNil(browser.responsiveViewport)
+    }
+
+    @MainActor
     func testAgentResponsiveViewportMakesItsFixedCanvasExplicitUntilReset() throws {
         let browser = BrowserViewController(contextKind: .private)
         _ = browser.view

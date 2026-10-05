@@ -1156,6 +1156,25 @@ final class MCPWireTests: XCTestCase {
     let definition = try XCTUnwrap(MCPTools.definition(for: .browserNavigate))
     XCTAssertTrue(definition.description.contains("creates this session's browser tab"))
     XCTAssertTrue(definition.description.contains("empty panel"))
+    XCTAssertTrue(definition.description.contains("current pane or window size"))
+    XCTAssertTrue(definition.description.contains("do not call browser_resize as routine browsing setup"))
+  }
+
+  func testBrowserSizingGuidanceReachesDeferredToolsAndScopedHelpers() throws {
+    let resize = try XCTUnwrap(MCPTools.definition(for: .browserResize))
+    let screenshot = try XCTUnwrap(MCPTools.definition(for: .browserScreenshot))
+    let resizeJSON = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(resize)) as? [String: Any]
+    )
+    let resizeDescription = try XCTUnwrap(resizeJSON["description"] as? String)
+    XCTAssertTrue(resizeDescription.contains("only when the user requests"))
+    XCTAssertTrue(resizeDescription.contains("restore the previous sizing"))
+    XCTAssertTrue(resizeDescription.contains("Leave a user-requested size in place"))
+    XCTAssertTrue(screenshot.description.contains("taking a screenshot does not require browser_resize"))
+
+    let scopedInstructions = MCPToolCatalog.scopedInstructions([MCPTools.browserResize])
+    XCTAssertTrue(scopedInstructions.contains("current pane or window size"))
+    XCTAssertTrue(scopedInstructions.contains("Do not set or reset its size as routine setup"))
   }
 
   func testClaudeLoadsOnlyBrowserEntryPointWithoutToolSearch() throws {

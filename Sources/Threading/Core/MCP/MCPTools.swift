@@ -4054,7 +4054,9 @@ enum MCPTools {
       description: """
         Open a URL in Threading's browser (a full pane beside this terminal), or run a \
         search if the text is not a URL. The call creates this session's browser tab if \
-        none is open; an empty panel does not mean the browser is unavailable. By default \
+        none is open; an empty panel does not mean the browser is unavailable. Keep the \
+        current pane or window size and any user-selected viewport; do not call \
+        browser_resize as routine browsing setup. By default \
         it waits for the full load event; wait_until can return at commit or \
         DOMContentLoaded for streaming or resource-heavy pages. It reports the current \
         title, address, and semantic snapshot when available. Use this before the other \
@@ -4444,13 +4446,18 @@ enum MCPTools {
         handler.browserResize(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Give the active browser tab an exact responsive-test viewport without resizing \
-        Threading's window. The user sees the same live page inside a pannable frame, and \
+        Change the active browser tab's CSS-pixel viewport only when the user requests a \
+        size change or a specific responsive or visual test needs exact dimensions. For \
+        ordinary browsing and screenshots, use the current pane or window size and preserve \
+        any user-selected viewport. Do not set or reset sizing as routine setup or screenshot \
+        preparation. This does not resize Threading's window. The user sees the same live \
+        page inside a pannable frame, and \
         page media queries, viewport units, element geometry, interactions, and \
         screenshots all use the requested CSS-pixel dimensions. Setting a viewport opens \
         the Device Toolbar so the fixed dimensions and reset route remain visible. Supply \
-        width and height together, then omit both when responsive testing is finished to \
-        return the page to filling its host.
+        width and height together. After a temporary test, restore the previous sizing \
+        reported by this call, preserving any later user changes; omit both dimensions only \
+        if that previous sizing filled its host. Leave a user-requested size in place.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -5751,7 +5758,8 @@ enum MCPTools {
         handler.browserScreenshot(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Capture the current browser page as PNG. By default the image is returned to you \
+        Capture the current browser page as PNG at its current sizing; taking a screenshot \
+        does not require browser_resize. By default the image is returned to you \
         for visual inspection without changing the panel tab the user is watching. It can \
         capture the viewport, the full document, or one current snapshot element. Prefer \
         a stable ref when isolating an element; the target is scrolled into view and the \

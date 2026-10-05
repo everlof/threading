@@ -321,9 +321,11 @@ enum MCPToolCatalog {
       in-surface pop-up that preserves window.opener, postMessage, and window.close. \
       browser_tabs creates and switches independent pages when a task needs more than one \
       live browsing context; list first and prefer stable tab ids for later activation. Use \
-      browser_resize for an exact responsive-test viewport; it opens the visible Device Toolbar, \
-      and you should omit both dimensions afterwards to return the shared page to the host's \
-      natural size when responsive testing is finished. Use browser_emulate to test \
+      the browser at its current pane or window size for ordinary browsing and screenshots, \
+      preserving any user-selected viewport. Do not set or reset its size as routine setup. \
+      Use browser_resize only when the user requests a size change or a specific responsive \
+      or visual test needs exact dimensions. After a temporary test, restore the previous \
+      sizing reported by that call; leave a user-requested size in place. Use browser_emulate to test \
       prefers-color-scheme in dark or light, set media_type to print for print CSS, or set a \
       custom user_agent for browser and server branching; use auto or an empty user_agent to \
       restore WebKit defaults. Call browser_capabilities before assuming WebKit can override \
