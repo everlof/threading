@@ -25,6 +25,7 @@ let package = Package(
         .systemLibrary(name: "CSDL2", pkgConfig: "sdl2"),
         .systemLibrary(name: "CPango", pkgConfig: "pangocairo"),
         .systemLibrary(name: "CGIO", pkgConfig: "gio-2.0"),
+        .systemLibrary(name: "CGdkPixbuf", pkgConfig: "gdk-pixbuf-2.0"),
         .target(name: "AppKitTextBridge", dependencies: [
             .target(name: "CPango", condition: .when(platforms: [.linux]))]),
         .systemLibrary(name: "CAtk", pkgConfig: "atk-bridge-2.0"),
@@ -32,6 +33,7 @@ let package = Package(
             .target(name: "CSDL2", condition: .when(platforms: [.linux])),
             .target(name: "CPango", condition: .when(platforms: [.linux])),
             .target(name: "CGIO", condition: .when(platforms: [.linux])),
+            .target(name: "CGdkPixbuf", condition: .when(platforms: [.linux])),
             .target(name: "CAtk", condition: .when(platforms: [.linux]))],
             linkerSettings: [.linkedLibrary("atk-1.0", .when(platforms: [.linux]))]),
         .executableTarget(name: "WindowHarness", dependencies: ["AppKit", "CoreText", "CoreSlice", "TerminalRuntime",

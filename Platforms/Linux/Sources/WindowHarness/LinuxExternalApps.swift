@@ -12,6 +12,13 @@ struct LinuxExternalApp: Equatable, Sendable {
 }
 
 enum LinuxExternalApps {
+    struct IconPixels: Sendable {
+        let rgba: [UInt8]
+        let width: Int
+        let height: Int
+        let isTemplate: Bool
+    }
+
     struct Catalogue: Sendable {
         let apps: [LinuxExternalApp]
         let defaultID: String?
@@ -42,6 +49,31 @@ enum LinuxExternalApps {
         }
         let preferred = decode(defaultID)
         return Catalogue(apps: apps, defaultID: preferred.isEmpty ? nil : preferred)
+    }
+
+    /// Desktop artwork is filesystem and codec work. Resolve one selected app per worker
+    /// request; a catalogue refresh never decodes its other 63 possible entries.
+    static func icon(for app: LinuxExternalApp) -> IconPixels? {
+        guard let hint = app.iconHint, !hint.isEmpty,
+              hint.utf8.count < Int(TW_EXTERNAL_APP_ICON_CAPACITY),
+              !hint.utf8.contains(0) else { return nil }
+        let pixelCapacity = 64 * 64 * 4
+        var rgba = [UInt8](repeating: 0, count: pixelCapacity)
+        var width: Int32 = 0
+        var height: Int32 = 0
+        let status = hint.withCString { pointer in
+            rgba.withUnsafeMutableBufferPointer { output in
+                tw_external_app_icon(pointer, output.baseAddress,
+                                     Int32(output.count), &width, &height)
+            }
+        }
+        guard status == 0, (1...64).contains(width), (1...64).contains(height) else {
+            return nil
+        }
+        rgba.removeLast(pixelCapacity - Int(width * height * 4))
+        let symbolic = hint.hasSuffix("-symbolic") || hint.hasSuffix("-symbolic.svg")
+        return IconPixels(rgba: rgba, width: Int(width), height: Int(height),
+                          isTemplate: symbolic)
     }
 
     /// Synchronous GIO launch. GIO applies the desktop entry's Exec grammar; no path or app ID

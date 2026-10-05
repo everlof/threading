@@ -1,0 +1,5 @@
+module CGdkPixbuf [system] {
+    header "shim.h"
+    link "gdk_pixbuf-2.0"
+    export *
+}

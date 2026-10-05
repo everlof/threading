@@ -17,6 +17,19 @@ private final class ComposerChipChoiceSession: ChipChoicePresentationSession {
     }
 }
 
+/// A host-resolved runtime and login. An empty account name represents a runtime's plain
+/// default login, while `id` always identifies both runtime and account for launch routing.
+struct ComposerIdentityChoice {
+    let id: String
+    let providerName: String
+    let accountName: String
+    let icon: NSImage?
+
+    var title: String {
+        accountName.isEmpty ? providerName : "\(providerName) · \(accountName)"
+    }
+}
+
 /// The idle workspace's bounded production content view. It keeps one view tree and texture
 /// while project rows change, and repaints only for resize or interaction.
 @MainActor
@@ -34,22 +47,28 @@ final class WorkspacePlaceholderPane {
     private lazy var projectChip = ChipView()
     private lazy var providerChip = ChipView()
     private let choiceSurface = SessionMenuSurface(frame: .zero)
-    private enum ChoiceKind { case project, provider }
+    private enum ChoiceKind { case project, identity }
+    private struct ChoiceOption {
+        let id: String
+        let name: String
+        let icon: NSImage?
+    }
     private var choiceKind: ChoiceKind?
     private var choiceSession: ComposerChipChoiceSession?
     private var choiceRows: [ThemedMenuRowView] = []
     private var choiceFirst = 0
     private var choiceSelected = 0
     private var choiceVisibleCount = 0
-    private var choiceOptions: [(id: String, name: String)] = []
+    private var choiceOptions: [ChoiceOption] = []
     private var projectOptions: [(id: String, name: String)] = []
-    private var providerOptions: [(id: String, name: String)] = []
+    private var identityOptions: [ComposerIdentityChoice] = []
     private var selectedProjectID = ""
-    private var selectedProviderID = ""
+    private var selectedIdentityID = ""
     private var selectedProjectName = ""
     private var selectedProviderName = ""
+    private var selectedIdentityName = ""
     private var onProjectChoice: ((String) -> Void)?
-    private var onProviderChoice: ((String) -> Void)?
+    private var onIdentityChoice: ((String) -> Void)?
     private var showsComposer = false
     private(set) var composerIdentity: String?
     private var root: NSView { showsComposer ? composerRoot : placeholderRoot }
@@ -77,7 +96,7 @@ final class WorkspacePlaceholderPane {
             self?.openChoice(.project, didDismiss: didDismiss)
         }
         providerChip.choicePresentationProvider = { [weak self] _, didDismiss in
-            self?.openChoice(.provider, didDismiss: didDismiss)
+            self?.openChoice(.identity, didDismiss: didDismiss)
         }
         projectChip.configure(symbolName: "folder", title: "Project")
         providerChip.configure(symbolName: "terminal", title: "Agent")
@@ -136,6 +155,7 @@ final class WorkspacePlaceholderPane {
         providerChip.configure(symbolName: "terminal", title: providerName)
         selectedProjectName = projectName
         selectedProviderName = providerName
+        selectedIdentityName = providerName
         composerEditor.textView.string = ""
         refreshStartButton()
         window.contentView = composerRoot
@@ -146,23 +166,30 @@ final class WorkspacePlaceholderPane {
     /// Choices are host-owned identities. This pane only presents a bounded visible page.
     func configureComposerChoices(
         projects: [(id: String, name: String)], selectedProjectID: String,
-        providers: [(id: String, name: String)], selectedProviderID: String,
+        identities: [ComposerIdentityChoice], selectedIdentityID: String,
         onProjectChoice: @escaping (String) -> Void,
-        onProviderChoice: @escaping (String) -> Void
+        onIdentityChoice: @escaping (String) -> Void
     ) {
         projectOptions = projects
-        providerOptions = providers
+        // Account discovery admits at most 32 per runtime; the current Linux composer has
+        // two runtimes. Retain values for 64 choices but mount no more than six row views.
+        identityOptions = Array(identities.prefix(64))
         self.selectedProjectID = selectedProjectID
-        self.selectedProviderID = selectedProviderID
+        self.selectedIdentityID = selectedIdentityID
         self.onProjectChoice = onProjectChoice
-        self.onProviderChoice = onProviderChoice
+        self.onIdentityChoice = onIdentityChoice
         if let project = projects.first(where: { $0.id == selectedProjectID }) {
             selectedProjectName = project.name
             projectChip.configure(symbolName: "folder", title: project.name)
         }
-        if let provider = providers.first(where: { $0.id == selectedProviderID }) {
-            selectedProviderName = provider.name
-            providerChip.configure(symbolName: "terminal", title: provider.name)
+        if let identity = identityOptions.first(where: { $0.id == selectedIdentityID }) {
+            selectedProviderName = identity.providerName
+            selectedIdentityName = identity.title
+            providerChip.configure(icon: identity.icon, title: identity.title)
+        } else {
+            selectedProviderName = ""
+            selectedIdentityName = ""
+            providerChip.configure(symbolName: "terminal", title: "Agent")
         }
         if showsComposer, !selectedProjectName.isEmpty, !selectedProviderName.isEmpty {
             title = "Start a \(selectedProviderName) session"
@@ -170,7 +197,7 @@ final class WorkspacePlaceholderPane {
             composerHero.configure(symbolName: "terminal", title: title, detail: detail)
         }
         projectChip.isEnabled = !projects.isEmpty
-        providerChip.isEnabled = !providers.isEmpty
+        providerChip.isEnabled = !identityOptions.isEmpty
         if choiceKind != nil { dismissChoice() }
         needsPresentation = true
     }
@@ -180,7 +207,7 @@ final class WorkspacePlaceholderPane {
     @discardableResult
     func pressComposerChoice(kind: Int, identity: String) -> Bool {
         guard showsComposer, identity == composerIdentity else { return false }
-        if kind == 1 && choiceKind == .project || kind == 2 && choiceKind == .provider {
+        if kind == 1 && choiceKind == .project || kind == 2 && choiceKind == .identity {
             dismissChoice()
             return true
         }
@@ -198,7 +225,7 @@ final class WorkspacePlaceholderPane {
     @discardableResult
     func chooseComposerChoice(kind: Int, index: Int, id: String, identity: String) -> Bool {
         guard showsComposer, identity == composerIdentity,
-              (kind == 1 && choiceKind == .project || kind == 2 && choiceKind == .provider),
+              (kind == 1 && choiceKind == .project || kind == 2 && choiceKind == .identity),
               index >= choiceFirst, index < choiceFirst + choiceRows.count,
               choiceOptions.indices.contains(index), choiceOptions[index].id == id
         else { return false }
@@ -236,12 +263,18 @@ final class WorkspacePlaceholderPane {
 
     private func openChoice(_ kind: ChoiceKind,
                             didDismiss: @escaping () -> Void) -> ChipChoicePresentationSession? {
-        let options = kind == .project ? projectOptions : providerOptions
+        let options: [ChoiceOption]
+        switch kind {
+        case .project:
+            options = projectOptions.map { ChoiceOption(id: $0.id, name: $0.name, icon: nil) }
+        case .identity:
+            options = identityOptions.map { ChoiceOption(id: $0.id, name: $0.title, icon: $0.icon) }
+        }
         guard showsComposer, !options.isEmpty else { return nil }
         dismissChoice()
         choiceKind = kind
         choiceOptions = options
-        let selectedID = kind == .project ? selectedProjectID : selectedProviderID
+        let selectedID = kind == .project ? selectedProjectID : selectedIdentityID
         choiceSelected = options.firstIndex(where: { $0.id == selectedID }) ?? 0
         choiceFirst = 0
         let session = ComposerChipChoiceSession(didDismiss: didDismiss)
@@ -292,10 +325,11 @@ final class WorkspacePlaceholderPane {
         choiceRows.removeAll(keepingCapacity: true)
         let visible = Array(choiceOptions[choiceFirst..<min(choiceOptions.count,
                                                            choiceFirst + choiceVisibleCount)])
-        let selectedID = choiceKind == .project ? selectedProjectID : selectedProviderID
+        let selectedID = choiceKind == .project ? selectedProjectID : selectedIdentityID
         let entries = visible.map { option in
             ThemedMenuEntry.item(ThemedMenuItem(title: option.name,
-                representedValue: option.id, isSelected: option.id == selectedID))
+                image: option.icon, representedValue: option.id,
+                isSelected: option.id == selectedID))
         }
         let plan = ThemedMenuRowPlan(entries: entries)
         var top: CGFloat = 6
@@ -343,7 +377,7 @@ final class WorkspacePlaceholderPane {
         dismissChoice()
         switch choiceKind {
         case .project: onProjectChoice?(id)
-        case .provider: onProviderChoice?(id)
+        case .identity: onIdentityChoice?(id)
         }
         focusEditor()
     }
@@ -655,9 +689,9 @@ final class WorkspacePlaceholderPane {
         }
 
         for (kind, chip, value) in [(1, projectChip, selectedProjectName),
-                                    (2, providerChip, selectedProviderName)] {
+                                    (2, providerChip, selectedIdentityName)] {
             let frame = pixels(chip)
-            let label = kind == 1 ? "Project" : "Provider"
+            let label = kind == 1 ? "Project" : "Identity"
             identity.withCString { token in
                 label.withCString { name in
                     value.withCString { selected in

@@ -20,6 +20,11 @@ int tw_external_apps_discover(TWExternalApp *apps, int capacity,
 // directory via GIO. Returns 0 on success; a nonzero result writes a bounded error string.
 int tw_external_app_launch(const char *appID, const char *directory,
                            char *error, int errorCapacity);
+// Worker-only desktop icon loader. At most 256 KiB of PNG/SVG source is read, source dimensions
+// are capped at 1024, and output is straight RGBA at no more than 64x64. The hint comes from
+// GIO discovery; named hints are resolved through bounded XDG icon-theme candidate paths.
+int tw_external_app_icon(const char *hint, uint8_t *rgba, int capacity,
+                         int *width, int *height);
 
 typedef struct TWWindow TWWindow;
 // 1 repaint/resize, 2 project click (action=1 for AT-SPI select, key=validated visible slot),
