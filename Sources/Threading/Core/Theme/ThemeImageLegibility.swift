@@ -1,8 +1,9 @@
 import AppKit
 import ImageIO
 
-/// Advisory image check: at most twenty 64×64 thumbnails per adaptive theme, decoded and sampled
-/// off the main actor. It measures the least legible tenth, not one exceptional bright pixel.
+/// Advisory image check: at most thirty 64×64 thumbnails per adaptive theme (a picture and four
+/// full-colour sprites in each of three regions per variant), decoded and sampled off the main
+/// actor. It measures the least legible tenth, not one exceptional bright pixel.
 ///
 /// The cost is bounded by the sample count, the thumbnail size, the gradient's stops and the
 /// opacity search's twenty steps. Linearising a channel is a table read rather than a `pow`, and
@@ -30,6 +31,8 @@ enum ThemeImageLegibility {
     enum Region: String, Sendable {
         case backdrop = "material.backdrop"
         case sidebar = "sidebar.background"
+        /// The new-session composer's welcome, measured with the greeting's ink when it states one.
+        case welcome = "welcome.backdrop"
     }
 
     struct Sample: Sendable {
@@ -97,10 +100,12 @@ enum ThemeImageLegibility {
         var samples: [Sample] = []
         for kind in kinds {
             guard let variant = theme.variant(kind), let appearance = kind.appearance else { continue }
-            for (region, backdrop, role) in [
-                (Region.backdrop, variant.material.backdrop, AppThemeRole.ground),
-                (Region.sidebar, variant.sidebar?.background, AppThemeRole.surface)
-            ] {
+            let welcomeInk = variant.welcome?.greeting?.style?.ink
+            for (region, backdrop, role, ink) in [
+                (Region.backdrop, variant.material.backdrop, AppThemeRole.ground, nil),
+                (Region.sidebar, variant.sidebar?.background, AppThemeRole.surface, nil),
+                (Region.welcome, variant.welcome?.backdrop, AppThemeRole.ground, welcomeInk)
+            ] as [(Region, ThemeBackdrop?, AppThemeRole, ThemeInk?)] {
                 var assets: [(file: String, opacity: Double, sprite: String?)] = []
                 if let image = backdrop?.image, image.opacity > 0 {
                     assets.append((image.asset, image.opacity, nil))
@@ -118,7 +123,8 @@ enum ThemeImageLegibility {
                 let grounds = backdrop?.gradient?.stops.map {
                     rgb($0.color).over(ground, opacity: $0.color.alphaComponent)
                 } ?? [ground]
-                let label = theme.resolved(.label, appearance: appearance)
+                let label = ink?.resolved(in: theme, appearance: appearance)
+                    ?? theme.resolved(.label, appearance: appearance)
                 for asset in assets {
                     let name = "\(kind.rawValue).\(region.rawValue)" + (asset.sprite.map { ".sprite.\($0)" } ?? "")
                     samples.append(Sample(name: name,

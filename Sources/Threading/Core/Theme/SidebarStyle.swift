@@ -474,6 +474,6 @@ public enum SidebarStyleLimits {
 
 // MARK: - Asset Slots
 
-/// The sidebar's two slots are two of the three `ThemeAssetSlot` cases; the name this file has
+/// The sidebar's two slots are two of the `ThemeAssetSlot` cases; the name this file has
 /// always used stays for the call sites and tests written against it.
 public typealias SidebarAssetSlot = ThemeAssetSlot

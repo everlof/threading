@@ -3,9 +3,9 @@ import ThreadingRemoteKit
 
 // MARK: - App Theme Tool Parsing
 
-/// The parsing the app-theme tools share between the sidebar block and the material's
-/// backdrop: a gradient from its wire form, image bytes from a path or base64, a backdrop
-/// patch applied to a base, and the document form both blocks read back through.
+/// The parsing the app-theme tools share between the sidebar block, the material's backdrop and
+/// the newer variant blocks: a gradient from its wire form, image bytes from a path or base64, a
+/// backdrop patch applied to a base, and the document form each block reads back through.
 ///
 /// A type of its own rather than more methods on `AgentToolCoordinator`, and the reason is the
 /// authority ratchet in `scripts/check_architecture_boundaries.sh`: the coordinator is the
@@ -92,33 +92,38 @@ enum AppThemeToolParsing {
     /// under the theme's id before validation can refuse the document, so the update path
     /// snapshots the slot first (see `updateAppTheme`) and the create path removes the
     /// folder on failure.
+    ///
+    /// The welcome's backdrop is the same vocabulary in another region: `field` names it in
+    /// every message and `slot` files its picture apart from the material's.
     static func backdrop(
         _ patch: AppThemeBackdropArguments,
         base: ThemeBackdrop?,
         themeID: AppThemeID,
-        kind: AppTheme.VariantKind
+        kind: AppTheme.VariantKind,
+        field: String = "material.backdrop",
+        slot: ThemeAssetSlot = .backdrop
     ) throws -> ThemeBackdrop? {
         if patch.remove == true {
             guard patch.gradient == nil, patch.image == nil, patch.particles == nil else {
                 throw AppThemeEditingError.invalid(
-                    "material.backdrop cannot set fields and remove in the same patch."
+                    "\(field) cannot set fields and remove in the same patch."
                 )
             }
             return nil
         }
         guard patch.particles == nil || patch.removeParticles != true else {
             throw AppThemeEditingError.invalid(
-                "material.backdrop cannot set particles and remove_particles in the same patch."
+                "\(field) cannot set particles and remove_particles in the same patch."
             )
         }
         guard patch.gradient == nil || patch.removeGradient != true else {
             throw AppThemeEditingError.invalid(
-                "material.backdrop cannot set gradient and remove_gradient in the same patch."
+                "\(field) cannot set gradient and remove_gradient in the same patch."
             )
         }
         guard patch.image == nil || patch.removeImage != true else {
             throw AppThemeEditingError.invalid(
-                "material.backdrop cannot set image and remove_image in the same patch."
+                "\(field) cannot set image and remove_image in the same patch."
             )
         }
 
@@ -136,22 +141,22 @@ enum AppThemeToolParsing {
             backdrop.image = try Self.imageLayer(
                 image,
                 base: backdrop.image,
-                field: "material.backdrop.image"
+                field: "\(field).image"
             ) { source in
                 let data = try Self.imageBytes(
                     source,
-                    describing: "material.backdrop.image.source",
-                    maximumBytes: ThemeAssetSlot.backdrop.maximumImageBytes
+                    describing: "\(field).image.source",
+                    maximumBytes: slot.maximumImageBytes
                 )
                 guard let stored = ThemeAssetStore.store(
                     imageData: data,
                     for: themeID,
-                    slot: .backdrop,
+                    slot: slot,
                     variant: kind
                 ) else {
                     throw AppThemeEditingError.invalid(
-                        "material.backdrop.image.source is not a readable image (or exceeds "
-                            + "\(ThemeAssetSlot.backdrop.maximumImageBytes / (1024 * 1024)) MB)."
+                        "\(field).image.source is not a readable image (or exceeds "
+                            + "\(slot.maximumImageBytes / (1024 * 1024)) MB)."
                     )
                 }
                 return stored
@@ -164,7 +169,7 @@ enum AppThemeToolParsing {
             backdrop.particles = try Self.particles(
                 particles,
                 base: backdrop.particles,
-                field: "material.backdrop.particles"
+                field: "\(field).particles"
             )
         }
 
@@ -1232,6 +1237,359 @@ enum AppThemeToolParsing {
         if let untitled = words.untitledSession {
             document["untitled_session"] = untitled
         }
+        return document
+    }
+
+    // MARK: - Welcome
+
+    /// The welcome after a patch. Each sub-block merges onto what is stated — the backdrop in
+    /// the material's idiom, a wording's lines replacing its list and its style one field at a
+    /// time, the scrims one veil at a time — and each `remove_*` gives one back to the app.
+    /// A picture's bytes are stored under the welcome slot before validation, so the callers own
+    /// the cleanup, as they do for every other picture.
+    static func welcome(
+        _ patch: AppThemeWelcomeArguments?,
+        remove: Bool?,
+        base: ThemeWelcome?,
+        themeID: AppThemeID,
+        kind: AppTheme.VariantKind
+    ) throws -> AppThemeEditing.BlockChange<ThemeWelcome> {
+        if remove == true {
+            guard patch == nil else {
+                throw AppThemeEditingError.invalid(
+                    "welcome cannot be set and removed in the same patch."
+                )
+            }
+            return .remove
+        }
+        guard let patch else { return .inherit }
+        guard patch.backdrop == nil || patch.removeBackdrop != true else {
+            throw AppThemeEditingError.invalid(
+                "welcome cannot set backdrop and remove_backdrop in the same patch."
+            )
+        }
+        guard (patch.mark == nil && patch.markSize == nil) || patch.removeMark != true else {
+            throw AppThemeEditingError.invalid(
+                "welcome cannot set mark or mark_size and remove_mark in the same patch."
+            )
+        }
+        guard patch.greeting == nil || patch.removeGreeting != true else {
+            throw AppThemeEditingError.invalid(
+                "welcome cannot set greeting and remove_greeting in the same patch."
+            )
+        }
+        guard patch.caption == nil || patch.removeCaption != true else {
+            throw AppThemeEditingError.invalid(
+                "welcome cannot set caption and remove_caption in the same patch."
+            )
+        }
+        guard patch.scrim == nil || patch.removeScrim != true else {
+            throw AppThemeEditingError.invalid(
+                "welcome cannot set scrim and remove_scrim in the same patch."
+            )
+        }
+
+        var welcome = base ?? ThemeWelcome()
+        if patch.removeBackdrop == true {
+            welcome.backdrop = nil
+        } else if let backdrop = patch.backdrop {
+            welcome.backdrop = try Self.backdrop(
+                backdrop,
+                base: welcome.backdrop,
+                themeID: themeID,
+                kind: kind,
+                field: "welcome.backdrop",
+                slot: .welcome
+            )
+        }
+
+        if patch.removeMark == true {
+            welcome.mark = nil
+            welcome.markSize = nil
+        } else {
+            if let raw = cleaned(patch.mark) {
+                guard let mark = ThemeWelcome.Mark(rawValue: raw.lowercased()) else {
+                    throw AppThemeEditingError.invalid(
+                        "welcome.mark must be one of "
+                            + ThemeWelcome.Mark.allCases.map { "\"\($0.rawValue)\"" }
+                                .joined(separator: ", ") + "."
+                    )
+                }
+                welcome.mark = mark
+            }
+            if let size = patch.markSize { welcome.markSize = size }
+        }
+
+        if patch.removeGreeting == true {
+            welcome.greeting = nil
+        } else if let greeting = patch.greeting {
+            welcome.greeting = try Self.wording(
+                greeting,
+                base: welcome.greeting,
+                field: "welcome.greeting",
+                takesAppLines: true
+            )
+        }
+        if patch.removeCaption == true {
+            welcome.caption = nil
+        } else if let caption = patch.caption {
+            welcome.caption = try Self.wording(
+                caption,
+                base: welcome.caption,
+                field: "welcome.caption",
+                takesAppLines: false
+            )
+        }
+
+        if patch.removeScrim == true {
+            welcome.scrim = nil
+        } else if let scrimPatch = patch.scrim {
+            var scrim = welcome.scrim ?? ThemeWelcome.Scrim()
+            if let hero = scrimPatch.hero { scrim.hero = hero }
+            if let prompt = scrimPatch.prompt { scrim.prompt = prompt }
+            welcome.scrim = scrim.hero == nil && scrim.prompt == nil ? nil : scrim
+        }
+
+        return welcome.isEmpty ? .remove : .set(welcome)
+    }
+
+    /// A greeting's or caption's pool after a patch. The list is bounded *before* any line is
+    /// parsed, so an oversized patch costs a count rather than sixty-five parses.
+    private static func wording(
+        _ patch: AppThemeWelcomeWordingArguments,
+        base: ThemeWelcome.Wording?,
+        field: String,
+        takesAppLines: Bool
+    ) throws -> ThemeWelcome.Wording {
+        guard patch.style == nil || patch.removeStyle != true else {
+            throw AppThemeEditingError.invalid(
+                "\(field) cannot set style and remove_style in the same patch."
+            )
+        }
+        var wording = base ?? ThemeWelcome.Wording(lines: [])
+        if let lines = patch.lines {
+            guard lines.count <= ThemeWelcomeLimits.maximumLines else {
+                throw AppThemeEditingError.invalid(
+                    "\(field).lines holds at most \(ThemeWelcomeLimits.maximumLines) lines."
+                )
+            }
+            wording.lines = try lines.enumerated().map { index, line in
+                try Self.welcomeLine(line, field: "\(field).lines[\(index)]")
+            }
+        }
+        // A caption has no app lines to include; the flag is the greeting's alone.
+        if takesAppLines, let include = patch.includeAppLines {
+            wording.includesAppLines = include
+        }
+        if patch.removeStyle == true {
+            wording.style = nil
+        } else if let style = patch.style {
+            wording.style = try Self.welcomeStyle(style, base: wording.style, field: "\(field).style")
+        }
+        return wording
+    }
+
+    private static func welcomeLine(
+        _ patch: AppThemeWelcomeLineArguments,
+        field: String
+    ) throws -> ThemeWelcome.Line {
+        guard let text = cleaned(patch.text) else {
+            throw AppThemeEditingError.invalid("\(field) needs text.")
+        }
+        var when: ThemeWelcome.Condition?
+        if let condition = patch.when {
+            let parsed = try Self.welcomeCondition(condition, field: "\(field).when")
+            when = parsed.isEmpty ? nil : parsed
+        }
+        return ThemeWelcome.Line(text: text, when: when, weight: patch.weight ?? 1)
+    }
+
+    private static func welcomeCondition(
+        _ patch: AppThemeWelcomeConditionArguments,
+        field: String
+    ) throws -> ThemeWelcome.Condition {
+        var condition = ThemeWelcome.Condition()
+        for raw in patch.dayparts ?? [] {
+            guard let daypart = ThemeWelcome.Daypart(rawValue: raw.lowercased()) else {
+                throw AppThemeEditingError.invalid(
+                    "\(field).dayparts: \"\(raw)\" is not one of "
+                        + ThemeWelcome.Daypart.allCases.map { "\"\($0.rawValue)\"" }
+                            .joined(separator: ", ") + "."
+                )
+            }
+            condition.dayparts.insert(daypart)
+        }
+        if let hours = patch.hours {
+            guard let from = hours.from, let to = hours.to else {
+                throw AppThemeEditingError.invalid("\(field).hours needs both from and to.")
+            }
+            condition.hours = ThemeWelcome.Hours(from: from, to: to)
+        }
+        for raw in patch.weekdays ?? [] {
+            guard let weekday = ThemeWelcome.Weekday(rawValue: raw.lowercased()) else {
+                throw AppThemeEditingError.invalid(
+                    "\(field).weekdays: \"\(raw)\" is not one of "
+                        + ThemeWelcome.Weekday.allCases.map { "\"\($0.rawValue)\"" }
+                            .joined(separator: ", ") + "."
+                )
+            }
+            condition.weekdays.insert(weekday)
+        }
+        if let dates = patch.dates {
+            guard dates.count <= ThemeWelcomeLimits.maximumDateSpans else {
+                throw AppThemeEditingError.invalid(
+                    "\(field).dates holds at most \(ThemeWelcomeLimits.maximumDateSpans) spans."
+                )
+            }
+            condition.dates = try dates.enumerated().map { index, span in
+                guard let rawFrom = cleaned(span.from),
+                      let from = ThemeWelcome.MonthDay(wireValue: rawFrom) else {
+                    throw AppThemeEditingError.invalid(
+                        "\(field).dates[\(index)].from must be a day written MM-DD."
+                    )
+                }
+                guard let rawTo = cleaned(span.to) else {
+                    return ThemeWelcome.DateSpan(from: from, to: from)
+                }
+                guard let to = ThemeWelcome.MonthDay(wireValue: rawTo) else {
+                    throw AppThemeEditingError.invalid(
+                        "\(field).dates[\(index)].to must be a day written MM-DD."
+                    )
+                }
+                return ThemeWelcome.DateSpan(from: from, to: to)
+            }
+        }
+        condition.months = Set(patch.months ?? [])
+        return condition
+    }
+
+    private static func welcomeStyle(
+        _ patch: AppThemeWelcomeStyleArguments,
+        base: ThemeWelcome.TextStyle?,
+        field: String
+    ) throws -> ThemeWelcome.TextStyle? {
+        var style = base ?? ThemeWelcome.TextStyle()
+        if let scale = patch.scale { style.scale = scale }
+        if let raw = cleaned(patch.weight) {
+            guard let weight = ThemeWelcome.TextStyle.Weight(rawValue: raw.lowercased()) else {
+                throw AppThemeEditingError.invalid(
+                    "\(field).weight must be one of "
+                        + ThemeWelcome.TextStyle.Weight.allCases.map { "\"\($0.rawValue)\"" }
+                            .joined(separator: ", ") + "."
+                )
+            }
+            style.weight = weight
+        }
+        if let raw = cleaned(patch.ink) {
+            guard let ink = ThemeInk(wireValue: raw) else {
+                throw AppThemeEditingError.invalid(
+                    "\(field).ink: \"\(raw)\" is neither a theme role nor #RRGGBB."
+                )
+            }
+            style.ink = ink
+        }
+        if let family = cleaned(patch.fontFamily) {
+            // The length is the document's gate; checking it first keeps a paragraph pasted
+            // as a family name from being compared against every installed family.
+            guard family.count <= ThemeWelcomeLimits.maximumFontFamilyLength else {
+                throw AppThemeEditingError.invalid(
+                    "\(field).font_family is a family name of 1 to "
+                        + "\(ThemeWelcomeLimits.maximumFontFamilyLength) characters."
+                )
+            }
+            // The material's own family gate: a family this theme carries is registered for
+            // the process (`ThemeFontStore`), so the installed list already holds it. The
+            // list's spelling is stored, so the renderer's lookup never depends on case.
+            guard let known = Design.Typography.availableFamilies.first(where: {
+                $0.caseInsensitiveCompare(family) == .orderedSame
+            }) else {
+                throw AppThemeEditingError.invalid(
+                    "\(field).font_family \"\(family)\" is neither a family this theme carries "
+                        + "nor one installed on this Mac — add it with add_app_theme_font, or "
+                        + "state a typeface."
+                )
+            }
+            style.fontFamily = known
+        }
+        if let raw = cleaned(patch.typeface) {
+            guard let typeface = AppTheme.Material.Typeface(rawValue: raw) else {
+                let accepted = AppTheme.Material.Typeface.allCases
+                    .map(\.rawValue)
+                    .joined(separator: ", ")
+                throw AppThemeEditingError.invalid(
+                    "\"\(raw)\" is not a valid \(field).typeface. Accepted: \(accepted)."
+                )
+            }
+            style.typeface = typeface
+        }
+        let isEmpty = style.scale == nil && style.weight == nil && style.ink == nil
+            && style.fontFamily == nil && style.typeface == nil
+        return isEmpty ? nil : style
+    }
+
+    /// The welcome as create/update speak it, with the picture by stored name — it reads back
+    /// into a patch unchanged.
+    static func document(_ welcome: ThemeWelcome) -> [String: Any] {
+        var document: [String: Any] = [:]
+        if let backdrop = welcome.backdrop { document["backdrop"] = Self.document(backdrop) }
+        if let mark = welcome.mark { document["mark"] = mark.rawValue }
+        if let size = welcome.markSize { document["mark_size"] = size }
+        if let greeting = welcome.greeting {
+            document["greeting"] = Self.document(greeting, takesAppLines: true)
+        }
+        if let caption = welcome.caption {
+            document["caption"] = Self.document(caption, takesAppLines: false)
+        }
+        if let scrim = welcome.scrim {
+            var fields: [String: Any] = [:]
+            if let hero = scrim.hero { fields["hero"] = hero }
+            if let prompt = scrim.prompt { fields["prompt"] = prompt }
+            document["scrim"] = fields
+        }
+        return document
+    }
+
+    private static func document(
+        _ wording: ThemeWelcome.Wording,
+        takesAppLines: Bool
+    ) -> [String: Any] {
+        var document: [String: Any] = [
+            "lines": wording.lines.map { line -> [String: Any] in
+                var fields: [String: Any] = ["text": line.text, "weight": line.weight]
+                if let when = line.when, !when.isEmpty { fields["when"] = Self.document(when) }
+                return fields
+            }
+        ]
+        if takesAppLines { document["include_app_lines"] = wording.includesAppLines }
+        if let style = wording.style {
+            var fields: [String: Any] = [:]
+            if let scale = style.scale { fields["scale"] = scale }
+            if let weight = style.weight { fields["weight"] = weight.rawValue }
+            if let ink = style.ink { fields["ink"] = ink.wireValue }
+            if let family = style.fontFamily { fields["font_family"] = family }
+            if let typeface = style.typeface { fields["typeface"] = typeface.rawValue }
+            document["style"] = fields
+        }
+        return document
+    }
+
+    private static func document(_ condition: ThemeWelcome.Condition) -> [String: Any] {
+        var document: [String: Any] = [:]
+        if !condition.dayparts.isEmpty {
+            document["dayparts"] = ThemeWelcome.Daypart.allCases
+                .filter(condition.dayparts.contains).map(\.rawValue)
+        }
+        if let hours = condition.hours { document["hours"] = ["from": hours.from, "to": hours.to] }
+        if !condition.weekdays.isEmpty {
+            document["weekdays"] = ThemeWelcome.Weekday.allCases
+                .filter(condition.weekdays.contains).map(\.rawValue)
+        }
+        if !condition.dates.isEmpty {
+            document["dates"] = condition.dates.map {
+                ["from": $0.from.wireValue, "to": $0.to.wireValue]
+            }
+        }
+        if !condition.months.isEmpty { document["months"] = condition.months.sorted() }
         return document
     }
 

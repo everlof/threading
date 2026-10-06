@@ -25,8 +25,8 @@ Built-in themes must be duplicated before editing. The host owns validation, ass
 motion gates and persistence. Themes and extensions only supply presentation.
 
 Call `get_app_theme(section: "schema")` for the block index, then request a dotted path such as
-`material.backdrop`, `sidebar.mascot`, `title_morph` or `terminal_colors.glow` for complete
-authoring documentation. Array members use dotted paths too (`sprites.source.path`).
+`material.backdrop`, `sidebar.mascot`, `title_morph`, `welcome` or `terminal_colors.glow` for
+complete authoring documentation. Array members use dotted paths too (`sprites.source.path`).
 Without `section`, `get_app_theme` still returns the theme document.
 
 The **meaning and limits** column is generated from the same schema the describe path returns;
@@ -76,6 +76,13 @@ def ownership(path):
         return ("Mac; Preview" + ("; Phone" if phone else ""), "AppThemeEditing", owner)
     if "title_morph" in path:
         return ("Mac/Phone names", "ThemeTitleMorphLimits / AppThemeEditing", "Core/Theme/ThemeTitleMorph.swift")
+    if path.startswith("welcome") or path == "remove_welcome":
+        picture = path.startswith("welcome.backdrop.image")
+        owner = "Core/Theme/ThemeWelcome.swift"
+        if path.startswith("welcome.backdrop"):
+            owner = "Core/Theme/ThemeParticles.swift" if path.startswith("welcome.backdrop.particles") else "Core/Theme/ThemeBackdrop.swift"
+        validator = "ThemeWelcomeLimits / AppThemeEditing" + (" / ThemeAssetStore" if picture else "")
+        return ("Mac new-session composer; Preview; Phone new chat", validator, owner)
     if path.startswith("words") or path == "remove_words":
         return ("Mac status/composer/title; Phone words", "ThemeWordsLimits / AppThemeEditing", "Core/Theme/ThemeWords.swift")
     if path.startswith("sidebar"):

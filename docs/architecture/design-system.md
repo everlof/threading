@@ -1600,10 +1600,10 @@ The vocabulary these encode, which new work should follow:
 
 - **A paragraph cannot morph; lines can.** LabelMorph diffs one Core Text line, so a wrapped
   block has no single line to be diffed against. `MorphingMultilineTitleLabel` keeps a value as
-  lines instead — one `MorphingTitleLabel` per line, split on newlines and never wrapped — which
-  is what lets the composer's hero morph between a chat's one-line greeting and a manager's
-  three-line brief (`ComposerDefaults.managerGreeting`) rather than hide one label and show
-  another. Three rules make that read as one motion. Every slot is the **font's** line height
+  lines instead — one `MorphingTitleLabel` per line, split on newlines and by default never
+  wrapped — which is what lets the composer's hero morph between a chat's one-line greeting and
+  a manager's three-line brief (`ComposerDefaults.managerGreeting`) rather than hide one label
+  and show another. Three rules make that read as one motion. Every slot is the **font's** line height
   rather than the height its characters happen to measure, so the block's size is a function of
   its line count alone — which is what makes the count animatable at all. The count then
   **travels**: every line either value uses stays in layout for the length of the morph, and the
@@ -1621,6 +1621,26 @@ The vocabulary these encode, which new work should follow:
   transaction, and a window that is never flushed would leave the block pinned at the shape it
   was passing through. Releasing moves nothing: a centred block gives its width back from both
   sides at once, and the height it gives back is the height the travel has just arrived at.
+
+  **A line the host did not write wraps before it morphs.** A theme's greeting may run to 160
+  characters, and truncating that at the hero's width threw most of it away. A block opts into
+  `Wrapping.words(maximumLines:)` and its host states `wrapWidth` — read from the host's own
+  room, never from the block's frame, which is its widest line and would only ratchet narrower.
+  The value is then broken into lines *before* the morph (`MorphingLineBreaker`: Core Text's
+  word-wrap suggestion in LabelMorph's own attributes, between characters only for a word wider
+  than the measure, the last line at the cap tail-truncated), so the morph still diffs line
+  against line and a wrapped greeting morphs into a one-line one like any change of count. The
+  breaker keeps one point back from the measure because the label reports its width rounded
+  *up*: a line broken at the measure itself came back a fraction over it, the host's margins
+  squeezed the block by that point, and LabelMorph truncated a line the breaker said fitted
+  (`MorphingMultilineTitleLabelWrapTests.testEveryWrappedLineIsDrawnWholeAtEveryMeasure`). A
+  re-break — new measure, new face, rule switched — lands directly rather than morphing, the way
+  a text field re-wrapping on resize does, and only when the lines come out different; restating
+  the same whole-point measure on every layout pass is a comparison and nothing else, so a morph
+  in flight is not cut short by it. The composer wraps the greeting (three lines) and caption
+  (two) to the pane between its margins, capped at `Design.Size.readableWidth`; the manager's
+  brief switches wrapping off, because its three lines are the app's own and a narrow pane must
+  not re-break them into a different three.
 
 **One silhouette per strip.** `ThemedTabItemView` owns a tab's geometry, interaction and type roles
 in one class. The pane strip and toolbar page tab differ only in their `InkSource`: ordinary chrome

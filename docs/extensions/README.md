@@ -136,7 +136,8 @@ The first vertical slice exists:
   same hook the other way up: a fill image or a surface *beneath* the sidebar's rows, with the
   host keeping an opacity ceiling, the cadence, the pointer and the layering.
   `display.backdrop@1` and `composer.backdrop@1` are the same contract beneath the display
-  panel's tabs and content and beneath the new-session composer. A surface may also name one
+  panel's tabs and content and beneath the new-session composer; the composer also tells a
+  Metal surface where its hero and prompt box sit (`uniforms.focus`). A surface may also name one
   package picture as its `texture`, and bind the theme's darkness, accent and ground and the
   app's turn-finished / needs-attention moments as live signals.
 - The `media` node is the only one whose pixels move on their own, and the host draws all of

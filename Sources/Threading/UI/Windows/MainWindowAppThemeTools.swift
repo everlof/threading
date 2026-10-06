@@ -238,6 +238,9 @@ extension AgentToolCoordinator {
             if patch.material?.backdrop?.image?.source != nil {
                 filesToSnapshot.append(ThemeAssetSlot.backdrop.fileName(for: kind))
             }
+            if patch.welcome?.backdrop?.image?.source != nil {
+                filesToSnapshot.append(ThemeAssetSlot.welcome.fileName(for: kind))
+            }
             for sprite in patch.sprites ?? [] where sprite.source != nil {
                 guard let name = sprite.name?.trimmingCharacters(in: .whitespaces),
                       ThemeSprite.isValidName(name) else { continue }
@@ -533,6 +536,13 @@ extension AgentToolCoordinator {
             remove: patch?.removeTitleMorph,
             base: source?.titleMorph
         )
+        let welcome = try AppThemeToolParsing.welcome(
+            patch?.welcome,
+            remove: patch?.removeWelcome,
+            base: source?.welcome,
+            themeID: themeID,
+            kind: kind
+        )
         return AppThemeEditing.makeVariant(
             named: name,
             from: base,
@@ -546,7 +556,8 @@ extension AgentToolCoordinator {
             sprites: sprites,
             moments: moments,
             words: words,
-            titleMorph: titleMorph
+            titleMorph: titleMorph,
+            welcome: welcome
         )
     }
 
@@ -1568,6 +1579,9 @@ extension AgentToolCoordinator {
         }
         if let titleMorph = variant?.titleMorph {
             document["title_morph"] = AppThemeToolParsing.document(titleMorph)
+        }
+        if let welcome = variant?.welcome {
+            document["welcome"] = AppThemeToolParsing.document(welcome)
         }
         return document
     }

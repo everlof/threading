@@ -121,8 +121,10 @@ process. The provider never receives the consumer token or access to its package
 
 Fact providers use `facts.provide` and repeat their manifest's `factDefinitions` in the live
 registration. `ExtensionHostClient.publishFacts(_:replacing:)` atomically replaces values for
-explicit repository or repository-branch subjects. The bearer supplies provider identity and
-process generation; no opaque project or session identifier is accepted by this capability.
+explicit repository or repository-branch subjects, or for the identity-free `.application`
+subject (a value about no repository, such as the weather, which a theme's welcome greeting can
+show through `{fact:KEY}`). The bearer supplies provider identity and process generation; no
+opaque project or session identifier is accepted by this capability.
 `Examples/GitLabStateExtension` is the data-only reference: it discovers public GitLab merge
 request state through an exact `gitlab.com` brokered-network grant and publishes
 `gitlab.mr.state@1` on canonical repository-branch subjects. It declares no navigator, component,

@@ -1857,6 +1857,8 @@ struct AppThemeVariantArguments: Codable, Sendable {
   let removeWords: Bool?
   let titleMorph: AppThemeTitleMorphArguments?
   let removeTitleMorph: Bool?
+  let welcome: AppThemeWelcomeArguments?
+  let removeWelcome: Bool?
 
   /// Defaulted so the call sites (and tests) written before `sidebar` and `chrome` existed
   /// keep reading as they did.
@@ -1875,7 +1877,9 @@ struct AppThemeVariantArguments: Codable, Sendable {
     words: AppThemeWordsArguments? = nil,
     removeWords: Bool? = nil,
     titleMorph: AppThemeTitleMorphArguments? = nil,
-    removeTitleMorph: Bool? = nil
+    removeTitleMorph: Bool? = nil,
+    welcome: AppThemeWelcomeArguments? = nil,
+    removeWelcome: Bool? = nil
   ) {
     self.roles = roles
     self.material = material
@@ -1892,6 +1896,8 @@ struct AppThemeVariantArguments: Codable, Sendable {
     self.removeWords = removeWords
     self.titleMorph = titleMorph
     self.removeTitleMorph = removeTitleMorph
+    self.welcome = welcome
+    self.removeWelcome = removeWelcome
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -1907,6 +1913,8 @@ struct AppThemeVariantArguments: Codable, Sendable {
     case removeWords = "remove_words"
     case titleMorph = "title_morph"
     case removeTitleMorph = "remove_title_morph"
+    case welcome
+    case removeWelcome = "remove_welcome"
   }
 }
 
@@ -1926,6 +1934,185 @@ struct AppThemeTitleMorphArguments: Codable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case style, characters
     case removeCharacters = "remove_characters"
+  }
+}
+
+/// The new-session composer's welcome in a variant. Every stated sub-block merges onto what is
+/// stated — `backdrop` in the material backdrop's idiom, a wording's `lines` replacing its list
+/// and its `style` one field at a time, a scrim one veil at a time — and each `remove_*` gives
+/// that sub-block back to the app.
+struct AppThemeWelcomeArguments: Codable, Sendable {
+  let backdrop: AppThemeBackdropArguments?
+  let removeBackdrop: Bool?
+  let mark: String?
+  let markSize: Double?
+  let removeMark: Bool?
+  let greeting: AppThemeWelcomeWordingArguments?
+  let removeGreeting: Bool?
+  let caption: AppThemeWelcomeWordingArguments?
+  let removeCaption: Bool?
+  let scrim: AppThemeWelcomeScrimArguments?
+  let removeScrim: Bool?
+
+  init(
+    backdrop: AppThemeBackdropArguments? = nil,
+    removeBackdrop: Bool? = nil,
+    mark: String? = nil,
+    markSize: Double? = nil,
+    removeMark: Bool? = nil,
+    greeting: AppThemeWelcomeWordingArguments? = nil,
+    removeGreeting: Bool? = nil,
+    caption: AppThemeWelcomeWordingArguments? = nil,
+    removeCaption: Bool? = nil,
+    scrim: AppThemeWelcomeScrimArguments? = nil,
+    removeScrim: Bool? = nil
+  ) {
+    self.backdrop = backdrop
+    self.removeBackdrop = removeBackdrop
+    self.mark = mark
+    self.markSize = markSize
+    self.removeMark = removeMark
+    self.greeting = greeting
+    self.removeGreeting = removeGreeting
+    self.caption = caption
+    self.removeCaption = removeCaption
+    self.scrim = scrim
+    self.removeScrim = removeScrim
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case backdrop
+    case removeBackdrop = "remove_backdrop"
+    case mark
+    case markSize = "mark_size"
+    case removeMark = "remove_mark"
+    case greeting
+    case removeGreeting = "remove_greeting"
+    case caption
+    case removeCaption = "remove_caption"
+    case scrim
+    case removeScrim = "remove_scrim"
+  }
+}
+
+/// A greeting's or caption's pool of lines and its type. `include_app_lines` is the greeting's
+/// alone; a caption has no app lines to include.
+struct AppThemeWelcomeWordingArguments: Codable, Sendable {
+  let lines: [AppThemeWelcomeLineArguments]?
+  let includeAppLines: Bool?
+  let style: AppThemeWelcomeStyleArguments?
+  let removeStyle: Bool?
+
+  init(
+    lines: [AppThemeWelcomeLineArguments]? = nil,
+    includeAppLines: Bool? = nil,
+    style: AppThemeWelcomeStyleArguments? = nil,
+    removeStyle: Bool? = nil
+  ) {
+    self.lines = lines
+    self.includeAppLines = includeAppLines
+    self.style = style
+    self.removeStyle = removeStyle
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case lines
+    case includeAppLines = "include_app_lines"
+    case style
+    case removeStyle = "remove_style"
+  }
+}
+
+struct AppThemeWelcomeLineArguments: Codable, Sendable {
+  let text: String?
+  let weight: Int?
+  let when: AppThemeWelcomeConditionArguments?
+
+  init(text: String? = nil, weight: Int? = nil, when: AppThemeWelcomeConditionArguments? = nil) {
+    self.text = text
+    self.weight = weight
+    self.when = when
+  }
+}
+
+/// When a line may be shown. Every stated facet must match; within a facet any value does.
+struct AppThemeWelcomeConditionArguments: Codable, Sendable {
+  let dayparts: [String]?
+  let hours: AppThemeWelcomeHoursArguments?
+  let weekdays: [String]?
+  let dates: [AppThemeWelcomeDateSpanArguments]?
+  let months: [Int]?
+
+  init(
+    dayparts: [String]? = nil,
+    hours: AppThemeWelcomeHoursArguments? = nil,
+    weekdays: [String]? = nil,
+    dates: [AppThemeWelcomeDateSpanArguments]? = nil,
+    months: [Int]? = nil
+  ) {
+    self.dayparts = dayparts
+    self.hours = hours
+    self.weekdays = weekdays
+    self.dates = dates
+    self.months = months
+  }
+}
+
+struct AppThemeWelcomeHoursArguments: Codable, Sendable {
+  let from: Int?
+  let to: Int?
+
+  init(from: Int? = nil, to: Int? = nil) {
+    self.from = from
+    self.to = to
+  }
+}
+
+struct AppThemeWelcomeDateSpanArguments: Codable, Sendable {
+  let from: String?
+  let to: String?
+
+  init(from: String? = nil, to: String? = nil) {
+    self.from = from
+    self.to = to
+  }
+}
+
+struct AppThemeWelcomeStyleArguments: Codable, Sendable {
+  let scale: Double?
+  let weight: String?
+  let ink: String?
+  let fontFamily: String?
+  let typeface: String?
+
+  init(
+    scale: Double? = nil,
+    weight: String? = nil,
+    ink: String? = nil,
+    fontFamily: String? = nil,
+    typeface: String? = nil
+  ) {
+    self.scale = scale
+    self.weight = weight
+    self.ink = ink
+    self.fontFamily = fontFamily
+    self.typeface = typeface
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case scale, weight, ink
+    case fontFamily = "font_family"
+    case typeface
+  }
+}
+
+struct AppThemeWelcomeScrimArguments: Codable, Sendable {
+  let hero: Double?
+  let prompt: Double?
+
+  init(hero: Double? = nil, prompt: Double? = nil) {
+    self.hero = hero
+    self.prompt = prompt
   }
 }
 
@@ -8093,7 +8280,7 @@ enum MCPTools {
       },
       description: """
         With section, read authoring documentation instead of a theme: "schema" lists blocks;
-        a path such as "material.backdrop", "sidebar.mascot", "title_morph" or
+        a path such as "material.backdrop", "sidebar.mascot", "title_morph", "welcome" or
         "terminal_colors.glow" returns that block's complete fields, limits and guidance.
         No theme_id is needed for documentation. Without section, read one complete app-chrome theme document in the same snake-case vocabulary \
         accepted by create_app_theme and update_app_theme. Each available light/dark \
@@ -8193,7 +8380,8 @@ enum MCPTools {
         Create an editable theme from a base (default: current); omitted fields inherit.
         Set roles AND terminal_colors in each variant for a coherent palette. Use material
         for shapes/backdrops, chrome for a window frame, sidebar for a mascot/logo, and
-        words/title_morph/moments for character. One variant is fixed; adaptive needs both.
+        words/title_morph/moments/welcome (the ⌘N composer) for character. One variant is
+        fixed; adaptive needs both.
         For every block's fields, limits and examples call get_app_theme(section: path),
         starting with section: "schema" (e.g. terminal_colors.glow). Applied by default; inspect with preview_app_theme.
         """,
@@ -8405,11 +8593,16 @@ enum MCPTools {
       description: """
         See what an app theme looks like: renders it on a sample window — the sidebar with \
         its brand, band and ambient particles, a pane with its backdrop, a card, buttons \
-        and the paired terminal colours — and returns the PNG for you to inspect. Works \
-        for any theme, applied or not, and in both appearances of an adaptive one. Sample \
-        rows stand in for the user's projects, so nothing of theirs is captured. Motion is \
-        shown as a still frame of where particles would be. Use it after create_app_theme \
-        or update_app_theme and before telling the user a theme is finished.
+        and the paired terminal colours — and returns the PNG for you to inspect. A variant \
+        that states a welcome adds a new-session band beneath its window: the welcome's \
+        backdrop, mark at its size, greeting and caption, scrims and a sample prompt box, \
+        with one line picked by a fixed seed and its tokens rendered at a fixed moment from \
+        sample values (project "threading", user "Ada", 2 working, 1 waiting); the result's \
+        text quotes the words drawn. Works for any theme, applied or not, and in both \
+        appearances of an adaptive one. Sample rows stand in for the user's projects, so \
+        nothing of theirs is captured. Motion is shown as a still frame of where particles \
+        would be. Use it after create_app_theme or update_app_theme and before telling the \
+        user a theme is finished.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -8419,12 +8612,13 @@ enum MCPTools {
           ),
           "appearance": MCPPropertySchema(
             type: .string,
-            description: "\"light\", \"dark\", or \"both\" (side by side). Defaults to every "
+            description: "\"light\", \"dark\", or \"both\" (stacked, light first). Defaults to every "
               + "variant the theme has."
           ),
           "frames": MCPPropertySchema(
             type: .integer,
-            description: "1 or 3. Three shows gradient drift at 0, ⅓ and ⅔ of its cycle; particles stay stamped."
+            description: "1 or 3. Three shows gradient drift at 0, ⅓ and ⅔ of its cycle, the welcome's "
+              + "too; particles stay stamped."
           ),
         ],
         required: []
@@ -9579,7 +9773,258 @@ enum MCPTools {
         type: .boolean,
         description: "True returns all of the app's own words."
       ),
+      "welcome": MCPPropertySchema(
+        type: .object,
+        description: """
+          The new-session composer (⌘N) in this variant's hands. The layout stays the app's: \
+          the prompt hangs from the pane's foot and the mark over the greeting floats centred \
+          above it, so design around both. The backdrop fills the pane beneath any \
+          composer.backdrop@1 extension surface, which is told where the two regions sit; \
+          scrims veil them over busy art. Every sub-block merges onto what is stated and each \
+          remove_* gives one back to the app. A manager session's brief and every control keep \
+          the app's own words.
+          """,
+        properties: appWelcomeSchema
+      ),
+      "remove_welcome": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns the whole new-session welcome to the app's own."
+      ),
     ]
+  }
+
+  /// The welcome block: a backdrop in the material's vocabulary, the mark, two pools of lines in
+  /// the token grammar, and the scrims. Ranges come from `ThemeWelcomeLimits`.
+  private static var appWelcomeSchema: [String: MCPPropertySchema] {
+    var backdrop = appMaterialSchema["backdrop"]?.properties ?? [:]
+    backdrop["particles"] = appParticlesSchema(
+      "An ambient field over the welcome's wash and picture, capped at 0.6 opacity; still "
+        + "under Reduce Motion and the Theme animations setting."
+    )
+    backdrop["remove_particles"] = MCPPropertySchema(
+      type: .boolean,
+      description: "True removes the welcome's particles."
+    )
+    backdrop["remove"] = MCPPropertySchema(
+      type: .boolean,
+      description: "True clears the welcome's whole backdrop, like remove_backdrop."
+    )
+    let marks = ThemeWelcome.Mark.allCases.map { "\"\($0.rawValue)\"" }.joined(separator: ", ")
+    return [
+      "backdrop": MCPPropertySchema(
+        type: .object,
+        description: "A gradient, picture and particles filling the composer pane, in "
+          + "material.backdrop's vocabulary; the picture is stored apart from the material's, "
+          + "at up to 2048 pixels and 8 MB. Each gradient stop must keep the greeting's ink "
+          + "(or the label) at 3:1 over the ground. Pictures receive sampled legibility "
+          + "warnings measured with the greeting's ink.",
+        properties: backdrop
+      ),
+      "remove_backdrop": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns the pane to the app's plain ground."
+      ),
+      "mark": MCPPropertySchema(
+        type: .string,
+        description: "What stands above the greeting, one of \(marks): the Threading mark "
+          + "(default), this variant's sidebar logo picture, its sidebar mascot in the mood of "
+          + "the window's sessions, or nothing. logo and mascot draw the app's mark when the "
+          + "variant has none."
+      ),
+      "mark_size": MCPPropertySchema(
+        type: .number,
+        description: "The mark's side, \(ThemeLimitText.span(ThemeWelcomeLimits.markSides)) "
+          + "points. Omit for the app's size."
+      ),
+      "remove_mark": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns the app's mark at the app's size."
+      ),
+      "greeting": appWelcomeWordingSchema(
+        "The heading line. One eligible line is picked by weight each time the composer is "
+          + "arrived at, re-picked when the theme changes and re-rendered on the minute while "
+          + "it shows a clock token. Lines are shown as written in every language. With no "
+          + "eligible line, the app's own greeting is shown.",
+        takesAppLines: true
+      ),
+      "remove_greeting": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns the app's own greeting, set the app's way."
+      ),
+      "caption": appWelcomeWordingSchema(
+        "An optional smaller line beneath the greeting, picked and rendered the same way. The "
+          + "app has none of its own: with no eligible line there is no caption.",
+        takesAppLines: false
+      ),
+      "remove_caption": MCPPropertySchema(
+        type: .boolean,
+        description: "True removes the caption."
+      ),
+      "scrim": MCPPropertySchema(
+        type: .object,
+        description: "Soft veils in the ground colour behind the two regions the person works "
+          + "in, so busy art never sits straight under the greeting or the prompt. Each veil "
+          + "merges on its own.",
+        properties: [
+          "hero": MCPPropertySchema(
+            type: .number,
+            description: "Peak opacity behind the mark and greeting, "
+              + "\(ThemeLimitText.span(ThemeWelcomeLimits.scrimOpacities))."
+          ),
+          "prompt": MCPPropertySchema(
+            type: .number,
+            description: "Peak opacity behind the prompt box, "
+              + "\(ThemeLimitText.span(ThemeWelcomeLimits.scrimOpacities))."
+          ),
+        ]
+      ),
+      "remove_scrim": MCPPropertySchema(
+        type: .boolean,
+        description: "True removes both veils."
+      ),
+    ]
+  }
+
+  /// A greeting's or caption's pool. Only the greeting may keep the app's lines in its pool.
+  private static func appWelcomeWordingSchema(
+    _ description: String,
+    takesAppLines: Bool
+  ) -> MCPPropertySchema {
+    let dayparts = ThemeWelcome.Daypart.allCases.map { "\"\($0.rawValue)\"" }.joined(separator: ", ")
+    let weekdays = ThemeWelcome.Weekday.allCases.map { "\"\($0.rawValue)\"" }.joined(separator: ", ")
+    let weights = ThemeWelcome.TextStyle.Weight.allCases.map { "\"\($0.rawValue)\"" }
+      .joined(separator: ", ")
+    let typefaces = AppTheme.Material.Typeface.allCases.map { "\"\($0.rawValue)\"" }
+      .joined(separator: ", ")
+    var properties: [String: MCPPropertySchema] = [
+      "lines": MCPPropertySchema(
+        type: .array,
+        description: "Up to \(ThemeWelcomeLimits.maximumLines) lines; stating it replaces the list.",
+        items: MCPArrayItemSchema(
+          type: .object,
+          properties: [
+            "text": MCPPropertySchema(
+              type: .string,
+              description: "1–\(ThemeWelcomeLimits.maximumLineLength) characters. "
+                + ThemeWelcomeText.grammar
+                + " A line naming {project} is shown only in a composer with a project; "
+                + "{days_until:MM-DD} is 0 on the day itself. {fact:KEY} (or {fact:KEY@VERSION}) "
+                + "shows a value an installed extension publishes — for the composer's project, "
+                + "its repository branch or repository, else for the whole app — worded by "
+                + "Threading; a line whose fact is missing or stale is not shown, and the "
+                + "iPhone never shows one."
+            ),
+            "weight": MCPPropertySchema(
+              type: .integer,
+              description: "How often the line is picked against the other eligible ones, "
+                + "\(ThemeLimitText.span(ThemeWelcomeLimits.weights)). Default 1."
+            ),
+            "when": MCPPropertySchema(
+              type: .object,
+              description: "When the line may be shown: every stated facet must hold, and any "
+                + "value within one does. Omit for always.",
+              properties: [
+                "dayparts": MCPPropertySchema(
+                  type: .array,
+                  description: "Any of \(dayparts) — the parts of the day the app's own "
+                    + "greeting speaks in.",
+                  items: MCPArrayItemSchema(type: .string)
+                ),
+                "hours": MCPPropertySchema(
+                  type: .object,
+                  description: "An inclusive range of whole hours; from after to wraps "
+                    + "midnight (22 to 4).",
+                  properties: [
+                    "from": MCPPropertySchema(
+                      type: .integer,
+                      description: "The first hour, \(ThemeLimitText.span(ThemeWelcomeLimits.hours))."
+                    ),
+                    "to": MCPPropertySchema(
+                      type: .integer,
+                      description: "The last hour, \(ThemeLimitText.span(ThemeWelcomeLimits.hours)), "
+                        + "inclusive."
+                    ),
+                  ]
+                ),
+                "weekdays": MCPPropertySchema(
+                  type: .array,
+                  description: "Any of \(weekdays).",
+                  items: MCPArrayItemSchema(type: .string)
+                ),
+                "dates": MCPPropertySchema(
+                  type: .array,
+                  description: "Up to \(ThemeWelcomeLimits.maximumDateSpans) spans of days in "
+                    + "any year. from after to wraps the new year (12-28 to 01-03); 02-29 "
+                    + "matches only in a leap year.",
+                  items: MCPArrayItemSchema(
+                    type: .object,
+                    properties: [
+                      "from": MCPPropertySchema(
+                        type: .string,
+                        description: "The first day, MM-DD."
+                      ),
+                      "to": MCPPropertySchema(
+                        type: .string,
+                        description: "The last day, MM-DD, inclusive; omit for one day."
+                      ),
+                    ],
+                    required: ["from"]
+                  )
+                ),
+                "months": MCPPropertySchema(
+                  type: .array,
+                  description: "Months, \(ThemeLimitText.span(ThemeWelcomeLimits.months)).",
+                  items: MCPArrayItemSchema(type: .integer)
+                ),
+              ]
+            ),
+          ],
+          required: ["text"]
+        )
+      ),
+      "style": MCPPropertySchema(
+        type: .object,
+        description: "How the line is set; each field merges, and an omitted one keeps the app's.",
+        properties: [
+          "scale": MCPPropertySchema(
+            type: .number,
+            description: "Size relative to the app's heading (greeting) or body (caption) "
+              + "text, \(ThemeLimitText.span(ThemeWelcomeLimits.greetingScales))."
+          ),
+          "weight": MCPPropertySchema(
+            type: .string,
+            description: "One of \(weights)."
+          ),
+          "ink": MCPPropertySchema(
+            type: .string,
+            description: "A role name (\"accent\", \"label\", …) or #RRGGBB(AA). It must keep "
+              + "3:1 against the welcome's ground: its gradient's stops over the ground, or the "
+              + "ground."
+          ),
+          "font_family": MCPPropertySchema(
+            type: .string,
+            description: "A family this theme carries (add_app_theme_font) or this Mac has "
+              + "installed, at most \(ThemeWelcomeLimits.maximumFontFamilyLength) characters."
+          ),
+          "typeface": MCPPropertySchema(
+            type: .string,
+            description: "The system design used when no family is stated or it is missing: "
+              + "\(typefaces)."
+          ),
+        ]
+      ),
+      "remove_style": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns the line to the app's type."
+      ),
+    ]
+    if takesAppLines {
+      properties["include_app_lines"] = MCPPropertySchema(
+        type: .boolean,
+        description: "True keeps the app's own greeting in the pool as one more line of weight 1."
+      )
+    }
+    return MCPPropertySchema(type: .object, description: description, properties: properties)
   }
 
   /// `{path}` or `{base64}` for a theme picture — one spelling for every slot that takes one.

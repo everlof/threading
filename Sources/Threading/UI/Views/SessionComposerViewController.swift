@@ -90,21 +90,42 @@ final class SessionComposerViewController: NSViewController {
 
     /// The hero: the mark above a greeting that knows what day it is. It fills the room the
     /// bottom-flush composer leaves, and hides when a short pane leaves none.
-    private let heroMark = ThreadingMarkView()
+    ///
+    /// The theme's welcome may stand its logo or mascot there instead of the mark, or nothing
+    /// (`ThemeWelcomeMarkView`), and may set a caption under the greeting.
+    private let welcomeMark = ThemeWelcomeMarkView(defaultSide: ComposerDefaults.heroMarkSide)
     private let greetingLabel = MorphingMultilineTitleLabel()
+    private let captionLabel = MorphingMultilineTitleLabel()
     private let heroStack = NSStackView()
     private let heroRegion = NSLayoutGuide()
     private var hasPlayedHeroDrawIn = false
 
-    /// The greeting this composer is holding — minted when it is pointed at a project, and kept
-    /// until it is pointed at another one.
+    /// Soft ground-coloured veils behind the hero and the box, when the theme asks for them.
+    /// Above the extension plane and beneath everything the person reads.
+    private let welcomeScrim = ThemeWelcomeScrimView()
+
+    /// The welcome this composer is holding — minted when it is pointed at a project, and kept
+    /// until it is pointed at another one, or until the theme's own words change.
     ///
     /// Held rather than asked for each time the hero is restated. The line is a *welcome*: it
     /// belongs to arriving at the composer, not to any decision made inside it. Re-rolled on
     /// every restatement it followed `refreshChips` instead, so choosing a model — or an effort,
     /// or a permission mode — morphed the sentence above the box into a different one, which
-    /// reads as the app answering a choice it has nothing to say about.
-    private var chatGreeting = ComposerGreeting.message()
+    /// reads as the app answering a choice it has nothing to say about. What is held is the
+    /// *line*; a theme line's `{time}` is rendered again each time it is shown.
+    private var welcomePick: ComposerWelcome.Pick
+
+    /// The clock, the seed and the session counts the welcome reads. Injected so a test states
+    /// the moment.
+    private let welcomeEnvironment: ComposerWelcomeEnvironment
+
+    /// The next on-the-minute re-render, while a shown line reads the clock and the composer is
+    /// on screen — and only then.
+    private var welcomeTick: ComposerWelcomeTick?
+
+    /// A fact re-render handed to the next main-queue turn and not yet run: later changes in the
+    /// same turn ride on it.
+    private var isWelcomeFactRenderPending = false
 
     /// Where the session runs: the project, and the checkout inside it.
     private let locationChip = ChipView()
@@ -506,7 +527,8 @@ final class SessionComposerViewController: NSViewController {
         appSettings: AppSettings = .shared,
         accountPreferences: AccountPreferencesStore = .shared,
         extensionBackdropImageResolver: @escaping ComponentCustomizationHost.ImageResolver =
-            ExtensionComponentResourceResolver.image
+            ExtensionComponentResourceResolver.image,
+        welcomeEnvironment: ComposerWelcomeEnvironment = .live
     ) {
         self.customizationLookup = customizationLookup
         self.extensionBackdropImageResolver = extensionBackdropImageResolver
@@ -514,6 +536,13 @@ final class SessionComposerViewController: NSViewController {
         self.projectDefaults = projectDefaults
         self.appSettings = appSettings
         self.accountPreferences = accountPreferences
+        self.welcomeEnvironment = welcomeEnvironment
+        var generator = welcomeEnvironment.generator()
+        self.welcomePick = .app(ComposerGreeting.message(
+            on: welcomeEnvironment.now(),
+            calendar: welcomeEnvironment.calendar(),
+            using: &generator
+        ))
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -525,27 +554,61 @@ final class SessionComposerViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        view = NSView()
+        // The root is the welcome's ground: the theme's backdrop is its own bottom layer, so it
+        // lies beneath the extension plane, which stays the root's first subview.
+        let ground = ThemeWelcomeGroundView()
+        ground.onVisibilityChange = { [weak self] _ in self?.updateWelcomeClock() }
+        ground.onAppearanceChange = { [weak self] in self?.welcomeAppearanceDidChange() }
+        view = ground
         setupViews()
     }
 
     // MARK: - Setup
 
     private func setupViews() {
-        greetingLabel.applyFont(.heading)
+        greetingLabel.applyFont(.welcomeGreeting)
         greetingLabel.alignment = .center
         // The label wrapper yields at priority 1 so hosts with slots can truncate it. This
         // host has no slot — the hero's width *is* the greeting's — and without this the
         // vertical stack resolved its ambiguous width to the mark's 40 points and cut the
         // greeting to one glyph and an ellipsis.
         greetingLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        // Rules rather than colours, re-asked on every theme and appearance change: the theme's
+        // ink for a chat's greeting, the app's for the manager's brief.
+        greetingLabel.setTextColor { [weak self] in
+            self?.welcomeInk(.greeting) ?? Design.Text.label
+        }
+        greetingLabel.setRasterizationGround { [weak self] in
+            self?.welcomeGround ?? Design.Surface.background
+        }
 
-        heroMark.setAccessibilityElement(false)
+        captionLabel.applyFont(.welcomeCaption)
+        captionLabel.alignment = .center
+        captionLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        captionLabel.setTextColor { [weak self] in
+            self?.welcomeInk(.caption) ?? Design.Text.secondary
+        }
+        captionLabel.setRasterizationGround { [weak self] in
+            self?.welcomeGround ?? Design.Surface.background
+        }
+        captionLabel.setAccessibilityIdentifier("composer.session-start.caption")
+        captionLabel.isHidden = true
+
+        // A theme writes these lines, up to `ThemeWelcomeLimits`' 160 characters, so they wrap
+        // to the hero's measure rather than truncating at it — and stop at a few lines, so a
+        // long one cannot push the hero out of the room above the box. The measure itself is
+        // stated in `viewDidLayout`, the one place the pane's width is known.
+        greetingLabel.wrapping = .words(maximumLines: ComposerDefaults.greetingMaximumLines)
+        captionLabel.wrapping = .words(maximumLines: ComposerDefaults.captionMaximumLines)
+
         heroStack.orientation = .vertical
         heroStack.alignment = .centerX
         heroStack.spacing = Design.Spacing.inset
-        heroStack.addArrangedSubview(heroMark)
+        heroStack.addArrangedSubview(welcomeMark)
         heroStack.addArrangedSubview(greetingLabel)
+        heroStack.addArrangedSubview(captionLabel)
+        // A caption belongs to its greeting: closer to it than the greeting is to the mark.
+        heroStack.setCustomSpacing(Design.Spacing.small, after: greetingLabel)
         heroStack.translatesAutoresizingMaskIntoConstraints = false
 
         // The quietest tier there is. With the primary gone from this screen, a bordered import
@@ -636,6 +699,7 @@ final class SessionComposerViewController: NSViewController {
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         installExtensionBackdrop()
+        installWelcomeScrim()
         view.addSubview(stack)
         view.addSubview(heroStack)
         view.addLayoutGuide(heroRegion)
@@ -704,14 +768,13 @@ final class SessionComposerViewController: NSViewController {
             heroStack.trailingAnchor.constraint(
                 lessThanOrEqualTo: view.trailingAnchor,
                 constant: -Design.Spacing.pane
-            ),
-            heroMark.widthAnchor.constraint(equalToConstant: ComposerDefaults.heroMarkSide),
-            heroMark.heightAnchor.constraint(equalToConstant: ComposerDefaults.heroMarkSide)
+            )
         ])
 
         wireChips()
         observeUsage()
         observeAccountPresentation()
+        observeWelcomeFacts()
         installActivityBeam()
         // Nothing has been discovered yet, so the offer starts absent rather than as an
         // untitled button holding a row open until the first scan comes back.
@@ -726,10 +789,74 @@ final class SessionComposerViewController: NSViewController {
     /// no part of it that has to be told what room it may take. What used to need telling was
     /// the usage panel, which drew one bar per rate-limit window and grew the *window* with them
     /// (see `window-chrome.md`); its reading is one line inside the box now.
+    ///
+    /// The hero's words are measured first, because the height that decision weighs is theirs: a
+    /// theme's greeting wrapped to three lines needs more room to float than the line it was
+    /// before the pane narrowed, and a hero judged on the old count would peek from behind the
+    /// box the moment it re-wrapped.
     override func viewDidLayout() {
         super.viewDidLayout()
+        if updateHeroMeasure() {
+            // The lines moved after this pass placed the hero; the next one places them.
+            view.needsLayout = true
+        }
         heroStack.isHidden = heroRegion.frame.height
             < heroStack.fittingSize.height + ComposerDefaults.heroMinimumClearance
+        updateWelcomeRegions()
+    }
+
+    /// Tells the greeting and caption the measure they wrap to: the pane between its side
+    /// margins — the room the hero's own constraints give it — and never wider than a reading
+    /// measure. Returns whether either one's lines changed.
+    ///
+    /// Read from the *pane*, not from the hero, whose width is its widest line's: wrapping at
+    /// that would only ever narrow. Restated on every pass and costs a width comparison when the
+    /// pane has not changed width; the labels re-break only when the measure moves.
+    private func updateHeroMeasure() -> Bool {
+        let measure = min(
+            view.bounds.width - Design.Spacing.pane * 2,
+            ComposerDefaults.heroMeasure
+        )
+        let before = (greetingLabel.presentedLines, captionLabel.presentedLines)
+        greetingLabel.wrapWidth = measure
+        captionLabel.wrapWidth = measure
+        return before != (greetingLabel.presentedLines, captionLabel.presentedLines)
+    }
+
+    /// Tells the scrims and the extension plane where the two working regions are: the hero
+    /// (nothing while a short pane hides it) and the prompt box, each in the receiver's own
+    /// coordinates. Restated on every layout, and when the box changes size inside the column
+    /// without the column moving — a growing prompt is laid out after this view is.
+    private func updateWelcomeRegions() {
+        let hero = heroStack.isHidden ? CGRect.zero : heroStack.frame
+        let prompt = view.convert(promptContentContainer.bounds, from: promptContentContainer)
+        welcomeScrim.heroRegion = hero.isEmpty ? .zero : welcomeScrim.convert(hero, from: view)
+        welcomeScrim.promptRegion = welcomeScrim.convert(prompt, from: view)
+        guard let plane = extensionBackdrop else { return }
+        plane.focus = ExtensionSurfaceFocus(
+            primary: hero.isEmpty ? .zero : plane.convert(hero, from: view),
+            secondary: plane.convert(prompt, from: view)
+        )
+    }
+
+    /// The veils go directly above the extension plane: an extension's art is veiled with the
+    /// theme's, and the words and the box stay above both.
+    private func installWelcomeScrim() {
+        if let plane = extensionBackdrop {
+            view.addSubview(welcomeScrim, positioned: .above, relativeTo: plane)
+        } else {
+            view.addSubview(welcomeScrim, positioned: .below, relativeTo: nil)
+        }
+        NSLayoutConstraint.activate([
+            welcomeScrim.topAnchor.constraint(equalTo: view.topAnchor),
+            welcomeScrim.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            welcomeScrim.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            welcomeScrim.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        promptContentContainer.postsFrameChangedNotifications = true
+        appEvents.observe(NSView.frameDidChangeNotification, object: promptContentContainer) {
+            [weak self] in self?.updateWelcomeRegions()
+        }
     }
 
     /// Places the protected native prompt behind the generic around-hook host. The contract only
@@ -791,10 +918,20 @@ final class SessionComposerViewController: NSViewController {
         appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
             self?.refreshChips()
         }
-        // A theme may state its own invitation (`ThemeWords.composerPlaceholder`); an open
-        // composer takes the new one with the theme rather than on its next project change.
+        // A theme may state its own invitation (`ThemeWords.composerPlaceholder`) and its own
+        // welcome; an open composer takes both with the theme rather than on its next project
+        // change.
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.repickWelcomeIfItsWordsChanged()
             self?.refreshRolePresentation()
+        }
+    }
+
+    /// A `{fact:KEY}` line reads the extension fact registry; a publication — or an expiry,
+    /// which the registry posts the same way — renders the picked lines again.
+    private func observeWelcomeFacts() {
+        appEvents.observe(ExtensionFactsDidChange.self) { [weak self] event in
+            self?.welcomeFactsDidChange(event.change)
         }
     }
 
@@ -1173,12 +1310,12 @@ final class SessionComposerViewController: NSViewController {
         // A fresh line for a fresh arrival. Not on the return above, which keeps the chips, the
         // half-written prompt and the attachments exactly as they were — and the sentence over
         // them is part of that picture.
-        chatGreeting = ComposerGreeting.message()
+        mintWelcome()
         refreshGreeting()
 
         if !hasPlayedHeroDrawIn, !Design.Motion.reducesMotion {
             hasPlayedHeroDrawIn = true
-            heroMark.playDrawIn()
+            welcomeMark.playDrawIn()
         }
 
         guard let projectID, let project = ProjectStore.shared.project(withID: projectID) else {
@@ -1352,15 +1489,209 @@ final class SessionComposerViewController: NSViewController {
     /// by `isHidden` did the same job and cut between them, which is the one transition on this
     /// screen the eye is already on.
     ///
-    /// It reads `chatGreeting` rather than asking `ComposerGreeting` for a line, because this
+    /// It reads `welcomePick` rather than asking `ComposerGreeting` for a line, because this
     /// runs on every chip selection — `refreshChips` restates the role, and the role owns the
     /// hero. Rolling a fresh line here meant picking a model rewrote the sentence above the box,
-    /// so a choice that changes nothing about the greeting animated it anyway.
+    /// so a choice that changes nothing about the greeting animated it anyway. A theme line is
+    /// *rendered* again, which changes it only when what its tokens read has moved.
+    ///
+    /// The theme's welcome is a chat's: a manager's brief keeps the app's type and ink and has
+    /// no caption. Nor does it wrap: its three lines are the app's own, each one a line on
+    /// purpose, so a narrow pane truncates them as it always has rather than re-breaking them
+    /// into a different three.
     private func refreshGreeting() {
-        let message = selectedRole == .manager ? ComposerDefaults.managerGreeting : chatGreeting
-        guard message != greetingLabel.stringValue else { return }
-        greetingLabel.setStringValue(message, animated: !greetingLabel.stringValue.isEmpty)
+        let isChat = selectedRole == .chat
+        greetingLabel.wrapping = isChat
+            ? .words(maximumLines: ComposerDefaults.greetingMaximumLines)
+            : .none
+        greetingLabel.applyFont(isChat ? .welcomeGreeting : .heading)
+        greetingLabel.refreshTextColor()
+        captionLabel.refreshTextColor()
+
+        let context = isChat && welcomePick.usesTheme
+            ? welcomeContext(reading: welcomePick.factKeys)
+            : nil
+        let message: String
+        if !isChat {
+            message = ComposerDefaults.managerGreeting
+        } else if let context {
+            message = welcomePick.renderedGreeting(at: context)
+        } else {
+            message = welcomePick.appGreeting
+        }
+        if message != greetingLabel.stringValue {
+            greetingLabel.setStringValue(message, animated: !greetingLabel.stringValue.isEmpty)
+        }
+
+        let caption = context.flatMap { welcomePick.renderedCaption(at: $0) }
+        if let caption {
+            let arriving = captionLabel.isHidden
+            captionLabel.isHidden = false
+            if caption != captionLabel.stringValue {
+                captionLabel.setStringValue(caption, animated: !arriving)
+            }
+        } else {
+            captionLabel.isHidden = true
+        }
+        updateWelcomeClock()
     }
+
+    // MARK: - Welcome
+
+    /// A fresh pick for a fresh arrival, from the pools the theme in force states for this
+    /// composer's appearance.
+    private func mintWelcome() {
+        let welcome = ThemeWelcomeAppearance.welcome(for: view.effectiveAppearance)
+        let greeting = ThemeWelcomeAppearance.wording(.greeting, of: welcome)
+        let caption = ThemeWelcomeAppearance.wording(.caption, of: welcome)
+        var generator = welcomeEnvironment.generator()
+        guard greeting != nil || caption != nil else {
+            // The app's own line, read without a context: nothing here names a project, a
+            // person or a session count, so none of them is asked for.
+            welcomePick = .app(ComposerGreeting.message(
+                on: welcomeEnvironment.now(),
+                calendar: welcomeEnvironment.calendar(),
+                using: &generator
+            ))
+            return
+        }
+        welcomePick = ComposerWelcome.pick(
+            greeting: greeting,
+            caption: caption,
+            at: welcomeContext(
+                reading: ComposerWelcome.factKeys(greeting: greeting, caption: caption)
+            ),
+            using: &generator
+        )
+    }
+
+    /// A theme change keeps the welcome on screen unless it changed the welcome's *words*:
+    /// a colour tuned, a font chosen or a backdrop swapped restates the same line, and a Tune
+    /// drag's preview ticks would otherwise re-roll the greeting at pointer cadence.
+    private func repickWelcomeIfItsWordsChanged() {
+        guard isViewLoaded else { return }
+        let welcome = ThemeWelcomeAppearance.welcome(for: view.effectiveAppearance)
+        let greeting = ThemeWelcomeAppearance.wording(.greeting, of: welcome)
+        let caption = ThemeWelcomeAppearance.wording(.caption, of: welcome)
+        guard greeting != welcomePick.greetingPool || caption != welcomePick.captionPool else {
+            return
+        }
+        mintWelcome()
+    }
+
+    /// An adaptive theme states its welcome per variant, and a system light/dark flip is a
+    /// variant change no theme notification announces.
+    private func welcomeAppearanceDidChange() {
+        repickWelcomeIfItsWordsChanged()
+        refreshGreeting()
+    }
+
+    /// What a theme line's tokens read, at this moment. `factKeys` are the facts the lines about
+    /// to be judged or rendered name: each is looked up once and worded by the host's rules, so a
+    /// composer whose words name no fact reads no fact.
+    private func welcomeContext(reading factKeys: Set<ExtensionFactKey> = []) -> ThemeWelcome.Context {
+        let counts = welcomeEnvironment.sessionCounts()
+        let now = welcomeEnvironment.now()
+        let calendar = welcomeEnvironment.calendar()
+        let locale = welcomeEnvironment.locale()
+        var facts: [ExtensionFactKey: String] = [:]
+        for key in factKeys {
+            guard let fact = welcomeEnvironment.fact(key, projectID),
+                  let text = ThemeWelcomeFacts.text(
+                      for: fact,
+                      at: now,
+                      calendar: calendar,
+                      locale: locale
+                  ) else { continue }
+            facts[key] = text
+        }
+        return ThemeWelcome.Context(
+            date: now,
+            calendar: calendar,
+            locale: locale,
+            project: projectID.flatMap { ProjectStore.shared.project(withID: $0)?.name },
+            user: welcomeEnvironment.userName(),
+            working: counts.working,
+            waiting: counts.waiting,
+            daypartName: ComposerWelcome.daypartName,
+            facts: facts
+        )
+    }
+
+    /// Renders the picked lines again — never picks again — when a fact change may have moved
+    /// what they read: one of their keys, or a project's repository or branch, which decides
+    /// where a key is looked up. At most one render per main-queue turn, and none at all for
+    /// words that name no fact.
+    private func welcomeFactsDidChange(_ change: ExtensionFactChange) {
+        guard isViewLoaded, !isWelcomeFactRenderPending else { return }
+        let keys = welcomePick.factKeys
+        guard !keys.isEmpty else { return }
+        if case .exact(let cells) = change,
+           !cells.contains(where: {
+               keys.contains($0.key) || ExtensionFactRegistry.snapshotStructuralKeys.contains($0.key)
+           }) {
+            return
+        }
+        isWelcomeFactRenderPending = true
+        welcomeEnvironment.nextTurn { [weak self] in
+            guard let self else { return }
+            self.isWelcomeFactRenderPending = false
+            self.refreshGreeting()
+        }
+    }
+
+    /// Whether a fact re-render is waiting for its turn — what a test asks without spinning.
+    var isWelcomeFactRenderScheduled: Bool { isWelcomeFactRenderPending }
+
+    /// The ink the theme states for a chat's line, or nil for the app's own.
+    private func welcomeInk(_ line: ThemeWelcomeAppearance.Line) -> NSColor? {
+        guard selectedRole == .chat, isViewLoaded else { return nil }
+        let appearance = view.effectiveAppearance
+        return ThemeWelcomeAppearance.ink(
+            line,
+            of: ThemeWelcomeAppearance.welcome(for: appearance),
+            appearance: appearance
+        )
+    }
+
+    /// What the hero's glyphs are smoothed against: the welcome's ground as the eye reads it.
+    private var welcomeGround: NSColor {
+        let appearance = isViewLoaded ? view.effectiveAppearance : NSApp.effectiveAppearance
+        return ThemeWelcomeAppearance.ground(
+            ThemeWelcomeAppearance.welcome(for: appearance),
+            appearance: appearance
+        )
+    }
+
+    /// Re-renders on the minute while a shown line reads the clock and the composer can be
+    /// seen; otherwise holds no timer at all. One tick at a time, each scheduled for the next
+    /// minute boundary rather than sixty seconds on, so `{time}` turns over with the menu bar.
+    private func updateWelcomeClock() {
+        let ground = view as? ThemeWelcomeGroundView
+        let wanted = (ground?.isVisible ?? false)
+            && selectedRole == .chat
+            && welcomePick.followsClock
+        guard wanted else {
+            welcomeTick?.invalidate()
+            welcomeTick = nil
+            return
+        }
+        guard welcomeTick == nil else { return }
+        let now = welcomeEnvironment.now()
+        let next = welcomeEnvironment.calendar().dateInterval(of: .minute, for: now)?.end
+            ?? now.addingTimeInterval(ComposerDefaults.welcomeClockFallbackInterval)
+        welcomeTick = welcomeEnvironment.schedule(next) { [weak self] in
+            guard let self else { return }
+            self.welcomeTick = nil
+            self.refreshGreeting()
+        }
+    }
+
+    /// Whether an on-the-minute re-render is scheduled — what a test asks without waiting.
+    var isWelcomeClockRunning: Bool { welcomeTick != nil }
+
+    /// The caption under the greeting, or nil while there is none — what a test reads.
+    var welcomeCaption: String? { captionLabel.isHidden ? nil : captionLabel.stringValue }
 
     /// Puts the caret in the prompt.
     ///
@@ -2842,8 +3173,27 @@ enum ComposerDefaults {
     /// smaller than an app icon because it is a flourish, not the content.
     static let heroMarkSide: CGFloat = 40
 
+    /// How far ahead the welcome's clock looks when the calendar cannot name the next minute
+    /// boundary — never in practice, but a minute either way.
+    static let welcomeClockFallbackInterval: TimeInterval = 60
+
     /// The least air the hero needs beyond its own height before it is worth showing at all.
     static let heroMinimumClearance: CGFloat = 48
+
+    /// The widest the hero's words are set, however wide the pane: a reading measure, because a
+    /// greeting is a sentence. Not the column's `contentWidth`, which is sized for a row of
+    /// controls — a theme's 160 characters across 720 points is a line the eye loses its place
+    /// in on the way back.
+    static let heroMeasure = Design.Size.readableWidth
+
+    /// The most lines a theme's greeting wraps to before the last one truncates. Three is what
+    /// the hero already stands at for the manager's brief, so the longest greeting a theme may
+    /// write is never taller over the box than the app's own longest words.
+    static let greetingMaximumLines = 3
+
+    /// The most lines the caption beneath it wraps to. The quieter line stays a line or two —
+    /// past that it is a paragraph competing with the greeting it annotates.
+    static let captionMaximumLines = 2
 
     /// The widest the location chip may grow before its title truncates.
     ///

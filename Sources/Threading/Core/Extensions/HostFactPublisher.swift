@@ -358,7 +358,9 @@ final class HostFactPublisher {
         )
     }
 
-    private static func opaqueID<ID>(_ id: ID) -> String where ID: CustomStringConvertible {
+    /// The opaque string a host entity's fact subject is named by. Shared with readers that
+    /// look a subject up by the model's identifier (the composer's welcome).
+    static func opaqueID<ID>(_ id: ID) -> String where ID: CustomStringConvertible {
         id.description.lowercased()
     }
 
@@ -370,6 +372,7 @@ final class HostFactPublisher {
         case .repository(let repository): "3:\(repository.host)/\(repository.path)"
         case .repositoryBranch(let repository, let branch):
             "4:\(repository.host)/\(repository.path)#\(branch)"
+        case .application: "5"
         }
     }
 }

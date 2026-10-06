@@ -197,8 +197,9 @@ those static tie-breakers. It does not invoke `required` / `enhances` degradatio
 Threading offers a host-localized None row plus at most 128 fact rows in each control after
 filtering the live host and extension registry. Grouping requires `.groupable`; sorting requires
 `.sortable`; and format 1 admits definitions applicable to `.session`, `.repositoryBranch`, or
-`.repository`. Project-only and terminal-only definitions cannot resolve from the pipeline's
-session source and are omitted. For a key with multiple compatible providers, the registry's
+`.repository`. Project-only, terminal-only and application-only definitions cannot resolve from
+the pipeline's session source and are omitted; the `.application` subject is read by a theme's
+welcome greeting, never by navigator rows. For a key with multiple compatible providers, the registry's
 winning definition — host first, then source order, extension identifier and process generation —
 alone supplies display name, usages and eligibility. Metadata from lower-precedence definitions is
 never merged. Choices sort by localized display name, then fact-key ID and version, so provider

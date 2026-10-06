@@ -39,7 +39,7 @@ public struct RemoteThemeAsset: Codable, Equatable, Sendable {
 
     public var pixelBound: Int? {
         switch slot {
-        case "backdrop", "sidebarImage": return 1_290
+        case "backdrop", "sidebarImage", "welcome": return 1_290
         case "logo": return 512
         case "surface.texture": return 1_024
         case "mascot.idle", "mascot.resting", "mascot.working", "mascot.attention", "mascot.celebrating": return 512

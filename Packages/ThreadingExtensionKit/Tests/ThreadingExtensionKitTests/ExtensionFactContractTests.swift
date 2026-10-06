@@ -29,6 +29,7 @@ final class ExtensionFactContractTests: XCTestCase {
                 .repositoryBranch(repository: repository, branch: "release/1"),
                 "{\"branch\":\"release\\/1\",\"repository\":{\"host\":\"gitlab.example\",\"path\":\"group\\/project\"},\"type\":\"repositoryBranch\"}"
             ),
+            (.application, "{\"type\":\"application\"}"),
         ]
 
         for (subject, expectedJSON) in fixtures {

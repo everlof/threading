@@ -185,6 +185,9 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemeLogoView",
         "ThemeMascotView",
         "SidebarMascotView",
+        "ThemeWelcomeGroundView",
+        "ThemeWelcomeMarkView",
+        "ThemeWelcomeScrimView",
         "ThemeSwatchImage",
         "ThemeSwatchView",
         "ThemeTransitionOverlayView",
@@ -299,6 +302,7 @@ final class ComponentGalleryViewController: NSViewController {
     private var particleMarkSamples: [ThreadingMarkView] = []
     private var themeLogoSample: ThemeLogoView?
     private var themeMascotSample: ThemeMascotView?
+    private var welcomeScrimSample: ThemeWelcomeScrimView?
     private var themeLogoSampleHovered = false
     private var arrivalStage: ThemedSurfaceView?
     private let appearanceToggle = ThemedToggle()
@@ -3893,6 +3897,29 @@ final class ComponentGalleryViewController: NSViewController {
                     makeSidebarMascotSample()
                 ),
                 story(
+                    "ThemeWelcomeGroundView",
+                    "The new-session composer's ground: the theme's welcome backdrop — wash, "
+                        + "picture and particles — beneath everything the composer holds, the "
+                        + "extension plane included. This sample previews a wash in the theme's "
+                        + "own roles with snow; Reduce Motion and the Theme animations setting "
+                        + "leave the snow still.",
+                    makeThemeWelcomeGroundSample()
+                ),
+                story(
+                    "ThemeWelcomeMarkView",
+                    "What stands above the composer's greeting: the Threading mark, the theme's "
+                        + "logo, its mascot in the window's mood, or nothing — each at the "
+                        + "theme's size. A logo or mascot the theme cannot draw is the mark.",
+                    makeThemeWelcomeMarkSample()
+                ),
+                story(
+                    "ThemeWelcomeScrimView",
+                    "Soft veils in the theme's ground colour behind the hero and the prompt "
+                        + "box, reaching a pane margin past each, so busy art never sits straight "
+                        + "under the words. Veils turns them off and on.",
+                    makeThemeWelcomeScrimSample()
+                ),
+                story(
                     "ThemeTransitionOverlayView",
                     "How a theme arrives: particles in the incoming theme's colours cross the "
                         + "window while a wash rises to hide the swap and lifts off the new "
@@ -5276,6 +5303,120 @@ final class ComponentGalleryViewController: NSViewController {
             strip.trailingAnchor.constraint(equalTo: column.trailingAnchor)
         ])
         return column
+    }
+
+    /// A wash in the current theme's own roles, with snow over it. Dynamic role colours, so
+    /// the sample follows a theme switch the way a theme's own stops would.
+    private static var welcomeSample: ThemeWelcome {
+        ThemeWelcome(
+            backdrop: ThemeBackdrop(
+                gradient: ThemeBackdrop.Gradient(
+                    stops: [
+                        .init(color: Design.Surface.ground, position: 0),
+                        .init(color: Design.Surface.accentMuted, position: 1)
+                    ],
+                    angleDegrees: 160
+                ),
+                particles: ThemeParticles(style: .snow, colors: [.role(.label)], density: 0.6)
+            ),
+            scrim: ThemeWelcome.Scrim(hero: 0.6, prompt: 0.75)
+        )
+    }
+
+    private func makeThemeWelcomeGroundSample() -> NSView {
+        let ground = ThemeWelcomeGroundView()
+        ground.translatesAutoresizingMaskIntoConstraints = false
+        ground.preview = Self.welcomeSample
+        NSLayoutConstraint.activate([
+            ground.widthAnchor.constraint(equalToConstant: 360),
+            ground.heightAnchor.constraint(equalToConstant: 140)
+        ])
+        return ground
+    }
+
+    /// The four marks side by side, the logo and mascot drawn from the app's own icon so the
+    /// story shows each under every theme.
+    private func makeThemeWelcomeMarkSample() -> NSView {
+        let icon = NSImage(named: NSImage.applicationIconName) ?? NSImage()
+        let pose = SidebarAppearance.Mascot.Pose(
+            spec: ThemeMascot.Pose(asset: "sample", motion: .bob),
+            image: icon,
+            particles: nil
+        )
+        let mascot = SidebarAppearance.Mascot(
+            spec: ThemeMascot(poses: [.idle: pose.spec]),
+            poses: [.idle: pose]
+        )
+        let marks: [(String, ThemeWelcomeAppearance.Mark)] = [
+            ("App", .app),
+            ("Logo", .logo(icon)),
+            ("Mascot", .mascot(mascot)),
+            ("None", .hidden)
+        ]
+        return row(marks.map { title, mark in
+            let view = ThemeWelcomeMarkView(defaultSide: ComposerDefaults.heroMarkSide)
+            view.previewSide = 56
+            view.preview = mark
+            return labelledControl(title, control: view)
+        })
+    }
+
+    /// A hero and a box over a snowy wash, veiled — the composer's arrangement in miniature.
+    private func makeThemeWelcomeScrimSample() -> NSView {
+        let stage = ThemeWelcomeGroundView()
+        stage.translatesAutoresizingMaskIntoConstraints = false
+        stage.preview = Self.welcomeSample
+
+        let scrim = ThemeWelcomeScrimView()
+        scrim.preview = Self.welcomeSample
+        welcomeScrimSample = scrim
+        stage.addSubview(scrim)
+        NSLayoutConstraint.activate([
+            scrim.topAnchor.constraint(equalTo: stage.topAnchor),
+            scrim.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
+            scrim.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
+            scrim.trailingAnchor.constraint(equalTo: stage.trailingAnchor)
+        ])
+
+        let greeting = NSTextField(labelWithString: L10n.string("Good evening."))
+        greeting.applyFont(.heading)
+        greeting.textColor = Design.Text.label
+        greeting.translatesAutoresizingMaskIntoConstraints = false
+        let box = ThemedSurfaceView()
+        box.applySurface(fill: Design.Surface.panel, radius: .panel, border: Design.Surface.border)
+        box.translatesAutoresizingMaskIntoConstraints = false
+        stage.addSubview(greeting)
+        stage.addSubview(box)
+        NSLayoutConstraint.activate([
+            stage.widthAnchor.constraint(equalToConstant: 360),
+            stage.heightAnchor.constraint(equalToConstant: 200),
+            greeting.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
+            greeting.topAnchor.constraint(equalTo: stage.topAnchor, constant: Design.Spacing.pane),
+            box.leadingAnchor.constraint(equalTo: stage.leadingAnchor, constant: Design.Spacing.pane),
+            box.trailingAnchor.constraint(equalTo: stage.trailingAnchor, constant: -Design.Spacing.pane),
+            box.bottomAnchor.constraint(equalTo: stage.bottomAnchor, constant: -Design.Spacing.large),
+            box.heightAnchor.constraint(equalToConstant: 56)
+        ])
+        stage.layoutSubtreeIfNeeded()
+        scrim.heroRegion = greeting.frame
+        scrim.promptRegion = box.frame
+
+        let column = NSStackView(views: [
+            stage,
+            button("Veils", action: #selector(toggleWelcomeVeils(_:)))
+        ])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = Design.Spacing.small
+        return column
+    }
+
+    @objc private func toggleWelcomeVeils(_ sender: Any?) {
+        guard let scrim = welcomeScrimSample else { return }
+        scrim.preview = scrim.preview?.scrim == nil
+            ? Self.welcomeSample
+            : ThemeWelcome(backdrop: Self.welcomeSample.backdrop)
+        showReceipt(L10n.string(scrim.isHidden ? "Veils off." : "Veils on."))
     }
 
     private func makeThemeArrivalSample() -> NSView {

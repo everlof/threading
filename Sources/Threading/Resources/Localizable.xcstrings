@@ -25461,6 +25461,17 @@
         }
       }
     },
+    "Good evening." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "God kväll."
+          }
+        }
+      }
+    },
     "Good evening. One more thing before the day ends?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30545,6 +30556,17 @@
         }
       }
     },
+    "Logo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logotyp"
+          }
+        }
+      }
+    },
     "Logo at rest." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31234,6 +31256,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Markdown-filer"
+          }
+        }
+      }
+    },
+    "Mascot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Maskot"
           }
         }
       }
@@ -50643,6 +50676,17 @@
         }
       }
     },
+    "Soft veils in the theme's ground colour behind the hero and the prompt box, reaching a pane margin past each, so busy art never sits straight under the words. Veils turns them off and on." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mjuka slöjor i temats grundfärg bakom hälsningen och prompten, som når en panelmarginal utanför var och en så att livfull konst aldrig ligger rakt under orden. Slöjor slår av och på dem."
+          }
+        }
+      }
+    },
     "Software Updates" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56623,6 +56667,17 @@
         }
       }
     },
+    "The new-session composer's ground: the theme's welcome backdrop — wash, picture and particles — beneath everything the composer holds, the extension plane included. This sample previews a wash in the theme's own roles with snow; Reduce Motion and the Theme animations setting leave the snow still." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Grunden i kompositören för nya sessioner: temats välkomstbakgrund – tonung, bild och partiklar – under allt kompositören rymmer, tilläggsplanet inräknat. Exemplet visar en tonung i temats egna roller med snö; Minska rörelse och inställningen Temaanimationer håller snön stilla."
+          }
+        }
+      }
+    },
     "The next reset date for an affected window may move." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58611,6 +58666,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ThemeTransitionOverlayView"
+          }
+        }
+      }
+    },
+    "ThemeWelcomeGroundView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemeWelcomeGroundView"
+          }
+        }
+      }
+    },
+    "ThemeWelcomeMarkView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemeWelcomeMarkView"
+          }
+        }
+      }
+    },
+    "ThemeWelcomeScrimView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemeWelcomeScrimView"
           }
         }
       }
@@ -64926,6 +65014,39 @@
         }
       }
     },
+    "Veils" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slöjor"
+          }
+        }
+      }
+    },
+    "Veils off." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slöjor av."
+          }
+        }
+      }
+    },
+    "Veils on." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slöjor på."
+          }
+        }
+      }
+    },
     "Verified chain" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -66151,6 +66272,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vad ska agenten uppmärksamma?"
+          }
+        }
+      }
+    },
+    "What stands above the composer's greeting: the Threading mark, the theme's logo, its mascot in the window's mood, or nothing — each at the theme's size. A logo or mascot the theme cannot draw is the mark." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det som står ovanför kompositörens hälsning: Threading-märket, temats logotyp, dess maskot i fönstrets humör eller ingenting – var och en i temats storlek. En logotyp eller maskot som temat inte kan rita blir märket."
           }
         }
       }
@@ -67851,6 +67983,17 @@
         }
       }
     },
+    "afternoon" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "eftermiddag"
+          }
+        }
+      }
+    },
     "agent" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -69013,6 +69156,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "esc avslutar"
+          }
+        }
+      }
+    },
+    "evening" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "kväll"
           }
         }
       }
@@ -70235,6 +70389,17 @@
         }
       }
     },
+    "morning" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "morgon"
+          }
+        }
+      }
+    },
     "moved %@%lld, %@%lld pixels" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -70319,6 +70484,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ny rad"
+          }
+        }
+      }
+    },
+    "night" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "natt"
           }
         }
       }

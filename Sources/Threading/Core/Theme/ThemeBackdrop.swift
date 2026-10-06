@@ -305,6 +305,10 @@ public enum ThemeAssetSlot: String, CaseIterable {
     /// The material's backdrop picture (`AppTheme.Material.backdrop.image`), under every
     /// broad ground.
     case backdrop
+    /// The new-session composer's welcome picture (`ThemeWelcome.backdrop.image`). A pane-sized
+    /// picture like the material's, so it shares that slot's budget, but a slot of its own: a
+    /// theme may dress the welcome with art it would never put under the display panel.
+    case welcome
 
     /// One asset per slot per variant: a light chrome may want the mono logo its dark half
     /// inverts, and a pale wallpaper its dark half does not.
@@ -316,7 +320,7 @@ public enum ThemeAssetSlot: String, CaseIterable {
     public var maximumImageBytes: Int {
         switch self {
         case .logo, .background: return SidebarStyleLimits.maximumImageBytes
-        case .backdrop: return ThemeBackdropLimits.maximumImageBytes
+        case .backdrop, .welcome: return ThemeBackdropLimits.maximumImageBytes
         }
     }
 }

@@ -81,6 +81,23 @@ public enum ExtensionCustomSurfaceKind: String, Codable, Equatable, Sendable {
 /// a stable uniform ABI, and at most eight scalar inputs. The extension never receives an
 /// `MTLDevice`, command encoder, buffer, or AppKit object, and never constructs a texture.
 ///
+/// The uniforms are `ThreadingSurfaceUniforms` (`ExtensionMetalSource.UniformLayout`):
+///
+/// ```metal
+/// struct ThreadingSurfaceUniforms {
+///     float2 size;      // drawable size in pixels
+///     float time;       // seconds since the surface was built; 0 under reduced motion
+///     float _padding;
+///     float values[8];  // the declared inputs, in declaration order; unused slots are 0
+///     float4 focus[2];  // host regions as (x, y, width, height) in uv; width 0 = none
+/// };
+/// ```
+///
+/// `uv` runs `0…1` across the surface from its top-left corner, y downward, and the focus
+/// regions use that space. At `composer.backdrop@1`, `focus[0]` is the composer's hero (its
+/// mark over the greeting; zero while hidden) and `focus[1]` its prompt box, so a shader can
+/// frame them; every other placement leaves both zero.
+///
 /// A surface may name one package image as `texture`. The host — never the extension — reads it
 /// through the package image limits (4 MiB, 1,024 × 1,024), decodes it off the main thread,
 /// uploads it, and hands the fragment function a read-only `texture2d<float>` and a linear,
@@ -163,8 +180,12 @@ public struct ExtensionMetalSurface: Equatable, Sendable {
                 message: "must be between 1 and \(Self.maximumFramesPerSecond)"
             ))
         }
-        if inputs.count > 8 {
-            issues.append(.init(path: "\(path).inputs", message: "must contain at most 8 inputs"))
+        let maximumInputs = ExtensionMetalSource.UniformLayout.maximumInputs
+        if inputs.count > maximumInputs {
+            issues.append(.init(
+                path: "\(path).inputs",
+                message: "must contain at most \(maximumInputs) inputs"
+            ))
         }
         var seen: Set<String> = []
         for (index, input) in inputs.enumerated() {

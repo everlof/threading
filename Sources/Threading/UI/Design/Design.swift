@@ -708,6 +708,91 @@ public enum Design {
             return prose(base)
         }
 
+        /// The new-session composer's greeting as the current theme's welcome sets it, and the
+        /// heading exactly when it sets nothing. See `welcomeLine`.
+        public static func welcomeGreeting() -> NSFont {
+            welcomeLine(
+                welcomeStyle(\.greeting),
+                basePointSize: WelcomeLine.headingPointSize,
+                defaultWeight: .semibold,
+                isHeading: true
+            )
+        }
+
+        /// The line beneath the greeting, measured from the body the way the greeting is from
+        /// the heading. The body exactly when the theme states no style for it.
+        public static func welcomeCaption() -> NSFont {
+            welcomeLine(
+                welcomeStyle(\.caption),
+                basePointSize: WelcomeLine.bodyPointSize,
+                defaultWeight: .regular,
+                isHeading: false
+            )
+        }
+
+        /// The point sizes `heading()` and `body()` scale, restated for the welcome's scale.
+        private enum WelcomeLine {
+            static let headingPointSize: CGFloat = 20
+            static let bodyPointSize: CGFloat = 13
+        }
+
+        private static func welcomeStyle(
+            _ slot: KeyPath<ThemeWelcome, ThemeWelcome.Wording?>
+        ) -> ThemeWelcome.TextStyle? {
+            AppThemePalette.current
+                .variant(for: NSApplication.shared.effectiveAppearance)?
+                .welcome?[keyPath: slot]?.style
+        }
+
+        /// A line the theme sets itself: its `scale` times the app role's size, its weight, and
+        /// the first face that answers — the stated family (a font the theme ships or one this
+        /// Mac has), then the user's own override and the stated system design — before the app
+        /// role's own layers.
+        ///
+        /// A stated family outranks the user's override for the wordmark's reason: the welcome
+        /// is the theme's voice, not prose the user reads in their chosen face. A system design
+        /// does not, because it is a class of face rather than a particular one — the same order
+        /// `prose` gives a heading style's typeface.
+        private static func welcomeLine(
+            _ style: ThemeWelcome.TextStyle?,
+            basePointSize: CGFloat,
+            defaultWeight: NSFont.Weight,
+            isHeading: Bool
+        ) -> NSFont {
+            guard let style else { return isHeading ? heading() : body() }
+            let limits = ThemeWelcomeLimits.greetingScales
+            let scale = CGFloat(min(max(style.scale ?? 1, limits.lowerBound), limits.upperBound))
+            let pointSize = scaled(basePointSize) * scale
+            let weight = style.weight?.appKitWeight
+            let system = NSFont.systemFont(ofSize: pointSize, weight: weight ?? defaultWeight)
+
+            if let family = style.fontFamily, !family.isEmpty,
+               let resolved = inFamily(family, like: system) {
+                return resolved
+            }
+            if let typeface = style.typeface {
+                for family in overrideFamilies(for: .chrome) {
+                    if let resolved = inFamily(family, like: system) { return resolved }
+                }
+                guard typeface != .standard,
+                      let descriptor = system.fontDescriptor.withDesign(typeface.systemDesign),
+                      let themed = NSFont(descriptor: descriptor, size: pointSize) else {
+                    return system
+                }
+                return themed
+            }
+            guard isHeading else { return prose(system) }
+            // A stated weight is the theme's, so it wins over the heading style's own; the
+            // style's face still answers.
+            guard weight == nil else {
+                let material = AppThemePalette.current.material(
+                    for: NSApplication.shared.effectiveAppearance
+                )
+                return prose(system, headingStyle: material.headingStyle)
+            }
+            return heading(pointSize: pointSize, defaultWeight: defaultWeight, surface: .chrome)
+        }
+
         /// Tool subjects, paths, diffs, and other code-shaped content. A dense code reader may
         /// choose one bounded, reader-controlled step without inventing a point size of its own.
         public static func code(

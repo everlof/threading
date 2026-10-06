@@ -42,13 +42,14 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Session identity | `sidebar.session-identity@1` | replacement | activity precedence and row shell | Implemented |
 | Sidebar backdrop | `sidebar.backdrop@1` | under-content hook: an overlay whose top is `.proceed`, admitting only a `backdrop` image and a Metal surface | legibility ceiling, frame cadence and the visibility hold, pointer passthrough, reduced motion, accessibility silence, layering beneath the theme's navigator well | Implemented |
 | Display panel backdrop | `display.backdrop@1` | the sidebar backdrop's under-content hook, unchanged | the same five, plus layering above the panel's themed ground and beneath its tab row and content; hosted tab content (browser, review, simulator) stays opaque over it | Implemented |
-| New-session composer backdrop | `composer.backdrop@1` | the sidebar backdrop's under-content hook, unchanged | the same five, plus layering beneath the greeting, chips, prompt box and actions; text input, focus and submission are never re-parented | Implemented |
+| New-session composer backdrop | `composer.backdrop@1` | the sidebar backdrop's under-content hook, unchanged; a Metal surface also reads the hero and prompt-box frames as `uniforms.focus[0]`/`[1]` in `uv` | the same five, plus layering beneath the greeting, chips, prompt box and actions; the layout those regions describe, and their contents (only geometry crosses); text input, focus and submission are never re-parented | Implemented |
 | Custom surface theme and moment signals, surface picture | `theme.*` and `moment.*` host signals; `ExtensionMetalSurface.texture` | scalar readings and one package image on the existing Metal surface contracts | which theme variant applies per appearance and its resolved colours, which events are moments and their edges, the pulse shape, the motion hold, the mood monitor's lifetime, the image read/decode limits and upload, the placeholder | Implemented |
 | Theme particles, logo motion, header band | theme document: `ThemeBackdrop.particles`, `sidebar.brand.motion`, `sidebar.brand.band`, `title.color` | theme-selected host presentation from a fixed vocabulary (styles, shapes, beats) | particle budgets per placement, the ambient opacity ceiling, the visibility hold, Reduce Motion / Theme animations / Low Power Mode, pointer passthrough, accessibility silence, band and title contrast gates | Implemented |
 | Theme arrival transition | theme document: `variants.<kind>.transition` | theme-selected host presentation over each main window | which switches play one (deliberate picks only), timing bounds, the swap moment, finish-the-first on a second pick, pointer passthrough, accessibility silence, every reason to apply at once | Implemented |
 | Theme sprites, pinned pictures | theme document: `variants.<kind>.sprites`, `ThemeParticles.sprites`, `ThemeBackdrop.ImageLayer.alignment` | theme-selected pictures on host-owned particle motion; host-placed images | the per-placement budget shared across every sprite cell, normalised 128-pixel sprites, the ambient opacity ceiling, the visibility hold, Reduce Motion / Theme animations / Low Power Mode, clipping to the region | Implemented |
 | Sidebar mascot | theme document: `sidebar.mascot` | theme-selected pose pictures and looping motions from a fixed vocabulary | the mood itself (`AgentMoodMonitor`), mood ranking and pose borrowing, placement beneath the list with reserved list breathing, pointer passthrough, accessibility silence, the hold (poses still change), stream budgets | Implemented |
 | Theme moments, words, Dock icon | theme document: `variants.<kind>.moments`, `variants.<kind>.words`, `sidebar.logo_in_dock` | theme-selected shower, sound and two copy slots | which events exist and their edges, which events may shower (never a finished turn), one-at-a-time cooldown, the Theme sounds setting, frontmost-only sound and the silence gate, every state word and accessibility label, the Dock plate and the never-upscaled mark | Implemented |
+| New-session composer welcome | theme document: `variants.<kind>.welcome` (backdrop, mark, `mark_size`, greeting, caption, scrim) | theme-selected host presentation from a fixed vocabulary: a backdrop through the shared dressing, one of four marks, `{token}` lines with conditions and weights (a `{fact:KEY}` line shows a scalar an extension publishes through `facts.provide`), a type style, two veil strengths | the layout (prompt at the foot, hero centred above, hidden when the pane is short), the pick-on-arrival rule and the re-pick only when the words change, every token's value and the localized daypart words, a fact's lookup chain, wording, 64-character cap, freshness and in-place re-render (Mac only), the app's own greeting as the fallback, the manager's brief, the on-the-minute re-render that runs only while the composer is seen, the mark's mood source and bounds, the veil reach and ceiling, the extension plane above the theme's backdrop, pointer passthrough and accessibility silence for every decorative layer, the hold | Implemented |
 | App theme preview (`preview_app_theme`) | — | host-only | sample rows instead of the user's data, the one-turn palette swap and restore, still frames for motion | Host-only |
 | Workspace navigator | `ui.workspace-navigation` or the signed native PluginKit navigator contract | complete semantic navigator, optionally augmented with a host-evaluated pipeline; native plugins receive bounded typed rows and visible-row enrichment | shell and menu, user selection and persistence, Native/failback route, declaration and fact validation, evaluation and virtualization, theme and accessibility, source-session activation, change-request truth and credentials, and intent availability, revalidation and execution | Implemented |
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
@@ -503,6 +504,13 @@ behind a live browser or a simulator's pixels and change what they say. The same
 answer for a display-panel or composer backdrop: a sibling contract at another placement, not a
 new vocabulary.
 
+The composer's plane is also the one placement that states **focus regions**: the hero's and the
+prompt box's frames, handed to every Metal surface it mounts and uploaded each frame as
+`ThreadingSurfaceUniforms.focus` in the fragment's `uv` space (`ExtensionMetalSource.UniformLayout`
+fixes the 80-byte layout for the Mac and the phone alike). Only geometry crosses — never the
+greeting's words, the draft or the caret — and the layout stays the host's: a shader can frame the
+prompt, not move it. Every other placement, and the phone, uploads zeros.
+
 ## Composer precedent
 
 Both composers wrap their existing native `PromptView` in the generic composition host. A
@@ -515,6 +523,31 @@ native input instance—and therefore its text, callbacks, focus, keyboard behav
 while still allowing useful actions such as templates, context attachment or status. Removal of
 the contributing generation removes only its controls and leaves that same prompt instance in
 place.
+
+### The theme's welcome on the start composer
+
+The start composer is also the one region a **theme** dresses by name besides the sidebar
+(`ThemeWelcome`, see `architecture/themes.md`). It is theme data the host interprets, not an
+extension seam, and it changes nothing above: the prompt instance, its hook and the composer's
+layout stay where they were. The stack, bottom to top, is the theme's welcome backdrop (the
+composer root's own layer, so the extension plane stays the root's first subview), the
+`composer.backdrop@1` plane, the theme's scrims, then the hero, chips, box and actions. A theme
+may choose the mark over the greeting (the app's, its sidebar logo, its sidebar mascot in the
+window's mood, or none), its size, the greeting's and a caption's lines and type, and two veil
+strengths. Threading keeps every value a token reads, when a line is picked and re-picked, the
+app's greeting as the fallback, the manager's brief, the bounds, and the hold; the decorative
+layers take no click and say nothing to accessibility. The greeting and caption remain ordinary
+static text to VoiceOver, in the words shown.
+
+The one place an extension reaches these words is a `{fact:KEY}` token, and it reaches them as
+data, not as presentation. The provider publishes a scalar (and optionally its label) through the
+existing `facts.provide` seam, on a repository, a repository branch or the identity-free
+`application` subject; it gains no new capability and learns nothing about the composer.
+Threading chooses the subject (the project's branch, then its repository, then the application),
+words the value for the person's locale, collapses and caps it at 64 characters, drops it at the
+registry's 15-minute freshness ceiling, and re-renders the line already shown — never re-picks —
+when it changes. A line without a fresh value is ineligible, so a provider cannot blank the hero.
+Facts are not projected to the phone, where such lines are never shown.
 
 ## Conversation-row precedent
 

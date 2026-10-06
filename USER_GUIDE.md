@@ -5113,6 +5113,27 @@ A theme can have a **character**, too — ask your agent for one and it can give
 - **Words.** The word a native chat's status line shows while a turn runs ("Herding…" instead
   of "Thinking…") and the invitation in an empty new-session composer. Status words such as
   "Waiting for your answer" always stay the app's own.
+- **A welcome.** The new-session composer (⌘N) can wear the theme: a backdrop across the whole
+  pane (a wash, a picture, drifting particles), the theme's logo or mascot above the greeting —
+  or nothing — at any size from 16 to 160 points, the theme's own greeting lines in its own
+  type and colour, and a smaller caption under them. A line can name the time, the date, the
+  part of the day, the project, your first name and how many chats are working or waiting, and
+  can be kept to some hours, weekdays, months or dates; a line showing the time keeps time while
+  the composer is open. A line can also show something an installed extension reports, written
+  `{fact:KEY}` — this project's CI status, its open reviews, the weather — worded by Threading
+  and updated in place while the composer is open; until the extension reports a fresh value, or
+  once it stops (after 15 minutes without a new one), that line is simply not shown. A theme can
+  keep Threading's own greetings in the mix, and when none of its lines fits the moment
+  Threading's greeting appears. Soft veils in the theme's background colour can sit behind the
+  greeting and the message box so busy art never sits straight under the words. The chips, the box and the buttons stay where they always are, a greeting is picked
+  when you arrive and changes only when the theme's words do, and a manager's brief stays
+  Threading's own. A greeting too long for one line wraps, up to three lines.
+
+  The paired iPhone's new-chat screen wears the same welcome: the backdrop, the mark, and a
+  greeting and caption picked on the phone's own clock (your name appears there only on your own
+  phone, never on a guest's; lines showing an extension's report stay on the Mac). The screen's
+  own hint stays beneath it. An agent can see a theme's welcome before applying it: the theme
+  preview draws it under each window.
 - **A Dock icon** made from the theme's logo, drawn on the theme's own plate.
 - **Pictures pinned to an edge.** A sidebar or pane picture can stand on the bottom edge (or
   any edge or corner) at any window size, rather than always being centred.

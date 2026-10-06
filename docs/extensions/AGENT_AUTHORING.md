@@ -377,9 +377,11 @@ items.
 - Declare `services.consume` and every exact `serviceDependencies` authority before calling
   another extension.
 - Declare `facts.provide` and the same static `factDefinitions` in the manifest and registration
-  before calling `publishFacts(_:replacing:)`. Provider subjects are canonical repositories or
-  repository branches, never guessed project, session, or terminal IDs. Each call is a complete
-  replacement for its named subjects; an empty fact list clears those subjects.
+  before calling `publishFacts(_:replacing:)`. Provider subjects are canonical repositories,
+  repository branches, or the identity-free `.application` subject — never guessed project,
+  session, or terminal IDs. Each call is a complete replacement for its named subjects; an empty
+  fact list clears those subjects. A theme's welcome greeting can show a published fact; see
+  [Facts a theme's welcome can show](#facts-a-themes-welcome-can-show).
 - Declare `source-control.read` and the same static `sourceControlProviders` in the manifest and
   registration before serving source-control requests. Use
   `ExtensionHostClient.sourceControlFetch`; do not declare a static network grant for the user's
@@ -1182,6 +1184,62 @@ opaque IDs, provider/account IDs, display title, activity, branch, side-chat/arc
 surface mode. Folder paths, git directories, complete remote URLs, credentials, prompts,
 transcript IDs/paths, and login email are never returned.
 
+### Facts a theme's welcome can show
+
+A theme's new-session greeting and caption may name a published fact as `{fact:KEY}` or
+`{fact:KEY@VERSION}` (the version defaults to 1): `"CI is {fact:ci.status}."`,
+`"{fact:weather.summary} outside"`. Nothing new is declared for it — the same `facts.provide`
+definitions and `publishFacts(_:replacing:)` calls a navigator reads are what the welcome reads.
+A value about a repository is published on its repository or branch as usual; a value about no
+repository goes on the `.application` subject:
+
+```swift
+let weather = ExtensionFactDefinition(
+    key: .init(id: "weather.summary"),
+    displayName: "Weather",
+    valueType: .string,
+    subjectKinds: [.application],
+    usages: [.presentable]
+)
+// `weather` is in the manifest's `factDefinitions` and the registration, as every definition is.
+try await host.publishFacts(
+    [ExtensionFact(
+        key: weather.key,
+        subject: .application,
+        value: .string("Sunny, 14 °C"),
+        observedAt: Date()
+    )],
+    replacing: [.application]
+)
+```
+
+- **Where Threading looks.** A composer pointed at a project reads that project's repository
+  branch, then its repository, then `.application`; a composer without a project reads
+  `.application` alone. The nearest fresh value wins.
+- **The application subject** is `ExtensionFactSubject.application`, written
+  `{"type":"application"}`, and names nothing. It is one subject shared by every provider: your
+  generation may state at most 32 facts for it, and all providers together resolve at most 128,
+  so publish a handful. It is otherwise an ordinary subject — a publication naming it replaces
+  your generation's facts there, an empty list clears them, and they go when your process
+  generation stops. Navigator rows never read it. A Threading build older than this subject
+  refuses the whole publication with HTTP 422, so publish application facts in a call of their
+  own rather than beside repository facts.
+- **Freshness.** The host's 15-minute ceiling applies: republish a value you still mean within
+  15 minutes, or the line stops being shown.
+- **The wording is Threading's.** A line shows your fact's `label` when you state one, else its
+  value: a string as published, an integer or number in the person's locale (at most two
+  decimals), a boolean as Threading's localized yes/no, a date as a time today and a short date
+  otherwise. Every value is collapsed to one line and capped at 64 characters with an ellipsis.
+  Write the label to be read inside a sentence ("passing", "3 open"), not as a dashboard cell.
+- **No value, no line.** A line whose fact has no fresh value is not eligible, so Threading shows
+  another line or its own greeting rather than a hole. A publication or expiry re-renders the line
+  already shown, in place; it never picks a different one, so a line that becomes eligible waits
+  for the next new session.
+- **The Mac only.** Facts stay on the Mac: the paired iPhone's new-chat screen never shows a
+  `{fact:…}` line.
+- A theme author's key is checked for shape only (a lowercase contribution identifier of at most
+  128 bytes, an optional `@VERSION` of 1–1,000,000); nothing requires a provider to exist.
+
 ### Resolving provider and account images
 
 Primitive identity extensions use two independent contribution/read pairs:
@@ -1312,15 +1370,33 @@ float4 threadingExtensionFragment(
 );
 ```
 
-The host supplies `ThreadingSurfaceUniforms` with `float2 size`, `float time`, one padding float,
-and `float values[8]`. Values use the declaration order in `ExtensionMetalSurface.inputs`;
+The host declares `ThreadingSurfaceUniforms` above your source and binds it at fragment buffer 0
+(80 bytes; `ExtensionMetalSource.UniformLayout` states the offsets):
+
+```metal
+struct ThreadingSurfaceUniforms {
+    float2 size;      // bytes  0…7:  the drawable in pixels
+    float time;       // bytes  8…11: seconds since the surface was built; 0 under reduced motion
+    float _padding;   // bytes 12…15
+    float values[8];  // bytes 16…47: your inputs in declaration order; unused slots are 0
+    float4 focus[2];  // bytes 48…79: host regions as (x, y, width, height) in uv
+};
+```
+
+Values use the declaration order in `ExtensionMetalSurface.inputs`;
 binding names are documentation and stable source identifiers, not shader reflection. Use
 the live-signal table below; unavailable readings use the binding's fallback. The host owns the `MTKView`, pipeline
 wrapper, command queue, fullscreen geometry, transparency, hit testing, frame cadence and
 reduced-motion behavior. Shader source is limited to 256 KiB at the actual opened-file read (a
-package-size preflight is not trusted) and frame rate to 60 fps. `uv` runs `0…1` from the
-top-left corner. Return straight (not premultiplied) colour; the host blends it over what is
-beneath.
+package-size preflight is not trusted) and frame rate to 60 fps. `uv` runs `0…1` across the
+surface from its top-left corner, x rightward and y downward. Return straight (not
+premultiplied) colour; the host blends it over what is beneath.
+
+`focus` tells a surface where the host's own content sits, in that same `uv` space: each region
+is `(x, y, width, height)` with `(x, y)` its top-left corner, and a width of 0 means the region
+does not exist. Only `composer.backdrop@1` states regions (see
+[Beneath the display panel and the composer](#beneath-the-display-panel-and-the-composer));
+every other placement, and the iPhone's projection of a theme's surface, leaves both zero.
 
 A surface may name one package picture as `texture` — a package-relative `.png`, `.jpg` or
 `.jpeg` under `Resources/`. Stating it changes the function the extension supplies to:
@@ -1434,6 +1510,42 @@ try ThreadingComponentCatalog.displayBackdrop.validate(paper)
   picture, under an empty panel. Do not count on it behind a web page.
 - **`composer.backdrop@1`** sits beneath the new-session composer's greeting, chips, prompt box
   and actions, covering the pane the composer fills. The prompt is being typed into: keep it calm.
+
+The composer's layout stays the host's — the prompt box hangs at the bottom and the hero (the mark
+over the greeting) floats centred above it — but a Metal surface here is told where both are, so
+it can design around them instead of guessing from the pane's size:
+
+- `uniforms.focus[0]` is the **hero**: the mark over the greeting, with the caption beneath it
+  when the theme states one. It is all zeros while the composer hides the hero.
+- `uniforms.focus[1]` is the **prompt box**.
+
+Each is `(x, y, width, height)` in the fragment's `uv` space (top-left origin, y downward, `0…1`
+across the surface); the host restates them whenever the composer lays out, so they follow a
+resized window, and a surface published later receives them as it mounts. A region may reach past
+`0…1` when it extends beyond the surface. Treat a width of 0 as "no region" and draw as though it
+were not there:
+
+```metal
+// Signed distance from uv to a region, measured in surface heights; negative inside.
+float distanceToRegion(float2 uv, float4 region, float aspect) {
+    if (region.z <= 0.0) { return 1.0e6; }
+    float2 q = abs(uv - (region.xy + region.zw * 0.5)) - region.zw * 0.5;
+    q.x *= aspect;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+}
+
+float4 threadingExtensionFragment(float2 uv, constant ThreadingSurfaceUniforms &uniforms) {
+    float aspect = uniforms.size.x / max(uniforms.size.y, 1.0);
+    float nearest = min(distanceToRegion(uv, uniforms.focus[0], aspect),
+                        distanceToRegion(uv, uniforms.focus[1], aspect));
+    float clearance = smoothstep(0.0, 0.08, nearest);   // 0 on the content, 1 away from it
+    float drift = 0.5 + 0.5 * sin(uniforms.time * 0.4 + uv.y * 6.0);
+    return float4(0.30, 0.50, 0.90, 0.35 * drift * clearance);
+}
+```
+
+The regions are geometry, not content: the greeting's words, the prompt's text and the caret never
+reach the extension.
 
 One patch dresses every display panel, or every composer — neither takes an entity. An extension
 may publish to any of the three backdrop placements at once
@@ -1661,7 +1773,9 @@ Before reporting an extension complete:
     an overlay whose top is `.proceed`, draw low-contrast and low-frequency (content sits on it),
     ask for a cadence at or below 30 fps, and check it under a light and a dark theme with the
     60% ceiling in mind. For a textured surface, check the first frames, drawn before the
-    picture arrives, and a package without the picture.
+    picture arrives, and a package without the picture. For a composer surface that reads
+    `uniforms.focus`, check it with the hero hidden (`focus[0]` zero), in a short and a tall
+    window, and under a display or sidebar placement, where both regions are zero.
 17. For `ui.rendering.metal`, review the packaged shader source, test its fallback signal value,
     compile it on a Metal-capable Mac, verify controls below it remain clickable, and verify
     reduced motion freezes animation.

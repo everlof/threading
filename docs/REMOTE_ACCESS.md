@@ -3005,3 +3005,51 @@ sound preference and per-device preview consent. Broker protocol 4 carries this 
 older brokers retain the ordinary default/silence behavior. Theme selection grants no consent.
 The usage widget exports only the pinned Mac's resolved accent, and WidgetKit tinted/vibrant
 modes keep system colors.
+
+### The theme's welcome on the new-chat screen (2026-10-05)
+
+The Mac's composer welcome ([themes](architecture/themes.md#2026-10-05--the-welcome-is-the-themes))
+reaches the phone's new-chat screen as an optional `welcome` block on the resolved app theme
+(`RemoteThemeWelcome`). It is additive in both directions: an older phone ignores the key, an
+older Mac sends none, and an unreadable block decodes as absent without costing the palette.
+
+**What crosses.** The variant in force's mark (`app` / `logo` / `mascot` / `none`) and mark size;
+the greeting and caption pools as the author wrote them — `text`, `when`, `weight`, and the
+greeting's `includesAppLines`; each pool's style with its ink **resolved to a hex colour** for
+the projected variant, its scale and weight, a font family only when the Mac can use that family,
+and a typeface hint; the two scrim opacities; and the backdrop's gradient (with drift) and
+particles in the material's portable recipes. The picture travels as an ordinary theme asset in
+its own slot, `welcome` (1,290 pixels, the backdrop's bounds and opacity), and a welcome's named
+families join the owner-only font transfer behind the material's. Catalogue entries carry no
+welcome; only the theme in force does. Lines are never rendered on the Mac for the phone: the
+phone picks and renders them with the shared grammar (`ThemeWelcomeGrammar`, in
+ThreadingRemoteKit) on its own clock, calendar and locale, with `{project}` the draft's project
+and `{working}` / `{waiting}` from its own catalogue.
+
+**`{user}` is the owner's alone.** The phone knows no person's name. The Mac sends its owner's
+given name in `welcome.user` only on a connection that may read host usage (an owner's), and
+only when some line actually names `{user}`. A guest's projection has no name, so on a guest's
+phone every `{user}` line is ineligible — dropped from the pool exactly as a `{project}` line is
+without a project — rather than rendered with a hole. The name is part of the cached theme on
+the owner's own phone and nowhere else.
+
+**`{fact:KEY}` stays on the Mac.** A line naming an extension's published fact travels as written,
+but no fact value is projected: the phone's context states none, so every such line is ineligible
+there, on owner and guest connections alike. A phone build that predates the token reads it as
+unknown, which is ineligible too.
+
+**Bounds.** Each pool holds at most 64 lines and 128 entries are examined, so lines a newer Mac
+wrote in a shape this build cannot read are skipped one by one without taking the pool. A line
+is 1–160 characters and at most 1 KB; the weight is 1–10; conditions keep the Mac's ranges. Both
+pools share one 32 KB text budget, greeting first. Inks are at most nine bytes, families and the
+name 256 bytes without control characters, the mark 16–160 points, the scale 0.5–3 and each
+scrim 0–0.9; anything outside is absent. The reconnect cache counts every welcome string
+against its existing 192 KB string and 256 KB archive budgets, and when a candidate would not
+fit it sets aside other Macs' welcomes first and then this one's, never a palette.
+
+**On the phone.** The screen keeps its layout and its single backdrop: the welcome's ground
+replaces the material's on this screen only, through the same backdrop view, motion lease, Theme
+motion switch, Reduce Motion, Low Power and Reduce Transparency gates (which drop the picture
+and particles and keep the gradient). The phone has no greeting of its own, so where the Mac
+would fall back to its own line the phone shows none. A clock-reading line is re-rendered on the
+minute only while the screen is visible and its scene active.

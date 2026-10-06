@@ -5,6 +5,22 @@ import CryptoKit
 import UIKit
 import SwiftUI
 
+/// Which of a theme's grounds a screen stands on. Every screen stands on the material's; the
+/// new-chat screen stands on the welcome's when the theme states one (`RemoteThemeWelcome`).
+/// Either way it is this one view, so the lease, the motion gates and Reduce Transparency are
+/// the same for both.
+enum MobileThemeBackdropDecoration: Equatable {
+    case material
+    case welcome
+
+    /// The welcome's ground when the theme states one — a recipe or its own picture.
+    static func forNewChat(_ theme: RemoteThemePalette) -> Self {
+        theme.source?.welcome?.backdrop != nil || theme.asset(welcomePictureSlot) != nil ? .welcome : .material
+    }
+
+    static let welcomePictureSlot = "welcome"
+}
+
 /// The dashboard's stationary ground. One layer fills the viewport independently of its
 /// virtualized rows. Themes supply decoration; the host retains hit testing, navigation,
 /// accessibility, power policy and the exact scroll position.
@@ -17,6 +33,10 @@ final class MobileThemeBackdropView: UIView {
     private var metal: MobileThemeMetalSurface?
     private var metalRecipe: RemoteThemeSurface?
     private var theme = RemoteThemePalette(nil)
+    /// Set before `apply`; a change re-reads every layer from the theme already applied.
+    var decoration = MobileThemeBackdropDecoration.material {
+        didSet { if oldValue != decoration { apply(theme, frozenPhase: frozenPhase) } }
+    }
 #if DEBUG
     private static let evidencePhase: Double? = {
         guard let id = ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"] else { return nil }
@@ -103,7 +123,9 @@ final class MobileThemeBackdropView: UIView {
         updatePicture()
         updateMetal()
         backgroundColor = theme.uiGround
-        let candidate = theme.source?.material.backdropGradient
+        let candidate = decoration == .welcome
+            ? theme.source?.welcome?.backdrop?.gradient
+            : theme.source?.material.backdropGradient
         let valid = candidate.flatMap { $0.hasValidGeometry ? $0 : nil }
         // Only a theme replacement sorts/decodes stops. Routine catalogue updates keep both
         // the layer and its animation, and cannot reset the phase.
@@ -191,9 +213,23 @@ final class MobileThemeBackdropView: UIView {
         refreshMotion()
     }
 
+    private var pictureAsset: RemoteThemeAsset? {
+        switch decoration {
+        case .material: return theme.asset("backdrop") ?? theme.asset("sidebarImage")
+        case .welcome: return theme.asset(MobileThemeBackdropDecoration.welcomePictureSlot)
+        }
+    }
+
+    private var statedParticles: RemoteThemeParticles? {
+        switch decoration {
+        case .material: return theme.source?.material.particles
+        case .welcome: return theme.source?.welcome?.backdrop?.particles
+        }
+    }
+
     private func updatePicture() {
         guard !prefersPlainGround(),
-              let asset = theme.asset("backdrop") ?? theme.asset("sidebarImage"),
+              let asset = pictureAsset,
               let image = MobileThemeAssets.shared.image(asset) else {
             picture.contents = nil
             picture.removeFromSuperlayer()
@@ -208,7 +244,7 @@ final class MobileThemeBackdropView: UIView {
     }
 
     private func updateParticles() {
-        particles.apply(prefersPlainGround() ? nil : theme.source?.material.particles, theme: theme, region: bounds,
+        particles.apply(prefersPlainGround() ? nil : statedParticles, theme: theme, region: bounds,
             scale: traitCollection.displayScale,
             reaction: MobileThemeMotionPreferences.reaction(workingCount: workingCount), parent: layer)
     }
@@ -242,6 +278,9 @@ final class MobileThemeBackdropView: UIView {
 
     var isAnimating: Bool { gradient.animation(forKey: ThemeGradientAnimator.animationKey) != nil }
     var showsGradient: Bool { !gradient.isHidden }
+    /// Whether a picture is composited: what Reduce Transparency and Increase Contrast take away.
+    var showsPicture: Bool { picture.superlayer != nil && picture.contents != nil }
+    var showsParticles: Bool { particles.emitter.superlayer != nil }
 }
 
 
@@ -303,7 +342,8 @@ enum MobileThemeMotionPreferences {
         return RemoteThemeDTO(
             id: theme.id, name: theme.name, mode: theme.mode, colors: theme.colors,
             material: theme.material, words: theme.words, titleMorph: theme.titleMorph,
-            assets: theme.assets?.filter { !$0.slot.hasPrefix(surfaceSlotPrefix) }, surface: nil
+            assets: theme.assets?.filter { !$0.slot.hasPrefix(surfaceSlotPrefix) }, surface: nil,
+            welcome: theme.welcome
         )
     }
 
@@ -353,6 +393,7 @@ struct MobileThemeBackdrop: UIViewControllerRepresentable {
     @Environment(\.mobileThemeWorkload) private var workload
     let theme: RemoteThemePalette
     var frozen = false
+    var decoration = MobileThemeBackdropDecoration.material
 
     func makeUIViewController(context: Context) -> MobileThemeBackdropController {
         MobileThemeBackdropController()
@@ -361,6 +402,7 @@ struct MobileThemeBackdrop: UIViewControllerRepresentable {
         controller.permitsPresentationMotion = !frozen
         controller.backdrop.workingCount = workload.working
         controller.backdrop.attentionCount = workload.attention
+        controller.backdrop.decoration = decoration
         controller.backdrop.apply(theme, frozenPhase: frozen ? 0 : nil)
     }
 }
@@ -380,8 +422,11 @@ final class MobileThemeBackdropController: UIViewController {
 }
 
 extension View {
-    func mobileThemeBackdrop(_ theme: RemoteThemePalette) -> some View {
-        background { MobileThemeBackdrop(theme: theme).ignoresSafeArea() }
+    func mobileThemeBackdrop(
+        _ theme: RemoteThemePalette,
+        decoration: MobileThemeBackdropDecoration = .material
+    ) -> some View {
+        background { MobileThemeBackdrop(theme: theme, decoration: decoration).ignoresSafeArea() }
     }
 }
 
@@ -573,7 +618,8 @@ private final class MobileThemeParticles {
 }
 
 /// The phone's passive, bounded interpretation of a reviewed Mac backdrop. Compilation and
-/// texture preparation stay off the main actor; frames read twelve prepared scalar values.
+/// texture preparation stay off the main actor; frames read the prepared scalar values of
+/// `ThreadingSurfaceUniforms`. The phone states no focus regions, so `focus` stays zeros.
 @MainActor
 final class MobileThemeMetalSurface: MTKView, MTKViewDelegate {
     private let recipe: RemoteThemeSurface
@@ -585,7 +631,10 @@ final class MobileThemeMetalSurface: MTKView, MTKViewDelegate {
     private var sampler: MTLSamplerState?
     private var imageIdentity: ObjectIdentifier?
     private let frames = DispatchSemaphore(value: 2)
-    private var uniforms = [Float](repeating: 0, count: 12)
+    /// `ThreadingSurfaceUniforms`, flat, as `ExtensionMetalSource.UniformLayout` lays it out —
+    /// sized from the shared layout so the bound length always matches the compiled struct.
+    private var uniforms = [Float](repeating: 0, count: Layout.floatCount)
+    private typealias Layout = ExtensionMetalSource.UniformLayout
     private var beganAt = ProcessInfo.processInfo.systemUptime
     private var finishedAt: TimeInterval?
     private var attentionAt: TimeInterval?
@@ -607,7 +656,11 @@ final class MobileThemeMetalSurface: MTKView, MTKViewDelegate {
     var exceedsFrameBudget: Bool { Self.isWithdrawn(recipe.sourceDigest) }
 #if DEBUG
     static func forgetWithdrawnShadersForTesting() { withdrawnDigests.removeAll() }
-    var inputUniformsForTesting: [Float] { Array(uniforms.dropFirst(4)) }
+    var inputUniformsForTesting: [Float] {
+        Array(uniforms[Layout.valuesOffset..<(Layout.valuesOffset + Layout.maximumInputs)])
+    }
+    var focusUniformsForTesting: [Float] { Array(uniforms[Layout.focusOffset...]) }
+    var uniformByteCountForTesting: Int { uniforms.count * MemoryLayout<Float>.stride }
     private(set) var completedFrameCount = 0
     var hasPreparedPipeline: Bool { pipeline != nil }
 #endif
@@ -691,8 +744,8 @@ final class MobileThemeMetalSurface: MTKView, MTKViewDelegate {
                 for (signal, value) in zip(signals, [r, g, b]) { readings[signal] = Double(value) }
             }
         }
-        for (index, input) in recipe.specification.inputs.enumerated() {
-            uniforms[4 + index] = Float(Self.resolve(input.value, readings: readings))
+        for (index, input) in recipe.specification.inputs.prefix(Layout.maximumInputs).enumerated() {
+            uniforms[Layout.valuesOffset + index] = Float(Self.resolve(input.value, readings: readings))
         }
         let identity = texture.map(ObjectIdentifier.init)
         if identity != imageIdentity, let device {
@@ -729,11 +782,11 @@ final class MobileThemeMetalSurface: MTKView, MTKViewDelegate {
         uniforms[0] = Float(drawableSize.width); uniforms[1] = Float(drawableSize.height)
         uniforms[2] = moving ? Float(ProcessInfo.processInfo.systemUptime - beganAt) : 0
         let uptime = ProcessInfo.processInfo.systemUptime
-        for (index, input) in recipe.specification.inputs.enumerated() {
+        for (index, input) in recipe.specification.inputs.prefix(Layout.maximumInputs).enumerated() {
             guard case .signal(let signal, let mapping) = input.value else { continue }
             switch signal {
             case .timeOfDayFraction:
-                uniforms[4 + index] = Float(Self.mapped(dayClock.fraction(at: Date()), mapping))
+                uniforms[Layout.valuesOffset + index] = Float(Self.mapped(dayClock.fraction(at: Date()), mapping))
             case .momentTurnFinished, .momentNeedsAttention:
                 // A moment is motion and a reaction: held motion or reactions off read the
                 // binding's fallback, otherwise the Mac's smoothstep pulse at the person's strength.
@@ -741,7 +794,7 @@ final class MobileThemeMetalSurface: MTKView, MTKViewDelegate {
                 let pulse = moving ? reactionScale.map {
                     min(max(Self.momentPulse(since: eventAt, at: uptime) * $0, 0), 1)
                 } : nil
-                uniforms[4 + index] = Float(Self.mapped(pulse, mapping))
+                uniforms[Layout.valuesOffset + index] = Float(Self.mapped(pulse, mapping))
             default:
                 continue
             }

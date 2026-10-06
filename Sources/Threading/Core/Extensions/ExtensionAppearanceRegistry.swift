@@ -185,7 +185,8 @@ final class ExtensionAppearanceRegistry {
                             ProfileStorage.shared.defaultProfile.fontName].compactMap { $0 })
         for variant in theme?.variants.values.map({ $0 }) ?? [] {
             families.formUnion([variant.material.fontFamily, variant.material.buttonStyle.fontFamily,
-                                variant.material.headingStyle?.fontFamily, variant.sidebar?.brand?.title?.fontFamily]
+                                variant.material.headingStyle?.fontFamily, variant.sidebar?.brand?.title?.fontFamily,
+                                variant.welcome?.greeting?.style?.fontFamily, variant.welcome?.caption?.style?.fontFamily]
                 .compactMap { $0 })
             families.formUnion(variant.material.fontFallbacks)
         }

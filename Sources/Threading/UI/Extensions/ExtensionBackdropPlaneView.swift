@@ -41,6 +41,10 @@ final class ExtensionBackdropPlaneView: NSView {
     struct Placement: Equatable {
         let contract: ExtensionComponentContract
         let accessibilityIdentifier: String
+        /// Whether the host states focus regions here (`ThreadingSurfaceUniforms.focus`). Only
+        /// the composer has a hero and a prompt box to design around; every other placement's
+        /// surfaces read zeros whatever `focus` says.
+        var statesFocus = false
 
         var target: ExtensionComponentTarget {
             ExtensionComponentTarget(component: contract.id, contractVersion: contract.version)
@@ -68,7 +72,8 @@ final class ExtensionBackdropPlaneView: NSView {
         /// Beneath the new-session composer's greeting, chips, prompt and actions.
         static let composer = Placement(
             contract: ThreadingComponentCatalog.composerBackdrop,
-            accessibilityIdentifier: "composer.extension-backdrop"
+            accessibilityIdentifier: "composer.extension-backdrop",
+            statesFocus: true
         )
     }
 
@@ -120,6 +125,9 @@ final class ExtensionBackdropPlaneView: NSView {
             contentContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
+        // A tree mounted after the host stated its regions — a later publish, a republish, a
+        // reloaded extension — is told them as it lands, not on the next layout.
+        contentContainer.onReplacementChanged = { [weak self] _ in self?.focusDidChange() }
         customizationHost.refresh()
     }
 
@@ -133,6 +141,38 @@ final class ExtensionBackdropPlaneView: NSView {
     /// Passive, all the way down: the content above owns every click.
     override func hitTest(_ point: NSPoint) -> NSView? {
         nil
+    }
+
+    /// Where the host's working regions sit inside this plane, for a surface to design around
+    /// (`composer.backdrop@1`: the hero over the greeting, and the prompt box). The host restates
+    /// it on layout; a placement with no such regions leaves it empty.
+    var focus = ExtensionSurfaceFocus() {
+        didSet { if focus != oldValue { focusDidChange() } }
+    }
+
+    /// Hands the regions to every Metal surface in the composed tree, stated in this plane's
+    /// coordinates with the plane as their space: each surface restates them in its own
+    /// coordinates on every frame, so no ordering between this plane's layout and its
+    /// descendants' can leave one drawing against a stale place. A plane showing nothing has
+    /// nobody to tell; a placement that states no regions tells its surfaces there are none.
+    /// The tree is the contract's (at most six nodes), so the walk is bounded.
+    private func focusDidChange() {
+        guard let content = contentContainer.replacementContent else { return }
+        let stated = placement.statesFocus ? focus : ExtensionSurfaceFocus()
+        for surface in Self.metalSurfaces(in: content) {
+            surface.setFocus(stated, in: self)
+        }
+    }
+
+    /// The Metal surfaces in `root`'s subtree, `root` included.
+    private static func metalSurfaces(in root: NSView) -> [ExtensionMetalSurfaceView] {
+        var found: [ExtensionMetalSurfaceView] = []
+        var pending = [root]
+        while let view = pending.popLast() {
+            if let surface = view as? ExtensionMetalSurfaceView { found.append(surface) }
+            pending.append(contentsOf: view.subviews)
+        }
+        return found
     }
 
     /// Whether an extension currently dresses the plane — what a test and the inspector can

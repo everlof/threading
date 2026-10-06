@@ -129,6 +129,58 @@ final class ExtensionFactPublicationContractTests: XCTestCase {
         }
     }
 
+    /// The application subject is the one provider domain that names no entity: a value about
+    /// the person's world (the weather) rather than a repository. It is admitted beside the
+    /// repository subjects, carries no identity to validate, and keeps the per-subject bound.
+    func testTheApplicationSubjectIsAProviderDomainWithTheSameBounds() throws {
+        XCTAssertTrue(ExtensionFactSubjectKind.application.isFactProviderDomain)
+        XCTAssertEqual(ExtensionFactSubject.application.kind, .application)
+        XCTAssertEqual(ExtensionFactSubject.application.validationIssues(), [])
+
+        let weather = definition(key: .init(id: "weather.summary"), subjectKinds: [.application])
+        XCTAssertEqual(weather.providerValidationIssues(), [])
+        XCTAssertNoThrow(try providerManifest(definitions: [weather]).validate())
+        XCTAssertEqual(
+            definition(subjectKinds: [.application, .repository]).providerValidationIssues(),
+            []
+        )
+
+        let main = ExtensionFactSubject.repositoryBranch(repository: repository, branch: "main")
+        XCTAssertNoThrow(try ExtensionFactPublication(
+            replacingSubjects: [.application, main],
+            facts: [
+                fact(key: .init(id: "weather.summary"), subject: .application, value: "Sunny"),
+                fact(subject: main),
+            ]
+        ).validate())
+        XCTAssertNoThrow(try ExtensionFactPublication(
+            replacingSubjects: [.application],
+            facts: []
+        ).validate(), "an empty list clears the application subject like any other")
+
+        let decoded = try JSONDecoder().decode(
+            ExtensionFactPublication.self,
+            from: Data(#"{"protocolVersion":1,"replacingSubjects":[{"type":"application"}],"facts":[]}"#.utf8)
+        )
+        XCTAssertEqual(decoded.replacingSubjects, [.application])
+
+        let overfull = (0...ExtensionFactProviderLimits.maximumFactsPerSubject).map {
+            fact(key: .init(id: "weather.reading-\($0)"), subject: .application)
+        }
+        XCTAssertThrowsError(try ExtensionFactPublication(
+            replacingSubjects: [.application],
+            facts: overfull
+        ).validate(), "one generation still states at most 32 facts for the subject")
+        XCTAssertThrowsError(try ExtensionFactPublication(
+            replacingSubjects: [.application, .application],
+            facts: []
+        ).validate())
+        XCTAssertThrowsError(try ExtensionFactPublication(
+            replacingSubjects: [.project("p1")],
+            facts: []
+        ).validate(), "opaque host subjects stay refused")
+    }
+
     func testPublicationAcceptsExactBoundsAndRejectsLimitPlusOne() throws {
         let subjects = (0..<64).map {
             ExtensionFactSubject.repositoryBranch(

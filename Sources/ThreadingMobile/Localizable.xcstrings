@@ -15177,6 +15177,18 @@
         }
       }
     },
+    "afternoon" : {
+      "comment" : "The part of the day, lower case, filling {daypart} inside a theme author's welcome line on the new-chat screen.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "eftermiddag"
+          }
+        }
+      }
+    },
     "another agent" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15228,6 +15240,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "esc"
+          }
+        }
+      }
+    },
+    "evening" : {
+      "comment" : "The part of the day, lower case, filling {daypart} inside a theme author's welcome line on the new-chat screen.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "kväll"
           }
         }
       }
@@ -15412,6 +15436,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "låst"
+          }
+        }
+      }
+    },
+    "morning" : {
+      "comment" : "The part of the day, lower case, filling {daypart} inside a theme author's welcome line on the new-chat screen.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "morgon"
+          }
+        }
+      }
+    },
+    "night" : {
+      "comment" : "The part of the day, lower case, filling {daypart} inside a theme author's welcome line on the new-chat screen.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "natt"
           }
         }
       }
