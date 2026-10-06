@@ -435,7 +435,7 @@ enum AppThemeLibrary {
     }
 
     private static var fallbackAfterRemoval: AppTheme {
-        guard let id = AppearanceActivationHost.shared.state?.standaloneThemeID else { return defaultTheme }
+        guard let id = AppearanceActivationHost.shared.state?.themeID else { return defaultTheme }
         return theme(withID: AppThemeID(id)) ?? defaultTheme
     }
 

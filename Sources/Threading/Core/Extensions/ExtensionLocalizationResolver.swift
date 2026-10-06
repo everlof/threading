@@ -395,7 +395,8 @@ struct ExtensionLocalizationResolver: Sendable {
                 )
             },
             replacement: patch.replacement.map(node),
-            hook: patch.hook.map(node)
+            hook: patch.hook.map(node),
+            themeScope: patch.themeScope
         )
     }
 
@@ -531,7 +532,8 @@ struct ExtensionLocalizationResolver: Sendable {
             id: field.id,
             title: string(field.title),
             description: optional(field.description),
-            control: settingControl(field.control)
+            control: settingControl(field.control),
+            appliedBy: field.appliedBy
         )
     }
 
@@ -549,7 +551,7 @@ struct ExtensionLocalizationResolver: Sendable {
             return .choice(
                 defaultValue: defaultValue,
                 options: options.map {
-                    ExtensionSettingOption(id: $0.id, title: string($0.title))
+                    ExtensionSettingOption(id: $0.id, title: string($0.title), value: $0.value)
                 }
             )
         case .integer(let defaultValue, let minimum, let maximum, let step):

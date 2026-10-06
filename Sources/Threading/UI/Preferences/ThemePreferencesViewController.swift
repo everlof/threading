@@ -300,11 +300,6 @@ final class ThemePreferencesViewController: NSViewController {
                 subtitleField: &appThemeSubtitle
             ),
             SettingsUI.row(
-                title: "Appearance packs",
-                subtitle: "Save a theme with companion extensions, then activate or deactivate the pack from the command palette.",
-                control: SettingsUI.button("Create Pack…", target: self, action: #selector(createAppearancePack))
-            ),
-            SettingsUI.row(
                 title: "Classic skins",
                 subtitle: "Import a classic Winamp .wsz skin, or drop one on this page. Files stay on this Mac.",
                 control: importButton
@@ -341,10 +336,6 @@ final class ThemePreferencesViewController: NSViewController {
         stack.alignment = .leading
         stack.spacing = Design.Spacing.small
         return stack
-    }
-
-    @objc private func createAppearancePack() {
-        AppearancePackEditor.present(packID: nil, in: view.window)
     }
 
     // MARK: - Fonts
@@ -543,7 +534,6 @@ final class ThemePreferencesViewController: NSViewController {
     }
 
     @objc private func appThemeChanged(_ sender: ThemedPopUp) {
-        if AppThemePicker.activatePackIfSelected(sender) { return }
         guard let raw = sender.selectedItem?.representedValue as? String else { return }
         applyAppTheme(id: AppThemeID(raw))
     }
@@ -573,7 +563,7 @@ final class ThemePreferencesViewController: NSViewController {
     private func reloadAppThemeControls() {
         guard let popUp = appThemePopUp else { return }
         popUp.isEnabled = !AppearanceActivationHost.shared.isChanging
-        // Recovery names the stored choice; an active pack names its saved recipe.
+        // Recovery names the stored choice rather than the System appearance it is wearing.
         AppThemePicker.populate(popUp, selectedThemeID: Self.selectedAppThemeID)
         let selected = Self.selectedAppTheme
         appThemeSubtitle?.stringValue = selected.summary ?? ""

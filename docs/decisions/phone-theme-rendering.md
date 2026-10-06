@@ -20,8 +20,10 @@ least four device pixels, while preserving the full-resolution foreground.
 
 The Mac may project one currently enabled, reviewed backdrop Metal surface. It sends only
 the admitted source, scalar bindings and optional texture through authenticated theme assets;
-no extension executable, token, host capability or process runs on the phone. Appearance packs
-remain Mac-owned: activating or releasing one changes the projected surface. The phone owns
+no extension executable, token, host capability or process runs on the phone. Extension
+enablement and the theme choice remain Mac-owned: changing either changes the projected surface.
+(Appearance packs, which this record originally named here, were
+[retired](appearance-packs.md).) The phone owns
 one passive surface per visible screen, at most 24 fps and 1,290 pixels on its long side.
 It freezes for Reduce Motion and stops for hidden/background/Low Power states. Audio is
 unavailable, and phone-local workload, theme and moment values obey local reaction controls.

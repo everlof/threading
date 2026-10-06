@@ -2218,7 +2218,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     /// Holds the shortcut-change subscription for the process lifetime.
     private let menuEvents = AppEventObservations()
-    private var appearanceMenu: NSMenu?
+    private weak var appearanceShortcutMenu: NSMenu?
+    private var appearanceShortcutCarriers: [NSMenuItem] = []
 
     /// Builds a menu item that takes its shortcut from the command table instead of a literal.
     private func commandItem(_ id: String, action: Selector) -> NSMenuItem {
@@ -2255,7 +2256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     /// The same, for a stated key window, so a test can read the menu bar both ways.
     func applyShortcutBindings(documentIsKey: Bool) {
-        rebuildAppearanceMenu()
+        rebuildAppearanceShortcutCarriers()
         let document = documentIsKey ? MarkdownEditorDefaults.documentShortcuts : [:]
         let claimed = Set(document.values)
         showsDocumentShortcuts = !document.isEmpty
@@ -2315,7 +2316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menuEvents.observe(CommandRegistryDidChange.self) { [weak self] _ in
             self?.rebuildExtensionMenus()
             self?.rebuildPanelCommandsMenu()
-            self?.rebuildAppearanceMenu()
+            self?.rebuildAppearanceShortcutCarriers()
         }
         menuEvents.observe(ProjectScriptsDidChange.self) { [weak self] _ in
             self?.rebuildProjectScriptsMenu()
@@ -2351,29 +2352,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
-    /// Only assigned shortcuts need AppKit carriers. Thousands of searchable theme values do
-    /// not become thousands of menu items on every menu validation pass.
-    private func rebuildAppearanceMenu() {
-        guard let menu = appearanceMenu else { return }
-        menu.removeAllItems()
+    /// Theme and extension commands are found in the palette, so none is shown in the menu bar;
+    /// only an assigned shortcut needs an AppKit carrier, hidden in the View menu the way ⌘1–⌘9
+    /// ride. Thousands of searchable theme values do not become thousands of menu items on every
+    /// menu validation pass.
+    private func rebuildAppearanceShortcutCarriers() {
+        guard let menu = appearanceShortcutMenu else { return }
+        let previous = Set(appearanceShortcutCarriers.map(ObjectIdentifier.init))
+        menu.items = menu.items.filter { !previous.contains(ObjectIdentifier($0)) }
+        appearanceShortcutCarriers.removeAll()
         for id in Array(commandItems.keys) where id.hasPrefix("appearance.") {
             commandItems.removeValue(forKey: id)
         }
-        for command in CommandRegistry.shared.all where command.appearanceTarget != nil {
-            let visible: Bool
-            switch command.appearanceTarget {
-            case .edit(nil): visible = true
-            case .deactivate(let id): visible = appearanceHost.state?.activePackID == id
-            default: visible = false
-            }
-            guard visible || ShortcutOverrideStore.shared.shortcut(for: command) != nil else { continue }
+        for command in CommandRegistry.shared.all where command.appearanceTarget != nil
+            && ShortcutOverrideStore.shared.shortcut(for: command) != nil {
             let item = commandItem(command.id, action: #selector(performHostMenuCommand(_:)))
             item.target = self
-            item.isHidden = !visible
-            item.allowsKeyEquivalentWhenHidden = !visible
+            item.isHidden = true
+            item.allowsKeyEquivalentWhenHidden = true
             menu.addItem(item)
+            appearanceShortcutCarriers.append(item)
         }
     }
+
+    /// The hidden carriers `rebuildAppearanceShortcutCarriers` keeps, for a test to read.
+    var appearanceShortcutCarriersForTesting: [NSMenuItem] { appearanceShortcutCarriers }
 
     func invokePanelCommand(_ id: String) {
         _ = hostCommandPlane.invoke(commandID: id)
@@ -2702,12 +2705,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let menu = NSMenu(title: MenuIdentifiers.viewMenu)
 
         menu.addItem(commandItem(AppCommands.ID.commandPalette, action: #selector(openCommandPalette)))
-        let appearance = NSMenuItem()
-        appearance.title = L10n.string("Appearance")
-        appearance.submenu = NSMenu(title: appearance.title)
-        appearanceMenu = appearance.submenu
-        menu.addItem(appearance)
-        rebuildAppearanceMenu()
         menu.addItem(.separator())
         menu.addItem(commandItem(AppCommands.ID.toggleSidebar, action: #selector(toggleSidebar)))
         for id in [
@@ -2841,6 +2838,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         extensionItem.isHidden = true
         menu.addItem(extensionItem)
         viewExtensionItem = extensionItem
+        appearanceShortcutMenu = menu
+        rebuildAppearanceShortcutCarriers()
 
         let item = NSMenuItem()
         item.submenu = menu
@@ -3548,20 +3547,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
 
         if let target = command.appearanceTarget {
-            let host = appearanceHost
-            let reason: String?
-            switch target {
-            case .edit(let packID):
-                AppearancePackEditor.present(packID: packID, in: mainWindowController?.window, host: host)
-                reason = nil
-            case .retry(let packID):
-                reason = host.retry(packID)
-            case .toggle(let packID):
-                reason = host.submit(host.state?.activePackID == packID
-                    ? .deactivatePack(packID) : .activatePack(packID))
-            default:
-                reason = target.action.flatMap { host.submit($0) }
-            }
+            let reason = target.action.flatMap { appearanceHost.submit($0) }
             return reason.map { .refused(commandID: id, reason: $0) } ?? .invoked(commandID: id)
         }
 

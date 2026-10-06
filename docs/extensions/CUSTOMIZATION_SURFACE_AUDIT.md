@@ -24,9 +24,11 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 
 | Surface | Proposed contract | First authority | Host must retain | Status |
 | --- | --- | --- | --- | --- |
-| Current Theme tuning and pack picker | — | host-only authoring over the public theme document | validated ranges, built-in immutability, live-preview ownership, one durable revision per drag, explicit pack activation/release and user choices | Host-only |
+| Current Theme tuning and theme picker | — | host-only authoring over the public theme document | validated ranges, built-in immutability, live-preview ownership, one durable revision per drag, the explicit theme choice and user choices | Host-only |
+| Current Theme ▸ Theme Options | existing `ExtensionSettingsContribution` fields of the extension contributing the active theme | static settings declaration (no new seam) | the gate (enabled extension that ships the active theme and declares settings), the same host-rendered themed controls and value store as its Settings page, validation, persistence, `appliedBy` routing and rollback | Implemented |
+| Setting-bound surface inputs | `ExtensionSurfaceScalar.setting` on existing Metal surface contracts; field `appliedBy: host` | the publishing extension's own toggle, choice or integer fields | value storage and resolution with no process round trip, publication-time refusal of undeclared/text fields, the eight-input budget, next-frame application, and the constant projected to iPhone instead of the setting | Implemented |
 | Mobile theme backdrop and character header | existing theme data projected through RemoteKit, no extension execution | palette, system typeface, words, morph recipe, identity ink, particles and bounded image renditions | authenticated asset admission, cache/decoder/emitter budgets, layout, navigation, session state and accessibility truth, device-local motion/power gates, one visible animator and one mascot slot | Host-owned presentation |
-| Appearance pack editor and activation commands | deliberately host-only; shared themed controls | host appearance service | exact membership/digest review, enablement ownership, capability disclosure, persistence, runtime admission, focus and failure truth | Implemented |
+| Theme and extension-enablement commands | deliberately host-only; shared themed controls | host appearance service | the theme choice, enablement ownership, persistence, runtime admission, focus and failure truth; appearance packs were retired on 2026-10-05 ([decision](../decisions/appearance-packs.md)) | Implemented |
 | Public browser guest client | deliberately host-only | existing RemoteClient UI with transport adapter | invitation decoding, service origin, membership/device binding, scope, approval, expiry and revocation | Implemented |
 | Chat invitation sheet | deliberately host-only | host form | capability scope, permission approval, route reachability, expiry, credential issuance and revocation | Implemented |
 | Hosted Direct enrollment controls | — | host-only | explicit Internet opt-in, installation-secret custody, service identity removal, device revocation and reachable status | Host-only |
@@ -34,7 +36,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Sidebar workload analyzer | existing theme `material.chart_style: spectrum` | theme-selected host presentation | workload/intensity truth, exact count, effort judgement, accessibility, bounded motion | Implemented |
 | Music spectrum presentation | `audio.*` host signals on existing Metal surface contracts; theme `sidebar.brand.analyzer` | theme-selected host presentation | consent, source identity/selection, system permission, private tap lifetime, local analysis, signal truth/freshness, visibility/motion/power gates and bounded cadence | Implemented |
 | Music-reactive theme controls | — | host-only | explicit audio opt-in, selected source, permission explanation and Retry; themes cannot enable capture | Host-only |
-| Reactions (Motion): activity switch and strength | — | host-only | whether agent activity drives decoration at all, and the person's 0–200 % scale on every theme and extension reaction to activity and music, applied by `ThemeReactions` to reactive readings before any theme or extension mapping (activity off reads as each binding's idle fallback); no theme, pack or extension carries a value for either | Host-only |
+| Reactions (Motion): activity switch and strength | — | host-only | whether agent activity drives decoration at all, and the person's 0–200 % scale on every theme and extension reaction to activity and music, applied by `ThemeReactions` to reactive readings before any theme or extension mapping (activity off reads as each binding's idle fallback); no theme or extension carries a value for either | Host-only |
 | Theme words, title morph, identity ink | theme document: `words.untitled_session`, `title_morph`, `material.identity_marks` | theme-selected copy and presentation from a fixed vocabulary | the untitled name is display-only and never stored; state words stay the app's own; the person's explicit morph style wins; a person's own icon, photo or colour keeps its pixels; Reduce Motion lands names directly | Implemented |
 | Project row | `sidebar.project-row@1` | properties, slot, replacement | selection, DnD, row actions, count, checkout availability mark | Implemented |
 | Project hover card | `sidebar.project-hover-card@1` | hook, replacement | hover, popover, sizing, dismissal | Implemented |
@@ -274,6 +276,16 @@ because none is a subject an extension needs a field on — the sidebar's order,
 defaults, Threading's own sounds, and what Threading writes into a CLI's configuration are all
 host policy. Opening one of them to extensions is a separate decision with its own entry here.
 
+The Current Theme page's **Theme Options** (2026-10-05) is the same contract shown in a second
+place, not a new seam. When the active app theme comes from an enabled extension that declares
+settings, the page renders that extension's fields with the host controls its Settings page uses,
+writing the same store; the extension declares nothing new and cannot choose to appear there or
+not. The pairing is what earns the placement: options such as a theme overlay's "Perimeter comets"
+shape the theme the person is inspecting. A field declared `appliedBy: host` is applied by
+Threading through the extension's own setting-bound surface inputs, so a render-only extension that
+never reads its requests can offer options without being rolled back or stopped over a request it
+never answers; the phone receives the resolved constant, never the setting.
+
 The mobile terminal key bar is host-only even though its key order, top-or-bottom row placement
 and solo Direct/Compose choice are deliberately customizable by the person using that phone. Its
 presentation is inseparable from the collaboration rule that temporarily requires atomic
@@ -502,6 +514,25 @@ empty pane — which is the right answer rather than a gap: nothing an extension
 behind a live browser or a simulator's pixels and change what they say. The same shape is the intended
 answer for a display-panel or composer backdrop: a sibling contract at another placement, not a
 new vocabulary.
+
+### A theme's decorations go with it (2026-10-05)
+
+Every contract above answers *where* an extension may draw; none answered *when*. An extension
+that ships a theme and a backdrop drew that backdrop under every theme the person picked, and
+could not even learn which theme was in force. `ExtensionComponentPatch.themeScope: .ownThemes`
+(and the manifest's binding `componentThemeScope` floor) is the answer, and it is a host
+decision, not a new extension authority: the extension learns nothing about the theme, the
+registry decides at every lookup, and a switch re-renders only the targets whose scoped patches
+came or went. It applies to every contract — slots, properties, replacements and hooks — because
+the question "is this the theme's look or a function?" is the author's to answer per patch, not
+the contract's. A Duplicate to Edit copy is the person's own custom theme and wears no
+extension's decorations; the phone's projected backdrop follows the Mac's answer. The install
+review, the update review and the Extensions page say so when a manifest declares it.
+
+**Gate for a new contract:** nothing to add. Scope is resolved in
+`ComponentCustomizationRegistry`, so a new placement inherits it through
+`ComponentCustomizationHost` or any lookup through the provider slot. A surface that caches a
+resolution outside that path must refresh on `ComponentCustomizationDidChange` like every other.
 
 ## Composer precedent
 
@@ -740,7 +771,7 @@ the phone without granting extension execution.
 
 These reuse authored theme and existing reviewed sidebar surface contracts; no public component
 or new extension executable authority is added. The phone's backdrop accepts a bounded source
-projection of the Mac's current enabled reviewed sidebar overlay. Threading keeps pack activation,
+projection of the Mac's current enabled reviewed sidebar overlay. Threading keeps extension enablement,
 authorization, source admission, scalar binding, layering, one-visible-surface ownership, shader
 compilation and GPU/power/visibility budgets. Font parsing, process registration, sound conversion,
 verified receipts and notification consent remain host-owned. The usage widget is deliberately

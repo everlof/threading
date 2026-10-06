@@ -39,6 +39,26 @@ enum ComponentCustomizationRegistryError: Error, Equatable, LocalizedError {
     }
 }
 
+/// Answers which extension, if any, ships the app theme in force.
+///
+/// A patch published with `ExtensionComponentThemeScope.ownThemes` applies only while this
+/// answer names its own extension. The registry asks on every lookup — the answer has to be
+/// right for whichever observer of a theme change reads first — and keeps the last answer only
+/// to work out, when the theme or the contributed tier changes, which targets changed with it.
+struct ComponentThemeScopeOracle {
+    let activeThemeContributor: @MainActor () -> String?
+
+    /// The selected app theme's contributing extension. A duplicated copy is a custom theme
+    /// with its own id, so it has no contributor and wears no extension's decorations.
+    @MainActor static var live: ComponentThemeScopeOracle {
+        ComponentThemeScopeOracle {
+            ExtensionAppearanceRegistry.shared.contributorIdentifier(
+                forThemeID: AppThemeLibrary.current.id
+            )
+        }
+    }
+}
+
 /// Validates extension publications and serves synchronous, precomputed-value lookups to AppKit.
 ///
 /// Storage stays deliberately in-memory even though publication is now process-backed. The
@@ -59,11 +79,20 @@ final class ComponentCustomizationRegistry: ComponentCustomizationProvider {
     private var publications: [SourceGeneration: Publication] = [:]
     private var activeReplacementExtension: [ExtensionComponentID: String] = [:]
     private let selectionDefaults: UserDefaults?
+    private let themeScope: ComponentThemeScopeOracle
+    /// The contributor `reevaluateThemeScope` last saw; lookups always ask the oracle afresh.
+    private var lastThemeContributor: String?
+    private let appEvents = AppEventObservations()
 
     /// Production supplies `.standard`; focused registries stay ephemeral by default so tests
     /// and gallery fixtures never change the user's selected renderer.
-    init(selectionDefaults: UserDefaults? = nil) {
+    init(
+        selectionDefaults: UserDefaults? = nil,
+        themeScope: ComponentThemeScopeOracle = .live
+    ) {
         self.selectionDefaults = selectionDefaults
+        self.themeScope = themeScope
+        lastThemeContributor = themeScope.activeThemeContributor()
         let stored = selectionDefaults?.dictionary(
             forKey: ComponentReplacementSelectionKeys.selections
         ) as? [String: String] ?? [:]
@@ -72,6 +101,17 @@ final class ComponentCustomizationRegistry: ComponentCustomizationProvider {
                 (ExtensionComponentID(rawValue: $0.key), $0.value)
             }
         )
+
+        // A Tune drag's ticks never change the theme's identity, so only a settled change can
+        // move a scoped patch in or out. A library change covers the contributed tier: a
+        // package updated, removed or (at launch) arriving after the theme was restored.
+        appEvents.observe(AppThemeDidChange.self) { [weak self] change in
+            guard !change.isLivePreview else { return }
+            self?.reevaluateThemeScope()
+        }
+        appEvents.observe(AppThemeLibraryDidChange.self) { [weak self] _ in
+            self?.reevaluateThemeScope()
+        }
     }
 
     func register(_ contract: ExtensionComponentContract) throws {
@@ -134,6 +174,34 @@ final class ComponentCustomizationRegistry: ComponentCustomizationProvider {
                 .filter { $0.component == component }
         )
         postChange(for: targets)
+    }
+
+    /// Re-asks which extension ships the theme in force and, when the answer moved, tells the
+    /// components whose `ownThemes` patches came or went — only those targets, so a theme
+    /// switch re-renders nothing an unscoped or unrelated patch dresses.
+    func reevaluateThemeScope() {
+        let contributor = themeScope.activeThemeContributor()
+        guard contributor != lastThemeContributor else { return }
+        let affectedExtensions = Set([lastThemeContributor, contributor].compactMap { $0 })
+        lastThemeContributor = contributor
+        postChange(for: Set(
+            publications.values
+                .filter { affectedExtensions.contains($0.source.extensionIdentifier) }
+                .flatMap(\.patches)
+                .filter { $0.themeScope == .ownThemes }
+                .map(\.target)
+        ))
+    }
+
+    /// How many of an extension's live patches are scoped to its own themes, for the
+    /// Extensions page to say so. Counts the running generation's publication only.
+    func themeScopedPatchCounts(
+        extensionIdentifier: String
+    ) -> (scoped: Int, total: Int) {
+        let patches = publications.values
+            .filter { $0.source.extensionIdentifier == extensionIdentifier }
+            .flatMap(\.patches)
+        return (patches.count { $0.themeScope == .ownThemes }, patches.count)
     }
 
     func selectedReplacementExtensionIdentifier(
@@ -246,13 +314,27 @@ final class ComponentCustomizationRegistry: ComponentCustomizationProvider {
     private func matchingPatches(
         for target: ExtensionComponentTarget
     ) -> [(source: ComponentCustomizationSource, patch: ExtensionComponentPatch)] {
-        publications.values
+        // Asked at most once per lookup, and only when a scoped patch is in the running.
+        var contributor: String?
+        var askedForContributor = false
+        func ownsActiveTheme(_ extensionIdentifier: String) -> Bool {
+            if !askedForContributor {
+                contributor = themeScope.activeThemeContributor()
+                askedForContributor = true
+            }
+            return contributor == extensionIdentifier
+        }
+        return publications.values
             .flatMap { publication in
                 publication.patches.compactMap { patch in
                     guard patch.target.component == target.component,
                           patch.target.contractVersion == target.contractVersion,
                           patch.target.entityID == nil
                             || patch.target.entityID == target.entityID else {
+                        return nil
+                    }
+                    if patch.themeScope == .ownThemes,
+                       !ownsActiveTheme(publication.source.extensionIdentifier) {
                         return nil
                     }
                     return (publication.source, patch)

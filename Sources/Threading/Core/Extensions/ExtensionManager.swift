@@ -126,6 +126,8 @@ struct InstalledExtensionSnapshot {
     let provenance: ExtensionInstallProvenance?
     let isEnabled: Bool
     let status: InstalledExtensionStatus
+    /// The manifest's declared floor for its component decorations.
+    var componentThemeScope: ExtensionComponentThemeScope = .always
 }
 
 struct ExtensionMCPToolInventory {
@@ -446,6 +448,12 @@ final class ExtensionManager:
     private let companionPermissionAuthorizer:
         ExtensionCompanionSystemPermissionAuthorizing
     private var packages: [String: InstalledExtensionPackage] = [:]
+    /// Each extension's effective settings values, read from the store once and dropped
+    /// whenever this manager writes that extension's values or the inventory is re-read. The
+    /// manager is the store's only writer, so rows, setting-bound surface inputs and the Current
+    /// Theme page answer a change notification with dictionary lookups rather than one file read
+    /// per row or per input.
+    private var effectiveSettingValues: [String: [String: ExtensionJSONValue]] = [:]
     private var enabledIdentifiers: Set<String> = []
     private var appearanceDesiredIdentifiers: Set<String>?
     private var appearanceRegistryIsDirty = true
@@ -453,7 +461,6 @@ final class ExtensionManager:
     private var installationsInProgress = 0
     private var hasStartedEnabledExtensions = false
     var appearanceEnablementRequest: ((Bool, String) throws -> Void)?
-    var appearanceRuntimeAdmission: ((String) -> String?)?
     var appearancePrepareForRemoval: ((String) async throws -> Void)?
 
     var currentDesiredExtensionIDs: Set<String> { enabledIdentifiers }
@@ -470,7 +477,7 @@ final class ExtensionManager:
 
     func endAppearanceMutation() { appearanceMutationInProgress = false }
 
-    /// A committed intent projection. Shared members keep their running generation.
+    /// A committed intent projection. An extension that stays enabled keeps its running generation.
     func adoptAppearanceEnablement(_ desired: Set<String>, startRuntimes: Bool) {
         let previous = enabledIdentifiers
         appearanceDesiredIdentifiers = desired
@@ -641,7 +648,8 @@ final class ExtensionManager:
                 packageURL: package.packageURL,
                 provenance: package.provenance,
                 isEnabled: enabledIdentifiers.contains(identifier),
-                status: status
+                status: status,
+                componentThemeScope: manifest?.componentThemeScope ?? .always
             )
         }
         .sorted {
@@ -664,15 +672,65 @@ final class ExtensionManager:
         extensionIdentifier: String,
         field: ExtensionSettingField
     ) -> ExtensionJSONValue {
-        (try? settingsStore.value(
+        if let values = effectiveSettingValues(extensionIdentifier: extensionIdentifier),
+           let value = values[field.id], field.control.accepts(value) {
+            return value
+        }
+        return (try? settingsStore.value(
             extensionIdentifier: extensionIdentifier,
             field: field
         )) ?? field.control.defaultValue
     }
 
+    /// The number a setting-bound surface input of `extensionIdentifier` reads for `fieldID`,
+    /// before its mapping — nil for a field the extension does not declare or cannot be read
+    /// as a number. Answered from the cached values, so a surface refreshing its bindings after
+    /// a change costs lookups, not a store read.
+    func surfaceSettingReading(extensionIdentifier: String, fieldID: String) -> Double? {
+        guard let field = packages[extensionIdentifier]?.bundle?.manifest.settings
+                .field(id: fieldID),
+              let value = effectiveSettingValues(extensionIdentifier: extensionIdentifier)?[fieldID]
+        else { return nil }
+        return field.control.surfaceReading(value)
+    }
+
+    private func effectiveSettingValues(
+        extensionIdentifier: String
+    ) -> [String: ExtensionJSONValue]? {
+        if let cached = effectiveSettingValues[extensionIdentifier] { return cached }
+        guard let settings = packages[extensionIdentifier]?.bundle?.manifest.settings,
+              !settings.isEmpty,
+              let values = try? settingsStore.effectiveValues(
+                  extensionIdentifier: extensionIdentifier,
+                  settings: settings
+              ) else { return nil }
+        effectiveSettingValues[extensionIdentifier] = values
+        return values
+    }
+
+    /// Every write to the store goes through here, so the cache can never outlive the value.
+    private func persistSetting(
+        _ value: ExtensionJSONValue,
+        field: ExtensionSettingField,
+        extensionIdentifier: String
+    ) throws {
+        defer { effectiveSettingValues[extensionIdentifier] = nil }
+        try settingsStore.set(value, field: field, extensionIdentifier: extensionIdentifier)
+    }
+
+    private func postSettingsValuesChange(extensionIdentifier: String) {
+        effectiveSettingValues[extensionIdentifier] = nil
+        NotificationCenter.default.post(ExtensionSettingsValuesDidChange())
+    }
+
     /// Persists one host-validated setting and, when the process is alive, waits for it to
     /// acknowledge the same value. Disabled or failed extensions read the persisted value from
     /// their launch environment the next time they start.
+    ///
+    /// A field the extension declares `appliedBy: .host` is Threading's to apply: it takes
+    /// effect through the extension's setting-bound surface inputs the moment it is persisted,
+    /// and the process — which may never read its requests at all — is not asked, so there is
+    /// no answer to wait for and nothing to roll back.
     func setSetting(
         extensionIdentifier: String,
         settingID: String,
@@ -691,7 +749,7 @@ final class ExtensionManager:
 
         let oldValue = settingValue(extensionIdentifier: extensionIdentifier, field: field)
         do {
-            try settingsStore.set(
+            try persistSetting(
                 value,
                 field: field,
                 extensionIdentifier: extensionIdentifier
@@ -704,8 +762,8 @@ final class ExtensionManager:
             return
         }
 
-        guard let process = sessions[extensionIdentifier] else {
-            NotificationCenter.default.post(ExtensionSettingsValuesDidChange())
+        guard field.appliedBy == .process, let process = sessions[extensionIdentifier] else {
+            postSettingsValuesChange(extensionIdentifier: extensionIdentifier)
             completion(.success(()))
             return
         }
@@ -717,7 +775,7 @@ final class ExtensionManager:
             }
             switch result {
             case .success(let response) where response.error == nil:
-                NotificationCenter.default.post(ExtensionSettingsValuesDidChange())
+                self.postSettingsValuesChange(extensionIdentifier: extensionIdentifier)
                 completion(.success(()))
             case .success(let response):
                 let rejection = ExtensionSettingsManagerError.rejected(
@@ -730,7 +788,7 @@ final class ExtensionManager:
                     after: rejection,
                     runtimeStateIsUncertain: false
                 )
-                NotificationCenter.default.post(ExtensionSettingsValuesDidChange())
+                self.postSettingsValuesChange(extensionIdentifier: extensionIdentifier)
                 completion(.failure(reported))
             case .failure(let error):
                 let reported = self.restoreSetting(
@@ -740,7 +798,7 @@ final class ExtensionManager:
                     after: error,
                     runtimeStateIsUncertain: true
                 )
-                NotificationCenter.default.post(ExtensionSettingsValuesDidChange())
+                self.postSettingsValuesChange(extensionIdentifier: extensionIdentifier)
                 completion(.failure(reported))
             }
         }
@@ -759,7 +817,7 @@ final class ExtensionManager:
         runtimeStateIsUncertain: Bool
     ) -> Error {
         do {
-            try settingsStore.set(
+            try persistSetting(
                 oldValue,
                 field: field,
                 extensionIdentifier: extensionIdentifier
@@ -2191,12 +2249,6 @@ final class ExtensionManager:
             return
         }
 
-        if let reason = appearanceRuntimeAdmission?(identifier) {
-            statuses[identifier] = .failed(reason)
-            notifyChange()
-            return
-        }
-
         generations[identifier, default: 0] += 1
         CommandRegistry.shared.removeExtensionCommands(extensionIdentifier: identifier)
         let generation = generations[identifier, default: 0]
@@ -2225,6 +2277,9 @@ final class ExtensionManager:
                 networkGrants: bundle.manifest.networkGrants,
                 sourceControlProviders: bundle.manifest.sourceControlProviders,
                 localization: localization,
+                componentThemeScope: bundle.manifest.componentThemeScope,
+                contributesThemes: !bundle.manifest.themes.isEmpty,
+                settings: bundle.manifest.settings,
                 transport: transport
             )
         } catch {
@@ -2417,11 +2472,13 @@ final class ExtensionManager:
                         "panels": String(started.registration.panels.count),
                         "tools": String(started.registration.mcpTools.count),
                     ])
+                    // Only what the process applies: a host-applied field is Threading's, and a
+                    // render-only extension that never reads its requests must not be asked.
                     if !bundle.manifest.settings.isEmpty,
-                       let values = try? self.settingsStore.effectiveValues(
+                       let values = (try? self.settingsStore.effectiveValues(
                            extensionIdentifier: identifier,
                            settings: bundle.manifest.settings
-                       ),
+                       )).map(bundle.manifest.settings.processAppliedValues),
                        !values.isEmpty {
                         started.session.updateSettings(values: values) { result in
                             if case .failure(let error) = result {
@@ -2733,6 +2790,8 @@ final class ExtensionManager:
             inventory.map { ($0.identifier, $0) },
             uniquingKeysWith: { first, _ in first }
         )
+        // An update may change a field's control, a removal moves the values aside: re-read.
+        effectiveSettingValues.removeAll()
         appearanceRegistryIsDirty = true
         enabledIdentifiers = appearanceDesiredIdentifiers ?? store.enabledIdentifiers()
 

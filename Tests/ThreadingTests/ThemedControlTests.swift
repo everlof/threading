@@ -7897,7 +7897,6 @@ final class ThemedControlTests: HostedStoreTestCase {
             [
                 "AudioSpectrumView",
                 "FactSheetView",
-                "AppearancePackMemberCell",
                 "AnnotationSendBar",
                 "KeyEquivalentScopeView",
                 "AgentActivityBeamView",

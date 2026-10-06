@@ -106,6 +106,12 @@ final class ExtensionHostService {
         let networkGrants: [ExtensionNetworkGrant]
         let sourceControlProviders: [ExtensionSourceControlProviderDefinition]
         let localization: ExtensionLocalizationResolver
+        /// The manifest's binding floor for every component patch, and whether it ships a
+        /// theme at all — the one fact an `ownThemes` patch is checked against.
+        let componentThemeScope: ExtensionComponentThemeScope
+        let contributesThemes: Bool
+        /// The manifest's settings — what a setting-bound surface input may name.
+        let settings: ExtensionSettingsContribution
     }
 
     private struct Failure: Encodable {
@@ -483,6 +489,9 @@ final class ExtensionHostService {
         networkGrants: [ExtensionNetworkGrant] = [],
         sourceControlProviders: [ExtensionSourceControlProviderDefinition] = [],
         localization: ExtensionLocalizationResolver = .init(strings: [:]),
+        componentThemeScope: ExtensionComponentThemeScope = .always,
+        contributesThemes: Bool = false,
+        settings: ExtensionSettingsContribution = .init(),
         transport: ExtensionHostTransport = .loopback
     ) throws -> ExtensionHostAuthorization? {
         let qualifying = transport == .descriptor
@@ -536,7 +545,10 @@ final class ExtensionHostService {
             serviceDependencies: Set(serviceDependencies),
             networkGrants: networkGrants,
             sourceControlProviders: sourceControlProviders,
-            localization: localization
+            localization: localization,
+            componentThemeScope: componentThemeScope,
+            contributesThemes: contributesThemes,
+            settings: settings
         )
 
         switch transport {
@@ -1945,6 +1957,9 @@ final class ExtensionHostService {
                 ))
                 return
             }
+            // A setting binding is answered from the publisher's own settings store, so it may
+            // name only a field its manifest declares, and only one with a number to give.
+            try publication.validateSettingBindings(against: authority.settings)
             if !hasGeneralComponentAuthority,
                publication.patches.contains(where: {
                    $0.target.component != .sidebarSessionIdentity
@@ -1956,8 +1971,19 @@ final class ExtensionHostService {
                 ))
                 return
             }
+            try ExtensionComponentPatchPublication.validateThemeScopes(
+                publication.patches,
+                contributesThemes: authority.contributesThemes
+            )
             try registry.replacePatches(
-                publication.patches.map(authority.localization.componentPatch),
+                publication.patches.map { patch in
+                    // The manifest's declaration is a floor the review already disclosed:
+                    // a patch that states nothing, or `always`, is still scoped.
+                    let scoped = authority.componentThemeScope == .ownThemes
+                        ? patch.withThemeScope(.ownThemes)
+                        : patch
+                    return authority.localization.componentPatch(scoped)
+                },
                 from: ComponentCustomizationSource(
                     extensionIdentifier: authority.extensionIdentifier,
                     processGeneration: authority.processGeneration,

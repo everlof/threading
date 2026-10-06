@@ -64,6 +64,8 @@ struct ExtensionInstallProposal: Equatable {
     /// How many of those themes also replace the app icon's glyph.
     let themesWithIconMarks: Int
     let fontFamilies: [String]
+    /// The manifest binds every component decoration to the extension's own themes.
+    let decorationsFollowOwnThemes: Bool
 
     init(
         bundle: ThreadingExtensionBundle,
@@ -87,6 +89,7 @@ struct ExtensionInstallProposal: Equatable {
         themeNames = bundle.themes.map(\.theme.name).sorted()
         themesWithIconMarks = bundle.themes.count { $0.iconMark != nil }
         fontFamilies = Array(Set(bundle.fonts.flatMap(\.familyNames))).sorted()
+        decorationsFollowOwnThemes = manifest.componentThemeScope == .ownThemes
     }
 
     var title: String {
@@ -172,8 +175,9 @@ struct ExtensionInstallProposal: Equatable {
             paragraphs.append(
                 "It offers \(themeNames.count) app theme(s) for Threading's own chrome: "
                     + themeNames.joined(separator: ", ")
-                    + ". They appear in Settings ▸ Themes while the extension is enabled; "
-                    + "nothing applies one automatically."
+                    + ". They appear in Settings ▸ Themes once it is installed and stay there "
+                    + "while the extension is disabled; nothing applies one automatically, and "
+                    + "choosing one does not enable the extension."
             )
             if themesWithIconMarks > 0 {
                 // Disclosed because it is the one contribution that changes how Threading
@@ -185,6 +189,19 @@ struct ExtensionInstallProposal: Equatable {
                         + "Threading's Dock icon while selected. The icon's plate is still drawn "
                         + "by Threading in the theme's own colours, so the icon cannot be made to "
                         + "look like a different application."
+                )
+            }
+            if decorationsFollowOwnThemes {
+                // Stated because it is the answer to "will this change my other themes?",
+                // and because the manifest makes it a promise the host keeps: no patch the
+                // extension publishes can appear under a theme it did not ship.
+                paragraphs.append(
+                    "Its component decorations — backdrops, overlays and other changes to "
+                        + "Threading's components — appear only while one of these themes is "
+                        + "selected, here and on a paired iPhone. Under any other theme "
+                        + "Threading's components stay as they "
+                        + "are, and a copy made with Duplicate to Edit is your own theme, "
+                        + "without them."
                 )
             }
         }

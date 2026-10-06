@@ -67,7 +67,7 @@ public struct TerminalProfile: Codable, Equatable, @unchecked Sendable {
         if let font = NSFont(name: fontName, size: fontSize) {
             return font
         }
-        return NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        return SystemFontFaces.monospaced(ofSize: fontSize, weight: .regular)
     }
 }
 

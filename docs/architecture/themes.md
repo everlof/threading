@@ -2733,9 +2733,10 @@ never rises), the live audio spectrum's bars, and every extension input whose si
 sees it; counts scale as counts, facts (`audio.available`, theme colours, the clock, the account)
 pass through. It never scales a fact the app reports, never starts capture, and leaves ambient
 time-driven motion alone. A slider move reaches mounted logos and mascots at once through the
-motion hold's existing settings fan-out. This is the activity/music half of the effects policy
-proposed in [`customization-packs.md`](../feature-drafts/customization-packs.md); decorative
-motion as a whole remains `playsThemeMotion`.
+motion hold's existing settings fan-out. This is the activity/music half of the personal effects policy
+first proposed beside appearance packs, which were later retired (see the
+[decision record](../decisions/appearance-packs.md)); decorative motion as a whole remains
+`playsThemeMotion`.
 
 ### Tests
 
@@ -2924,17 +2925,15 @@ renderer draws (particle opacity stops at the ambient ceiling; radius tracks sha
 person's locale, the title-morph menu sets a scramble alphabet aside rather than stating it on
 another style, and releasing a picture or particle opacity samples legibility off-main and shows
 the advisory under the colours. Built-ins require duplication. The shared
-app-theme picker offers explicit appearance packs; choosing a plain theme releases pack-owned
-enablement without touching manual extension choices. A pack saved for the selected theme is
-listed once, as "Use with … pack" under a "Packs for …" head, not again among the other packs,
-and a refused activation puts the picker back on the theme in force. Theme animations now leads Motion,
+app-theme picker lists only themes; the appearance packs it briefly offered were retired (see the
+[decision record](../decisions/appearance-packs.md)). Theme animations now leads Motion,
 followed by music, reactions and strength. Sounds stays on Themes, beside a link to Motion.
 
 The preview uses the real terminal frame preparation and glow renderer, `ThemeWording`,
 `IdentityMarkInk` and `WindowTitleBandView`. It executes no extension. An optional `frames: 3` stacks the gradient drift at 0, ⅓ and ⅔ of its authored cycle — fractions
 rather than seconds, which moved a default 24-second drift by 4% across three identical frames.
 Terminal contact sheets now require foreground ink in every normal and bold region, with an
-unfed negative control. The gallery includes a frozen spectrum, facts, and pack-member cells;
+unfed negative control. The gallery includes a frozen spectrum and facts;
 the non-drawing spectrum viewport observer has an explicit test-backed exemption.
 
 The phone receives optional, tolerant title morph, identity ink, particles and asset metadata.
@@ -2985,8 +2984,8 @@ The host projects the current enabled sidebar Metal overlay, using the same host
 scalar ABI as macOS. The shader compiler cache has two active jobs, 32 pending sources and 16
 pipelines. Textures and source stay on workers. One phone backdrop owns the surface, with local
 workload/moment signals, static Reduce Motion presentation, and complete Low Power/hidden stops.
-The Mac still owns pack membership and activation. The picker additionally offers “Use with
-… pack” only for a saved pack whose explicit theme id matches the selected plain theme.
+The Mac still owns the theme choice and extension enablement; appearance packs, which once
+paired them, were retired ([decision record](../decisions/appearance-packs.md)).
 
 SwiftTerm's Metal renderer keeps the foreground sharp and blurs a separate halo beneath ANSI
 cell backgrounds. Halos with at least four device pixels of support use half resolution;
@@ -3004,3 +3003,104 @@ can create a receipt, and only the current theme's matching receipt can reach AP
 owner access, preview consent and sound preference. Protocol 4 adds the optional field without
 changing older broker behavior. The pinned usage widget carries one contrast-adjusted accent;
 its semantic content and system rendering modes remain host-owned.
+
+## 2026-10-05 — a theme's extension decorations go with it
+
+An extension that ships a theme is a bundle: its sidebar backdrop or window overlay is that
+theme's look. Until now every enabled extension's component patches rendered under **every** app
+theme — a rain shader over Solarized — and the extension could not even learn which theme was in
+force to stand down by itself. Appearance packs were the workaround (a saved theme plus the
+extensions to enable with it) and are retired; the binding now lives where the decision is made,
+on the patch.
+
+**The shape.** `ExtensionComponentPatch.themeScope` is `.always` (the default, written by
+omission, so an existing publication is byte-identical) or `.ownThemes`: the whole patch —
+properties, slots, replacement and hook — applies only while `AppThemeLibrary.current` is one
+of the publishing extension's contributed themes. The manifest's `componentThemeScope:
+"ownThemes"` is a **floor**, not a default: the host applies it to every patch the generation
+publishes, and no patch can widen it. A floor because the manifest is read before any code runs,
+which is the only way the install review can promise "its decorations appear only while one of
+its themes is selected"; a per-patch scope is known only once the process publishes. Both refuse
+an extension with no theme — `manifest.validate()` for the floor, the publication route (422,
+the SDK's own sentence) for a patch — because a scope that can never be satisfied is a bug, not a
+setting.
+
+**Where it is decided.** `ComponentCustomizationRegistry` filters in its lookup, through
+`ComponentThemeScopeOracle` — the selected theme's contributor, read from an index
+`ExtensionAppearanceRegistry` rebuilds in `replace(contributions:)`, so the per-row lookup the
+sidebar does stays a dictionary read and costs nothing at all when no scoped patch is in the
+running. The registry asks on *every* lookup rather than caching, because observers of a theme
+change run in no particular order and the first one to read must already get the right answer;
+the cached contributor exists only to diff. On a settled `AppThemeDidChange` (a Tune tick is
+skipped: it never changes the theme's identity) and on `AppThemeLibraryDidChange` (the
+contributed tier changed — an update, a removal, a launch-time arrival) it re-asks, and when the
+contributor moved posts `ComponentCustomizationDidChange` for exactly the targets of the
+`ownThemes` patches belonging to the old and new contributor. An unscoped patch, or another
+extension's, is never re-rendered by a theme switch. No view learned anything: every plane, hook
+host and slot already refreshed on that event.
+
+**The phone.** `RemoteThemeAssets.surfaceHook` reads the sidebar backdrop through the same
+provider slot, so the projected shader is offered exactly while the Mac draws it, and the
+registry's change for the backdrop target is what re-prepares the phone's asset set.
+
+**A duplicate is the person's own.** Duplicate to Edit gives the copy a custom id, so it has no
+contributor and wears no extension's decorations — it keeps the colours, artwork and fonts it
+copied. That is deliberate: the copy is a theme the person now owns, and an extension's
+decorations follow *its* themes, not resemblances to them. Selecting one of the extension's own
+themes again brings them back.
+
+**What the person is told.** The install review adds a paragraph when the manifest declares the
+floor; the update review says when it narrows or widens (presentation, never an approval —
+an older version without the floor could already publish everywhere); the Extensions page's
+detail gains a Decorations row from the manifest, or from the running generation's scoped
+patches.
+
+| What | Where |
+|---|---|
+| Wire form (omission, byte identity with the pre-field encoding, an older decoder, an unknown scope refused), the manifest floor and its refusals, `validate(for:)`, the generated patch schema | `ExtensionComponentThemeScopeTests` (SDK) |
+| A real contributed theme: the scoped sidebar backdrop drawn with it, absent under a stock theme, back again, absent under a Duplicate to Edit copy and after the contribution is removed; `.always` unchanged; only affected targets posted; a Tune tick ignored; the publication route's refusal and floor; the phone's surface hook; the install and update review text | `ComponentThemeScopeTests` |
+
+## 2026-10-05 — a theme extension's options, without a round trip
+
+A theme's overlay wants simple options — "Perimeter comets: on/off" — and an extension could
+already declare settings, but a change reached it only as an `ExtensionSettingsUpdateRequest` its
+process had to answer and republish after. A render-only Wasm overlay that publishes its hooks once
+and never reads stdin could not react, and worse: an unanswered request is a timeout, which rolls
+the value back *and stops the process* as runtime-uncertain.
+
+**The input.** `ExtensionSurfaceScalar.setting(fieldID, mapping:)` reads one of the publishing
+extension's own fields from the host's settings store: toggle `0`/`1`, choice the option's stated
+`value` (or its index), integer itself, then the binding's mapping —
+`ExtensionScalarMapping.output(for:)`, now the one definition the Mac view, the phone and the
+projection share. The publication route refuses a field the manifest does not declare, or a text
+field, through the SDK's `validateSettingBindings(against:)`; the eight-input budget is unchanged.
+`ExtensionMetalSurfaceView` reads its bound fields once at mount and again only on
+`ExtensionSettingsValuesDidChange`, through `ExtensionManager.surfaceSettingReading`, which answers
+from a per-extension cache of effective values the manager drops on its own writes and on an
+inventory re-read; a frame is a dictionary lookup. A surface whose frames are held for motion
+draws the changed frame at once. A setting is neither reactive nor motion.
+
+**Who applies it.** `ExtensionSettingField.appliedBy` is `process` (by omission, the old
+behaviour) or `host`. A host-applied field is persisted and announced, and no request is sent —
+not on a change, not in the launch sync — so there is nothing to await and nothing to roll back.
+Declared, not inferred from bindings: bindings are runtime publications, while the decision about
+whether the process is a party to a change has to be made from the manifest, even with the
+process not running, and an extension that binds a field *and* handles its requests must keep
+getting them. Only a readable control may be host-applied.
+
+**The phone** never sees a setting: `RemoteThemeAssets` resolves each setting input to the
+constant the Mac reads before projecting the sidebar backdrop, re-projects on a settings change
+when the hook binds one, and `RemoteThemeSurface.isValid` refuses a surface still carrying one.
+
+**Where the person finds them.** Besides the extension's own Settings page, the Current Theme
+page shows a **Theme Options** section (`CurrentThemeOptionsSection`) while the active theme is
+contributed by an enabled extension that declares settings — the same rows
+`ExtensionSettingsRenderer` builds, writing the same store. Rows follow a value changed from the
+other place. The section is rebuilt only when the owner or its declaration changes (bounded by
+one contribution's 128 fields), never on a value change.
+
+| What | Where |
+|---|---|
+| Wire form, `appliedBy` omission, option values all-or-none, readings per control, the shared mapping, binding refusals with paths | `ExtensionSettingBindingContractTests` (SDK) |
+| Uniform resolution and read-once caching, fallback, a host-applied toggle flipping a mounted surface with no request and no stop, a hybrid's requests carrying only process fields, publication refusals, the phone's constant | `ExtensionSettingBindingTests` |
+| Theme Options following the active theme and the extension's enablement; light/dark renders at 420 pt and the settings width | `CurrentThemeOptionsTests` |

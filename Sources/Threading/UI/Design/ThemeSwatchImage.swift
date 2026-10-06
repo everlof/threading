@@ -195,7 +195,7 @@ enum ThemeSwatchImage {
                 let prompt = NSAttributedString(
                     string: "$_",
                     attributes: [
-                        .font: NSFont.monospacedSystemFont(ofSize: pointSize, weight: .medium),
+                        .font: SystemFontFaces.monospaced(ofSize: pointSize, weight: .medium),
                         .foregroundColor: theme.foreground
                     ]
                 )

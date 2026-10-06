@@ -28,6 +28,10 @@ public struct RemoteThemeSurface: Codable, Equatable, Sendable {
                         mapping.outputMaximum, mapping.fallback,
                         mapping.inputMaximum - mapping.inputMinimum,
                         mapping.outputMaximum - mapping.outputMinimum].allSatisfy { Float($0).isFinite }
+            case .setting:
+                // The phone has no access to the Mac's extension settings: the Mac resolves a
+                // setting binding to the constant it reads before projecting the surface.
+                return false
             }
         }
     }

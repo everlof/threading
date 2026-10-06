@@ -1172,6 +1172,12 @@ public enum ThreadingComponentCatalog {
                 "items": slotSchemas.isEmpty
                     ? .bool(false)
                     : .object(["oneOf": .array(slotSchemas)])
+            ]),
+            "themeScope": .object([
+                "enum": .array(ExtensionComponentThemeScope.allCases.map {
+                    .string($0.rawValue)
+                }),
+                "default": .string(ExtensionComponentThemeScope.always.rawValue)
             ])
         ]
 

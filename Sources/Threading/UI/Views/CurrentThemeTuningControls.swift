@@ -8,7 +8,7 @@ import ThreadingRemoteKit
 /// is recorded when the preview starts; each later tick builds on the preview, and the release
 /// saves it only while that preview is still the theme in force and the stored document is still
 /// the one recorded. Anything else that moves the theme meanwhile — `set_app_theme`, an MCP
-/// update, a pack — wins: the rest of the drag does nothing rather than writing into whatever
+/// update, a theme command — wins: the rest of the drag does nothing rather than writing into whatever
 /// theme happens to be current by then. Unrelated events (another theme's library edit, an
 /// appearance-activation refresh) leave the drag alone.
 @MainActor

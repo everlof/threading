@@ -3,7 +3,7 @@ import AppKit
 /// The **Reactions** section of Motion settings: whether themes and extensions answer agent
 /// activity at all, and one Threading-wide scale on how strongly they answer activity and music
 /// (`ThemeReactions`). Each theme authors its own response; this is the person's say over all of
-/// them, so it is host-only and no theme or pack carries a value for it. The music half's switch
+/// them, so it is host-only and no theme or extension carries a value for it. The music half's switch
 /// is the Music section's opt-in, which also governs capture.
 @MainActor
 final class ThemeReactionPreferences: NSObject {

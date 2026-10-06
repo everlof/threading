@@ -90,7 +90,6 @@ final class ComponentGalleryViewController: NSViewController {
     static let componentNames: Set<String> = [
         "AudioSpectrumView",
         "FactSheetView",
-        "AppearancePackMemberCell",
         "AnnotationSendBar",
         "KeyEquivalentScopeView",
         "AgentActivityBeamView",
@@ -292,7 +291,6 @@ final class ComponentGalleryViewController: NSViewController {
     /// pass that built the section.
     private var hoverPolicyDemos: [GalleryHoverPolicyDemo] = []
 
-    private let packMemberModel = GalleryPackMemberModel()
     private let themePopUp = ThemedPopUp()
     /// The mark stories' views, retained so the replay control can reach them.
     private var markSamples: [ThreadingMarkView] = []
@@ -2055,23 +2053,6 @@ final class ComponentGalleryViewController: NSViewController {
         return row([reading, unavailable])
     }
 
-    private func makePackMemberStory() -> NSView {
-        let table = ThemedTableView()
-        table.addTableColumn(column("member", title: "Member", width: 420))
-        table.headerView = nil
-        table.rowHeight = 60
-        table.delegate = packMemberModel
-        table.dataSource = packMemberModel
-        let scroll = ThemedScrollView()
-        scroll.documentView = table
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            scroll.widthAnchor.constraint(equalToConstant: 420),
-            scroll.heightAnchor.constraint(equalToConstant: 180)
-        ])
-        return scroll
-    }
-
     private func makeFeedbackSection() -> NSView {
         spinner.isAnimating = true
         spinner.setAccessibilityLabel(L10n.string("Working"))
@@ -2190,11 +2171,6 @@ final class ComponentGalleryViewController: NSViewController {
                         .init(label: L10n.string("Account"), value: L10n.string("Default account"), detail: L10n.string("No account was chosen."), tone: .caution),
                         .init(label: L10n.string("Permissions"), value: L10n.string("Read files and propose changes"))
                     ], width: 420)
-                ),
-                story(
-                    "AppearancePackMemberCell",
-                    "Included, available and unavailable members in their real table host. Toggle the available rows.",
-                    makePackMemberStory()
                 ),
                 story(
                     "ThemedSpinner",
@@ -7418,31 +7394,5 @@ private final class GalleryHoverPolicyDemo {
         scheduler.cancelPendingWork()
         popover?.close()
         popover = nil
-    }
-}
-
-/// Three fixed fixture values; the table owns the cell lifetime and selection behavior.
-@MainActor
-private final class GalleryPackMemberModel: NSObject, NSTableViewDataSource, NSTableViewDelegate {
-    private var included = [true, false, false]
-    private let names = ["Matrix Rain", L10n.string("Quiet stars"), L10n.string("Unavailable extension")]
-
-    func numberOfRows(in tableView: NSTableView) -> Int { names.count }
-
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let identifier = NSUserInterfaceItemIdentifier("gallery.pack-member")
-        let cell = tableView.makeView(withIdentifier: identifier, owner: self)
-            as? AppearancePackMemberCell ?? AppearancePackMemberCell()
-        cell.identifier = identifier
-        cell.configure(name: names[row], detail: row == 2 ? L10n.string("Not installed") : L10n.string("Reviewed decoration"),
-                       selected: included[row], enabled: row != 2)
-        cell.toggle.tag = row
-        cell.toggle.target = self
-        cell.toggle.action = #selector(toggleMember(_:))
-        return cell
-    }
-
-    @objc private func toggleMember(_ sender: ThemedToggle) {
-        included[sender.tag] = sender.state == .on
     }
 }

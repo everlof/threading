@@ -78,7 +78,8 @@ public enum ExtensionCustomSurfaceKind: String, Codable, Equatable, Sendable {
 /// A constrained custom Metal fragment surface.
 ///
 /// `shaderResource` is package-relative source. Threading supplies the fullscreen vertex stage,
-/// a stable uniform ABI, and at most eight scalar inputs. The extension never receives an
+/// a stable uniform ABI, and at most eight scalar inputs — constants, host signals, or the
+/// extension's own settings fields (`ExtensionSurfaceScalar.setting`). The extension never receives an
 /// `MTLDevice`, command encoder, buffer, or AppKit object, and never constructs a texture.
 ///
 /// A surface may name one package image as `texture`. The host — never the extension — reads it
@@ -207,21 +208,32 @@ public struct ExtensionSurfaceInputBinding: Codable, Equatable, Sendable {
     }
 }
 
-/// A scalar supplied to a custom surface either directly or from a host-owned live signal.
+/// A scalar supplied to a custom surface directly, from a host-owned live signal, or from one of
+/// the extension's own settings fields.
 public enum ExtensionSurfaceScalar: Codable, Equatable, Sendable {
     case constant(Double)
     case signal(ExtensionHostSignal, mapping: ExtensionScalarMapping)
+    /// The current value of one of the publishing extension's own settings fields, read by the
+    /// host from its settings store — no process round trip. A toggle reads `0`/`1`, a choice
+    /// its selected option's `value` (or its index when the options state none), an integer
+    /// itself; the mapping then shapes that number like a signal's. A changed setting reaches
+    /// the uniform on the surface's next frame. The field must exist in the extension's settings
+    /// contribution and must not be text; Threading refuses a publication that names one which
+    /// does not. Declare the field `appliedBy: .host` when nothing but bindings reads it.
+    case setting(String, mapping: ExtensionScalarMapping)
 
     private enum CodingKeys: String, CodingKey {
         case type
         case value
         case signal
+        case setting
         case mapping
     }
 
     private enum Kind: String, Codable {
         case constant
         case signal
+        case setting
     }
 
     public init(from decoder: Decoder) throws {
@@ -232,6 +244,14 @@ public enum ExtensionSurfaceScalar: Codable, Equatable, Sendable {
         case .signal:
             self = .signal(
                 try container.decode(ExtensionHostSignal.self, forKey: .signal),
+                mapping: try container.decodeIfPresent(
+                    ExtensionScalarMapping.self,
+                    forKey: .mapping
+                ) ?? .identity
+            )
+        case .setting:
+            self = .setting(
+                try container.decode(String.self, forKey: .setting),
                 mapping: try container.decodeIfPresent(
                     ExtensionScalarMapping.self,
                     forKey: .mapping
@@ -250,7 +270,17 @@ public enum ExtensionSurfaceScalar: Codable, Equatable, Sendable {
             try container.encode(Kind.signal, forKey: .type)
             try container.encode(signal, forKey: .signal)
             try container.encode(mapping, forKey: .mapping)
+        case .setting(let fieldID, let mapping):
+            try container.encode(Kind.setting, forKey: .type)
+            try container.encode(fieldID, forKey: .setting)
+            try container.encode(mapping, forKey: .mapping)
         }
+    }
+
+    /// The settings field this scalar reads, or nil for a constant or a signal.
+    public var settingID: String? {
+        if case .setting(let fieldID, _) = self { return fieldID }
+        return nil
     }
 
     func validationIssues(path: String) -> [ExtensionValidationIssue] {
@@ -263,6 +293,12 @@ public enum ExtensionSurfaceScalar: Codable, Equatable, Sendable {
             var issues = signal.rawValue.isEmpty
                 ? [.init(path: "\(path).signal", message: "must not be empty")]
                 : [ExtensionValidationIssue]()
+            issues.append(contentsOf: mapping.validationIssues(path: "\(path).mapping"))
+            return issues
+        case .setting(let fieldID, let mapping):
+            var issues = ExtensionIdentifierRules.isContributionIdentifier(fieldID)
+                ? [ExtensionValidationIssue]()
+                : [.init(path: "\(path).setting", message: ExtensionIdentifierRules.contributionMessage)]
             issues.append(contentsOf: mapping.validationIssues(path: "\(path).mapping"))
             return issues
         }
@@ -434,6 +470,27 @@ public struct ExtensionScalarMapping: Codable, Equatable, Sendable {
         self.fallback = fallback
     }
 
+    /// The number this mapping hands the shader for `reading`: the reading's position in the
+    /// input range, clamped to it and shaped by the curve, laid onto the output range — or the
+    /// fallback when there is no reading. One definition, so the Mac, the phone and the
+    /// constants the Mac projects to the phone cannot round a binding differently.
+    public func output(for reading: Double?) -> Double {
+        guard let reading, reading.isFinite else { return fallback }
+        let position = min(max((reading - inputMinimum) / (inputMaximum - inputMinimum), 0), 1)
+        let curved: Double
+        switch curve {
+        case .linear:
+            curved = position
+        case .easeIn:
+            curved = position * position
+        case .easeOut:
+            curved = 1 - (1 - position) * (1 - position)
+        case .easeInOut:
+            curved = position * position * (3 - 2 * position)
+        }
+        return outputMinimum + curved * (outputMaximum - outputMinimum)
+    }
+
     func validationIssues(path: String) -> [ExtensionValidationIssue] {
         let values = [inputMinimum, inputMaximum, outputMinimum, outputMaximum, fallback]
         guard values.allSatisfy(\.isFinite) else {
@@ -446,6 +503,103 @@ public struct ExtensionScalarMapping: Codable, Equatable, Sendable {
             )]
         }
         return []
+    }
+}
+
+// MARK: - Setting-bound inputs
+
+public extension ExtensionMetalSurface {
+    /// The extension's own settings fields this surface reads, in input order, without repeats.
+    var boundSettingIDs: [String] {
+        var seen: Set<String> = []
+        return inputs.compactMap(\.value.settingID).filter { seen.insert($0).inserted }
+    }
+
+    /// Why `settings` — the publishing extension's own contribution — cannot answer this
+    /// surface's setting-bound inputs: a field it does not declare, or a text field, which has
+    /// no number to give. Empty when every binding resolves.
+    func settingBindingIssues(
+        against settings: ExtensionSettingsContribution,
+        path: String = "surface"
+    ) -> [ExtensionValidationIssue] {
+        inputs.enumerated().compactMap { index, input in
+            guard let fieldID = input.value.settingID else { return nil }
+            let inputPath = "\(path).inputs[\(index)].value.setting"
+            guard let field = settings.field(id: fieldID) else {
+                return .init(
+                    path: inputPath,
+                    message: "names '\(fieldID)', which this extension's settings do not declare"
+                )
+            }
+            guard field.control.isSurfaceReadable else {
+                return .init(
+                    path: inputPath,
+                    message: "names '\(fieldID)', a text field; a surface input reads only "
+                        + "a toggle, choice or integer"
+                )
+            }
+            return nil
+        }
+    }
+}
+
+public extension ExtensionNode {
+    /// Every Metal surface in this tree with its path, depth first.
+    func metalSurfaces(path: String = "node") -> [(path: String, surface: ExtensionMetalSurface)] {
+        switch self {
+        case .customSurface(.metal(let surface), _):
+            return [(path, surface)]
+        case .overlay(let base, let overlay):
+            return base.metalSurfaces(path: "\(path).base")
+                + overlay.metalSurfaces(path: "\(path).overlay")
+        case .stack(_, _, let children):
+            return children.enumerated().flatMap {
+                $1.metalSurfaces(path: "\(path).children[\($0)]")
+            }
+        case .disclosure(_, let summary, let detail):
+            return summary.metalSurfaces(path: "\(path).summary")
+                + detail.enumerated().flatMap { $1.metalSurfaces(path: "\(path).detail[\($0)]") }
+        default:
+            return []
+        }
+    }
+}
+
+public extension ExtensionComponentPatch {
+    /// Every Metal surface this patch publishes — in its replacement, hook and slot children.
+    var metalSurfaces: [(path: String, surface: ExtensionMetalSurface)] {
+        (replacement?.metalSurfaces(path: "replacement") ?? [])
+            + (hook?.metalSurfaces(path: "hook") ?? [])
+            + slots.enumerated().flatMap { slotIndex, slot in
+                slot.children.enumerated().flatMap {
+                    $1.metalSurfaces(path: "slots[\(slotIndex)].children[\($0)]")
+                }
+            }
+    }
+
+    /// Refuses a patch whose setting-bound surface inputs `settings` — the publishing
+    /// extension's own settings contribution — cannot answer. Threading runs the same check at
+    /// publication; call it before publishing to see the reason first.
+    func validateSettingBindings(against settings: ExtensionSettingsContribution) throws {
+        let issues = metalSurfaces.flatMap {
+            $0.surface.settingBindingIssues(against: settings, path: $0.path)
+        }
+        if !issues.isEmpty { throw ExtensionValidationError(issues: issues) }
+    }
+}
+
+public extension ExtensionComponentPatchPublication {
+    /// `ExtensionComponentPatch.validateSettingBindings(against:)` for every patch at once.
+    func validateSettingBindings(against settings: ExtensionSettingsContribution) throws {
+        let issues = patches.enumerated().flatMap { index, patch in
+            patch.metalSurfaces.flatMap {
+                $0.surface.settingBindingIssues(
+                    against: settings,
+                    path: "patches[\(index)].\($0.path)"
+                )
+            }
+        }
+        if !issues.isEmpty { throw ExtensionValidationError(issues: issues) }
     }
 }
 

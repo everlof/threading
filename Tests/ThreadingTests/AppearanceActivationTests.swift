@@ -19,59 +19,67 @@ final class AppearanceActivationTests: XCTestCase {
     private let rain = "com.example.rain"
     private let shared = "com.example.shared"
     private let manual = "com.example.manual"
-    private let digest = String(repeating: "a", count: 64)
 
-    private func pack(_ name: String, members: [String]) -> AppearancePack {
-        AppearancePack(id: UUID(), recipeRevision: UUID(), name: name, themeID: "system",
-                       extensions: members.map { .init(identifier: $0, contentDigest: digest) })
+    private func inventory(
+        themeIDs: Set<String> = ["system", "standalone"],
+        unavailable: String? = nil,
+        suppressed: Bool = false
+    ) -> AppearanceActivationInventory {
+        .init(themeIDs: themeIDs, extensions: Dictionary(uniqueKeysWithValues: [rain, shared, manual].map {
+            ($0, .init(name: $0, unavailableReason: $0 == unavailable ? "Invalid package" : nil))
+        }), extensionsSuppressed: suppressed)
     }
 
-    private func inventory(digest: String? = nil, suppressed: Bool = false) -> AppearanceActivationInventory {
-        .init(themeIDs: ["system", "standalone"], extensions: Dictionary(uniqueKeysWithValues:
-            [rain, shared, manual].map { ($0, .init(name: $0, contentDigest: digest ?? self.digest,
-                unavailableReason: nil, requiredExtensionIDs: [], status: .running)) }),
-              extensionsSuppressed: suppressed)
+    private func temporaryStoreURL() -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return directory.appendingPathComponent("appearance.json")
     }
 
-    func testSwitchThenOffPreservesOnlyManualReasonsAndStandaloneTheme() async throws {
-        let a = pack("A", members: [rain, shared]), b = pack("B", members: [shared])
-        let initial = AppearanceActivationState(standaloneThemeID: "standalone",
-            manuallyEnabledExtensionIDs: [manual], packs: [a, b])
-        let persistence = AppearanceTestPersistence()
-        var departing: [Set<String>] = []
-        let service = AppearanceActivationService(state: initial, persistence: persistence,
-            inventory: { self.inventory() }, reconcile: { before, after in
-                departing.append(before.desiredExtensionIDs.subtracting(after.desiredExtensionIDs))
-            })
-        try await service.perform(.activatePack(a.id))
-        XCTAssertEqual(service.state.desiredExtensionIDs, [manual, rain, shared])
-        try await service.perform(.activatePack(b.id))
-        XCTAssertEqual(departing.last, [rain], "shared runtime keeps its generation")
-        try await service.perform(.deactivatePack(b.id))
-        XCTAssertEqual(service.state.desiredExtensionIDs, [manual])
-        XCTAssertEqual(service.state.selectedThemeID, "standalone")
-        let stored = await persistence.writes
-        XCTAssertEqual(stored.last, service.state)
-        XCTAssertEqual(stored.count, 3)
+    func testThemeChoiceAndEnablementAreIndependentAndRepairedAgainstInventory() throws {
+        let initial = AppearanceActivationState(themeID: "standalone", enabledExtensionIDs: [manual])
+        let themed = try initial.changing(.selectTheme("system"))
+        XCTAssertEqual(themed.themeID, "system")
+        XCTAssertEqual(themed.enabledExtensionIDs, [manual], "a theme choice leaves extensions alone")
+        XCTAssertEqual(themed.revision, 1)
+        XCTAssertEqual(try themed.changing(.selectTheme("system")), themed, "a repeated choice writes nothing")
+
+        let enabled = try themed.changing(.setExtensionEnabled(rain, true))
+        XCTAssertEqual(enabled.enabledExtensionIDs, [manual, rain])
+        XCTAssertEqual(enabled.themeID, "system", "enablement leaves the theme alone")
+        XCTAssertEqual(try enabled.changing(.setExtensionEnabled(manual, false)).enabledExtensionIDs, [rain])
+
+        let repaired = try enabled.changing(.reconcileInventory(
+            themeIDs: ["standalone"], extensionIDs: [rain], fallbackThemeID: "standalone"
+        ))
+        XCTAssertEqual(repaired.themeID, "standalone", "a removed theme falls back")
+        XCTAssertEqual(repaired.enabledExtensionIDs, [rain], "a removed extension loses its enablement")
+        XCTAssertThrowsError(try initial.changing(.setExtensionEnabled("not an identifier", true)))
     }
 
-    func testKeepEnabledAndExplicitDisableHaveDifferentMeaning() throws {
-        let pack = pack("Rain", members: [rain, shared])
-        let active = AppearanceActivationState(standaloneThemeID: "standalone",
-            manuallyEnabledExtensionIDs: [manual], packs: [pack], activePackID: pack.id)
-        let kept = try active.changing(.setExtensionEnabled(rain, true))
-        XCTAssertEqual(kept.activePackID, pack.id)
-        XCTAssertEqual(try kept.changing(.deactivatePack(pack.id)).desiredExtensionIDs, [manual, rain])
-        let disabled = try kept.changing(.setExtensionEnabled(rain, false))
-        XCTAssertNil(disabled.activePackID)
-        XCTAssertEqual(disabled.desiredExtensionIDs, [manual])
-        let selected = try active.changing(.selectTheme("system"))
-        XCTAssertNil(selected.activePackID, "choosing the same visible theme still releases the pack")
-        XCTAssertEqual(selected.desiredExtensionIDs, [manual])
+    func testHeldBackOrUnavailableExtensionsCannotBeEnabledButCanAlwaysBeDisabled() async throws {
+        var snapshot = inventory()
+        let service = AppearanceActivationService(
+            state: AppearanceActivationState(themeID: "system", enabledExtensionIDs: [manual]),
+            persistence: AppearanceTestPersistence(), inventory: { snapshot }, reconcile: { _, _ in })
+        XCTAssertNil(service.unavailableReason(for: .setExtensionEnabled(rain, true)))
+        XCTAssertEqual(service.unavailableReason(for: .setExtensionEnabled("com.example.missing", true)),
+                       AppearanceActivationError.extensionUnavailable("com.example.missing").localizedDescription)
+        snapshot = inventory(unavailable: rain)
+        XCTAssertEqual(service.unavailableReason(for: .setExtensionEnabled(rain, true)),
+                       AppearanceActivationError.extensionUnavailable(rain).localizedDescription)
+        snapshot = inventory(suppressed: true)
+        XCTAssertEqual(service.unavailableReason(for: .setExtensionEnabled(rain, true)),
+                       AppearanceActivationError.suppressed.localizedDescription)
+        XCTAssertNil(service.unavailableReason(for: .setExtensionEnabled(manual, false)))
+        try await service.perform(.setExtensionEnabled(manual, false))
+        XCTAssertEqual(service.state.enabledExtensionIDs, [])
+        XCTAssertEqual(service.unavailableReason(for: .selectTheme("missing")),
+                       AppearanceActivationError.themeUnavailable.localizedDescription)
     }
 
     func testFailedCommitDoesNotPublishOrApplyAndConcurrentMutationsAreRefused() async throws {
-        let initial = AppearanceActivationState(standaloneThemeID: "standalone", manuallyEnabledExtensionIDs: [])
+        let initial = AppearanceActivationState(themeID: "standalone", enabledExtensionIDs: [])
         let persistence = AppearanceTestPersistence(fails: true, delay: 50_000_000)
         var reconciliations = 0, releases = 0
         let service = AppearanceActivationService(state: initial, persistence: persistence,
@@ -88,54 +96,34 @@ final class AppearanceActivationTests: XCTestCase {
         XCTAssertFalse(service.isChanging)
     }
 
-    func testChangedReceiptsPrerequisitesAndRecoveryDoNotGrantEnablement() throws {
-        let pack = pack("Rain", members: [rain])
-        XCTAssertThrowsError(try inventory(digest: String(repeating: "b", count: 64))
-            .validate(pack, manualExtensionIDs: []))
-        XCTAssertThrowsError(try inventory(suppressed: true).validate(pack, manualExtensionIDs: []))
-        let missingDependency = AppearanceActivationInventory(themeIDs: ["system"], extensions: [
-            rain: .init(name: "Rain", contentDigest: digest, unavailableReason: nil,
-                        requiredExtensionIDs: [shared], status: .stopped)
-        ])
-        XCTAssertThrowsError(try missingDependency.validate(pack, manualExtensionIDs: []))
-        let active = AppearanceActivationState(standaloneThemeID: "standalone",
-            manuallyEnabledExtensionIDs: [manual], packs: [pack], activePackID: pack.id)
-        let repaired = try active.changing(.reconcileInventory(themeIDs: ["system"],
-            extensionIDs: [manual], fallbackThemeID: "system"))
-        XCTAssertNil(repaired.activePackID)
-        XCTAssertEqual(repaired.desiredExtensionIDs, [manual])
-        XCTAssertEqual(repaired.standaloneThemeID, "system")
-        XCTAssertEqual(repaired.packs, [pack], "missing content does not erase the user's recipe")
-    }
-
-    func testRenamePreservesActivationAndIdentityButNewRecipeReleasesIt() throws {
-        let pack = pack("Rain", members: [rain])
-        let active = AppearanceActivationState(standaloneThemeID: "standalone",
-            manuallyEnabledExtensionIDs: [], packs: [pack], activePackID: pack.id)
-        let renamed = AppearancePack(id: pack.id, recipeRevision: pack.recipeRevision, name: "Storm",
-                                     themeID: pack.themeID, extensions: pack.extensions)
-        let next = try active.changing(.savePack(renamed))
-        XCTAssertEqual(next.activePackID, pack.id)
-        XCTAssertEqual(AppearanceCommandTarget.toggle(pack.id).commandID,
-                       AppearanceCommandTarget.toggle(renamed.id).commandID)
-        let edited = AppearancePack(id: pack.id, recipeRevision: UUID(), name: "Storm",
-                                    themeID: pack.themeID, extensions: [])
-        XCTAssertNil(try next.changing(.savePack(edited)).activePackID)
+    func testCommittedChangesProjectInOrderAndPersistTheWholeState() async throws {
+        let persistence = AppearanceTestPersistence()
+        var projected: [AppearanceActivationState] = []
+        let service = AppearanceActivationService(
+            state: AppearanceActivationState(themeID: "standalone", enabledExtensionIDs: [manual]),
+            persistence: persistence, inventory: { self.inventory() },
+            reconcile: { _, next in projected.append(next) })
+        try await service.perform(.setExtensionEnabled(rain, true))
+        try await service.perform(.selectTheme("system"))
+        try await service.perform(.selectTheme("system"))
+        let stored = await persistence.writes
+        XCTAssertEqual(stored.count, 2, "an unchanged choice is not written again")
+        XCTAssertEqual(stored, projected)
+        XCTAssertEqual(stored.last, service.state)
+        XCTAssertEqual(service.state.enabledExtensionIDs, [manual, rain])
     }
 
     func testFileMigrationRestartAndCorruptionNeverReimportLegacyState() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let url = directory.appendingPathComponent("appearance.json")
-        let pack = pack("Rain", members: [rain])
-        let legacy = AppearanceActivationState(standaloneThemeID: "standalone", manuallyEnabledExtensionIDs: [manual])
+        let url = temporaryStoreURL()
+        let directory = url.deletingLastPathComponent()
+        let legacy = AppearanceActivationState(themeID: "standalone", enabledExtensionIDs: [manual])
         let store = AppearanceActivationStore(url: url)
         let migrated = try await store.load(migrating: legacy)
         XCTAssertEqual(migrated, legacy)
-        let active = try legacy.changing(.savePack(pack)).changing(.activatePack(pack.id))
-        try await store.save(active)
+        let changed = try legacy.changing(.selectTheme("system")).changing(.setExtensionEnabled(rain, true))
+        try await store.save(changed)
         let restored = try await AppearanceActivationStore(url: url).load(migrating: legacy)
-        XCTAssertEqual(restored, active)
+        XCTAssertEqual(restored, changed)
         try Data("broken".utf8).write(to: url)
         for _ in 0..<2 {
             do {
@@ -147,72 +135,185 @@ final class AppearanceActivationTests: XCTestCase {
         XCTAssertEqual(files.filter { $0.contains("unreadable") }.count, 1)
     }
 
+    /// The record exactly as a build with appearance packs wrote it, with a saved and an active
+    /// pack. It loads without quarantine; the pack fields are dropped and never written back.
+    func testRecordWrittenWhilePacksExistedLoadsAndDropsThem() async throws {
+        let url = temporaryStoreURL()
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let digest = String(repeating: "a", count: 64)
+        let fixture = """
+        {
+          "formatVersion" : 1,
+          "value" : {
+            "activePackID" : "6F1C3C1E-2B0A-4B8E-9C55-0D7E1A4B2C3D",
+            "formatVersion" : 1,
+            "manuallyEnabledExtensionIDs" : [
+              "\(manual)"
+            ],
+            "packs" : [
+              {
+                "extensions" : [
+                  {
+                    "contentDigest" : "\(digest)",
+                    "identifier" : "\(rain)"
+                  }
+                ],
+                "id" : "6F1C3C1E-2B0A-4B8E-9C55-0D7E1A4B2C3D",
+                "name" : "Night Shift",
+                "recipeRevision" : "0B7C2D9E-1F3A-4C5B-8D6E-7F8091A2B3C4",
+                "themeID" : "cyberpunk"
+              }
+            ],
+            "revision" : 11,
+            "standaloneThemeID" : "custom-744b1d30-b37b-4098-8544-7ffb18b22f95"
+          }
+        }
+        """
+        try Data(fixture.utf8).write(to: url)
+        let legacy = AppearanceActivationState(themeID: "system", enabledExtensionIDs: [])
+        let store = AppearanceActivationStore(url: url)
+
+        let loaded = try await store.load(migrating: legacy)
+        XCTAssertEqual(loaded, AppearanceActivationState(
+            revision: 11, themeID: "custom-744b1d30-b37b-4098-8544-7ffb18b22f95", enabledExtensionIDs: [manual]
+        ), "the plain choices survive; the pack's theme and member are not adopted")
+        let siblings = try FileManager.default.contentsOfDirectory(atPath: url.deletingLastPathComponent().path)
+        XCTAssertEqual(siblings.filter { $0.contains("unreadable") }, [], "an old record is not corrupt")
+
+        try await store.save(loaded.changing(.selectTheme("system")))
+        let written = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let value = try XCTUnwrap(written["value"] as? [String: Any])
+        XCTAssertEqual(Set(value.keys), ["formatVersion", "revision", "standaloneThemeID", "manuallyEnabledExtensionIDs", "packs"])
+        XCTAssertEqual((value["packs"] as? [Any])?.count, 0, "an older build still finds the key it requires")
+        XCTAssertEqual(value["standaloneThemeID"] as? String, "system")
+        XCTAssertEqual(value["manuallyEnabledExtensionIDs"] as? [String], [manual])
+        let reloaded = try await AppearanceActivationStore(url: url).load(migrating: legacy)
+        XCTAssertEqual(reloaded.revision, 12)
+        XCTAssertEqual(reloaded.themeID, "system")
+    }
+
     func testRecoveryReadsLegacyWithoutWritingAndAllowsExplicitOff() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let url = directory.appendingPathComponent("appearance.json")
-        let legacy = AppearanceActivationState(standaloneThemeID: "system", manuallyEnabledExtensionIDs: [manual])
+        let url = temporaryStoreURL()
+        let legacy = AppearanceActivationState(themeID: "system", enabledExtensionIDs: [manual])
         let store = AppearanceActivationStore(url: url)
         let restored = try await store.load(migrating: legacy, persistMigration: false)
         XCTAssertEqual(restored, legacy)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.deletingLastPathComponent().path))
         try await store.save(legacy.changing(.setExtensionEnabled(manual, false)))
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
     }
 
-    func testRealHostMenuRouteCommitsPackAndRefusesStaleCommand() async throws {
-        let pack = pack("Rain", members: [rain])
-        let state = AppearanceActivationState(standaloneThemeID: "system", manuallyEnabledExtensionIDs: [], packs: [pack])
+    func testRealHostMenuRouteCommitsThemeAndExtensionChoicesAndRefusesStaleCommand() async throws {
+        let system = AppTheme.system.id.rawValue, cyberpunk = AppThemeStyles.cyberpunk.id.rawValue
+        var snapshot = inventory(themeIDs: [system, cyberpunk])
         var projected: AppearanceActivationState?
-        let service = AppearanceActivationService(state: state, persistence: AppearanceTestPersistence(),
-            inventory: { self.inventory() }, reconcile: { _, next in projected = next })
-        let host = AppearanceActivationHost(service: service, inventory: { self.inventory() })
+        let service = AppearanceActivationService(
+            state: AppearanceActivationState(themeID: system, enabledExtensionIDs: []),
+            persistence: AppearanceTestPersistence(), inventory: { snapshot },
+            reconcile: { _, next in projected = next })
+        let host = AppearanceActivationHost(service: service, inventory: { snapshot })
         AppearanceCommands.refresh(host: host)
         defer { CommandRegistry.shared.replaceAppearanceCommands([]) }
         let delegate = AppDelegate()
         delegate.appearanceHost = host
-        let id = AppearanceCommandTarget.activate(pack.id).commandID
-        let item = NSMenuItem(title: "Activate", action: NSSelectorFromString("performHostMenuCommand:"), keyEquivalent: "")
-        item.representedObject = id
-        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(item.action), to: delegate, from: item))
-        for _ in 0..<200 where service.state.activePackID == nil { try await Task.sleep(nanoseconds: 1_000_000) }
-        XCTAssertEqual(projected?.activePackID, pack.id)
-        try await service.perform(.removePack(pack.id))
-        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(item.action), to: delegate, from: item))
+        func invoke(_ target: AppearanceCommandTarget) throws {
+            let item = NSMenuItem(title: "Appearance", action: NSSelectorFromString("performHostMenuCommand:"), keyEquivalent: "")
+            item.representedObject = target.commandID
+            XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(item.action), to: delegate, from: item))
+        }
+
+        try invoke(.theme(cyberpunk))
+        for _ in 0..<200 where service.state.themeID != cyberpunk { try await Task.sleep(nanoseconds: 1_000_000) }
+        XCTAssertEqual(projected?.themeID, cyberpunk)
+        try invoke(.extensionEnabled(rain, true))
+        for _ in 0..<200 where service.state.enabledExtensionIDs.isEmpty { try await Task.sleep(nanoseconds: 1_000_000) }
+        XCTAssertEqual(projected?.enabledExtensionIDs, [rain])
+        XCTAssertEqual(service.state.revision, 2)
+
+        snapshot = inventory(themeIDs: [cyberpunk])
+        try invoke(.theme(system))
         await Task.yield()
-        XCTAssertNil(service.state.activePackID)
+        XCTAssertEqual(service.state.themeID, cyberpunk, "a theme that went away is refused, not selected")
         XCTAssertEqual(service.state.revision, 2)
     }
 
-    func testThemePickerActivatesTheSavedPackAndThemeSelectionReleasesIt() async throws {
-        let pack = pack("Rain", members: [rain])
-        let state = AppearanceActivationState(standaloneThemeID: "system",
-            manuallyEnabledExtensionIDs: [manual], packs: [pack])
-        let service = AppearanceActivationService(state: state, persistence: AppearanceTestPersistence(),
-            inventory: { self.inventory() }, reconcile: { _, _ in })
-        let host = AppearanceActivationHost(service: service, inventory: { self.inventory() })
+    func testThemePickerListsOnlyThemesAndSelectsTheStoredChoice() {
         let picker = ThemedPopUp()
-        AppThemePicker.populate(picker, selectedThemeID: .system, host: host)
-        let offer = try XCTUnwrap(picker.indexOfItem {
-            $0.representedValue as? UUID == pack.id && $0.title == L10n.format("Use with “%@” pack", pack.name)
-        })
-        XCTAssertGreaterThan(offer, 0, "the matching saved pack remains an explicit actionable row")
-        let index = try XCTUnwrap(picker.indexOfItem { $0.representedValue as? UUID == pack.id })
-        picker.selectItem(at: index)
-        XCTAssertTrue(AppThemePicker.activatePackIfSelected(picker, host: host))
-        for _ in 0..<200 where service.state.activePackID == nil { try await Task.sleep(nanoseconds: 1_000_000) }
-        XCTAssertEqual(service.state.desiredExtensionIDs, [manual, rain])
-        try await service.perform(.selectTheme("system"))
-        AppThemePicker.populate(picker, selectedThemeID: .system, host: host)
-        XCTAssertFalse(AppThemePicker.activatePackIfSelected(picker, host: host))
-        XCTAssertEqual(service.state.desiredExtensionIDs, [manual])
-        XCTAssertNil(service.state.activePackID)
-        let restoredIndex = try XCTUnwrap(picker.indexOfItem { $0.representedValue as? UUID == pack.id })
-        picker.selectItem(at: restoredIndex)
-        XCTAssertTrue(AppThemePicker.activatePackIfSelected(picker, host: host))
-        for _ in 0..<200 where service.state.activePackID == nil { try await Task.sleep(nanoseconds: 1_000_000) }
-        XCTAssertEqual(service.state.activePackID, pack.id)
-        XCTAssertEqual(service.state.desiredExtensionIDs, [manual, rain])
+        AppThemePicker.populate(picker, selectedThemeID: AppThemeStyles.cyberpunk.id)
+        var headers: [String] = []
+        var values: [String] = []
+        for entry in picker.entries {
+            switch entry {
+            case .header(let title): headers.append(title)
+            case .item(let item):
+                guard let value = item.representedValue as? String else {
+                    return XCTFail("every row names a theme by its id: \(item.title)")
+                }
+                values.append(value)
+            case .separator: break
+            }
+        }
+        XCTAssertEqual(Set(values), Set(AppThemeLibrary.sections.flatMap(\.themes).map(\.id.rawValue)))
+        XCTAssertEqual(values.count, Set(values).count, "no theme is offered twice")
+        XCTAssertEqual(headers, AppThemeLibrary.sections.compactMap(\.title))
+        XCTAssertEqual(picker.selectedItem?.representedValue as? String, AppThemeStyles.cyberpunk.id.rawValue)
+    }
+
+    func testCatalogueOffersThemesTerminalThemesAndExtensionSwitchesOnly() throws {
+        let system = AppTheme.system.id.rawValue
+        let snapshot = inventory(themeIDs: Set(AppThemeLibrary.all.map(\.id.rawValue)))
+        let service = AppearanceActivationService(
+            state: AppearanceActivationState(themeID: system, enabledExtensionIDs: [manual]),
+            persistence: AppearanceTestPersistence(), inventory: { snapshot }, reconcile: { _, _ in })
+        let host = AppearanceActivationHost(service: service, inventory: { snapshot })
+        let commands = AppearanceCommands.catalog(host: host)
+        let prefixes = ["appearance.theme.use.", "appearance.terminal-theme.use.",
+                        "appearance.extension.enable.", "appearance.extension.disable."]
+        for command in commands {
+            XCTAssertNotNil(command.appearanceTarget)
+            XCTAssertTrue(prefixes.contains { command.id.hasPrefix($0) }, command.id)
+            XCTAssertFalse(command.title.contains("Pack"), command.title)
+        }
+        XCTAssertEqual(commands.filter { $0.id.hasPrefix("appearance.theme.use.") }.count, AppThemeLibrary.all.count)
+        XCTAssertEqual(commands.filter { $0.id.hasPrefix("appearance.extension.") }.count, 6)
+        let current = try XCTUnwrap(commands.first { $0.id == AppearanceCommandTarget.theme(system).commandID })
+        XCTAssertEqual(current.detail, L10n.format("Current theme · %@", L10n.string("Built-in")))
+        let enabled = try XCTUnwrap(commands.first { $0.id == AppearanceCommandTarget.extensionEnabled(manual, false).commandID })
+        XCTAssertEqual(enabled.detail, L10n.string("Enabled"))
+        let disabled = try XCTUnwrap(commands.first { $0.id == AppearanceCommandTarget.extensionEnabled(rain, true).commandID })
+        XCTAssertEqual(disabled.title, L10n.format("Enable %@ Extension", rain))
+        XCTAssertEqual(disabled.detail, L10n.string("Disabled"))
+    }
+
+    /// The palette is where theme and extension commands are found. The menu bar holds none of
+    /// them visibly; an assigned shortcut rides a hidden View-menu carrier.
+    func testViewMenuHoldsAppearanceCommandsOnlyAsHiddenShortcutCarriers() throws {
+        let previousMainMenu = NSApp.mainMenu
+        let previousWindowsMenu = NSApp.windowsMenu
+        let previousHelpMenu = NSApp.helpMenu
+        defer {
+            NSApp.mainMenu = previousMainMenu
+            NSApp.windowsMenu = previousWindowsMenu
+            NSApp.helpMenu = previousHelpMenu
+        }
+        let snapshot = inventory(themeIDs: Set(AppThemeLibrary.all.map(\.id.rawValue)))
+        let service = AppearanceActivationService(
+            state: AppearanceActivationState(themeID: AppTheme.system.id.rawValue, enabledExtensionIDs: []),
+            persistence: AppearanceTestPersistence(), inventory: { snapshot }, reconcile: { _, _ in })
+        AppearanceCommands.refresh(host: AppearanceActivationHost(service: service, inventory: { snapshot }))
+        defer { CommandRegistry.shared.replaceAppearanceCommands([]) }
+
+        let delegate = AppDelegate()
+        delegate.setupMenuBar()
+        let view = try XCTUnwrap(NSApp.mainMenu?.items.compactMap(\.submenu).first { $0.title == MenuIdentifiers.viewMenu })
+        XCTAssertNil(view.item(withTitle: L10n.string("Appearance")), "no empty Appearance submenu")
+        let appearanceItems = view.items.filter { ($0.representedObject as? String)?.hasPrefix("appearance.") == true }
+        XCTAssertEqual(appearanceItems, delegate.appearanceShortcutCarriersForTesting)
+        for item in appearanceItems {
+            XCTAssertTrue(item.isHidden)
+            XCTAssertTrue(item.allowsKeyEquivalentWhenHidden)
+            XCTAssertFalse(item.keyEquivalent.isEmpty, "only a bound command needs a carrier")
+        }
     }
 
     func testTerminalScopeKeepsIdentityAndRefusesMissingTarget() {
@@ -230,10 +331,9 @@ final class AppearanceActivationTests: XCTestCase {
                 AppTheme(id: AppThemeID("stress-\(index)"), name: "Stress \(index)", mode: .dark,
                          summary: nil, variants: AppThemeStyles.cyberpunk.variants)
             }
-            let packs = (0..<min(count, AppearancePack.maximumCount)).map { pack("Pack \($0)", members: [rain]) }
             let inventory = AppearanceActivationInventory(themeIDs: Set(themes.map { $0.id.rawValue }).union(["system"]),
                                                          extensions: self.inventory().extensions)
-            let state = AppearanceActivationState(standaloneThemeID: "system", manuallyEnabledExtensionIDs: [], packs: packs)
+            let state = AppearanceActivationState(themeID: "system", enabledExtensionIDs: [])
             let service = AppearanceActivationService(state: state, persistence: AppearanceTestPersistence(),
                 inventory: { inventory }, reconcile: { _, _ in })
             let host = AppearanceActivationHost(service: service, inventory: { inventory })
@@ -252,7 +352,7 @@ final class AppearanceActivationTests: XCTestCase {
             XCTAssertLessThanOrEqual(results.count, HostCommandSearch.maximumResults)
             XCTAssertEqual(Set(commands.map(\.id)).count, commands.count)
             XCTAssertLessThan(catalogDuration, 0.25, "catalogue work must remain bounded at the admitted inventory limit")
-            print("Appearance catalogue: \(count) themes, \(packs.count) packs, build+availability \(catalogDuration * 1000) ms; search \(searchDuration * 1000) ms")
+            print("Appearance catalogue: \(count) themes, build+availability \(catalogDuration * 1000) ms; search \(searchDuration * 1000) ms")
         }
     }
 }

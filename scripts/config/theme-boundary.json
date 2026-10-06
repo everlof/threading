@@ -233,6 +233,12 @@
       "reason": "Design is the single mapping from semantic typography roles to AppKit fonts."
     },
     {
+      "path": "Sources/Threading/UI/Design/SystemFontFaces.swift",
+      "kind": "fontFactory",
+      "symbol": "systemFont",
+      "reason": "The last-resort face when AppKit cannot build a design-variant system face at all."
+    },
+    {
       "path": "Sources/Threading/Models/TerminalProfile.swift",
       "kind": "fontFactory",
       "symbol": "*",

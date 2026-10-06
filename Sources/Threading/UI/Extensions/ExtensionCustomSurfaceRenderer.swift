@@ -27,6 +27,7 @@ enum ExtensionCustomSurfaceRenderer {
         signalProvider: @escaping ExtensionMetalSurfaceView.SignalProvider = { signal, context in
             ExtensionHostSignals.value(signal, in: context)
         },
+        settingProvider: ExtensionMetalSurfaceView.SettingProvider? = nil,
         textureLoader: TextureLoader = loadPackageTexture
     ) -> NSView? {
         switch surface {
@@ -43,7 +44,15 @@ enum ExtensionCustomSurfaceRenderer {
                     specification: specification,
                     source: source,
                     maximumFramesPerSecond: maximumFramesPerSecond,
-                    signalProvider: signalProvider
+                    signalProvider: signalProvider,
+                    // A setting binding reads the publishing extension's own values from the
+                    // host's store — never another extension's, never through its process.
+                    settingProvider: settingProvider ?? { fieldID in
+                        ExtensionManager.shared.surfaceSettingReading(
+                            extensionIdentifier: extensionIdentifier,
+                            fieldID: fieldID
+                        )
+                    }
                 )
             } catch {
                 ThreadingLogger.extensions.error(

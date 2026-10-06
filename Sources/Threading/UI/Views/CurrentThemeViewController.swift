@@ -14,6 +14,8 @@ final class CurrentThemeViewController: NSViewController {
     private let appEvents = AppEventObservations()
     private let colorEditor = CurrentAppThemeColorEditor()
     private let tuning = CurrentThemeTuningControls()
+    /// The contributing extension's own settings, when the active theme came from one.
+    private let themeOptions = CurrentThemeOptionsSection()
 
     private var displayedThemeID: AppThemeID?
     private var isShowingAdvisory = false
@@ -89,6 +91,11 @@ final class CurrentThemeViewController: NSViewController {
         appEvents.observe(AppThemeLibraryDidChange.self) { [weak self] _ in
             self?.reload(followCurrentAppearance: false)
         }
+        // Enabling, disabling or updating the theme's extension adds, removes or reshapes its
+        // options without the theme itself changing.
+        appEvents.observe(ExtensionSettingsRegistryDidChange.self) { [weak self] _ in
+            self?.themeOptions.show(for: AppThemeLibrary.current)
+        }
 
         reload(followCurrentAppearance: true)
     }
@@ -104,6 +111,7 @@ final class CurrentThemeViewController: NSViewController {
         let page = SettingsUI.page([
             SettingsUI.heading("Current Theme"),
             SettingsUI.section("Theme", overviewCard()),
+            themeOptions,
             tuning.section(),
             SettingsUI.section("Colors", colorEditor),
             validationNote,
@@ -186,6 +194,7 @@ final class CurrentThemeViewController: NSViewController {
         }
         displayedThemeID = theme.id
         tuning.show(theme, kind: selectedVariantKind)
+        themeOptions.show(for: theme)
 
         reloadThemePopUp(theme)
         reloadVariantPopUp(kinds)
@@ -326,7 +335,6 @@ final class CurrentThemeViewController: NSViewController {
     // MARK: - Actions
 
     @objc private func themeChanged(_ sender: ThemedPopUp) {
-        if AppThemePicker.activatePackIfSelected(sender) { return }
         guard let raw = sender.selectedItem?.representedValue as? String,
               let theme = AppThemeLibrary.theme(withID: AppThemeID(raw)) else { return }
         ThemeSwitch.apply(theme)

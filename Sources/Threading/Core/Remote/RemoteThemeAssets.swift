@@ -73,6 +73,12 @@ final class RemoteThemeAssets {
             guard change.targets?.contains(Self.backdropTarget) ?? true else { return }
             self?.refresh()
         }
+        events.observe(ExtensionSettingsValuesDidChange.self) { [weak self] _ in
+            // A projected surface carries its setting bindings as constants, so only a surface
+            // that binds a setting has anything to re-project.
+            guard Self.surfaceHook()?.specification.boundSettingIDs.isEmpty == false else { return }
+            self?.refresh()
+        }
     }
 
     private static var backdropTarget: ExtensionComponentTarget {
@@ -112,7 +118,7 @@ final class RemoteThemeAssets {
         let families = variant?.material.fontFamilies ?? []
         let fontDirectory = ThemeFontStore.folder(for: theme.id)
         let fontURLs = ExtensionAppearanceRegistry.shared.phoneFontURLs(families: families)
-        let hook = Self.surfaceHook()
+        let hook = Self.surfaceHook().map(Self.resolvingSettingInputs)
         let expected = generation
         pending = Task { [weak self, worker] in
             do { try await Task.sleep(for: Self.preparationDelay) } catch { return }
@@ -171,18 +177,26 @@ final class RemoteThemeAssets {
         prepare(current, appearance: RemoteThemeBridge.drawingAppearance(for: current))
     }
 
-    private struct SurfaceHook {
+    struct SurfaceHook {
         let identifier: String
         let generation: String
         let root: URL
         let specification: ExtensionMetalSurface
     }
 
-    private static func surfaceHook() -> SurfaceHook? {
+    /// The sidebar backdrop surface a phone may draw, read from the same resolved
+    /// customization the Mac's plane renders. A patch scoped to its extension's own themes is
+    /// therefore projected exactly while the Mac draws it, and the registry's change for the
+    /// backdrop target on a theme switch is what re-prepares the set.
+    static func surfaceHook(
+        resourceRoot: (String) -> (root: URL, generation: String)? = {
+            ExtensionManager.shared.remoteSurfaceResourceRoot(for: $0)
+        }
+    ) -> SurfaceHook? {
         for hook in ComponentCustomizationProviderSlot.shared.customization(for: backdropTarget).hooks {
             guard case .overlay(let base, let overlay) = hook.node, overlay == .proceed,
                   case .customSurface(.metal(let specification), _) = base, specification.isValid,
-                  let resource = ExtensionManager.shared.remoteSurfaceResourceRoot(for: hook.extensionIdentifier) else { continue }
+                  let resource = resourceRoot(hook.extensionIdentifier) else { continue }
             return SurfaceHook(identifier: hook.extensionIdentifier, generation: resource.generation,
                 root: resource.root, specification: specification)
         }
@@ -490,5 +504,50 @@ private struct BoundedMemo<Value: Sendable>: Sendable {
             order.append(key)
             while order.count > capacity { values[order.removeFirst()] = nil }
         }
+    }
+}
+
+// MARK: - Setting-bound inputs
+
+extension RemoteThemeAssets {
+    /// The hook with every setting-bound input replaced by the constant the Mac reads for it
+    /// now. The phone has no access to the Mac's extension settings, and a phone built before
+    /// setting inputs existed could not decode one, so a setting never crosses the wire: the
+    /// constant does, and a settings change re-projects the surface.
+    static func resolvingSettingInputs(_ hook: SurfaceHook) -> SurfaceHook {
+        SurfaceHook(
+            identifier: hook.identifier,
+            generation: hook.generation,
+            root: hook.root,
+            specification: resolvingSettingInputs(hook.specification) { fieldID in
+                ExtensionManager.shared.surfaceSettingReading(
+                    extensionIdentifier: hook.identifier,
+                    fieldID: fieldID
+                )
+            }
+        )
+    }
+
+    /// `specification` with each `.setting` input resolved through its own mapping — the same
+    /// `ExtensionScalarMapping.output(for:)` the Mac's surface uses — and every other input,
+    /// order and name untouched.
+    static func resolvingSettingInputs(
+        _ specification: ExtensionMetalSurface,
+        reading: (String) -> Double?
+    ) -> ExtensionMetalSurface {
+        guard !specification.boundSettingIDs.isEmpty else { return specification }
+        return ExtensionMetalSurface(
+            shaderResource: specification.shaderResource,
+            fragmentFunction: specification.fragmentFunction,
+            preferredFramesPerSecond: specification.preferredFramesPerSecond,
+            inputs: specification.inputs.map { input in
+                guard case .setting(let fieldID, let mapping) = input.value else { return input }
+                return ExtensionSurfaceInputBinding(
+                    name: input.name,
+                    value: .constant(mapping.output(for: reading(fieldID)))
+                )
+            },
+            texture: specification.texture
+        )
     }
 }

@@ -1577,6 +1577,21 @@ public struct ExtensionComponentSlotPatch: Codable, Equatable, Sendable {
     }
 }
 
+/// Which app themes a component patch applies under.
+///
+/// An extension that ships a theme is a bundle: a backdrop under the sidebar or an overlay on
+/// the window is usually part of *that theme's* look, not something the person wants under
+/// every other theme they pick. `.ownThemes` says so, and the host then applies the patch only
+/// while the selected app theme is one this extension contributes under the manifest's
+/// `themes`. A copy made with Duplicate to Edit is a custom theme of the person's own and does
+/// not count.
+public enum ExtensionComponentThemeScope: String, Codable, CaseIterable, Equatable, Sendable {
+    /// Under every app theme — what every patch did before this field existed.
+    case always
+    /// Only while the active app theme is one this extension contributes.
+    case ownThemes
+}
+
 /// One atomic customization publication.
 public struct ExtensionComponentPatch: Codable, Equatable, Sendable {
     public let id: String
@@ -1585,6 +1600,11 @@ public struct ExtensionComponentPatch: Codable, Equatable, Sendable {
     public let slots: [ExtensionComponentSlotPatch]
     public let replacement: ExtensionNode?
     public let hook: ExtensionNode?
+    /// Which app themes the whole patch — properties, slots, replacement and hook — applies
+    /// under. `.always` is written by omission, so a patch that never states a scope encodes
+    /// exactly as it did before the field existed, and a host that predates the field ignores
+    /// the key and applies the patch under every theme.
+    public let themeScope: ExtensionComponentThemeScope
 
     public init(
         id: String,
@@ -1592,7 +1612,8 @@ public struct ExtensionComponentPatch: Codable, Equatable, Sendable {
         properties: [ExtensionComponentPropertyPatch] = [],
         slots: [ExtensionComponentSlotPatch] = [],
         replacement: ExtensionNode? = nil,
-        hook: ExtensionNode? = nil
+        hook: ExtensionNode? = nil,
+        themeScope: ExtensionComponentThemeScope = .always
     ) {
         self.id = id
         self.target = target
@@ -1600,6 +1621,56 @@ public struct ExtensionComponentPatch: Codable, Equatable, Sendable {
         self.slots = slots
         self.replacement = replacement
         self.hook = hook
+        self.themeScope = themeScope
+    }
+
+    /// The same patch under another theme scope.
+    public func withThemeScope(_ scope: ExtensionComponentThemeScope) -> ExtensionComponentPatch {
+        ExtensionComponentPatch(
+            id: id,
+            target: target,
+            properties: properties,
+            slots: slots,
+            replacement: replacement,
+            hook: hook,
+            themeScope: scope
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, target, properties, slots, replacement, hook, themeScope
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        target = try container.decode(ExtensionComponentTarget.self, forKey: .target)
+        properties = try container.decode(
+            [ExtensionComponentPropertyPatch].self,
+            forKey: .properties
+        )
+        slots = try container.decode([ExtensionComponentSlotPatch].self, forKey: .slots)
+        replacement = try container.decodeIfPresent(ExtensionNode.self, forKey: .replacement)
+        hook = try container.decodeIfPresent(ExtensionNode.self, forKey: .hook)
+        themeScope = try container.decodeIfPresent(
+            ExtensionComponentThemeScope.self,
+            forKey: .themeScope
+        ) ?? .always
+    }
+
+    /// Key for key what the synthesized encoder wrote, plus `themeScope` only when it says
+    /// something, so an existing publication stays byte-identical.
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(target, forKey: .target)
+        try container.encode(properties, forKey: .properties)
+        try container.encode(slots, forKey: .slots)
+        try container.encodeIfPresent(replacement, forKey: .replacement)
+        try container.encodeIfPresent(hook, forKey: .hook)
+        if themeScope != .always {
+            try container.encode(themeScope, forKey: .themeScope)
+        }
     }
 }
 

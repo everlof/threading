@@ -1,7 +1,7 @@
 import Foundation
 
 /// All file/codec work is actor-isolated away from the UI. A corrupt new record never grants
-/// permission to reimport old preferences or silently overwrite the preserved user's packs.
+/// permission to reimport old preferences or silently overwrite the user's preserved choices.
 actor AppearanceActivationStore: AppearanceActivationPersisting {
     private let persistence: RecoverableFileStore<AppearanceActivationState>
     private let url: URL

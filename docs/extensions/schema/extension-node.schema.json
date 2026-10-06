@@ -455,6 +455,17 @@
             },
             "mapping": { "$ref": "#/$defs/scalarMapping" }
           }
+        },
+        {
+          "description": "One of the publishing extension's own settings fields, read by the host from its settings store with no process round trip: a toggle reads 0 or 1, a choice its selected option's value (or zero-based index when the options state none), an integer itself; the mapping then applies. The field must be a toggle, choice or integer declared in the same extension's manifest settings; the host refuses a publication naming any other.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "setting", "mapping"],
+          "properties": {
+            "type": { "const": "setting" },
+            "setting": { "type": "string", "pattern": "^[a-z][a-z0-9.-]*$" },
+            "mapping": { "$ref": "#/$defs/scalarMapping" }
+          }
         }
       ]
     },

@@ -802,6 +802,8 @@ final class MobileThemeMetalSurface: MTKView, MTKViewDelegate {
         switch scalar {
         case .constant(let value): return value
         case .signal(let signal, let mapping): return mapped(readings[signal], mapping)
+        // Never projected — the Mac resolves a setting to a constant first; a fallback if one were.
+        case .setting(_, let mapping): return mapping.fallback
         }
     }
 

@@ -499,8 +499,7 @@ public enum Design {
                 }
                 if let typeface = headingStyle.typeface {
                     guard typeface != .standard else { return font }
-                    if let descriptor = font.fontDescriptor.withDesign(typeface.systemDesign),
-                       let themed = NSFont(descriptor: descriptor, size: font.pointSize) {
+                    if let themed = SystemFontFaces.designed(font, design: typeface.systemDesign) {
                         return themed
                     }
                 }
@@ -512,8 +511,7 @@ public enum Design {
                 }
                 if let typeface = buttonStyle.typeface {
                     guard typeface != .standard else { return font }
-                    if let descriptor = font.fontDescriptor.withDesign(typeface.systemDesign),
-                       let themed = NSFont(descriptor: descriptor, size: font.pointSize) {
+                    if let themed = SystemFontFaces.designed(font, design: typeface.systemDesign) {
                         return themed
                     }
                 }
@@ -523,11 +521,7 @@ public enum Design {
             }
 
             guard material.typeface != .standard else { return font }
-            guard let descriptor = font.fontDescriptor.withDesign(material.typeface.systemDesign),
-                  let themed = NSFont(descriptor: descriptor, size: font.pointSize) else {
-                return font
-            }
-            return themed
+            return SystemFontFaces.designed(font, design: material.typeface.systemDesign) ?? font
         }
 
         /// Builds a display role before family resolution so its authored weight and slant
@@ -714,27 +708,27 @@ public enum Design {
             weight: NSFont.Weight = .regular,
             size: Design.CodeTextScale = .standard
         ) -> NSFont {
-            .monospacedSystemFont(ofSize: scaled(11) * size.factor, weight: weight)
+            SystemFontFaces.monospaced(ofSize: scaled(11) * size.factor, weight: weight)
         }
 
         /// Inline code that must share the body's line box.
         public static func inlineCode() -> NSFont {
-            .monospacedSystemFont(ofSize: scaled(12), weight: .regular)
+            SystemFontFaces.monospaced(ofSize: scaled(12), weight: .regular)
         }
 
         /// A code sample inside the compact theme-preview card.
         public static func previewCode() -> NSFont {
-            .monospacedSystemFont(ofSize: scaled(11.5), weight: .regular)
+            SystemFontFaces.monospaced(ofSize: scaled(11.5), weight: .regular)
         }
 
         /// Dense process metadata and compact hexadecimal values.
         public static func compactCode() -> NSFont {
-            .monospacedSystemFont(ofSize: scaled(10), weight: .regular)
+            SystemFontFaces.monospaced(ofSize: scaled(10), weight: .regular)
         }
 
         /// A compact tool identifier; deliberately halfway between code and metadata.
         public static func compactToolName() -> NSFont {
-            .monospacedSystemFont(ofSize: scaled(10.5), weight: .regular)
+            SystemFontFaces.monospaced(ofSize: scaled(10.5), weight: .regular)
         }
 
         /// Numeric labels use fixed-width digits without making the surrounding prose code.

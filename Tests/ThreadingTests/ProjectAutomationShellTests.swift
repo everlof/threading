@@ -5,6 +5,24 @@ import XCTest
 
 @MainActor
 final class ProjectAutomationShellTests: HostedStoreTestCase {
+    private var themeAtStart: HostedThemeState?
+
+    override func setUp() {
+        super.setUp()
+        themeAtStart = .capture()
+    }
+
+    /// A shell render installs three themes in turn; whatever it moved has to be back before
+    /// the next class builds a window, or that window inherits the last one's appearance.
+    override func tearDown() {
+        if let themeAtStart {
+            themeAtStart.assertUnchanged(by: name)
+            themeAtStart.restore()
+        }
+        themeAtStart = nil
+        super.tearDown()
+    }
+
     func testProjectWorkspaceStartsWithDirtyProductCheckoutAndPersistsOwner() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("automation-session-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -50,8 +68,12 @@ final class ProjectAutomationShellTests: HostedStoreTestCase {
         let shell = makeMainWindowController(initialFramePlan: .useDefaultFrame)
         let window = try XCTUnwrap(shell.window)
         window.setContentSize(NSSize(width: 1400, height: 900))
-        let oldPalette = AppThemePalette.current
-        defer { AppThemeLibrary.installResolved(oldPalette) }
+        // The renders install through the library, which moves the installed theme, the palette
+        // and `NSApp.appearance`; all three go back. Restoring the *palette* through the library
+        // installed whatever an earlier class left in it and pinned the app Light for the rest
+        // of the suite.
+        let themeBeforeRenders = HostedThemeState.capture()
+        defer { themeBeforeRenders.restore() }
         shell.containerViewController.showTriggers(store: store, projectID: project.id)
         let center = try XCTUnwrap(shell.containerViewController.children.compactMap { $0 as? TriggerCenterViewController }.first)
         let output = URL(fileURLWithPath: ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] ?? "/tmp/ThreadingRenders")

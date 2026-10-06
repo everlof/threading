@@ -91,6 +91,13 @@
         "contractVersion"
       ],
       "type" : "object"
+    },
+    "themeScope" : {
+      "default" : "always",
+      "enum" : [
+        "always",
+        "ownThemes"
+      ]
     }
   },
   "required" : [

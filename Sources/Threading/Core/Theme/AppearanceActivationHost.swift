@@ -27,7 +27,7 @@ final class AppearanceActivationHost {
 
     var state: AppearanceActivationState? { service?.state }
     var isChanging: Bool { service?.isChanging == true }
-    var selectedThemeID: AppThemeID? { state.map { AppThemeID($0.selectedThemeID) } }
+    var selectedThemeID: AppThemeID? { state.map { AppThemeID($0.themeID) } }
 
     init(service: AppearanceActivationService? = nil, inventory: (() -> AppearanceActivationInventory)? = nil) {
         self.service = service
@@ -56,8 +56,8 @@ final class AppearanceActivationHost {
                 }.value
             }
             loaded = .success(try await persistence.load(migrating: AppearanceActivationState(
-                standaloneThemeID: legacyTheme.rawValue,
-                manuallyEnabledExtensionIDs: legacyEnabled
+                themeID: legacyTheme.rawValue,
+                enabledExtensionIDs: legacyEnabled
             ), persistMigration: startsExtensions))
         } catch {
             loaded = .failure(error)
@@ -74,7 +74,7 @@ final class AppearanceActivationHost {
             )
             self.service = service
             service.didChange = { [weak self] in self?.publish() }
-            manager?.adoptAppearanceEnablement(state.desiredExtensionIDs, startRuntimes: false)
+            manager?.adoptAppearanceEnablement(state.enabledExtensionIDs, startRuntimes: false)
         case .failure(let error):
             failure = error.localizedDescription
             manager?.adoptAppearanceEnablement([], startRuntimes: false)
@@ -84,12 +84,6 @@ final class AppearanceActivationHost {
             if let reason = self.submit(.setExtensionEnabled(identifier, enabled)) {
                 throw AppearanceHostRequestError(message: reason)
             }
-        }
-        manager?.appearanceRuntimeAdmission = { [weak self] identifier in
-            guard let self, let state = self.state,
-                  !state.manuallyEnabledExtensionIDs.contains(identifier),
-                  let pack = state.activePack else { return nil }
-            return self.validationProblem(pack, snapshot: self.inventory())
         }
         manager?.appearancePrepareForRemoval = { [weak self] identifier in
             try await self?.perform(.setExtensionEnabled(identifier, false))
@@ -117,30 +111,19 @@ final class AppearanceActivationHost {
     func inventory() -> AppearanceActivationInventory {
         if let inventoryProvider { return inventoryProvider() }
         if let cachedInventory { return cachedInventory }
-        var runtimes: [String: AppearanceActivationInventory.Runtime] = [:]
+        var installed: [String: AppearanceActivationInventory.InstalledExtension] = [:]
         for item in manager?.installedExtensions ?? [] {
-            let status: AppearanceActivationInventory.Runtime.Status
             let unavailable: String?
             switch item.status {
-            case .disabled: status = .stopped; unavailable = nil
-            case .starting: status = .starting; unavailable = nil
-            case .running: status = .running; unavailable = nil
-            case .failed(let reason): status = .failed(reason); unavailable = nil
-            case .invalid(let reason): status = .failed(reason); unavailable = reason
-            case .updating: status = .starting; unavailable = L10n.string("Updating")
+            case .disabled, .starting, .running, .failed: unavailable = nil
+            case .invalid(let reason): unavailable = reason
+            case .updating: unavailable = L10n.string("Updating")
             }
-            runtimes[item.identifier] = .init(
-                name: item.name,
-                contentDigest: item.provenance?.contentDigest,
-                unavailableReason: unavailable,
-                requiredExtensionIDs: Set(item.serviceDependencies.filter(\.required).map(\.providerIdentifier)),
-                status: status,
-                capabilitySummary: item.capabilities.joined(separator: ", ")
-            )
+            installed[item.identifier] = .init(name: item.name, unavailableReason: unavailable)
         }
         let snapshot = AppearanceActivationInventory(
             themeIDs: Set(AppThemeLibrary.all.map { $0.id.rawValue }),
-            extensions: runtimes,
+            extensions: installed,
             extensionsSuppressed: extensionsSuppressed
         )
         cachedInventory = snapshot
@@ -172,71 +155,13 @@ final class AppearanceActivationHost {
         if let reason = submit(.selectTheme(theme.id.rawValue)) { presentFailure(reason) }
     }
 
-    func retry(_ packID: UUID) -> String? {
-        guard let state, state.activePackID == packID, let pack = state.activePack else {
-            return AppearanceActivationError.packUnavailable.localizedDescription
-        }
-        do {
-            let snapshot = inventory()
-            try snapshot.validate(pack, manualExtensionIDs: state.manuallyEnabledExtensionIDs)
-            guard !isChanging else { throw AppearanceActivationError.changeInProgress }
-            for member in pack.extensions {
-                if case .failed = snapshot.extensions[member.identifier]?.status {
-                    manager?.reload(identifier: member.identifier)
-                }
-            }
-            return nil
-        } catch { return error.localizedDescription }
-    }
-
-    func packDetail(_ pack: AppearancePack, snapshot: AppearanceActivationInventory) -> String {
-        let names = pack.extensions.map { snapshot.extensions[$0.identifier]?.name ?? $0.identifier }
-        let themeName = AppThemeLibrary.theme(withID: AppThemeID(pack.themeID))?.name ?? pack.themeID
-        let contents = ([themeName] + names).joined(separator: " · ")
-        guard state?.activePackID == pack.id else { return contents }
-        let status: String
-        if extensionsSuppressed {
-            status = L10n.string("Held back for this launch")
-        } else if let reason = validationProblem(pack, snapshot: snapshot) {
-            status = L10n.format("Needs attention: %@", reason)
-        } else {
-            let members = pack.extensions.compactMap { snapshot.extensions[$0.identifier] }
-            if let failed = members.first(where: { if case .failed = $0.status { return true }; return false }) {
-                status = L10n.format("Needs attention: %@", failed.name)
-            } else if members.contains(where: { $0.status != .running }) {
-                status = L10n.string("Starting")
-            } else {
-                status = L10n.string("Active")
-            }
-        }
-        return status + " · " + contents
-    }
-
-    private func validationProblem(_ pack: AppearancePack, snapshot: AppearanceActivationInventory) -> String? {
-        do {
-            try snapshot.validate(pack, manualExtensionIDs: state?.manuallyEnabledExtensionIDs ?? [])
-            return nil
-        } catch { return error.localizedDescription }
-    }
-
-    func enablementDetail(identifier: String) -> String? {
-        guard let state else { return nil }
-        let manual = state.manuallyEnabledExtensionIDs.contains(identifier)
-        if let pack = state.activePack, pack.extensionIDs.contains(identifier) {
-            return manual
-                ? L10n.format("Enabled manually and by %@", pack.name)
-                : L10n.format("Enabled by %@", pack.name)
-        }
-        return manual ? L10n.string("Enabled manually") : nil
-    }
-
     private func reconcile(_ previous: AppearanceActivationState, _ next: AppearanceActivationState) {
-        manager?.adoptAppearanceEnablement(next.desiredExtensionIDs, startRuntimes: true)
-        guard let theme = AppThemeLibrary.theme(withID: AppThemeID(next.selectedThemeID)) else {
+        manager?.adoptAppearanceEnablement(next.enabledExtensionIDs, startRuntimes: true)
+        guard let theme = AppThemeLibrary.theme(withID: AppThemeID(next.themeID)) else {
             AppThemeLibrary.installResolved(AppThemeLibrary.defaultTheme)
             return
         }
-        if previous.selectedThemeID != next.selectedThemeID {
+        if previous.themeID != next.themeID {
             ThemeTransitionPresenter.shared.presentResolved(theme)
         } else if AppThemeLibrary.current != theme {
             AppThemeLibrary.installResolved(theme)

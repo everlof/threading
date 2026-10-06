@@ -2983,8 +2983,8 @@ checking, and the answer. Never a code, a key or a secret; the requester chain i
 ### Portable theme assets (2026-10-04)
 
 The [phone rendering decision](decisions/phone-theme-rendering.md) adds owner-only fonts and one
-reviewed, currently enabled sidebar Metal backdrop. No extension executable or appearance-pack
-membership travels: the Mac retains activation ownership. Shader source is capped at 256 KiB;
+reviewed, currently enabled sidebar Metal backdrop. No extension executable or enablement state
+travels: the Mac retains activation ownership. Shader source is capped at 256 KiB;
 its optional texture is at most 1,024 pixels. The phone owns visibility, a 24 fps / 1,290-pixel
 surface budget, reaction controls and power gates. Audio is unavailable; three consecutive GPU
 frames over 4 ms withdraw the surface. Terminal glow uses the shared GPU renderer and is disabled

@@ -726,5 +726,9 @@ final class ExtensionAppearanceTests: XCTestCase {
             message.contains("nothing applies one automatically"),
             "the disclosure states that installation changes no appearance by itself"
         )
+        XCTAssertTrue(
+            message.contains("stay there while the extension is disabled"),
+            "the disclosure states the installed-content rule: disabling code keeps its themes"
+        )
     }
 }

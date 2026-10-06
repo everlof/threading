@@ -193,6 +193,13 @@ tab belonging to the targeted session. Tab identity, selection, close, order, ov
 state, persistence, pane visibility, and the new-tab menu remain host-owned. Targets use the
 sanitized session ID; internal tab UUIDs are not part of the public API.
 
+An extension that also ships an app theme can bind any patch to it with
+`themeScope: .ownThemes`, or every patch at once with the manifest's `componentThemeScope`
+floor: Threading then applies those patches only while one of the extension's own themes is
+selected, and a Duplicate to Edit copy does not count. `.always` is written by omission, so
+existing publications are byte-identical; an `ownThemes` scope from an extension without a theme
+is refused. See "Decorations that belong to your theme" in `AGENT_AUTHORING.md`.
+
 Host data is connected through the same per-generation token but independently capability-gated:
 `host.projects.read`, `host.sessions.read`, `host.repositories.read`, `host.providers.read`,
 `host.accounts.presentation.read`, and `host.events`.

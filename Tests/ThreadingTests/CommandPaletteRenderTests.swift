@@ -3,8 +3,8 @@ import XCTest
 
 @testable import Threading
 
-/// The shipping palette and attached appearance editor, including command input, shortcut
-/// recording and active/degraded pack states in the native window shell.
+/// The shipping palette, including command input, shortcut recording and the appearance
+/// commands (themes and extension switches) in the native window shell.
 @MainActor
 final class CommandPaletteRenderTests: XCTestCase {
     private enum Render {
@@ -31,8 +31,6 @@ final class CommandPaletteRenderTests: XCTestCase {
         case refreshModels = "refresh-models"
         case panelActions = "panel-actions"
         case appearance
-        case appearanceAttention = "appearance-attention"
-        case packEditor = "pack-editor"
     }
 
     private struct Variant {
@@ -83,19 +81,20 @@ final class CommandPaletteRenderTests: XCTestCase {
 
     private func image(appearance name: NSAppearance.Name, state: State) async -> Data? {
         guard let appearance = NSAppearance(named: name) else { return nil }
-        let appearanceHost = appearanceFixture(failed: state == .appearanceAttention)
+        let appearanceHost = appearanceFixture()
         let appearanceCommands = AppearanceCommands.catalog(host: appearanceHost).filter {
             switch $0.appearanceTarget {
-            case .activate, .deactivate, .toggle, .retry, .edit: return true
-            case .theme(let id): return id == AppThemeStyles.cyberpunk.id.rawValue
-            default: return false
+            case .extensionEnabled: return true
+            case .theme(let id): return [AppThemeStyles.cyberpunk.id.rawValue, AppTheme.system.id.rawValue].contains(id)
+            case .terminalTheme, nil: return false
             }
         }.map { command in
             command.hostDescriptor(shortcut: nil,
                 availability: command.appearanceTarget.flatMap { AppearanceCommands.unavailableReason($0, host: appearanceHost) }
                     .map { .unavailable(reason: $0) } ?? .available)
         }
-        let showsAppearance = state == .appearance || state == .appearanceAttention
+        let showsAppearance = state == .appearance
+        XCTAssertEqual(appearanceCommands.count, 6, "two themes and each extension's enable and disable")
         var presentation: (TitlebarActionWindow, CommandPaletteViewController)?
         appearance.performAsCurrentDrawingAppearance {
             let window = TitlebarActionWindow(
@@ -135,32 +134,6 @@ final class CommandPaletteRenderTests: XCTestCase {
         switch state {
         case .commands, .appearance:
             break
-        case .appearanceAttention:
-            controller.setSearchQueryForTesting("Night Shift")
-            await drain(until: { controller.visibleCommandIDsForTesting.count == 5 })
-        case .packEditor:
-            controller.dismiss()
-            window.setContentSize(NSSize(width: 900, height: 740))
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            let alert = AppearancePackEditor.present(packID: appearanceHost.state?.activePackID, in: window, host: appearanceHost)
-            defer { alert?.dismiss(); window.orderOut(nil) }
-            await drain(until: { alert?.presentedWindow?.isVisible == true })
-            guard let panel = alert?.presentedWindow else { return nil }
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            // Follow the actual attached panel, as the application-level evidence bridge does.
-            // A parent bitmap cannot include a separate child window; screen capture also
-            // requires a recording grant that app-owned view rendering does not need.
-            guard let content = panel.contentView else { return nil }
-            AppThemeRefresh.repaint(content)
-            content.layoutSubtreeIfNeeded()
-            guard let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return nil }
-            appearance.performAsCurrentDrawingAppearance {
-                content.cacheDisplay(in: content.bounds, to: rep)
-            }
-            let data = rep.representation(using: .png, properties: [:])
-            await verifyEditorSave(alert, host: appearanceHost)
-            return data
         case .sessionTarget:
             controller.confirmSelectionForTesting()
             await drain(until: { controller.visibleInputIDsForTesting.count == self.sessionOptions.count })
@@ -210,53 +183,15 @@ final class CommandPaletteRenderTests: XCTestCase {
         return data
     }
 
-    private func verifyEditorSave(_ alert: ThemedAlert?, host: AppearanceActivationHost) async {
-        guard let root = alert?.presentedWindow?.contentView else { XCTFail("Missing editor"); return }
-        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
-        let views = descendants(root)
-        let toggles = views.compactMap { $0 as? ThemedToggle }
-        XCTAssertEqual(toggles.count, 2)
-        for toggle in toggles {
-            let rect = toggle.convert(toggle.bounds, to: root)
-            XCTAssertGreaterThan(rect.width, 30)
-            XCTAssertTrue(root.bounds.contains(rect), "member toggle outside editor: \(rect), parent \(String(describing: toggle.superview?.frame))")
-        }
-        guard let name = views.first(where: { $0.accessibilityIdentifier() == "appearance-pack.name" }) as? ThemedTextField,
-              let save = views.compactMap({ $0 as? ThemedButton }).first(where: { $0.title == L10n.string("Save Pack") })
-        else { XCTFail("Missing editor controls"); return }
-        let original = host.state?.activePack
-        name.stringValue = ""
-        save.performClick()
-        XCTAssertNotNil(alert?.presentedWindow, "invalid input keeps the editor open")
-        XCTAssertEqual(host.state?.activePack, original)
-        if let member = toggles.first(where: { $0.state == .on }) {
-            XCTAssertTrue(member.performPrimaryAction())
-            XCTAssertEqual(member.state, .off)
-            XCTAssertTrue(member.performPrimaryAction())
-            XCTAssertEqual(member.state, .on)
-        } else { XCTFail("The reviewed member is not selected") }
-        name.stringValue = "Evening"
-        save.performClick()
-        await drain(until: { host.state?.activePack?.name == "Evening" })
-        XCTAssertNil(alert?.presentedWindow)
-        XCTAssertEqual(host.state?.activePack?.recipeRevision, original?.recipeRevision)
-        XCTAssertEqual(host.state?.activePack?.extensions, original?.extensions)
-    }
-
-    private func appearanceFixture(failed: Bool) -> AppearanceActivationHost {
-        let digest = String(repeating: "a", count: 64)
-        let pack = AppearancePack(id: UUID(), recipeRevision: UUID(), name: "Night Shift",
-            themeID: AppThemeStyles.cyberpunk.id.rawValue,
-            extensions: [.init(identifier: "com.example.rain", contentDigest: digest)])
+    /// Cyberpunk chosen, one extension enabled and one not, so the rows show the current theme
+    /// and both switch states.
+    private func appearanceFixture() -> AppearanceActivationHost {
         let inventory = AppearanceActivationInventory(themeIDs: Set(AppThemeLibrary.all.map { $0.id.rawValue }), extensions: [
-            "com.example.rain": .init(name: "Ambient Rain", contentDigest: digest, unavailableReason: nil,
-                requiredExtensionIDs: [], status: failed ? .failed("The extension stopped") : .running,
-                capabilitySummary: "Window decorations · Audio playback"),
-            "com.example.tools": .init(name: "Workspace Tools", contentDigest: digest, unavailableReason: nil,
-                requiredExtensionIDs: [], status: .stopped, capabilitySummary: "Commands · Panels")
+            "com.example.rain": .init(name: "Ambient Rain", unavailableReason: nil),
+            "com.example.tools": .init(name: "Workspace Tools", unavailableReason: nil)
         ])
-        let state = AppearanceActivationState(standaloneThemeID: AppTheme.system.id.rawValue,
-            manuallyEnabledExtensionIDs: [], packs: [pack], activePackID: pack.id)
+        let state = AppearanceActivationState(themeID: AppThemeStyles.cyberpunk.id.rawValue,
+                                              enabledExtensionIDs: ["com.example.rain"])
         let service = AppearanceActivationService(state: state, persistence: AppearanceRenderPersistence(),
             inventory: { inventory }, reconcile: { _, _ in })
         return AppearanceActivationHost(service: service, inventory: { inventory })

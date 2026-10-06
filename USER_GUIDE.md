@@ -405,7 +405,9 @@ list, and a logo that tilts, pops or fizzes — see [Themes](#themes). An extens
 can put a picture or a live, animated surface beneath the list as well, above the theme's own
 gradient and below every row; Threading keeps it at most 60% opaque, never faster than 30 frames
 a second, still while the window is hidden and under Reduce Motion, and nothing in it can be
-clicked. Disable the extension and the theme's own sidebar is exactly what was underneath.
+clicked. Disable the extension and the theme's own sidebar is exactly what was underneath. An
+extension that ships a theme can keep its backdrop to that theme, so choosing another theme
+takes the backdrop away too.
 
 Classic Player uses that slot as a tiny workload analyzer instead. Its two-digit reading is the
 number of agents working anywhere in Threading; **MAX** means at least one is using the highest
@@ -5088,6 +5090,14 @@ colour roles the app actually reads. Built-in and extension themes are shown at 
 locked; **Duplicate to Edit** creates and applies a custom copy in one step. A custom theme's
 colour changes repaint the open window immediately.
 
+When the active theme comes from an enabled extension that has settings of its own, the page shows
+them under **Theme Options**, right below the theme — for example a rain overlay's **Perimeter
+comets** switch or its density. They are the same settings as on the extension's own Settings
+page, with the same controls: change one in either place and the other follows. Options that only
+change how the theme's animated layer draws take effect on its next frame, without the extension
+having to do anything; the section's **?** names the extension they come from. A built-in or
+custom theme, or an extension theme whose extension declares no settings, shows no Theme Options.
+
 Sidebar symbols and agent marks automatically adjust low-contrast template colors against their
 background, including custom-theme selections. Photos and other full-color artwork keep their colors.
 
@@ -5101,11 +5111,7 @@ validated change on release; if an agent or another window changes the theme mid
 change wins and the rest of the drag does nothing. Releasing a picture or particle opacity checks
 the picture under your text and, if labels would be hard to read, suggests a lower opacity below
 the colours. Choosing another title morph style keeps a scramble's alphabet for when you come back
-to Scramble. Duplicate a built-in theme to make these changes. Saved appearance packs appear in
-their own group in both app-theme pickers: choosing a pack activates its theme and extensions
-together, and choosing an ordinary theme releases the pack's extensions. A pack saved for the
-selected theme is offered once, as **Use with “…” pack** under **Packs for “…”**; if it cannot be
-activated, the picker goes back to your theme.
+to Scramble. Duplicate a built-in theme to make these changes.
 
 A theme can also put a wash or a picture under the app's panes — the display panel beside a
 conversation, the browser, Git Review, the audit, the settings subpages — the same surfaces a
@@ -5324,6 +5330,15 @@ its theme documents and reloads them the moment they change — so a theme can *
 extension may rewrite its own palette to follow the weather or the hour, and an author editing
 a theme sees the window follow each save. An edit that does not validate is skipped and the
 last good version stays.
+
+**An extension's decorations can follow its theme.** An extension that ships a theme may also
+dress the app around it — a picture or a live surface beneath the sidebar, the display panel or
+the composer, an overlay on the window. It can tie those decorations to its own themes: they
+then appear only while one of its themes is selected, go the moment you pick any other theme, and
+come back with it — on the Mac and on a paired iPhone alike. A copy made with **Duplicate to
+Edit** is your own theme: it keeps the colours, pictures and fonts, but not the extension's
+decorations. The install review says so when an extension ties its decorations to its themes,
+and the extension's details under **Settings ▸ Extensions** show it as **Decorations**.
 
 #### The sidebar belongs to the theme
 
@@ -6356,19 +6371,12 @@ move and Return to run. The result area shows at most six rows at once and scrol
 more. **Escape** closes the palette and returns keyboard focus to the terminal or control you
 were using before opening it.
 
-**Themes and appearance packs are commands too.** Search a theme's name and choose **Use …
-Theme** to apply it. Installed extension themes are available even when their extension is off.
+**Themes and extensions are commands too.** Search a theme's name and choose **Use … Theme** to
+apply it. Installed extension themes are available even when their extension is off.
 Terminal-theme commands ask whether to change the default, a project, a session or a terminal.
-
-Choose **Create Appearance Pack…** in the palette, or **Create Pack…** in **Settings ▸ Themes**,
-to save a theme together with selected installed extensions. Saving does not turn anything on.
-Search the pack's name to activate, deactivate, toggle, edit or remove it, or assign a shortcut.
-One pack can be active at a time. Turning it off restores your standalone theme; extensions
-you enabled manually stay on. **Keep … Enabled Without Pack** makes a member independent.
-Disabling a required member also deactivates its pack. An extension that stops shows **Needs
-attention**, with Retry and Deactivate still available. If its installed content changes,
-edit the pack to review the new version before activating it again. Packs do not change your
-sound, motion or audio-capture preferences. Portable pack import/export is not available yet.
+Search an extension's name to **Enable** or **Disable** it. Each of these commands can take a
+shortcut of its own. Choosing a theme never turns an extension on or off, and never changes your
+sound, motion or audio-capture preferences.
 
 Session commands do not require you to select a chat first. If a command such as **Close Session**
 or **Rename Session** only needs a session and none is selected, press **Tab or Return** to move to
@@ -6660,8 +6668,10 @@ Fonts you supply with a theme can appear in your own paired iPhone's titles and 
 font is registered only inside Threading; conversation text and terminal fonts keep their own
 settings. While a font loads, the phone uses its native typeface fallback.
 
-An enabled appearance pack can also bring its reviewed sidebar shader backdrop to the phone.
-The Mac chooses the pack; **Theme motion**, **Workload reactions** and **Reaction strength** on
+An enabled extension can also bring its reviewed sidebar shader backdrop to the phone. A
+backdrop the extension keeps to its own themes reaches the phone only while one of them is
+selected on the Mac.
+The Mac chooses the extension; **Theme motion**, **Workload reactions** and **Reaction strength** on
 the phone control its local behavior. Reduce Motion stills it, and Low Power Mode turns the
 shader off. A shader that repeatedly exceeds the phone's frame budget is withdrawn on every
 screen until the Mac sends a different one. Turn off **Settings ▸ Extension backdrops** on the
@@ -6677,5 +6687,3 @@ from the Mac pinned for widgets; tinted Home Screens and vibrant Lock Screens us
 
 Agents can request `preview_app_theme` with `frames: 3` to compare gradient drift at 0, ⅓ and ⅔
 of its authored cycle. Particles remain stamped for a stable comparison.
-The app-theme picker offers a matching saved appearance pack beneath its theme when that pack
-explicitly includes the theme.

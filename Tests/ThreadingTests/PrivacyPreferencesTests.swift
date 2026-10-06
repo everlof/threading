@@ -10,6 +10,26 @@ import os
 @MainActor
 final class PrivacyPreferencesTests: XCTestCase {
 
+    // MARK: - Setup
+
+    /// Every test here leaves the theme as it found it; the live-switch test is the one that
+    /// moves it, and a palette it left behind once pinned the whole suite light.
+    private var themeAtStart: HostedThemeState?
+
+    override func setUp() {
+        super.setUp()
+        themeAtStart = .capture()
+    }
+
+    override func tearDown() {
+        if let themeAtStart {
+            themeAtStart.assertUnchanged(by: name)
+            themeAtStart.restore()
+        }
+        themeAtStart = nil
+        super.tearDown()
+    }
+
     // MARK: - Fixtures
 
     /// A reader whose every answer is stated by the test, so an assertion never depends on what
@@ -469,6 +489,10 @@ final class PrivacyPreferencesTests: XCTestCase {
     }
 
     func testTheStatusIndicatorFollowsALiveThemeSwitch() throws {
+        // Put back the palette this switches, not a fixed one: it ended on Swiss Minimalist, a
+        // light theme, which a later class captured and installed — see `HostedThemeState`.
+        let previousPalette = AppThemePalette.current
+        defer { AppThemePalette.set(previousPalette) }
         AppThemePalette.set(AppThemeStyles.cyberpunk)
         let controller = page(reader(accessibility: true))
 

@@ -74,6 +74,11 @@ struct ExtensionUpdatePlan: Equatable {
     let addedNavigatorIntents: [String]
     let removedNavigatorIntents: [String]
     let candidateNavigatorIntents: [ExtensionNavigatorIntentDisclosure]
+    /// The manifest's floor for component decorations, before and after. Said when it moves,
+    /// but never an approval: it is presentation, and a version that never declared it could
+    /// already publish decorations under every theme.
+    let installedComponentThemeScope: ExtensionComponentThemeScope
+    let candidateComponentThemeScope: ExtensionComponentThemeScope
     /// A hash of the source package's contents when the plan was made.
     ///
     /// Part of the plan's identity, so `update(from:approving:)` refuses a source whose *code*
@@ -175,6 +180,20 @@ struct ExtensionUpdatePlan: Equatable {
                     + "\nThe extension never receives the press or session identity."
             )
         }
+        switch (installedComponentThemeScope, candidateComponentThemeScope) {
+        case (.ownThemes, .always):
+            lines.append(
+                "Its component decorations are no longer limited to its own themes: they may "
+                    + "appear under any theme you select."
+            )
+        case (.always, .ownThemes):
+            lines.append(
+                "Its component decorations will appear only while one of its own themes is "
+                    + "selected."
+            )
+        default:
+            break
+        }
         if candidateDataVersion > installedDataVersion {
             lines.append(
                 "Stored data schema \(installedDataVersion) → \(candidateDataVersion). "
@@ -242,6 +261,8 @@ struct ExtensionUpdatePlan: Equatable {
         candidateNavigatorIntents = ExtensionNavigatorIntentDisclosure.disclosures(
             in: candidate.workspaceNavigators
         )
+        installedComponentThemeScope = installed.componentThemeScope
+        candidateComponentThemeScope = candidate.componentThemeScope
     }
 
     private static func companionAuthorities(

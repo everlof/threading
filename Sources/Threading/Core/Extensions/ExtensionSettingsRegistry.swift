@@ -31,7 +31,7 @@ struct RegisteredExtensionSettingsSection {
 final class ExtensionSettingsRegistry {
     static let shared = ExtensionSettingsRegistry()
 
-    private struct Owner {
+    fileprivate struct Owner {
         let identifier: String
         let name: String
         let settings: ExtensionSettingsContribution
@@ -182,6 +182,19 @@ final class ExtensionSettingsRegistry {
         localPageID: String
     ) -> String {
         "extension.\(extensionIdentifier).settings.\(localPageID)"
+    }
+
+    /// The registry's complete contents, opaque, so a hosted test that lets an
+    /// `ExtensionManager` of its own write here — every manager's initializer does — can put
+    /// back exactly what it found rather than an approximation of it.
+    struct Snapshot {
+        fileprivate let owners: [String: Owner]
+    }
+
+    var snapshot: Snapshot { Snapshot(owners: owners) }
+
+    func restore(_ snapshot: Snapshot) {
+        replace(owners: Array(snapshot.owners.values), postChange: true)
     }
 
     private func sameOwners(_ other: [String: Owner]) -> Bool {

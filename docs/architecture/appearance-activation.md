@@ -1,30 +1,26 @@
 # Appearance activation
 
-App themes and saved appearance packs are host commands. A pack is a locally saved combination
-of one existing app theme and up to sixteen explicitly selected installed extensions. The editor
-records a stable UUID, a recipe revision, resolved theme/extension IDs and each executable
-package's inspected content digest. It never infers membership from names. Renaming preserves
-the identity and shortcuts; changing the recipe releases an active pack until it is activated
-again. There is one active appearance pack at a time.
+The app-theme choice and extension enablement are host commands over one durable record. Choosing
+a theme and switching an extension on or off are independent: neither changes the other, and the
+same operations serve Settings, the command palette, shortcuts, MCP and the paired iPhone.
 
-The portable `.threadingpack` archive and importer remain a separate
-[sharing proposal](../feature-drafts/customization-packs.md). Local recipes are resolved activation
-receipts, not a new distributable package format. A future importer must populate these same
-identities and reviewed members rather than inventing another runtime enablement store.
+## Packs were retired
+
+From 2026-10-04 to 2026-10-05 a third concept sat between the two: an *appearance pack*, a saved
+combination of one app theme and up to sixteen extensions with its own identity, content digests,
+editor and activate/deactivate commands. It was removed. An extension that ships a theme is
+already the bundle, and the decorations it draws follow its own themes, so choosing the theme is
+the whole switch; a separate membership record only gave every extension switch three meanings
+(manual, by pack, both). The reasoning, what was removed and what would reopen it are in the
+[appearance packs decision record](../decisions/appearance-packs.md).
 
 ## Choice ownership
 
-`AppearanceActivationState` is the durable owner of the standalone app theme, manually enabled
-extensions, saved recipes and active pack. Effective extension intent is the union of manual
-enablement and the active recipe. Switching A → B changes only that union; a shared member keeps
-its supervised generation. Off restores the standalone theme and removes only pack ownership.
-
-Choosing any app theme explicitly releases the active pack, including choosing its current
-theme. Content-only refreshes use `AppThemeLibrary.installResolved` and retain ownership.
-Disabling a required member also deactivates the pack and removes that member's manual reason.
-**Keep Enabled Without Pack** adds the manual reason without changing the active recipe.
-Theme animations, sounds, audio capture, font overrides and terminal assignments are never
-snapshotted or changed by pack activation.
+`AppearanceActivationState` is the durable owner of the app-theme choice (`themeID`) and the set
+of enabled extensions (`enabledExtensionIDs`). That set is the runtime's desired set: nothing else
+adds a reason to run an extension. Content-only refreshes use `AppThemeLibrary.installResolved`
+and keep the choice. Theme animations, sounds, audio capture, font overrides and terminal
+assignments are never changed by an app-theme choice.
 
 `AppearanceActivationService` admits an operation against an inventory value, reserves the
 extension mutation boundary, saves asynchronously through `AppearanceActivationStore`, then
@@ -33,11 +29,12 @@ running generation intact. Overlapping writes and installation/update/removal du
 are refused. MCP and remote theme selection await the same commit before reporting success.
 UI commands admit synchronously and report any later save failure through the host alert.
 
-Runtime startup is separate from saved intent. A failed member leaves the pack selected with
-**Needs attention**, **Retry** and **Deactivate** commands. Before starting a pack-owned runtime,
-the manager checks its reviewed digests and prerequisites again. Updating a member cannot use
-an old receipt to start the new executable; edit/review the pack before reactivating it. Manual
-enablement remains governed by the existing installed-extension update review.
+Admission is per action. A theme must be in the current inventory. Enabling an extension needs an
+installed, valid package that is not mid-update, and is refused while extensions are held back
+for the launch; disabling one is always admitted. Runtime startup is separate from saved intent:
+an extension that fails to start stays enabled and reports its failure through the Extensions
+page and the existing supervisor, and the installed-extension update review still governs a new
+version.
 
 ## Storage and recovery
 
@@ -47,11 +44,18 @@ and manual extension flags. An initialization marker survives quarantine so subs
 cannot silently reimport stale legacy flags after corruption. The unreadable record remains
 preserved and activation is unavailable until the state is recovered.
 
+The file keeps the key names it had while packs existed — `standaloneThemeID` and
+`manuallyEnabledExtensionIDs` — through `CodingKeys`. A record written by a build with packs
+loads unchanged: `packs` and `activePackID` are ignored, so an active pack's theme and members are
+not adopted. Every save still writes an empty `packs` list, because a build from before the
+retirement decodes that key unconditionally and would otherwise quarantine the whole record on a
+downgrade. `AppearanceActivationTests` reads a fixture shaped exactly like that older record.
+
 Recovery launches read without migration, quarantine, or writes; extensions remain held back and
 the existing recovery appearance override stays in force. Explicit subsequent user choices can
-still be saved. A confirmed successful inventory scan removes missing manual IDs, clears a pack
-whose required content disappeared and repairs a missing standalone theme. Saved recipes remain
-available for editing. An inventory read failure and temporary update state are not removal.
+still be saved. A confirmed successful inventory scan removes missing extension IDs and repairs a
+missing theme with the product default. An inventory read failure and temporary update state are
+not removal.
 
 ## Installed appearance and bounded work
 
@@ -66,55 +70,49 @@ runtime consumers, the selected theme and explicit font choices. This includes c
 named by a custom theme. Theme resource preparation precedes the first themed window and every
 resolved switch. The existing custom-theme font store retains its own lifecycle.
 
-The receipt limit is 256 packs and sixteen members each, inside a 1 MiB file budget. The editor
-uses reusable table rows over inspected values. Palette rows already have a bounded viewport and
-asynchronous search. Inventory snapshots are cached until inventory/library events; availability
-checks validate one action instead of reducing and validating every saved recipe per row.
-
-The Debug catalogue fixture measures both command construction and availability over 100 themes /
-100 packs and 5,096 themes / 256 packs. On 2026-10-04 the larger case fell from 427 ms to 63 ms
-after removing repeated whole-state validation, repeated active-pack scans and locale-based ID
-formatting. The matched smaller runs were 12 ms and 28 ms. Search took 110 ms for the larger
-case on its existing worker; these are fixture timings, not Release opening-latency claims.
-The catalogue regression ceiling is 250 ms at the admitted inventory limit.
+The command catalogue is one row per app theme and terminal theme plus two per installed
+extension (at most 256). Palette rows already have a bounded viewport and asynchronous search.
+Inventory snapshots are cached until inventory/library events, and availability validates the one
+action a row names rather than reducing the whole record per row: on 2026-10-04 removing that
+repeated whole-state validation took the 5,096-theme Debug fixture from 427 ms to 63 ms. The
+fixture still measures command construction and availability over 100 and 5,096 themes, with a
+250 ms regression ceiling; these are fixture timings, not Release opening-latency claims.
 
 ## Commands and surfaces
 
-`AppearanceCommands` contributes stable, bindable theme, activate, deactivate, toggle, retry,
-edit, remove and extension enable/disable identities to `CommandRegistry`. Explicit actions keep
-their identity when state changes. Menus carry the user-bound shortcuts even for inactive packs.
-The real `HostCommandPlane` re-resolves commands before invocation. An extension does not have to
-be running to expose its pack's off switch.
+`AppearanceCommands` contributes stable, bindable identities to `CommandRegistry`: **Use … Theme**
+per app theme, **Use … Terminal Theme…** per terminal theme, and **Enable/Disable … Extension**
+per installed extension. Identities are hex-encoded canonical IDs, never names or indices, so a
+renamed theme keeps its shortcut. The real `HostCommandPlane` re-resolves commands before
+invocation, so a theme that went away is refused rather than selected. None of these rows is
+shown in the menu bar — the palette is where they are found — but a command the user has bound a
+shortcut to gets a hidden View-menu carrier, the way ⌘1–⌘9 do, because AppKit dispatches key
+equivalents through menu items.
 
 Terminal-theme commands name a theme and request typed `terminalThemeScope` input. Each option
 names the default, a project, a session or a standalone terminal by canonical identity. The host
 validates that selection again and calls the existing `ThemeAssignments` operation. A shortcut
 opens the same scope picker rather than taking an ambient session as its target.
 
-The pack editor and activation controls are deliberately host-only. Shared themed controls own
-presentation; the host owns receipt review, capability disclosure, identity, persistence,
-runtime authority, focus and error reporting. Extensions cannot replace those decisions.
+The app-theme pickers in Settings ▸ Themes and Current Theme list only themes, grouped by the
+library's sections. Shared themed controls own presentation; the host owns identity,
+persistence, runtime authority, focus and error reporting. Extensions cannot replace those
+decisions.
 
 Coverage belongs in `AppearanceActivationTests`, `ExtensionAppearanceTests`,
-`ExtensionPackageStoreTests`, and `CommandPaletteRenderTests`. The latter captures themes,
-active/degraded packs and the actual attached editor in the native product shell.
+`ExtensionPackageStoreTests`, and `CommandPaletteRenderTests`. The latter captures the theme and
+extension rows in the native product shell.
 
-## Verification on 2026-10-04
+## Verification on 2026-10-05 (pack retirement)
 
-Focused unit/integration runs completed with no failures: 285 tests (three environment/opt-in
-skips), 129 tests, and a final 14-test activation/focus rerun. These cover persisted ownership,
-failure and recovery, real host menu dispatch, supervised runtime generation, theme tools and
-remote theme selection. The final palette render also exercises invalid-name refusal, member
-toggle clicks and a saved rename through the actual editor controls.
-
-The palette/editor's 36 captures passed and were inspected under System light/dark, Cyberpunk
-and Swiss. Themes Settings was inspected at constrained and regular widths, and the Extensions
-page was rendered under the same representative appearances. No baseline approvals were applied.
-The sheet's table width is explicitly tied to its clip view: autoresizing alone retained a
-larger initial fitting width and put the member toggles outside the visible sheet.
-
-`AppearancePackJourneyUITests` adds the full create → activate → relaunch → deactivate journey.
-It compiled, but two attempts failed in `UIScenarioSandbox.launch` because XCUITest could not
-activate the app (reported `Running Background`), before any feature interaction. App launch
-logs reached normal startup completion; the complete application-level journey remains
-unverified. The full repository test suite was not run for this change.
+Focused runs after removing packs: `AppearanceActivationTests` 13/13 (reducer, admission,
+failed commit, ordered projection, migration and corruption, the pack-era fixture, recovery, the
+real host menu route with a stale refusal, the theme-only picker, a pack-free catalogue, the
+hidden View-menu carriers, terminal scopes and the catalogue stress case),
+`ExtensionAppearanceTests` 20, `ExtensionPackageStoreTests` 78 (three skips), `ThemeSystemWorkflowTests` 17,
+`ThemePickerSectionTests` 4, `RecoveryModeCommandPolicyTests` 5, `AppDelegateTests` 16 and the
+two Component Gallery coverage tests, with no failures. The localization, architecture, theme
+and main-actor latency lints are clean. `CommandPaletteRenderTests` renders its five states under
+four appearances and passes, but crashed intermittently in fresh processes (4 of 10) inside
+`ShortcutRecorderView.drawLabel`, where CoreText's attribute copy meets a nil value; the colour
+workaround at that call site predates this change. The full suite was not run.

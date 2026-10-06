@@ -34,6 +34,11 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         ExtensionHostSignalContext
     ) -> Double?
 
+    /// Answers one of the publishing extension's own settings fields as the number a surface
+    /// input reads before its mapping (`ExtensionSettingControl.surfaceReading`), or nil when
+    /// the field cannot be read — the binding then reads its fallback.
+    typealias SettingProvider = @MainActor (_ fieldID: String) -> Double?
+
     private static let maximumInputs = 8
     private static let hostVertexFunction = "threadingHostSurfaceVertex"
     private static let hostFragmentFunction = "threadingHostSurfaceFragment"
@@ -43,6 +48,12 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
 
     private let specification: ExtensionMetalSurface
     private let signalProvider: SignalProvider
+    private let settingProvider: SettingProvider
+    /// The setting-bound inputs' readings, read once at mount and again only when an extension
+    /// setting changes — never per frame. A frame resolves a binding with a dictionary lookup.
+    private var settingReadings: [String: Double] = [:]
+    /// Held only by a surface that binds a setting; nil for every other surface.
+    private var settingObservations: AppEventObservations?
     private let commandQueue: MTLCommandQueue
     private var pipeline: MTLRenderPipelineState?
     private var preparation: Task<Void, Never>?
@@ -83,13 +94,15 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         specification: ExtensionMetalSurface,
         source: String,
         maximumFramesPerSecond: Int = ExtensionMetalSurface.maximumFramesPerSecond,
-        signalProvider: @escaping SignalProvider
+        signalProvider: @escaping SignalProvider,
+        settingProvider: @escaping SettingProvider = { _ in nil }
     ) throws {
         guard let device = MTLCreateSystemDefaultDevice(),
               let commandQueue = device.makeCommandQueue() else {
             throw ExtensionMetalSurfaceError.metalUnavailable
         }
         self.specification = specification
+        self.settingProvider = settingProvider
         let boundSignals = specification.inputs.compactMap { input -> ExtensionHostSignal? in
             if case .signal(let signal, _) = input.value { return signal }
             return nil
@@ -130,6 +143,14 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         setAccessibilityElement(false)
         signalContext = ExtensionHostSignalContext(appearance: effectiveAppearance)
         if audioDemand != nil { ThemeParticleHold.shared.register(self) }
+        if !specification.boundSettingIDs.isEmpty {
+            refreshSettingReadings()
+            let observations = AppEventObservations()
+            observations.observe(ExtensionSettingsValuesDidChange.self) { [weak self] _ in
+                self?.settingsDidChange()
+            }
+            settingObservations = observations
+        }
         let completeSource = Self.completeSource(extensionSource: source,
             fragmentFunction: specification.fragmentFunction, isTextured: specification.texture != nil)
         preparation = Task { [weak self] in
@@ -449,26 +470,38 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
             // turned off read as no reading, the binding's idle fallback.
             guard let measured = signalProvider(signal, signalContext),
                   let raw = Self.reacted(signal, measured) else { return mapping.fallback }
-            let position = min(max(
-                (raw - mapping.inputMinimum)
-                    / (mapping.inputMaximum - mapping.inputMinimum),
-                0
-            ), 1)
-            let curved: Double
-            switch mapping.curve {
-            case .linear:
-                curved = position
-            case .easeIn:
-                curved = position * position
-            case .easeOut:
-                curved = 1 - (1 - position) * (1 - position)
-            case .easeInOut:
-                curved = position * position * (3 - 2 * position)
-            }
-            return mapping.outputMinimum
-                + curved * (mapping.outputMaximum - mapping.outputMinimum)
+            return mapping.output(for: raw)
+        case .setting(let fieldID, let mapping):
+            // A setting is the person's own standing choice, not a reaction and not motion: it
+            // passes straight to the extension's mapping, from the cached reading.
+            return mapping.output(for: settingReadings[fieldID])
         }
     }
+
+    // MARK: - Settings
+
+    /// Re-reads every setting this surface binds. Called at mount and when an extension setting
+    /// changes; a frame only ever reads the cache this fills.
+    private func refreshSettingReadings() {
+        var readings: [String: Double] = [:]
+        for fieldID in specification.boundSettingIDs {
+            readings[fieldID] = settingProvider(fieldID)
+        }
+        settingReadings = readings
+    }
+
+    /// The new value reaches the uniform on the next frame. A surface whose frames are held for
+    /// motion — not for visibility — draws that frame now, or a changed option would wait for
+    /// the hold to lift.
+    private func settingsDidChange() {
+        let previous = settingReadings
+        refreshSettingReadings()
+        guard settingReadings != previous else { return }
+        if isPaused, pipeline != nil, !isHeldForVisibility, !hasWithdrawn { draw() }
+    }
+
+    /// The readings a frame would use now, for tests.
+    var settingReadingsForTesting: [String: Double] { settingReadings }
 
     private static func isMomentSignal(_ signal: ExtensionHostSignal) -> Bool {
         ExtensionHostSignal.momentSignals.contains(signal)

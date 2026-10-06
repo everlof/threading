@@ -62,6 +62,42 @@ public struct ExtensionComponentPatchPublication: Codable, Equatable, Sendable {
             throw ExtensionValidationError(issues: issues)
         }
     }
+
+    /// `validate()` plus the rules only the publishing extension's manifest can answer.
+    ///
+    /// Call it before publishing, beside `registration.validate(for:)`. Threading applies the
+    /// same theme-scope rule at publication, from the manifest it inspected.
+    public func validate(for manifest: ExtensionManifest) throws {
+        try validate()
+        try Self.validateThemeScopes(patches, contributesThemes: !manifest.themes.isEmpty)
+    }
+
+    /// Refuses `.ownThemes` from an extension that contributes no app theme: the scope would
+    /// never be satisfied, and a decoration that can never appear is a bug, not a setting.
+    public static func validateThemeScopes(
+        _ patches: [ExtensionComponentPatch],
+        contributesThemes: Bool
+    ) throws {
+        guard !contributesThemes else { return }
+        let issues = patches.enumerated().compactMap { index, patch -> ExtensionValidationIssue? in
+            guard patch.themeScope == .ownThemes else { return nil }
+            return ExtensionValidationIssue(
+                path: "patches[\(index)].themeScope",
+                message: ExtensionComponentThemeScope.requiresContributedThemeMessage
+            )
+        }
+        if !issues.isEmpty {
+            throw ExtensionValidationError(issues: issues)
+        }
+    }
+}
+
+public extension ExtensionComponentThemeScope {
+    /// The one sentence the manifest check, the publication check and Threading's host share.
+    static let requiresContributedThemeMessage =
+        "'ownThemes' applies only while one of the extension's own app themes is selected, "
+            + "and this extension contributes none; declare a theme under 'themes' "
+            + "(with 'appearance.themes') or use 'always'"
 }
 
 /// Short-lived authority injected into one supervised extension process.

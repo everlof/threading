@@ -63,6 +63,22 @@ terminal sizing remains useful independently of the surrounding interface. A tex
 joins the same `AppThemeRefresh` sweep as a family override, which re-resolves roles already
 recorded on live views and rebuilds attributed surfaces through `AppThemeDidChange`.
 
+**SF Mono and the other design-variant faces come from `SystemFontFaces`, never from AppKit
+directly.** On macOS 26 UIFoundation caches a design-variant face (SF Mono, SF Rounded, New York)
+in an object that refers to the face's descriptor only weakly. Once a string has been laid out in
+the face and its last font is released, `NSFont.monospacedSystemFont(ofSize:weight:)` — imported
+as non-optional — returns nil (54 to 225 times in 2,000 make/measure/release cycles, standalone),
+and an attribute dictionary carrying that nil aborts the process inside CoreText. That was the
+`CommandPaletteRenderTests` crash in `ShortcutRecorderView.drawLabel()`, earlier blamed twice on
+the label's colour. `SystemFontFaces` pins each face it vends for the life of the process (one
+font per face, so the table is bounded by the installed faces; a pinned descriptor alone does not
+hold a `withDesign` face) and calls the factory
+through a signature that admits nil, retrying once and then degrading to the fixed-pitch and
+system faces; a Swift `guard let` on the non-optional import was compiled away in a Debug build.
+`scripts/check_architecture_boundaries.sh` refuses `monospacedSystemFont(` and `withDesign(`
+anywhere else in the app target, and `SystemFontFacesTests` reproduces the losing pattern. The
+file is shared into `ThreadingDesignKit` beside `Design.swift` and `TerminalProfile.swift`.
+
 Git Review adds a second, deliberately local scale on top of that global choice.
 `Design.CodeTextScale` is the bounded compact/standard/large/extra-large/maximum ladder used by
 the review header's smaller/larger controls. `Typography.code` composes it after the app and

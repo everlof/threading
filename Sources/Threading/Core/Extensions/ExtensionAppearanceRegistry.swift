@@ -67,6 +67,7 @@ final class ExtensionAppearanceRegistry {
 
     private(set) var contributions: [Contribution] = []
     private(set) var activeFontURLs: Set<URL> = []
+    private var themeContributors: [AppThemeID: String] = [:]
 
     /// Cached inspection metadata only; the remote rendition worker reads the selected files.
     func phoneFontURLs(families: [String]) -> [URL] {
@@ -91,6 +92,15 @@ final class ExtensionAppearanceRegistry {
 
     func contributorName(forThemeID id: AppThemeID) -> String? {
         contributions.first { $0.themes.contains { $0.id == id } }?.extensionName
+    }
+
+    /// The extension that ships the theme with this id, if an extension does.
+    ///
+    /// Asked by the component registry on every customization lookup — once per row the
+    /// sidebar configures — so it is a dictionary read kept in step with `replace`, not a scan.
+    /// A duplicated copy has a custom id and therefore no contributor.
+    func contributorIdentifier(forThemeID id: AppThemeID) -> String? {
+        themeContributors[id]
     }
 
     /// The app-icon mark a contributed theme ships, if it ships one.
@@ -142,6 +152,12 @@ final class ExtensionAppearanceRegistry {
         let previousMarks = contributions.map(\.iconMarks)
         let previousSidebarAssets = contributions.map(\.sidebarAssets)
         contributions = newContributions
+        themeContributors = Dictionary(
+            newContributions.flatMap { contribution in
+                contribution.themes.map { ($0.id, contribution.extensionIdentifier) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
         updateFontRegistrations()
         decodedMarks = [:]
         decodedSidebarAssets = [:]

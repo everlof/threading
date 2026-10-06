@@ -232,7 +232,7 @@ final class ProfilePreferencesViewController: NSViewController {
     private func updatePreview() {
         previewView.applyLayerBackground(currentProfile.theme.background)
         previewLabel.textColor = currentProfile.theme.foreground
-        previewLabel.font = NSFont.monospacedSystemFont(ofSize: currentProfile.fontSize, weight: .regular)
+        previewLabel.font = SystemFontFaces.monospaced(ofSize: currentProfile.fontSize, weight: .regular)
     }
 
     private func saveProfile() {
@@ -247,7 +247,7 @@ final class ProfilePreferencesViewController: NSViewController {
         fontManager.target = self
         fontManager.action = #selector(fontChanged(_:))
 
-        let font = NSFont.monospacedSystemFont(ofSize: currentProfile.fontSize, weight: .regular)
+        let font = SystemFontFaces.monospaced(ofSize: currentProfile.fontSize, weight: .regular)
         fontManager.setSelectedFont(font, isMultiple: false)
 
         let panel = fontManager.fontPanel(true)
