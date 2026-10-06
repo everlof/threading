@@ -191,7 +191,10 @@ checks selection/copy, read-only text, code, tables, light/dark appearance, resi
 The diagnostic prepares a provider envelope through the production `StreamEvent` parser and
 `ConversationTimeline` on a worker, then renders the authoritative assistant reply. The same
 timeline contracts run in CoreSliceHarness and Mac XCTest, including 1,000/10,000-turn histories.
-The installed runtime suite includes this journey. This remains a diagnostic document surface:
+The installed runtime suite includes this journey. The core slice also carries the production
+`AgentStreamTransport`; its shared contract drives a real child process through framing, a 1 MiB
+line, a stderr flood, a Unicode stdin echo and the EOF diagnostic on both platforms.
+This remains a diagnostic document surface:
 native conversation transports, the transcript table/controller and web-link activation are still open.
 `WindowHarness --automatic-rows-ui-fixture OUTPUT_DIRECTORY` places assistant blocks in the
 shared conversation cell host with shim-owned automatic heights. Its native journey checks

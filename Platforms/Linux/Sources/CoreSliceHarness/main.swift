@@ -93,6 +93,15 @@ if CommandLine.arguments.contains("--conversation-contracts") {
     exit(0)
 }
 
+if CommandLine.arguments.contains("--stream-transport-contracts") {
+    do { try await runStreamTransportContracts() }
+    catch {
+        FileHandle.standardError.write(Data("FAIL: \(error)\n".utf8))
+        exit(1)
+    }
+    exit(0)
+}
+
 if CommandLine.arguments.contains("--navigation-stress") {
     do {
         try runNavigationStress()
@@ -105,6 +114,7 @@ if CommandLine.arguments.contains("--navigation-stress") {
 
 do {
     try runConversationContracts()
+    try await runStreamTransportContracts()
     try runHostCommandContracts()
     try runHandshakeContracts()
     try runBindingContracts()

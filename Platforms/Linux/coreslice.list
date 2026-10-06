@@ -71,3 +71,4 @@ Sources/Threading/Core/Control/HostCommandContract.swift
 Sources/Threading/Core/Agent/CodeContextPreview.swift
 Sources/Threading/Core/Agent/ConversationContextAttachment.swift
 Sources/Threading/Core/Agent/GitReviewDefaults.swift
+Sources/Threading/Core/Agent/AgentStreamTransport.swift

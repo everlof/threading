@@ -5471,3 +5471,50 @@ second median. That measurement is what prompted this work, and it is why §172 
 leading edge and spacing required. Every layout, priority, clipping, table, outline and stack
 contract listed in §172 passes on the new solver. No per-solve timing assertion was added, and
 Debug journeys were not re-measured.
+
+The rebuilt package passes the complete Swift-free, non-root installed runtime suite at
+`out/bundle-smoke/run.EJnmX5Kj`. That includes delayed GTK admission, workspace and composer,
+all three document/row/diff journeys, the 5,100-project outline, terminal restoration,
+live-child reinstall and the desktop entry. Installed first presentation took 0.475 seconds for
+the document page, against 4.292 seconds in the §170 installed run, plus 0.317 seconds for
+automatic rows and 0.259 seconds for the diff. Installed and source runs differ in load, so the
+matched comparison above is the performance claim. The package SHA-256 is
+`1047abafd8e1e39012d58941b94422bdc4fcd9835090189178007fd980e0923c`.
+
+## 174. The production agent stream transport runs on Linux
+
+`CoreSlice` now carries the exact `AgentStreamTransport`, the bounded pipe owner every native
+conversation session uses: newline framing, parsing off the main actor, a capped stderr capture
+that keeps draining, the ordered writer lane and its admission limit, and detach. It is
+Foundation-only and compiled unchanged.
+
+One contract source, `StreamTransportContracts.swift`, runs in `CoreSliceHarness` (and so in
+the bundle build gate) and in Mac XCTest as `PortableStreamTransportContractTests`. Unlike the
+existing Mac tests, it drives a real `/bin/sh` child through `Process`. The child writes:
+
+- a line split across two writes 50 ms apart, then a malformed line;
+- a 300 KiB stderr flood, more than any pipe holds;
+- a single 1 MiB JSON line;
+- a Unicode message echoed back from stdin.
+
+The contract then closes stdin, waits for exit, and checks that `finish` returns exactly the
+first 64 KiB of stderr. Separately it checks the newline-free output bound, write refusal after
+failure, and that a detached transport delivers no line it had already parsed. These are the
+corelibs paths that differ from Darwin: `FileHandle.readabilityHandler`, `Process`, `readToEnd`
+and main-queue delivery.
+
+Two platform facts shaped the contract rather than the transport. First, pumping `RunLoop.main`
+is not a portable way to receive main-queue work. On Linux, corelibs' `run(mode:before:)` waited
+in its descriptor poll far past its limit date, even with a timer scheduled, until something
+else was enqueued. The contract awaits instead, which services the main queue on both platforms.
+Second, after an async main on Linux the main actor's queue runs on a dispatch worker, so
+`Thread.isMainThread` is false there even for correct delivery. The transport enters every
+callback through `MainActor.assumeIsolated`, which traps off the main actor; that is the check
+that holds.
+
+Verification on 2026-10-06: the contract passes three consecutive times in Debug and three in
+the shipping Release configuration on Ubuntu arm64, and the complete `CoreSliceHarness` passes
+with it. On macOS the same contract passes in XCTest beside the five existing
+`AgentStreamTransportTests` and the two portable conversation contracts, with no new compiler
+warning. This is the transport only. `ClaudeStreamSession`'s launch planning, child-process
+ownership, control channel and permission brokering are not yet compiled for Linux.
