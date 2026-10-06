@@ -31,6 +31,19 @@ Sources/Threading/Models/PendingCheckoutMove.swift
 Sources/Threading/Core/Control/ControlAuthority.swift
 Sources/Threading/Core/Agent/ConversationContextAttachment.swift
 Sources/Threading/Core/Agent/ConversationOutboxDefaults.swift
+Sources/Threading/Core/Agent/ConversationTimeline.swift
+Sources/Threading/Core/Agent/ConversationTimelineDefaults.swift
+Sources/Threading/Core/Agent/StreamEvent.swift
+Sources/Threading/Core/Agent/WorkingWords.swift
+Sources/Threading/Core/Session/BackgroundWorkLedger.swift
+Sources/Threading/Core/Agent/PermissionRequest.swift
+Sources/Threading/Core/Agent/DiffLine.swift
+Sources/Threading/Core/Agent/CodexPatch.swift
+Sources/Threading/UI/Views/EditDiff.swift
+Sources/Threading/Core/Agent/ToolOutcome.swift
+Sources/Threading/Core/Agent/WireList.swift
+Sources/Threading/Core/Agent/WireInteger.swift
+Sources/Threading/Models/ChartSpec.swift
 Sources/Threading/Models/ProjectExecutionHost.swift
 Sources/Threading/Models/RemoteHostRecord.swift
 Sources/Threading/Models/SessionReadReceiptState.swift
@@ -55,3 +68,6 @@ Sources/Threading/Core/Session/ProjectTerminalStartPlan.swift
 Sources/Threading/Core/Agent/AgentEnvironment.swift
 Sources/Threading/Core/Constants/EnvironmentKeys.swift
 Sources/Threading/Core/Control/HostCommandContract.swift
+Sources/Threading/Core/Agent/CodeContextPreview.swift
+Sources/Threading/Core/Agent/ConversationContextAttachment.swift
+Sources/Threading/Core/Agent/GitReviewDefaults.swift

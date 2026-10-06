@@ -108,6 +108,40 @@ private func checkSubviewOrdering() {
                  "hit testing must use the reordered stack")
 }
 
+@MainActor
+private func checkLayerBackgrounds(flipped: Bool) {
+    let root = PaintedView(frame: NSRect(x: 0, y: 0, width: 24, height: 24), flipped: flipped)
+    let parent = PaintedView(frame: NSRect(x: 4, y: 4, width: 12, height: 12), flipped: flipped)
+    parent.wantsLayer = true
+    parent.layer?.backgroundColor = NSColor(red: 1, green: 0, blue: 0, alpha: 1).cgColor
+    let child = PaintedView(frame: NSRect(x: 7, y: 2, width: 10, height: 10), flipped: flipped)
+    child.wantsLayer = true
+    child.layer?.backgroundColor = NSColor(red: 0, green: 0, blue: 1, alpha: 1).cgColor
+    let painted = PaintedView(frame: NSRect(x: 2, y: 2, width: 4, height: 4),
+                              ink: .black, flipped: flipped)
+    painted.wantsLayer = true
+    painted.layer?.backgroundColor = NSColor(red: 0, green: 1, blue: 0, alpha: 1).cgColor
+    root.addSubview(parent)
+    parent.addSubview(child)
+    parent.addSubview(painted)
+    let bitmap = Bitmap(width: 24, height: 24, background: (1, 1, 1, 1))
+    root.render(in: NSGraphicsContext(bitmap: bitmap, scale: 1))
+    expect(bitmap, 5, 5, flipped: flipped, equal: [255, 0, 0, 255], "backing-layer fill absent")
+    expect(bitmap, 12, 9, flipped: flipped, equal: [0, 0, 255, 255], "nested layer fill absent")
+    expect(bitmap, 7, 7, flipped: flipped, equal: [0, 0, 0, 255], "layer painted over view contents")
+    expect(bitmap, 17, 8, flipped: flipped, equal: [255, 255, 255, 255], "layer escaped ancestor clip")
+    parent.alphaValue = 0.5
+    let faded = Bitmap(width: 24, height: 24, background: (1, 1, 1, 1))
+    root.render(in: NSGraphicsContext(bitmap: faded, scale: 1))
+    expect(faded, 5, 5, flipped: flipped, equal: [255, 128, 128, 255], "layer ignored view alpha")
+    let copy = CALayer(layer: parent.layer!)
+    precondition(copy.backgroundColor == parent.layer!.backgroundColor, "copied layer lost its fill")
+    parent.wantsLayer = false
+    let detached = Bitmap(width: 24, height: 24, background: (1, 1, 1, 1))
+    root.render(in: NSGraphicsContext(bitmap: detached, scale: 1))
+    expect(detached, 5, 5, flipped: flipped, equal: [255, 255, 255, 255], "removed backing layer still painted")
+}
+
 @main
 private struct ViewClippingFixture {
     @MainActor static func main() {
@@ -116,6 +150,8 @@ private struct ViewClippingFixture {
         checkNestedViews(flipped: false, ownClip: true)
         checkNestedViews(flipped: true, ownClip: true)
         checkSubviewOrdering()
+        checkLayerBackgrounds(flipped: false)
+        checkLayerBackgrounds(flipped: true)
         checkScrollViewport()
         print("PASS view bounds, clipping, ordering, and scroll viewport geometry, rendering and wheel routing")
     }

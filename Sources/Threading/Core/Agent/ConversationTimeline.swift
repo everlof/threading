@@ -87,7 +87,7 @@ struct ConversationTimeline {
             let text: String
             let isError: Bool
 
-            /// Whether the text was cut to `ConversationDefaults.toolResultLimit`.
+            /// Whether the text was cut to `ConversationTimelineDefaults.toolResultLimit`.
             let isTruncated: Bool
 
             /// Settled once, when the result attaches — `isError` plus the text sniff, so the
@@ -216,11 +216,13 @@ struct ConversationTimeline {
     private var currentTurnStartIndex: Int?
 
     private let sessionID: SessionID
+    private let chartDecoder: (String, [String: Any]) -> ChartSpec?
 
     // MARK: - Initialization
 
-    init(sessionID: SessionID) {
+    init(sessionID: SessionID, chartDecoder: @escaping (String, [String: Any]) -> ChartSpec?) {
         self.sessionID = sessionID
+        self.chartDecoder = chartDecoder
     }
 
     // MARK: - Public Methods
@@ -490,7 +492,7 @@ struct ConversationTimeline {
                     forTool: tool.rawName,
                     input: foundationInput
                 ),
-                chart: ChartSpec.decoded(fromToolNamed: tool.rawName, input: foundationInput),
+                chart: chartDecoder(tool.rawName, foundationInput),
                 result: nil
             )
             let change = append(.toolCall(call))
@@ -515,7 +517,7 @@ struct ConversationTimeline {
     }
 
     private mutating func attach(_ result: ToolResult) -> Change {
-        let limit = ConversationDefaults.toolResultLimit
+        let limit = ConversationTimelineDefaults.toolResultLimit
         let isTruncated = result.text.count > limit
         let text = isTruncated ? String(result.text.prefix(limit)) + "\n…" : result.text
 

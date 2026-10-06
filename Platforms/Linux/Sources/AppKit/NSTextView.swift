@@ -70,6 +70,10 @@ open class NSTextContainer {
 /// only the visible lines, so a long prompt does not rasterize its hidden paragraphs.
 @MainActor
 open class NSTextView: NSText {
+    open override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .iBeam)
+    }
+
     private struct Line {
         let range: NSRange
         let y: CGFloat
@@ -104,6 +108,7 @@ open class NSTextView: NSText {
     private var dirtyLocation: Int?
     private var layoutHeight: CGFloat = 0
     private var lineHeight: CGFloat = 16
+    private var verticalCaretX: CGFloat?
     private var layingOut = false
 
     open private(set) var textContainer: NSTextContainer?
@@ -206,6 +211,7 @@ open class NSTextView: NSText {
         let end = min(max(start, NSMaxRange(range)), length)
         selected = NSRange(location: start, length: end - start)
         selectionAnchor = nil
+        verticalCaretX = nil
         needsDisplay = true
         scrollRangeToVisible(selected)
     }
@@ -376,9 +382,20 @@ open class NSTextView: NSText {
                            extending: event.modifierFlags.contains(.shift))
             return
         }
+        if event.keyCode == 115 || event.keyCode == 119 {
+            moveToBoundary(beginning: event.keyCode == 115,
+                document: event.modifierFlags.contains(.control) || event.modifierFlags.contains(.command),
+                extending: event.modifierFlags.contains(.shift))
+            return
+        }
+        if event.keyCode == 116 || event.keyCode == 121 {
+            moveByPage(up: event.keyCode == 116, extending: event.modifierFlags.contains(.shift))
+            return
+        }
         guard isEditable, !event.modifierFlags.contains(.command),
               !event.modifierFlags.contains(.control), !characters.isEmpty else { return }
-        insertText(characters, replacementRange: selected)
+        let insertion = event.keyCode == 36 || characters == "\r" ? "\n" : characters
+        insertText(insertion, replacementRange: selected)
     }
 
     open override func mouseDown(with event: NSEvent) {
@@ -631,17 +648,21 @@ open class NSTextView: NSText {
             max(0, textContainerInset.width)
         let source = line.text as NSString
         var offset = 0
+        var beforeWidth: CGFloat = 0
         while offset < source.length {
             let next = source.rangeOfComposedCharacterSequence(at: offset).upperBound
             let prefix = source.substring(to: next)
-            if measuredWidth(prefix) >= target { break }
+            let afterWidth = measuredWidth(prefix)
+            if target < (beforeWidth + afterWidth) / 2 { break }
             offset = next
+            beforeWidth = afterWidth
         }
         return line.range.location + offset
     }
 
     private func moveCaret(left: Bool, extending: Bool) {
         guard isSelectable else { return }
+        verticalCaretX = nil
         let source = string as NSString
         let active = activeCaret(towardStart: left, extending: extending)
         let next: Int
@@ -656,8 +677,37 @@ open class NSTextView: NSText {
         guard isSelectable else { return }
         let active = activeCaret(towardStart: up, extending: extending)
         let caret = caretRect(at: active)
-        let point = NSPoint(x: caret.minX, y: caret.midY + (up ? -lineHeight : lineHeight))
+        let x = verticalCaretX ?? caret.minX
+        let point = NSPoint(x: x, y: caret.midY + (up ? -lineHeight : lineHeight))
         selectCaret(at: characterIndex(at: point), extending: extending)
+        verticalCaretX = x
+    }
+
+    private func moveToBoundary(beginning: Bool, document: Bool, extending: Bool) {
+        guard isSelectable else { return }
+        verticalCaretX = nil
+        let active = activeCaret(towardStart: beginning, extending: extending)
+        let next: Int
+        if document {
+            next = beginning ? 0 : (textStorage?.length ?? 0)
+        } else {
+            ensureLayout()
+            let range = line(at: active).range
+            next = beginning ? range.location : NSMaxRange(range)
+        }
+        selectCaret(at: next, extending: extending)
+    }
+
+    private func moveByPage(up: Bool, extending: Bool) {
+        guard isSelectable else { return }
+        let active = activeCaret(towardStart: up, extending: extending)
+        let caret = caretRect(at: active)
+        let x = verticalCaretX ?? caret.minX
+        let height = (superview as? NSClipView)?.bounds.height ?? visibleRect.height
+        let distance = max(lineHeight, height - lineHeight)
+        let point = NSPoint(x: x, y: caret.midY + (up ? -distance : distance))
+        selectCaret(at: characterIndex(at: point), extending: extending)
+        verticalCaretX = x
     }
 
     private func activeCaret(towardStart: Bool, extending: Bool) -> Int {
@@ -689,7 +739,12 @@ open class NSTextView: NSText {
         let visible = visibleRect
         let padding = max(0, textContainer?.lineFragmentPadding ?? 5) +
             max(0, textContainerInset.width)
-        for line in lines where line.y + lineHeight >= visible.minY && line.y <= visible.maxY {
+        // Cached visual lines have one height and start at the text inset. A wheel frame must
+        // index its viewport directly, not examine the entire brief to find visible lines.
+        let firstY = max(0, textContainerInset.height)
+        let first = min(lines.count, max(0, Int(ceil((visible.minY - firstY) / lineHeight)) - 1))
+        let end = min(lines.count, max(first, Int(floor((visible.maxY - firstY) / lineHeight)) + 1))
+        for line in lines[first..<end] {
             let start = max(selected.location, line.range.location)
             let end = min(NSMaxRange(selected), NSMaxRange(line.range))
             if end > start {

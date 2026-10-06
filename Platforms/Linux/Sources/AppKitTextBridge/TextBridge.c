@@ -15,7 +15,7 @@ static int valid_text(const uint8_t *text, int length, double size) {
 }
 
 static PangoLayout *new_layout(cairo_t *cr, const uint8_t *text, int length,
-                               int monospace, int weight, double size) {
+                               int monospace, int weight, int italic, double size) {
     PangoLayout *layout = pango_cairo_create_layout(cr);
     PangoFontDescription *font = pango_font_description_new();
     pango_font_description_set_family(font, monospace ? "DejaVu Sans Mono" : "DejaVu Sans");
@@ -23,22 +23,28 @@ static PangoLayout *new_layout(cairo_t *cr, const uint8_t *text, int length,
                                      weight == 2 ? PANGO_WEIGHT_SEMIBOLD :
                                      weight == 1 ? PANGO_WEIGHT_MEDIUM : PANGO_WEIGHT_NORMAL;
     pango_font_description_set_weight(font, pango_weight);
+    pango_font_description_set_style(font, italic ? PANGO_STYLE_ITALIC : PANGO_STYLE_NORMAL);
     pango_font_description_set_absolute_size(font, size * PANGO_SCALE);
     pango_layout_set_font_description(layout, font);
     pango_layout_set_text(layout, (const char *)text, length);
+    PangoAttrList *attributes = pango_attr_list_new();
+    pango_attr_list_insert(attributes, pango_attr_insert_hyphens_new(FALSE));
+    pango_layout_set_attributes(layout, attributes);
+    pango_attr_list_unref(attributes);
     pango_font_description_free(font);
     return layout;
 }
 
-int tat_font_metrics(int monospace, int weight, double size, TATFontMetrics *result) {
+int tat_font_metrics(int monospace, int weight, int italic, double size, TATFontMetrics *result) {
     if (!result || (monospace != 0 && monospace != 1) || weight < 0 || weight > 3 ||
+        (italic != 0 && italic != 1) ||
         !isfinite(size) || size < 1 || size > 128) return 0;
     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
     if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(surface); return 0;
     }
     cairo_t *cr = cairo_create(surface);
-    PangoLayout *layout = new_layout(cr, (const uint8_t *)"Ag", 2, monospace, weight, size);
+    PangoLayout *layout = new_layout(cr, (const uint8_t *)"Ag", 2, monospace, weight, italic, size);
     PangoFontMetrics *metrics = pango_context_get_metrics(
         pango_layout_get_context(layout), pango_layout_get_font_description(layout),
         pango_language_get_default());
@@ -56,9 +62,10 @@ int tat_font_metrics(int monospace, int weight, double size, TATFontMetrics *res
 }
 
 static int measure(const uint8_t *text, int length, int monospace, int weight,
-                   double size, int maximum_lines, int paragraphs,
+                   int italic, double size, int maximum_lines, int paragraphs,
                    int wrap_width, int char_wrapping, TATMetrics *result) {
     if (!result || !valid_text(text, length, size) || weight < 0 || weight > 3 ||
+        (monospace != 0 && monospace != 1) || (italic != 0 && italic != 1) ||
         maximum_lines < 1 || maximum_lines > TAT_MAX_LINES ||
         wrap_width < 0 || wrap_width > TAT_MAX_WIDTH ||
         (char_wrapping != 0 && char_wrapping != 1)) return 0;
@@ -67,7 +74,7 @@ static int measure(const uint8_t *text, int length, int monospace, int weight,
         cairo_surface_destroy(surface); return 0;
     }
     cairo_t *cr = cairo_create(surface);
-    PangoLayout *layout = new_layout(cr, text, length, monospace, weight, size);
+    PangoLayout *layout = new_layout(cr, text, length, monospace, weight, italic, size);
     pango_layout_set_single_paragraph_mode(layout, !paragraphs);
     if (wrap_width > 0) {
         pango_layout_set_width(layout, wrap_width * PANGO_SCALE);
@@ -126,27 +133,27 @@ static int measure(const uint8_t *text, int length, int monospace, int weight,
     return 1;
 }
 
-int tat_measure(const uint8_t *text, int length, int monospace, int weight,
+int tat_measure(const uint8_t *text, int length, int monospace, int weight, int italic,
                 double size, TATMetrics *result) {
-    return measure(text, length, monospace, weight, size, 1, 0, 0, 0, result);
+    return measure(text, length, monospace, weight, italic, size, 1, 0, 0, 0, result);
 }
 
-int tat_measure_paragraphs(const uint8_t *text, int length, int monospace, int weight,
+int tat_measure_paragraphs(const uint8_t *text, int length, int monospace, int weight, int italic,
                            double size, int maximum_lines, TATMetrics *result) {
-    return measure(text, length, monospace, weight, size, maximum_lines, 1, 0, 0, result);
+    return measure(text, length, monospace, weight, italic, size, maximum_lines, 1, 0, 0, result);
 }
 
-int tat_measure_wrapped(const uint8_t *text, int length, int monospace, int weight,
+int tat_measure_wrapped(const uint8_t *text, int length, int monospace, int weight, int italic,
                         double size, int maximum_lines, int wrap_width,
                         int char_wrapping, TATMetrics *result) {
     if (wrap_width <= 0) return 0;
-    return measure(text, length, monospace, weight, size, maximum_lines, 1,
+    return measure(text, length, monospace, weight, italic, size, maximum_lines, 1,
                    wrap_width, char_wrapping, result);
 }
 
 int tat_render(uint8_t *coverage, int capacity, int width, int height,
                int layout_width, int clip_x, int clip_y, const uint8_t *text, int length,
-               int monospace, int weight, double size, int mode, int alignment, int max_lines) {
+               int monospace, int weight, int italic, double size, int mode, int alignment, int max_lines) {
     if (!coverage || !valid_text(text, length, size) || width <= 0 || height <= 0 ||
         width > TAT_MAX_WIDTH || height > TAT_MAX_HEIGHT ||
         width * height > TAT_MAX_PIXELS || capacity < width * height ||
@@ -154,14 +161,15 @@ int tat_render(uint8_t *coverage, int capacity, int width, int height,
         clip_x < 0 || clip_x > TAT_MAX_WIDTH || clip_y < -TAT_MAX_HEIGHT ||
         clip_y > TAT_MAX_HEIGHT || mode < 0 || mode > 7 ||
         alignment < 0 || alignment > 3 || max_lines < 1 || max_lines > TAT_MAX_LINES ||
-        weight < 0 || weight > 3) return 0;
+        weight < 0 || weight > 3 || (monospace != 0 && monospace != 1) ||
+        (italic != 0 && italic != 1)) return 0;
 
     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_A8, width, height);
     if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(surface); return 0;
     }
     cairo_t *cr = cairo_create(surface);
-    PangoLayout *layout = new_layout(cr, text, length, monospace, weight, size);
+    PangoLayout *layout = new_layout(cr, text, length, monospace, weight, italic, size);
     pango_layout_set_width(layout, layout_width * PANGO_SCALE);
     pango_layout_set_alignment(layout, alignment == 1 ? PANGO_ALIGN_CENTER :
                                         alignment == 2 ? PANGO_ALIGN_RIGHT : PANGO_ALIGN_LEFT);
@@ -192,11 +200,11 @@ int tat_render(uint8_t *coverage, int capacity, int width, int height,
     return 1;
 }
 #else
-int tat_font_metrics(int m, int w, double s, TATFontMetrics *r) { return 0; }
-int tat_measure(const uint8_t *t, int n, int m, int b, double s, TATMetrics *r) { return 0; }
-int tat_measure_paragraphs(const uint8_t *t, int n, int m, int b, double s, int l, TATMetrics *r) { return 0; }
-int tat_measure_wrapped(const uint8_t *t, int n, int m, int b, double s, int l,
+int tat_font_metrics(int m, int w, int i, double s, TATFontMetrics *r) { return 0; }
+int tat_measure(const uint8_t *t, int n, int m, int b, int i, double s, TATMetrics *r) { return 0; }
+int tat_measure_paragraphs(const uint8_t *t, int n, int m, int b, int i, double s, int l, TATMetrics *r) { return 0; }
+int tat_measure_wrapped(const uint8_t *t, int n, int m, int b, int i, double s, int l,
                         int w, int c, TATMetrics *r) { return 0; }
 int tat_render(uint8_t *c, int a, int w, int h, int lw, int x, int y,
-               const uint8_t *t, int n, int m, int b, double s, int mode, int align, int lines) { return 0; }
+               const uint8_t *t, int n, int m, int b, int i, double s, int mode, int align, int lines) { return 0; }
 #endif

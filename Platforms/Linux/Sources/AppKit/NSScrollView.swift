@@ -79,6 +79,7 @@ open class NSScrollView: NSView {
     }
 
     private var storedContentView: NSClipView
+    private var viewportConstraints: [NSLayoutConstraint] = []
 
     open var contentView: NSClipView {
         get { storedContentView }
@@ -86,10 +87,12 @@ open class NSScrollView: NSView {
             guard storedContentView !== newValue else { return }
             let document = storedContentView.documentView
             storedContentView.documentView = nil
+            NSLayoutConstraint.deactivate(viewportConstraints)
             storedContentView.removeFromSuperview()
             storedContentView = newValue
             addSubview(newValue)
             newValue.documentView = document
+            constrainViewport()
             tile()
         }
     }
@@ -102,6 +105,8 @@ open class NSScrollView: NSView {
     open var drawsBackground = false
     open var hasVerticalScroller = false
     open var hasHorizontalScroller = false
+    /// Elasticity is a request; this renderer currently keeps the viewport clamped.
+    open var horizontalScrollElasticity: Elasticity = .none
     /// The clip view clamps to the document bounds; there is no rubber-band animation in the
     /// Linux host. Let shared views request that behavior explicitly, and reject other modes.
     open var verticalScrollElasticity: Elasticity = .none {
@@ -115,12 +120,25 @@ open class NSScrollView: NSView {
         storedContentView = NSClipView(frame: NSRect(origin: .zero, size: frameRect.size))
         super.init(frame: frameRect)
         addSubview(storedContentView)
+        constrainViewport()
     }
 
     public required init?(coder: NSCoder) {
         storedContentView = NSClipView(frame: .zero)
         super.init(coder: coder)
         addSubview(storedContentView)
+        constrainViewport()
+    }
+
+    private func constrainViewport() {
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        viewportConstraints = [
+            contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            contentView.topAnchor.constraint(equalTo: topAnchor),
+            contentView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ]
+        NSLayoutConstraint.activate(viewportConstraints)
     }
 
     open override var frame: NSRect {
@@ -145,7 +163,7 @@ open class NSScrollView: NSView {
         let before = contentView.bounds.origin
         let target = NSPoint(
             x: before.x - event.scrollingDeltaX * horizontalLineScroll,
-            y: before.y - event.scrollingDeltaY * verticalLineScroll
+            y: before.y + event.scrollingDeltaY * verticalLineScroll * (contentView.isFlipped ? -1 : 1)
         )
         contentView.scroll(to: target)
         if contentView.bounds.origin != before {

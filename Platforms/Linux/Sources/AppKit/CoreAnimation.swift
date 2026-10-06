@@ -1,8 +1,8 @@
 import Foundation
 
 /// Core Animation's small data surface used by shared drawn controls. The Linux raster host
-/// paints the ordinary control in `draw(_:)`; an optional backing layer records shadow and
-/// floating-target state without taking ownership of that control's pointer or focus behavior.
+/// paints backing-layer backgrounds before ordinary control drawing. Shadow, animation and
+/// floating-target state are retained without claiming a complete Core Animation compositor.
 public typealias CGColor = NSColor
 
 public struct CGPath {
@@ -104,6 +104,7 @@ open class CALayer {
     public enum CornerCurve { case circular, continuous }
 
     open var frame: CGRect = .zero
+    open var backgroundColor: CGColor?
     open var bounds: CGRect { CGRect(origin: .zero, size: frame.size) }
     open var name: String?
     open var needsDisplayOnBoundsChange = false
@@ -121,6 +122,7 @@ open class CALayer {
     public init(layer: Any) {
         guard let source = layer as? CALayer else { return }
         frame = source.frame
+        backgroundColor = source.backgroundColor
         name = source.name
         contentsScale = source.contentsScale
         cornerCurve = source.cornerCurve

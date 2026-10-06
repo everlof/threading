@@ -6,6 +6,9 @@ import PackageDescription
 let package = Package(
     name: "LinuxAppKitSpike",
     dependencies: [
+        // The exact NativeDiffCore revision resolved by the shipping Xcode project.
+        .package(url: "https://github.com/everlof/NativeDiffKit.git",
+                 revision: "363c6197d8e334fa0aaf30550fb0a0bcac540e71"),
         // The real package, unmodified. Its manifest says it has no dependencies and its boundary
         // check keeps it Foundation-only, so building it here is the cheapest available test of
         // that claim on a platform it has never been compiled for.
@@ -18,6 +21,11 @@ let package = Package(
         .target(name: "AppKit", dependencies: [
             .target(name: "AppKitTextBridge", condition: .when(platforms: [.linux]))]),
         .target(name: "CoreText"),
+        // Exact upstream renderer, with the AppKit shim made an explicit dependency. The
+        // upstream package cannot name a host-provided AppKit module in its own manifest.
+        .target(name: "LinuxNativeDiffAppKit", dependencies: ["AppKit",
+            .product(name: "NativeDiffCore", package: "NativeDiffKit")],
+            exclude: ["LICENSE"], swiftSettings: [.swiftLanguageMode(.v5)]),
         // The system library, declared as a module the way Apple's SDK already does.
         .systemLibrary(name: "SQLite3", path: "Sources/SQLite3"),
         .systemLibrary(name: "CZlib", path: "Sources/CZlib"),
@@ -36,12 +44,13 @@ let package = Package(
             .target(name: "CGdkPixbuf", condition: .when(platforms: [.linux])),
             .target(name: "CAtk", condition: .when(platforms: [.linux]))],
             linkerSettings: [.linkedLibrary("atk-1.0", .when(platforms: [.linux]))]),
-        .executableTarget(name: "WindowHarness", dependencies: ["AppKit", "CoreText", "CoreSlice", "TerminalRuntime",
+        .executableTarget(name: "WindowHarness", dependencies: ["AppKit", "CoreText", "CoreSlice", "TerminalRuntime", "LinuxNativeDiffAppKit",
             .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit"),
             .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient"),
             .target(name: "LinuxWindowBridge", condition: .when(platforms: [.linux]))],
             resources: [.copy("Resources/ProviderMarks"), .copy("Resources/Theme")],
-            swiftSettings: [.define("THREADING_WINDOW_HARNESS")]),
+            swiftSettings: [.define("THREADING_WINDOW_HARNESS"),
+                .unsafeFlags(["-module-alias", "NativeDiffAppKit=LinuxNativeDiffAppKit"])]),
         // Apple's Compression framework, reduced to the two symbols GzipWriter uses. See its header.
         .target(name: "Compression", dependencies: ["CZlib"]),
         // Real Threading persistence, vendored byte-identical. No AppKit anywhere near it.
@@ -50,6 +59,7 @@ let package = Package(
         .target(
             name: "CoreSlice",
             dependencies: ["SQLite3", "OSLog", .product(name: "ThreadingDomain", package: "ThreadingDomain"),
+                .product(name: "NativeDiffCore", package: "NativeDiffKit"),
                 .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit")],
             // Swift 5 language mode on purpose. The app target is not in Swift 6 mode yet — see
             // the shipping contract in reliability-and-type-safety.md — and compiling this slice
@@ -77,8 +87,16 @@ let package = Package(
         .executableTarget(name: "Harness", dependencies: ["AppKit", "CoreText"]),
         .executableTarget(name: "ViewClippingHarness", dependencies: ["AppKit"],
             path: "tests/view_clipping"),
+        .executableTarget(name: "PriorityLayoutHarness", dependencies: ["AppKit"],
+            path: "tests/priority_layout"),
+        .executableTarget(name: "ParagraphWrappingHarness", dependencies: ["AppKitTextBridge"],
+            path: "tests/paragraph_wrapping", linkerSettings: [.linkedLibrary("m")]),
         .executableTarget(name: "OutlineViewHarness", dependencies: ["AppKit"],
             path: "tests/outline_view", exclude: ["run.sh", "README.md"]),
+        .executableTarget(name: "TableHeightHarness", dependencies: ["AppKit"],
+            path: "tests/table_heights",
+            sources: ["Fixture.swift", "AutomaticRows.swift", "StructuralRows.swift",
+                      "ThemeBoundary.swift", "ConversationVirtualRowHost.swift"]),
         .executableTarget(name: "TextLabelHarness", dependencies: ["AppKit",
             .target(name: "AppKitTextBridge", condition: .when(platforms: [.linux]))],
             path: "tests/text_label", exclude: ["run.sh"],
@@ -93,13 +111,19 @@ let package = Package(
         .executableTarget(name: "TextEditorHarness", dependencies: ["AppKit"],
             path: "tests/text_editor", exclude: ["run.sh"],
             sources: ["ThemedTextView.swift", "PromptTextView.swift", "ThemeBoundary.swift", "Fixture.swift"]),
+        // Compile the exact production Markdown grammar against the shim. This is the text
+        // compatibility prerequisite; it does not claim the transcript controller is mounted.
+        .executableTarget(name: "MarkdownHarness", dependencies: ["AppKit"],
+            path: "tests/markdown", exclude: ["run.sh"],
+            sources: ["Markdown.swift", "MarkdownInline.swift", "AgentAuthoredURLPolicy.swift",
+                      "ThemeBoundary.swift", "Fixture.swift"]),
         // The exact control files plus the same fixed-palette boundary linked into WindowHarness.
         // The fixture's Specimen facts are the native shell's measured fixed grounds.
         .executableTarget(name: "IconButtonHarness", dependencies: ["AppKit"],
             path: "tests/icon_button", exclude: ["run.sh"],
             sources: ["ThemedControl.swift", "ThemedIconButton.swift", "PointerClaims.swift",
                       "SurfaceDrawing.swift", "GlyphView.swift", "TemplateImageDrawing.swift",
-                      "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift",
+                      "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift", "AppEvent.swift",
                       "NeutralInk.swift", "TextLegibilityPolicy.swift", "SpecimenBoundary.swift",
                       "Fixture.swift"]),
         // Compile the production selectable child row against the fixed diagnostic palette.
@@ -109,7 +133,7 @@ let package = Package(
             sources: ["SubagentNavigatorRowView.swift", "SubagentSummaryItem.swift",
                       "ThemedControl.swift", "ThemedIconButton.swift", "PointerClaims.swift",
                       "SurfaceDrawing.swift", "GlyphView.swift", "TemplateImageDrawing.swift",
-                      "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift",
+                      "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift", "AppEvent.swift",
                       "NeutralInk.swift", "TextLegibilityPolicy.swift", "SpecimenBoundary.swift",
                       "RowBoundary.swift", "Fixture.swift"]),
         .executableTarget(name: "PaneHeaderHarness", dependencies: ["AppKit"],
@@ -118,7 +142,7 @@ let package = Package(
                       "SeparatorView.swift", "ThemedControl.swift", "ThemedIconButton.swift",
                       "PointerClaims.swift", "SurfaceDrawing.swift", "GlyphView.swift",
                       "TemplateImageDrawing.swift", "AppKitLifetime.swift",
-                      "GlyphThemeBoundary.swift", "IconButtonBoundary.swift",
+                      "GlyphThemeBoundary.swift", "IconButtonBoundary.swift", "AppEvent.swift",
                       "NeutralInk.swift", "TextLegibilityPolicy.swift", "SpecimenBoundary.swift",
                       "Fixture.swift"],
             swiftSettings: [.define("THREADING_PANE_HEADER_HARNESS")]),
@@ -129,7 +153,7 @@ let package = Package(
             sources: ["PageTitleView.swift", "MorphingTitleLabel.swift", "PageTitleBoundary.swift", "Fixture.swift",
                       "ThemedControl.swift", "ThemedIconButton.swift", "PointerClaims.swift",
                       "SurfaceDrawing.swift", "GlyphView.swift", "TemplateImageDrawing.swift",
-                      "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift",
+                      "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift", "AppEvent.swift",
                       "NeutralInk.swift", "TextLegibilityPolicy.swift", "SpecimenBoundary.swift"]),
         // Exact production glyph drawing with test-only theme vocabulary. Its Linux bitmap
         // contract exercises the shim's image and backing-pixel behavior, not symbol lookup.

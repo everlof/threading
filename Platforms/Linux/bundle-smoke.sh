@@ -3,6 +3,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ./vendor-core.sh --verify
+./vendor-diff.sh --verify
 mkdir -p out/bundle-smoke
 evidence=$(mktemp -d "$PWD/out/bundle-smoke/run.XXXXXXXX")
 printf 'bundle-smoke evidence: %s\n' "$evidence"
@@ -29,14 +30,26 @@ export DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC
 apt-get update -qq >/dev/null
 apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev libglib2.0-dev libgdk-pixbuf-2.0-dev librsvg2-common >/dev/null
 ./package-app.sh
+clang -shared -fPIC -Wall -Wextra -Werror tests/gtk_present_delay.c -ldl -o out/gtk-present-delay.so
 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --project-row-layout-fixture
 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --session-row-layout-fixture
 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --terminal-row-layout-fixture
+timeout 120 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --app-event-contract
 # Exercise the same Release emulator/client modules before leaving the build container.
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product CoreSliceHarness
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product PortablePTYClientHarness
+swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product TableHeightHarness
+swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product OutlineViewHarness
+swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product PriorityLayoutHarness
+swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product ViewClippingHarness
+swift build -c release --product ParagraphWrappingHarness
 contract_bin=$(swift build -c release --show-bin-path)
 timeout 120 "$contract_bin/CoreSliceHarness"
+timeout 120 "$contract_bin/TableHeightHarness"
+timeout 120 "$contract_bin/OutlineViewHarness"
+timeout 120 "$contract_bin/PriorityLayoutHarness"
+timeout 120 "$contract_bin/ViewClippingHarness"
+timeout 120 "$contract_bin/ParagraphWrappingHarness"
 contract_fixture=$(mktemp -d /tmp/threading-contracts.XXXXXXXX)
 out/threading-linux-preview-ubuntu24.04-arm64/bin/threading-ptyd \
   --socket "$contract_fixture/pty.sock" --state "$contract_fixture/daemon" >"$contract_fixture/daemon.log" 2>&1 &
@@ -67,6 +80,7 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/terminal_directory_identity_smoke.py:/terminal_directory_identity_smoke.py:ro" \
   -v "$PWD/tests/workspace_smoke.py:/workspace_smoke.py:ro" \
   -v "$PWD/tests/agent_catalogue_smoke.py:/agent_catalogue_smoke.py:ro" \
+  -v "$PWD/out/gtk-present-delay.so:/gtk-present-delay.so:ro" \
   -v "$PWD/tests/provider_marks_smoke.py:/provider_marks_smoke.py:ro" \
   -v "$PWD/tests/account_picker_rows_smoke.py:/account_picker_rows_smoke.py:ro" \
   -v "$PWD/tests/project_count_smoke.py:/project_count_smoke.py:ro" \
@@ -74,6 +88,10 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/project_actions_smoke.py:/project_actions_smoke.py:ro" \
   -v "$PWD/tests/project_create_menu_smoke.py:/project_create_menu_smoke.py:ro" \
   -v "$PWD/tests/composer_smoke.py:/composer_smoke.py:ro" \
+  -v "$PWD/tests/document_ui_smoke.py:/document_ui_smoke.py:ro" \
+  -v "$PWD/tests/automatic_rows_smoke.py:/automatic_rows_smoke.py:ro" \
+  -v "$PWD/tests/diff_ui_smoke.py:/diff_ui_smoke.py:ro" \
+  -v "$PWD/tests/x11_cursor.py:/x11_cursor.py:ro" \
   -v "$PWD/tests/composer_account_smoke.py:/composer_account_smoke.py:ro" \
   -v "$PWD/tests/add_project_button_smoke.py:/add_project_button_smoke.py:ro" \
   -v "$PWD/tests/actions_smoke.py:/actions_smoke.py:ro" \

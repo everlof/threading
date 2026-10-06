@@ -20,7 +20,7 @@ public struct TATFontMetrics {
     }
 }
 
-public func tat_font_metrics(_ mono: Int32, _ weight: Int32, _ size: Double,
+public func tat_font_metrics(_ mono: Int32, _ weight: Int32, _ italic: Int32, _ size: Double,
                              _ result: inout TATFontMetrics) -> Int32 {
     preconditionFailure("raster fixture must not request Pango font metrics")
 }

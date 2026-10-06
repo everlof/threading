@@ -10,6 +10,10 @@ Its shared pane header has `+` for Add Project and `⋯` for Actions; Ctrl+Shift
 opens Actions. The preview still uses a fixed palette and does not include the complete
 macOS UI. See the [Linux preview guide](Platforms/Linux/BUNDLE_README.md) for installation,
 supported commands and keyboard navigation.
+New Session accepts a multiline brief; wheel input scrolls long briefs, Return adds a line,
+and Super+Return starts the selected agent.
+Tab and Shift+Tab reach the project and identity choices, editor and submit button. Space or
+Return opens a focused choice; Escape closes it. Home/End and Page Up/Down navigate the brief.
 
 ## First Launch
 

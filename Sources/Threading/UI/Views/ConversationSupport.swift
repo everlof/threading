@@ -176,7 +176,7 @@ enum ConversationDefaults {
     /// `ConversationVirtualRowHost.setColumnWidth`. One below required so that a row which
     /// cannot fit loses the argument in its own content rather than in an unsatisfiable
     /// required set, and well above the 750 a label defends its text at.
-    static let columnWidthPriority = NSLayoutConstraint.Priority(999)
+    static let columnWidthPriority = ConversationRowDefaults.columnWidthPriority
 
     /// A pane-level column must beat content hugging (250) but yield to the display pane's
     /// holding priority (260). A drag or restored divider can arrive before the next layout
@@ -197,7 +197,7 @@ enum ConversationDefaults {
 
     /// Tool output beyond this is truncated. Generous, because output is collapsed by
     /// default — the cost of keeping it is layout, not attention.
-    static let toolResultLimit = 20_000
+    static let toolResultLimit = ConversationTimelineDefaults.toolResultLimit
 
     /// Shown above a replay that dropped older turns, so the conversation does not appear to
     /// have begun where the replay does.

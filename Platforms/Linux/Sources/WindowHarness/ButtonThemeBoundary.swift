@@ -86,7 +86,9 @@ extension Design.Motion {
     static let lift = CAMediaTimingFunction(controlPoints: 0, 0, 0.58, 1)
 }
 
-struct WindowBackdropDidChange {}
+struct WindowBackdropDidChange: AppEvent {
+    static let name = Notification.Name("windowBackdropDidChange")
+}
 
 @MainActor
 enum WindowBackdrop {

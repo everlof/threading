@@ -85,6 +85,13 @@ runtime without sending those keys to the shell. From the focused project list, 
 opens the folder chooser. Escape backs out of a picker or returns focus to the terminal.
 Alt+F4 closes the window while running children remain with the daemon.
 
+The idle pane's **New Session** action opens project and agent choices and a multiline brief.
+Wheel input over a long brief scrolls it without moving the caret or changing keyboard focus.
+Return adds a line; Super+Return or **Start Session** launches the selected agent with the brief.
+Tab and Shift+Tab move through project, identity, editor and submit; disabled submit is skipped.
+Space or Return opens a focused choice, and Escape returns to it. Home/End move to the line
+boundaries, Ctrl+Home/End to the document boundaries, and Page Up/Down move through the editor.
+
 Ctrl+Shift+T switches the current window between Threading's light and dark appearances. The
 sidebar, idle pane, terminal header, menus and visible terminal colors update together; the
 choice resets to light when the preview restarts. A theme settings control is not yet available.

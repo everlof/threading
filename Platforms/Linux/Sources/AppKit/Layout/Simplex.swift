@@ -37,7 +37,7 @@ struct Simplex {
         fileprivate let rowCount: Int
         fileprivate let variableCount: Int
         fileprivate let artificials: Set<Int>
-        fileprivate let cost: [Double]
+        fileprivate let costs: [[Double]]
         /// Each prepared row's sign flip, so a new constant can be prepared the same way.
         fileprivate let flipped: [Bool]
 
@@ -54,7 +54,7 @@ struct Simplex {
             rowCount: Int,
             variableCount: Int,
             artificials: Set<Int>,
-            cost: [Double],
+            costs: [[Double]],
             flipped: [Bool]
         ) {
             self.tableau = tableau
@@ -63,7 +63,7 @@ struct Simplex {
             self.rowCount = rowCount
             self.variableCount = variableCount
             self.artificials = artificials
-            self.cost = cost
+            self.costs = costs
             self.flipped = flipped
             values = []
             readBack()
@@ -123,21 +123,13 @@ struct Simplex {
                 }
                 guard leaving >= 0 else { return true }
 
-                var reduced = cost
-                for (index, variable) in basis.enumerated() {
-                    let multiplier = cost[variable]
-                    guard multiplier != 0 else { continue }
-                    for column in 0..<pivotable {
-                        reduced[column] -= multiplier * tableau[index][column]
-                    }
-                }
+                let reduced = Simplex.reducedCosts(costs, tableau: tableau, basis: basis,
+                                                   pivotable: pivotable)
 
                 var entering = -1
-                var bestRatio = Double.greatestFiniteMagnitude
                 for column in 0..<pivotable where tableau[leaving][column] < -1e-9 {
-                    let ratio = reduced[column] / -tableau[leaving][column]
-                    if ratio < bestRatio - 1e-12 {
-                        bestRatio = ratio
+                    if entering < 0 || Simplex.ratioIsLess(column, than: entering,
+                        reduced: reduced, row: tableau[leaving]) {
                         entering = column
                     }
                 }
@@ -163,7 +155,8 @@ struct Simplex {
         }
     }
 
-    /// Minimize `objective · x` subject to `rows`, with every variable ≥ 0.
+    /// Minimize error terms by descending priority, with every variable ≥ 0. No quantity of
+    /// lower-priority errors may trade away one higher-priority constraint.
     @MainActor
     static func solve(
         objective: [Int: Double],
@@ -246,25 +239,31 @@ struct Simplex {
         if !artificials.isEmpty {
             var phaseOne = [Double](repeating: 0, count: pivotable)
             for artificial in artificials { phaseOne[artificial] = 1 }
-            guard let residual = optimize(
-                tableau: &tableau, basis: &basis, cost: phaseOne,
+            guard optimize(
+                tableau: &tableau, basis: &basis, costs: [phaseOne],
                 pivotable: pivotable, rhsColumn: rhsColumn, iterationLimit: iterationLimit
-            ), residual <= 1e-6 else { return nil }
+            ) else { return nil }
+            let residual = basis.enumerated().reduce(0.0) {
+                $0 + phaseOne[$1.element] * tableau[$1.offset][rhsColumn]
+            }
+            guard residual <= 1e-6 else { return nil }
         }
 
-        // Phase two: the weighted sum of the soft constraints' error terms. The artificials keep a
-        // large cost rather than being zeroed out of the tableau, because `B⁻¹` has to stay a true
-        // inverse for the incremental path — and a basic artificial at zero is legitimate.
-        var cost = [Double](repeating: 0, count: pivotable)
-        for (variable, coefficient) in objective where variable < pivotable {
-            cost[variable] = coefficient
+        // Retain artificials in their own highest objective tier so B⁻¹ remains a true inverse
+        // for warm updates. Soft errors have unit cost within each distinct priority tier.
+        let priorities = Set(objective.values).sorted(by: >)
+        let tiers = Dictionary(uniqueKeysWithValues: priorities.enumerated().map { ($0.element, $0.offset + 1) })
+        var costs = [[Double]](repeating: [Double](repeating: 0, count: pivotable),
+                               count: priorities.count + 1)
+        for (variable, priority) in objective where variable < pivotable {
+            costs[tiers[priority]!][variable] = 1
         }
-        for artificial in artificials { cost[artificial] = 1e12 }
+        for artificial in artificials { costs[0][artificial] = 1 }
 
         guard optimize(
-            tableau: &tableau, basis: &basis, cost: cost,
+            tableau: &tableau, basis: &basis, costs: costs,
             pivotable: pivotable, rhsColumn: rhsColumn, iterationLimit: iterationLimit
-        ) != nil else { return nil }
+        ) else { return nil }
 
         for (index, variable) in basis.enumerated() where artificials.contains(variable) {
             if abs(tableau[index][rhsColumn]) > 1e-6 { return nil }
@@ -277,48 +276,69 @@ struct Simplex {
             rowCount: rowCount,
             variableCount: variableCount,
             artificials: artificials,
-            cost: cost,
+            costs: costs,
             flipped: flipped
         )
     }
 
-    /// The primal simplex, over an already-feasible basis. Returns the objective value.
+    private static func reducedCosts(_ costs: [[Double]], tableau: [[Double]],
+                                     basis: [Int], pivotable: Int) -> [[Double]] {
+        var result = costs
+        for tier in costs.indices {
+            for (index, variable) in basis.enumerated() {
+                let multiplier = costs[tier][variable]
+                guard multiplier != 0 else { continue }
+                for column in 0..<pivotable {
+                    result[tier][column] -= multiplier * tableau[index][column]
+                }
+            }
+        }
+        return result
+    }
+
+    private static func improves(_ column: Int, reduced: [[Double]]) -> Bool {
+        for tier in reduced {
+            let value = tier[column]
+            if value < -1e-9 { return true }
+            if value > 1e-9 { return false }
+        }
+        return false
+    }
+
+    private static func ratioIsLess(_ column: Int, than other: Int,
+                                    reduced: [[Double]], row: [Double]) -> Bool {
+        for tier in reduced {
+            let difference = tier[column] / -row[column] - tier[other] / -row[other]
+            if difference < -1e-12 { return true }
+            if difference > 1e-12 { return false }
+        }
+        return false
+    }
+
+    /// The primal simplex over a feasible basis, using lexicographic reduced costs.
     private static func optimize(
         tableau: inout [[Double]],
         basis: inout [Int],
-        cost: [Double],
+        costs: [[Double]],
         pivotable: Int,
         rhsColumn: Int,
         iterationLimit: Int
-    ) -> Double? {
+    ) -> Bool {
         var iterations = 0
         while true {
             iterations += 1
-            guard iterations <= iterationLimit else { return nil }
+            guard iterations <= iterationLimit else { return false }
 
-            var reduced = cost
-            for (index, variable) in basis.enumerated() {
-                let multiplier = cost[variable]
-                guard multiplier != 0 else { continue }
-                for column in 0..<pivotable {
-                    reduced[column] -= multiplier * tableau[index][column]
-                }
-            }
+            let reduced = reducedCosts(costs, tableau: tableau, basis: basis, pivotable: pivotable)
 
             // Bland's rule: the lowest-index improving column, which cannot cycle. Slower than
             // steepest-edge and the only pivot rule worth trusting in code nobody will tune.
             var entering = -1
-            for column in 0..<pivotable where reduced[column] < -1e-9 {
+            for column in 0..<pivotable where improves(column, reduced: reduced) {
                 entering = column
                 break
             }
-            guard entering >= 0 else {
-                var value = 0.0
-                for (index, variable) in basis.enumerated() {
-                    value += cost[variable] * tableau[index][rhsColumn]
-                }
-                return value
-            }
+            guard entering >= 0 else { return true }
 
             var leaving = -1
             var bestRatio = Double.greatestFiniteMagnitude
@@ -331,7 +351,7 @@ struct Simplex {
                     leaving = index
                 }
             }
-            guard leaving >= 0 else { return nil }
+            guard leaving >= 0 else { return false }
 
             let divisor = tableau[leaving][entering]
             for column in 0...rhsColumn { tableau[leaving][column] /= divisor }

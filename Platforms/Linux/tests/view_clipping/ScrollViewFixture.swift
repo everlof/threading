@@ -48,10 +48,10 @@ func checkScrollViewport() {
     let window = NSWindow()
     window.contentView = root
     window.dispatchToContent(NSEvent(type: .scrollWheel, locationInWindow: NSPoint(x: 3, y: 3),
-                                     scrollingDeltaY: -1))
+                                     scrollingDeltaY: 1))
     precondition(scroll.contentView.bounds.origin.y == 12, "wheel did not clamp at document end")
     window.dispatchToContent(NSEvent(type: .scrollWheel, locationInWindow: NSPoint(x: 3, y: 3),
-                                     scrollingDeltaY: 1))
+                                     scrollingDeltaY: -1))
     precondition(scroll.contentView.bounds.origin.y == 2, "wheel did not travel toward beginning")
 
     scroll.contentView.scroll(to: NSPoint(x: 0, y: 12))
@@ -77,6 +77,12 @@ func checkScrollViewport() {
                  "flipped hit test missed scrolled document")
     precondition(viewportPixel(flippedRoot) == [0, 0, 255, 255],
                  "flipped scrolled stripe did not render")
+    flippedScroll.scrollWheel(with: NSEvent(type: .scrollWheel, scrollingDeltaY: -1))
+    precondition(flippedScroll.contentView.bounds.minY == 12,
+                 "flipped wheel did not clamp toward the document end")
+    flippedScroll.scrollWheel(with: NSEvent(type: .scrollWheel, scrollingDeltaY: 1))
+    precondition(flippedScroll.contentView.bounds.minY == 2,
+                 "flipped wheel did not travel toward the document beginning")
 
     // The native navigator has unflipped row content inside a flipped outline document.
     // A scrolled press must hit the row at the painted point, not another recycled row.

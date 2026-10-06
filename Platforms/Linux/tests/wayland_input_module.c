@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/input-event-codes.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +27,10 @@ void notify_button(struct weston_seat *, const struct timespec *, int32_t,
                    enum wl_pointer_button_state);
 void notify_key(struct weston_seat *, const struct timespec *, uint32_t,
                 enum wl_keyboard_key_state, enum weston_key_state_update);
+void notify_axis(struct weston_seat *, const struct timespec *,
+                 struct weston_pointer_axis_event *);
+void notify_axis_source(struct weston_seat *, uint32_t);
+void notify_pointer_frame(struct weston_seat *);
 
 struct input_module {
     struct weston_compositor *compositor;
@@ -59,6 +64,7 @@ static int receive_command(int fd, uint32_t mask, void *data) {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     int x, y, key;
+    double amount;
     char state[16];
     const char *reply = "ERR";
     char detail[128];
@@ -86,6 +92,26 @@ static int receive_command(int fd, uint32_t mask, void *data) {
         notify_button(&module->seat, &now, right ? BTN_RIGHT : BTN_LEFT,
                       down ? WL_POINTER_BUTTON_STATE_PRESSED
                            : WL_POINTER_BUTTON_STATE_RELEASED);
+        reply = "OK";
+    } else if (sscanf(command, "wheel %d", &key) == 1 && key != 0 &&
+               key >= -128 && key <= 128) {
+        // Match Weston's X11 backend: one discrete notch carries ten axis-distance units.
+        struct weston_pointer_axis_event axis = {
+            .axis = WL_POINTER_AXIS_VERTICAL_SCROLL, .value = key * 10.0,
+            .has_discrete = true, .discrete = key
+        };
+        notify_axis_source(&module->seat, WL_POINTER_AXIS_SOURCE_WHEEL);
+        notify_axis(&module->seat, &now, &axis);
+        notify_pointer_frame(&module->seat);
+        reply = "OK";
+    } else if (sscanf(command, "finger %lf", &amount) == 1 && isfinite(amount) &&
+               amount >= -1280 && amount <= 1280) {
+        struct weston_pointer_axis_event axis = {
+            .axis = WL_POINTER_AXIS_VERTICAL_SCROLL, .value = amount
+        };
+        notify_axis_source(&module->seat, WL_POINTER_AXIS_SOURCE_FINGER);
+        notify_axis(&module->seat, &now, &axis);
+        notify_pointer_frame(&module->seat);
         reply = "OK";
     } else if (sscanf(command, "key %d %7s", &key, state) == 2 &&
                key >= 0 && key <= KEY_MAX &&

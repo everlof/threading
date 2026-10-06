@@ -20,6 +20,7 @@ capture = evidence / 'capture'
 capture.mkdir(parents=True)
 project = evidence / project_name
 project.mkdir()
+project = project.resolve()  # ProjectDirectory records the canonical checkout identity.
 home = evidence / 'home'
 home.mkdir()
 agent = evidence / 'record-agent'
@@ -181,6 +182,40 @@ try:
         eventually(has_prompt,
                    'Unicode multiline native editor input')
         assert text.get_caret_offset() == len(prompt)
+
+        long_prompt = '\n'.join(f'Rad {index:02d} å🙂' for index in range(40))
+        editable = editor.get_editable_text_iface()
+        editable.set_text_contents(long_prompt)
+        eventually(lambda: Atspi.Text.get_text(text, 0, -1) == long_prompt,
+                   'long Wayland brief')
+        assert text.set_caret_offset(len(long_prompt))
+        eventually(lambda: text.get_caret_offset() == len(long_prompt), 'long brief caret')
+        (capture / 'trigger').write_text('scroll-tail\n')
+        move_to(editor)
+        tail_image = eventually(lambda: valid_bitmap(capture / 'scroll-tail.bmp')
+            if (capture / 'scroll-tail.bmp').is_file() else None, 'tail compositor capture')
+
+        for source, amount in [('wheel', 8), ('finger', 7.5)]:
+            up = 'scroll-up' if source == 'wheel' else 'finger-up'
+            down = 'scroll-down' if source == 'wheel' else 'finger-down'
+            (capture / 'trigger').write_text(up + '\n')
+            inject(f'{source} {-amount}')
+            eventually(lambda: valid_bitmap(capture / (up + '.bmp')) != tail_image
+                if (capture / (up + '.bmp')).is_file() else None,
+                source + ' changes native viewport pixels')
+            assert Atspi.Text.get_text(text, 0, -1) == long_prompt
+            assert text.get_caret_offset() == len(long_prompt)
+            assert editor.get_state_set().contains(Atspi.StateType.FOCUSED)
+            (capture / 'trigger').write_text(down + '\n')
+            inject(f'{source} {amount}')
+            eventually(lambda: valid_bitmap(capture / (down + '.bmp')) == tail_image
+                if (capture / (down + '.bmp')).is_file() else None,
+                source + ' restores exact tail pixels')
+        inject('finger 0')  # Complete the smooth axis gesture through wl_pointer.axis_stop.
+        editable.set_text_contents(prompt)
+        eventually(has_prompt, 'opening brief restored after scroll')
+        assert text.set_caret_offset(len(prompt))
+        eventually(lambda: text.get_caret_offset() == len(prompt), 'opening brief caret')
         (capture / 'trigger').write_text('open\n')
         action = composer.get_child_at_index(composer.get_child_count() - 1)
         assert action.get_name() == 'Start Session', action.get_name()
@@ -210,7 +245,10 @@ try:
         assert child_input.read_bytes() == b'q', child_input.read_bytes()
         protocol = log_path.read_text()
         assert 'wl_keyboard@' in protocol and '.key(' in protocol, 'no Wayland keyboard delivery'
-        print('PASS installed Wayland Unicode composer, exact project launch and PTY isolation',
+        assert '.axis(' in protocol and '.axis_source(' in protocol and '.axis_stop(' in protocol, (
+            'no compositor scroll/stop delivery')
+        print('PASS installed Wayland Unicode composer, wheel and smooth scrolling, '
+              'exact project launch and PTY isolation',
               flush=True)
 finally:
     if process is not None and process.poll() is None:

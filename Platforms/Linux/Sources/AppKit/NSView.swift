@@ -43,6 +43,32 @@ open class NSResponder: Equatable {
 /// separate measurements.
 @MainActor
 open class NSView: NSResponder, NSLayoutItem {
+    // Key-view edges do not own controls. A pane supplies its semantic loop; traversal skips
+    // disabled, hidden and detached members without walking an externally sized view tree.
+    private weak var precedingKeyView: NSView?
+    open weak var nextKeyView: NSView? {
+        didSet {
+            if oldValue?.precedingKeyView === self { oldValue?.precedingKeyView = nil }
+            nextKeyView?.precedingKeyView = self
+        }
+    }
+    open var previousKeyView: NSView? { precedingKeyView }
+    open var canBecomeKeyView: Bool {
+        window != nil && acceptsFirstResponder && !isHiddenOrHasHiddenAncestor
+    }
+    open var nextValidKeyView: NSView? { validKeyView(forward: true) }
+    open var previousValidKeyView: NSView? { validKeyView(forward: false) }
+
+    private func validKeyView(forward: Bool) -> NSView? {
+        guard let owner = window else { return nil }
+        var candidate = forward ? nextKeyView : previousKeyView
+        var visited: Set<ObjectIdentifier> = []
+        while let view = candidate, visited.insert(ObjectIdentifier(view)).inserted {
+            if view.window === owner, view.canBecomeKeyView { return view }
+            candidate = forward ? view.nextKeyView : view.previousKeyView
+        }
+        return nil
+    }
 
     public struct AutoresizingMask: OptionSet, Sendable {
         public let rawValue: UInt
@@ -80,6 +106,7 @@ open class NSView: NSResponder, NSLayoutItem {
             layer?.frame = NSRect(origin: .zero, size: frame.size)
             let widthDelta = frame.width - oldValue.width
             let heightDelta = frame.height - oldValue.height
+            if self === window?.contentView { window?.contentHeightDidChange(by: heightDelta) }
             if widthDelta != 0 || heightDelta != 0 {
                 for child in subviews {
                     var resized = child.frame
@@ -101,7 +128,8 @@ open class NSView: NSResponder, NSLayoutItem {
     /// and, on a real invalidation loop, never settle.
     func setLaidOutFrame(_ rect: NSRect) {
         if frame != rect {
-            frame = rect
+            frame.origin = rect.origin
+            setFrameSize(rect.size)
             needsLayout = true
         }
     }
@@ -164,6 +192,10 @@ open class NSView: NSResponder, NSLayoutItem {
     open var layer: CALayer?
     open var wantsUpdateLayer: Bool { false }
     private var appliedSurface: (fill: NSColor, radius: CGFloat, border: NSColor?)?
+
+    /// The host's ground-resolution policy can inspect the same retained fill that is drawn.
+    /// Application palette and ancestor composition remain outside the AppKit shim.
+    public var recordedSurfaceFill: NSColor? { appliedSurface?.fill ?? layer?.backgroundColor }
 
     /// Layer-backed controls retain their resolved surface recipe. The Linux raster tree paints
     /// that recipe before the control's own drawing and children, just as AppKit's backing layer
@@ -509,6 +541,9 @@ open class NSView: NSResponder, NSLayoutItem {
     /// Walks the tree the way AppKit does for a layer-free view: the view's own `draw(_:)`, then
     /// its subviews in order, each under a translated origin, a clipped bounds, and its own alpha.
     public func render(in context: NSGraphicsContext) {
+        defer {
+            if self === window?.contentView { window?.refreshCursorIfNeeded() }
+        }
         guard !isHidden, alphaValue > 0 else { return }
         effectiveAppearance.performAsCurrentDrawingAppearance {
             _ = layoutIslandIfNeeded()
@@ -533,6 +568,10 @@ open class NSView: NSResponder, NSLayoutItem {
             NSBezierPath(rect: bounds).addClip()
 
             layout()
+            if let background = layer?.backgroundColor {
+                background.setFill()
+                NSBezierPath(rect: bounds).fill()
+            }
             if let appliedSurface {
                 let borderWidth: CGFloat = 1
                 let rect = appliedSurface.border == nil ? bounds
@@ -802,6 +841,7 @@ public enum NSAccessibility {
         case staticText
         case textArea
         case button
+        case table
         case group
         case menu
         case menuItem

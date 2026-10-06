@@ -4880,3 +4880,492 @@ named `CODEX_HOME`. I inspected `out/composer-account/composer-account.png` from
 non-root installed `.deb` suite also passed the composer-account smoke. I inspected its
 `out/bundle-smoke/run.UKrYwWt5/restart-out/composer-account/composer-account.png` from the
 installed product shell.
+
+## 161. Native wheel input reaches the production prompt's scroll viewport
+
+The SDL bridge discarded every wheel event over the idle right pane, including its New Session
+composer. A new real-window regression reproduced this with a 40-line Unicode brief: the editor
+pixels stayed unchanged after upward wheel input. The bridge now delivers that event through
+the retained AppKit window's hit testing and responder chain to the existing scroll owner.
+Both fractional SDL notch axes survive the boundary, FLIPPED direction is normalized, and the
+event retains its own pointer position. Invalid non-finite deltas are refused. Scrolling leaves
+keyboard focus, selection and draft text intact; later typing reveals the caret again.
+
+The Linux text renderer also computes its visible cached line range before drawing. The previous
+loop examined every wrapped line to discover that range. Preparation remains document-sized;
+warm drawing visits only the viewport. Three alternating Release measurements of 170 and 1,700
+lines found no material latency improvement. The workload, numbers and limitations are in
+`docs/architecture/performance.md` under Linux prompt viewport drawing.
+
+This reuses the unchanged production `PromptTextView` within the existing composer surface.
+The Linux host retains project/account identity, prompt admission, persistence and launch;
+the shared Design editor retains presentation and text interaction. It adds no extension API.
+
+Verification on 2026-10-05: the Release editor fixture, strict native C pointer contract,
+source X11 composer journey, 11 runner contracts, and theme-boundary and main-actor-latency
+checks passed. Build/core contracts passed, and the rebuilt non-root installed package's complete
+runtime suite passed on rerun, including its composer wheel journey and 5,100-project outline.
+I inspected its real 1120×480 `composer-scroll-up.png` and `composer-scroll-down.png` in
+`out/bundle-smoke/runtime-scroll.j8q0owmb/restart-out/composer/`; returning to the tail reproduced
+the original editor pixels and retained the exact Unicode brief, caret and focus. The package
+SHA-256 is `f3cb72466cd2c056e887e57c5aa306826af9cb469e5c40d1c18cded35f949e82`.
+Installed Weston Unicode editing, exact launch and PTY isolation passed; its inspected capture
+is `out/wayland-smoke.C80opiwE/composer/capture/open.bmp`. Wayland wheel and physical trackpad
+input remain unverified.
+
+The first complete installed-suite attempt stopped on an unavailable second terminal before
+reaching the composer; its original cause was not captured. The same package subsequently
+passed two complete workspace journeys. The workspace test now captures its accessible terminal
+reason and failure screenshot, and enables bounded navigation tracing. This is additional
+failure evidence, not a claimed fix for that intermittent launch refusal.
+
+## 162. Workspace recorder resize signals publish through one loop
+
+The native workspace fixture's child called its JSON publisher directly from `SIGWINCH`.
+A resize between the main publisher's temporary write and rename reentered that publisher,
+consumed the temporary file, and killed the child with `FileNotFoundError`. A deterministic
+POSIX-PTY regression failed on the old recorder on both macOS and Ubuntu. The preserved unsafe
+recorder also reproduced an exited second child in the installed native workspace.
+
+Signals now wake a pipe; the child's one input loop publishes state and mouse-mode changes.
+The same opt-in `THREADING_WORKSPACE_RESIZE_INTERLEAVING=Workspace02` probe passes the complete
+installed workspace journey with the corrected recorder. Its evidence is
+`out/workspace-signal.XmYZaYpO`; the negative native run is
+`out/workspace-signal-before.rBYn9bNC`. The 12 local runner/recorder contracts and the focused
+Ubuntu recorder regression pass. This fixes a proven fixture race. The earlier unavailable-pane
+failure remains a separate, unconfirmed cause; it is not relabelled as this child exit.
+
+## 163. Composer controls participate in the shim key-view loop
+
+The composer now declares an explicit AppKit key-view loop through its two unchanged production
+`ChipView`s, `PromptTextView` and `ThemedButton`. The shim's weak next/previous edges skip disabled,
+hidden and detached views and terminate an ineligible cycle. Tab and Shift+Tab traverse the loop;
+Space/Return opens a focused choice, Escape restores that control, and Home/End/Page keys navigate
+the bounded menu. AT-SPI focus follows the retained first responder rather than assuming every
+non-editor focus belongs to Submit. The native bridge keeps composer functional keys separate
+from text/IME enablement and preserves command release ownership across a session launch.
+IME-owned releases have their own state, so ordinary composer keys cannot be mistaken for preedit.
+
+The same keyboard route handles line/document boundaries and page movement in the text shim.
+Return's native carriage-return character becomes a newline. Caret hit testing chooses the
+nearest grapheme boundary, and vertical movement retains its column through short lines. These
+paths use cached visual lines; the four-control loop and at-most-six menu rows remain bounded.
+The host still owns project/account choice, input authority, admission, persistence and launch;
+this adds no extension contract or fork of the production Design components.
+
+The compact form fits the supported 640×180 window with a readable editor and all controls.
+Its primary title becomes **Start**, while the accessible action remains **Start Session**.
+The resize journey also exposed a stale-frame refusal: SDL can resize before Swift consumes the
+size event, while a preceding key still needs painting. The placeholder now uses the same retained,
+cropped frame path as other panes until the new layout is ready. It does not stretch text or abort
+the window over that normal ordering.
+
+Verification on 2026-10-06: editor/key-loop/navigation fixtures, strict C input/resize contracts,
+the source X11 composer journey, theme and latency boundaries, and real IBus Pinyin preedit,
+Escape cancellation and `你好` commit passed. Inspected native focus and 640×180 captures are in
+`out/composer-focus.89o1e9lF`. The rebuilt non-root installed composer journey also passed;
+the complete installed runtime suite passed, including 5,100-project navigation, terminal
+restoration and desktop entry. Its inspected focused-chip and compact **Start** captures are in
+`out/bundle-smoke/runtime-focus.oeqwo2jw/restart-out/composer/`. The package SHA-256 is
+`116342912d569adc61b49cadc95e47215e00031f81e0135fccea43284744e08b`.
+The installed Weston journey also verifies compositor wheel and smooth finger axis/stop delivery,
+unchanged Unicode brief/caret/focus, exact return pixels and exact-project launch. Its evidence is
+`out/wayland-focus.2e4kb39j`. Physical trackpad hardware remains unverified.
+
+## 164. Production Markdown grammar compiles through the font shim
+
+The unchanged `Markdown.swift`, `MarkdownInline.swift` and `AgentAuthoredURLPolicy.swift` now
+compile in `MarkdownHarness` through the AppKit shim. The first compile exposed missing font
+trait conversion and link keys. `NSFontManager` implements the measured bold/italic subset,
+retaining the other trait, family role and point size; descriptor resizing retains those traits.
+Plain label shaping, attributed spans and font metrics all pass italic to Pango rather than
+accepting the request and drawing upright text. Unsupported conversions still refuse explicitly.
+
+Comparing normalized attributed blocks against macOS exposed two further faults. The shim's
+Right and Center alignment raw values were swapped. Fonts also lacked value equality, so
+literal scanner tokens remained separate runs and could exhaust the 64-span drawing budget.
+The font now supplies Swift `Hashable`/`Equatable` values; 170 repetitions of an intraword
+identifier merge to one run without changing the text. This uses corelibs Foundation's
+[Hashable value-box equality](https://github.com/swiftlang/swift-corelibs-foundation/blob/main/Sources/Foundation/Bridging.swift),
+not an Objective-C object adapter. Raster and source-byte budgets remain unchanged.
+
+On 2026-10-06, eight complete grammar snapshots match macOS AppKit: block splitting, headings,
+quotes, lists, tables, Unicode, nested bold/italic/code, safe web-link metadata and inert non-web
+labels. Both platforms also verify the nesting ceiling and equivalent-run regression. Inspected
+1×/2× renders are in `out/markdown-{linux,macos}/`; the Pango and Apple font faces differ, so this
+is semantic and visual compatibility evidence rather than a pixel-identity claim. Strict C
+checks, the existing label/editor fixtures and 12 local runner contracts pass. The source native
+composer journey passes at `out/markdown-composer.Rprjd5PY`.
+
+The ordinary `window-smoke.sh` runs this grammar fixture. It does not mount the full
+`MarkdownView` or a conversation screen. Selectable labels, complete paragraph/document paging,
+transcript integration and Linux web-link activation remain required before that claim is valid.
+
+The rebuilt Ubuntu arm64 package passes the complete installed runtime suite without Swift,
+including the composer, 5,100-project outline, 1,024-terminal stress, terminal restoration,
+live-child reinstall and desktop entry. Evidence is
+`out/bundle-smoke/runtime-markdown.vo2dymn4`; the installed composer captures were inspected.
+The package SHA-256 is `e5124b42a3eb4153d6c01de5d2980593f28b92c84fd847ecbadba36e4251630d`.
+Physical Linux input remains unverified; the original intermittent unavailable-terminal failure
+from §162 remains unexplained despite the later passing workspace journeys.
+
+## 165. The shared document renderer reaches the native Linux window
+
+`MarkdownView` now compiles in the native preview with its production paragraph, list, code,
+quote, table and pager implementation. Only Objective-C action wiring has a Linux closure branch.
+The document table was extracted from `ThemedTables.swift` into `ThemedDocumentTableView.swift`;
+the extracted implementation is byte-identical. The preview links both files through source
+symlinks rather than maintaining Linux copies of the renderer.
+
+Selectable labels retain one bounded Pango layout for grapheme hit testing. Keyboard and pointer
+selection preserve Unicode; selected text keeps its font/code/link styling and copies through an
+explicit native clipboard provider. The label remains read-only. Its existing 4096-byte,
+64-style and eight-line drawing limits still apply, so this does not prove complete rendering of
+an arbitrarily long individual paragraph or code block.
+
+The installed narrow-window capture exposed a separate scale bug: the old 128-device-pixel
+measurement cap clipped the final line of an ordinary paragraph at 2×. Selectable-label metrics
+now cover the bounded eight-line layout, and drawing uses visible tiles of at most 2048×128
+pixels. An eight-line Unicode regression checks the last line's ink at 2×; its rendered capture
+was inspected. Existing nonselectable label measurement and raster limits remain unchanged.
+
+The assembled view exposed geometry the leaf fixtures could not: wrapping labels needed their
+settled width before height measurement, scroll-view viewports were being pinned at their old
+zero-sized frames, and Auto Layout documents floated at root coordinates. The shim now measures
+wrapping in bounded follow-up passes, constrains the viewport to its scroll owner, and gives the
+clip owner its document origin. Frame application calls subclass size hooks, so the shared table
+reflows on resize. Wheel direction respects flipped and unflipped documents.
+
+The table's new changed-height API updates an indexed prefix sum rather than rebuilding every
+following offset. The 1,000/10,000-row fixture checks exact boundaries, one provider height read
+per changed row and a bounded recycled viewport. One thousand changes took 8.24/3.65 ms in the
+optimized fixture under shared-machine load; these are scope checks, not a before/after speedup.
+
+The native optimized document journey passes at `out/document-ui-release.2dD5XcQF`: exact Unicode
+copy, read-only keys, code, live light/dark appearance, resize and bounded document paging.
+Open, selected, dark, narrow and last-page captures were inspected. Initial presentation took
+1.95 seconds. The Debug general solver took over a minute on this same bounded page; optimized
+first-paint latency and larger nested blocks remain performance work, rather than being hidden by
+reducing the production page budget.
+
+Mac `native-chat-showcase` builds and renders successfully under System, Cyberpunk and Swiss
+Minimalist. Its report is `.build/ui-evidence-reports/20261006-002212-93268/report/`. Forty-eight
+captures have no approved baseline; four existing references differ in the composer model label
+(`gpt-6-sol` versus `gpt-6.1-sol`). No baselines were changed, and exact regression approval is
+not claimed. The renderer remains a diagnostic in Linux: native conversation transport, timeline
+integration, complete long-label viewports and web-link actions are still open.
+
+The complete Swift-free, non-root installed runtime suite passes at
+`out/bundle-smoke/runtime-document.wgltoi_u`, including the document journey, 5,100-project
+outline, terminal restoration, live-child reinstall and desktop entry. This suite used package
+SHA-256 `647b4021272287ed9af09ffdc4c57e02f5f02c73057e52f6274fc5f889834dbd`, before the final
+selectable-label tile correction above.
+
+The final rebuilt package repeats the document journey as a non-root user in the Swift-free
+Ubuntu container at `out/document-installed-final.atB5oV0f`. Its narrow and dark captures were
+inspected: the previously clipped final paragraph line is visible. First presentation took
+2.366 seconds. The final package SHA-256 is
+`34cbc8a737ae7e4b8247bab0c050b040034b65e6e5b86e9e21170b30fdd5144d`.
+The complete runtime suite was not repeated for this final selectable-label-only correction;
+the targeted 2× render regression, strict C checks and installed document journey passed.
+
+## 166. Pointer claims reach the native cursor
+
+`NSCursor.set()` previously changed only a Swift value. The Linux host now installs a cursor
+provider for its native window's lifetime, mapping the shim's six semantic shapes to SDL system
+cursors. The native window lazily retains at most six objects; repeated requests reuse those
+objects, and teardown restores SDL's default before freeing them. The TextKit editor now declares
+its I-beam through the same cursor-rectangle mechanism as selectable document labels.
+
+Moving a view under a stationary pointer can invalidate its claim without producing an input
+event. Cursor invalidation now coalesces until the content root has rendered, resolving once
+against settled geometry. The last physical pointer event determines which shim pane owns that
+refresh, so repainting another pane cannot overwrite the cursor.
+
+Window-height changes also rebase the last pointer location from its old bottom-origin window
+coordinates. A native regression leaves the physical pointer in a paragraph gap, narrows the
+window until the heading covers that point, then restores the size. It fails against the earlier
+packaged executable (`out/document-cursor-height-reference.E9V0QPs7`) and passes after rebasing
+(`out/document-cursor-height.f3X3PXuw`), with the actual X server cursor observed at each step.
+
+The strict native contract checks all six shapes, 1,000 repeated selections, object reuse and
+invalid-request isolation. The Markdown fixture checks a label moving away from a stationary
+pointer and separate pane ownership. Source X11 document and composer journeys pass at
+`out/document-cursor.uNzfT9FJ` and `out/composer-cursor.3lDgz3uw`. Their independently captured
+XFixes arrow and I-beam images were inspected. Physical pointer hardware remains unverified;
+terminal-content cursor routing is still incomplete. Native conversation
+transport and controller integration remain separate required work.
+
+The complete Swift-free, non-root installed runtime suite passes at
+`out/bundle-smoke/runtime-cursor.62UvxBNc`, including the native cursor document/composer checks,
+5,100-project and 1,024-terminal stress, terminal restoration, live reinstall and desktop entry.
+This used SHA-256 `d144f507d524e07445db7dcc3aa4683a50655a4a677026af78413b89fc4c910a`, before
+the final height-rebasing and explicit default-cursor teardown corrections.
+
+The final rebuilt package repeats the document and composer checks as a non-root user without
+Swift at `out/cursor-installed-final.myiR4fBq`, including the stationary-resize cursor regression.
+Its native cursor images were inspected; first document presentation took 2.563 seconds under
+shared-machine load. The installed Weston composer journey passes at
+`out/wayland-smoke.T1SjZVNR`; its protocol trace contains actual `wl_pointer.set_cursor` updates
+and no host cursor-provider failure. This is compositor software evidence, with physical hardware
+still unverified. The complete suite was not repeated for the final two corrections; the strict
+C contract and targeted final-package journeys passed. The final package SHA-256 is
+`0b6bfcc7682cc86e5459bcccf9b9721fc4f1ab863ee10d91337703c0fd572e81`.
+
+## 167. The production conversation reducer compiles on Linux
+
+`CoreSlice` now includes the exact production `ConversationTimeline`, `StreamEvent`, run-progress,
+tool-summary/outcome, diff and chart value models. NativeDiffCore is pinned to the same revision
+as the Xcode resolution (`363c6197d8e334fa0aaf30550fb0a0bcac540e71`). PermissionRequest and the
+shared diff aliases were extracted byte-identically into Foundation files. The reducer's unchanged
+20,000-character tool-result budget now belongs to `ConversationTimelineDefaults`.
+
+Chart projection remains a host decision: the app's existing initializer supplies its exact MCP
+registry decoder. The portable initializer accepts that projection explicitly, keeping the
+application's admitted tool catalogue and execution/permission machinery outside the Foundation
+reducer. The chart decoder was extracted byte-identically; the Linux document diagnostic supplies
+no chart projection and does not advertise chart or native-session support.
+
+The Linux contract exposed a shared live-wire bug: decoding an entire typed content array with
+`try?` lost valid assistant text and tool calls when one sibling was null or another non-object.
+`WireList.decode` now obtains each element decoder before trying its expected type, preserving
+order and reporting skipped shapes once by structural counts. Assistant blocks and tool results
+use this path. Malformed JSON still reports a malformed envelope.
+
+The same contract source runs in Linux CoreSliceHarness and Mac XCTest. It checks boolean/integer
+identity and overflow, streaming replacement, stable tool/diff/result identity, interrupted
+settlement and readable provider siblings. Generated 1,000/10,000-turn histories each return one
+changed-row receipt and one streaming receipt; this verifies projection scope, not a latency bound.
+The complete Linux core harness and 71 focused Mac tests pass.
+An additional 39-test Mac chart/factory selection passes, including both raw and qualified chart
+tool names through the app's preserved registry projection.
+
+The native document diagnostic now prepares its provider envelope and timeline on one bounded
+worker, then gives the authoritative assistant message to the shared MarkdownView. Its source
+X11 journey passes at `out/conversation-document.RoRmdNnJ`; normal and narrow captures were
+inspected. First presentation took 2.229 seconds. This is a wire → model → document compatibility
+path. The production transcript table, row factories, session transports and real conversation
+controller remain required before native Linux conversation integration is complete.
+
+The first installed suite stopped in a folder-import overlap fixture while waiting two seconds
+for GTK chrome inside a deliberately held four-second hello. The fixture now releases that hello
+once the owned chooser process establishes overlap, then waits separately for visible chrome.
+The shipping hello deadline is unchanged. A test-only three-second GTK native-dialog presentation
+delay reproduces the old failure at `out/catalogue-gtk-reference.29ugvwb6`; its trace confirms the
+delay ran. The delay module is included in the source and installed regression runners.
+The corrected non-root installed overlap fixture passes with four confirmed delayed presentations
+at `out/catalogue-gtk-delay.Ayq809r0`, retaining the exact durable counts and selected identity.
+
+The rebuilt package passes the complete Swift-free, non-root installed runtime suite at
+`out/bundle-smoke/runtime-conversation-final.X8ObO1Qu`, including the confirmed GTK delay,
+production wire/timeline/document journey, composer, large outline, terminal restoration,
+live-child reinstall and desktop entry. Its document capture was inspected. Installed first
+presentation took 4.339 seconds, so first-paint latency remains unresolved. The package SHA-256 is
+`5fa719d77bd1a4aebd745a9bf5bdd958146cde9fd4aaaa8bcad44d72431824ee`.
+Theme and main-actor boundaries, strict C delay-module compilation, shell syntax, all 60 source
+copy checks and 12 local runner contracts pass. No native conversation-session completion or
+physical Linux hardware claim is made.
+
+## 168. Shared conversation cells use viewport-owned automatic heights
+
+The production `ConversationVirtualRowHost` moved from the transcript-table feature file into
+`UI/Design/`. Its implementation is unchanged except that the identical 999 column-width priority
+now belongs to `ConversationRowDefaults`; the existing conversation defaults forward to it.
+Linux links the shared file directly. The UI-structure ratchet decreases with this ownership move.
+
+The table shim now supplies automatic row heights, mounted-row enumeration and cell reuse cleanup.
+Offscreen rows retain estimates; only invalid visible cells ask their shared host for fitting size.
+Measured changes update the indexed row geometry, and newly revealed rows settle through the same
+viewport reconciliation. Removed cells release content before entering the bounded reuse pool.
+An explicit changed-row reload invalidates its measurement without rebuilding history.
+
+Automatic navigation now lands at a requested row's estimated start. Bottom-aligning an estimate
+could measure a preceding partial row, change its height and push the requested row out of view.
+The 1,000/10,000-row fixture exposed this and now checks the requested row remains materialized.
+Both sizes use three shared hosts in a 120-point viewport, with no manual-height delegate reads;
+width changes reflow visible content, offscreen invalidation creates no view, and replacement
+content drops the old height. Existing indexed-height and outline fixtures also pass.
+
+The native diagnostic mounts the production assistant block renderer inside these shared hosts.
+Cheap source-block planning is now explicitly nonisolated and runs on the existing worker;
+font/style materialization stays on the UI actor. The X11 journey passes at
+`out/automatic-rows-native.RCzoUplB`: exact Unicode clipboard, width reflow, bounded cells, last
+block and return. Its normal, narrow and tail captures were inspected. First presentation took 0.498 seconds under
+shared-machine load; this is a different viewport materialization path, not a matched speedup or
+proof of full conversation-controller latency. Native session transports, row kinds beyond
+assistant Markdown and the production transcript controller remain open.
+
+The final package passes the complete Swift-free, non-root installed suite at
+`out/bundle-smoke/runtime-automatic-rows.P9c7oEqF`, including both document paths, delayed GTK
+admission, workspace/composer, large outline, terminal restoration, reinstall and desktop entry.
+Installed normal/narrow/tail automatic-row captures were inspected. First presentation took
+0.374 seconds for automatic rows and 1.900 seconds for the whole-page diagnostic in this run;
+these are observations of different workloads, not a matched performance comparison.
+The package SHA-256 is `c8a11823b92382f86d5a8d84dfef24c0c1d7b0c98462742d4645639538f852dc`.
+
+Mac conversation render/rhythm tests pass (38 tests, five skipped). The canonical native-chat
+showcase run captures all 52 variants but exits 3: 48 are unbaselined and four differ. Inspection
+of all four composer differences shows the model label changing from `gpt-6-sol` to
+`gpt-6.1-sol`, its resulting control offsets, and the animated activity indicator. Decoded pixels
+match the preceding showcase run outside that indicator's 36×36 region; the transcript area
+matches the accepted images. No baseline was changed, and exact visual regression acceptance
+is still pending. The report is `.build/ui-evidence-reports/20261006-023215-36704/report/`.
+
+## 169. Incremental transcript table mutations preserve the viewport
+
+The shim now implements the production transcript's `insertRows(at:withAnimation:)` and
+`removeRows(at:withAnimation:)` calls. Surviving cells and automatic-height measurements move
+with their rows. Removed mounted cells release content, selection follows retained rows, and
+inserting/removing above the viewport restores the reading anchor. This covers the transcript's
+empty animation options; animated row transitions remain unsupported.
+
+Tail appends extend the indexed heights and identity map only for new rows. Tail removal drops
+the suffix directly. Middle/disjoint edits remap cheap O(history) metadata once without asking
+every row for a height or reconstructing surviving views. This does not claim constant-cost
+middle insertion. The 1,000/10,000-row contracts pass across manual/automatic heights and
+positional/stable identities, with 40 successive appends, disjoint edits and selected-row removal.
+The existing automatic-height and large-outline contracts pass too; the bundle build gate now
+runs both harnesses against its shipping build configuration.
+
+The native diagnostic checks prefix insertion/removal and offscreen tail append/removal through
+SDL key events at `out/structural-rows-native.v315Kv85`. Its inserted capture was inspected, and
+the middle/inserted viewport decoded pixels are identical. Cell configurations stay unchanged;
+live contents equal mounted cells. First presentation took 0.379 seconds, an observation rather
+than a matched performance claim. The first native attempt used repaint serials as page-action
+receipts and observed an earlier frame; the runner now waits for an explicit navigation-action
+counter. This fixes test synchronization without masking rendered differences.
+
+The complete conversation table/controller and session transports remain open: these APIs remove
+another prerequisite, but the diagnostic still presents assistant Markdown blocks only.
+
+A direct typecheck of the exact pinned NativeDiffAppKit source against the built shim identifies
+the next diff-rendering prerequisites: six system color names and `CALayer.backgroundColor`.
+The backing layer currently does not participate in `NSView.render`, so merely storing a color
+would leave diff-row fills missing. That needs rendered layer integration before tool/diff rows
+can be claimed. This probe does not claim that the app's `DiffView` adapter is already compiled.
+
+The rebuilt package passes the complete Swift-free, non-root installed runtime suite at
+`out/bundle-smoke/runtime-structural-rows.Qz1fl9aB`, including delayed GTK admission, workspace,
+composer, both document journeys, large outline, terminal restoration, live-child reinstall and
+desktop entry. Installed inserted/narrow/tail captures were inspected; middle/inserted decoded
+RGBA buffers match exactly. The insertion changes 66 rows to 67 while retaining the same 12 live
+cells and 33 cumulative configurations. Installed first presentation took 0.316 seconds for
+automatic rows and 1.843 seconds for the whole-page diagnostic; these are different workloads.
+The package SHA-256 is `ecdc19aa1a52dbe63bd02192c1afdab50bfc2d08392c6c96da276dc5cf435976`.
+Shipping-configuration table/outline contracts, all production-source copy checks, theme and
+main-actor boundaries, shell syntax and 12 local runner/worker contracts pass. No Mac source or
+baseline changed in this step; the preceding showcase's pending baseline review remains pending.
+
+## 170. Native diff drawing exposes and fixes priority precedence
+
+The exact pinned NativeDiffAppKit renderer now builds in a distinct `LinuxNativeDiffAppKit`
+target with an explicit dependency on the shim. The executable aliases its original module name;
+the renderer body is unmodified. `vendor-diff.sh` verifies its source/license hashes and matching
+NativeDiffKit resolution. The preview package includes the MIT license.
+
+The missing six system color names now resolve by appearance from sRGB values sampled from
+Mac AppKit 26.5 (25F71). These are platform fallbacks, not app palette policy. Backing-layer
+backgrounds draw before view contents under the view's existing bounds clip and alpha. The
+clipping fixture covers nested fills, ordering, inherited clipping, alpha, layer copying and
+removal in both coordinate orientations. This is background support, not a complete Core
+Animation compositor or animation implementation.
+
+The existing diff theme adapter moved into `UI/Design/`; its body is unchanged, with visibility
+made internal so other files can use it. ThemeContrast moved byte-identically into a standalone
+color helper, and the DesignKit shared-source link follows that extraction. Linux links these
+files plus exact `DiffInk`, `PerceptualColor` and `NSColor+Terminal` sources. Its existing environment
+adapter supplies checked theme roles, diagnostic type scale and default contrast preference.
+The focused Mac palette/OKLCH/theme/snapshot selection passes all 29 tests.
+
+An Edit envelope and successful result pass through the production parser/timeline on a worker.
+The native diagnostic mounts its authoritative eight-line diff inside the shared conversation
+host. Initial capture showed a too-narrow diff: its text field was 455 pixels wide in a pane that
+owed it 644. The same host/renderer on real Mac AppKit uses its full 344-point content width.
+The shim's objective treated numeric priorities as proportional weights, allowing many weak
+hugging constraints to outweigh one stronger width constraint.
+
+Simplex now compares distinct priority tiers lexicographically, preserving unit-cost error
+minimization within each tier. Artificial variables have their own highest tier, replacing a
+finite large weight; retained-basis dual updates compare vector ratios too. The portable fixture
+matches Mac AppKit for 1/8/32 weak constraints against priority 251, warm shrink/restore and a
+required bound. Existing layout, clipping, indexed/automatic/structural table and large-outline
+contracts pass. Earlier weighted-priority explanations describe the original implementation,
+not the repaired priority contract.
+
+Rendered inspection also found Pango adding synthetic hyphens during character wrapping.
+Plain/attributed layouts now disable insertion, matching AppKit's default zero hyphenation factor.
+The focused bridge contract equates wrapping with authored three-character line breaks. Removing
+the correction reproduces the failure: 75 pixels of height instead of 60 for both text paths.
+
+The final source native journey passes at `out/native-diff-final.liOCQdxi`: exact row-wash pixels,
+Unicode copy, read-only text, live theme refresh, full pane width and narrow reflow. Its normal and
+narrow captures were inspected. First presentation took 0.382 seconds; no matched latency
+improvement is claimed. The new priority, layer and paragraph contracts run in the bundle build
+gate, and the installed runtime runner includes this diff journey.
+
+The canonical Mac native-chat showcase captures all 52 variants and exits 3 for 48 unbaselined
+and four changed images. Compared with the preceding run, decoded differences are confined to
+the animated 36×36 activity indicator; transcript pixels match. The accepted-image differences
+still include the model-label change and its control offsets. No baselines were changed. The
+report is `.build/ui-evidence-reports/20261006-032835-23841/report/`.
+
+Full ToolCallView/app DiffView/controller integration, transport-backed conversations and
+large-diff tokenization/materialization remain open. The bounded diagnostic does not establish
+those paths or a complete large-transcript latency bound.
+
+The final package passes the complete Swift-free, non-root installed runtime suite at
+`out/bundle-smoke/runtime-native-diff.nPCqTDG6`, including all three document/diff journeys,
+workspace/composer, GTK delay, large outline, terminal restoration, reinstall and desktop entry.
+Installed light/dark/narrow diff captures were inspected. The Unicode field is 644 pixels wide
+normally and 364 when narrow, its height reflows from 83 to 137 pixels, and only one row host is
+constructed. Installed first presentation took 0.317 seconds for the diff and 0.313 seconds for
+automatic Markdown rows. The whole-page Markdown diagnostic took 4.292 seconds, so its cold
+layout remains unresolved; none of these different workloads establishes a speedup.
+The package SHA-256 is `e26c12ef6b672fc26c96613c6e2bd078455089b4d73bd9b26251bdabb515a90c`.
+Source-copy/license verification, shipping priority/layer contracts, paragraph/Markdown contracts,
+theme/main-actor boundaries, shell syntax and 12 local runner/worker contracts pass.
+
+## 171. Shared views observe production app events on Linux
+
+Shared Design views (`MarkdownView`, `ConversationDiffView`, `PaneHeaderView`, `ThemedControl`
+and `ThemedButton`) observe theme, profile, accessibility and backdrop changes through
+`AppEventObservations`. Linux previously linked a no-op stand-in, so none of those observers
+ran; only views the host explicitly invalidated could follow a theme change. The preview and its
+focused icon/pane/page/subagent fixtures now link the unchanged production `AppEvent.swift`, and
+the four Linux event declarations conform to `AppEvent` with the production notification names.
+
+Linking the real file exposed a corelibs difference. An observer registered with
+`queue: .main` makes `post` add a block to `OperationQueue.main` and wait for it. When the Linux
+main actor already occupies the main dispatch queue, corelibs does not identify that as the
+current operation queue, so a post can wait on the executor that is meant to run it. On Linux the
+shared file now observes without an operation queue: a post already on the main queue delivers
+inline under `MainActor.assumeIsolated`, and a post from anywhere else crosses with
+`DispatchQueue.main.async`. macOS keeps `OperationQueue.main` delivery unchanged.
+
+Asynchronous delivery made a second fault reachable. `removeAll()` removes the tokens, but a
+worker post already queued for main would still have run its handler afterwards. Each
+`AppEventObservations` now advances a generation on `removeAll()`, and every handler checks the
+generation it was registered under, so a retired popover or panel generation cannot receive a
+late event while the owner stays reusable.
+
+`WindowHarness --app-event-contract` checks main and worker delivery, removal, reuse,
+queued-generation cancellation and owner lifetime, including a worker post that must not block
+on the occupied UI executor. It runs in the bundle build gate and the installed runtime suite;
+the runner mock asserts that invocation. `AppEventDeliveryTests` checks the same observable
+contract on macOS.
+
+Verification on 2026-10-06: the Linux contract passes in Debug and in the shipping
+`-c release --static-swift-stdlib -enable-testing` configuration. The macOS Debug app build,
+including the repository boundary lints, succeeds, and seven focused Mac tests pass
+(`AppEventDeliveryTests`, `ClaudeStreamContentTests`, `PortableConversationContractTests`).
+Release native document, automatic-row and diff journeys pass under `xvfb-run` at
+`out/llk-document_ui`, `out/llk-automatic_rows` and `out/llk-diff_ui`; their first frames took
+4.316, 0.369 and 0.378 seconds. The live dark diff and dark document captures were inspected.
+The same three journeys timed out or missed their selection receipts against a Debug build;
+that configuration is not the one these journeys verify. The complete installed suite was not
+rerun for this step.
+
+The focused `IconButtonHarness`, `SubagentRowHarness`, `PaneHeaderHarness` and
+`PageTitleHarness` targets do not build. Their shared theme boundary has referred to
+`LinuxTheme` since the live light/dark theme step, but those targets link neither that file nor
+its bundled snapshot. This predates the app-event change and is addressed separately.

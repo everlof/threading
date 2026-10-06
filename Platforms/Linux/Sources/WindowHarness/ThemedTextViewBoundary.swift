@@ -15,12 +15,15 @@ extension SelectionSurface {
     }
 }
 
-extension NSView {
-    func resolvedGround() -> NSColor { Design.Surface.ground }
-}
-
 @MainActor
-public class ThemedScrollView: NSScrollView {}
+public class ThemedScrollView: NSScrollView {
+    var forwardsVerticalScroll = false
+    public override func scrollWheel(with event: NSEvent) {
+        if forwardsVerticalScroll, abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX) {
+            superview?.scrollWheel(with: event)
+        } else { super.scrollWheel(with: event) }
+    }
+}
 
 // A field editor can arrive at ThemedTextSelection through the production API. No editable
 // field is mounted yet; this type reserves its explicit well-ground contract for that path.

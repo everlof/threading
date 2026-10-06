@@ -12,6 +12,7 @@ fi
 ./vendor-core.sh --verify
 ./vendor.sh --verify
 ./vendor-marks.sh --verify
+./vendor-diff.sh --verify
 if [[ -n ${THREADING_LINUX_SOURCE_REVISION:-} || -n ${THREADING_LINUX_SOURCE_DIRTY:-} ]]; then
   revision=${THREADING_LINUX_SOURCE_REVISION:-}
   dirty=${THREADING_LINUX_SOURCE_DIRTY:-}
@@ -69,6 +70,8 @@ cp -a "$bin_dir/LinuxAppKitSpike_WindowHarness.resources" "$bundle/bin/"
 install -m 0755 "$bin_dir/LinuxHost" "$bundle/bin/LinuxHost"
 install -m 0755 "$daemon_dir/threading-ptyd" "$bundle/bin/threading-ptyd"
 install -m 0644 BUNDLE_README.md "$bundle/README.md"
+mkdir -p "$bundle/licenses/NativeDiffKit"
+install -m 0644 Sources/LinuxNativeDiffAppKit/LICENSE "$bundle/licenses/NativeDiffKit/LICENSE"
 cat > "$bundle/BUNDLE-MANIFEST" <<EOF
 format=threading-linux-preview-1
 target=ubuntu-24.04-aarch64

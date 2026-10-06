@@ -1,5 +1,5 @@
 {
-  "originHash" : "5f48581d684901d7b7783ed9b047b447949d89e4aea6193fd90e4bd211ec35bb",
+  "originHash" : "ab52fb333ab3e809a778328392baec1917be4e1c15108f3e9e36c15a6ba93103",
   "pins" : [
     {
       "identity" : "h",
@@ -8,6 +8,14 @@
       "state" : {
         "revision" : "aa3626829160917d4378330617971977cbd78f5b",
         "version" : "1.0.1"
+      }
+    },
+    {
+      "identity" : "nativediffkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/everlof/NativeDiffKit.git",
+      "state" : {
+        "revision" : "363c6197d8e334fa0aaf30550fb0a0bcac540e71"
       }
     },
     {

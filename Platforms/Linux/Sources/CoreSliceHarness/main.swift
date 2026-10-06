@@ -84,6 +84,15 @@ func runContracts() throws {
     print("5 project persistence contracts passed")
 }
 
+if CommandLine.arguments.contains("--conversation-contracts") {
+    do { try runConversationContracts() }
+    catch {
+        FileHandle.standardError.write(Data("FAIL: \(error)\n".utf8))
+        exit(1)
+    }
+    exit(0)
+}
+
 if CommandLine.arguments.contains("--navigation-stress") {
     do {
         try runNavigationStress()
@@ -95,6 +104,7 @@ if CommandLine.arguments.contains("--navigation-stress") {
 }
 
 do {
+    try runConversationContracts()
     try runHostCommandContracts()
     try runHandshakeContracts()
     try runBindingContracts()

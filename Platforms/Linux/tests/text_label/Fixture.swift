@@ -141,7 +141,7 @@ private func measured(_ text: String, scale: CGFloat = 1) -> TATMetrics {
     var metric = TATMetrics(width: 0, height: 0, baseline: 0, glyphs: 0)
     let bytes = Array(text.utf8)
     let success = bytes.withUnsafeBufferPointer {
-        tat_measure($0.baseAddress, Int32($0.count), 0, 0, Double(13 * scale), &metric)
+        tat_measure($0.baseAddress, Int32($0.count), 0, 0, 0, Double(13 * scale), &metric)
     }
     precondition(success == 1)
     return metric
@@ -1205,7 +1205,7 @@ private struct InkPolicy: Decodable {
         var oversized = [UInt8](repeating: 65, count: 4097)
         var rejected = TATMetrics(width: 0, height: 0, baseline: 0, glyphs: 0)
         precondition(oversized.withUnsafeMutableBufferPointer {
-            tat_measure($0.baseAddress, Int32($0.count), 0, 0, 13, &rejected)
+            tat_measure($0.baseAddress, Int32($0.count), 0, 0, 0, 13, &rejected)
         } == 0, "bridge must reject overlong UTF-8")
 
         // Unchanged production ControlRowView lays out two real shaped labels.

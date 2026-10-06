@@ -1,5 +1,6 @@
 import Foundation
 import ThreadingUsage
+import CoreFoundation
 
 // MARK: - Stream Event
 
@@ -858,10 +859,12 @@ private struct ClaudeWireMessage: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: DynamicCodingKey.self)
-        content = (try? container.decode(
-            [ClaudeWireContentBlock].self,
-            forKey: DynamicCodingKey("content")
-        )) ?? []
+        guard var elements = try? container.nestedUnkeyedContainer(forKey: DynamicCodingKey("content")) else {
+            content = []
+            return
+        }
+        content = try WireList.decode(ClaudeWireContentBlock.self, from: &elements,
+            site: WireListSite.claudeStreamContent, log: ThreadingLogger.agent)
     }
 }
 

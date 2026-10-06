@@ -106,7 +106,7 @@ public enum LayoutEngine {
 
     @discardableResult
     public static func layout(_ root: NSView) -> Diagnosis {
-        solve(root, measuring: false).diagnosis
+        solveWithWrapping(root, excluding: []).diagnosis
     }
 
     /// Frame-placed descendants can lay out their own children without joining their parent's
@@ -114,7 +114,18 @@ public enum LayoutEngine {
     /// keeps that branch in the parent's solve.
     static func layoutIsland(_ root: NSView, boundaries: [NSView]) -> Diagnosis {
         let excluded = Set(boundaries.map(ObjectIdentifier.init))
-        return solve(root, measuring: false, excludingDescendantsOf: excluded).diagnosis
+        return solveWithWrapping(root, excluding: excluded).diagnosis
+    }
+
+    private static func solveWithWrapping(_ root: NSView, excluding: Set<ObjectIdentifier>, measuring: Bool = false)
+        -> (diagnosis: Diagnosis, size: NSSize?, wrapChanged: Bool) {
+        var result = solve(root, measuring: measuring, excludingDescendantsOf: excluding)
+        // Width is known only after solving; wrapping labels then contribute their actual
+        // height. This is bounded by the attached layout island, never transcript history.
+        for _ in 0..<3 where result.wrapChanged && result.diagnosis.solved {
+            result = solve(root, measuring: measuring, excludingDescendantsOf: excluding)
+        }
+        return result
     }
 
     static func independentDescendants(of root: NSView) -> [NSView] {
@@ -156,7 +167,7 @@ public enum LayoutEngine {
     /// pass does. This never writes frames into the live tree; a later layout still uses the
     /// actual root frame and its separate warm-start tableau.
     public static func fittingSize(of root: NSView) -> NSSize {
-        solve(root, measuring: true).size ?? .zero
+        solveWithWrapping(root, excluding: [], measuring: true).size ?? .zero
     }
 
     private static func solve(
@@ -164,7 +175,7 @@ public enum LayoutEngine {
         measuring: Bool,
         excludingDescendantsOf boundaries: Set<ObjectIdentifier> = []
     )
-        -> (diagnosis: Diagnosis, size: NSSize?) {
+        -> (diagnosis: Diagnosis, size: NSSize?, wrapChanged: Bool) {
         let started = Date()
 
         var items: [NSLayoutItem] = []
@@ -202,7 +213,7 @@ public enum LayoutEngine {
         }) {
             return (Diagnosis(itemCount: items.count, constraintCount: 0, rowCount: 0,
                               variableCount: 0, solved: true,
-                              seconds: Date().timeIntervalSince(started)), nil)
+                              seconds: Date().timeIntervalSince(started)), nil, false)
         }
 
         let variableCount = items.count * Column.stride
@@ -258,9 +269,8 @@ public enum LayoutEngine {
                 rows.append(Simplex.Row(coefficients: terms, relation: relation, constant: constant))
                 return
             }
-            // A soft constraint is the same row with somewhere to put its failure, and the
-            // objective pays for that failure in proportion to the priority. This is the whole of
-            // what a priority *means*, and it is why a priority cannot be honoured by a sort order.
+            // Errors share an objective tier only at the same priority. The simplex compares
+            // tiers in descending order, so many weak hugs cannot outweigh one pane-width rule.
             var terms = terms
             let weight = Double(priority.rawValue)
             switch relation {
@@ -298,6 +308,21 @@ public enum LayoutEngine {
             priority: measuring ? .fittingSizeCompression : .required)
 
         for item in items {
+#if os(Linux)
+            if item !== root, let view = item as? NSView,
+               !view.translatesAutoresizingMaskIntoConstraints,
+               let clip = view.superview as? NSClipView, clip.documentView === view,
+               indexOf[ObjectIdentifier(clip)] != nil {
+                // NSClipView owns its document's local origin. An Auto Layout document may
+                // derive width/height from its content, but it does not float at root (0,0).
+                for attribute: NSLayoutConstraint.Attribute in [.leading, clip.isFlipped ? .top : .bottom] {
+                    let child = expression(view, attribute)
+                    let parent = expression(clip, attribute)
+                    let terms = child.terms.merging(parent.terms.mapValues { -$0 }, uniquingKeysWith: +)
+                    add(terms, .equal, parent.offset - child.offset, priority: .required)
+                }
+            }
+#endif
             // A view still translating its autoresizing mask keeps the frame it was given. Mixing
             // the two is normal and load-bearing: most of this app's constraint code hangs off a
             // container whose own frame comes from a split view.
@@ -417,6 +442,7 @@ public enum LayoutEngine {
         diagnosis.solved = solution != nil
 
         var fittedSize: NSSize?
+        var wrapChanged = false
         if let solution {
             let values = solution.values
             if measuring {
@@ -433,7 +459,7 @@ public enum LayoutEngine {
                     height: CGFloat(values[base + 5])
                 )
             }
-            for item in items where !measuring && !(item === root) {
+            for item in items where !(item === root) {
                 guard let box = absolute[ObjectIdentifier(item)],
                       let superview = item.layoutSuperview,
                       let container = absolute[ObjectIdentifier(superview)] else { continue }
@@ -447,15 +473,19 @@ public enum LayoutEngine {
                     height: box.height
                 )
                 if let view = item as? NSView, !view.translatesAutoresizingMaskIntoConstraints {
-                    view.setLaidOutFrame(frame)
-                } else if let guide = item as? NSLayoutGuide {
+                    if !measuring { view.setLaidOutFrame(frame) }
+#if os(Linux)
+                    if let field = view as? NSTextField,
+                       field.commitAutomaticLayoutWidth(frame.width) { wrapChanged = true }
+#endif
+                } else if !measuring, let guide = item as? NSLayoutGuide {
                     guide.frame = frame
                 }
             }
         }
 
         diagnosis.seconds = Date().timeIntervalSince(started)
-        return (diagnosis, fittedSize)
+        return (diagnosis, fittedSize, wrapChanged)
     }
 
     /// A frame-driven view's current rectangle, expressed in the solve's root-absolute top-down

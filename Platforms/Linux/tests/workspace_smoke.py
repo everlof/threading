@@ -30,19 +30,26 @@ child = root / 'workspace_child.py'
 # An actual daemon PTY runs a plain bash exec of this recorder. Raw input provides exact
 # evidence that navigation keys never reached either child, rather than relying on shell echo.
 child.write_text(r'''
-import fcntl, json, os, pathlib, signal, struct, sys, termios, tty
+import fcntl, json, os, pathlib, select, signal, struct, sys, termios, tty
 root = pathlib.Path(sys.argv[1])
 name = pathlib.Path.cwd().name
 target = root / (name + '.json')
 received = bytearray()
 mouse = False
+resize_probe = os.environ.get('THREADING_WORKSPACE_RESIZE_INTERLEAVING') == name
+resize_probed = False
 tty.setraw(0)
 def publish(*unused):
+    global resize_probed
     rows, cols, _, _ = struct.unpack('HHHH', fcntl.ioctl(0, termios.TIOCGWINSZ, b'\0' * 8))
     value = {'pid': os.getpid(), 'cwd': os.getcwd(), 'input': received.hex(),
              'rows': rows, 'cols': cols, 'mouse': mouse}
     temporary = target.with_suffix('.tmp')
     temporary.write_text(json.dumps(value))
+    # Opt-in native reproduction of a resize arriving inside the first atomic publication.
+    if resize_probe and not resize_probed:
+        resize_probed = True
+        os.kill(os.getpid(), signal.SIGWINCH)
     temporary.replace(target)
     os.write(1, ('\x1b[2J\x1b[HVISIBLE 界 e\u0301\r\n' + name
                  + '\r\nINPUT ' + received.hex() + '\r\n'
@@ -51,18 +58,30 @@ def toggle_mouse(*unused):
     global mouse
     mouse = not mouse
     os.write(1, b'\x1b[?1002h\x1b[?1006h' if mouse else b'\x1b[?1002l\x1b[?1006l')
-    publish()
-signal.signal(signal.SIGWINCH, publish)
-signal.signal(signal.SIGUSR1, toggle_mouse)
+wake_read, wake_write = os.pipe()
+os.set_blocking(wake_read, False)
+os.set_blocking(wake_write, False)
+signal.set_wakeup_fd(wake_write)
+# A signal may interrupt snapshot write/replace. Queue its byte and let the one main loop
+# publish, rather than reentering the publisher and consuming its temporary file.
+signal.signal(signal.SIGWINCH, lambda *unused: None)
+signal.signal(signal.SIGUSR1, lambda *unused: None)
 publish()
 while True:
-    data = os.read(0, 4096)
-    if not data:
-        break
-    received.extend(data)
+    ready, _, _ = select.select([0, wake_read], [], [])
+    if wake_read in ready:
+        for notification in os.read(wake_read, 4096):
+            if notification == signal.SIGUSR1:
+                toggle_mouse()
+    if 0 in ready:
+        data = os.read(0, 4096)
+        if not data:
+            break
+        received.extend(data)
     publish()
 ''')
-environment = dict(os.environ, HOME=str(home), PROMPT_COMMAND='')
+environment = dict(os.environ, HOME=str(home), PROMPT_COMMAND='',
+                   THREADING_LINUX_NAVIGATION_TRACE='1')
 environment.pop('BASH_ENV', None)
 environment.pop('ENV', None)
 log_path = Path('out/workspace-window.log')
@@ -517,6 +536,14 @@ with log_path.open('w+') as log:
               'offset text/selection, gesture ownership, input during blocked selection and real PTY resize',
               flush=True)
     except BaseException:
+        # The window log records a failure frame without its user-visible cause. Capture the
+        # terminal's accessible reason before teardown removes the only evidence of refusal.
+        try:
+            _, _, terminal = panes()
+            print('Native terminal: ' + terminal.get_name(), file=sys.stderr)
+            screenshot('failure')
+        except Exception as error:
+            print(f'workspace failure evidence unavailable: {error}', file=sys.stderr)
         print(tail(), file=sys.stderr)
         raise
     finally:

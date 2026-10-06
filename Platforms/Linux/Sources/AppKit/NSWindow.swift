@@ -5,6 +5,7 @@ import Foundation
 /// lifecycle and first-responder ownership. Title bars and window ordering remain native-host work.
 @MainActor
 public final class NSWindow: NSResponder {
+    public var backgroundColor: NSColor = .windowBackgroundColor
     private struct CursorRect {
         let rect: NSRect
         let cursor: NSCursor
@@ -27,7 +28,10 @@ public final class NSWindow: NSResponder {
     // detached registrations are dropped when the tree moves or the pointer is resolved.
     private var cursorRegistrations: [ObjectIdentifier: CursorRegistration] = [:]
     private var pointerLocation: NSPoint = .zero
+    private static weak var pointerWindow: NSWindow?
+    private var needsCursorUpdate = true
     public var firstResponder: NSResponder? { focusedResponder ?? self }
+    public weak var initialFirstResponder: NSView?
     public var isKeyWindow = true
     public var screenOrigin: NSPoint = .zero
     public var mouseLocationOutsideOfEventStream: NSPoint { pointerLocation }
@@ -61,6 +65,19 @@ public final class NSWindow: NSResponder {
             focusedResponder = nil
         }
         return true
+    }
+
+    public func selectNextKeyView(_ sender: Any?) { selectAdjacentKeyView(forward: true) }
+    public func selectPreviousKeyView(_ sender: Any?) { selectAdjacentKeyView(forward: false) }
+
+    private func selectAdjacentKeyView(forward: Bool) {
+        if let view = firstResponder as? NSView {
+            let candidate = forward ? view.nextValidKeyView : view.previousValidKeyView
+            if let candidate { _ = makeFirstResponder(candidate) }
+        } else if let initialFirstResponder, initialFirstResponder.window === self,
+                  initialFirstResponder.canBecomeKeyView {
+            _ = makeFirstResponder(initialFirstResponder)
+        }
     }
 
     /// AppKit clears focus when its view leaves the window, without a resign callback. Keep
@@ -129,9 +146,11 @@ public final class NSWindow: NSResponder {
     public func dispatch(_ event: NSEvent) -> NSEvent? {
         event.attach(to: self)
         if event.type.carriesPointer {
+            Self.pointerWindow = self
             pointerLocation = event.locationInWindow
             root?.pointerMoved(toWindowPoint: pointerLocation, event: event)
             cursor(atWindowPoint: pointerLocation).set()
+            needsCursorUpdate = false
         }
         return NSEvent.dispatchLocalMonitors(event)
     }
@@ -206,16 +225,36 @@ public final class NSWindow: NSResponder {
         let registration = cursorRegistrations[key] ?? CursorRegistration(view: view)
         registration.rects.append(CursorRect(rect: rect, cursor: cursor))
         cursorRegistrations[key] = registration
+        needsCursorUpdate = true
     }
 
     public func invalidateCursorRects(for view: NSView) {
+        needsCursorUpdate = true
         cursorRegistrations.removeValue(forKey: ObjectIdentifier(view))
         guard view.window === self else { return }
         view.resetCursorRects()
     }
 
     public func discardCursorRects(for view: NSView) {
+        needsCursorUpdate = true
         cursorRegistrations.removeValue(forKey: ObjectIdentifier(view))
+    }
+
+    /// Geometry can move a claim under a stationary pointer. Resolve once after the content
+    /// root renders, rather than once for every descendant frame or cursor-rect invalidation.
+    /// Separate shim pane owners must not overwrite the owner of the last physical event.
+    func refreshCursorIfNeeded() {
+        guard needsCursorUpdate, Self.pointerWindow === self else { return }
+        cursor(atWindowPoint: pointerLocation).set()
+        needsCursorUpdate = false
+    }
+
+    /// Native pointer coordinates are top-down, while window coordinates start at the bottom.
+    /// A content-height change moves that origin even when the physical pointer does not move.
+    func contentHeightDidChange(by delta: CGFloat) {
+        guard delta != 0, Self.pointerWindow === self else { return }
+        pointerLocation.y += delta
+        needsCursorUpdate = true
     }
 
     private func discardCursorRects(in view: NSView) {

@@ -4,6 +4,7 @@
 #include <SDL2/SDL.h>
 #include <atk/atk.h>
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,10 +50,40 @@ static void editor_input_contract(TWWindow *window) {
     assert(!tw_workspace_editor_focused(window));
     assert(tw_workspace_editor_focus(window, 1) == -1);
     tw_workspace_placeholder_mode(window, 1);
+    uint8_t *previousFrame = calloc(320 * 180, 4);
+    assert(previousFrame);
+    assert(tw_present_placeholder(window, previousFrame, 320, 180) == 0);
+    free(previousFrame);
     assert(tw_workspace_editor_focus(window, 1) == 0);
     assert(tw_workspace_editor_focused(window));
     assert(SDL_IsTextInputActive());
     settle();
+
+    // Wheel events belong to the hit pane, including fractional and flipped SDL notches.
+    // A queued event retains its own position even when the live pointer is elsewhere.
+    SDL_Event wheel = {.type = SDL_MOUSEWHEEL};
+    wheel.wheel.mouseX = 400;
+    wheel.wheel.mouseY = 120;
+    wheel.wheel.preciseX = 0.5f;
+    wheel.wheel.preciseY = 2.5f;
+    assert(SDL_PushEvent(&wheel) == 1);
+    event = next(window, 39, 7, 80, 120);
+    assert(event.scrollingDeltaX == 0.5 && event.scrollingDeltaY == 2.5);
+    assert(tw_workspace_editor_focused(window));
+    wheel.wheel.direction = SDL_MOUSEWHEEL_FLIPPED;
+    assert(SDL_PushEvent(&wheel) == 1);
+    event = next(window, 39, 7, 80, 120);
+    assert(event.scrollingDeltaX == -0.5 && event.scrollingDeltaY == -2.5);
+    wheel.wheel.preciseY = NAN;
+    assert(SDL_PushEvent(&wheel) == 1);
+    assert(tw_next_timeout(window, &event, 30) == 0);
+    assert(tw_workspace_editor_focus(window, 0) == 0);
+    wheel.wheel.preciseY = 1.5f;
+    assert(SDL_PushEvent(&wheel) == 1);
+    event = next(window, 39, 7, 80, 120);
+    assert(event.scrollingDeltaY == -1.5);
+    assert(!tw_workspace_editor_focused(window));
+    assert(tw_workspace_editor_focus(window, 1) == 0);
 
     SDL_Event input = {.type = SDL_TEXTINPUT};
     strcpy(input.text.text, "draft");
@@ -157,6 +188,41 @@ static void editor_input_contract(TWWindow *window) {
     assert(tw_workspace_editor_focus(window, 0) == 0);
     assert(!tw_workspace_editor_focused(window));
     assert(!SDL_IsTextInputActive());
+    assert(tw_workspace_composer_mode(window, 1) == 0);
+    key.type = SDL_KEYDOWN;
+    key.key.keysym.sym = SDLK_TAB;
+    key.key.keysym.scancode = SDL_SCANCODE_TAB;
+    key.key.keysym.mod = KMOD_SHIFT;
+    assert(SDL_PushEvent(&key) == 1);
+    event = next(window, 48, 1, 0, 0);
+    assert(event.key == TW_KEY_TAB && event.modifiers == 1);
+    key.type = SDL_KEYUP;
+    assert(SDL_PushEvent(&key) == 1);
+    assert(tw_next_timeout(window, &event, 30) == 0);
+    assert(!SDL_IsTextInputActive() && "control focus must not enable text entry");
+    key.type = SDL_KEYDOWN;
+    key.key.keysym.sym = SDLK_RETURN;
+    key.key.keysym.scancode = SDL_SCANCODE_RETURN;
+    key.key.keysym.mod = KMOD_NONE;
+    assert(SDL_PushEvent(&key) == 1);
+    event = next(window, 48, 1, 0, 0);
+    assert(event.key == TW_KEY_ENTER);
+    tw_workspace_placeholder_mode(window, 0);
+    key.key.repeat = 1;
+    assert(SDL_PushEvent(&key) == 1);
+    assert(tw_next_timeout(window, &event, 30) == 0);
+    key.type = SDL_KEYUP;
+    key.key.repeat = 0;
+    assert(SDL_PushEvent(&key) == 1);
+    assert(tw_next_timeout(window, &event, 30) == 0);
+    key.type = SDL_KEYDOWN;
+    assert(SDL_PushEvent(&key) == 1);
+    event = next(window, 7, 1, 0, 0);
+    assert(event.key == TW_KEY_ENTER && "a fresh terminal press must replace old UI ownership");
+    key.type = SDL_KEYUP;
+    assert(SDL_PushEvent(&key) == 1);
+    next(window, 7, 3, 0, 0);
+    tw_workspace_placeholder_mode(window, 1);
     tw_workspace_editor_focus(window, 1);
     tw_workspace_focus(window, 1);
     assert(!tw_workspace_editor_focused(window));
@@ -186,6 +252,24 @@ int main(int argc, char **argv) {
     if (noBus) assert(getenv("DBUS_SESSION_BUS_ADDRESS") == NULL);
     TWWindow *window = tw_open("Navigator pointer contract", 800, 480);
     assert(window);
+    SDL_Cursor *cursors[6];
+    for (int kind = TW_CURSOR_ARROW; kind <= TW_CURSOR_IBEAM; kind++) {
+        assert(tw_set_cursor(window, kind) == 0);
+        cursors[kind] = SDL_GetCursor();
+        assert(cursors[kind]);
+        for (int earlier = 0; earlier < kind; earlier++) assert(cursors[earlier] != cursors[kind]);
+    }
+    for (int turn = 0; turn < 1000; turn++) {
+        const int kind = turn % 6;
+        assert(tw_set_cursor(window, kind) == 0);
+        assert(SDL_GetCursor() == cursors[kind]);
+    }
+    SDL_Cursor *retained = SDL_GetCursor();
+    assert(tw_set_cursor(NULL, TW_CURSOR_ARROW) == -1);
+    assert(tw_set_cursor(window, -1) == -1);
+    assert(tw_set_cursor(window, 6) == -1);
+    assert(SDL_GetCursor() == retained);
+    puts("PASS six native cursor shapes, retained reuse and invalid-request isolation");
     if (noBus) {
         tw_project_mode(window);
         settle();

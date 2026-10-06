@@ -124,8 +124,11 @@ dbus-run-session -- python3 /session_actions_smoke.py "$bin/WindowHarness" "$bin
   "$fixture/pty.sock" "$fixture" /evidence/restart-out
 dbus-run-session -- python3 /open_in_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$fixture/pty.sock" "$fixture" /evidence/restart-out/open-in
-dbus-run-session -- python3 /agent_catalogue_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+LD_PRELOAD=/gtk-present-delay.so THREADING_GTK_PRESENT_DELAY_MS=3000 \
+  THREADING_GTK_PRESENT_TRACE=/evidence/restart-out/gtk-delay.log \
+  dbus-run-session -- python3 /agent_catalogue_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
+grep -q 'delayMs=3000' /evidence/restart-out/gtk-delay.log
 dbus-run-session -- python3 /actions_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
 dbus-run-session -- python3 /project_actions_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
@@ -134,6 +137,10 @@ dbus-run-session -- python3 /project_create_menu_smoke.py "$bin/WindowHarness" "
   "$bin/threading-ptyd" "$fixture" /evidence/restart-out/project-create-menu
 dbus-run-session -- python3 /composer_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/composer.sock" "$fixture" /evidence/restart-out/composer
+dbus-run-session -- python3 /document_ui_smoke.py "$bin/WindowHarness" /evidence/restart-out/document
+dbus-run-session -- python3 /automatic_rows_smoke.py "$bin/WindowHarness" /evidence/restart-out/automatic-rows
+dbus-run-session -- python3 /diff_ui_smoke.py "$bin/WindowHarness" /evidence/restart-out/diff
+timeout 15 "$bin/WindowHarness" --app-event-contract
 dbus-run-session -- python3 /composer_account_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/composer-account.sock" "$fixture" \
   /evidence/restart-out/composer-account

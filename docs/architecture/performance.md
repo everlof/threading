@@ -632,6 +632,100 @@ The full source-built X11 suite and the rebuilt Swift-free Ubuntu Release instal
 suite passed with the compact clip representation; its fresh project-list capture was inspected.
 The installed Wayland frame and AT-SPI Actions checks passed, and their captures were inspected.
 
+## Linux document and changed-row geometry, 2026-10-06
+
+The Linux document compatibility path mounts the production Markdown page budget unchanged:
+48 blocks and 96 source lines, including selectable labels and nested code/table viewports.
+Pointer hit testing reuses one Pango layout per bounded label (4096 bytes, 64 style runs,
+eight visible lines). Scroll and selection do not shape an entire transcript. Complete rendering
+of longer individual blocks and lower first-paint latency remain open.
+
+Selectable-label height is measured separately from the 128-device-pixel raster tile limit,
+so the eight logical lines survive 2× scale. Drawing admits at most 2048 device pixels of height
+and allocates only visible tiles of at most 2048×128 pixels; the retained layout is reused.
+
+The assembled Debug page spent over a minute in the general constraint solver. After correcting
+viewport constraints, wrapping-height follow-up and document-origin ownership, the optimized
+native journey's first presentation was 1.95 seconds under shared-machine load. This includes
+the diagnostic evidence writer and is not a matched solver speedup. Warm interactions pass, but
+the initial layout cost is still product debt; reducing the shared page budget is not the fix.
+
+Changed table heights use an indexed prefix sum. The 1,000/10,000-row public-API fixture checks
+one delegate height read per changed row, exact following offsets and a bounded recycled viewport.
+One thousand changes took 8.24/3.65 ms in Release. No before/after latency claim is made; the
+regression boundary is O(changed × log rows), with no full-history delegate enumeration.
+
+The shared Foundation conversation reducer now compiles in the Linux core slice. Identical
+contracts on Mac and Linux build 1,000/10,000-turn histories and check that a warm tool result
+returns one indexed row change and a text delta returns one streaming change. This checks update
+scope rather than latency. The native document diagnostic performs provider JSON decoding and
+timeline reduction on one worker before presenting the authoritative Markdown reply; its source
+first-paint observation remains 2.229 seconds under shared-machine load.
+The rebuilt Swift-free installed run observed 4.339 seconds; its inspected frame is correct,
+but that observation reinforces the unresolved first-paint cost rather than establishing a
+performance improvement.
+
+The automatic-height shim now measures only invalid mounted cells through the shared
+`ConversationVirtualRowHost`. Unmounted rows keep estimates, changed measurements update the
+indexed geometry, and recycled cells release their content. The 1,000/10,000-row fixture uses
+three hosts in a 120-point viewport at either size, reads no manual-height delegate, and checks
+visible width reflow, offscreen invalidation without view construction, and middle-row navigation.
+Pure Markdown source-block planning runs on the existing bounded worker; UI materialization is
+limited to mounted rows. The native diagnostic checks exact Unicode copy, width reflow, tail and
+return with fewer than 12 mounted cells and fewer than 20 constructed hosts across the journey.
+Source first presentation was 0.498 seconds; the final installed run observed 0.374 seconds for
+automatic rows and 1.900 seconds for the whole-page diagnostic. These differ in materialization
+scope and are not a matched speedup. Full native session/controller latency remains unmeasured.
+
+Incremental table insert/remove APIs preserve mounted cells and measured heights. A tail append
+extends the prefix-sum tree and identity map only for new rows; tail removal drops only the
+removed suffix. Middle edits remap O(history) value metadata once, while retaining surviving
+viewport content and restoring its reading anchor. This is not an O(changed) middle-edit claim.
+The 1,000/10,000-row contracts cover both automatic/manual heights and positional/stable
+identities, including 40 successive tail appends across a prefix-tree boundary, disjoint edits,
+selection movement and content release. An offscreen single append reads one manual height (zero
+automatic heights), fewer than 30 identities, and constructs no cell at either cardinality.
+The native keyboard journey checks no cell reconfiguration for offscreen edits and preserves
+decoded viewport pixels exactly when inserting above the reading position. Its waits now use
+an explicit navigation-action receipt rather than an unrelated repaint counter.
+
+The native diff compatibility journey exposed incorrect priority aggregation: 8 rows' weak
+label hugs narrowed the shared host below its stronger pane-width rule. The scalar weighted
+objective is now a lexicographic vector of priority tiers, with a separate feasibility tier for
+artificials. Warm updates retain the basis and compare vector reduced-cost ratios. The portable
+1/8/32-leaf fixture matches real Mac AppKit for priority 251 versus repeated 250 constraints,
+warm shrink/restore and required bounds; the full layout and table/outline contracts pass.
+This restores layout semantics rather than claiming a solver speedup. The final eight-line diff
+diagnostic observed 0.382-second first presentation with a single shared row host. Its renderer
+still tokenizes the supplied diff before applying its display cap, and complete large-diff
+performance and native conversation-controller latency remain open.
+The complete final installed suite observed 0.317-second diff and 0.313-second automatic-row
+first presentation, with one diff host constructed and correct 644→364-pixel text reflow.
+The whole-page Markdown path observed 4.292 seconds; its cold layout cost remains product debt.
+
+## Linux prompt viewport drawing, 2026-10-05
+
+Enabling native wheel input for the shared prompt exposed a total-line scan in the Linux
+`NSTextView.draw` path. Cached visual lines have uniform height, so the renderer now computes
+the intersecting line range directly from the clip viewport and text inset. Text preparation
+and width changes still lay out the document; warm scrolling paints only visible lines.
+
+The opt-in `THREADING_EDITOR_CONFIGURATION=release THREADING_EDITOR_SCROLL_BENCHMARK=1
+Platforms/Linux/tests/text_editor/run.sh` prepares 170 typical and 1,700 stress lines separately,
+then takes 30 warm scroll/draw samples after five warmups in a fixed 180×58 viewport. Three
+alternating before/after runs used preserved Release executables in the same Ubuntu arm64
+container. Median-of-run medians were 0.83 → 0.81 ms for 170 lines and 0.87 → 0.86 ms for 1,700.
+The stress maximum was 5.08 → 13.39 ms under concurrent Docker activity. These results show no
+material latency improvement; the change removes the total-content scan, and does not establish
+an installed native-frame budget. Stress preparation remained about 275 → 287 ms median.
+
+The focused fixture drives wheel events through an `NSWindow` containing the unchanged
+production `PromptTextView`, preserves selection, clamps the document start, and reveals the
+caret again after subsequent typing. Native composer and installed-package journeys compare
+real window pixels before scrolling and after returning to the same tail, while checking
+unchanged Unicode text, caret and focus. Raw measurement logs are kept in
+`Platforms/Linux/out/editor-scroll-matched.log`.
+
 ## Startup checkpoint reconciliation, 2026-09-25
 
 The installed Release HUD recorded three launch stalls of 681, 274 and 299 ms. The first had

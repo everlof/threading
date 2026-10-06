@@ -169,11 +169,20 @@ exit 23''')
         self.env.update(RUNNER_FIXTURE_ROOT=str(self.root),
                         RUNNER_CONTRACT_BIN=str(contract_bin))
         self.command("apt-get", "exit 0")
+        self.command("clang", 'printf "%s\\n" "$*" >> "$RUNNER_FIXTURE_ROOT/compiler-calls"')
         self.command("swift", '''if [[ "$*" == "build -c release --show-bin-path" ]]; then
     printf '%s\\n' "$RUNNER_CONTRACT_BIN"
 fi''')
         self.command("timeout", '[[ "$1" == 30 || "$1" == 120 ]] || exit 91; shift; exec "$@"')
         self.write(self.spike / "package-app.sh", 'touch "$RUNNER_FIXTURE_ROOT/packaged"')
+        # The build gate now runs all three packaged row-layout fixtures before the daemon
+        # contracts. Keep those invocations in this mock so it reaches the cleanup assertion.
+        self.write(artifact_bin / "WindowHarness", '''case "$1" in
+    --project-row-layout-fixture|--session-row-layout-fixture|--terminal-row-layout-fixture)
+        printf '%s\\n' "$1" >> "$RUNNER_FIXTURE_ROOT/layout-fixtures" ;;
+    --app-event-contract) exit 0 ;;
+    *) exit 92 ;;
+esac''')
 
         daemon = artifact_bin / "threading-ptyd"
         daemon.write_text(f"#!{sys.executable}\n" + '''import json
@@ -207,6 +216,11 @@ while True:
 ''')
         daemon.chmod(0o755)
         self.write(contract_bin / "CoreSliceHarness", "exit 0")
+        self.write(contract_bin / "TableHeightHarness", "exit 0")
+        self.write(contract_bin / "OutlineViewHarness", "exit 0")
+        self.write(contract_bin / "PriorityLayoutHarness", "exit 0")
+        self.write(contract_bin / "ViewClippingHarness", "exit 0")
+        self.write(contract_bin / "ParagraphWrappingHarness", "exit 0")
         harness = contract_bin / "PortablePTYClientHarness"
         harness.write_text(f"#!{sys.executable}\n" + '''import json
 import os
@@ -236,6 +250,11 @@ assert pid == json.loads((root / 'daemon-started').read_text())['pid']
             self.assertFalse(process.stdin.closed)
             self.assertEqual(process.returncode, 0, process.stdout.read() + process.stderr.read())
             self.assertTrue((self.root / "packaged").exists())
+            self.assertIn("tests/gtk_present_delay.c", (self.root / "compiler-calls").read_text())
+            self.assertEqual((self.root / "layout-fixtures").read_text().splitlines(), [
+                "--project-row-layout-fixture", "--session-row-layout-fixture",
+                "--terminal-row-layout-fixture",
+            ])
             started = json.loads((self.root / "daemon-started").read_text())
             self.assertEqual((self.root / "harness-finished").read_text(), str(started["pid"]))
             self.assertEqual((self.root / "daemon-stopped").read_text(), str(started["pid"]))

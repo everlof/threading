@@ -102,7 +102,7 @@ public enum Design {
         public static func image(_ name: String, slot: CGFloat, pointSize: CGFloat,
                                  weight: NSFont.Weight) -> NSImage? {
             precondition(name == "ellipsis" || name == "plus" || name == "terminal"
-                         || name == "chevron.down" || name == "folder",
+                         || name == "chevron.down" || name == "folder" || name == "doc.text",
                          "No Linux diagnostic symbol artwork for \(name)")
             precondition(slot.isFinite && pointSize.isFinite && slot > 0 && pointSize > 0)
             // Keep the artwork at its optical point size inside the requested layout slot.
@@ -116,7 +116,28 @@ public enum Design {
             let size = NSSize(width: canvasSide, height: canvasSide)
             let image = NSImage(size: size, flipped: false) { canvas in
                 NSColor.white.setFill()
-                if name == "terminal" {
+                if name == "doc.text" {
+                    let paper = NSBezierPath()
+                    paper.move(to: NSPoint(x: origin + side * 0.22, y: origin + side * 0.08))
+                    paper.line(to: NSPoint(x: origin + side * 0.78, y: origin + side * 0.08))
+                    paper.line(to: NSPoint(x: origin + side * 0.78, y: origin + side * 0.70))
+                    paper.line(to: NSPoint(x: origin + side * 0.60, y: origin + side * 0.90))
+                    paper.line(to: NSPoint(x: origin + side * 0.22, y: origin + side * 0.90))
+                    paper.close()
+                    paper.lineWidth = max(1, side * 0.07 * weightFactor)
+                    NSColor.white.setStroke()
+                    paper.stroke()
+                    let detail = NSBezierPath()
+                    detail.move(to: NSPoint(x: origin + side * 0.60, y: origin + side * 0.90))
+                    detail.line(to: NSPoint(x: origin + side * 0.60, y: origin + side * 0.70))
+                    detail.line(to: NSPoint(x: origin + side * 0.78, y: origin + side * 0.70))
+                    for height: CGFloat in [0.55, 0.40, 0.25] {
+                        detail.move(to: NSPoint(x: origin + side * 0.34, y: origin + side * height))
+                        detail.line(to: NSPoint(x: origin + side * 0.66, y: origin + side * height))
+                    }
+                    detail.lineWidth = paper.lineWidth
+                    detail.stroke()
+                } else if name == "terminal" {
                     let screen = NSBezierPath(roundedRect: NSRect(
                         x: origin + side * 0.1, y: origin + side * 0.16,
                         width: side * 0.8, height: side * 0.68),

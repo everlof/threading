@@ -9,6 +9,7 @@ public extension NSAttributedString.Key {
     static let kern = NSAttributedString.Key("NSKern")
     static let underlineStyle = NSAttributedString.Key("NSUnderline")
     static let paragraphStyle = NSAttributedString.Key("NSParagraphStyle")
+    static let link = NSAttributedString.Key("NSLink")
 }
 
 public extension NSMutableAttributedString {
@@ -37,11 +38,16 @@ enum AttributedTextDrawing {
         var spans: [TATStyleSpan]
 
         func measure(wrappingAt width: Int = 0, maximumLines: Int = 8,
-                     characterWrapping: Bool = false) -> TATMetrics? {
+                     characterWrapping: Bool = false, completeLabelHeight: Bool = false) -> TATMetrics? {
             guard !utf8.isEmpty else { return TATMetrics(width: 0, height: 0, baseline: 0, glyphs: 0) }
             var result = TATMetrics(width: 0, height: 0, baseline: 0, glyphs: 0)
             let accepted = utf8.withUnsafeBufferPointer { text in
                 spans.withUnsafeBufferPointer { styles in
+                    if completeLabelHeight {
+                        return tat_attributed_measure_label(text.baseAddress, Int32(text.count),
+                            styles.baseAddress, Int32(styles.count), Int32(width), Int32(maximumLines),
+                            characterWrapping ? 1 : 0, &result)
+                    }
                     if width > 0 {
                         return tat_attributed_measure_wrapped(
                             text.baseAddress, Int32(text.count), styles.baseAddress,
@@ -73,6 +79,7 @@ enum AttributedTextDrawing {
         span.weight = weight >= NSFont.Weight.bold.rawValue ? 3 :
             weight >= NSFont.Weight.semibold.rawValue ? 2 :
             weight >= NSFont.Weight.medium.rawValue ? 1 : 0
+        span.italic = font.isItalic ? 1 : 0
         span.underline = ((attributes[.underlineStyle] as? NSNumber)?.intValue ?? 0) > 0 ? 1 : 0
         span.pixel_size = Double(max(1, min(128, font.pointSize * scale)))
         let authoredKern = (attributes[.kern] as? NSNumber)?.doubleValue ?? 0
@@ -248,6 +255,17 @@ enum AttributedTextDrawing {
 }
 
 public extension NSAttributedString {
+    func boundingRect(with size: NSSize, options: NSStringDrawingOptions) -> NSRect {
+        guard size.width.isFinite, size.width > 0 else { return .zero }
+        let prepared = AttributedTextDrawing.prepare(self, scale: 1)
+        let metrics = options.contains(.usesLineFragmentOrigin)
+            ? prepared.measure(wrappingAt: Int(min(2048, ceil(size.width))))
+            : prepared.measure()
+        guard let metrics else { return .zero }
+        return NSRect(x: 0, y: 0, width: CGFloat(metrics.width),
+                      height: min(max(0, size.height), CGFloat(metrics.height)))
+    }
+
     func size() -> NSSize {
         guard let metric = AttributedTextDrawing.prepare(self, scale: 1).measure() else { return .zero }
         var width = CGFloat(metric.width)
@@ -275,6 +293,13 @@ public extension NSAttributedString {
     func draw(in rect: NSRect) {
         AttributedTextDrawing.draw(self, at: nil, in: rect)
     }
+}
+
+public struct NSStringDrawingOptions: OptionSet, Sendable {
+    public let rawValue: UInt
+    public init(rawValue: UInt) { self.rawValue = rawValue }
+    public static let usesLineFragmentOrigin = NSStringDrawingOptions(rawValue: 1)
+    public static let usesFontLeading = NSStringDrawingOptions(rawValue: 2)
 }
 
 public extension NSString {

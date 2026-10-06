@@ -150,6 +150,26 @@ public final class NSColor: @unchecked Sendable, Equatable, Hashable {
     public static let clear = NSColor(red: 0, green: 0, blue: 0, alpha: 0)
     public static let black = NSColor(white: 0, alpha: 1)
     public static let white = NSColor(white: 1, alpha: 1)
+
+    // sRGB snapshots of the current Mac AppKit system palette in Aqua/Dark Aqua. These are
+    // fallback platform colors; application renderers still receive their host's theme roles.
+    public static let systemGreen = systemColor("systemGreen", light: (52, 199, 89), dark: (48, 209, 88))
+    public static let systemRed = systemColor("systemRed", light: (255, 56, 60), dark: (255, 66, 69))
+    public static let systemPurple = systemColor("systemPurple", light: (203, 48, 224), dark: (219, 52, 242))
+    public static let systemTeal = systemColor("systemTeal", light: (0, 195, 208), dark: (0, 210, 224))
+    public static let systemOrange = systemColor("systemOrange", light: (255, 141, 40), dark: (255, 146, 48))
+    public static let systemBlue = systemColor("systemBlue", light: (0, 136, 255), dark: (0, 145, 255))
+
+    private static func systemColor(_ name: String, light: (Int, Int, Int), dark: (Int, Int, Int)) -> NSColor {
+        func color(_ values: (Int, Int, Int)) -> NSColor {
+            NSColor(red: CGFloat(values.0) / 255, green: CGFloat(values.1) / 255,
+                    blue: CGFloat(values.2) / 255, alpha: 1)
+        }
+        let lightColor = color(light), darkColor = color(dark)
+        return NSColor(name: Name(name)) { appearance in
+            appearance.name == .darkAqua ? darkColor : lightColor
+        }
+    }
     // Values measured from AppKit's sRGB resolution with the default macOS accent.
     public static let labelColor = NSColor(name: Name("labelColor")) { appearance in
         NSColor(white: appearance.name == .darkAqua ? 1 : 0, alpha: 216.0 / 255)

@@ -23,14 +23,21 @@ void SDL_RenderPresent(SDL_Renderer *renderer) {
             fclose(source);
             requested[strcspn(requested, "\r\n")] = 0;
         }
-        if ((strcmp(requested, "normal") == 0 || strcmp(requested, "alternate") == 0
+        // Scroll assertions observe successive native frames until the viewport settles.
+        // Other states retain their one-shot capture; this hook creates no repaint timer.
+        const int scrolling = strcmp(requested, "scroll-up") == 0
+            || strcmp(requested, "scroll-down") == 0
+            || strcmp(requested, "finger-up") == 0
+            || strcmp(requested, "finger-down") == 0;
+        if ((scrolling || strcmp(requested, "scroll-tail") == 0
+             || strcmp(requested, "normal") == 0 || strcmp(requested, "alternate") == 0
              || strcmp(requested, "open") == 0 || strcmp(requested, "idle") == 0
              || strcmp(requested, "dark-idle") == 0
              || strcmp(requested, "light-idle") == 0
              || strcmp(requested, "terminal") == 0
              || strcmp(requested, "other-selected") == 0
              || strcmp(requested, "title-reveal") == 0)
-            && strcmp(requested, captured) != 0) {
+            && (scrolling || strcmp(requested, captured) != 0)) {
             int width = 0, height = 0;
             if (SDL_GetRendererOutputSize(renderer, &width, &height) == 0
                 && width > 0 && height > 0 && width <= 1600 && height <= 900) {

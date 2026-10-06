@@ -3,12 +3,14 @@
 #ifdef __linux__
 #include <SDL2/SDL.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 struct TWWindow {
     SDL_Window *window;
+    SDL_Cursor *cursors[6];
     SDL_Renderer *renderer;
     SDL_Texture *texture;
     SDL_Texture *sidebarTexture, *terminalTexture, *terminalHeaderTexture, *sessionMenuTexture;
@@ -16,7 +18,7 @@ struct TWWindow {
     int terminalHeaderTextureWidth, terminalHeaderTextureHeight;
     SDL_Rect sessionMenuBounds;
     int sessionMenuTracking, sessionMenuHovered;
-    int sidebarWidth, sidebarFocused, terminalTopInset, placeholderMode, editorFocused;
+    int sidebarWidth, sidebarFocused, terminalTopInset, placeholderMode, editorFocused, composerMode;
     uint32_t terminalButtons;
     int terminalHeaderTracking, terminalHeaderHovered;
     int placeholderTracking, placeholderHovered;
@@ -28,6 +30,7 @@ struct TWWindow {
     int width, height, terminal, projectNavigation, suppressActivation, explicitSurfaceUpdate;
     int composing;
     uint8_t suppressedKeyups[SDL_NUM_SCANCODES];
+    uint8_t composingKeyups[SDL_NUM_SCANCODES];
 };
 static int tw_modifiers(SDL_Keymod mods) {
     return ((mods & KMOD_SHIFT) ? 1 : 0) | ((mods & KMOD_ALT) ? 2 : 0)
@@ -130,6 +133,9 @@ static void tw_navigation_trace_dequeue(const SDL_Event *event, int current) {
 void tw_close(TWWindow *w) {
     if (!w) return;
     tw_accessibility_close();
+    SDL_Cursor *defaultCursor = SDL_GetDefaultCursor();
+    if (defaultCursor) SDL_SetCursor(defaultCursor);
+    for (int index = 0; index < 6; index++) SDL_FreeCursor(w->cursors[index]);
     SDL_DestroyTexture(w->texture);
     SDL_DestroyTexture(w->sidebarTexture);
     SDL_DestroyTexture(w->terminalTexture);
@@ -177,6 +183,17 @@ void tw_window_geometry(TWWindow *w, int *x, int *y, int *width, int *height) {
 }
 int tw_window_has_focus(TWWindow *w) {
     return w && (SDL_GetWindowFlags(w->window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+}
+int tw_set_cursor(TWWindow *w, int kind) {
+    if (!w || !w->window || kind < TW_CURSOR_ARROW || kind > TW_CURSOR_IBEAM) return -1;
+    const SDL_SystemCursor shapes[] = {
+        SDL_SYSTEM_CURSOR_ARROW, SDL_SYSTEM_CURSOR_HAND, SDL_SYSTEM_CURSOR_CROSSHAIR,
+        SDL_SYSTEM_CURSOR_SIZEWE, SDL_SYSTEM_CURSOR_SIZENS, SDL_SYSTEM_CURSOR_IBEAM
+    };
+    if (!w->cursors[kind]) w->cursors[kind] = SDL_CreateSystemCursor(shapes[kind]);
+    if (!w->cursors[kind]) return -1;
+    if (SDL_GetCursor() != w->cursors[kind]) SDL_SetCursor(w->cursors[kind]);
+    return 0;
 }
 int tw_present(TWWindow *w, const uint8_t *rgba, int width, int height) {
     if (!w || w->sidebarWidth || !rgba || width < 1 || width > 1280 || height < 1 || height > 900) return -1;
@@ -256,9 +273,9 @@ int tw_present_pane(TWWindow *w, const uint8_t *rgba, int width, int height, int
 }
 int tw_present_placeholder(TWWindow *w, const uint8_t *rgba, int width, int height) {
     if (!w || !w->sidebarWidth || !w->placeholderMode) return -1;
-    int originX, originY, windowWidth, windowHeight;
-    tw_window_geometry(w, &originX, &originY, &windowWidth, &windowHeight);
-    if (width != windowWidth - w->sidebarWidth || height != windowHeight) return -1;
+    // A resize can reach SDL before Swift consumes its size event, while a preceding key
+    // still owes a redraw. Keep that bounded retained frame: tw_repaint crops it without
+    // stretching until the host publishes the new layout, just as for terminal/sidebar panes.
     return tw_present_pane(w, rgba, width, height, 0);
 }
 int tw_present_terminal_header(TWWindow *w, const uint8_t *rgba, int width, int height) {
@@ -345,11 +362,6 @@ static int placeholder_contains(TWWindow *w, const TWEvent *frame, int x, int y)
     return w->placeholderMode && w->sidebarWidth && x >= w->sidebarWidth &&
         x < frame->width && y >= 0 && y < frame->height;
 }
-static int placeholder_wheel_contains(TWWindow *w) {
-    int x, y;
-    SDL_GetMouseState(&x, &y);
-    return w->placeholderMode && x >= w->sidebarWidth;
-}
 void tw_navigator_pointer_route(TWWindow *w, int enabled) {
     if (!w || w->navigatorPointerRoute == (enabled != 0)) return;
     w->navigatorPointerRoute = enabled != 0;
@@ -422,6 +434,14 @@ int tw_workspace_editor_focus(TWWindow *w, int focused) {
     return 0;
 }
 int tw_workspace_editor_focused(TWWindow *w) { return w && w->editorFocused; }
+int tw_workspace_composer_mode(TWWindow *w, int enabled) {
+    if (!w || (enabled && (!w->sidebarWidth || !w->placeholderMode))) return -1;
+    const int next = enabled != 0;
+    if (w->composerMode == next) return 0;
+    w->composerMode = next;
+    if (!next) tw_workspace_editor_focus(w, 0);
+    return 0;
+}
 void tw_workspace_placeholder_mode(TWWindow *w, int enabled) {
     if (!w || !w->sidebarWidth || w->placeholderMode == (enabled != 0)) return;
     if (w->sessionMenuTexture) tw_hide_session_menu(w);
@@ -438,7 +458,9 @@ void tw_workspace_placeholder_mode(TWWindow *w, int enabled) {
     w->placeholderMode = enabled != 0;
     w->terminal = !w->sidebarFocused && !w->placeholderMode;
     w->editorFocused = 0;
-    memset(w->suppressedKeyups, 0, sizeof(w->suppressedKeyups));
+    w->composerMode = 0;
+    // Held navigation/composer commands retain their release ownership across a launch.
+    // A fresh physical press below replaces stale ownership if focus loss omitted its keyup.
     tw_reset_text_input(w, w->terminal);
     tw_accessibility_page_title(w, NULL, NULL, 0, 0, 0, 0);
     tw_accessibility_terminal_text(w, NULL, 0, -1, NULL, 0);
@@ -472,6 +494,7 @@ void tw_workspace_mode(TWWindow *w, int sidebarWidth, int sidebarFocused) {
     w->placeholderTracking = w->placeholderHovered = 0;
     w->placeholderMode = 0;
     w->editorFocused = 0;
+    w->composerMode = 0;
     tw_accessibility_placeholder(w, NULL, NULL, NULL, 0, 0, 0, 0, 0);
     w->terminalTopInset = 0;
     if (w->navigatorTracking) {
@@ -634,11 +657,16 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             e.key.keysym.scancode >= 0 && e.key.keysym.scancode < SDL_NUM_SCANCODES) {
             if (e.type == SDL_KEYUP && w->suppressedKeyups[e.key.keysym.scancode]) {
                 w->suppressedKeyups[e.key.keysym.scancode] = 0;
+                w->composingKeyups[e.key.keysym.scancode] = 0;
                 if (w->suppressActivation == e.key.keysym.sym) w->suppressActivation = 0;
                 continue;
             }
-            if (!w->terminal && !w->editorFocused && e.type == SDL_KEYDOWN)
-                w->suppressedKeyups[e.key.keysym.scancode] = 1;
+            if (e.type == SDL_KEYDOWN && !e.key.repeat) {
+                w->composingKeyups[e.key.keysym.scancode] = 0;
+                w->suppressedKeyups[e.key.keysym.scancode] = !w->terminal &&
+                    (!w->editorFocused || w->composerMode);
+            } else if (e.type == SDL_KEYDOWN && e.key.repeat && w->terminal &&
+                     w->suppressedKeyups[e.key.keysym.scancode]) continue;
         }
         if (w->navigatorSuppressLeftUp && e.type == SDL_MOUSEBUTTONUP &&
             e.button.button == SDL_BUTTON_LEFT) {
@@ -962,7 +990,8 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         } else if (w->sidebarWidth && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
                    ((e.key.keysym.sym == SDLK_p && (e.key.keysym.mod & KMOD_CTRL) &&
                      (e.key.keysym.mod & KMOD_SHIFT)) ||
-                    (!w->terminal && !w->editorFocused && e.key.keysym.sym == SDLK_TAB))) {
+                    (!w->terminal && !w->editorFocused && e.key.keysym.sym == SDLK_TAB &&
+                     !(w->composerMode && !w->sidebarFocused)))) {
             if (e.type != SDL_KEYDOWN || e.key.repeat) continue;
             const int sidebar = e.key.keysym.sym == SDLK_p;
             tw_workspace_focus(w, sidebar);
@@ -970,7 +999,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             if (e.key.keysym.scancode >= 0 && e.key.keysym.scancode < SDL_NUM_SCANCODES)
                 w->suppressedKeyups[e.key.keysym.scancode] = 1;
             out->kind = 24; out->action = sidebar;
-        } else if (w->placeholderMode && !w->sidebarFocused && !w->editorFocused &&
+        } else if (w->placeholderMode && !w->sidebarFocused && !w->editorFocused && !w->composerMode &&
                    e.type == SDL_KEYDOWN && !e.key.repeat &&
                    (e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER ||
                     e.key.keysym.sym == SDLK_SPACE)) {
@@ -992,8 +1021,17 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                    (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP) &&
                    e.button.x >= w->sidebarWidth) {
             continue;
-        } else if (e.type == SDL_MOUSEWHEEL && placeholder_wheel_contains(w)) {
-            continue;
+        } else if (e.type == SDL_MOUSEWHEEL &&
+                   placeholder_contains(w, out, e.wheel.mouseX, e.wheel.mouseY)) {
+            // SDL's precise values are fractional wheel notches, not AppKit point deltas.
+            // Preserve them until the shim scroll owner applies its line-scroll amount.
+            const double x = e.wheel.preciseX != 0 ? e.wheel.preciseX : e.wheel.x;
+            const double y = e.wheel.preciseY != 0 ? e.wheel.preciseY : e.wheel.y;
+            if (!isfinite(x) || !isfinite(y) || (x == 0 && y == 0)) continue;
+            const double direction = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1;
+            out->kind = 39; out->action = 7;
+            out->x = e.wheel.mouseX - w->sidebarWidth; out->y = e.wheel.mouseY;
+            out->scrollingDeltaX = x * direction; out->scrollingDeltaY = y * direction;
         } else if (w->sidebarWidth && w->terminalTopInset > 0 &&
                    e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT &&
                    !w->terminalButtons && e.button.x >= w->sidebarWidth &&
@@ -1115,13 +1153,14 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         } else if ((w->terminal || w->editorFocused) &&
                    (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)
                    && (w->composing || (e.key.keysym.scancode >= 0 && e.key.keysym.scancode < SDL_NUM_SCANCODES
-                                         && w->suppressedKeyups[e.key.keysym.scancode]))) {
+                                         && w->composingKeyups[e.key.keysym.scancode]))) {
             // Enter, Backspace and arrows are IME editing gestures until commit/cancel. Their
             // keyup must stay suppressed even if an empty EDIT or INPUT ended composition first.
             if (e.key.keysym.scancode >= 0 && e.key.keysym.scancode < SDL_NUM_SCANCODES) {
-                w->suppressedKeyups[e.key.keysym.scancode] = e.type == SDL_KEYDOWN;
+                w->composingKeyups[e.key.keysym.scancode] = e.type == SDL_KEYDOWN;
             }
-        } else if (w->editorFocused && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)) {
+        } else if ((w->editorFocused || (w->composerMode && !w->sidebarFocused)) &&
+                   (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)) {
             if ((e.key.keysym.mod & KMOD_ALT) && e.key.keysym.sym == SDLK_F4) {
                 if (e.type == SDL_KEYDOWN) { out->kind = 5; return 1; }
                 continue;
@@ -1129,6 +1168,10 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             out->action = e.type == SDL_KEYUP ? 3 : (e.key.repeat ? 2 : 1);
             out->modifiers = tw_modifiers(e.key.keysym.mod);
             out->key = tw_function_key(e.key.keysym.sym);
+            if (!w->editorFocused && e.key.keysym.sym == SDLK_SPACE) out->key = SDLK_SPACE;
+            if (!w->editorFocused && e.type == SDL_KEYDOWN &&
+                (e.key.keysym.sym == SDLK_SPACE || e.key.keysym.sym == SDLK_RETURN ||
+                 e.key.keysym.sym == SDLK_KP_ENTER)) w->suppressActivation = e.key.keysym.sym;
             if (!out->key && (e.key.keysym.mod & (KMOD_CTRL | KMOD_GUI)) &&
                 ((e.key.keysym.sym >= SDLK_a && e.key.keysym.sym <= SDLK_z) ||
                  (e.key.keysym.sym >= SDLK_0 && e.key.keysym.sym <= SDLK_9))) {

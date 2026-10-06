@@ -67,16 +67,30 @@ open class NSText: NSView {
 /// point size. The current bounded Pango leaf distinguishes proportional and mono families;
 /// arbitrary installed-family selection remains outside this diagnostic palette.
 public final class NSFontDescriptor {
+    public struct SymbolicTraits: OptionSet, Sendable {
+        public let rawValue: UInt32
+        public init(rawValue: UInt32) { self.rawValue = rawValue }
+        public static let italic = SymbolicTraits(rawValue: 1)
+        public static let bold = SymbolicTraits(rawValue: 2)
+        public static let monoSpace = SymbolicTraits(rawValue: 1 << 10)
+    }
+
     public let familyName: String
     public let weight: NSFont.Weight
+    public let symbolicTraits: SymbolicTraits
 
-    fileprivate init(familyName: String, weight: NSFont.Weight) {
+    fileprivate init(familyName: String, weight: NSFont.Weight, italic: Bool) {
         self.familyName = familyName
         self.weight = weight
+        var traits: SymbolicTraits = []
+        if italic { traits.insert(.italic) }
+        if weight.rawValue >= NSFont.Weight.semibold.rawValue { traits.insert(.bold) }
+        if familyName.contains("Mono") { traits.insert(.monoSpace) }
+        symbolicTraits = traits
     }
 }
 
-public final class NSFont {
+public final class NSFont: Equatable, Hashable {
     public struct Weight: RawRepresentable, Hashable, Sendable {
         public let rawValue: CGFloat
         public init(rawValue: CGFloat) { self.rawValue = rawValue }
@@ -90,21 +104,24 @@ public final class NSFont {
     private let storedFamilyName: String
     public var familyName: String? { storedFamilyName }
     public let weight: Weight
-    public var fontName: String { storedFamilyName }
+    public let isItalic: Bool
+    public var fontName: String { storedFamilyName + (isItalic ? "-Italic" : "") }
     public var fontDescriptor: NSFontDescriptor {
-        NSFontDescriptor(familyName: storedFamilyName, weight: weight)
+        NSFontDescriptor(familyName: storedFamilyName, weight: weight, italic: isItalic)
     }
     private let fontBoundsLock = NSLock()
     private var fontBoundsCache: NSRect?
-    init(familyName: String, pointSize: CGFloat, weight: Weight = .regular) {
+    init(familyName: String, pointSize: CGFloat, weight: Weight = .regular,
+         italic: Bool = false) {
         storedFamilyName = familyName
         self.pointSize = pointSize
         self.weight = weight
+        isItalic = italic
     }
     public convenience init?(descriptor: NSFontDescriptor, size: CGFloat) {
         guard size.isFinite, size > 0, size <= 128 else { return nil }
         self.init(familyName: descriptor.familyName, pointSize: size,
-                  weight: descriptor.weight)
+                  weight: descriptor.weight, italic: descriptor.symbolicTraits.contains(.italic))
     }
     public static func systemFont(ofSize size: CGFloat) -> NSFont { NSFont(familyName: "System", pointSize: size) }
     public static func systemFont(ofSize size: CGFloat, weight: Weight) -> NSFont {
@@ -135,7 +152,7 @@ public final class NSFont {
                 weight.rawValue >= Weight.semibold.rawValue ? 2 :
                 weight.rawValue >= Weight.medium.rawValue ? 1 : 0
             let accepted = tat_font_metrics(storedFamilyName.contains("Mono") ? 1 : 0,
-                                            role, Double(size), &metrics)
+                                            role, isItalic ? 1 : 0, Double(size), &metrics)
             let rect = accepted == 1
                 ? NSRect(x: 0, y: -metrics.descent, width: metrics.approximate_width,
                          height: metrics.ascent + metrics.descent)
@@ -146,6 +163,60 @@ public final class NSFont {
     }
     public var ascender: CGFloat { boundingRectForFont.maxY }
     public var descender: CGFloat { boundingRectForFont.minY }
+    /// The current Pango font-metrics leaf's line box is ascent plus descent.
+    public var leading: CGFloat { 0 }
+
+    public static func == (first: NSFont, second: NSFont) -> Bool {
+        if first === second { return true }
+        return first.storedFamilyName == second.storedFamilyName && first.pointSize == second.pointSize
+            && first.weight == second.weight && first.isItalic == second.isItalic
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(storedFamilyName)
+        hasher.combine(pointSize)
+        hasher.combine(weight)
+        hasher.combine(isItalic)
+    }
+}
+
+/// The measured trait subset used by the unchanged Markdown parser. Conversion preserves the
+/// family, point size, and any existing opposite trait rather than substituting a system font.
+public struct NSFontTraitMask: OptionSet, Sendable {
+    public let rawValue: UInt
+    public init(rawValue: UInt) { self.rawValue = rawValue }
+    public static let italicFontMask = NSFontTraitMask(rawValue: 1)
+    public static let boldFontMask = NSFontTraitMask(rawValue: 2)
+    public static let unboldFontMask = NSFontTraitMask(rawValue: 4)
+    public static let fixedPitchFontMask = NSFontTraitMask(rawValue: 1 << 10)
+    public static let unitalicFontMask = NSFontTraitMask(rawValue: 1 << 24)
+}
+
+public final class NSFontManager: Sendable {
+    public static let shared = NSFontManager()
+
+    public func traits(of font: NSFont) -> NSFontTraitMask {
+        var traits: NSFontTraitMask = []
+        if font.isItalic { traits.insert(.italicFontMask) }
+        if font.weight.rawValue >= NSFont.Weight.semibold.rawValue { traits.insert(.boldFontMask) }
+        if font.fontDescriptor.symbolicTraits.contains(.monoSpace) { traits.insert(.fixedPitchFontMask) }
+        return traits
+    }
+
+    public func convert(_ font: NSFont, toHaveTrait traits: NSFontTraitMask) -> NSFont {
+        let supported: NSFontTraitMask = [.boldFontMask, .italicFontMask,
+                                         .unboldFontMask, .unitalicFontMask]
+        precondition(traits.subtracting(supported).isEmpty,
+                     "Linux NSFontManager supports bold and italic trait conversion")
+        guard !traits.isEmpty else { return font }
+
+        let weight: NSFont.Weight = traits.contains(.unboldFontMask) ? .regular
+            : traits.contains(.boldFontMask) ? .bold : font.weight
+        let italic = !traits.contains(.unitalicFontMask)
+            && (traits.contains(.italicFontMask) || font.isItalic)
+        return NSFont(familyName: font.fontDescriptor.familyName, pointSize: font.pointSize,
+                      weight: weight, italic: italic)
+    }
 }
 
 public final class NSAppearance: @unchecked Sendable {

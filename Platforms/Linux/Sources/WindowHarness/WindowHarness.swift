@@ -513,6 +513,18 @@ struct WindowHarness {
         let decodedMarks = await Task.detached(priority: .utility) { ProviderMarks.decode() }.value
         ProviderMarks.install(decodedMarks)
         let mode = CommandLine.arguments.dropFirst().first
+        if mode == "--app-event-contract" {
+            try await AppEventContract.run()
+            return
+        }
+        if mode == "--document-ui-fixture" || mode == "--automatic-rows-ui-fixture" || mode == "--diff-ui-fixture" {
+            let args = Array(CommandLine.arguments.dropFirst(2))
+            guard args.count == 1 else { throw WindowFailure("usage: WindowHarness --document-ui-fixture OUTPUT") }
+            try await DocumentUIFixture.run(output: args[0], automaticRows: mode == "--automatic-rows-ui-fixture",
+                                            diffMode: mode == "--diff-ui-fixture",
+                                            keyEvent: composerKeyEvent)
+            return
+        }
         if mode == "--project-row-layout-fixture" {
             ProjectRowLayoutFixture.run()
             return
@@ -1082,6 +1094,40 @@ struct WindowHarness {
         return result
     }
 
+    @MainActor private static func composerKeyEvent(_ input: TWEvent) -> NSEvent {
+        let keyCode: UInt16
+        let characters: String
+        switch Int(input.key) {
+        case TW_KEY_ESCAPE: keyCode = 53; characters = "\u{1b}"
+        case TW_KEY_ENTER: keyCode = 36; characters = "\r"
+        case TW_KEY_TAB: keyCode = 48; characters = "\t"
+        case TW_KEY_BACKSPACE: keyCode = 51; characters = "\u{7f}"
+        case TW_KEY_DELETE: keyCode = 117; characters = ""
+        case TW_KEY_LEFT: keyCode = 123; characters = ""
+        case TW_KEY_RIGHT: keyCode = 124; characters = ""
+        case TW_KEY_DOWN: keyCode = 125; characters = ""
+        case TW_KEY_UP: keyCode = 126; characters = ""
+        case TW_KEY_HOME: keyCode = 115; characters = ""
+        case TW_KEY_END: keyCode = 119; characters = ""
+        case TW_KEY_PAGE_UP: keyCode = 116; characters = ""
+        case TW_KEY_PAGE_DOWN: keyCode = 121; characters = ""
+        default:
+            keyCode = 0
+            // Functional protocol codes are not text. Only actual native letter/digit
+            // shortcut keys and the control's Space activation carry characters.
+            let code = Int(input.key)
+            let isTextKey = code == 32 || (48...57).contains(code) || (97...122).contains(code)
+            characters = isTextKey ? UnicodeScalar(code).map(String.init) ?? "" : ""
+        }
+        var modifiers: NSEvent.ModifierFlags = []
+        if input.modifiers & 1 != 0 { modifiers.insert(.shift) }
+        if input.modifiers & 2 != 0 { modifiers.insert(.option) }
+        if input.modifiers & 4 != 0 { modifiers.insert(.control) }
+        if input.modifiers & 8 != 0 { modifiers.insert(.command) }
+        return NSEvent(type: .keyDown, modifierFlags: modifiers, keyCode: keyCode,
+                       charactersIgnoringModifiers: characters)
+    }
+
     @MainActor static func sendFunctional(_ event: TWEvent, to session: GraphicalTerminal) {
         let key: PTYEmulator.Key
         switch event.key {
@@ -1145,6 +1191,8 @@ struct WindowHarness {
             throw WindowFailure(String(cString: tw_error()))
         }
         defer { tw_close(window) }
+        NativeCursorBoundary.install(for: window)
+        defer { NativeCursorBoundary.uninstall() }
         let session = GraphicalTerminal()
         defer { session.stop() }
         session.start(store: args[0], socket: args[1], directory: args[2], executable: args[3], arguments: Array(args.dropFirst(4)))
@@ -1156,6 +1204,8 @@ struct WindowHarness {
             throw WindowFailure(String(cString: tw_error()))
         }
         defer { tw_close(window) }
+        NativeCursorBoundary.install(for: window)
+        defer { NativeCursorBoundary.uninstall() }
         let session = GraphicalTerminal()
         defer { session.stop() }
         if agent { session.attachAgent(store: args[0], socket: args[1], sessionID: args[2]) }
@@ -1432,6 +1482,8 @@ struct WindowHarness {
         }
         trace("open.end")
         defer { tw_close(window) }
+        NativeCursorBoundary.install(for: window)
+        defer { NativeCursorBoundary.uninstall() }
         // The raster surface is two device pixels per AppKit point. Keep one content owner and
         // root for the native window's lifetime so attachment callbacks describe that lifetime.
         let contentWindow = NSWindow(backingScaleFactor: 2)
@@ -2111,6 +2163,7 @@ struct WindowHarness {
                         }
                     }
                 } else if event.kind == 47 {
+                    guard idlePane.editorHasFocus, !idlePane.hasOpenComposerChoice else { return true }
                     var preedit = event
                     if let value = String(validatingCString: tw_event_text(&preedit)) {
                         let units = value.unicodeScalars.map { String($0).utf16.count }
@@ -2121,18 +2174,9 @@ struct WindowHarness {
                         idlePane.updatePreedit(value, selectedRange: range)
                     }
                 } else if event.action != 3 {
+                    let keyEvent = composerKeyEvent(event)
                     if idlePane.hasOpenComposerChoice {
-                        let keyCode: UInt16
-                        switch Int(event.key) {
-                        case TW_KEY_ESCAPE: keyCode = 53
-                        case TW_KEY_UP: keyCode = 126
-                        case TW_KEY_DOWN: keyCode = 125
-                        case TW_KEY_ENTER: keyCode = 36
-                        default: keyCode = 0
-                        }
-                        if keyCode != 0,
-                           idlePane.handleComposerChoiceKey(NSEvent(type: .keyDown,
-                               keyCode: keyCode, charactersIgnoringModifiers: "")) {
+                        if idlePane.handleComposerChoiceKey(keyEvent) {
                             _ = tw_workspace_editor_focus(window,
                                 idlePane.editorHasFocus || idlePane.hasOpenComposerChoice ? 1 : 0)
                             dirty = true
@@ -2148,7 +2192,8 @@ struct WindowHarness {
                         return true
                     }
                     let modifierShortcut = event.modifiers & (4 | 8) != 0
-                    if modifierShortcut, let letter = UnicodeScalar(Int(event.key)) {
+                    if idlePane.editorHasFocus, modifierShortcut,
+                       let letter = UnicodeScalar(Int(event.key)) {
                         switch letter {
                         case "a": idlePane.selectAllText(); return true
                         case "c", "x":
@@ -2175,29 +2220,13 @@ struct WindowHarness {
                         }
                     }
                     if Int(event.key) == TW_KEY_TAB {
-                        idlePane.focusAction()
-                        _ = tw_workspace_editor_focus(window, 0)
+                        idlePane.advanceFocus(backward: event.modifiers & 1 != 0)
+                        _ = tw_workspace_editor_focus(window,
+                            idlePane.editorHasFocus || idlePane.hasOpenComposerChoice ? 1 : 0)
                     } else {
-                        let keyCode: UInt16
-                        let characters: String
-                        switch Int(event.key) {
-                        case TW_KEY_ENTER: keyCode = 36; characters = "\n"
-                        case TW_KEY_BACKSPACE: keyCode = 51; characters = "\u{7f}"
-                        case TW_KEY_DELETE: keyCode = 117; characters = "\u{7f}"
-                        case TW_KEY_LEFT: keyCode = 123; characters = ""
-                        case TW_KEY_RIGHT: keyCode = 124; characters = ""
-                        case TW_KEY_DOWN: keyCode = 125; characters = ""
-                        case TW_KEY_UP: keyCode = 126; characters = ""
-                        default:
-                            keyCode = 0
-                            characters = UnicodeScalar(Int(event.key)).map(String.init) ?? ""
-                        }
-                        var modifiers: NSEvent.ModifierFlags = []
-                        if event.modifiers & 1 != 0 { modifiers.insert(.shift) }
-                        if event.modifiers & 4 != 0 { modifiers.insert(.control) }
-                        if event.modifiers & 8 != 0 { modifiers.insert(.command) }
-                        idlePane.handleEditorKey(NSEvent(type: .keyDown, modifierFlags: modifiers,
-                            keyCode: keyCode, charactersIgnoringModifiers: characters))
+                        idlePane.handleComposerKey(keyEvent)
+                        _ = tw_workspace_editor_focus(window,
+                            idlePane.editorHasFocus || idlePane.hasOpenComposerChoice ? 1 : 0)
                     }
                 }
                 return true

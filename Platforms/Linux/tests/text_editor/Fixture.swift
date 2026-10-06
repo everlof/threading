@@ -1,6 +1,10 @@
 import AppKit
 import Foundation
 
+@MainActor private final class KeyLoopControl: NSControl {
+    override var acceptsFirstResponder: Bool { isEnabled }
+}
+
 @MainActor
 private final class PlaceholderInk: NSView {
     override var isFlipped: Bool { true }
@@ -124,6 +128,28 @@ enum Fixture {
             location: (prompt.textView.string as NSString).length, length: 0))
         precondition(prompt.contentView.bounds.minY > 0,
                      "production prompt must reveal its caret in a fixed-height viewport")
+        let promptWindow = NSWindow()
+        promptWindow.contentView = prompt
+        precondition(promptWindow.makeFirstResponder(prompt.textView))
+        let tailOrigin = prompt.contentView.bounds.origin
+        let tailSelection = prompt.textView.selectedRange()
+        promptWindow.dispatchToContent(NSEvent(type: .scrollWheel,
+            locationInWindow: NSPoint(x: 90, y: 29), scrollingDeltaY: 2.5))
+        precondition(prompt.contentView.bounds.minY == tailOrigin.y - 25,
+                     "wheel hit on prompt text must reach its enclosing clip viewport")
+        precondition(prompt.textView.selectedRange() == tailSelection,
+                     "scrolling must preserve the caret")
+        promptWindow.dispatchToContent(NSEvent(type: .scrollWheel,
+            locationInWindow: NSPoint(x: 90, y: 29), scrollingDeltaY: -2.5))
+        precondition(prompt.contentView.bounds.origin == tailOrigin,
+                     "opposite wheel input must return to the same viewport")
+        promptWindow.dispatchToContent(NSEvent(type: .scrollWheel,
+            locationInWindow: NSPoint(x: 90, y: 29), scrollingDeltaY: 1000))
+        precondition(prompt.contentView.bounds.minY == 0,
+                     "wheel input must clamp at the document start")
+        prompt.textView.insertText("!", replacementRange: tailSelection)
+        precondition(prompt.contentView.bounds.minY > 0,
+                     "typing after a scroll must reveal the retained caret again")
         let promptText = prompt.textView
         var submitIntents: [PromptSubmitIntent] = []
         promptText.onSubmit = { submitIntents.append($0) }
@@ -157,6 +183,13 @@ enum Fixture {
                                         charactersIgnoringModifiers: "\n"))
         precondition(promptText.string == "Draft\n仮名\n" && submitIntents.count == 2,
                      "an external-submit composer must use bare Return for a newline")
+        promptText.keyDown(with: NSEvent(type: .keyDown, keyCode: 36,
+                                        charactersIgnoringModifiers: "\r"))
+        precondition(promptText.string == "Draft\n仮名\n\n",
+                     "native Return characters must insert a newline, not a carriage return")
+
+        verifyKeyLoop()
+        verifyNavigationKeys()
 
         let paint = ThemedTextView(frame: NSRect(x: 0, y: 0, width: 180, height: 40),
                                    textContainer: nil)
@@ -184,5 +217,115 @@ enum Fixture {
         let output = URL(fileURLWithPath: "/repo/Platforms/Linux/out/text-editor-fixture.png")
         try! PNGWriter.write(bitmap, to: output)
         print("text editor fixture passed; rendered \(output.path)")
+        if ProcessInfo.processInfo.environment["THREADING_EDITOR_SCROLL_BENCHMARK"] == "1" {
+            benchmarkScroll(lineCount: 170)
+            benchmarkScroll(lineCount: 1700)
+        }
+    }
+
+    private static func verifyKeyLoop() {
+        let window = NSWindow()
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 160))
+        let first = KeyLoopControl(), second = KeyLoopControl(), submit = KeyLoopControl()
+        let editor = PromptTextView(frame: .zero, textContainer: nil)
+        for view in [first, second, editor, submit] { root.addSubview(view) }
+        first.nextKeyView = second
+        second.nextKeyView = editor
+        editor.nextKeyView = submit
+        submit.nextKeyView = first
+        window.contentView = root
+        window.initialFirstResponder = editor
+        window.selectNextKeyView(nil)
+        precondition(window.firstResponder === editor)
+        submit.isEnabled = false
+        window.selectNextKeyView(nil)
+        precondition(window.firstResponder === first, "disabled submit must leave the loop")
+        window.selectPreviousKeyView(nil)
+        precondition(window.firstResponder === editor, "reverse traversal must skip disabled submit")
+        second.isHidden = true
+        window.selectPreviousKeyView(nil)
+        precondition(window.firstResponder === first, "hidden choices must leave the loop")
+        second.isHidden = false
+        second.removeFromSuperview()
+        window.selectNextKeyView(nil)
+        precondition(window.firstResponder === editor, "detached choices must leave the loop")
+        first.isEnabled = false
+        window.selectNextKeyView(nil)
+        precondition(window.firstResponder === editor, "a single eligible member keeps focus")
+        editor.isEditable = false
+        editor.isSelectable = false
+        precondition(editor.nextValidKeyView == nil && editor.previousValidKeyView == nil,
+                     "an ineligible cycle must terminate")
+        print("PASS explicit key-view loop: forward/reverse, disabled, hidden, detached and empty")
+    }
+
+    private static func verifyNavigationKeys() {
+        let prompt = PromptTextView.scrollingPrompt()
+        prompt.frame = NSRect(x: 0, y: 0, width: 360, height: 58)
+        let view = prompt.textView
+        let second = "Second👩‍🚀line"
+        let first = "One🙂\n"
+        let source = first + second + "\nLast"
+        view.string = source
+        let start = first.utf16.count
+        view.setSelectedRange(NSRange(location: start + 4, length: 0))
+        view.keyDown(with: NSEvent(type: .keyDown, keyCode: 115))
+        precondition(view.selectedRange().location == start, "Home must reach the visual line start")
+        view.keyDown(with: NSEvent(type: .keyDown, keyCode: 119))
+        precondition(view.selectedRange().location == start + second.utf16.count,
+                     "End must reach the visual line end without inserting a control byte")
+        view.keyDown(with: NSEvent(type: .keyDown, modifierFlags: [.control], keyCode: 115))
+        precondition(view.selectedRange().location == 0, "Ctrl+Home must reach the document start")
+        view.keyDown(with: NSEvent(type: .keyDown, modifierFlags: [.control, .shift], keyCode: 119))
+        precondition(view.selectedRange() == NSRange(location: 0, length: source.utf16.count),
+                     "Ctrl+Shift+End must extend selection through joined Unicode")
+        precondition(view.string == source, "navigation must preserve the draft")
+        let longLine = "0123👩‍🚀5678"
+        view.string = longLine + "\nx\n" + longLine
+        let column = "0123👩‍🚀5".utf16.count
+        view.setSelectedRange(NSRange(location: column, length: 0))
+        view.keyDown(with: NSEvent(type: .keyDown, keyCode: 125))
+        view.keyDown(with: NSEvent(type: .keyDown, keyCode: 125))
+        precondition(view.selectedRange().location == longLine.utf16.count + 3 + column,
+                     "vertical navigation must retain its Unicode column across a short line")
+        view.keyDown(with: NSEvent(type: .keyDown, keyCode: 126))
+        view.keyDown(with: NSEvent(type: .keyDown, keyCode: 126))
+        precondition(view.selectedRange().location == column,
+                     "vertical round trip must not shift the caret left")
+        view.string = (0..<40).map { "Line \($0)" }.joined(separator: "\n")
+        let length = view.string.utf16.count
+        view.setSelectedRange(NSRange(location: length, length: 0))
+        view.keyDown(with: NSEvent(type: .keyDown, keyCode: 116))
+        precondition(view.selectedRange().location < length, "Page Up must move through visual lines")
+        view.keyDown(with: NSEvent(type: .keyDown, keyCode: 121))
+        precondition(view.selectedRange().location == length, "Page Down must reach the original tail")
+        print("PASS Unicode line/document boundaries and viewport-sized page navigation")
+    }
+
+    /// Manufacture and layout are measured separately. Warm scroll/draw must visit only the
+    /// fixed viewport, with 170 typical or 1,700 stress lines and no text or width mutation.
+    private static func benchmarkScroll(lineCount: Int) {
+        let start = ProcessInfo.processInfo.systemUptime
+        let prompt = PromptTextView.scrollingPrompt()
+        prompt.frame = NSRect(x: 0, y: 0, width: 180, height: 58)
+        prompt.textView.string = (0..<lineCount).map { "Line \($0) scroll" }.joined(separator: "\n")
+        let height = prompt.textView.textUsedRect.height
+        let prepared = ProcessInfo.processInfo.systemUptime - start
+        let bitmap = Bitmap(width: 180, height: 58, background: (1, 1, 1, 1))
+        let context = NSGraphicsContext(bitmap: bitmap, scale: 1)
+        var samples: [Double] = []
+        for sample in 0..<35 {
+            let before = ProcessInfo.processInfo.systemUptime
+            prompt.contentView.scroll(to: NSPoint(x: 0,
+                y: max(0, height - 58) * CGFloat(sample % 3) / 2))
+            prompt.render(in: context)
+            if sample >= 5 {
+                samples.append((ProcessInfo.processInfo.systemUptime - before) * 1000)
+            }
+        }
+        samples.sort()
+        print(String(format: "EDITOR_SCROLL lines=%d prepare_ms=%.2f median_ms=%.2f p95_ms=%.2f max_ms=%.2f",
+            lineCount, prepared * 1000, samples[samples.count / 2],
+            samples[Int(Double(samples.count - 1) * 0.95)], samples.last!))
     }
 }

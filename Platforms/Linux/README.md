@@ -172,6 +172,42 @@ reparenting; the shim now answers AppKit's descendant and inherited-hidden queri
 text selection, advanced paragraph layout and IME remain
 outside this label implementation. The native window mounts visible navigator fragments through
 this leaf.
+`tests/markdown/run.sh linux` now compiles the unchanged production `Markdown.swift`,
+`MarkdownInline.swift`, and `AgentAuthoredURLPolicy.swift` against the shim. Font trait conversion
+preserves bold, italic, their nesting, monospacing and descriptor resizing; plain and attributed
+Pango text both draw italic. Equivalent fonts compare by value, so literal scanner tokens merge
+into one attributed run instead of spending the 64-span drawing budget. Run the same fixture
+with `macos`, then `compare`, to check normalized blocks, traits, URL metadata and table
+alignments against AppKit. Inspected 1×/2× text captures are in `out/markdown-{linux,macos}/`.
+This fixture covers grammar and text compatibility, including selectable labels, Unicode-safe
+keyboard/pointer ranges and explicit clipboard services. The native window now also compiles the
+shared `MarkdownView` and `ThemedDocumentTableView`. Run `WindowHarness --document-ui-fixture
+OUTPUT_DIRECTORY` to mount the complete document in the preview shell; `tests/document_ui_smoke.py`
+checks selection/copy, read-only text, code, tables, light/dark appearance, resize and paging.
+The diagnostic prepares a provider envelope through the production `StreamEvent` parser and
+`ConversationTimeline` on a worker, then renders the authoritative assistant reply. The same
+timeline contracts run in CoreSliceHarness and Mac XCTest, including 1,000/10,000-turn histories.
+The installed runtime suite includes this journey. This remains a diagnostic document surface:
+native conversation transports, the transcript table/controller and web-link activation are still open.
+`WindowHarness --automatic-rows-ui-fixture OUTPUT_DIRECTORY` places assistant blocks in the
+shared conversation cell host with shim-owned automatic heights. Its native journey checks
+viewport-only materialization, released/reused content, Unicode copy, resize and return navigation,
+plus incremental insertion/removal above the reading position and offscreen tail edits;
+the installed runtime suite runs it alongside the document-page journey. This advances the table
+compatibility path while the full conversation controller and other row kinds remain open.
+In this opt-in fixture, F6/F7 insert/remove a prefix block and F8/F9 append/remove a tail block.
+`TableHeightHarness` checks the same mutation APIs at 1,000/10,000 rows, retaining viewport cells,
+measured heights and selection. Tail appends extend indexed geometry without enumerating history;
+middle edits remap cheap row metadata without rebuilding surviving cells.
+`WindowHarness --diff-ui-fixture OUTPUT_DIRECTORY` decodes a successful Edit through the
+production wire/timeline path and mounts the exact pinned NativeDiffAppKit renderer in the shared
+row host. Its palette uses the production `DiffInk`, `PerceptualColor`, `ThemeContrast` and diff
+theme adapter over the checked Threading theme export. The native journey verifies row-wash
+pixels, Unicode copy, read-only text, live light/dark changes and width reflow. `vendor-diff.sh`
+verifies the renderer and license against their recorded revision; the package includes that license.
+This does not yet mount `ToolCallView`, the full app `DiffView` adapter or native session transports.
+Labels retain the current 4096-byte/64-span/eight-line drawing limits; long individual paragraphs
+and code blocks still need complete viewport rendering before full transcript coverage is claimed.
 `tests/search_match/run.sh` links unchanged production `SearchMatchLabel` through the same
 Pango-backed label path and checks highlighted attributed pixels, a one-line ellipsis, cell
 truncation behavior and the full accessibility value. `out/search-match.png` is its inspected
@@ -499,6 +535,26 @@ launch. `tests/text_editor/run.sh` exercises the editor itself;
 `THREADING_LINUX_COMPOSER_ONLY=1 ./window-smoke.sh` exercises the native X11 window,
 AT-SPI text and chooser actions, screenshot, and agent launch. The shared editor draws the empty
 placeholder and handles Return and Command-Return.
+The shim's pointer claims now reach native SDL system cursors. Selectable document labels and
+the prompt editor use an I-beam; controls restore their declared cursor. Each native window
+retains at most six cursor objects, and geometry invalidation refreshes a stationary pointer
+once after rendering the owning content root. X11 journeys inspect the actual server cursor
+images rather than only the shim's semantic state. Physical pointer hardware remains unverified;
+terminal-content cursor routing is still incomplete.
+Wheel input over the prompt scrolls its clipped viewport while preserving the text, selection
+and keyboard focus. SDL's fractional wheel notches and reversed direction reach the retained
+AppKit responder tree; typing afterwards reveals the caret again. Cached visual lines are
+indexed by viewport before drawing, so scrolling does not scan the entire brief.
+`THREADING_EDITOR_CONFIGURATION=release THREADING_EDITOR_SCROLL_BENCHMARK=1
+tests/text_editor/run.sh` measures preparation separately from warm scroll/draw for 170 and
+1,700 lines in the same fixed viewport.
+The composer declares a four-control key-view loop in the shim window. Tab/Shift+Tab skip
+disabled, hidden and detached controls; choice keyboard activation does not edit the draft.
+AT-SPI focus follows the retained first responder. Home/End, Ctrl+Home/End and Page Up/Down
+preserve text and grapheme boundaries, and vertical movement retains its column across short
+lines. The compact form fits the supported 640×180 minimum window; its submit label becomes
+**Start** while keeping the full accessible action name and shortcut. Resize may temporarily
+crop a retained pane frame until new layout arrives, without aborting the window.
 `THREADING_LINUX_COMPOSER_IME_ONLY=1 ./window-smoke.sh` checks real IBus Pinyin preedit,
 Escape cancellation, `你好` commit, and exact session launch in the same X11 composer.
 The installed `bundle-smoke.sh` repeats that journey from the packaged binary. AT-SPI publishes

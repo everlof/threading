@@ -54,6 +54,23 @@ import OSLog
 /// category rather than under `agent`.
 enum WireList {
 
+    /// A Codable list with independently meaningful elements. Taking each element's decoder
+    /// first advances the container even when its expected value cannot be decoded.
+    static func decode<Value: Decodable>(
+        _ type: Value.Type,
+        from container: inout UnkeyedDecodingContainer,
+        site: String,
+        log: Logger
+    ) throws -> [Value] {
+        var values: [Value] = []
+        while !container.isAtEnd {
+            let element = try container.superDecoder()
+            if let value = try? Value(from: element) { values.append(value) }
+        }
+        report(kept: values.count, of: container.currentIndex, site: site, log: log)
+        return values
+    }
+
     // MARK: - Objects
 
     /// The elements of `value` that are JSON objects, or nil when `value` is not an array.
@@ -169,6 +186,7 @@ enum WireList {
 
 /// The labels `WireList` reports under, spelled once so a log line names a place in the source.
 enum WireListSite {
+    static let claudeStreamContent = "claude.stream.message.content"
     static let claudeAssistantContent = "claude.assistant.content"
     static let claudeUserContent = "claude.user.content"
     static let claudeUserText = "claude.user.content.text"

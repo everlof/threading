@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from x11_cursor import NativeCursor
 
 import gi
 gi.require_version('Atspi', '2.0')
@@ -111,6 +112,7 @@ def open_composer(app, process):
 
 daemon_process = None
 process = None
+cursor = None
 window_log = output / 'window.log'
 try:
     with (output / 'daemon.log').open('w') as log:
@@ -128,6 +130,7 @@ try:
                                         str(process.pid), '--name', '^Threading experiment - '),
                             'native window', process).splitlines()[0]
         xdo('windowfocus', '--sync', window)
+        cursor = NativeCursor()
         composer = open_composer(app, process)
         xdo('key', 'Escape')
         eventually(lambda: panel(app).get_child_at_index(0).get_name() == 'No Session Selected',
@@ -143,11 +146,86 @@ try:
         assert action_bounds.y >= editor_bounds.y + editor_bounds.height, (
             'composer action should sit below its prompt', editor_bounds, action_bounds)
         assert not action.get_state_set().contains(Atspi.StateType.ENABLED)
+        project_chip = eventually(lambda: child_by_id(composer, 'linux.composer.project'),
+                                  'AT-SPI project chip', process)
+        provider_chip = eventually(lambda: child_by_id(composer, 'linux.composer.provider'),
+                                   'AT-SPI provider chip', process)
+
+        def focused_only(expected):
+            controls = [project_chip, provider_chip, editor, action]
+            return [control for control in controls
+                    if control.get_state_set().contains(Atspi.StateType.FOCUSED)] == [expected]
+
+        xdo('key', 'shift+Tab')
+        eventually(lambda: focused_only(provider_chip), 'reverse Tab reaches identity choice', process)
+        subprocess.run(['import', '-window', window, str(output / 'composer-identity-focused.png')],
+                       check=True, timeout=5)
+        xdo('key', 'space')
+        eventually(lambda: child_by_id(composer, 'linux.composer.choices'),
+                   'keyboard identity choice opens', process)
+        def highlighted_choice(name):
+            choices = child_by_id(composer, 'linux.composer.choices')
+            return choices and any(choices.get_child_at_index(index).get_name() == name
+                and choices.get_child_at_index(index).get_state_set().contains(Atspi.StateType.SELECTED)
+                for index in range(choices.get_child_count()))
+        for key, name in [('End', 'Claude Code'), ('Home', 'Codex'),
+                          ('Next', 'Claude Code'), ('Prior', 'Codex')]:
+            xdo('key', key)
+            eventually(lambda name=name: highlighted_choice(name), 'choice boundary/page keys', process)
+        xdo('key', 'Escape')
+        eventually(lambda: focused_only(provider_chip), 'choice dismissal restores its focus', process)
+        xdo('key', 'Tab')
+        eventually(lambda: focused_only(editor), 'Tab returns to the editor', process)
+        xdo('key', 'Tab')
+        eventually(lambda: focused_only(project_chip), 'Tab skips disabled submit', process)
+        subprocess.run(['import', '-window', window, str(output / 'composer-project-focused.png')],
+                       check=True, timeout=5)
+        xdo('key', 'space')
+        eventually(lambda: child_by_id(composer, 'linux.composer.choices'),
+                   'keyboard project choice opens', process)
+        xdo('key', 'Escape', 'shift+Tab')
+        eventually(lambda: focused_only(editor), 'reverse Tab skips disabled submit', process)
+        assert Atspi.Text.get_text(editor.get_text_iface(), 0, -1) == '', (
+            'choice activation must not become draft text')
         xdo('type', '--clearmodifiers', '--delay', '20', 'Draft stays')
         eventually(lambda: Atspi.Text.get_text(editor.get_text_iface(), 0, -1) == 'Draft stays',
                    'draft before choice change', process)
         eventually(lambda: action.get_state_set().contains(Atspi.StateType.ENABLED),
                    'composer action enabled for draft', process)
+        for key, target in [('Tab', action), ('Tab', project_chip), ('Tab', provider_chip),
+                            ('shift+Tab', project_chip), ('shift+Tab', action), ('shift+Tab', editor)]:
+            xdo('key', key)
+            eventually(lambda target=target: focused_only(target), 'four-control Tab loop', process)
+        text = editor.get_text_iface()
+        xdo('key', 'Home')
+        eventually(lambda: text.get_caret_offset() == 0, 'native Home reaches line start', process)
+        xdo('key', 'End')
+        eventually(lambda: text.get_caret_offset() == len('Draft stays'),
+                   'native End reaches line end', process)
+        assert Atspi.Text.get_text(text, 0, -1) == 'Draft stays', 'navigation changed the draft'
+        xdo('windowsize', '--sync', window, '640', '180')
+
+        def controls_fit():
+            bounds = [control.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+                      for control in [project_chip, provider_chip, editor, action]]
+            return all(value.x >= 320 and value.y >= 0 and value.width > 0 and value.height > 0
+                       and value.x + value.width <= 640 and value.y + value.height <= 180
+                       for value in bounds)
+
+        eventually(controls_fit, 'all composer controls fit the minimum window', process)
+        xdo('key', 'shift+Tab')
+        eventually(lambda: focused_only(provider_chip), 'identity focus in the minimum window', process)
+        subprocess.run(['import', '-window', window, str(output / 'composer-minimum-window.png')],
+                       check=True, timeout=5)
+        xdo('key', 'space')
+        eventually(lambda: child_by_id(composer, 'linux.composer.choices'),
+                   'choice opens in the minimum window', process)
+        subprocess.run(['import', '-window', window, str(output / 'composer-minimum-choice.png')],
+                       check=True, timeout=5)
+        xdo('key', 'Escape', 'Tab')
+        xdo('windowsize', '--sync', window, '1120', '480')
+        eventually(lambda: editor.get_component_iface().get_extents(Atspi.CoordType.WINDOW).width > 600,
+                   'composer restores its full viewport', process)
         project_chip = eventually(lambda: child_by_id(composer, 'linux.composer.project'),
                                   'AT-SPI project chip', process)
         assert project_chip.get_role_name() == 'combo box'
@@ -212,6 +290,7 @@ try:
                    'composer action focus', process)
         subprocess.run(['import', '-window', window,
                         str(output / 'composer-empty-placeholder.png')], check=True, timeout=5)
+        arrow = cursor.read(output / 'cursor-control.png')
         editor_bounds = editor.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
         xdo('mousemove', '--window', window,
             str(editor_bounds.x + editor_bounds.width // 2),
@@ -219,6 +298,47 @@ try:
         xdo('click', '1')
         eventually(lambda: editor.get_state_set().contains(Atspi.StateType.FOCUSED),
                    'composer editor refocus', process)
+        eventually(lambda: cursor.read() != arrow, 'native composer I-beam cursor', process)
+        cursor.read(output / 'cursor-editor.png')
+        xdo('mousemove', '--window', window,
+            str(provider_bounds.x + provider_bounds.width // 2),
+            str(provider_bounds.y + provider_bounds.height // 2))
+        eventually(lambda: cursor.read() == arrow, 'composer control restores native arrow', process)
+        xdo('mousemove', '--window', window,
+            str(editor_bounds.x + editor_bounds.width // 2),
+            str(editor_bounds.y + editor_bounds.height // 2))
+        eventually(lambda: cursor.read() != arrow, 'native editor cursor restored', process)
+        editor_text = editor.get_text_iface()
+        editable = editor.get_editable_text_iface()
+        long_prompt = '\n'.join(f'Brief line {index:02d} — scroll 🙂' for index in range(40))
+        editable.set_text_contents(long_prompt)
+        eventually(lambda: Atspi.Text.get_text(editor_text, 0, -1) == long_prompt,
+                   'long composer brief', process)
+        assert editor_text.set_caret_offset(len(long_prompt))
+        eventually(lambda: editor_text.get_caret_offset() == len(long_prompt),
+                   'caret at end of long brief', process)
+
+        def editor_pixels(name):
+            capture = output / name
+            subprocess.run(['import', '-window', window, str(capture)], check=True, timeout=5)
+            bounds = editor.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+            return subprocess.check_output(['convert', str(capture), '-crop',
+                f'{bounds.width}x{bounds.height}+{bounds.x}+{bounds.y}', '+repage',
+                '-depth', '8', 'rgba:-'], timeout=5)
+
+        xdo('mousemove', '--window', window,
+            str(editor_bounds.x + editor_bounds.width // 2),
+            str(editor_bounds.y + editor_bounds.height // 2))
+        tail_pixels = editor_pixels('composer-scroll-tail.png')
+        xdo('click', '--repeat', '12', '--delay', '20', '4')
+        eventually(lambda: editor_pixels('composer-scroll-up.png') != tail_pixels,
+                   'wheel scrolls long brief without moving caret', process)
+        assert Atspi.Text.get_text(editor_text, 0, -1) == long_prompt
+        assert editor_text.get_caret_offset() == len(long_prompt)
+        assert editor.get_state_set().contains(Atspi.StateType.FOCUSED)
+        xdo('click', '--repeat', '12', '--delay', '20', '5')
+        eventually(lambda: editor_pixels('composer-scroll-down.png') == tail_pixels,
+                   'wheel returns to the same tail pixels', process)
         xdo('key', 'ctrl+a')
         opening = 'Please inspect $(literal) 🦉'
         subprocess.run(['xclip', '-selection', 'clipboard'], input=opening.encode(),
@@ -308,9 +428,11 @@ try:
         xdo('key', 'q')
         eventually(lambda: (other_project / 'composer-agent-complete').exists(),
                    'agent received only its own terminal input', process)
-        print('PASS right-pane composer, project/provider choices, keyboard and AT-SPI '
+        print('PASS right-pane composer, Tab focus loop, wheel scrolling, project/provider choices, keyboard and AT-SPI '
               'multiline Unicode edits, exact project and one agent launch', flush=True)
 finally:
+    if cursor is not None:
+        cursor.close()
     if process is not None and process.poll() is None:
         process.terminate()
         try:

@@ -2,8 +2,15 @@ import Foundation
 
 @MainActor
 public final class NSTableColumn {
+    public struct ResizingOptions: OptionSet, Sendable {
+        public let rawValue: Int
+        public init(rawValue: Int) { self.rawValue = rawValue }
+        public static let autoresizingMask = Self(rawValue: 1)
+        public static let userResizingMask = Self(rawValue: 2)
+    }
     public let identifier: NSUserInterfaceItemIdentifier
     public var width: CGFloat = 100
+    public var resizingMask: ResizingOptions = []
 
     public init(identifier: NSUserInterfaceItemIdentifier) {
         self.identifier = identifier
@@ -11,7 +18,9 @@ public final class NSTableColumn {
 }
 
 @MainActor
-open class NSTableCellView: NSView {}
+open class NSTableCellView: NSView {
+    open func prepareForReuse() {}
+}
 
 /// AppKit's row chrome sits behind a cell, and owns selection/hover drawing independently of
 /// the cell's content. Subclasses can override either drawing hook without recreating cells.
@@ -62,6 +71,37 @@ public extension Notification.Name {
 /// direct documentView of an NSScrollView.
 @MainActor
 open class NSTableView: NSView, NSClipViewDocumentObserver {
+    public struct AnimationOptions: OptionSet, Sendable {
+        public let rawValue: UInt
+        public init(rawValue: UInt) { self.rawValue = rawValue }
+        public static let effectFade = Self(rawValue: 1)
+        public static let effectGap = Self(rawValue: 2)
+        public static let slideUp = Self(rawValue: 16)
+        public static let slideDown = Self(rawValue: 32)
+        public static let slideLeft = Self(rawValue: 64)
+        public static let slideRight = Self(rawValue: 128)
+    }
+    open func row(for view: NSView) -> Int {
+        mounted.first { view.isDescendant(of: $0.value.view) }?.key ?? -1
+    }
+    open func noteHeightOfRows(withIndexesChanged indexes: IndexSet) {
+        if usesAutomaticRowHeights {
+            measuredRows.subtract(indexes)
+            reconcileVisibleRows()
+            return
+        }
+        var changed = false
+        for row in indexes where row >= 0 && row < numberOfRows {
+            let height = heightOfRow(row)
+            precondition(height.isFinite && height > 0, "table row height must be positive")
+            let delta = height - rowHeights[row]
+            guard delta != 0 else { continue }
+            rowHeights[row] = height
+            rowHeightIndex.add(delta, at: row)
+            changed = true
+        }
+        if changed { finishDocumentGeometry() }
+    }
     private struct MountedRow {
         let identity: AnyHashable
         let rowView: NSTableRowView
@@ -70,6 +110,13 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
 
     open weak var dataSource: AnyObject?
     open weak var delegate: AnyObject?
+    open var usesAutomaticRowHeights = false {
+        didSet {
+            guard usesAutomaticRowHeights != oldValue else { return }
+            measuredRows.removeAll()
+            updateDocumentGeometry()
+        }
+    }
     public private(set) var tableColumns: [NSTableColumn] = []
     open var rowHeight: CGFloat = 44 {
         didSet {
@@ -95,9 +142,12 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
     private var reusableRows: [NSTableRowView] = []
     private var selectedIdentities: Set<AnyHashable> = []
     private var rowForIdentity: [AnyHashable: Int] = [:]
+    private var rowIdentities: [AnyHashable] = []
     private var rowHeights: [CGFloat] = []
-    private var rowOffsets: [CGFloat] = [0]
+    private var rowHeightIndex = RowHeightIndex()
     private var changingDocumentGeometry = false
+    private var reconcilingRows = false
+    private var measuredRows: Set<Int> = []
 
     open override var isFlipped: Bool { true }
     open var enclosingScrollView: NSScrollView? { superview?.superview as? NSScrollView }
@@ -117,6 +167,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
     open override var frame: NSRect {
         didSet {
             guard !changingDocumentGeometry, frame.size != oldValue.size else { return }
+            if frame.width != oldValue.width { measuredRows.removeAll() }
             reconcileVisibleRows()
         }
     }
@@ -134,9 +185,153 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         setRowCount(count)
     }
 
+    /// Insert indexes describe the updated source. Tail appends extend the height index and
+    /// identity map only for new rows; existing viewport cells retain their content.
+    open func insertRows(at indexes: IndexSet, withAnimation animationOptions: AnimationOptions) {
+        guard !indexes.isEmpty else { return }
+        let oldCount = numberOfRows
+        let newCount = oldCount + indexes.count
+        precondition(indexes.first! >= 0 && indexes.last! < newCount, "invalid inserted rows")
+        let appends = indexes.first == oldCount && indexes.last == newCount - 1
+        let anchor = viewportAnchor()
+        let selectedRows = selectedRowIndexes
+        numberOfRows = newCount
+        if appends {
+            for row in indexes {
+                let height = initialHeight(at: row)
+                rowHeights.append(height)
+                rowHeightIndex.append(height + intercellSpacing.height)
+                let identity = rowIdentity(at: row)
+                rowIdentities.append(identity)
+                rowForIdentity[identity] = row
+            }
+        } else {
+            var oldToNew: [Int] = []
+            oldToNew.reserveCapacity(oldCount)
+            var heights: [CGFloat] = []
+            heights.reserveCapacity(newCount)
+            var oldRow = 0
+            for row in 0..<newCount {
+                if indexes.contains(row) {
+                    heights.append(initialHeight(at: row))
+                } else {
+                    heights.append(rowHeights[oldRow])
+                    oldToNew.append(row)
+                    oldRow += 1
+                }
+            }
+            rowHeights = heights
+            remapRetainedRows { oldToNew[$0] }
+            rebuildIdentities(selecting: selectedRows.map { oldToNew[$0] })
+            rowHeightIndex.reset(heights.map { $0 + intercellSpacing.height })
+            finishStructuralChange(anchor: anchor.map { (oldToNew[$0.row], $0.offset) },
+                                   previousSelection: selectedRows)
+            return
+        }
+        finishStructuralChange(anchor: anchor, previousSelection: selectedRows)
+    }
+
+    /// Remove indexes describe the old source. Only removed mounted cells are released;
+    /// surviving cells and measured heights move with their rows.
+    open func removeRows(at indexes: IndexSet, withAnimation animationOptions: AnimationOptions) {
+        guard !indexes.isEmpty else { return }
+        let oldCount = numberOfRows
+        precondition(indexes.first! >= 0 && indexes.last! < oldCount, "invalid removed rows")
+        let newCount = oldCount - indexes.count
+        let removesTail = indexes.first == newCount && indexes.last == oldCount - 1
+        let anchor = viewportAnchor()
+        let selectedRows = selectedRowIndexes
+        numberOfRows = newCount
+        if removesTail {
+            for row in indexes {
+                if let cell = mounted.removeValue(forKey: row) { recycle(cell) }
+                measuredRows.remove(row)
+            }
+            for identity in rowIdentities.suffix(indexes.count) {
+                rowForIdentity[identity] = nil
+                selectedIdentities.remove(identity)
+            }
+            rowIdentities.removeLast(indexes.count)
+            rowHeights.removeLast(indexes.count)
+            rowHeightIndex.removeLast(indexes.count)
+            finishStructuralChange(anchor: anchor.flatMap { $0.row < newCount ? $0 : nil },
+                                   previousSelection: selectedRows)
+            return
+        }
+        var oldToNew: [Int?] = []
+        oldToNew.reserveCapacity(oldCount)
+        var heights: [CGFloat] = []
+        heights.reserveCapacity(newCount)
+        for row in 0..<oldCount {
+            if indexes.contains(row) {
+                oldToNew.append(nil)
+            } else {
+                oldToNew.append(heights.count)
+                heights.append(rowHeights[row])
+            }
+        }
+        rowHeights = heights
+        remapRetainedRows { oldToNew[$0] }
+        rebuildIdentities(selecting: selectedRows.compactMap { oldToNew[$0] })
+        rowHeightIndex.reset(heights.map { $0 + intercellSpacing.height })
+        let retainedAnchor = anchor.flatMap { value in
+            oldToNew[value.row].map { (row: $0, offset: value.offset) }
+        }
+        finishStructuralChange(anchor: retainedAnchor, previousSelection: selectedRows)
+    }
+
+    private func initialHeight(at row: Int) -> CGFloat {
+        let height = usesAutomaticRowHeights ? rowHeight : heightOfRow(row)
+        precondition(height.isFinite && height > 0, "table row height must be positive")
+        return height
+    }
+
+    private func viewportAnchor() -> (row: Int, offset: CGFloat)? {
+        guard let clip = superview as? NSClipView,
+              let row = visibleRowRange().first else { return nil }
+        return (row, clip.bounds.minY - rowHeightIndex.offset(row))
+    }
+
+    private func remapRetainedRows(_ position: (Int) -> Int?) {
+        var retained: [Int: MountedRow] = [:]
+        for (row, cell) in mounted {
+            guard let newRow = position(row) else {
+                recycle(cell)
+                continue
+            }
+            retained[newRow] = MountedRow(identity: rowIdentity(at: newRow),
+                rowView: cell.rowView, view: cell.view)
+        }
+        mounted = retained
+        measuredRows = Set(measuredRows.compactMap(position))
+    }
+
+    private func rebuildIdentities(selecting rows: [Int]) {
+        rowIdentities = (0..<numberOfRows).map { rowIdentity(at: $0) }
+        rowForIdentity = Dictionary(uniqueKeysWithValues:
+            rowIdentities.enumerated().map { ($0.element, $0.offset) })
+        selectedIdentities = Set(rows.map { rowIdentities[$0] })
+    }
+
+    private func finishStructuralChange(anchor: (row: Int, offset: CGFloat)?,
+                                        previousSelection: IndexSet) {
+        // Keep clip notifications from mounting rows at the obsolete offset between resizing
+        // the document and restoring the retained reading anchor.
+        reconcilingRows = true
+        finishDocumentGeometry()
+        if let anchor, let clip = superview as? NSClipView {
+            clip.scroll(to: NSPoint(x: clip.bounds.minX,
+                y: rowHeightIndex.offset(anchor.row) + anchor.offset))
+        }
+        reconcilingRows = false
+        reconcileVisibleRows()
+        if selectedRowIndexes != previousSelection { selectionDidChange() }
+    }
+
     /// Reconfigures changed viewport cells without asking the data source for every row.
     open func reloadData(forRowIndexes rows: IndexSet, columnIndexes columns: IndexSet) {
         guard !columns.isEmpty else { return }
+        measuredRows.subtract(rows)
         for row in rows {
             guard let cell = mounted.removeValue(forKey: row) else { continue }
             recycle(cell)
@@ -153,9 +348,11 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
             recycle(cell)
         }
         mounted.removeAll()
+        measuredRows.removeAll()
         numberOfRows = count
+        rowIdentities = (0..<count).map { rowIdentity(at: $0) }
         rowForIdentity = Dictionary(uniqueKeysWithValues:
-            (0..<count).map { (rowIdentity(at: $0), $0) })
+            rowIdentities.enumerated().map { ($0.element, $0.offset) })
         updateDocumentGeometry()
         reconcileVisibleRows()
     }
@@ -165,7 +362,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
 
     open func rect(ofRow row: Int) -> NSRect {
         guard row >= 0, row < numberOfRows else { return .zero }
-        return NSRect(x: 0, y: rowOffsets[row],
+        return NSRect(x: 0, y: rowHeightIndex.offset(row),
                       width: frame.width, height: rowHeights[row])
     }
 
@@ -174,7 +371,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
               point.x < frame.width else { return -1 }
         let index = firstOffset(after: point.y) - 1
         guard index >= 0, index < numberOfRows,
-              point.y < rowOffsets[index] + rowHeights[index] else { return -1 }
+              point.y < rowHeightIndex.offset(index) + rowHeights[index] else { return -1 }
         return index
     }
 
@@ -198,6 +395,12 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         guard row >= 0, row < numberOfRows, let clip = superview as? NSClipView else { return }
         let rect = rect(ofRow: row)
         let visible = clip.documentVisibleRect
+        if usesAutomaticRowHeights, rect.minY < visible.minY || rect.maxY > visible.maxY {
+            // Land at the estimated row's start. Measuring a preceding partial row while
+            // bottom-aligning the estimate could otherwise push the requested row offscreen.
+            clip.scroll(to: NSPoint(x: clip.bounds.minX, y: rect.minY))
+            return
+        }
         if rect.minY < visible.minY {
             clip.scroll(to: NSPoint(x: clip.bounds.minX, y: rect.minY))
         } else if rect.maxY > visible.maxY {
@@ -233,6 +436,11 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         guard row >= 0, row < numberOfRows else { return nil }
         if makeIfNecessary { reconcileVisibleRows() }
         return mounted[row]?.rowView
+    }
+
+    open func enumerateAvailableRowViews(_ body: (NSTableRowView, Int) -> Void) {
+        let cells = mounted.sorted { $0.key < $1.key }
+        for (row, cell) in cells { body(cell.rowView, row) }
     }
 
     open override func mouseDown(with event: NSEvent) {
@@ -280,20 +488,24 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
     }
 
     private func updateDocumentGeometry() {
+        measuredRows.removeAll()
         rowHeights.removeAll(keepingCapacity: true)
         rowHeights.reserveCapacity(numberOfRows)
-        rowOffsets.removeAll(keepingCapacity: true)
-        rowOffsets.reserveCapacity(numberOfRows + 1)
-        rowOffsets.append(0)
+        var extents: [CGFloat] = []
+        extents.reserveCapacity(numberOfRows)
         for row in 0..<numberOfRows {
-            let height = heightOfRow(row)
+            let height = usesAutomaticRowHeights ? rowHeight : heightOfRow(row)
             precondition(height.isFinite && height > 0, "table row height must be positive")
-            let nextOffset = rowOffsets[row] + height + intercellSpacing.height
-            precondition(nextOffset.isFinite, "table document exceeds finite geometry")
             rowHeights.append(height)
-            rowOffsets.append(nextOffset)
+            extents.append(height + intercellSpacing.height)
         }
-        let height = rowOffsets[numberOfRows]
+        rowHeightIndex.reset(extents)
+        finishDocumentGeometry()
+    }
+
+    private func finishDocumentGeometry() {
+        let height = rowHeightIndex.offset(numberOfRows)
+        precondition(height.isFinite, "table document exceeds finite geometry")
         changingDocumentGeometry = true
         if frame.height != height { frame.size.height = height }
         changingDocumentGeometry = false
@@ -308,7 +520,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         guard !visible.isEmpty else { return 0..<0 }
         var lower = max(0, min(numberOfRows, firstOffset(after: visible.minY) - 1))
         if lower < numberOfRows,
-           visible.minY >= rowOffsets[lower] + rowHeights[lower] {
+           visible.minY >= rowHeightIndex.offset(lower) + rowHeights[lower] {
             lower += 1
         }
         let upper = max(lower, min(numberOfRows, firstOffset(atOrAfter: visible.maxY)))
@@ -317,27 +529,44 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
 
     /// First prefix offset greater than `value` (upper bound).
     private func firstOffset(after value: CGFloat) -> Int {
-        var low = 0
-        var high = rowOffsets.count
-        while low < high {
-            let middle = low + (high - low) / 2
-            if rowOffsets[middle] <= value { low = middle + 1 } else { high = middle }
-        }
-        return low
+        rowHeightIndex.firstOffset(value, strictlyAfter: true)
     }
 
     /// First prefix offset greater than or equal to `value` (lower bound).
     private func firstOffset(atOrAfter value: CGFloat) -> Int {
-        var low = 0
-        var high = rowOffsets.count
-        while low < high {
-            let middle = low + (high - low) / 2
-            if rowOffsets[middle] < value { low = middle + 1 } else { high = middle }
-        }
-        return low
+        rowHeightIndex.firstOffset(value, strictlyAfter: false)
     }
 
     private func reconcileVisibleRows() {
+        guard !reconcilingRows else { return }
+        reconcilingRows = true
+        defer { reconcilingRows = false }
+        while true {
+            reconcileCurrentViewport()
+            guard usesAutomaticRowHeights, measureVisibleRows() else { return }
+            // New geometry can reveal another row. Every pass measures previously invalid
+            // viewport cells; hidden history never constructs a measurement view.
+            finishDocumentGeometry()
+        }
+    }
+
+    private func measureVisibleRows() -> Bool {
+        var changed = false
+        for row in mounted.keys.sorted() where !measuredRows.contains(row) {
+            guard let cell = mounted[row] else { continue }
+            let height = max(1, cell.view.fittingSize.height)
+            precondition(height.isFinite, "automatic table height must be finite")
+            measuredRows.insert(row)
+            let delta = height - rowHeights[row]
+            guard abs(delta) > 0.001 else { continue }
+            rowHeights[row] = height
+            rowHeightIndex.add(delta, at: row)
+            changed = true
+        }
+        return changed
+    }
+
+    private func reconcileCurrentViewport() {
         let visible = visibleRowRange()
         let visibleSet = Set(visible)
         for row in Array(mounted.keys) {
@@ -375,6 +604,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
     private func recycle(_ cell: MountedRow) {
         cell.rowView.removeFromSuperview()
         cell.view.removeFromSuperview()
+        (cell.view as? NSTableCellView)?.prepareForReuse()
         recycle(cell.view)
         // A delegate-owned row may be reused through makeView(withIdentifier:owner:), just as
         // its cell is. The default shell has no identifier and uses its own small reuse pool.

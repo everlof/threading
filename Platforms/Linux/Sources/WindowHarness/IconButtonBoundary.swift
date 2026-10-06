@@ -36,13 +36,14 @@ import AppKit
     }
 }
 
-public struct AppThemeDidChange {}
-public struct ProfileDidChange {}
-public struct AccessibilityDisplayOptionsDidChange {}
-@MainActor public final class AppEventObservations {
-    public func observe<Event>(_ event: Event.Type, _ handler: @escaping (Event) -> Void) {
-        // WindowHarness explicitly invalidates its bounded retained views on theme changes.
-    }
+public struct AppThemeDidChange: AppEvent {
+    public static let name = Notification.Name("appThemeDidChange")
+}
+public struct ProfileDidChange: AppEvent {
+    public static let name = Notification.Name("profileDidChange")
+}
+public struct AccessibilityDisplayOptionsDidChange: AppEvent {
+    public static let name = Notification.Name("accessibilityDisplayOptionsDidChange")
 }
 
 @MainActor public enum InkSource: Equatable {

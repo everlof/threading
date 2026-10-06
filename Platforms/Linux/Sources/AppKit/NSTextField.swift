@@ -2,7 +2,7 @@
 import Foundation
 import AppKitTextBridge
 
-public enum NSTextAlignment: Int, Sendable { case left = 0, right = 1, center = 2, justified = 3, natural = 4 }
+public enum NSTextAlignment: Int, Sendable { case left = 0, right = 2, center = 1, justified = 3, natural = 4 }
 public enum NSLineBreakMode: Int, Sendable {
     case byWordWrapping = 0, byCharWrapping = 1, byClipping = 2
     case byTruncatingHead = 3, byTruncatingTail = 4, byTruncatingMiddle = 5
@@ -23,8 +23,8 @@ public final class NSTextFieldCell {
     }
 }
 
-/// A bounded, Pango-shaped label with attributed style runs. Text entry, selection, and IME
-/// remain separate platform services; those properties are deliberately absent.
+/// A bounded, Pango-shaped label with attributed style runs and read-only selection.
+/// Editing and IME remain the separate NSTextView/platform input path.
 @MainActor
 open class NSTextField: NSView {
     private static let maximumUTF8Bytes = 4096
@@ -36,6 +36,11 @@ open class NSTextField: NSView {
     private var attributedStorage: NSAttributedString?
     private var naturalMetrics: TATMetrics?
     private var scaledMetrics: (scale: CGFloat, metrics: TATMetrics)?
+    private var automaticLayoutWidth: CGFloat = 0
+    private var labelLayout: SelectableLabelLayout?
+    private var selectionAnchor: Int?
+    private var draggingSelection = false
+    public private(set) var selectedTextRange = NSRange(location: 0, length: 0)
 
     private var textStorage = ""
     open var stringValue: String {
@@ -43,6 +48,8 @@ open class NSTextField: NSView {
         set {
             textStorage = newValue
             attributedStorage = nil
+            selectedTextRange = NSRange(location: 0, length: 0)
+            selectionAnchor = nil
             setAccessibilityRole(.staticText)
             setAccessibilityLabel(newValue)
             let prefix = Array(newValue.utf8.prefix(Self.maximumUTF8Bytes + 1))
@@ -73,8 +80,8 @@ open class NSTextField: NSView {
         }
     }
     open var font: NSFont? = .systemFont(ofSize: 13) { didSet { invalidateTextMetrics() } }
-    open var textColor: NSColor? = .labelColor { didSet { needsDisplay = true } }
-    open var alignment: NSTextAlignment = .natural { didSet { needsDisplay = true } }
+    open var textColor: NSColor? = .labelColor { didSet { labelLayout = nil; needsDisplay = true } }
+    open var alignment: NSTextAlignment = .natural { didSet { labelLayout = nil; needsDisplay = true } }
     open var lineBreakMode: NSLineBreakMode = .byClipping { didSet { invalidateTextMetrics() } }
     open var maximumNumberOfLines: Int = 0 { didSet { invalidateTextMetrics() } }
     open var usesSingleLineMode = false { didSet { invalidateTextMetrics() } }
@@ -93,8 +100,19 @@ open class NSTextField: NSView {
         didSet { precondition(!isEditable, "Linux NSTextField currently supports labels, not editing") }
     }
     open var isSelectable = false {
-        didSet { precondition(!isSelectable, "Linux NSTextField currently supports labels, not selection") }
+        didSet {
+            if !isSelectable {
+                selectedTextRange = NSRange(location: 0, length: 0)
+                selectionAnchor = nil
+                if window?.firstResponder === self { _ = window?.makeFirstResponder(nil) }
+            }
+            window?.invalidateCursorRects(for: self)
+            needsDisplay = true
+        }
     }
+    open var selectedTextAttributes: [NSAttributedString.Key: Any] = [
+        .backgroundColor: NSColor.controlAccentColor, .foregroundColor: NSColor.white
+    ] { didSet { needsDisplay = true } }
     open var isBordered = false {
         didSet { precondition(!isBordered, "Linux NSTextField label has no control border") }
     }
@@ -105,6 +123,11 @@ open class NSTextField: NSView {
     public convenience init(labelWithString string: String) {
         self.init(frame: .zero)
         stringValue = string
+    }
+
+    public convenience init(labelWithAttributedString string: NSAttributedString) {
+        self.init(frame: .zero)
+        attributedStringValue = string
     }
 
     public convenience init(wrappingLabelWithString string: String) {
@@ -127,6 +150,11 @@ open class NSTextField: NSView {
         invalidateIntrinsicContentSize()
     }
 
+    open override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        invalidateTextMetrics()
+    }
+
     open override var firstBaselineMetric: NSBaselineMetric { baselineMetric }
     open override var lastBaselineMetric: NSBaselineMetric { baselineMetric }
 
@@ -146,8 +174,19 @@ open class NSTextField: NSView {
     private func invalidateTextMetrics() {
         naturalMetrics = nil
         scaledMetrics = nil
+        labelLayout = nil
         needsDisplay = true
         invalidateIntrinsicContentSize()
+    }
+
+    func commitAutomaticLayoutWidth(_ width: CGFloat) -> Bool {
+        guard !translatesAutoresizingMaskIntoConstraints, preferredMaxLayoutWidth == 0,
+              effectiveLineBreakMode == .byWordWrapping || effectiveLineBreakMode == .byCharWrapping,
+              width > 0, abs(automaticLayoutWidth - width) > 0.5 else { return false }
+        let before = intrinsicContentSize
+        automaticLayoutWidth = width
+        invalidateTextMetrics()
+        return intrinsicContentSize != before
     }
 
     private func metrics(at scale: CGFloat) -> TATMetrics {
@@ -155,12 +194,19 @@ open class NSTextField: NSView {
         if let scaledMetrics, scaledMetrics.scale == scale { return scaledMetrics.metrics }
         let wraps = effectiveLineBreakMode == .byWordWrapping || effectiveLineBreakMode == .byCharWrapping
         let lineLimit = min(Self.maximumLines, max(1, maximumNumberOfLines == 0 ? Self.maximumLines : maximumNumberOfLines))
-        let wrapWidth = wraps && preferredMaxLayoutWidth.isFinite && preferredMaxLayoutWidth > 0
-            ? Int(ceil(min(CGFloat(Self.maximumRasterWidth), preferredMaxLayoutWidth * scale))) : 0
-        if let attributedStorage {
-            let result = AttributedTextDrawing.prepare(attributedStorage, scale: scale)
+        let measuredWidth = preferredMaxLayoutWidth > 0 ? preferredMaxLayoutWidth : automaticLayoutWidth
+        let wrapWidth = wraps && measuredWidth.isFinite && measuredWidth > 0
+            ? Int(ceil(min(CGFloat(Self.maximumRasterWidth), measuredWidth * scale))) : 0
+        if attributedStorage != nil || isSelectable {
+            let source = attributedStorage ?? NSAttributedString(
+                string: String(decoding: preparedUTF8, as: UTF8.self), attributes: [
+                    .font: font ?? NSFont.systemFont(ofSize: 13),
+                    .foregroundColor: textColor ?? NSColor.labelColor
+                ])
+            let result = AttributedTextDrawing.prepare(source, scale: scale)
                 .measure(wrappingAt: wrapWidth, maximumLines: lineLimit,
-                         characterWrapping: effectiveLineBreakMode == .byCharWrapping)
+                         characterWrapping: effectiveLineBreakMode == .byCharWrapping,
+                         completeLabelHeight: isSelectable)
                 ?? TATMetrics(width: 0, height: 0, baseline: 0, glyphs: 0)
             if scale == 1 { naturalMetrics = result }
             else { scaledMetrics = (scale, result) }
@@ -171,21 +217,26 @@ open class NSTextField: NSView {
         var emptyByte: UInt8 = 0
         withUnsafePointer(to: &emptyByte) { emptyPointer in
             preparedUTF8.withUnsafeBufferPointer { bytes in
-                if wraps {
+                let hasParagraphs = !usesSingleLineMode && maximumNumberOfLines != 1
+                    && preparedUTF8.contains(10)
+                if wraps || hasParagraphs {
                     if wrapWidth > 0 {
                         _ = tat_measure_wrapped(bytes.baseAddress ?? emptyPointer,
                                                 Int32(bytes.count), isMonospace, pangoWeight,
+                                                font?.isItalic == true ? 1 : 0,
                                                 Double(size), Int32(lineLimit), Int32(wrapWidth),
                                                 effectiveLineBreakMode == .byCharWrapping ? 1 : 0,
                                                 &result)
                     } else {
                         _ = tat_measure_paragraphs(bytes.baseAddress ?? emptyPointer,
                                                    Int32(bytes.count), isMonospace, pangoWeight,
+                                                   font?.isItalic == true ? 1 : 0,
                                                    Double(size), Int32(lineLimit), &result)
                     }
                 } else {
                     _ = tat_measure(bytes.baseAddress ?? emptyPointer, Int32(bytes.count),
-                                    isMonospace, pangoWeight, Double(size), &result)
+                                    isMonospace, pangoWeight, font?.isItalic == true ? 1 : 0,
+                                    Double(size), &result)
                 }
             }
         }
@@ -210,6 +261,10 @@ open class NSTextField: NSView {
     }
 
     open override func draw(_ dirtyRect: NSRect) {
+        if isSelectable {
+            drawSelectableLabel()
+            return
+        }
         if let attributedStorage {
             guard attributedStorage.length > 0,
                   let context = NSGraphicsContext.current, context.alpha > 0,
@@ -286,6 +341,7 @@ open class NSTextField: NSView {
                 tat_render(destination.baseAddress, Int32(destination.count), Int32(width), Int32(height),
                            Int32(layoutWidth), Int32(left - fieldLeft), Int32(top - textTop),
                            bytes.baseAddress, Int32(bytes.count), isMonospace, pangoWeight,
+                           font?.isItalic == true ? 1 : 0,
                            Double(pixelSize), mode, horizontalAlignment, Int32(lineLimit))
             }
         }
@@ -294,6 +350,118 @@ open class NSTextField: NSView {
                     color.alphaComponent * context.alpha)
         context.compositeCoverage(coverage, x: left, y: top, width: width, height: height,
                                   color: rgba)
+    }
+
+    open override var acceptsFirstResponder: Bool { isSelectable }
+    open override func becomeFirstResponder() -> Bool { needsDisplay = true; return true }
+    open override func resignFirstResponder() -> Bool { selectionAnchor = nil; needsDisplay = true; return true }
+
+    open override func resetCursorRects() {
+        if isSelectable { addCursorRect(bounds, cursor: .iBeam) }
+    }
+
+    open override func mouseDown(with event: NSEvent) {
+        guard isSelectable else { super.mouseDown(with: event); return }
+        _ = window?.makeFirstResponder(self)
+        let offset = textOffset(at: convert(event.locationInWindow, from: nil))
+        let anchor = event.modifierFlags.contains(.shift)
+            ? selectionAnchor ?? selectedTextRange.location : offset
+        select(from: anchor, to: offset)
+        selectionAnchor = anchor
+        draggingSelection = true
+    }
+
+    open override func mouseDragged(with event: NSEvent) {
+        guard isSelectable, draggingSelection, let anchor = selectionAnchor else { return }
+        select(from: anchor, to: textOffset(at: convert(event.locationInWindow, from: nil)))
+    }
+
+    open override func mouseUp(with event: NSEvent) { draggingSelection = false }
+
+    open override func keyDown(with event: NSEvent) {
+        guard isSelectable else { super.keyDown(with: event); return }
+        let chord = !event.modifierFlags.intersection([.command, .control]).isEmpty
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        if chord, key == "a" { selectAll(nil); return }
+        if chord, key == "c" { copy(nil); return }
+        guard [123, 124, 115, 119].contains(event.keyCode) else {
+            super.keyDown(with: event)
+            return
+        }
+        let source = stringValue as NSString
+        let extends = event.modifierFlags.contains(.shift)
+        let left = event.keyCode == 123 || event.keyCode == 115
+        let cursor = selectionAnchor == selectedTextRange.location
+            ? NSMaxRange(selectedTextRange) : selectedTextRange.location
+        let next: Int
+        if event.keyCode == 115 || event.keyCode == 119 {
+            next = left ? 0 : source.length
+        } else if !extends && selectedTextRange.length > 0 {
+            next = left ? selectedTextRange.location : NSMaxRange(selectedTextRange)
+        } else if left && cursor > 0 {
+            next = source.rangeOfComposedCharacterSequence(at: cursor - 1).location
+        } else if !left && cursor < source.length {
+            next = NSMaxRange(source.rangeOfComposedCharacterSequence(at: cursor))
+        } else { next = cursor }
+        let anchor = extends ? selectionAnchor ?? cursor : next
+        select(from: anchor, to: next)
+        selectionAnchor = extends ? anchor : nil
+    }
+
+    public func selectAll(_ sender: Any?) {
+        guard isSelectable else { return }
+        select(from: 0, to: (stringValue as NSString).length)
+        selectionAnchor = 0
+    }
+
+    public func copy(_ sender: Any?) {
+        guard isSelectable, selectedTextRange.length > 0,
+              selectedTextRange.length <= 65_536 else { return }
+        let value = (stringValue as NSString).substring(with: selectedTextRange)
+        _ = NSPasteboard.general.setString(value, forType: .string)
+    }
+
+    private func select(from anchor: Int, to cursor: Int) {
+        selectedTextRange = NSRange(location: min(anchor, cursor), length: abs(cursor - anchor))
+        needsDisplay = true
+    }
+
+    private func selectableLayout(at scale: CGFloat) -> SelectableLabelLayout? {
+        let width = min(Self.maximumRasterWidth, max(1, Int(ceil(bounds.width * scale))))
+        if let labelLayout, labelLayout.scale == scale, labelLayout.width == width { return labelLayout }
+        let source = attributedStorage ?? NSAttributedString(
+            string: String(decoding: preparedUTF8, as: UTF8.self), attributes: [
+                .font: font ?? NSFont.systemFont(ofSize: 13),
+                .foregroundColor: textColor ?? NSColor.labelColor
+            ])
+        var prepared: AttributedTextDrawing.Prepared!
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            prepared = AttributedTextDrawing.prepare(source, scale: scale)
+        }
+        let lines = min(Self.maximumLines, max(1, maximumNumberOfLines == 0 ? Self.maximumLines : maximumNumberOfLines))
+        labelLayout = SelectableLabelLayout(prepared: prepared, original: stringValue,
+            scale: scale, width: width, mode: effectiveLineBreakMode,
+            alignment: alignment, lines: lines, truncates: labelCell.truncatesLastVisibleLine)
+        return labelLayout
+    }
+
+    private func textTop(at scale: CGFloat) -> CGFloat {
+        if effectiveLineBreakMode == .byWordWrapping || effectiveLineBreakMode == .byCharWrapping { return 0 }
+        return max(0, (bounds.height - CGFloat(metrics(at: scale).height) / scale) / 2)
+    }
+
+    private func textOffset(at point: NSPoint) -> Int {
+        let scale = window?.backingScaleFactor ?? 1
+        guard let layout = selectableLayout(at: scale) else { return 0 }
+        return layout.textOffset(x: point.x * scale, y: (point.y - textTop(at: scale)) * scale)
+    }
+
+    private func drawSelectableLabel() {
+        guard let context = NSGraphicsContext.current,
+              let layout = selectableLayout(at: context.scale) else { return }
+        layout.draw(in: context, bounds: bounds, top: textTop(at: context.scale),
+            selection: window?.firstResponder === self ? selectedTextRange : NSRange(location: 0, length: 0),
+            attributes: selectedTextAttributes)
     }
 }
 #endif

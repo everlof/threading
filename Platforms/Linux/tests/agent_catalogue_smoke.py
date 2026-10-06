@@ -244,10 +244,14 @@ class Scenario:
                 pass
         return None
 
-    def open_folder(self, timeout=12):
+    def begin_folder(self, timeout=12):
         self.key('ctrl+shift+p')
         pid = self.eventually(self.folder_pid, 'owned GTK folder chooser', timeout)
         self.chooser = (pid, (Path('/proc') / str(pid) / 'stat').read_text().split()[21])
+        return pid
+
+    def open_folder(self, timeout=12):
+        pid = self.begin_folder(timeout)
         return self.title('Add project folder', pid=pid, timeout=timeout)
 
     def submit_folder(self, dialog):
@@ -365,8 +369,11 @@ def import_overlap(current, outside_projection=False):
     current.eventually(lambda: 'PROJECT_IMPORT_CANCELLED' in current.log_path.read_text(), 'GTK warmup cancelled')
     current.chooser = None
     current.begin_creation()
-    dialog = current.open_folder(timeout=2)
+    # The owned chooser process establishes overlap. GTK mapping is independent of the
+    # client's bounded hello, so release that handshake before waiting for visible chrome.
+    chooser_pid = current.begin_folder(timeout=2)
     current.release_creation()
+    dialog = current.title('Add project folder', pid=chooser_pid)
     if outside_projection:
         # A later store update can contain the complete count while omitting this receipt's
         # row from its recent projection. Dedupe-by-visible-ID alone must not add to that count.

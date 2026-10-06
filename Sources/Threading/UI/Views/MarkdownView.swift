@@ -560,11 +560,14 @@ private final class MarkdownPagedContentView: NSStackView {
 
         guard pageCount > 1 else { return }
 
-        let previous = ThemedButton(
-            title: L10n.string("Previous"),
-            target: self,
-            action: #selector(showPreviousPage)
-        )
+        let previous = ThemedButton()
+        previous.title = L10n.string("Previous")
+#if os(Linux)
+        previous.action = { [weak self] in self?.showPreviousPage() }
+#else
+        previous.target = self
+        previous.action = #selector(showPreviousPage)
+#endif
         previous.emphasis = .tertiary
         previous.isEnabled = pageIndex > 0
 
@@ -577,11 +580,14 @@ private final class MarkdownPagedContentView: NSStackView {
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let next = ThemedButton(
-            title: L10n.string("Next"),
-            target: self,
-            action: #selector(showNextPage)
-        )
+        let next = ThemedButton()
+        next.title = L10n.string("Next")
+#if os(Linux)
+        next.action = { [weak self] in self?.showNextPage() }
+#else
+        next.target = self
+        next.action = #selector(showNextPage)
+#endif
         next.emphasis = .tertiary
         next.isEnabled = pageIndex + 1 < pageCount
 
@@ -597,13 +603,19 @@ private final class MarkdownPagedContentView: NSStackView {
         ])
     }
 
-    @objc private func showPreviousPage() {
+#if canImport(ObjectiveC)
+    @objc
+#endif
+    private func showPreviousPage() {
         guard pageIndex > 0 else { return }
         pageIndex -= 1
         rebuildAndRemeasure()
     }
 
-    @objc private func showNextPage() {
+#if canImport(ObjectiveC)
+    @objc
+#endif
+    private func showNextPage() {
         guard pageIndex + 1 < pageCount else { return }
         pageIndex += 1
         rebuildAndRemeasure()

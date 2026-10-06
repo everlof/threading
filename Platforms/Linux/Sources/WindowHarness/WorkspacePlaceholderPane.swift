@@ -113,6 +113,11 @@ final class WorkspacePlaceholderPane {
             onSubmit()
         }
         composerStartButton.isEnabled = false
+        projectChip.nextKeyView = providerChip
+        providerChip.nextKeyView = composerEditor.textView
+        composerEditor.textView.nextKeyView = composerStartButton
+        composerStartButton.nextKeyView = projectChip
+        window.initialFirstResponder = composerEditor.textView
         composerEditor.textView.drawsBackground = true
         composerEditor.textView.backgroundColor = LinuxTheme.color("fieldSurface")
         composerEditor.textView.textContainerInset = NSSize(width: 10, height: 8)
@@ -240,6 +245,10 @@ final class WorkspacePlaceholderPane {
         case 53: dismissChoice(); return true // Escape
         case 126: moveChoice(by: -1); return true
         case 125: moveChoice(by: 1); return true
+        case 115: highlightChoice(0); return true // Home
+        case 119: highlightChoice(choiceOptions.count - 1); return true // End
+        case 116: moveChoice(by: -max(1, choiceRows.count)); return true
+        case 121: moveChoice(by: max(1, choiceRows.count)); return true
         case 36, 76: chooseHighlighted(); return true
         default: break
         }
@@ -248,7 +257,8 @@ final class WorkspacePlaceholderPane {
             dismissChoice()
             return true
         }
-        if let letter = characters.first, letter.isLetter,
+        let isTextKey = event.modifierFlags.intersection([.command, .control, .option]).isEmpty
+        if isTextKey, let letter = characters.first, letter.isLetter,
            let next = choiceOptions.indices.first(where: {
                $0 > choiceSelected && choiceOptions[$0].name.lowercased().hasPrefix(String(letter).lowercased())
            }) ?? choiceOptions.indices.first(where: {
@@ -392,9 +402,10 @@ final class WorkspacePlaceholderPane {
         needsPresentation = true
     }
 
-    func focusAction() {
+    func advanceFocus(backward: Bool) {
         guard showsComposer else { return }
-        _ = window.makeFirstResponder(actionAnchor)
+        if backward { window.selectPreviousKeyView(nil) }
+        else { window.selectNextKeyView(nil) }
         needsPresentation = true
     }
 
@@ -495,7 +506,7 @@ final class WorkspacePlaceholderPane {
         return true
     }
 
-    func handleEditorKey(_ event: NSEvent) {
+    func handleComposerKey(_ event: NSEvent) {
         guard showsComposer else { return }
         _ = window.dispatchToContent(event)
         refreshStartButton()
@@ -526,6 +537,7 @@ final class WorkspacePlaceholderPane {
         case 1: eventType = .leftMouseDown
         case 2: eventType = .leftMouseDragged
         case 3: eventType = .leftMouseUp
+        case 7: eventType = .scrollWheel
         default: eventType = .mouseMoved
         }
         let point = NSPoint(x: CGFloat(input.x) / 2,
@@ -536,7 +548,9 @@ final class WorkspacePlaceholderPane {
             dismissChoice()
             if clickedSource { return }
         }
-        _ = window.dispatchToContent(NSEvent(type: eventType, locationInWindow: point))
+        _ = window.dispatchToContent(NSEvent(type: eventType, locationInWindow: point,
+            scrollingDeltaX: CGFloat(input.scrollingDeltaX),
+            scrollingDeltaY: CGFloat(input.scrollingDeltaY)))
         if input.action == 4 { window.cancelPointerGesture() }
         needsPresentation = true
     }
@@ -556,17 +570,27 @@ final class WorkspacePlaceholderPane {
     func present(nativeWindow: OpaquePointer, width: Int, height: Int,
                  originX: Int) throws {
         let size = NSSize(width: CGFloat(width) / 2, height: CGFloat(height) / 2)
+        _ = tw_workspace_composer_mode(nativeWindow, showsComposer ? 1 : 0)
         guard needsPresentation || presentedSize != size else { return }
         root.frame = NSRect(origin: .zero, size: size)
         if showsComposer {
             let horizontalInset = min(24, max(8, size.width * 0.08))
             let bottomInset: CGFloat = 8
             let isShort = size.height < 160
+            let startTitle = isShort ? "Start" : "Start Session"
+            if composerStartButton.title != startTitle { composerStartButton.title = startTitle }
             let actionGap: CGFloat = isShort ? 4 : 8
             let chipGap: CGFloat = isShort ? 4 : 8
             let actionHeight = max(26, composerStartButton.intrinsicContentSize.height)
-            let editorHeight = min(108, max(isShort ? 36 : 44, size.height * 0.20))
             let chipHeight = max(24, Design.Size.choiceHeight)
+            let desiredEditorHeight = min(108, max(isShort ? 36 : 44, size.height * 0.20))
+            let availableEditorHeight = max(1, size.height - bottomInset - actionHeight
+                - actionGap - chipGap - chipHeight)
+            let editorHeight = min(desiredEditorHeight, availableEditorHeight)
+            let textInset = NSSize(width: 10, height: isShort ? 2 : 8)
+            if composerEditor.textView.textContainerInset != textInset {
+                composerEditor.textView.textContainerInset = textInset
+            }
             let editorY = bottomInset + actionHeight + actionGap
             let chipY = editorY + editorHeight + chipGap
             let heroBottom = chipY + chipHeight + 4
@@ -662,6 +686,15 @@ final class WorkspacePlaceholderPane {
         }
         publishComposerChoiceAccessibility(nativeWindow: nativeWindow, originX: originX,
                                            scale: scale)
+        if showsComposer, let identity = composerIdentity {
+            let focused: Int32
+            if window.firstResponder === projectChip { focused = 1 }
+            else if window.firstResponder === providerChip { focused = 2 }
+            else if window.firstResponder === composerEditor.textView { focused = 3 }
+            else if window.firstResponder === composerStartButton { focused = 4 }
+            else { focused = 0 }
+            identity.withCString { tw_accessibility_composer_focus(nativeWindow, $0, focused) }
+        }
         presentedSize = size
         needsPresentation = false
         print("IDLE_PANE_FRAME \(width)x\(height) action=\(actionTitle)")

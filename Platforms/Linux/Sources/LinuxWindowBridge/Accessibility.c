@@ -73,7 +73,7 @@ static AccessibleNode *composerProjectChip, *composerProviderChip, *composerMenu
 static int actionsVisible, addProjectVisible, pageTitleVisible, placeholderVisible, placeholderActionVisible;
 static int composerChipVisible[2], composerMenuVisible, composerMenuKind;
 static ComposerEditorNode *composerEditor;
-static int composerEditorVisible, composerEditorFocused;
+static int composerEditorVisible, composerEditorFocused, composerFocusKind = -1;
 typedef struct {
     uint32_t serial, incarnation;
     int operation, start, end, length;
@@ -312,8 +312,14 @@ static void refresh_focus(void) {
                 if (row->selected) { next = row; break; }
             }
         } else if (content == (AccessibleNode *)terminal) next = content;
-        else if (content == placeholder && composerEditorVisible && composerEditorFocused)
-            next = (AccessibleNode *)composerEditor;
+        else if (content == placeholder && composerEditorVisible) {
+            if (composerFocusKind == 1 && composerChipVisible[0]) next = composerProjectChip;
+            else if (composerFocusKind == 2 && composerChipVisible[1]) next = composerProviderChip;
+            else if ((composerFocusKind == 3 || composerFocusKind == -1) && composerEditorFocused)
+                next = (AccessibleNode *)composerEditor;
+            else if ((composerFocusKind == 4 || composerFocusKind == -1) && placeholderActionVisible)
+                next = placeholderAction;
+        }
         else if (content == placeholder && placeholderActionVisible) next = placeholderAction;
     }
     set_focused(next);
@@ -1646,6 +1652,7 @@ static void rebuild_placeholder_children(void) {
     generation++;
 }
 static void clear_composer_choice_projection(void) {
+    composerFocusKind = -1;
     const int expandedKind = composerMenuVisible ? composerMenuKind : 0;
     if (composerChipVisible[0] || composerChipVisible[1] || composerMenuVisible) generation++;
     composerChipVisible[0] = composerChipVisible[1] = 0;
@@ -1770,6 +1777,12 @@ void tw_accessibility_composer_chip(TWWindow *window, const char *identity, int 
         chip->bounds = (AtkRectangle){x, y, width, height};
     }
     rebuild_placeholder_children();
+    refresh_focus();
+}
+void tw_accessibility_composer_focus(TWWindow *window, const char *identity, int kind) {
+    if (!bridgeReady || window != hostWindow || !composerEditorVisible ||
+        !composer_identity_valid(identity) || kind < 0 || kind > 4) return;
+    composerFocusKind = kind;
     refresh_focus();
 }
 void tw_accessibility_composer_menu_begin(TWWindow *window, const char *identity, int kind,

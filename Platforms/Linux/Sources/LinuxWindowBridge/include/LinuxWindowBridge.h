@@ -60,6 +60,8 @@ typedef struct TWWindow TWWindow;
 // Kind38 presses the mounted page title through its production AppKit accessibility action.
 // Kind39 delivers idle right-pane pointer motion/down/drag/up/cancel to the placeholder view.
 // Coordinates are right-pane-local x and window-local y; action matches kind27.
+// Action7 is wheel input at that event's pointer position. scrollingDeltaX/Y preserve SDL's
+// fractional notch units, normalized for FLIPPED; neither focus nor terminal input changes.
 // Kind40 presses the mounted idle placeholder's action button through AT-SPI or keyboard.
 // Kind41 owns an open right-pane session menu: actions 0 motion, 1 down, 2 drag, 3 up,
 // 4 outside press/dismiss, 6 Escape, 7 Up, 8 Down, 9 Enter, 10/11 PageUp/PageDown,
@@ -92,11 +94,19 @@ typedef struct {
     int kind, x, y, width, height;
     char text[1024];
     int key, modifiers, action, textCursor, textSelectionLength;
+    double scrollingDeltaX, scrollingDeltaY;
 } TWEvent;
 TWWindow *tw_open(const char *title, int width, int height);
 const char *tw_error(void);
 int tw_next(TWWindow *, TWEvent *);
 int tw_window_has_focus(TWWindow *);
+// Native pointer shapes selected by the shim's ordinary cursor-rect arbitration. Each
+// window retains at most six lazily created SDL cursors, freed before the video backend.
+enum TWCursorKind {
+    TW_CURSOR_ARROW, TW_CURSOR_HAND, TW_CURSOR_CROSSHAIR,
+    TW_CURSOR_RESIZE_HORIZONTAL, TW_CURSOR_RESIZE_VERTICAL, TW_CURSOR_IBEAM
+};
+int tw_set_cursor(TWWindow *, int kind);
 int tw_present(TWWindow *, const uint8_t *rgba, int width, int height);
 // Persistent workspace: 320-pixel sidebar, terminal up to 1280 pixels, total up to 1600x900.
 // sidebarWidth must be 320 or zero (restore standalone presentation). No child is resized here.
@@ -108,6 +118,9 @@ void tw_workspace_focus(TWWindow *, int sidebarFocused);
 // -1 when the requested editor is unavailable. No editor input is active by default.
 int tw_workspace_editor_focus(TWWindow *, int focused);
 int tw_workspace_editor_focused(TWWindow *);
+// Keep functional keys with a mounted composer even when a chip/button owns focus. Text and
+// IME remain controlled by tw_workspace_editor_focus. This does not move pane or editor focus.
+int tw_workspace_composer_mode(TWWindow *, int enabled);
 // Reserve the top of the workspace's right pane for its AppKit header. Terminal input and
 // accessibility geometry use the remaining content rectangle; standalone mode has no inset.
 void tw_workspace_terminal_top_inset(TWWindow *, int pixels);
@@ -115,7 +128,8 @@ int tw_workspace_terminal_top_inset_value(TWWindow *);
 // Explicit idle right-pane state; entering discards retained terminal/header pixels, clears
 // terminal accessibility text and input gestures, and keeps the navigator mounted.
 void tw_workspace_placeholder_mode(TWWindow *, int enabled);
-// Retain the production placeholder's full right-pane bitmap; only valid in placeholder mode.
+// Retain the production placeholder's bounded right-pane bitmap; only valid in placeholder
+// mode. A preceding-size frame is cropped during resize until the host publishes new geometry.
 int tw_present_placeholder(TWWindow *, const uint8_t *rgba, int width, int height);
 // Explicit runtime activation invalidates the previous terminal image and mouse gesture owner.
 // Repaints the retained sidebar over an empty terminal ground; returns 0 on success.
@@ -222,6 +236,9 @@ void tw_accessibility_composer_editor(TWWindow *, const char *identity,
 void tw_accessibility_composer_chip(TWWindow *, const char *identity, int kind,
                                     const char *label, const char *value,
                                     int x, int y, int width, int height);
+// Publish the retained window's focus owner after mounting the composer projection. kind is
+// 0 none, 1 project chip, 2 identity chip, 3 editor, 4 submit. Stale identities are refused.
+void tw_accessibility_composer_focus(TWWindow *, const char *identity, int kind);
 // Publish only the currently visible choice rows (at most six). A NULL identity or
 // zero rows unmounts the menu. optionIndex is the absolute choice index; id is its
 // exact host identity. AT-SPI actions never mutate the choice directly.
