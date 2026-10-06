@@ -533,6 +533,9 @@ final class DrawerHostViewController: NSViewController {
         newTabButton.isHidden = currentSessionID == nil
 
         let active = state.activeTab
+        if let active, let browser = active.browser {
+            browser.tabShortcutFocusOwner = strip.chipView(for: active.id)
+        }
         installHosted(active?.hostedController)
 
         // Deferred exactly like the panel's terminal tabs: no process until the tab is shown

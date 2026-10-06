@@ -16,18 +16,18 @@ final class PrivacyPreferencesTests: XCTestCase {
     /// moves it, and a palette it left behind once pinned the whole suite light.
     private var themeAtStart: HostedThemeState?
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         themeAtStart = .capture()
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         if let themeAtStart {
             themeAtStart.assertUnchanged(by: name)
             themeAtStart.restore()
         }
         themeAtStart = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Fixtures
@@ -650,7 +650,7 @@ final class PrivacyPreferencesTests: XCTestCase {
         let ungranted = account(handle: "claude-two", path: "/fixtures/claude-two")
         let absent = account(handle: "claude-three", path: "/fixtures/claude-three")
 
-        var requested: [String] = []
+        let requested = OSAllocatedUnfairLock(initialState: [String]())
         let asked = expectation(description: "grant flow ran")
 
         let (page, settings, cleanup) = try keychainPage(
@@ -663,7 +663,7 @@ final class PrivacyPreferencesTests: XCTestCase {
                 }
             },
             grant: { path in
-                requested.append(path)
+                requested.withLock { $0.append(path) }
                 return true
             },
             prefetch: { asked.fulfill() }
@@ -677,7 +677,7 @@ final class PrivacyPreferencesTests: XCTestCase {
         wait(for: [asked], timeout: 5)
         XCTAssertTrue(settings.readsClaudeLoginFromKeychain)
         XCTAssertEqual(
-            requested,
+            requested.withLock { $0 },
             [ungranted.configPath],
             "only the login that needed a grant may be asked for one"
         )

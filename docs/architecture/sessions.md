@@ -900,6 +900,9 @@ resolved off-main, preserving live/remote transcript authority. Publication rech
 transcript and execution directory, and the stored title's authority still protects a chosen name.
 Launch reconciliation gathers immutable identities, discovers accounts once and reads each
 distinct account index once, rather than performing discovery for each retained row.
+The launch call returns its task when a batch exists, so a caller can observe completed
+publication. Its retained-session test awaits that task; a wall-clock poll of a row also counted
+queueing behind other title reads and failed under a concurrent cold build.
 
 **`ai-title` is written once and then almost never rewritten**, which is the fact the rest of
 this section turns on. Counted across the twelve largest transcripts here: each carries 34–422

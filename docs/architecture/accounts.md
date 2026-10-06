@@ -502,6 +502,16 @@ fleet also used at the top of Usage settings. Option is deliberate: Control-clic
 platform's secondary-click convention. The fleet shows active windows only and, when the current
 conversation passes `SessionMigration`'s provider/transcript safety checks, offers the existing
 Move to Account operation on eligible destinations; presentation never broadens migration rules.
+
+The single-account popover measures one row before presentation and includes intercell spacing
+in its viewport height, so the popup opens at its final size rather than stretching its header
+after a later fitting pass. It also reconciles short lists against AppKit's laid-out row extent,
+up to the existing height
+ceiling. Short lists therefore have no scroll range or standing scrollbar; large model-window
+inventories keep their bounded, scrollable viewport. Fitting queries at most six rows; the document
+frame cannot provide that measure because it also fills any excess viewport height. Layout visits
+only available rows, never materializing the provider's complete inventory.
+
 `AccountUsageService` caches
 per account and keeps the last good reading through failed refreshes. The credential posture
 mirrors `~/repo/claudex`: read the short-lived tokens the official CLIs already keep, use

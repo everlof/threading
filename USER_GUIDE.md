@@ -939,6 +939,9 @@ reopens the session if it was the one on screen; the agent is not restarted, so 
 back dormant with **Resume** on it, exactly as it would after Close. Miss the band and nothing is
 lost — the session is in **Settings ▸ Archived**, which is what the band's second line says.
 
+Toast headings use at most two lines and their details at most three. Longer text ends with an
+ellipsis, keeping the sidebar and the band's controls available even for a long automation report.
+
 **You do not have to wait for it.** Every band carries a ✕ in its corner that takes it away at
 once, and you can also just throw it out: drag it sideways, or swipe it with two fingers, and let
 go. It fades as it travels, so you can see when it has gone far enough; let go short of that, or
@@ -4300,6 +4303,7 @@ device-scale, browser-engine, or complete hardware emulation.
 The current address rests as plain toolbar text. Point at it to reveal the editable field; click it
 to edit. Focus and text selection use the ordinary macOS text editor.
 When the browser tab is visible, Cmd+F opens its native find bar inside that tab.
+Cmd+R reloads while the page, its address field, or its selected tab has keyboard focus.
 After a download finishes, a brief toast names the saved file and offers **Reveal in Finder**.
 You can find it later in the browser's recent downloads menu.
 
@@ -4359,8 +4363,16 @@ their separate confirmations.
 Passwords, file selection, download destinations, and form submissions stay with you. Threading
 reveals the browser or opens a native sheet for those boundaries instead of passing their secrets
 or decisions through the conversation. Console, network, CSS-query, and page-snapshot results are
-explicitly marked as untrusted page data; request bodies, response bodies, headers, and cookies
-are never captured for the agent.
+explicitly marked as untrusted page data. Network capture defaults to metadata only.
+**Settings ▸ Tools ▸ Browser Network Capture** has independent switches for request headers,
+response headers, request bodies and response bodies. These apply to all in-app browser tabs and
+future requests without reloading; changing them clears existing captured payloads. Capture covers
+main-frame fetch/XHR text bodies up to 8 KiB and headers the page can read. Sensitive header values
+are redacted. Binary/streaming bodies, cross-origin frames and document/resource bodies are excluded.
+Agents can inspect the settings with `browser_capabilities` or `browser_network(configuration: true)`,
+and request a change with `request_capture`; you approve the proposed settings before they apply.
+`browser_network(include_details: true)` returns captured payloads, with `request_id` to inspect
+one request. At most 64 payload records are retained across the app; older records are evicted.
 
 When an agent reaches a password field, Threading comes forward, selects the session that asked,
 opens its browser, and focuses that exact field — so your password manager's own shortcut, which
@@ -6549,8 +6561,8 @@ Option is otherwise left to the keyboard layout rather than claimed as a Meta ke
 
 ### In the Browser and iOS Simulator tabs
 
-These answer only while keyboard focus is inside the tab; everywhere else the same keys keep their
-app command.
+These answer only while keyboard focus is inside the tab, or on the selected browser tab's header.
+Everywhere else the same keys keep their app command.
 
 | Action | Shortcut |
 |--------|----------|

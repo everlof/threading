@@ -592,10 +592,17 @@ struct BrowserNetworkArguments: Codable, Sendable {
   let kind: String?
   let errorsOnly: Bool?
   let clear: Bool?
+  var configuration: Bool? = nil
+  var requestCapture: BrowserNetworkCaptureRequest? = nil
+  var includeDetails: Bool? = nil
+  var requestID: String? = nil
 
   private enum CodingKeys: String, CodingKey {
-    case kind, clear
+    case kind, clear, configuration
     case errorsOnly = "errors_only"
+    case requestCapture = "request_capture"
+    case includeDetails = "include_details"
+    case requestID = "request_id"
   }
 }
 
@@ -2932,6 +2939,10 @@ struct MCPToolResult: Encodable, Sendable {
 
   static func failure(_ text: String) -> MCPToolResult {
     MCPToolResult(content: [.text(text)], isError: true, structuredContent: nil)
+  }
+
+  static func structured(_ text: String, value: MCPJSONValue) -> MCPToolResult {
+    MCPToolResult(content: [.text(text)], isError: false, structuredContent: value)
   }
 
   static func targeted(
@@ -6371,28 +6382,33 @@ enum MCPTools {
       groupID: "browser",
       family: .browser,
       annotations: MCPToolAnnotations(
-        readOnlyHint: true,
+        readOnlyHint: false,
         destructiveHint: false,
-        idempotentHint: true,
+        idempotentHint: false,
         openWorldHint: true
       ),
       title: "Read network activity",
-      detail: "Inspect redacted request metadata, status codes, and durations.",
+      detail: "Inspect network activity and configurable header/body capture.",
       symbol: "network",
       decodeArguments: { container in
         try container.decodeIfPresent(BrowserNetworkArguments.self, forKey: .arguments)
           ?? BrowserNetworkArguments(kind: nil, errorsOnly: nil, clear: nil)
       },
-      browserTraceDetail: { arguments in "network metadata" },
+      browserTraceDetail: { arguments in arguments.requestCapture != nil ? "request capture settings" : arguments.configuration == true ? "capture configuration" : "network inspection" },
       observesPanel: true,
       executeArguments: { handler, arguments, sessionID, completion in
         handler.browserNetwork(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Read bounded network metadata captured from the current page: method, redacted \
-        URL, resource type, status, and duration. Request and response bodies, headers, \
-        cookies, and credentials are never collected. Use errors_only to focus on failed \
-        fetches and HTTP errors.
+        Read bounded network metadata from the current page. Use configuration=true to \
+        inspect header/body capture settings without a page or origin grant. request_capture \
+        proposes any of request_headers, response_headers, request_body, response_body; \
+        the user must approve changes, which apply to all in-app tabs and future requests. \
+        Settings default to metadata only. include_details=true returns captured page-visible \
+        fetch/XHR headers and bounded text bodies for at most five recent requests; use \
+        request_id from the metadata inventory to inspect one. Sensitive header values and \
+        known filled credentials are redacted. Binary/streaming bodies, cross-origin frames \
+        and document/resource bodies are unavailable. Use errors_only for failed requests.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -6410,6 +6426,25 @@ enum MCPTools {
           "clear": MCPPropertySchema(
             type: .boolean,
             description: "Clear the captured buffer after returning it."
+          ),
+          "configuration": MCPPropertySchema(
+            type: .boolean, description: "Return current capture options and limits without reading a page."
+          ),
+          "request_capture": MCPPropertySchema(
+            type: .object,
+            description: "Ask the user to approve changed capture options; omitted options stay unchanged.",
+            properties: [
+              "request_headers": MCPPropertySchema(type: .boolean, description: "Capture page-visible request headers."),
+              "response_headers": MCPPropertySchema(type: .boolean, description: "Capture page-visible response headers."),
+              "request_body": MCPPropertySchema(type: .boolean, description: "Capture bounded text request bodies."),
+              "response_body": MCPPropertySchema(type: .boolean, description: "Capture bounded text response bodies.")
+            ]
+          ),
+          "include_details": MCPPropertySchema(
+            type: .boolean, description: "Include payloads enabled by the user's capture settings, up to five recent requests."
+          ),
+          "request_id": MCPPropertySchema(
+            type: .string, description: "Inspect one request using its id from browser_network."
           ),
         ],
         required: []

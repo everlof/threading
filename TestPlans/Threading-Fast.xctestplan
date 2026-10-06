@@ -82,6 +82,7 @@
         "BrowserOffScreenCaptureTests",
         "SidebarRevealFocusTests",
         "CommandPaletteFocusTests/testEscapeReturnsKeyboardToTerminalInKeyWindow()",
+        "BrowserReloadShortcutTests/testApplicationDispatchReloadsBeforeRenameMenuWithBrowserFocus()",
         "ThemedControlTests\/testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()",
         "ThemedControlTests\/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()",
         "ThemedPresentationTests\/testAlertDismissEndsTheSheetWithoutAButtonAnswer()",

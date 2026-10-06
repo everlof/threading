@@ -373,6 +373,9 @@ final class DetachedBrowserHostViewController: NSViewController {
                 isActive: $0.id == tabs.activeTab?.id
             )
         })
+        if let active = tabs.activeTab, let browser = active.browser {
+            browser.tabShortcutFocusOwner = strip.chipView(for: active.id)
+        }
         installHosted(tabs.activeTab?.hostedController)
     }
 

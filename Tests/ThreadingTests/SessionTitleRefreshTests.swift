@@ -75,15 +75,13 @@ final class SessionTitleRefreshTests: HostedStoreTestCase {
         }.joined(separator: "\n") + "\n"
         try Data(index.utf8).write(to: directory.appendingPathComponent("session_index.jsonl"))
         var discoveries = 0
-        SessionNaming.refreshProviderTitlesAtLaunch(accountsProvider: {
+        let refresh = try XCTUnwrap(SessionNaming.refreshProviderTitlesAtLaunch(accountsProvider: {
             discoveries += 1
             return [account]
-        })
-        let deadline = Date().addingTimeInterval(5)
-        while ProjectStore.shared.session(withID: sessions.last!.id)?.agentTitle == nil,
-              Date() < deadline {
-            try await Task.sleep(for: .milliseconds(5))
-        }
+        }))
+        // The utility-priority worker can queue behind other bounded title reads. Await this
+        // batch's publication rather than giving actor scheduling a five-second speed limit.
+        await refresh.value
         XCTAssertEqual(discoveries, 1)
         for (index, session) in sessions.enumerated() {
             XCTAssertEqual(

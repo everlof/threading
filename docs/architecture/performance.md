@@ -4,6 +4,25 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## Toast text bounds — 2026-10-06
+
+Toast prose is externally sized: ordinary receipts carry a short heading and a few sentences,
+while automation results may carry an entire report. The matched 24-paragraph main-window
+fixture rendered a 4,087pt System receipt (4,774pt Cyberpunk, 2,210pt Win98), covering the sidebar
+and placing its title and close control outside the viewport. After bounding the heading to two
+lines and the detail to three, the identical shipping-shell fixture measures 83pt System, 98pt
+Cyberpunk and 70pt Win98 in both appearances. The rendered ellipsis and reachable close control
+are inspected evidence, not inferred from constraints.
+
+Both initial label construction and replacement take at most 512 Unicode scalars plus an
+ellipsis per text field, including waiting-card headings. The scalar bound also covers one
+enormous combining sequence; a character bound would not. Layout and resize therefore measure
+only that fixed preview, while the original request and accessibility announcement retain the
+complete text. The existing one-current/three-waiting queue bounds aggregate view ownership.
+`ToastSizingTests` covers narrow/default/dragged widths, five themes, in-place report replacement,
+resizing, a 1.05MB report and a 150,000-scalar combining sequence. Full-input retention and the
+accessibility announcement remain arrival/update work; they are not performed by layout.
+
 ## Attachment scan contention and title discovery — 2026-10-04
 
 The installed Release app's retained stall reports covered 20 recent incidents, with durations
@@ -104,7 +123,8 @@ visible backdrop; at most 16 cells share an area-scaled live-particle budget cap
 lifetime at most 24 seconds. Still decoration is a fixed 240-point tile. There is no per-frame
 session scan, SwiftUI timer or CPU image generation. Workload is computed on catalogue publish.
 Drift stays at least eight seconds per cycle and at most 0.25 travel. Lifecycle, motion, power
-and accessibility gates pause both drift and particles.
+and accessibility gates pause both drift and particles; a held field freezes in place, and the
+still tile is for motion off.
 
 Rendition preparation is serial and off-main: at most 32 descriptors, 1 MB per PNG and 6 MB per
 theme, with 24 source-digest cache entries. Phone downloads are limited to two; decoding and

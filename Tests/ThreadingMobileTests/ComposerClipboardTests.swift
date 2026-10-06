@@ -809,6 +809,24 @@ final class TerminalLineTextLayoutTests: XCTestCase {
         XCTAssertEqual(textView.text, "ship it")
     }
 
+    /// The suggestion row is where the system keyboard offers to paste what was just copied, and
+    /// an iPhone keyboard drops the whole row for a view that turns autocorrection off.
+    func testTerminalEditorKeepsTheKeyboardSuggestionRowWithStraightQuotes() throws {
+        let host = UIHostingController(rootView: TerminalEditorHarness())
+        let window = makeWindow(hosting: host)
+        defer { window.isHidden = true }
+
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+
+        XCTAssertNotEqual(
+            textView.autocorrectionType,
+            .no,
+            "autocorrection off hides the keyboard's suggestion row and its paste suggestion"
+        )
+        XCTAssertEqual(textView.smartQuotesType, .no, "a terminal line needs straight quotes")
+        XCTAssertEqual(textView.smartDashesType, .no, "a terminal line needs plain hyphens")
+    }
+
     private func descendants<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
         let own = (root as? T).map { [$0] } ?? []
         return own + root.subviews.flatMap { descendants(of: type, in: $0) }

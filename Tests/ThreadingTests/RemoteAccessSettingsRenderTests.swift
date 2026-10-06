@@ -324,6 +324,18 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
     /// Ordinary local builds use the same accountless production service as public builds.
     /// A deliberately hosted-disabled controller still omits its controls and segment.
     func testDefaultPageOffersAccountlessAccessAndHostedDisabledPageKeepsTheLocalWaysIn() throws {
+        let defaults = UserDefaults.standard
+        let enrollmentKey = AppSettingDefinitions.remoteHostedEnrollmentEnabled.persistenceKey
+        let previousEnrollment = defaults.object(forKey: enrollmentKey)
+        defer {
+            if let previousEnrollment {
+                defaults.set(previousEnrollment, forKey: enrollmentKey)
+            } else {
+                defaults.removeObject(forKey: enrollmentKey)
+            }
+        }
+        // This case is the first-use page, even when the developer has already opted in.
+        AppSettings.shared.remoteHostedEnrollmentEnabled = false
         let development = page(state: .lanBound)
         XCTAssertNotNil(help(in: development.view, titled: L10n.string("Hosted Direct")))
         XCTAssertNil(view(in: development.view, id: "settings.remote-access.hosted-sign-in"))

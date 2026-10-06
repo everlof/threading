@@ -602,6 +602,114 @@ final class MobileThemeBackdropTests: XCTestCase {
         XCTAssertEqual(MobileThemeMotionPreferences.reaction(workingCount: 3), 0)
     }
 
+    /// A push puts two screens on screen and only one holds the lease. The other used to swap its
+    /// live particles for the still tile and snap its drift to phase zero, and swap back when the
+    /// slide ended: every coin on the ground jumped twice per push and twice per pop. A screen
+    /// without the lease now holds its ground where it stands, and resumes from that instant.
+    ///
+    /// The window is shown: Core Animation drops the animations of a layer tree it commits for
+    /// no display, so an unshown window would lose the held drift for a reason no phone has.
+    func testAScreenWithoutTheLeaseHoldsItsGroundAndResumesWhereItStood() throws {
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let list = MobileThemeBackdropView(frame: window.bounds)
+        let composer = MobileThemeBackdropView(frame: window.bounds)
+        for view in [list, composer] {
+            view.permitsMotion = { true }; view.sceneIsActive = { _ in true }
+            window.rootViewController?.view.addSubview(view)
+            view.apply(theme(drift: .init(), particles: true))
+        }
+        defer { list.removeFromSuperview(); composer.removeFromSuperview() }
+        let gradient = list.groundLayersForTesting.gradient
+        let emitter = list.particleEmitterForTesting
+
+        XCTAssertEqual(composer.particleState, .paused,
+                       "a screen not yet presented is already full, held — not the still tile")
+        list.isPresentationActive = true
+        XCTAssertEqual(list.particleState, .running)
+        XCTAssertTrue(list.isAnimating)
+
+        composer.isPresentationActive = true
+        XCTAssertEqual(list.particleState, .paused, "the covered list freezes its field mid-flight")
+        XCTAssertFalse(emitter.isHidden, "and keeps showing it")
+        XCTAssertFalse(list.isAnimating)
+        XCTAssertNotNil(gradient.animation(forKey: ThemeGradientAnimator.animationKey),
+                        "the drift keeps its keyframes, so it keeps its phase")
+        let heldField = emitter.convertTime(CACurrentMediaTime(), from: nil)
+        let heldDrift = gradient.convertTime(CACurrentMediaTime(), from: nil)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        let fieldAfterHold = emitter.convertTime(CACurrentMediaTime(), from: nil)
+        let driftAfterHold = gradient.convertTime(CACurrentMediaTime(), from: nil)
+        XCTAssertEqual(fieldAfterHold, heldField, accuracy: 0.001)
+        XCTAssertEqual(driftAfterHold, heldDrift, accuracy: 0.001)
+
+        composer.isPresentationActive = false
+        // Read before asserting: recording a failure takes long enough to move a running clock.
+        let resumedField = emitter.convertTime(CACurrentMediaTime(), from: nil)
+        let resumedDrift = gradient.convertTime(CACurrentMediaTime(), from: nil)
+        XCTAssertEqual(resumedField, heldField, accuracy: 0.05,
+                       "resuming continues from the held instant instead of leaping the time it was held")
+        XCTAssertEqual(resumedDrift, heldDrift, accuracy: 0.05)
+        XCTAssertEqual(list.particleState, .running)
+        XCTAssertTrue(list.isAnimating, "the drift held across the hold resumes rather than being dropped")
+    }
+
+    /// The still tile is what motion-off looks like, and only that.
+    func testTheStillTileIsForMotionOffOnly() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let backdrop = MobileThemeBackdropView(frame: window.bounds)
+        var allowed = true
+        backdrop.permitsMotion = { allowed }; backdrop.sceneIsActive = { _ in true }
+        window.addSubview(backdrop)
+        defer { backdrop.removeFromSuperview() }
+        backdrop.isPresentationActive = true
+        backdrop.apply(theme(drift: .init(), particles: true))
+        XCTAssertEqual(backdrop.particleState, .running)
+
+        allowed = false
+        backdrop.refreshMotion()
+        XCTAssertEqual(backdrop.particleState, .still)
+        XCTAssertTrue(backdrop.particleEmitterForTesting.isHidden)
+
+        allowed = true
+        backdrop.refreshMotion()
+        XCTAssertEqual(backdrop.particleState, .running, "motion back on starts a full field again")
+    }
+
+    /// The list's ground is its collection view's background and the composer's runs to the
+    /// screen's foot, so filling each view's own bounds drew the same picture at two scales.
+    /// Both lay the picture and the gradient out against the window and only clip them.
+    func testEveryScreenLaysItsGroundOutAgainstTheWindow() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let list = MobileThemeBackdropView(frame: CGRect(x: 0, y: 116, width: 390, height: 694))
+        let composer = MobileThemeBackdropView(frame: window.bounds)
+        for view in [list, composer] {
+            window.addSubview(view)
+            view.apply(theme(drift: nil))
+            view.layoutIfNeeded()
+            let ground = view.groundLayersForTesting
+            XCTAssertEqual(view.convert(ground.gradient.frame, to: window), window.bounds)
+            XCTAssertEqual(view.convert(ground.picture.frame, to: window), window.bounds)
+            XCTAssertTrue(view.clipsToBounds)
+            view.removeFromSuperview()
+        }
+    }
+
+    private func theme(drift: ThemeGradientDrift?, count: Int = 2, particles: Bool) -> RemoteThemePalette {
+        let base = theme(drift: drift, count: count)
+        guard let source = base.source else { return base }
+        return RemoteThemePalette(RemoteThemeDTO(
+            id: source.id, name: source.name, mode: source.mode, colors: source.colors.merging(["accent": "#FF8A1F"]) { $1 },
+            material: .init(panelRadius: 10, controlRadius: 5, borderWidth: 1,
+                backdropGradient: source.material.backdropGradient,
+                particles: particles ? .init(style: .snow, density: 1, speed: 1) : nil)
+        ))
+    }
+
     private func theme(drift: ThemeGradientDrift?, count: Int = 2) -> RemoteThemePalette {
         RemoteThemePalette(RemoteThemeDTO(
             id: "backdrop-test", name: "Backdrop test", mode: .dark,

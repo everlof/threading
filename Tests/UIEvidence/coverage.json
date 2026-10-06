@@ -389,8 +389,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Sidebar toast receipts",
-      "description": "The real sidebar receipt surface at its standing and user-expanded widths, covering running and dormant archives, an agent-authored archive, queued and opened decks, storage progress, and the multi-provider update action.",
-      "states": ["Running archive", "Dormant archive", "Agent archive", "Queued deck", "Opened deck", "Cleanup progress", "Agent update action"],
+      "description": "The real sidebar receipt surface at its standing and user-expanded widths, covering running and dormant archives, an agent-authored archive, queued and opened decks, storage progress, the multi-provider update action, and a long automation report in the main-window sidebar.",
+      "states": ["Running archive", "Dormant archive", "Agent archive", "Queued deck", "Opened deck", "Cleanup progress", "Agent update action", "Long automation report", "Main-window sidebar"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist", "Claymorphism", "Win98"],
         "appearances": ["Light", "Dark"],
@@ -400,7 +400,8 @@
         "path": "Tests/ThreadingTests/ToastRenderTests.swift",
         "tests": [
           "ThreadingTests/ToastRenderTests/testRendersTheArchiveToastStorybook",
-          "ThreadingTests/ToastRenderTests/testRendersTheArchiveToastInADraggedColumn"
+          "ThreadingTests/ToastRenderTests/testRendersTheArchiveToastInADraggedColumn",
+          "ThreadingTests/ToastRenderTests/testRendersLongReportInTheMainWindowSidebar"
         ]
       },
       "capture": {
@@ -1010,12 +1011,12 @@
       "status": "implemented",
       "priority": "important",
       "title": "Tools settings",
-      "description": "The real virtualized Tools destination with its MCP groups collapsed and unfolded across contrasting theme families.",
-      "states": ["Collapsed groups", "Unfolded tool inventory"],
+      "description": "The real virtualized Tools destination with MCP groups collapsed and unfolded, plus independent browser network capture controls in the product settings shell.",
+      "states": ["Collapsed groups", "Unfolded tool inventory", "Network capture metadata only", "Network capture enabled"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Neo Brutalism", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],
-        "sizes": ["Shared settings width"]
+        "sizes": ["Shared settings width", "Product shell"]
       },
       "source": {
         "path": "Tests/ThreadingTests/SettingsDisclosureRenderTests.swift",
@@ -1625,10 +1626,10 @@
       "status": "implemented",
       "priority": "important",
       "title": "Single-account usage popover",
-      "description": "The shipping single-account usage controller scrolled into a provider-sized model-window inventory, plus its reachable native keychain grant in the main-window toolbar popover.",
-      "states": ["Provider model windows", "Deep virtual scroll", "Fixed identity and freshness", "Clock over fill", "Clock over empty track", "Clock at fill edge", "Native keychain grant"],
+      "description": "The shipping single-account usage controller scrolled into a provider-sized model-window inventory, plus its reachable native keychain grant and short lists without scrolling in the main-window toolbar popover.",
+      "states": ["Provider model windows", "Deep virtual scroll", "Fixed identity and freshness", "Clock over fill", "Clock over empty track", "Clock at fill edge", "Native keychain grant", "Two windows without scrolling"],
       "matrix": {
-        "themes": ["System", "Pure", "Cyberpunk"],
+        "themes": ["System", "Pure", "Cyberpunk", "Cappuccino"],
         "appearances": ["Light", "Dark"],
         "sizes": ["264×400-point popover", "Toolbar-anchored grant popup"]
       },

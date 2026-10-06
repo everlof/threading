@@ -3,6 +3,7 @@ import Metal
 import ThreadingExtensionKit
 import ThreadingRemoteKit
 import XCTest
+import os
 @testable import Threading
 
 /// Setting-bound surface inputs on the host: a shader input answered from the extension's own
@@ -16,17 +17,17 @@ final class ExtensionSettingBindingTests: XCTestCase {
     /// the shared appearance registry on every enablement change; this puts both back.
     private var hostedState: HostedExtensionStateGuard?
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         hostedState = HostedExtensionStateGuard()
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         hostedState?.restore()
         hostedState = nil
         cleanupURLs.forEach { try? FileManager.default.removeItem(at: $0) }
         cleanupURLs.removeAll()
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Fixtures
@@ -451,7 +452,7 @@ final class ExtensionSettingBindingTests: XCTestCase {
         token authorization: ExtensionHostAuthorization,
         through service: ExtensionHostService
     ) -> HTTPResponse {
-        var result: HTTPResponse?
+        let result = OSAllocatedUnfairLock<HTTPResponse?>(initialState: nil)
         service.route(
             HTTPRequest(
                 method: "PUT",
@@ -462,8 +463,8 @@ final class ExtensionSettingBindingTests: XCTestCase {
                 ],
                 body: try! JSONEncoder().encode(publication)
             )
-        ) { result = $0 }
-        return result!
+        ) { response in result.withLock { $0 = response } }
+        return result.withLock { $0! }
     }
 
     // MARK: - The phone

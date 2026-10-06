@@ -67,7 +67,6 @@ final class RemoteTerminalHydrationDiagnosticsTests: HostedStoreTestCase {
     func testOutputThatNeverGoesQuietEndsWhenTheSettleWindowCloses() async throws {
         let fixture = try makeFixture(quiet: .seconds(2))
         let phone = try attachedPhone(to: fixture)
-        let requestedAt = ContinuousClock.now
         fixture.registry.requestViewport(
             from: phone,
             sessionID: fixture.sessionID,
@@ -86,12 +85,9 @@ final class RemoteTerminalHydrationDiagnosticsTests: HostedStoreTestCase {
         defer { drawing.cancel() }
 
         await wait { !fixture.ends.values.isEmpty }
+        // The reported cause establishes which deadline won. Measuring after this waiter
+        // also includes actor scheduling and observation delays unrelated to the hold.
         XCTAssertEqual(fixture.ends.values, [.continuousOutput])
-        XCTAssertLessThan(
-            ContinuousClock.now - requestedAt,
-            Fixture.ceiling,
-            "an animating program must not sit out the ceiling"
-        )
     }
 
     /// The ceiling still bounds everything when both quiet and settle windows extend past it.

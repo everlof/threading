@@ -2449,8 +2449,10 @@ with the floating bar is about 20 points at the very end of the list. It replace
 that stood the logo and mascot side by side on an opaque surface under the navigation bar. That
 strip cost a band of every visit, cut the backdrop off at a hard edge, and put a theme's shop-front
 logo under the Mac's name. The logo is no longer projected to the phone, which has no brand row;
-the phone skips a logo an older Mac still names. Poses borrow as on the Mac, attention wearing
-working's before idle's.
+the phone skips a logo an older Mac still names. A project heading's add disc resolves its
+translucent control colour over the dashboard ground before drawing, so the mascot passes behind
+the whole disc and plus together. Poses borrow as on the Mac, attention wearing working's before
+idle's.
 
 **The loop runs in the render server.** A pose's motion is one `CAKeyframeAnimation` repeated
 for ever: the motion in the first `duration / every` of the period, rest for the remainder. A mood
@@ -3024,7 +3026,7 @@ extensions to enable with it) and are retired; the binding now lives where the d
 on the patch.
 
 **The shape.** `ExtensionComponentPatch.themeScope` is `.always` (the default, written by
-omission, so an existing publication is byte-identical) or `.ownThemes`: the whole patch —
+omission, so an existing publication keeps its wire shape) or `.ownThemes`: the whole patch —
 properties, slots, replacement and hook — applies only while `AppThemeLibrary.current` is one
 of the publishing extension's contributed themes. The manifest's `componentThemeScope:
 "ownThemes"` is a **floor**, not a default: the host applies it to every patch the generation
@@ -3067,7 +3069,7 @@ patches.
 
 | What | Where |
 |---|---|
-| Wire form (omission, byte identity with the pre-field encoding, an older decoder, an unknown scope refused), the manifest floor and its refusals, `validate(for:)`, the generated patch schema | `ExtensionComponentThemeScopeTests` (SDK) |
+| Wire form (omission, matching the pre-field encoding with canonical JSON key order, an older decoder, an unknown scope refused), the manifest floor and its refusals, `validate(for:)`, the generated patch schema | `ExtensionComponentThemeScopeTests` (SDK) |
 | A real contributed theme: the scoped sidebar backdrop drawn with it, absent under a stock theme, back again, absent under a Duplicate to Edit copy and after the contribution is removed; `.always` unchanged; only affected targets posted; a Tune tick ignored; the publication route's refusal and floor; the phone's surface hook; the install and update review text | `ComponentThemeScopeTests` |
 
 ## 2026-10-05 — a theme extension's options, without a round trip

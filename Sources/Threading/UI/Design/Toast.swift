@@ -42,6 +42,21 @@ enum ToastDefaults {
     /// Between the message and the ✕ standing in the corner beside it.
     static let closeGap: CGFloat = Design.Spacing.small
 
+    /// A receipt previews its content; provider reports must not cover the sidebar.
+    static let maximumMessageLines = 2
+    static let maximumDetailLines = 3
+
+    /// Bound the text handed to AppKit before construction and every update, not only its
+    /// visible lines. Scalars also bound an input made of one enormous combining sequence.
+    static let maximumPreviewScalars = 512
+
+    static func textPreview(_ text: String) -> String {
+        let scalars = text.unicodeScalars
+        let prefix = scalars.prefix(maximumPreviewScalars)
+        guard prefix.endIndex < scalars.endIndex else { return text }
+        return String(prefix) + "…"
+    }
+
     /// How far the pointer travels sideways before a press on the band becomes a carry.
     ///
     /// The tab strip's slop, for the tab strip's reason: a hand that is not quite still must not
@@ -393,8 +408,10 @@ final class ToastView: NSView {
 
     init(request: ToastRequest) {
         self.request = request
-        messageLabel = NSTextField(wrappingLabelWithString: request.message)
-        detailLabel = request.detail.map { NSTextField(wrappingLabelWithString: $0) }
+        messageLabel = NSTextField(wrappingLabelWithString: ToastDefaults.textPreview(request.message))
+        detailLabel = request.detail.map {
+            NSTextField(wrappingLabelWithString: ToastDefaults.textPreview($0))
+        }
         comparisonView = request.comparison.map(ToastComparisonView.init)
         actionButton = request.hasAction
             ? ThemedButton(title: request.actionTitle ?? "", target: nil, action: nil)
@@ -452,8 +469,8 @@ final class ToastView: NSView {
            comparisonView?.update(with: comparison) != true { return false }
 
         self.request = request
-        messageLabel.stringValue = request.message
-        detailLabel?.stringValue = request.detail ?? ""
+        messageLabel.stringValue = ToastDefaults.textPreview(request.message)
+        detailLabel?.stringValue = request.detail.map(ToastDefaults.textPreview) ?? ""
         actionButton?.title = request.actionTitle ?? ""
         progressBar?.progress = request.progress ?? 0
         setAccessibilityLabel(request.announcement)
@@ -795,7 +812,8 @@ final class ToastView: NSView {
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
         messageLabel.applyFont(.control)
         messageLabel.textColor = Design.Text.label
-        messageLabel.maximumNumberOfLines = 0
+        messageLabel.maximumNumberOfLines = ToastDefaults.maximumMessageLines
+        messageLabel.cell?.truncatesLastVisibleLine = true
 
         // `.detail`, not `.caption`: the caption role is semibold, which on the line *under* a
         // medium-weight message reads as a second heading rather than as the consequence of the
@@ -804,7 +822,8 @@ final class ToastView: NSView {
         detailLabel?.translatesAutoresizingMaskIntoConstraints = false
         detailLabel?.applyFont(.detail())
         detailLabel?.textColor = Design.Text.secondary
-        detailLabel?.maximumNumberOfLines = 0
+        detailLabel?.maximumNumberOfLines = ToastDefaults.maximumDetailLines
+        detailLabel?.cell?.truncatesLastVisibleLine = true
 
         // A receipt does not get to decide how wide the column it floats in is — see
         // `ToastDefaults.contentWidthPriority`, which is the sidebar jumping wider as the band
@@ -1638,7 +1657,7 @@ private final class ToastWaitingCardView: NSView {
     }
 
     private func applyRequest() {
-        messageLabel.stringValue = request.message
+        messageLabel.stringValue = ToastDefaults.textPreview(request.message)
         takeBackButton.title = request.actionTitle ?? ""
         takeBackButton.isHidden = !request.hasAction
         setAccessibilityLabel(request.announcement)

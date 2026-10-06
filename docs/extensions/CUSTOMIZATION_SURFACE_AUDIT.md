@@ -679,6 +679,12 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+Browser Network Capture extends the host-only Tools page with four fixed opt-in rows. Threading
+owns persistence, exact owner-approved agent proposals, capture generations, origin access,
+payload redaction and process-wide retention bounds. Themes style the existing Settings controls;
+extensions cannot enable capture, answer approval or read network payloads through presentation.
+No new public extension component or data capability is introduced.
+
 The project-scoped **Automations** destination and locked-project automation editor are host-only
 surfaces over one project and its automation definitions. They reuse the global automation
 page's native Design components. Threading owns file admission, identity, local account/source

@@ -973,6 +973,16 @@ directory. The final request keeps the same identifier and progress anatomy, cha
 turns persistence off, and starts the ordinary dwell. This is separate from the bottom-edge dwell
 rail: one says how much work is done; the other says how long a completed receipt remains.
 
+**A toast carries a preview, even when its caller supplies a report.** The heading wraps to at
+most two lines and the detail to three, with `truncatesLastVisibleLine` marking overflow. Keep
+word wrapping: `byTruncatingTail` turns each paragraph into its own truncated line instead of
+filling the available column. Text is bounded before label construction and replacement, so
+layout does not typeset the rest of an automation report. The request and accessibility
+announcement retain the complete text; the close control and optional action remain reachable.
+These are host-owned presentation bounds within the existing toast surface, with no new
+extension component or authority. `ToastRenderTests` covers a long report both in the receipt
+matrix and in the real main-window sidebar.
+
 **Nothing that can be taken back is dropped, so bursts queue.** One band at a time is still the
 rule — two of them in a 240-point column is a wall over the list they report on — but the band
 already up is no longer overwritten by the next arrival. Four archives in a row are four separate

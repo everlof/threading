@@ -5,22 +5,16 @@ import XCTest
 
 @MainActor
 final class ProjectAutomationShellTests: HostedStoreTestCase {
-    private var themeAtStart: HostedThemeState?
-
-    override func setUp() {
-        super.setUp()
-        themeAtStart = .capture()
-    }
-
     /// A shell render installs three themes in turn; whatever it moved has to be back before
     /// the next class builds a window, or that window inherits the last one's appearance.
-    override func tearDown() {
-        if let themeAtStart {
-            themeAtStart.assertUnchanged(by: name)
+    override func setUp() async throws {
+        try await super.setUp()
+        let themeAtStart = HostedThemeState.capture()
+        let testName = name
+        addTeardownBlock { @MainActor () async in
+            themeAtStart.assertUnchanged(by: testName)
             themeAtStart.restore()
         }
-        themeAtStart = nil
-        super.tearDown()
     }
 
     func testProjectWorkspaceStartsWithDirtyProductCheckoutAndPersistsOwner() throws {

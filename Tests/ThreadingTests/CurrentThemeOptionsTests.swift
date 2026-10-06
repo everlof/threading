@@ -15,8 +15,8 @@ final class CurrentThemeOptionsTests: XCTestCase {
     /// choice, either of which can differ from what the previous class left in force.
     private var hostedState: HostedExtensionStateGuard?
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         hostedState = HostedExtensionStateGuard()
         // The rows read their values through `ExtensionManager.shared`, and that manager's first
         // touch replaces the settings registry with its own inventory — silently. Made here, the
@@ -25,10 +25,10 @@ final class CurrentThemeOptionsTests: XCTestCase {
         _ = ExtensionManager.shared
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         hostedState?.restore()
         hostedState = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Fixtures

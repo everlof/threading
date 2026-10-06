@@ -24,6 +24,18 @@ enum MobileThemeBackdropDecoration: Equatable {
 /// The dashboard's stationary ground. One layer fills the viewport independently of its
 /// virtualized rows. Themes supply decoration; the host retains hit testing, navigation,
 /// accessibility, power policy and the exact scroll position.
+///
+/// **Every screen stands on the same ground.** Each pushed screen carries its own backdrop, so
+/// the picture and the gradient are laid out against the *window* and this view only clips
+/// them: a list whose ground stops under the navigation bar and a composer whose ground runs to
+/// the screen's foot show one picture at one scale, where filling each view's own bounds drew
+/// two different crops that slid past each other on every push.
+///
+/// **A screen that is not moving holds still where it stands.** Only the window's lease holder
+/// moves, but a screen sliding in or out of a push is on screen without it. Its drift keeps its
+/// phase, its particle field freezes mid-flight and its extension surface shows its last frame;
+/// the still frames are for when motion is off. Swapping a live field for the still tile at the
+/// start of a push, and back at its end, made every particle jump twice per navigation.
 final class MobileThemeBackdropView: UIView {
     private let gradient = CAGradientLayer()
     private let picture = CALayer()
@@ -52,6 +64,8 @@ final class MobileThemeBackdropView: UIView {
     var workingCount = 0 { didSet { if oldValue != workingCount { updateDrift() } } }
     var attentionCount = 0 { didSet { if oldValue != attentionCount { updateDrift() } } }
     private var frozenPhase: Double?
+    /// How fast the drift runs while this screen moves; work quickens it.
+    private var driftRate: Float = 1
     private var ownsMotion = false
     fileprivate func setMotionOwner(_ value: Bool) { ownsMotion = value; refreshMotion() }
     var permitsMotion: () -> Bool = {
@@ -103,14 +117,27 @@ final class MobileThemeBackdropView: UIView {
         super.layoutSubviews()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        gradient.frame = bounds
-        picture.frame = bounds
+        gradient.frame = groundRect
+        picture.frame = groundRect
         metal?.frame = bounds
         updateParticles()
         CATransaction.commit()
     }
 
-    override func didMoveToWindow() { super.didMoveToWindow(); MobileBackdropOwnership.changed(self) }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        setNeedsLayout()
+        MobileBackdropOwnership.changed(self)
+    }
+
+    /// The window in this view's coordinates: where the picture and the gradient are laid out,
+    /// so they meet every screen at the same place. The model geometry, so a screen measured
+    /// mid-push is placed where it is going, not where the slide has it. Before there is a
+    /// window, the view's own bounds.
+    private var groundRect: CGRect {
+        guard let window else { return bounds }
+        return convert(window.bounds, from: window)
+    }
 
     override var isHidden: Bool { didSet { refreshMotion() } }
 
@@ -161,11 +188,17 @@ final class MobileThemeBackdropView: UIView {
         refreshMotion()
     }
 
-    /// Changes the gradient's clock rate from where its drift is now. A layer's local time is
-    /// `(parent − beginTime) × speed + timeOffset`, so restating both offsets at this instant
-    /// keeps the running keyframes at their current phase.
     private func setDriftSpeed(_ speed: Double) {
-        let rate = Float(max(speed, 1))
+        driftRate = Float(max(speed, 1))
+        setDriftClock(running: isMoving)
+    }
+
+    /// Runs or holds the gradient's clock from where its drift is now. A layer's local time is
+    /// `(parent − beginTime) × speed + timeOffset`, so restating both offsets at this instant
+    /// keeps the keyframes at their current phase whether the speed quickens, slows or stops —
+    /// a held drift resumes where it stood rather than restarting at phase zero.
+    private func setDriftClock(running: Bool) {
+        let rate = running ? driftRate : 0
         guard gradient.speed != rate else { return }
         let now = CACurrentMediaTime()
         gradient.timeOffset = gradient.convertTime(now, from: nil)
@@ -240,47 +273,71 @@ final class MobileThemeBackdropView: UIView {
         // A phone reads labels over broad grounds at smaller sizes. Pictures stay subdued,
         // even when the Mac author has deliberately chosen stronger photographic imagery.
         picture.opacity = Float(min(asset.opacity ?? 1, 0.25))
-        picture.frame = bounds
+        picture.frame = groundRect
     }
 
     private func updateParticles() {
         particles.apply(prefersPlainGround() ? nil : statedParticles, theme: theme, region: bounds,
             scale: traitCollection.displayScale,
             reaction: MobileThemeMotionPreferences.reaction(workingCount: workingCount), parent: layer)
+        particles.setMotion(allowed: motionAllowed, running: isMoving)
     }
 
     @objc private func environmentChanged(_ notification: Notification) {
-        // willDeactivate is delivered before activationState changes. Stop immediately, and
+        // willDeactivate is delivered before activationState changes. Hold immediately, and
         // only resume on didActivate once this particular scene reports itself active.
         if notification.name == UIScene.willDeactivateNotification,
            let scene = notification.object as? UIScene, scene === window?.windowScene {
-            animator.setActive(false)
-            particles.setActive(false)
-            metal?.setPresentation(visible: false, moving: false)
+            applyMotion(sceneActive: false)
         } else {
             updateDrift()
         }
     }
 
-    func refreshMotion() {
-        let active = ownsMotion && isPresentationActive && !isHidden
-            && window.map(sceneIsActive) == true && permitsMotion() && frozenPhase == nil
-        animator.setActive(active && !gradient.isHidden)
-        particles.setActive(active)
-        let visible = ownsMotion && isPresentationActive && !isHidden
-            && window.map(sceneIsActive) == true && !ProcessInfo.processInfo.isLowPowerModeEnabled
-        metal?.setPresentation(visible: visible, moving: active)
+    func refreshMotion() { applyMotion(sceneActive: isSceneActive) }
+
+    /// Whether the theme's motion may play here at all. Off, every layer shows its still frame.
+    private var motionAllowed: Bool { permitsMotion() && frozenPhase == nil }
+    /// Whether this view is somewhere a person could see it: in a window, unhidden, and not held
+    /// back by Low Power Mode, which takes the extension surface away entirely.
+    private var isShown: Bool {
+        !isHidden && window != nil && !ProcessInfo.processInfo.isLowPowerModeEnabled
+    }
+    private var isSceneActive: Bool { window.map(sceneIsActive) == true }
+    /// Whether this view's decoration moves now: it holds the window's lease, its screen is
+    /// presented, and nothing has asked motion to stop.
+    private var isMoving: Bool {
+        motionAllowed && ownsMotion && isPresentationActive && !isHidden && isSceneActive
+    }
+
+    private func applyMotion(sceneActive: Bool) {
+        let moving = isMoving && sceneActive
+        // The animator keeps its keyframes whenever motion is allowed; whether they advance is
+        // the gradient's clock, so a held screen keeps its phase.
+        animator.setActive(motionAllowed && !gradient.isHidden)
+        setDriftClock(running: moving)
+        particles.setMotion(allowed: motionAllowed, running: moving)
+        metal?.setPresentation(visible: isShown, moving: moving)
     }
 
     @objc nonisolated private func powerStateChanged() {
         Task { @MainActor [weak self] in self?.refreshMotion() }
     }
 
-    var isAnimating: Bool { gradient.animation(forKey: ThemeGradientAnimator.animationKey) != nil }
+    /// Whether the drift is advancing now — attached, and its clock running.
+    var isAnimating: Bool {
+        gradient.animation(forKey: ThemeGradientAnimator.animationKey) != nil && gradient.speed > 0
+    }
     var showsGradient: Bool { !gradient.isHidden }
     /// Whether a picture is composited: what Reduce Transparency and Increase Contrast take away.
     var showsPicture: Bool { picture.superlayer != nil && picture.contents != nil }
     var showsParticles: Bool { particles.emitter.superlayer != nil }
+    /// The particle field's state: a live emitter moving or held in place, or the still tile.
+    var particleState: MobileThemeParticleState { particles.state }
+#if DEBUG
+    var groundLayersForTesting: (gradient: CAGradientLayer, picture: CALayer) { (gradient, picture) }
+    var particleEmitterForTesting: CAEmitterLayer { particles.emitter }
+#endif
 }
 
 
@@ -566,17 +623,38 @@ extension EnvironmentValues {
     }
 }
 
+/// The Mac's `ThemeParticleFieldLayer` states, on the phone.
+enum MobileThemeParticleState: Equatable {
+    /// No field: the theme states none, or there is nowhere to draw it.
+    case empty
+    /// A live emitter, moving.
+    case running
+    /// The same emitter frozen in time, its particles where they stood — a screen that is on
+    /// screen without the window's lease, such as one sliding in or out of a push.
+    case paused
+    /// No emitter, and a deterministic scatter tiled in its place: motion is off.
+    case still
+}
+
 /// One emitter per screen, with the same numeric recipe as macOS. UIKit owns only raster
-/// artwork and y-axis direction. The deterministic still keeps decoration under reduced motion.
+/// artwork and y-axis direction.
+///
+/// Three states, as on the Mac (`MobileThemeParticleState`). A field starts prewarmed, so a
+/// screen arrives with its particles already spread rather than filling from one edge, and a
+/// screen that stops moving holds its particles where they are. The deterministic still is for
+/// when motion is off (Reduce Motion, the Theme motion switch, Low Power Mode), never for a
+/// screen that merely is not the one moving: swapping between the two is a visible jump.
 @MainActor
 private final class MobileThemeParticles {
     let emitter = CAEmitterLayer()
     let still = CALayer()
+    private(set) var state = MobileThemeParticleState.empty
     private var recipe: RemoteThemeParticles?
     private var colors: [UIColor] = []
     private var region = CGRect.zero
     private var scale: CGFloat = 1
-    private var active = false
+    private var motionAllowed = false
+    private var running = false
     private var reaction: Double = 0
     private var imageRevision = -1
     private var assets: [RemoteThemeAsset] = []
@@ -589,12 +667,19 @@ private final class MobileThemeParticles {
         let colors = (next?.colors.isEmpty == false ? next!.colors : ["accent"]).compactMap {
             UIColor(remoteHex: $0.hasPrefix("#") ? $0 : (theme.source?.colors[$0] ?? ""))
         }
-        guard recipe != next || self.colors != colors || self.region != region
-                || self.scale != scale || self.reaction != reaction
-                || imageRevision != MobileThemeAssets.shared.revision
-                || assets != (theme.source?.assets ?? []) else { return }
+        let sameField = recipe == next && self.colors == colors && self.region == region
+            && self.scale == scale && imageRevision == MobileThemeAssets.shared.revision
+            && assets == (theme.source?.assets ?? [])
+        guard !sameField || self.reaction != reaction else { return }
+        self.reaction = reaction
+        // Work changes how fast particles are born, not the field: the rates are restated on the
+        // live cells, as the Mac does, so the particles already in flight keep flying.
+        if sameField {
+            if let next, emitter.superlayer != nil { retime(next) }
+            return
+        }
         self.recipe = next; self.colors = colors; self.region = region
-        self.scale = scale; self.reaction = reaction
+        self.scale = scale
         imageRevision = MobileThemeAssets.shared.revision
         assets = theme.source?.assets ?? []
         spritePictures = (next?.sprites ?? []).prefix(4).compactMap { slot in
@@ -603,33 +688,110 @@ private final class MobileThemeParticles {
         }
         guard let next, next.density > 0, next.opacity > 0, !colors.isEmpty, !region.isEmpty else {
             emitter.removeFromSuperlayer(); still.removeFromSuperlayer()
+            state = .empty
             return
         }
         if emitter.superlayer == nil { parent.addSublayer(emitter); parent.addSublayer(still) }
         configure(next)
-        setActive(active)
+        // New cells empty the field, so it starts again — prewarmed, and moving or held as it was.
+        state = .empty
+        settle()
     }
 
-    func setActive(_ value: Bool) {
-        active = value
-        emitter.isHidden = !value
-        // Speed zero holds simulation as well as stopping births. No hidden GPU simulation.
-        emitter.speed = value ? 1 : 0
-        still.isHidden = value
+    /// Whether the theme's motion may play at all, and whether this field moves now.
+    func setMotion(allowed: Bool, running: Bool) {
+        motionAllowed = allowed
+        self.running = allowed && running
+        settle()
     }
 
-    private func configure(_ particles: RemoteThemeParticles) {
-        let motion = ThemeParticleMotion(style: particles.style, speed: particles.speed,
+    private func settle() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        guard emitter.superlayer != nil else { state = .empty; return }
+        guard motionAllowed else {
+            emitter.isHidden = true
+            emitter.speed = 0
+            still.isHidden = false
+            state = .still
+            return
+        }
+        if state == .empty || state == .still { start() }
+        if running { resume() } else { pause() }
+    }
+
+    /// A begin time in the past has Core Animation simulate the field as if it had been running
+    /// all along, so it is spread across the screen from its first frame.
+    private func start() {
+        still.isHidden = true
+        emitter.isHidden = false
+        emitter.speed = 1
+        emitter.timeOffset = 0
+        let lifetime = CFTimeInterval(emitter.emitterCells?.first?.lifetime ?? 0)
+        let now = emitter.superlayer?.convertTime(CACurrentMediaTime(), from: nil) ?? CACurrentMediaTime()
+        emitter.beginTime = now - lifetime
+        state = .running
+    }
+
+    /// Speed zero holds the simulation as well as the births, from the instant it stops: no GPU
+    /// work, and every particle stays where it stood.
+    private func pause() {
+        guard state == .running else { return }
+        let now = emitter.convertTime(CACurrentMediaTime(), from: nil)
+        emitter.speed = 0
+        emitter.timeOffset = now
+        state = .paused
+    }
+
+    /// Resumes from the held instant. Restoring only the speed would jump the field forward by
+    /// however long it was held.
+    private func resume() {
+        guard state == .paused else { return }
+        let paused = emitter.timeOffset
+        emitter.speed = 1
+        emitter.timeOffset = 0
+        emitter.beginTime = 0
+        emitter.beginTime = emitter.convertTime(CACurrentMediaTime(), from: nil) - paused
+        state = .running
+    }
+
+    private func particleMotion(_ particles: RemoteThemeParticles) -> ThemeParticleMotion {
+        ThemeParticleMotion(style: particles.style, speed: particles.speed,
             size: particles.size, placement: .ambient, region: region.size)
+    }
+
+    private static func lifetimeRange(_ motion: ThemeParticleMotion) -> Float {
+        min(motion.lifetime * 0.15, max(0, 24 - motion.lifetime))
+    }
+
+    /// Births per second across every cell: the density over this region, quickened by work,
+    /// within a bounded number of live particles.
+    private func birthRate(_ particles: RemoteThemeParticles) -> Double {
+        let motion = particleMotion(particles)
         let baseRate: Double
         switch motion.source {
         case .area: baseRate = particles.density * Double(region.width * region.height) / 9_000
         default: baseRate = particles.density * Double(region.width) / 26
         }
         let aliveBudget = min(120, max(1, Double(region.width * region.height) / 3_000))
-        let lifetimeRange = min(motion.lifetime * 0.15, max(0, 24 - motion.lifetime))
-        let longestLifetime = max(motion.lifetime + lifetimeRange, 0.1)
-        let rate = min(baseRate * (1 + reaction), aliveBudget / Double(longestLifetime))
+        let longestLifetime = max(motion.lifetime + Self.lifetimeRange(motion), 0.1)
+        return min(baseRate * (1 + reaction), aliveBudget / Double(longestLifetime))
+    }
+
+    private func retime(_ particles: RemoteThemeParticles) {
+        let cells = emitter.emitterCells ?? []
+        guard !cells.isEmpty else { return }
+        let perCell = Float(birthRate(particles) / Double(cells.count))
+        for name in cells.compactMap(\.name) {
+            emitter.setValue(perCell, forKeyPath: "emitterCells.\(name).birthRate")
+        }
+    }
+
+    private func configure(_ particles: RemoteThemeParticles) {
+        let motion = particleMotion(particles)
+        let lifetimeRange = Self.lifetimeRange(motion)
+        let rate = birthRate(particles)
         emitter.frame = region
         emitter.emitterShape = .rectangle
         emitter.emitterMode = .volume

@@ -1656,6 +1656,18 @@ enum AppSettingDefinitions {
     ]
 
     private static let surfaceDefinitions: [AppSettingDefinition] = [
+        surfaced("tools.network.requestHeaders", pageID: "tools", order: 1,
+                  section: "Browser Network Capture", title: "Capture request headers",
+                  "browser", "network", "headers", "bodies", "capture", "development"),
+        surfaced("tools.network.responseHeaders", pageID: "tools", order: 2,
+                  section: "Browser Network Capture", title: "Capture response headers",
+                  "browser", "network", "headers", "bodies", "capture", "development"),
+        surfaced("tools.network.requestBody", pageID: "tools", order: 3,
+                  section: "Browser Network Capture", title: "Capture request bodies",
+                  "browser", "network", "headers", "bodies", "capture", "development"),
+        surfaced("tools.network.responseBody", pageID: "tools", order: 4,
+                  section: "Browser Network Capture", title: "Capture response bodies",
+                  "browser", "network", "headers", "bodies", "capture", "development"),
         surfaced("general.agentTools", pageID: "general", order: 7,
                   section: "Software Updates", title: "Agent tools",
                   "install", "update", "CLI", "TUI", "Claude", "Codex", "model", "version"),

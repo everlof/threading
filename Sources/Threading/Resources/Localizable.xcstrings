@@ -8816,6 +8816,23 @@
         }
       }
     },
+    "Apply Capture Settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply Capture Settings"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillämpa inställningarna"
+          }
+        }
+      }
+    },
     "Apply a theme to this session, its project, or as the default." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11051,6 +11068,23 @@
         }
       }
     },
+    "Browser Network Capture" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Browser Network Capture"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Insamling av webbläsartrafik"
+          }
+        }
+      }
+    },
     "Browser Options" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12185,6 +12219,91 @@
         }
       }
     },
+    "Capture covers main-frame fetch/XHR text payloads and page-visible headers. Document/resource bodies, cross-origin frames, binary data and streaming responses are excluded. Agents can inspect the configuration and ask you to approve changes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Capture covers main-frame fetch/XHR text payloads and page-visible headers. Document/resource bodies, cross-origin frames, binary data and streaming responses are excluded. Agents can inspect the configuration and ask you to approve changes."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Insamlingen omfattar textinnehåll och läsbara huvuden från fetch/XHR i huvudramen. Dokument- och resursinnehåll, ramar från andra ursprung, binärdata och strömmande svar ingår inte. Agenter kan läsa inställningarna och be dig godkänna ändringar."
+          }
+        }
+      }
+    },
+    "Capture request bodies" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Capture request bodies"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Samla in anropsinnehåll"
+          }
+        }
+      }
+    },
+    "Capture request headers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Capture request headers"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Samla in anropshuvuden"
+          }
+        }
+      }
+    },
+    "Capture response bodies" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Capture response bodies"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Samla in svarsinnehåll"
+          }
+        }
+      }
+    },
+    "Capture response headers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Capture response headers"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Samla in svarshuvuden"
+          }
+        }
+      }
+    },
     "Capture runs only while a visible theme or preview needs it. Reduce Motion, Theme animations, and Low Power Mode stop music-driven decoration." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12269,6 +12388,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Firar"
+          }
+        }
+      }
+    },
+    "Change Browser Network Capture?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change Browser Network Capture?"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändra insamling av webbläsartrafik?"
           }
         }
       }
@@ -31811,6 +31947,23 @@
         }
       }
     },
+    "Metadata only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metadata only"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Endast metadata"
+          }
+        }
+      }
+    },
     "Metal is unavailable on this Mac." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38145,6 +38298,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sida %lld av %lld"
+          }
+        }
+      }
+    },
+    "Page-visible fetch/XHR headers; sensitive values are redacted." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Page-visible fetch/XHR headers; sensitive values are redacted."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fetch/XHR-huvuden som sidan kan läsa. Känsliga värden maskeras."
           }
         }
       }
@@ -53637,6 +53807,23 @@
         }
       }
     },
+    "Text payloads up to 8 KiB; captured site data becomes readable to agents." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text payloads up to 8 KiB; captured site data becomes readable to agents."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Textinnehåll upp till 8 KiB. Insamlade webbplatsdata blir läsbara för agenter."
+          }
+        }
+      }
+    },
     "Text size" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59604,6 +59791,23 @@
         }
       }
     },
+    "These opt-ins apply to all in-app browser tabs. Changes affect future requests without reloading, and clear existing captured payloads." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "These opt-ins apply to all in-app browser tabs. Changes affect future requests without reloading, and clear existing captured payloads."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dessa val gäller alla webbläsarflikar i appen. Ändringar gäller kommande anrop utan att sidan laddas om och rensar redan insamlat innehåll."
+          }
+        }
+      }
+    },
     "These options come from “%@”, the extension that ships this theme. They are the same settings as on its Settings page, so a change here applies there too." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60002,6 +60206,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Detta kan ändra data utanför Threading genom att använda webbläsarens inloggade session.%@\n\nGodkänn endast om detta är en del av uppgiften du gav agenten."
+          }
+        }
+      }
+    },
+    "This changes capture for all in-app browser tabs. Enabled details:\n%@\n\nText payloads can contain site data and become readable to agents with website access. Changes affect future requests and clear existing captured payloads. You can change this in Settings ▸ Tools ▸ Browser Network Capture." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This changes capture for all in-app browser tabs. Enabled details:\n%@\n\nText payloads can contain site data and become readable to agents with website access. Changes affect future requests and clear existing captured payloads. You can change this in Settings ▸ Tools ▸ Browser Network Capture."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detta ändrar insamlingen i alla webbläsarflikar i appen. Aktiverade detaljer:\n%@\n\nTextinnehåll kan innehålla webbplatsdata och blir läsbart för agenter med webbplatsåtkomst. Ändringar gäller kommande anrop och rensar redan insamlat innehåll. Du kan ändra detta i Inställningar ▸ Verktyg ▸ Insamling av webbläsartrafik."
           }
         }
       }

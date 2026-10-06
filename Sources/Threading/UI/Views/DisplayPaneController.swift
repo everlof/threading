@@ -2416,6 +2416,9 @@ final class DisplayPaneController: NSViewController {
       )
     }
     tabBar.update(items: ownItems + proxyItems)
+    if let active, let browser = active.browser {
+      browser.tabShortcutFocusOwner = tabBar.keyboardFocusOwner(for: active.id)
+    }
   }
 
   private func renderContent(active: DisplayTab?) {

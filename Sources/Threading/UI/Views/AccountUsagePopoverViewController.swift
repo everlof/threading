@@ -70,6 +70,7 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
     private lazy var scrollView: ThemedScrollView = {
         let scroll = ThemedScrollView()
         scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.automaticallyAdjustsContentInsets = false
         scroll.documentView = tableView
@@ -216,9 +217,30 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
                 (cell as? ThemedVirtualTableCell)?.setColumnWidth(width)
             }
         }
+        fitWindowListToDocument()
     }
 
     // MARK: - Private Methods
+
+    private func measuredWindowHeight() -> CGFloat? {
+        guard let window = windows.first else { return nil }
+        let row = UsageWindowRow(window: window, now: renderedAt, limits: limits)
+        row.appearance = view.effectiveAppearance
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.widthAnchor.constraint(equalToConstant: UsagePopoverDefaults.contentWidth).isActive = true
+        return row.fittingSize.height
+    }
+
+    private func fitWindowListToDocument() {
+        guard !windows.isEmpty,
+              windows.count <= UsagePopoverDefaults.maximumFittedWindowCount else { return }
+        let rowExtent = tableView.rect(ofRow: windows.count - 1).maxY
+        let height = min(rowExtent, UsagePopoverDefaults.maximumWindowListHeight)
+        guard height > 0, windowListHeight.constant != height else { return }
+        // Row rectangles include intercell spacing. The document frame also fills its viewport,
+        // so using that frame would retain any excess height from the initial estimate.
+        windowListHeight.constant = height
+    }
 
     private func usageDidChange(_ event: AccountUsageDidChange) {
         guard event.accountID == account.id else { return }
@@ -248,10 +270,14 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
             rules: limits,
             at: renderedAt
         )
+        // Measure one row before the popover asks for its fitting size. The row's fixed three-
+        // line anatomy follows live typography and bar metrics without constructing the list.
+        let rowHeight = measuredWindowHeight() ?? UsagePopoverDefaults.estimatedWindowHeight
+        tableView.rowHeight = rowHeight
         tableView.reloadData()
         scrollView.isHidden = windows.isEmpty
         windowListHeight.constant = min(
-            CGFloat(windows.count) * UsagePopoverDefaults.estimatedWindowHeight,
+            CGFloat(windows.count) * (rowHeight + tableView.intercellSpacing.height),
             UsagePopoverDefaults.maximumWindowListHeight
         )
         scrollView.contentView.scroll(to: origin)
@@ -333,4 +359,5 @@ enum UsagePopoverDefaults {
     static let width = contentWidth + 2 * Design.Spacing.inset
     static let estimatedWindowHeight: CGFloat = 52
     static let maximumWindowListHeight: CGFloat = 312
+    static let maximumFittedWindowCount = Int(maximumWindowListHeight / estimatedWindowHeight)
 }

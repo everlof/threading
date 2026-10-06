@@ -3,7 +3,7 @@ import XCTest
 @testable import ThreadingExtensionKit
 
 /// A theme-shipping extension may scope its decorations to its own themes. The field is
-/// additive: an unscoped patch or manifest must encode exactly as before, an older decoder must
+/// additive: an unscoped patch or manifest must keep its previous wire fields, an older decoder must
 /// read a scoped one, and a scope that could never be satisfied is refused before it reaches
 /// a host.
 final class ExtensionComponentThemeScopeTests: XCTestCase {
@@ -26,7 +26,7 @@ final class ExtensionComponentThemeScopeTests: XCTestCase {
         overlay: .proceed
     )
 
-    func testAnUnscopedPatchEncodesByteForByteAsBefore() throws {
+    func testAnUnscopedPatchKeepsTheLegacyWireShape() throws {
         let patch = ExtensionComponentPatch(
             id: "sidebar-dunes",
             target: .sidebarBackdrop(),
@@ -41,16 +41,22 @@ final class ExtensionComponentThemeScopeTests: XCTestCase {
             hook: backdrop
         )
 
+        // JSON key order is not part of the wire contract; compare canonical encodings.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let encodedPatch = try encoder.encode(patch)
+        let encodedLegacy = try encoder.encode(legacy)
+
         XCTAssertEqual(patch.themeScope, .always)
-        XCTAssertEqual(try JSONEncoder().encode(patch), try JSONEncoder().encode(legacy))
+        XCTAssertEqual(encodedPatch, encodedLegacy)
         let object = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: JSONEncoder().encode(patch)) as? [String: Any]
+            JSONSerialization.jsonObject(with: encodedPatch) as? [String: Any]
         )
         XCTAssertNil(object["themeScope"], "`always` is written by omission")
         XCTAssertEqual(
             try JSONDecoder().decode(
                 ExtensionComponentPatch.self,
-                from: JSONEncoder().encode(legacy)
+                from: encodedLegacy
             ),
             patch,
             "a publication from an older SDK decodes as `always`"

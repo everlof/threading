@@ -52,18 +52,54 @@ final class AccountUsageHoverInteractionTests: HostedStoreTestCase {
         XCTAssertNil(panel.parent, "Escape must close the pinned popup")
     }
 
+    func testShortWindowListsFitWithoutScrollingInMainWindowPopover() throws {
+        let previousTheme = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(previousTheme) }
+        for theme in [AppTheme.system, AppThemeStyles.cappuccino, AppThemeStyles.win98] {
+            AppThemeLibrary.apply(theme)
+            for windowCount in [1, 2] {
+                let fixture = try makeFixture(windowCount: windowCount)
+                defer { fixture.item.configure(account: nil) }
+                let panel = try openByHover(fixture)
+                let root = try XCTUnwrap(panel.contentView)
+                root.layoutSubtreeIfNeeded()
+                let content = try XCTUnwrap((root as? ThemedPopoverChromeView)?.contentView)
+                XCTAssertEqual(
+                    content.frame.height, content.fittingSize.height, accuracy: 0.5,
+                    "the popover must open at its final content height"
+                )
+                let scroll = try XCTUnwrap(descendants(in: root).first {
+                    ($0 as? ThemedScrollView)?.documentView is ThemedTableView
+                } as? ThemedScrollView)
+                let table = try XCTUnwrap(scroll.documentView as? ThemedTableView)
+                XCTAssertEqual(
+                    scroll.contentView.bounds.height,
+                    table.rect(ofRow: windowCount - 1).maxY,
+                    accuracy: 0.5,
+                    "a short list must fit its rows without retaining estimated empty space"
+                )
+                let overflow = max(0, table.frame.height - scroll.contentView.bounds.height)
+                XCTAssertEqual(overflow, 0, accuracy: 0.5,
+                               "\(theme.id.rawValue), \(windowCount) windows: rows \(table.frame.height), viewport \(scroll.contentView.bounds.height)")
+                XCTAssertTrue(scroll.verticalScroller?.isHidden == true,
+                              "a list that fits must not keep a scrollbar")
+            }
+        }
+    }
+
     /// Capture the popup through its real chrome and toolbar placement in the main shell.
     func testRendersNativeGrantInMainWindowPopover() throws {
         let directory = try XCTUnwrap(ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"])
         let previousTheme = AppThemeLibrary.current
         defer { AppThemeLibrary.apply(previousTheme) }
-        for (name, theme, appearanceName) in [
-            ("system-light", AppTheme.system, NSAppearance.Name.aqua),
-            ("system-dark", AppTheme.system, NSAppearance.Name.darkAqua),
-            ("cyberpunk", AppThemeStyles.cyberpunk, NSAppearance.Name.darkAqua)
+        for (name, theme, appearanceName, windowCount) in [
+            ("system-light", AppTheme.system, NSAppearance.Name.aqua, 1),
+            ("system-dark", AppTheme.system, NSAppearance.Name.darkAqua, 1),
+            ("cyberpunk", AppThemeStyles.cyberpunk, NSAppearance.Name.darkAqua, 1),
+            ("cappuccino-two-windows", AppThemeStyles.cappuccino, NSAppearance.Name.darkAqua, 2)
         ] {
             AppThemeLibrary.apply(theme)
-            let fixture = try makeFixture()
+            let fixture = try makeFixture(windowCount: windowCount)
             fixture.window.appearance = NSAppearance(named: appearanceName)
             AppThemeRefresh.repaint(fixture.window.contentView!)
             // The theme sweep refreshes the reading before the pointer opens it.
@@ -88,7 +124,10 @@ final class AccountUsageHoverInteractionTests: HostedStoreTestCase {
         let item: AccountUsageItemView
     }
 
-    private func makeFixture(onRefresh: @escaping () -> Void = {}) throws -> Fixture {
+    private func makeFixture(
+        windowCount: Int = 1,
+        onRefresh: @escaping () -> Void = {}
+    ) throws -> Fixture {
         let suite = "account-usage-hover-\(UUID().uuidString)"
         addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: suite)))
@@ -101,13 +140,18 @@ final class AccountUsageHoverInteractionTests: HostedStoreTestCase {
         )
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let usage = AccountUsage(
-            windows: [AccountUsage.Window(
-                id: "5h", label: "5-hour", fraction: 0.51,
-                resetsAt: now.addingTimeInterval(3_600), windowDuration: 18_000
-            )],
+            windows: (0..<windowCount).map { index in
+                AccountUsage.Window(
+                    id: index == 0 ? "5h" : "7d",
+                    label: index == 0 ? "5-hour" : "Weekly",
+                    fraction: index == 0 ? (windowCount == 1 ? 0.51 : 0.97) : 0.90,
+                    resetsAt: now.addingTimeInterval(3_600),
+                    windowDuration: index == 0 ? 18_000 : 604_800
+                )
+            },
             planLabel: nil,
             observedAt: now,
-            source: .profileSnapshot
+            source: windowCount == 1 ? .profileSnapshot : .localCache
         )
         AccountUsageService.shared.acceptAuthoritative(usage, for: account)
         let access = ClaudeKeychainAccess(

@@ -372,8 +372,10 @@ enum MCPToolCatalog {
       pass a ref to isolate one element and omit surrounding page content. Captures stay \
       quiet by default; set show=true only when the screenshot itself is user-facing. \
       browser_console \
-      and browser_network report page errors and failed requests without exposing headers, \
-      cookies, or bodies. Use browser_performance for a bounded current-document timing \
+      and browser_network report page errors and failed requests. browser_capabilities reports \
+      network_capture options; browser_network with configuration=true reports capture settings \
+      and limits. request_capture asks the user to change request/response header/body capture; \
+      include_details=true reads enabled fetch/XHR payloads, with request_id for one request. Use browser_performance for a bounded current-document timing \
       summary and the slowest resources; it is lighter than a raw performance trace and \
       never contacts an external field-data service. Use browser_accessibility_audit while \
       developing or reviewing a page to find deterministic semantic problems such as \

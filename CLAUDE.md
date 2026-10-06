@@ -579,6 +579,9 @@ the following cases genuinely need to be visible, and they are skipped by name i
 - `CommandPaletteFocusTests/testEscapeReturnsKeyboardToTerminalInKeyWindow()` — opens the
   shipping palette over a real terminal in a key window and proves Escape returns the keyboard.
   Its unshown responder-lifecycle cases stay in `fast`; key-window ownership requires activation.
+- `BrowserReloadShortcutTests/testApplicationDispatchReloadsBeforeRenameMenuWithBrowserFocus()` —
+  uses a visible nonactivating panel to assert key-window ownership and dispatch Cmd+R through
+  AppKit with the competing Rename Session menu binding. Its offscreen routing cases stay in `fast`.
 - `ThemedControlTests/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()` and
   `testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()` — both assert on first
   responder, which requires a key window.

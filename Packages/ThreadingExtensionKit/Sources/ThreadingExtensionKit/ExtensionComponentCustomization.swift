@@ -1603,8 +1603,8 @@ public struct ExtensionComponentPatch: Codable, Equatable, Sendable {
     public let replacement: ExtensionNode?
     public let hook: ExtensionNode?
     /// Which app themes the whole patch — properties, slots, replacement and hook — applies
-    /// under. `.always` is written by omission, so a patch that never states a scope encodes
-    /// exactly as it did before the field existed, and a host that predates the field ignores
+    /// under. `.always` is written by omission, so a patch that never states a scope keeps
+    /// the same wire fields as before, and a host that predates the field ignores
     /// the key and applies the patch under every theme.
     public let themeScope: ExtensionComponentThemeScope
 
@@ -1661,7 +1661,7 @@ public struct ExtensionComponentPatch: Codable, Equatable, Sendable {
     }
 
     /// Key for key what the synthesized encoder wrote, plus `themeScope` only when it says
-    /// something, so an existing publication stays byte-identical.
+    /// something, so an existing publication keeps its wire shape.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)

@@ -4835,7 +4835,7 @@ struct NewSessionButton: View {
                     width: MobileDesign.Size.compactControl,
                     height: MobileDesign.Size.compactControl
                 )
-                .background(theme.controlResting, in: Circle())
+                .background(theme.dashboardControlResting, in: Circle())
                 .contentShape(Circle())
         }
         .onAppear { MobileButtonFeedback.shared.prepare() }

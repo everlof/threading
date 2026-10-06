@@ -834,6 +834,11 @@ struct RemoteThemePalette: Equatable {
     /// keeps a custom translucent floating role from revealing the content beneath the modal.
     var floatingSurface: Color { Color(uiFloatingSurface) }
     var controlResting: Color { color("control_resting", fallback: "#FFFFFF12") }
+    /// A dashboard heading can scroll across the mascot. Keep its control disc visually
+    /// whole when the authored resting colour is translucent.
+    var dashboardControlResting: Color {
+        Color(uiControlResting.remoteComposited(over: uiGround.withAlphaComponent(1)))
+    }
     var controlHover: Color { color("control_hover", fallback: "#FFFFFF20") }
     var border: Color { color("border", fallback: "#FFFFFF14") }
     var divider: Color { color("divider", fallback: "#FFFFFF0C") }

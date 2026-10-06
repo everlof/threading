@@ -325,11 +325,12 @@ enum SessionNaming {
     /// Account discovery and one index read per account run on bounded workers. The catalogue
     /// pass groups immutable identities by handle without consulting the filesystem per row.
     @MainActor
+    @discardableResult
     static func refreshProviderTitlesAtLaunch(
         accountsProvider: @escaping @MainActor () async -> [AgentAccount] = {
             await AgentAccountDiscovery.allAccountsAfterDiscovery(for: .codex)
         }
-    ) {
+    ) -> Task<Void, Never>? {
         struct RetainedSession: Sendable {
             let sessionID: SessionID
             let transcriptID: TranscriptID
@@ -355,8 +356,8 @@ enum SessionNaming {
                 )
             }
         }
-        guard !sessionsByHandle.isEmpty else { return }
-        Task(priority: .utility) { @MainActor in
+        guard !sessionsByHandle.isEmpty else { return nil }
+        return Task(priority: .utility) { @MainActor in
             let accounts = await accountsProvider()
             var batches: [String: Batch] = [:]
             for (handle, sessions) in sessionsByHandle {

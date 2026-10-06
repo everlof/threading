@@ -109,8 +109,8 @@ final class ComponentThemeScopeTests: XCTestCase {
     private var preservedActivate: ((URL) -> Bool)?
     private var preservedDeactivate: ((URL) -> Void)?
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         preservedTheme = AppThemeLibrary.current
         preservedThemeID = PreferenceStore.shared.string(forKey: "appThemeID")
         preservedActivate = ExtensionAppearanceRegistry.shared.activateFont
@@ -119,7 +119,7 @@ final class ComponentThemeScopeTests: XCTestCase {
         ExtensionAppearanceRegistry.shared.deactivateFont = { _ in }
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         ExtensionAppearanceRegistry.shared.replace(contributions: [])
         if let preservedActivate { ExtensionAppearanceRegistry.shared.activateFont = preservedActivate }
         if let preservedDeactivate { ExtensionAppearanceRegistry.shared.deactivateFont = preservedDeactivate }
@@ -129,7 +129,7 @@ final class ComponentThemeScopeTests: XCTestCase {
             PreferenceStore.shared.removeObject(forKey: "appThemeID")
         }
         if let preservedTheme { AppThemeLibrary.installResolved(preservedTheme) }
-        super.tearDown()
+        try await super.tearDown()
     }
 
     /// Storm ships a theme and an `ownThemes` sidebar backdrop. Wearing Storm draws it, any

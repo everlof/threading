@@ -2642,7 +2642,13 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
         view.isScrollEnabled = false
         view.adjustsFontForContentSizeCategory = true
         view.autocapitalizationType = .none
-        view.autocorrectionType = .no
+        // On iPhone, turning autocorrection off removes the keyboard's whole suggestion row, and
+        // with it iOS 27's one-tap paste of whatever was just copied. The chat composers keep
+        // that row, so this line does too; quotes and dashes stay straight because the line is
+        // written into a terminal.
+        view.autocorrectionType = .default
+        view.smartQuotesType = .no
+        view.smartDashesType = .no
         view.returnKeyType = .send
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.accessibilityLabel = MobileL10n.string("Compose on this device…")

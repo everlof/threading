@@ -788,7 +788,8 @@ extension AgentToolCoordinator {
             defaultBackend: "webkit_in_app",
             activeTab: activeTab,
             signIn: signIn,
-            backends: [webKitBackend, playwrightBackend, attachedBackend]
+            backends: [webKitBackend, playwrightBackend, attachedBackend],
+            networkCapture: browserNetworkCaptureSettings.options
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

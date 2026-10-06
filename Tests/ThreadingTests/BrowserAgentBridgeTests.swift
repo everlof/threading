@@ -2653,6 +2653,121 @@ final class BrowserAgentBridgeTests: XCTestCase {
 @MainActor
 final class BrowserAgentBridgeIntegrationTests: XCTestCase {
 
+    func testNetworkHeaderBodyCaptureIsOptInLiveAndDoesNotConsumePageResponses() async throws {
+        let suite = "BrowserNetworkWebKit-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = BrowserNetworkCaptureSettings(defaults: defaults)
+        let server = try BrowserLoopbackHTTPServer(pages: [
+            "/capture": "<!doctype html><title>Network capture</title><p id='result'></p>",
+            "/api": #"{"message":"response-marker","password":"server-private"}"#,
+            "/large": String(repeating: "body-marker", count: 4_000)
+        ])
+        defer { server.stop() }
+        let browser = BrowserViewController(networkCaptureSettings: settings)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = browser
+        window.orderFront(nil)
+        defer { window.close() }
+        let loaded = await performNavigation(browser, to: server.url(host: "localhost", path: "/capture").absoluteString)
+        XCTAssertTrue(loaded.0, loaded.1)
+        let request = #"""
+            fetch('/api', {method:'POST', headers:{'X-Debug':'header-marker', 'Authorization':'private-token'},
+              body:JSON.stringify({message:'request-marker', password:'client-private', auth:{password:'nested-private'}})})
+              .then(r=>r.text()).then(text=>document.getElementById('result').textContent=text);
+            true;
+            """#
+        _ = try await browser.evaluate(request)
+        try await waitForNetwork(browser, containing: "/api")
+        let disabled = browser.networkOutput(kind: "fetch", errorsOnly: false, clear: true, includeDetails: true)
+        XCTAssertFalse(disabled.contains("request-marker"))
+        XCTAssertFalse(disabled.contains("response-marker"))
+
+        settings.options = .init(requestHeaders: true, responseHeaders: true, requestBody: true, responseBody: true)
+        _ = try await browser.evaluate(request)
+        let deadline = Date().addingTimeInterval(3)
+        var details = ""
+        while Date() < deadline {
+            details = browser.networkOutput(kind: "fetch", errorsOnly: false, clear: false, includeDetails: true)
+            if details.contains("response-marker") { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(details.contains("header-marker"), details)
+        XCTAssertTrue(details.contains("content-type"), details)
+        XCTAssertTrue(details.contains("request-marker"), details)
+        XCTAssertTrue(details.contains("response-marker"), details)
+        XCTAssertFalse(details.contains("private-token"), details)
+        XCTAssertFalse(details.contains("client-private"), details)
+        XCTAssertFalse(details.contains("nested-private"), details)
+        XCTAssertFalse(details.contains("server-private"), details)
+        let pageResult = try await browser.evaluate("document.getElementById('result').textContent") as? String
+        XCTAssertTrue(pageResult?.contains("response-marker") == true, "Capture consumed the page's response")
+        let id = try XCTUnwrap(browser.capturedNetworkEntries.last(where: { $0.kind == "fetch" })?.captureID)
+        let single = browser.networkOutput(kind: nil, errorsOnly: false, clear: false, includeDetails: true, requestID: id)
+        XCTAssertTrue(single.contains("request-marker"))
+
+        _ = try await browser.evaluate("fetch('/large').then(r=>r.text()).then(text=>document.getElementById('result').textContent=String(text.length)); true;")
+        let largeDeadline = Date().addingTimeInterval(3)
+        var largeDetails = ""
+        while Date() < largeDeadline {
+            let largeID = browser.capturedNetworkEntries.last(where: { $0.url.contains("/large") })?.captureID
+            if let largeID {
+                largeDetails = browser.networkOutput(kind: "fetch", errorsOnly: false, clear: false, includeDetails: true, requestID: largeID)
+            }
+            if largeDetails.contains("[truncated]") { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(largeDetails.contains("[truncated]"), largeDetails)
+        XCTAssertLessThan(largeDetails.utf8.count, 10_000)
+        let originalLength = try await browser.evaluate("document.getElementById('result').textContent") as? String
+        XCTAssertEqual(originalLength, "44000", "The page must receive its complete large response")
+
+        let foreignServer = try BrowserLoopbackHTTPServer(pages: [
+            "/foreign-frame": "<!doctype html><script>fetch('/foreign-api').then(r=>r.text());</script>",
+            "/foreign-api": "foreign-body-private"
+        ])
+        defer { foreignServer.stop() }
+        let frameURL = foreignServer.url(host: "localhost", path: "/foreign-frame").absoluteString
+        _ = try await browser.evaluate("const frame=document.createElement('iframe'); frame.src='\(frameURL)'; document.body.append(frame); true;")
+        try await waitForNetwork(browser, containing: "/foreign-api")
+        let frameDetails = browser.networkOutput(kind: "fetch", errorsOnly: false, clear: false, includeDetails: true)
+        XCTAssertFalse(frameDetails.contains("foreign-body-private"), frameDetails)
+
+        _ = try await browser.evaluate("const xhr=new XMLHttpRequest(); xhr.open('POST','/api'); xhr.setRequestHeader('X-Debug','xhr-header'); xhr.send('xhr-body'); true;")
+        let xhrDeadline = Date().addingTimeInterval(3)
+        var xhrDetails = ""
+        while Date() < xhrDeadline {
+            xhrDetails = browser.networkOutput(kind: "xhr", errorsOnly: false, clear: false, includeDetails: true)
+            if xhrDetails.contains("response-marker") { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(xhrDetails.contains("xhr-header"), xhrDetails)
+        XCTAssertTrue(xhrDetails.contains("xhr-body"), xhrDetails)
+        XCTAssertTrue(xhrDetails.contains("response-marker"), xhrDetails)
+        settings.options = .init(responseBody: true)
+        _ = try await browser.evaluate(request)
+        let partialDeadline = Date().addingTimeInterval(3)
+        var partial = ""
+        while Date() < partialDeadline {
+            partial = browser.networkOutput(kind: "fetch", errorsOnly: false, clear: false, includeDetails: true)
+            if partial.contains("response-marker") { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(partial.contains("response-marker"), partial)
+        XCTAssertFalse(partial.contains("request-marker"), partial)
+        XCTAssertFalse(partial.contains("header-marker"), partial)
+        settings.options = .metadataOnly
+        let revoked = browser.networkOutput(kind: nil, errorsOnly: false, clear: false, includeDetails: true)
+        XCTAssertFalse(revoked.contains("request-marker"))
+        XCTAssertFalse(revoked.contains("response-marker"))
+        _ = try await browser.evaluate(request)
+        try await waitForNetwork(browser, containing: "/api")
+        let future = browser.networkOutput(kind: nil, errorsOnly: false, clear: false, includeDetails: true)
+        XCTAssertFalse(future.contains("response-marker"))
+    }
+
     func testCookiesAndLocalStorageAreSharedOnlyWithinTheProject() async throws {
         let server = try BrowserLoopbackHTTPServer(pages: [
             "/project-storage": "<!doctype html><title>Project storage fixture</title><p>Storage</p>"

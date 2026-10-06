@@ -310,6 +310,16 @@ the browser changes only the chrome around AppKit's editor rather than building 
 control or shrinking the target when its plate disappears. The responsive strip can move the field
 when controls fold, so its hover is revalidated whenever its tracking area is rebuilt.
 
+Cmd+R is scoped to the browser's page, native chrome, and selected tab header. A tab press keeps
+keyboard focus on `ThemedTabItemView`, which is a sibling of the browser content rather than its
+descendant. Each host therefore assigns that selected chip as the browser scope's additional
+keyboard focus owner. The reference is weak and must belong to the same window; panel, drawer,
+and detached-window rendering update it when the browser moves. Other tabs and composer focus
+keep the app's Rename Session binding. Matching visits only the focused view's ancestry and one
+related control, independent of page size and retained tab/session counts; no event monitor or
+focus transfer is added. Shortcut routing and navigation remain host-owned when a tab header's
+presentation is customized.
+
 `browser_emulate` applies public per-view WebKit conditions to the active tab. `NSAppearance`
 makes `prefers-color-scheme`, matchMedia, rendered pixels, and screenshots agree without changing
 Threading's window or global appearance; `WKWebView.customUserAgent` changes JavaScript identity and
@@ -405,8 +415,30 @@ Application Support directory, so Reset Everything moves it aside with the rest 
 state.
 Page-world user scripts capture console/error output and network metadata, because isolated-world
 wrappers cannot see calls made through the page's own `console`, `fetch`, or XHR. Network capture
-never records request or response bodies, headers, cookies, or credentials, and sensitive query
-values are redacted before they can leave the browser controller. A capture-phase resource-error
+defaults to metadata only, and sensitive query values are redacted before they can leave the
+browser controller. `BrowserNetworkCaptureSettings` owns four independent, persistent host-only
+opt-ins for request/response headers and bodies, presented as fixed virtual rows in Settings ▸
+Tools ▸ Browser Network Capture. `browser_capabilities` exposes current options;
+`browser_network(configuration: true)` adds scope, limits and the settings destination.
+`request_capture` proposes a partial change through an owner-confirmed browser permission request.
+Approval applies the exact proposal only if the prior settings remain current. Website access
+alone cannot change capture policy. Themes and extensions cannot choose capture authority.
+
+Capture is limited to main-frame fetch/XHR page-visible headers and bounded text bodies. WebKit
+does not supply document/resource bodies or wire headers; opaque cross-origin frames, binary
+payloads and streaming responses stay excluded. Sensitive headers are masked again at the native
+boundary, and agent output uses the existing filled-secret scrubber. Page-supplied payloads remain
+untrusted data. Response clones preserve the page's original response and are read outside its
+fetch promise, with four concurrent reads, 8 KiB/64-chunk limits and a one-second deadline. XHR
+captures text responses only. Disabling/changing policy updates live pages and future user scripts
+without reloading and clears payloads. A generation check rejects in-flight details from old policy;
+document navigation, buffer clearing and project moves retire the owning tab's payloads.
+`BrowserNetworkPayloadBuffer` has a process-wide 64-record cap (normally 10–20) so the payload
+budget does not multiply by retained chats and tabs. Each record bounds headers and both bodies;
+metadata retains its existing 300-entry cap per tab. `include_details` returns at most five recent
+requests, with a 64 KiB output cap and `request_id` for one request. Payloads are runtime-only;
+authorized tool results follow ordinary execution-audit persistence. Trace and visual-baseline
+diagnostics continue to contain only metadata. A capture-phase resource-error
 listener supplies metadata-only failures for images, scripts, stylesheets, and media that never
 produce a usable Performance Resource Timing entry.
 `browser_performance` complements those event buffers with a bounded, current-document Web

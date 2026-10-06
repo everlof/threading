@@ -513,6 +513,16 @@ final class BrowserViewController: NSViewController {
     private var reloadButton: ThemedButton { chromeBar.reloadButton }
     private var closePopupButton: ThemedButton { chromeBar.closePopupButton }
     private var addressField: ThemedTextField { chromeBar.addressField }
+
+    /// The tab belongs to the browser's keyboard scope even though its strip is a host sibling.
+    /// Hosts set this for the displayed browser; agent navigation does not move keyboard focus.
+    weak var tabShortcutFocusOwner: NSView? {
+        didSet {
+            guard isViewLoaded else { return }
+            (view as? KeyEquivalentScopeView)?.additionalKeyboardFocusOwner = tabShortcutFocusOwner
+        }
+    }
+
     /// The address text a navigation last wrote. `syncAddress` compares the field editor against
     /// it to tell a user's half-typed destination from a field that merely holds focus.
     private var syncedAddress = ""
@@ -604,6 +614,9 @@ final class BrowserViewController: NSViewController {
     private var observations: [NSKeyValueObservation] = []
     private var consoleMessages: [BrowserConsoleMessage] = []
     private var networkEntries: [BrowserNetworkEntry] = []
+    private let networkPayloadOwner = UUID()
+    private let networkCaptureSettings: BrowserNetworkCaptureSettings
+    private var networkCaptureGeneration = 0
 
     /// The buffers as a diagnostics capture reads them. Internal rather than private because the
     /// snapshot is assembled in `BrowserDiagnosticsCapture`, beside the comparison it feeds.
@@ -652,16 +665,21 @@ final class BrowserViewController: NSViewController {
         urlSchemeHandlers: [String: WKURLSchemeHandler] = [:],
         contextKind: BrowserContextKind = .shared,
         projectID: ProjectID? = nil,
+        networkCaptureSettings: BrowserNetworkCaptureSettings = .shared,
         openPanelProvider: BrowserOpenPanelProvider? = nil,
         savePanelProvider: BrowserSavePanelProvider? = nil
     ) {
         self.urlSchemeHandlers = urlSchemeHandlers
         self.contextKind = contextKind
+        self.networkCaptureSettings = networkCaptureSettings
         self.openPanelProvider = openPanelProvider
         self.savePanelProvider = savePanelProvider
         websiteDataProjectID = projectID
         websiteDataStore = BrowserWebsiteDataStores.store(for: contextKind, projectID: projectID)
         super.init(nibName: nil, bundle: nil)
+        appEvents.observe(BrowserNetworkCaptureDidChange.self) { [weak self] _ in
+            self?.refreshNetworkCapture()
+        }
         appEvents.observe(SessionProjectDidChange.self) { [weak self] event in
             guard let self, self.annotationSessionID == event.sessionID else { return }
             self.changeWebsiteDataProject(to: event.projectID)
@@ -694,6 +712,7 @@ final class BrowserViewController: NSViewController {
         annotationDraft = nil
         consoleMessages.removeAll()
         networkEntries.removeAll()
+        BrowserNetworkPayloadBuffer.shared.clear(owner: networkPayloadOwner)
         for page in webViewStack {
             page.stopLoading()
             page.navigationDelegate = nil
@@ -719,6 +738,7 @@ final class BrowserViewController: NSViewController {
     override func loadView() {
         let root = KeyEquivalentScopeView()
         root.onKeyEquivalent = { [weak self] event in self?.performBrowserShortcut(event) ?? false }
+        root.additionalKeyboardFocusOwner = tabShortcutFocusOwner
         view = root
         view.applySurface(
             fill: Design.Surface.ground,
@@ -810,7 +830,10 @@ final class BrowserViewController: NSViewController {
         )
         contentController.addUserScript(
             WKUserScript(
-                source: BrowserAgentScripts.networkCapture,
+                source: BrowserNetworkCaptureScripts.installation(
+                    options: networkCaptureSettings.options,
+                    generation: networkCaptureGeneration
+                ),
                 injectionTime: .atDocumentStart,
                 forMainFrameOnly: false
             )
@@ -1100,8 +1123,10 @@ final class BrowserViewController: NSViewController {
     }
 
     private func activateWebView(_ candidate: WKWebView) {
-        if candidate !== webView { setAnnotationMode(false) }
+        let changedDocument = candidate !== webView
+        if changedDocument { setAnnotationMode(false) }
         webView = candidate
+        if changedDocument { refreshNetworkCapture() }
         chromeBar.setPasswordFieldFocused(
             passwordFocusedFrameTokens[ObjectIdentifier(candidate)]?.isEmpty == false
         )
@@ -2535,23 +2560,40 @@ final class BrowserViewController: NSViewController {
         return lines.joined(separator: "\n")
     }
 
-    /// Metadata-only request log. Bodies, headers and cookies are never collected.
-    func networkOutput(kind: String?, errorsOnly: Bool, clear: Bool) -> String {
+    /// Detail reads are explicit and capped separately from the small metadata inventory.
+    func networkOutput(
+        kind: String?, errorsOnly: Bool, clear: Bool,
+        includeDetails: Bool = false, requestID: String? = nil
+    ) -> String {
         let normalizedKind = kind?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         let matching = networkEntries.filter { entry in
             let kindMatches = normalizedKind?.isEmpty != false || entry.kind == normalizedKind
             return kindMatches && (!errorsOnly || entry.isError)
+                && (requestID == nil || entry.captureID == requestID)
         }
-        var lines = matching.map { entry -> String in
+        let selected = includeDetails ? Array(matching.suffix(5)) : matching
+        let options = networkCaptureSettings.options
+        var lines = selected.map { entry -> String in
             let status = entry.status.map(String.init) ?? (entry.error == nil ? "—" : "ERR")
             let duration = entry.duration.map {
                 String(format: " %.1fms", $0)
             } ?? ""
             let error = entry.error.map { " — \($0)" } ?? ""
-            return "[\(status)] \(entry.method) \(entry.kind) \(entry.redactedURL)"
+            var line = "[\(status)] \(entry.method) \(entry.kind) \(entry.redactedURL)"
                 + duration + error
+            if let id = entry.captureID { line += " [request_id=\(id)]" }
+            if includeDetails {
+                let payload = entry.captureID.flatMap {
+                    BrowserNetworkPayloadBuffer.shared.payload(owner: networkPayloadOwner, request: $0)
+                }
+                let details = payload?.agentText(options: options) ?? ""
+                line += "\n" + (details.isEmpty
+                    ? "  Payload unavailable: disabled, not captured, unsupported, or evicted."
+                    : details)
+            }
+            return line
         }
         if lines.isEmpty {
             lines = ["No matching network requests."]
@@ -2563,8 +2605,12 @@ final class BrowserViewController: NSViewController {
         }
         if clear {
             networkEntries.removeAll()
+            BrowserNetworkPayloadBuffer.shared.clear(owner: networkPayloadOwner)
         }
-        return lines.joined(separator: "\n")
+        let output = lines.joined(separator: "\n")
+        guard output.utf8.count > 65_536 else { return output }
+        return String(decoding: output.utf8.prefix(65_000), as: UTF8.self)
+            + "\n[Network output truncated; use request_id to inspect one request.]"
     }
 
     func hasNetworkEntry(urlContaining text: String?, status: Int?) -> Bool {
@@ -2592,7 +2638,8 @@ final class BrowserViewController: NSViewController {
             status: entry.status,
             duration: entry.duration.map { max(0, $0) },
             error: entry.error?.isEmpty == false ? "Request failed or was blocked" : nil,
-            timestamp: entry.timestamp
+            timestamp: entry.timestamp,
+            captureID: entry.captureID.map { String($0.prefix(100)) }
         )
         networkEntries.append(normalizedEntry)
         recordAgentNetworkTrace(normalizedEntry)
@@ -2600,6 +2647,30 @@ final class BrowserViewController: NSViewController {
             networkEntries.removeFirst(
                 networkEntries.count - BrowserAgentDefaults.maximumNetworkEntries
             )
+        }
+    }
+
+    private func refreshNetworkCapture() {
+        networkCaptureGeneration &+= 1
+        BrowserNetworkPayloadBuffer.shared.clear(owner: networkPayloadOwner)
+        guard isViewLoaded else { return }
+        let options = networkCaptureSettings.options
+        for page in webViewStack {
+            let controller = page.configuration.userContentController
+            let retained = controller.userScripts.filter {
+                !$0.source.hasPrefix(BrowserNetworkCaptureScripts.source)
+            }
+            controller.removeAllUserScripts()
+            retained.forEach { controller.addUserScript($0) }
+            controller.addUserScript(WKUserScript(
+                source: BrowserNetworkCaptureScripts.installation(
+                    options: options, generation: networkCaptureGeneration
+                ),
+                injectionTime: .atDocumentStart, forMainFrameOnly: false
+            ))
+            page.evaluateJavaScript(BrowserNetworkCaptureScripts.configuration(
+                options: options, generation: networkCaptureGeneration
+            ), completionHandler: nil)
         }
     }
 
@@ -2615,8 +2686,8 @@ final class BrowserViewController: NSViewController {
     @objc private func goForward() { webView.goForward() }
     @objc private func reload() { webView.reload() }
 
-    /// ⌘R reloads while focus is anywhere in the browser — page or address bar — as it does in
-    /// every browser; outside it the chord stays Rename Session's. The chord is the browser's own
+    /// ⌘R reloads while focus belongs to the page, address bar, or selected browser tab.
+    /// Outside it the chord stays Rename Session's. The chord is the browser's own
     /// rather than read from the command table, so rebinding Rename does not move Reload.
     private func performBrowserShortcut(_ event: NSEvent) -> Bool {
         guard BrowserDefaults.reloadShortcut.matches(event) else { return false }
@@ -3924,6 +3995,8 @@ extension BrowserViewController: WKNavigationDelegate {
         recordAgentNavigationTrace("start")
         consoleMessages.removeAll()
         networkEntries.removeAll()
+        BrowserNetworkPayloadBuffer.shared.clear(owner: networkPayloadOwner)
+        refreshNetworkCapture()
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
@@ -4544,6 +4617,17 @@ extension BrowserViewController: WKScriptMessageHandler {
             return
         }
         if message.name == BrowserDefaults.networkMessageHandler {
+            if payload["details"] as? Bool == true {
+                guard message.frameInfo.isMainFrame, message.webView === webView,
+                      (payload["generation"] as? NSNumber)?.intValue == networkCaptureGeneration,
+                      let id = payload["capture_id"] as? String,
+                      networkEntries.contains(where: { $0.captureID == id }) else { return }
+                let details = BrowserNetworkPayload(
+                    message: payload, options: networkCaptureSettings.options
+                )
+                BrowserNetworkPayloadBuffer.shared.record(details, owner: networkPayloadOwner, request: id)
+                return
+            }
             receiveNetworkMessage(payload)
             return
         }
@@ -4578,7 +4662,8 @@ extension BrowserViewController: WKScriptMessageHandler {
             status: number?.intValue,
             duration: duration?.doubleValue,
             error: payload["error"] as? String,
-            timestamp: Date()
+            timestamp: Date(),
+            captureID: payload["capture_id"] as? String
         ))
     }
 }

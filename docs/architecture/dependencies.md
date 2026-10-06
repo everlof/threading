@@ -134,6 +134,10 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     public alongside `mouseMode` so a mirrored session can *state* both to a second renderer —
     see [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md), where the ring cannot be relied on to carry
     the arming sequence.
+    Mac mouse fixtures observe callbacks through `DispatchQueue.main`, including each bounded
+    poll of a deferred semantic click. Yielding only actor jobs can leave the coalescing timer
+    behind a busy actor queue and report a false timeout in the full package suite. The queue
+    barrier preserves the existing one-second bounds and waits for the actual callback owner.
   - **The accessory-key encoder seam is ours.** `Terminal.encodedFunctionalKey` exposes the same
     DECCKM- and kitty-aware functional-key encoder used by SwiftTerm's own keyboard paths. The
     app's customizable touch caps know both touch-down and touch-up, so when a TUI requests event
