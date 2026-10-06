@@ -66,6 +66,46 @@ endpoint's token is deliberately never written down — a helper run is one run.
 cannot read is quarantined (`.unreadable-<uuid>`) and the launch mints fresh, rather than being
 interpreted as empty and overwritten; a single unparsable row is skipped and the rest still load.
 
+## Agent problem reports
+
+`report_problem` is the default-enabled **Issue reporting** group (`issue-reporting`). Agents
+can file observed Threading defects through Help's private `MacIssueReportSubmitter` and durable
+outbox. Disabling the group removes discovery, launch admission and dispatch together. The
+composition root installs `AgentProblemReportService`; the adapter never opens a sheet, selects
+a session or moves the panel. Calling identity comes from the MCP session token, not an argument.
+
+Title and description are required. Optional reproduction steps, expected/actual behavior and
+sanitized text evidence become named sections. Threading adds version, build and OS plus the
+existing bounded, content-free diagnostic journal; it never loads transcripts, raw logs or project
+files. This route deliberately avoids the manual support report's synchronous inventory probes.
+Optional `image_paths` requires the user's permission to share and accepts at most four absolute
+PNG/JPEG paths on the Mac, each at most 8 MiB, under the shared source pixel bounds. Remote-host
+sessions retain the text tool but image paths are refused before any file read.
+
+One in-flight admission bounds worker image reads, thumbnail validation, hashing, snapshots and
+cleanup. Each original is frozen on a worker before the outbox copies it into custody and makes
+the existing 12 KiB JPEG preview. The composed description has a 10 KiB UTF-8 ceiling and oversized
+reports are refused rather than silently clipped. The ten-timestamp rate ledger admits at most
+ten new reports in a rolling hour per app run; expected cardinality is one report and the stress
+case is 1,000 overlapping calls, of which only one can start work.
+
+A SHA-256-derived version-8 UUID includes the session identity, composed content/environment and
+ordered image digests, never temporary image paths. Identical retries in the same session/build
+read the first record by that ID, including after an app restart. They neither repost nor rewrite
+it and are exempt from the new-report rate limit. The endpoint's existing UUID idempotency still
+protects automatic outbox retries after a lost response. Changing report content, image bytes,
+session or build creates a new identity.
+
+The JSON receipt carries `status`, `report_id`, optional `reference` and `record_path`, `duplicate`
+and a message. `delivered` requires a matching service receipt; `queued` means a durable pending
+package; `saved` means a local record without confirmed delivery. `failed` remains an MCP error
+and names the retained record when one exists. Duplicate lookups read only the exact record's
+bounded receipt and queue presence, never enumerate the archive for matching content. Reports
+remain untrusted data when read by another agent.
+
+This is a host-owned capability, not a public extension component. Threading owns identity,
+admission, content/image bounds, original custody, backend selection and receipt truth.
+
 ## Requested clipboard writes
 
 `copy_to_clipboard` belongs to **This session** and writes plain text, code or links only

@@ -42,6 +42,13 @@ enum GitReviewReader {
 
     private static let queue = DispatchQueue(label: "codes.threading.git-review", qos: .userInitiated)
 
+    /// The Activity atlas and file browser need a roster, not a full patch. Keep these serial
+    /// reads independent so a slow review cannot delay discovery in an unrelated checkout.
+    private static let repositoryFilesQueue = DispatchQueue(
+        label: "codes.threading.git-repository-files",
+        qos: .utility
+    )
+
     /// Turn admission must not wait behind a large review already being parsed — or behind a
     /// different session whose checkout is slow. Each capture owns a UUID-named alternate index,
     /// and git's object writes are atomic, so independent session baselines can safely overlap.
@@ -447,7 +454,7 @@ enum GitReviewReader {
         in root: URL,
         completion: @escaping @MainActor @Sendable (Result<[String], Failure>) -> Void
     ) {
-        perform("git.read.repository-files", completion) {
+        perform("git.read.repository-files", on: repositoryFilesQueue, completion) {
             try repositoryFilePaths(in: root)
         }
     }

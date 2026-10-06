@@ -5,6 +5,9 @@ import Foundation
 /// Every method round-trips through the authoritative declaration decoder. These are not
 /// registrations and carry no schema, routing, catalogue, or annotation metadata.
 extension AgentCommand {
+  static func reportProblem(_ value: ReportProblemArguments) -> Self {
+    builtIn(.reportProblem, value)
+  }
   private static func builtIn<Arguments: Encodable & Sendable>(
     _ tool: MCPBuiltInTool,
     _ arguments: Arguments

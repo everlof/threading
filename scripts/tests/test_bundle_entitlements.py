@@ -63,14 +63,40 @@ class BundleEntitlementTests(unittest.TestCase):
         )
 
     def test_profile_prefix_is_expanded_before_comparing_signed_values(self) -> None:
-        declaration = self.root / checker.HELPER_ENTITLEMENTS["threading-triggerd"]
+        declaration = self.root / checker.HELPER_ENTITLEMENTS["threading-extension-helper"]
         declaration.write_bytes(
             plistlib.dumps(
                 {
-                    "keychain-access-groups": [
-                        "$(AppIdentifierPrefix)codes.threading.triggers"
-                    ]
+                    "com.apple.security.app-sandbox": True,
+                    "com.apple.security.temporary-exception.files.home-relative-path.read-only": [
+                        "$(AppIdentifierPrefix)packages/"
+                    ],
                 }
+            )
+        )
+        self.observed["threading-extension-helper"] = {
+            "com.apple.security.app-sandbox": True,
+            "com.apple.security.temporary-exception.files.home-relative-path.read-only": [
+                "SMQ3E8Y57T.packages/"
+            ],
+        }
+
+        problems = checker.verify_bundle(
+            self.bundle,
+            self.root,
+            self.signed_reader,
+            {"AppIdentifierPrefix": "SMQ3E8Y57T."},
+        )
+
+        self.assertEqual(problems, [])
+
+    def test_a_bare_helper_with_a_profile_backed_entitlement_fails(self) -> None:
+        # The 2026-09-12 shape: declared and signed alike, so the exact-match check passed, and
+        # AMFI killed every launch with OS_REASON_CODESIGNING.
+        declaration = self.root / checker.HELPER_ENTITLEMENTS["threading-triggerd"]
+        declaration.write_bytes(
+            plistlib.dumps(
+                {"keychain-access-groups": ["$(AppIdentifierPrefix)codes.threading.triggers"]}
             )
         )
         self.observed["threading-triggerd"] = {
@@ -84,7 +110,18 @@ class BundleEntitlementTests(unittest.TestCase):
             {"AppIdentifierPrefix": "SMQ3E8Y57T."},
         )
 
-        self.assertEqual(problems, [])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("threading-triggerd: bare helper carries profile-backed", problems[0])
+        self.assertIn("keychain-access-groups", problems[0])
+
+    def test_no_repository_helper_declares_a_profile_backed_entitlement(self) -> None:
+        for name, declaration in checker.HELPER_ENTITLEMENTS.items():
+            entitlements = plistlib.loads((REPOSITORY / declaration).read_bytes())
+            self.assertEqual(
+                profile_backing.profile_backed_entitlements(entitlements),
+                set(),
+                f"{name} is a bare executable and cannot embed the profile its key needs",
+            )
 
     def test_app_entitlements_on_a_sandboxed_helper_fail(self) -> None:
         self.observed["threading-extension-helper"] = {

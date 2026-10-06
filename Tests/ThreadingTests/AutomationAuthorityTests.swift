@@ -107,14 +107,14 @@ final class AutomationAuthorityTests: XCTestCase {
         let remaining = Project(name: "Other", folderURL: URL(fileURLWithPath: "/tmp/other"))
         var config = AutomationConfiguration(projectID: ProjectID())
         config.name = "Report"; config.instructions = "Summarize"
-        let orphaned = AutomationEditorViewController(configuration: config, projects: [remaining])
+        let orphaned = AutomationEditorViewController(configuration: config, projects: [remaining], choices: AutomationEditorChoicesTests.fixture)
         _ = orphaned.view
         XCTAssertThrowsError(try orphaned.submission()) { error in
             XCTAssertEqual(error as? AutomationEditorError, .projectUnavailable)
         }
 
         config.projectID = remaining.id
-        let current = AutomationEditorViewController(configuration: config, projects: [remaining])
+        let current = AutomationEditorViewController(configuration: config, projects: [remaining], choices: AutomationEditorChoicesTests.fixture)
         _ = current.view
         XCTAssertEqual(try current.submission().0?.projectID, remaining.id)
     }
@@ -130,7 +130,7 @@ final class AutomationAuthorityTests: XCTestCase {
         config.options.schedule = nil
         config.sourceID = TriggerSourceInstallationID()
         config.eventKind = "review.required"
-        let editor = AutomationEditorViewController(configuration: config, sources: [other], projects: [project])
+        let editor = AutomationEditorViewController(configuration: config, sources: [other], projects: [project], choices: AutomationEditorChoicesTests.fixture)
         _ = editor.view
         XCTAssertThrowsError(try editor.submission()) { error in
             XCTAssertEqual(error as? AutomationEditorError, .sourceUnavailable)

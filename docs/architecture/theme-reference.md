@@ -24,9 +24,10 @@ unprojected fields remain Mac-only. Owner paths are relative to `Sources/Threadi
 This page does not claim per-field test coverage: a list kept by hand here only ever guessed.
 Find the tests for a field by searching `Tests/` for its owner type or wire name.
 
-Phone images use bounded PNG renditions: backdrop/sidebar fallback 1,290 px, logo/mascot 512 px,
+Phone images use bounded PNG renditions: backdrop/sidebar fallback 1,290 px, mascot 512 px,
 sprites 128 px; at most 1 MB each and 6 MB per theme. Backgrounds always aspect-fill and opacity
-is capped at 0.25. Logo/mascot layout, visibility, mood selection and motion gates are host-owned.
+is capped at 0.25. Mascot layout, visibility, mood selection and motion gates are host-owned; the
+logo stays on the Mac.
 Typeface and process-registered owner fonts affect chrome; message bodies retain their own fonts.
 Font assets use four 16 MiB slots and 1 MiB ranged requests. Attention/turn-finished sounds use
 verified CAF receipts and notification consent; terminal glow uses the shared GPU renderer.
@@ -346,7 +347,7 @@ One reviewed current sidebar shader may travel through the asset route; window c
 | `sidebar.image.source` | The image: {path} or {base64}. | Mac sidebar; Preview; Phone image rendition | SidebarAppearance / AppThemeEditing / ThemeAssetStore | `Core/Theme/SidebarAppearance.swift` |
 | `sidebar.image.source.base64` | The image bytes, base64-encoded, when no file exists on disk. | Mac sidebar; Preview; Phone image rendition | SidebarAppearance / AppThemeEditing / ThemeAssetStore | `Core/Theme/SidebarAppearance.swift` |
 | `sidebar.image.source.path` | Absolute path to an image file on this machine; the host reads, normalises to PNG and stores a copy, so the file need not persist. | Mac sidebar; Preview; Phone image rendition | SidebarAppearance / AppThemeEditing / ThemeAssetStore | `Core/Theme/SidebarAppearance.swift` |
-| `sidebar.logo` | What sits in the brand slot: "mark" (the Threading mark, drawn in the theme's ink), "hidden" (wordmark alone), or an object {path} or {base64} supplying the theme's own logo image (drawn in a 24-point square, aspect-fit). | Mac sidebar; Preview; Phone image rendition | SidebarAppearance / AppThemeEditing / ThemeAssetStore | `Core/Theme/SidebarAppearance.swift` |
+| `sidebar.logo` | What sits in the brand slot: "mark" (the Threading mark, drawn in the theme's ink), "hidden" (wordmark alone), or an object {path} or {base64} supplying the theme's own logo image (drawn in a 24-point square, aspect-fit). | Mac sidebar; Preview | SidebarAppearance / AppThemeEditing / ThemeAssetStore | `Core/Theme/SidebarAppearance.swift` |
 | `sidebar.logo.base64` | The image bytes, base64-encoded, when no file exists on disk. | Mac sidebar; Preview | SidebarAppearance / AppThemeEditing / ThemeAssetStore | `Core/Theme/SidebarAppearance.swift` |
 | `sidebar.logo.path` | Absolute path to an image file on this machine; the host reads, normalises to PNG and stores a copy, so the file need not persist. | Mac sidebar; Preview | SidebarAppearance / AppThemeEditing / ThemeAssetStore | `Core/Theme/SidebarAppearance.swift` |
 | `sidebar.logo_in_dock` | True also draws the theme's logo image on the Dock tile, on the theme's own plate, instead of the Threading mark. Needs an image logo; false returns the mark. | Mac sidebar; Preview | SidebarAppearance / AppThemeEditing / ThemeAssetStore | `Core/Theme/SidebarAppearance.swift` |

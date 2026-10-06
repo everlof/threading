@@ -549,6 +549,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 return try await self.publicIssueReportDiagnostics()
             }
         )
+        mainWindowController.agentToolCoordinator.problemReporter = AgentProblemReportService(
+            submitter: MacIssueReportSubmitter(diagnosticsProvider: {
+                let report = await MacRemoteDiagnostics.report()
+                return await Task.detached(priority: .utility) {
+                    PublicIssueReportDiagnosticsDTO(bounding: report)
+                }.value
+            })
+        )
         self.mainWindowController = mainWindowController
         let navigationSearchIndexStore = NavigationSearchIndexStore(
             projectStore: environment.projectStore

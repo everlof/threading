@@ -21,6 +21,10 @@ final class TriggerCenterViewController: NSViewController {
 
         /// How many catalogue rows one page constructs.
         static let pageSize = 25
+
+        /// How long after re-registering the listener the Sources page reads its state again:
+        /// launchd starts it within that, and its first heartbeat follows at once.
+        static let listenerRestartSettle: TimeInterval = 1
     }
 
     private(set) var projectID: ProjectID?
@@ -28,6 +32,9 @@ final class TriggerCenterViewController: NSViewController {
     private let titleLabel = NSTextField(labelWithString: "")
     private var fileDiagnostics: [TriggerID: String] = [:]
     private let store: TriggerStore
+    /// The listener's receipts and state; nil reads the live ones. Tests substitute a fixed
+    /// answer, so a page's words do not depend on the launchd state of the Mac running them.
+    private let receiptsReader: (@Sendable () async -> TriggerSourceReceipts)?
     private let pages = ThemedSegmentedControl()
     private let primaryAction = ThemedButton()
     private let list = PanelListView(rowSpacing: Design.Spacing.small)
@@ -46,9 +53,15 @@ final class TriggerCenterViewController: NSViewController {
     /// Opens the chat a run started in. Set by the window, which owns the sidebar's selection.
     var onOpenSession: ((SessionID) -> Void)?
 
-    init(store: TriggerStore = .shared) {
+    init(store: TriggerStore = .shared, readReceipts: (@Sendable () async -> TriggerSourceReceipts)? = nil) {
         self.store = store
+        receiptsReader = readReceipts
         super.init(nibName: nil, bundle: nil)
+    }
+
+    private func readReceipts() async -> TriggerSourceReceipts {
+        if let receiptsReader { return await receiptsReader() }
+        return await TriggerSourceReceipts.read()
     }
 
     @available(*, unavailable)
@@ -74,7 +87,7 @@ final class TriggerCenterViewController: NSViewController {
         if isViewLoaded {
             pages.configure(titles: pageTitles)
             pages.selectedIndex = 0
-            titleLabel.stringValue = id.flatMap { ProjectStore.shared.project(withID: $0)?.name }.map { L10n.format("%@ · Automations", $0) } ?? L10n.string("Automations")
+            titleLabel.stringValue = pageTitle
             reload()
         }
     }
@@ -103,14 +116,24 @@ final class TriggerCenterViewController: NSViewController {
         return pairs
     }
 
+    /// The project page is "<project> · Automations" and the app-wide one "All automations": the
+    /// two had the same title and nearly the same tabs, and a person on one could not tell why
+    /// the other had the controls they were looking for.
+    private var pageTitle: String {
+        projectID.flatMap { ProjectStore.shared.project(withID: $0)?.name }
+            .map { L10n.format("%@ · Automations", $0) } ?? L10n.string("All automations")
+    }
+
+    /// Sources is on both: the project's lists the sources its own automations wait on. Remote
+    /// controllers are not a project's, so only the app-wide page has them.
     private var pageTitles: [String] {
-        [L10n.string("Automations"), L10n.string("Activity")]
-            + (projectID == nil ? [L10n.string("Sources"), L10n.string("Remote")] : [])
+        [L10n.string("Automations"), L10n.string("Activity"), L10n.string("Sources")]
+            + (projectID == nil ? [L10n.string("Remote")] : [])
     }
 
     private func build() {
         let title = titleLabel
-        title.stringValue = projectID.flatMap { ProjectStore.shared.project(withID: $0)?.name }.map { L10n.format("%@ · Automations", $0) } ?? L10n.string("Automations")
+        title.stringValue = pageTitle
         title.applyFont(.heading)
         title.textColor = Design.Text.label
 
@@ -229,16 +252,10 @@ final class TriggerCenterViewController: NSViewController {
                     renderRuns(result.items, triggers: pairs)
                 case .sources:
                     let sources = try await store.sources()
-                    let daemonStatusTask = Task.detached(priority: .utility) {
-                        try TriggerDaemonStatusStore.statuses()
-                    }
-                    let registrationTask = Task.detached(priority: .utility) {
-                        TriggerDaemonRegistrationCoordinator.currentStatus()
-                    }
-                    let daemonStatuses = (try? await daemonStatusTask.value) ?? [:]
-                    let registration = await registrationTask.value
+                    let usage = try await projectSourceUsage()
+                    let receipts = await readReceipts()
                     guard !Task.isCancelled else { return }
-                    renderSources(sources, daemonStatuses: daemonStatuses, registrationStatus: registration)
+                    renderSources(sources, receipts: receipts, usage: usage)
                 }
             } catch {
                 guard !Task.isCancelled else { return }
@@ -260,6 +277,8 @@ final class TriggerCenterViewController: NSViewController {
     var drawnRowCount: Int { list.rows.count }
     var drawnRows: [NSView] { list.rows }
     var isShowingDetail: Bool { detailID != nil }
+    var drawnTitle: String { titleLabel.stringValue }
+    var drawnPageTitles: [String] { pages.titles }
 
     /// Deterministic render-test seam: the shipping segmented control owns the same selection,
     /// while the evidence test awaits the async store projection before capturing pixels.
@@ -280,11 +299,11 @@ final class TriggerCenterViewController: NSViewController {
             nextHistoryCursor = result.next
             renderRuns(result.items, triggers: try await store.triggers())
         case .sources:
-            renderSources(
-                try await store.sources(),
-                daemonStatuses: [:],
-                registrationStatus: .enabled
-            )
+            // Without an injected reader, evidence shows a running listener rather than whatever
+            // state the Mac running the test happens to be in.
+            renderSources(try await store.sources(),
+                          receipts: await receiptsReader?() ?? .init(statuses: [:], listener: .running),
+                          usage: try await projectSourceUsage())
         }
     }
 
@@ -302,10 +321,12 @@ final class TriggerCenterViewController: NSViewController {
 
     private typealias Pair = (definition: TriggerDefinition, revision: TriggerRevision)
 
-    /// What a list row reads beyond its own record: when it runs next and how it last ran.
+    /// What a list row reads beyond its own record: when it runs next and how it last ran. On a
+    /// project's page, also what is wrong with the event sources its automations wait on.
     private struct Readings {
         var nextDates: [TriggerID: Date] = [:]
         var lastRuns: [TriggerID: TriggerRun] = [:]
+        var sourceProblems: [SourceProblem] = []
     }
 
     /// Everything one automation's page shows, read before anything is drawn.
@@ -314,11 +335,55 @@ final class TriggerCenterViewController: NSViewController {
         let summary: AutomationSummary
         let review: AutomationReview
         let runs: [TriggerRun]
+        let sourceProblem: SourceProblem?
+    }
+
+    /// An event source some automations wait on, what keeps it from delivering events, and
+    /// which automations those are.
+    private struct SourceProblem {
+        let attention: TriggerSourceAttention
+        let source: TriggerSourceInstallation
+        let automationNames: [String]
     }
 
     private func updatePrimaryAction() {
+        // A source belongs to the whole Mac, so connecting one is the app-wide page's action.
         primaryAction.isHidden = page == .activity || page == .remote || detailID != nil
+            || (page == .sources && projectID != nil)
         primaryAction.title = page == .sources ? L10n.string("Connect Source") : L10n.string("New automation")
+    }
+
+    /// The event automations of this page's project by the source each waits on, or nil on the
+    /// app-wide page. Revisions only, without discovery: the Sources tab reads no project files.
+    private func projectSourceUsage() async throws -> [TriggerSourceInstallationID: [String]]? {
+        guard let projectID else { return nil }
+        let pairs = try await store.triggers().filter { $0.revision.projectID == projectID }
+        return Self.sourceUsage(pairs)
+    }
+
+    private static func sourceUsage(_ pairs: [Pair]) -> [TriggerSourceInstallationID: [String]] {
+        var usage: [TriggerSourceInstallationID: [String]] = [:]
+        for pair in pairs where pair.revision.automation?.schedule == nil {
+            usage[pair.revision.sourceInstallationID, default: []].append(pair.definition.name)
+        }
+        return usage
+    }
+
+    /// What is wrong with each event source these automations wait on: one source read and one
+    /// listener read for the page, however many automations share a source. A page with no event
+    /// automation reads nothing.
+    private func loadSourceProblems(_ pairs: [Pair]) async throws -> [SourceProblem] {
+        let usage = Self.sourceUsage(pairs)
+        guard !usage.isEmpty else { return [] }
+        let sources = try await store.sources().filter { usage[$0.id] != nil }
+        guard !sources.isEmpty else { return [] }
+        let receipts = await readReceipts()
+        return sources.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+            .compactMap { source in
+                TriggerSourceAttention.evaluate(source, daemonStatus: receipts.current(for: source),
+                                                listener: receipts.listener)
+                    .map { SourceProblem(attention: $0, source: source, automationNames: usage[source.id] ?? []) }
+            }
     }
 
     /// One page of rows' readings: two indexed reads per visible row, never per definition.
@@ -329,6 +394,7 @@ final class TriggerCenterViewController: NSViewController {
             readings.nextDates[id] = try await store.nextAutomationDate(id)
             readings.lastRuns[id] = try await store.runs(triggerID: id, limit: 1).first
         }
+        if projectID != nil { readings.sourceProblems = try await loadSourceProblems(pairs) }
         return readings
     }
 
@@ -350,7 +416,8 @@ final class TriggerCenterViewController: NSViewController {
             pair: pair,
             summary: .make(definition: pair.definition, revision: pair.revision, nextRun: next, lastRun: runs.first),
             review: .make(pair.revision, purpose: .activate, context: .live(sourceName: sourceName)),
-            runs: runs
+            runs: runs,
+            sourceProblem: try await loadSourceProblems([pair]).first
         )
     }
 
@@ -359,6 +426,10 @@ final class TriggerCenterViewController: NSViewController {
         status.stringValue = pairs.isEmpty && discoveryErrors.isEmpty
             ? L10n.string("No automations")
             : L10n.format("%lld configured", Int64(pairs.count + discoveryErrors.count))
+        if !readings.sourceProblems.isEmpty {
+            list.addSection(L10n.string("Needs attention"))
+            for problem in readings.sourceProblems { list.addRow(sourceProblemRow(problem, namingAutomations: true)) }
+        }
         list.addSection(L10n.string("Configured automations"))
         if let projectID, let project = ProjectStore.shared.project(withID: projectID) {
             list.addRow(TriggerCenterRowView(title: L10n.string("Project files"),
@@ -409,6 +480,38 @@ final class TriggerCenterViewController: NSViewController {
         }
     }
 
+    /// One row naming an event source and what keeps it from delivering events, with the host
+    /// flow that fixes it and the way to the source's own row.
+    private func sourceProblemRow(_ problem: SourceProblem, namingAutomations: Bool) -> TriggerCenterRowView {
+        let attention = problem.attention
+        var detail = attention.consequence
+        if namingAutomations, !problem.automationNames.isEmpty {
+            detail += "\n" + L10n.format("Used by %@", ListFormatter.localizedString(byJoining: problem.automationNames))
+        }
+        return TriggerCenterRowView(
+            title: L10n.format("Event source “%@”", attention.sourceName),
+            status: .init(words: attention.stateWords, tone: attention.tone),
+            detail: detail,
+            actionTitle: attention.actionTitle,
+            onAction: attention.action.map { action in { [weak self] in self?.perform(action, source: problem.source) } },
+            secondaryActionTitle: L10n.string("Show in Sources"),
+            onSecondaryAction: { [weak self] in self?.showPage(.sources) },
+            identifier: "automation.source-attention.\(attention.sourceID.uuidString)"
+        )
+    }
+
+    /// Selects a tab the way pressing it does.
+    private func showPage(_ page: Page) {
+        guard pageTitles.indices.contains(page.rawValue) else { return }
+        pages.selectedIndex = page.rawValue
+        self.page = page
+        pageOffset = 0
+        detailID = nil
+        historyCursors = [Int64.max]
+        list.scrollToTop()
+        reload()
+    }
+
     private func showDetail(_ id: TriggerID) {
         detailID = id
         list.scrollToTop()
@@ -427,13 +530,14 @@ final class TriggerCenterViewController: NSViewController {
         list.clear()
         status.stringValue = ""
         let pair = detail.pair
-        let header = AutomationDetailHeaderView(summary: detail.summary)
+        let header = AutomationDetailHeaderView(summary: detail.summary, backTitle: pageTitle)
         header.onBack = { [weak self] in self?.showList() }
         header.onStateAction = { [weak self] in self?.act(on: pair) }
         header.onRunNow = { [weak self] in self?.runNow(pair) }
         header.onEdit = { [weak self] in self?.editAutomation(pair) }
         header.onDelete = { [weak self] in self?.deleteAutomation(pair) }
         list.addRow(header)
+        if let problem = detail.sourceProblem { list.addRow(sourceProblemRow(problem, namingAutomations: false)) }
 
         if let diagnostic = fileDiagnostics[pair.definition.id] { list.addNote(diagnostic) }
         if let files = pair.revision.projectAutomation {
@@ -541,13 +645,41 @@ final class TriggerCenterViewController: NSViewController {
         if let window = view.window { alert.beginSheetModal(for: window) }
     }
 
+    /// The fix a source's or the listener's problem names, through the flow the Sources page
+    /// itself uses: the approval sheet, Resume, Reconnect, Login Items, a fresh registration.
+    private func perform(_ action: TriggerSourceAttention.Action, source: TriggerSourceInstallation?) {
+        switch action {
+        case .review:
+            if let source { reviewProbe(source) }
+        case .resume:
+            guard let source else { return }
+            if source.sourceType == TriggerProbeDefaults.sourceType {
+                actOnProbe(source, state: .paused)
+            } else {
+                toggleSource(source)
+            }
+        case .reconnect:
+            if let source { connectSource(replacing: source) }
+        case .openLoginItems:
+            TriggerDaemonRegistrationCoordinator.openLoginItemsSettings()
+        case .restartListener:
+            TriggerDaemonRegistrationCoordinator.shared.restart()
+            DispatchQueue.main.asyncAfter(deadline: .now() + Layout.listenerRestartSettle) { [weak self] in
+                self?.reload()
+            }
+        }
+    }
+
+    /// `usage` is nil on the app-wide page. On a project's page it names the sources that
+    /// project's event automations wait on, and only those are listed.
     private func renderSources(
-        _ sources: [TriggerSourceInstallation],
-        daemonStatuses: [TriggerSourceInstallationID: TriggerDaemonSourceStatus],
-        registrationStatus: TriggerDaemonRegistrationStatus
+        _ allSources: [TriggerSourceInstallation],
+        receipts: TriggerSourceReceipts,
+        usage: [TriggerSourceInstallationID: [String]]?
     ) {
+        let listener = receipts.listener
         // A deleted probe is a tombstone kept for history; it is not a source any more.
-        let sources = sources.filter { !$0.isDeleted }
+        let sources = allSources.filter { !$0.isDeleted && (usage == nil || usage?[$0.id] != nil) }
         list.clear()
         status.stringValue = sources.isEmpty
             ? L10n.string("No sources")
@@ -555,45 +687,44 @@ final class TriggerCenterViewController: NSViewController {
                 ? L10n.string("1 source")
                 : L10n.format("%lld sources", Int64(sources.count)))
         list.addSection(L10n.string("Background listener"))
+        let listenerAction = listener.action
         list.addRow(TriggerCenterRowView(
-            title: L10n.string("Runs while Threading is closed"),
-            detail: registrationStatus.displayTitle,
-            actionTitle: registrationStatus.actionTitle,
-            onAction: registrationStatus.actionTitle == nil ? nil : { [weak self] in
-                guard let self else { return }
-                if registrationStatus == .requiresApproval {
-                    TriggerDaemonRegistrationCoordinator.openLoginItemsSettings()
-                } else {
-                    TriggerDaemonRegistrationCoordinator.shared.reconcile(shouldRun: true)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                        self?.reload()
-                    }
-                }
-            },
+            title: L10n.string("Checks sources while Threading is closed"),
+            status: .init(words: listener.title, tone: listener.tone),
+            detail: listener.detail,
+            actionTitle: listenerAction.map(TriggerSourceAttention.title(for:)),
+            onAction: listenerAction.map { action in { [weak self] in self?.perform(action, source: nil) } },
             secondaryActionTitle: nil,
-            onSecondaryAction: nil
+            onSecondaryAction: nil,
+            identifier: "sources.listener"
         ))
-        let probes = sources.filter { $0.sourceType == TriggerProbeDefaults.sourceType && !$0.isDeleted }
+        let probes = sources.filter { $0.sourceType == TriggerProbeDefaults.sourceType }
         let connected = sources.filter { $0.sourceType != TriggerProbeDefaults.sourceType }
-        defer { renderProbes(probes, daemonStatuses: daemonStatuses) }
-        guard !connected.isEmpty else {
+        if usage != nil, sources.isEmpty {
             list.addSection(L10n.string("Event sources"))
+            list.addNote(L10n.string("None of this project’s automations waits for an event source."))
+            return
+        }
+        if usage == nil || !connected.isEmpty {
+            list.addSection(L10n.string("Event sources"))
+        }
+        if connected.isEmpty, usage == nil {
             list.addNote(L10n.string(
                 "Sources run through Threading’s background listener, so events can wake the app even when its window is closed."
             ))
-            return
         }
-        list.addSection(L10n.string("Event sources"))
         for source in connected {
-            let daemonStatus = daemonStatuses[source.id].flatMap {
-                $0.lastCheckedAt >= source.updatedAt ? $0 : nil
-            }
+            let daemonStatus = receipts.current(for: source)
             let checked = (daemonStatus?.lastCheckedAt ?? source.lastCheckedAt).map {
                 AutomationInk.relativeDate.localizedString(for: $0, relativeTo: Date())
             }
             let health = source.enabled ? (daemonStatus?.health ?? source.health) : .disconnected
-            let detail = [source.sourceType, health.displayTitle, checked,
-                          daemonStatus?.boundedDiagnostic ?? source.boundedDiagnostic]
+            // While the listener is not running, the last receipt describes a check that is not
+            // happening any more; say that instead.
+            let polling = !source.enabled || listener.isListening
+            let detail = [source.sourceType,
+                          polling ? health.displayTitle : L10n.string("Not checked"), checked,
+                          polling ? (daemonStatus?.boundedDiagnostic ?? source.boundedDiagnostic) : listener.sourceConsequence]
                 .compactMap { $0 }.joined(separator: "  ·  ")
             list.addRow(TriggerCenterRowView(
                 title: source.displayName,
@@ -613,16 +744,18 @@ final class TriggerCenterViewController: NSViewController {
                 onSecondaryAction: { [weak self] in self?.disconnectSource(source) }
             ))
         }
+        if usage == nil || !probes.isEmpty {
+            renderProbes(probes, receipts: receipts, offersNewProbe: usage == nil)
+        }
     }
 
     /// Probe sources: programs a person (or an agent, as a draft) wrote, run unsandboxed on the
     /// probe contract. Every row says whether it is approved and offers Run now once it is.
     private func renderProbes(
-        _ probes: [TriggerSourceInstallation],
-        daemonStatuses: [TriggerSourceInstallationID: TriggerDaemonSourceStatus]
+        _ probes: [TriggerSourceInstallation], receipts: TriggerSourceReceipts, offersNewProbe: Bool
     ) {
         list.addSection(L10n.string("Probe sources"))
-        list.addRow(TriggerCenterRowView(
+        if offersNewProbe { list.addRow(TriggerCenterRowView(
             title: L10n.string("Your own programs"),
             detail: L10n.string(
                 "A probe checks something on a schedule and reports events without starting a model. It runs unsandboxed, as you, so each one needs your approval."
@@ -632,10 +765,10 @@ final class TriggerCenterViewController: NSViewController {
             secondaryActionTitle: nil,
             onSecondaryAction: nil,
             identifier: "probe.new"
-        ))
+        )) }
         for source in probes.prefix(25) {
-            let status = daemonStatuses[source.id].flatMap { $0.lastCheckedAt >= source.updatedAt ? $0 : nil }
-            let row = TriggerProbePresentation.row(source, daemonStatus: status)
+            let row = TriggerProbePresentation.row(
+                source, daemonStatus: receipts.current(for: source), listener: receipts.listener)
             var extras: [(title: String, handler: () -> Void)] = [
                 (L10n.string("Edit…"), { [weak self] in self?.editProbe(source) }),
             ]
@@ -1320,29 +1453,6 @@ extension TriggerSourceHealth {
         case .authenticationRequired: return L10n.string("Authentication required")
         case .failed: return L10n.string("Failed")
         case .changed: return L10n.string("Changed since approval")
-        }
-    }
-}
-
-private extension TriggerDaemonRegistrationStatus {
-    var displayTitle: String {
-        switch self {
-        case .enabled:
-            return L10n.string("Enabled in Login Items")
-        case .requiresApproval:
-            return L10n.string("Waiting for approval in System Settings ▸ General ▸ Login Items")
-        case .notRegistered, .notFound, .unknown:
-            return L10n.string("Not running; retry registration to keep listening in the background")
-        case .missingHelper:
-            return L10n.string("The background listener is unavailable in this build")
-        }
-    }
-
-    var actionTitle: String? {
-        switch self {
-        case .requiresApproval: return L10n.string("Open Login Items…")
-        case .notRegistered, .notFound, .unknown: return L10n.string("Retry")
-        case .enabled, .missingHelper: return nil
         }
     }
 }

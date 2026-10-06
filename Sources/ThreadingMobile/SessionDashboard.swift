@@ -789,6 +789,8 @@ private struct MobileDashboardCollection: UIViewControllerRepresentable {
     let theme: RemoteThemePalette
     var workingCount: Int = 0
     var attentionCount: Int = 0
+    var mascotMood = MobileThemeMascotView.restingMood
+    var mascotFoot = NSDirectionalEdgeInsets.zero
     let bottomContentInset: CGFloat
     let content: @MainActor (DashboardCollectionItemID) -> AnyView
     let rowConfiguration: @MainActor (String) -> DashboardUIKitRowConfiguration?
@@ -820,6 +822,8 @@ private struct MobileDashboardCollection: UIViewControllerRepresentable {
             refresh: refresh,
             previewChange: model.previewChange
         )
+        // After the theme, so a finished turn is celebrated in the pictures now in force.
+        controller.setMascot(mood: mascotMood, foot: mascotFoot)
     }
 }
 
@@ -840,6 +844,10 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
     private var presentedSections: [DashboardCollectionSection]
     private var theme: RemoteThemePalette
     private let themeBackdrop = MobileThemeBackdropView()
+    private let themeMascot = MobileThemeMascotView()
+    /// Where the mascot stands, measured from the safe area: the floating bar's geometry,
+    /// which the SwiftUI page that draws the bar states.
+    private var mascotFoot = NSDirectionalEdgeInsets.zero
     private var bottomContentInset: CGFloat
     private var content: @MainActor (DashboardCollectionItemID) -> AnyView
     private var rowConfiguration: @MainActor (String) -> DashboardUIKitRowConfiguration?
@@ -873,7 +881,16 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
         view.delegate = self
         view.alwaysBounceVertical = true
         view.backgroundColor = .clear
-        view.backgroundView = themeBackdrop
+        // One stationary ground: the backdrop, and the mascot standing on it. Rows scroll over
+        // both, so the mascot costs the list no strip of its own.
+        let ground = UIView()
+        ground.isUserInteractionEnabled = false
+        for layer in [themeBackdrop, themeMascot] as [UIView] {
+            layer.frame = ground.bounds
+            layer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            ground.addSubview(layer)
+        }
+        view.backgroundView = ground
         view.contentInset = UIEdgeInsets(
             top: MobileDesign.Spacing.large,
             left: 0,
@@ -922,11 +939,20 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
     func setWorkingCount(_ count: Int) { themeBackdrop.workingCount = count }
     func setAttentionCount(_ count: Int) { themeBackdrop.attentionCount = count }
 
+    func setMascot(mood: String, foot: NSDirectionalEdgeInsets) {
+        themeMascot.mood = mood
+        guard foot != mascotFoot else { return }
+        mascotFoot = foot
+        placeMascot()
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = theme.uiGround
         themeBackdrop.apply(theme)
+        themeMascot.apply(theme)
         view.addSubview(collectionView)
+        placeMascot()
         NSLayoutConstraint.activate([
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -965,6 +991,23 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
         themeBackdrop.isPresentationActive = false
     }
 
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        placeMascot()
+    }
+
+    /// The floating bar rides the safe area, so the mascot standing on it does too.
+    private func placeMascot() {
+        guard isViewLoaded else { return }
+        let safe = view.safeAreaInsets
+        let trailing = view.effectiveUserInterfaceLayoutDirection == .rightToLeft ? safe.left : safe.right
+        themeMascot.foot = NSDirectionalEdgeInsets(
+            top: 0, leading: 0,
+            bottom: safe.bottom + mascotFoot.bottom,
+            trailing: trailing + mascotFoot.trailing
+        )
+    }
+
     func update(
         sections: [DashboardCollectionSection],
         theme: RemoteThemePalette,
@@ -989,6 +1032,7 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
 
         guard isViewLoaded else { return }
         themeBackdrop.apply(theme)
+        themeMascot.apply(theme)
         collectionView.refreshControl?.tintColor = theme.uiAccent
         if bottomInsetChanged {
             collectionView.contentInset.bottom = bottomContentInset
@@ -2553,6 +2597,8 @@ enum MobileDashboardHighlightProbe {
 struct MobileDashboardCollectionPerformanceMetrics: Equatable {
     let backdropLayerCount: Int
     let showsBackdropGradient: Bool
+    /// The collection's stationary ground holds exactly the backdrop and, above it, the mascot.
+    let groundStacksMascotOverBackdrop: Bool
     let snapshotItemCount: Int
     let hostedContentCount: Int
     let mountedCellCount: Int
@@ -3054,6 +3100,8 @@ private extension MobileDashboardCollectionViewController {
         return MobileDashboardCollectionPerformanceMetrics(
             backdropLayerCount: themeBackdrop.layer.sublayers?.count ?? 0,
             showsBackdropGradient: themeBackdrop.showsGradient,
+            groundStacksMascotOverBackdrop: collectionView.backgroundView?.subviews
+                .map { ObjectIdentifier($0) } == [ObjectIdentifier(themeBackdrop), ObjectIdentifier(themeMascot)],
             snapshotItemCount: dataSource.snapshot().numberOfItems,
             hostedContentCount: hostedContentCount,
             mountedCellCount: collectionView.visibleCells.count,
@@ -3367,6 +3415,12 @@ struct SessionDashboard: View {
             theme: theme,
             workingCount: model.dashboardCatalogue?.workingCount ?? 0,
             attentionCount: model.dashboardCatalogue?.attentionCount ?? 0,
+            mascotMood: model.dashboardCatalogue?.mascotMood ?? MobileThemeMascotView.restingMood,
+            mascotFoot: NSDirectionalEdgeInsets(
+                top: 0, leading: 0,
+                bottom: dashboardMascotFootInset,
+                trailing: Self.floatingBarMargin
+            ),
             bottomContentInset: dashboardCollectionBottomInset,
             content: { item in
                 dashboardCollectionContent(item, model: collectionModel)
@@ -3385,10 +3439,22 @@ struct SessionDashboard: View {
     /// strip—the bottom-bar regression the overlay avoids.
     private var dashboardCollectionBottomInset: CGFloat {
         let breathingRoom = MobileDesign.Spacing.pane + MobileDesign.Spacing.medium
-        guard showsDashboardFloatingBar else { return breathingRoom }
-        return breathingRoom
-            + MobileDesign.Size.floatingBarControl
-            + 2 * MobileDesign.Spacing.small
+        let controls = showsDashboardFloatingBar
+            ? MobileDesign.Size.floatingBarControl + 2 * MobileDesign.Spacing.small
+            : 0
+        // Rows pass over the mascot; only the last one needs to be able to rise clear of it.
+        let mascot = MobileThemeMascotView.stands(in: theme)
+            ? dashboardMascotFootInset + MobileDesign.Size.mascot + MobileDesign.Spacing.small
+            : 0
+        return max(breathingRoom + controls, mascot)
+    }
+
+    /// How far above the safe area the theme's mascot stands: on the top edge of the floating
+    /// pills, or at the foot itself when there are none.
+    private var dashboardMascotFootInset: CGFloat {
+        showsDashboardFloatingBar
+            ? MobileDesign.Size.floatingBarControl + MobileDesign.Spacing.small
+            : MobileDesign.Spacing.small
     }
 
     private var showsDashboardFloatingBar: Bool {
@@ -3835,9 +3901,6 @@ struct SessionDashboard: View {
 
     private var dashboardNavigation: some View {
         dashboardContent
-            .safeAreaInset(edge: .top, spacing: 0) {
-                MobileThemeCharacterHeader(theme: theme, mood: model.dashboardCatalogue?.mascotMood ?? "resting")
-            }
             // Extend only the scrolling viewport through the home-indicator region. The
             // overlay still uses the safe area, and UIKit adds that region to its scroll inset.
             .ignoresSafeArea(.container, edges: .bottom)
@@ -4089,6 +4152,10 @@ struct SessionDashboard: View {
         }
     }
 
+    /// The floating bar's inset from the safe area's sides. The theme's mascot stands on its
+    /// trailing pill, so it keeps the same margin.
+    private static let floatingBarMargin = MobileDesign.Spacing.large
+
     /// Search and the chat starter, floating at the page's bottom edge.
     ///
     /// Both lived in the navigation bar for a while, which crowded the Mac's name out of its
@@ -4152,7 +4219,7 @@ struct SessionDashboard: View {
                     )
                 }
             }
-            .padding(.horizontal, MobileDesign.Spacing.large)
+            .padding(.horizontal, Self.floatingBarMargin)
             .padding(.top, MobileDesign.Spacing.small)
             .padding(.bottom, MobileDesign.Spacing.small)
         }

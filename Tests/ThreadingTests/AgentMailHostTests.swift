@@ -592,10 +592,44 @@ final class MailboxHandoverTests: XCTestCase {
         let w = try await world()
         let session = SessionID()
         _ = try await w.mac.register(session, name: "Deploy")
-        async let first = w.handover.move(session, title: "Deploy", from: .thisMac, to: .host(w.endpoint))
-        async let second = w.handover.move(session, title: "Deploy", from: .host(w.endpoint), to: .thisMac)
-        _ = await (first, second)
+        let entered = expectation(description: "first move reached provisioning")
+        let gate = ProvisionGate(entered: entered)
+        defer { gate.release() }
+        w.mailboxes.ensurePeered = { _ in
+            await gate.wait()
+            return w.remoteHost
+        }
+        let first = Task {
+            await w.handover.move(session, title: "Deploy", from: .thisMac, to: .host(w.endpoint))
+        }
+        // Sibling async-let tasks have no admission order. Hold the first move in provisioning
+        // before asking for the return move, so this exercises the queue rather than scheduling.
+        await fulfillment(of: [entered], timeout: 5)
+        _ = await w.handover.move(session, title: "Deploy", from: .host(w.endpoint), to: .thisMac)
+        gate.release()
+        _ = await first.value
         XCTAssertNil(w.mailboxes.binding(for: session), "the later move ran: the mailbox is back on this Mac")
+    }
+
+    @MainActor
+    private final class ProvisionGate {
+        private let entered: XCTestExpectation
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var isReleased = false
+
+        init(entered: XCTestExpectation) { self.entered = entered }
+
+        func wait() async {
+            entered.fulfill()
+            guard !isReleased else { return }
+            await withCheckedContinuation { continuation = $0 }
+        }
+
+        func release() {
+            isReleased = true
+            continuation?.resume()
+            continuation = nil
+        }
     }
 
     func testConcurrentProvisioningBothGetTheHostMailbox() async throws {

@@ -40,6 +40,17 @@ actor TriggerRuntime {
     func start() async {
         guard !didStart else { return }
         didStart = true
+        // Secrets an earlier build stored name only the app on their access list; rewrite them so
+        // the listener can read them (TriggerSecretStore). Detached: the pass waits on the shared
+        // keychain gate, which a prompt elsewhere may hold, and nothing below depends on it.
+        let automatedRun = await MainActor.run { AutomatedRun.isUnderway }
+        Task.detached(priority: .utility) {
+            guard let migration = TriggerSecretStore.shared.migrateEarlierItemsAtLaunch(automatedRun: automatedRun),
+                  migration != .init() else { return }
+            ThreadingLogger.app.notice(
+                "Trigger secrets rewritten for the listener: \(migration.rewritten, privacy: .public) rewritten, \(migration.unreadable, privacy: .public) unreadable"
+            )
+        }
         await discoverProjects()
         // The daemon's file is a projection; failing to write it must not also stop recovery and
         // the schedule sweep below. The listener's registration is left as it was.

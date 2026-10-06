@@ -57,6 +57,8 @@ public struct MailEnvelope: Codable, Equatable, Sendable {
     /// Set when the message carries a blocking question; the reply answers it.
     public let questionID: QuestionID?
     public let chainID: UUID
+    /// How many messages deep in its chain this one is. Informational: the chain's message
+    /// fuse (`MailLimits.chainMessages`) is what bounds a loop, not how deep it nests.
     public let depth: Int
     public let sentAt: String
     /// Set on the one copy a forward makes: the address it was first accepted for. A message
@@ -71,7 +73,7 @@ public struct MailEnvelope: Codable, Equatable, Sendable {
         try Limits.text(text, field: "mail_text")
         try Limits.text(senderName, field: "sender_name", maximum: 256)
         try Limits.text(sentAt, field: "sent_at", maximum: 64)
-        guard (0...MailLimits.maximumDepth).contains(depth) else { throw ControllerError.invalidInput("chain_depth") }
+        guard depth >= 0 else { throw ControllerError.invalidInput("chain_depth") }
         guard sender != recipient else { throw ControllerError.invalidInput("mail_recipient") }
     }
     /// A retried send is the same request even though its timestamp differs.
@@ -164,7 +166,6 @@ public enum MailOwnerRPCWords {
 }
 
 public enum MailLimits {
-    public static let maximumDepth = 4
     public static let chainMessages = 50
     public static let sendsPerMinute = 20
     public static let openInbox = 1_000
@@ -398,7 +399,7 @@ extension ControllerStore {
             return prior
         }
         // The chain continues from what this sender is answering, or from the mail this
-        // execution acted on, so a loop cannot escape its depth by omitting reply_to.
+        // execution acted on, so a loop cannot escape its chain's fuse by omitting reply_to.
         var chainID = UUID()
         var depth = 0
         var answeringFor: MailAddress?
@@ -413,10 +414,9 @@ extension ControllerStore {
                   let inherited: MailContext = try optional("mailContext", sender.description) {
             // A session continues what it acknowledged since a person last started a turn:
             // stop-hook continuations and wakes keep agents going unattended, and this is what
-            // keeps such an exchange inside one chain's depth and budget.
+            // keeps such an exchange inside one chain's message fuse and budget.
             chainID = inherited.chainID; depth = inherited.depth + 1
         }
-        guard depth <= MailLimits.maximumDepth else { throw ControllerError.invalidInput("chain_depth") }
         try spendSendRate(sender)
         var envelope = MailEnvelope(id: id, sender: sender, senderName: senderName, recipient: recipient, text: text,
                                     priority: priority, replyTo: replyTo, questionID: questionID, chainID: chainID,

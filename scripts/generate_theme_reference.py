@@ -43,9 +43,10 @@ unprojected fields remain Mac-only. Owner paths are relative to `Sources/Threadi
 This page does not claim per-field test coverage: a list kept by hand here only ever guessed.
 Find the tests for a field by searching `Tests/` for its owner type or wire name.
 
-Phone images use bounded PNG renditions: backdrop/sidebar fallback 1,290 px, logo/mascot 512 px,
+Phone images use bounded PNG renditions: backdrop/sidebar fallback 1,290 px, mascot 512 px,
 sprites 128 px; at most 1 MB each and 6 MB per theme. Backgrounds always aspect-fill and opacity
-is capped at 0.25. Logo/mascot layout, visibility, mood selection and motion gates are host-owned.
+is capped at 0.25. Mascot layout, visibility, mood selection and motion gates are host-owned; the
+logo stays on the Mac.
 Typeface and process-registered owner fonts affect chrome; message bodies retain their own fonts.
 Font assets use four 16 MiB slots and 1 MiB ranged requests. Attention/turn-finished sounds use
 verified CAF receipts and notification consent; terminal glow uses the shared GPU renderer.
@@ -83,7 +84,6 @@ def ownership(path):
         pose_picture = (path.startswith("sidebar.mascot.poses.")
                         and (len(parts) == 4 or parts[4] == "source"))
         phone = (path in ("sidebar.mascot", "sidebar.mascot.poses") or pose_picture
-                 or path == "sidebar.logo" or path.startswith("sidebar.logo.source")
                  or path == "sidebar.image" or path.startswith("sidebar.image.source")
                  or path == "sidebar.image.opacity")
         return ("Mac sidebar; Preview" + ("; Phone image rendition" if phone else ""), "SidebarAppearance / AppThemeEditing / ThemeAssetStore", "Core/Theme/SidebarAppearance.swift")

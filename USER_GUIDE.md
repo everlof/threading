@@ -101,11 +101,18 @@ when creating a session. See [Accounts](#accounts).
 
 ### Automations
 
-Every expanded project has an **Automations** row. It opens that project's list even when empty.
-Create and edit there with the project locked. Save writes versionable project files; Review &
+Projects with saved automations have an **Automations** row showing their count. Empty projects
+add no sidebar row; choose **Automations** from the project's ⋯ menu or **View → Project
+Automations** to open their empty list. Create and edit there with the project locked. Save writes versionable project files; Review &
 Activate approves the exact files and local permissions. Pause, Run now and Open configuration
-folder are available on the automation's page. The global Automations page groups definitions by
-project and keeps Sources and Remote.
+folder are available on the automation's page. **View → All Automations** (or the sidebar's bolt
+button) opens **All automations**, which groups definitions by project and adds **Remote**. A
+project's page has its own **Sources** tab listing the event sources its automations wait on, with
+the same Review & Approve…, Pause/Resume and Run now buttons. When an event automation's source
+needs approval, is paused, changed since approval, failing or not being checked, the project page
+opens with a **Needs attention** row naming the source and the automations waiting on it, and the
+automation's own page shows the same row; its button opens the fix (**Review & Approve…**,
+**Resume**, **Reconnect**).
 
 Project files live in `.threading/automations/<id>/`: `automation.json` (format version 1),
 `instructions.md` and declared scripts/templates. IDs use lowercase letters, numbers, `-` and
@@ -139,7 +146,11 @@ runs next and how its last run went. **Details** opens the automation's own page
 **Resume** (or **Review & Activate** for a draft), **Run now**, **Edit…** and **Delete…**, the exact
 settings a run uses, the full instructions, and its ten most recent runs. A run's **Details** shows
 its result, timing, changed files and tests; **Open chat** goes to the conversation it ran in.
-**All automations** returns to the list. The editor groups its fields into Task, When, Agent,
+The back button returns to the list you came from. Account lists the selected agent's logins and marks
+signed-out logins. Model and Reasoning effort use that login's agent catalog, with **Default**
+first. Effort choices follow the selected model. A saved model or effort the catalog does not list
+stays in its menu as **Custom**, and a saved login that is no longer on this Mac as
+**Unavailable**; you can switch away and back to either while the saved agent is selected. The editor groups its fields into Task, When, Agent,
 Permissions and After a run, and shows only the fields the chosen schedule uses.
 
 Choose **Skip missed runs** or **Run once on return** for offline periods. A schedule never replays
@@ -156,7 +167,12 @@ stay visible. Deleting an automation stops future scheduling and preserves its h
 Tasks can be read-only or permit local edits and tests. Event rules also retain **Assess only**
 and **Assess, then fix if straightforward**. Tasks changing product files use a clean project
 checkout or an isolated worktree. Automation permission does not include pushing, deployment or source write-back.
-**Sources** connects the Sonda review-required feed with a scoped API key held in Keychain.
+**Sources** connects the Sonda review-required feed with a scoped API key held in Keychain. Its
+**Background listener** row says whether the listener that checks sources is running. When it is
+not — waiting for approval in Login Items, refused by macOS, or stopped — the row says why and
+offers **Open Login Items…** or **Restart Listener** where that helps, and every source it would
+check reads **Not checked** instead of its last result. It reads **Off** when no source or schedule
+needs it yet; Threading starts it on its own when one does.
 
 **Probe sources** on the same page run your own programs on a schedule — an IMAP check, a feed
 reader, a script that watches a folder — without starting a model. A probe reads
@@ -167,7 +183,8 @@ secret names and when it runs — the same **Repeat** choices as an automation: 
 weekdays or weekly at a time in a time zone, or a fixed interval. Saving leaves it paused. **Review & Approve…** shows the exact files,
 their SHA-256, the schedule, environment keys and secret names, and says plainly that the probe
 runs unsandboxed with your account's authority; approving enables it. **Secrets…** stores secret
-values in Keychain — they are handed only to the probe's environment and never shown again.
+values in your login keychain, where only Threading and its background listener can read them
+without asking — they are handed only to the probe's environment and never shown again.
 **Run now** asks for one poll immediately; **Pause** and **Resume** stop and restart its schedule.
 **Delete…** stops it for good and removes it from the page; the events it reported and the runs
 they started stay in **Activity**, and its files and Keychain secrets are left alone.
@@ -1311,6 +1328,18 @@ when the build has a report service configured; otherwise it says **Send to Outb
 folder on your Mac, and tells you how many reports are there. Nothing is deleted once it is
 delivered, so the folder is a record of everything you filed.
 
+**Agents can report Threading problems too.** The `report_problem` MCP tool files an observed
+Threading defect through the same private report outbox. It accepts a title, description,
+reproduction steps, expected and actual behavior, and sanitized evidence. Threading adds its
+version and safe diagnostics. Images are optional and require your permission to share;
+the tool accepts up to four PNG/JPEG files of 8 MiB each on your Mac. Agents running on a remote
+host can send text reports but cannot attach paths from that host.
+
+The tool returns a report ID and distinguishes received by the inbox, queued for retry, and
+saved locally. Identical reports in the same chat and build reuse their original record, even
+after an app restart. Threading admits one agent report at a time and up to ten new reports per
+hour per app run. You can turn this capability off in **Settings ▸ Tools ▸ Issue reporting**.
+
 ### Continuing with another provider
 
 Right-click a recorded chat and choose **Continue with…** to start a new session with any other
@@ -2290,8 +2319,9 @@ panel's own controls slide right and the pill stays over the conversation it des
 
 Hover it for the full picture: every rate-limit window (the 5-hour session window and the
 weekly one), each with its own bar, percentage and reset countdown, plus how fresh the
-reading is. The detail opens the moment the pointer settles on the pill and closes the
-moment it leaves.
+reading is. The detail opens immediately and stays open while you move into it and use its
+button or scroll its windows. It closes shortly after you leave both the pill and the popup.
+Click the pill to pin it; Escape closes it. Option-click shows all accounts.
 
 For Claude accounts the freshest numbers come from **Settings ▸ Privacy ▸ Live usage from
 your Claude login**; without it the pill reads the CLI's local caches, which can lag by
@@ -5128,7 +5158,7 @@ the same gradient and movement reach the iPhone's themed screens. The Mac sideba
 fraction of the gradient it travels (0.02–0.25). Replacing the gradient without `drift` makes it
 still. Reduce Motion and Low Power Mode keep the colors but stop the movement, and hidden
 screens stop animating. The paired iPhone can show bounded copies of background pictures,
-particle sprites, the logo and mascot. Downloaded pictures remain available offline; missing
+particle sprites and the mascot. Downloaded pictures remain available offline; missing
 pictures leave the theme usable, and photograph opacity is capped on the phone for readability.
 
 On iPhone, **Settings ▸ Theme motion** controls movement locally. **Workload reactions** and
@@ -5146,7 +5176,9 @@ A theme can have a **character**, too — ask your agent for one and it can give
 - **A mascot** standing at the foot of the sidebar, under the list. It changes pose with what
   your agents are doing: resting when nothing runs, idle, working, looking up when a chat needs
   you, and celebrating for a moment when a turn comes back. The list keeps room at its foot so
-  the last row always scrolls clear of it.
+  the last row always scrolls clear of it. On the paired iPhone the mascot stands on the bottom
+  **New** button the same way, with the chat list scrolling over it; the theme's logo stays on
+  the Mac.
 - **Moments.** When a turn finishes, the theme can answer with a sound of its own. When a chat
   starts waiting for you, it can add a short shower of its particles too. A finished turn never
   gets a shower: turns finish all day, and confetti on every one is too much, so the mascot's

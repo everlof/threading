@@ -32,7 +32,12 @@ private struct TriggerSourceListPayload: Encodable {
         let type: String
         let name: String
         let enabled: Bool
+        /// The latest receipt's health, or `not_checked` while the background listener is not
+        /// running: a receipt (or "checking") would otherwise describe polling that is not
+        /// happening.
         let health: String
+        /// The listener's bounded diagnostic for this source, or why it is not checked.
+        let diagnostic: String?
         /// Probe sources only. Secret *names* and environment *keys*; values never leave
         /// Keychain or the configuration, and no tool returns them.
         let probe: Probe?
@@ -66,10 +71,12 @@ private struct TriggerSourceListPayload: Encodable {
     }
     let sources: [Item]
     let backgroundListener: String
+    let backgroundListenerDetail: String
 
     private enum CodingKeys: String, CodingKey {
         case sources
         case backgroundListener = "background_listener"
+        case backgroundListenerDetail = "background_listener_detail"
     }
 }
 
@@ -100,27 +107,22 @@ enum TriggerToolActions {
         Task { @MainActor in
             do {
                 let sources = try await TriggerStore.shared.sources()
-                let daemonStatusTask = Task.detached(priority: .utility) {
-                    try TriggerDaemonStatusStore.statuses()
-                }
-                let registrationTask = Task.detached(priority: .utility) {
-                    TriggerDaemonRegistrationCoordinator.currentStatus()
-                }
-                let daemonStatuses = (try? await daemonStatusTask.value) ?? [:]
+                let receipts = await TriggerSourceReceipts.read()
                 let payload = TriggerSourceListPayload(
                     sources: sources.filter { !$0.isDeleted }.map { source in
-                        .init(
+                        let report = receipts.report(for: source)
+                        return .init(
                             id: source.id.uuidString,
                             type: source.sourceType,
                             name: source.displayName,
                             enabled: source.enabled,
-                            health: (daemonStatuses[source.id].flatMap { status in
-                                status.lastCheckedAt >= source.updatedAt ? status.health : nil
-                            } ?? source.health).rawValue,
+                            health: report.health,
+                            diagnostic: report.diagnostic,
                             probe: source.probe.map(TriggerSourceListPayload.Probe.init)
                         )
                     },
-                    backgroundListener: await registrationTask.value.rawValue
+                    backgroundListener: receipts.listener.wireValue,
+                    backgroundListenerDetail: receipts.listener.diagnostic
                 )
                 completion(Self.triggerJSON(payload))
             } catch {

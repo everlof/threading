@@ -223,10 +223,10 @@ struct PTYHostBackgroundSessionsState: Equatable {
 ///
 /// **Attach, then kill, on a connection of its own.** `kill` names a session, and the daemon
 /// only accepts a frame naming the session the connection is *bound* to — one connection is one
-/// session, which is what lets terminal bytes travel with no envelope. So a watcher that wants
-/// to end a child it is not watching has to become its watcher first, for as long as it takes to
-/// say so. The replay that costs is bounded to the floor. Nothing about the daemon changes for
-/// this; the asymmetry is the protocol's and is documented in `pty-host.md`.
+/// session, which is what lets terminal bytes travel with no envelope. Ending another held child
+/// therefore binds a dedicated lifecycle connection first. This keeps output from competing
+/// with the ending. The replay
+/// budget remains at the floor for older hosts that do not yet honor that attachment mode.
 ///
 /// **Blocking**; never on the main actor.
 enum PTYHostSessionStop {
@@ -257,7 +257,8 @@ enum PTYHostSessionStop {
         do {
             try client.attach(PTYHostAttach(
                 id: identity,
-                replayBudget: PTYHostBackgroundSessionsDefaults.stopReplayBudget
+                replayBudget: PTYHostBackgroundSessionsDefaults.stopReplayBudget,
+                receivesOutput: false
             ))
             try client.kill(PTYHostKill(id: identity, escalate: true))
         } catch {

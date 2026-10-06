@@ -3238,6 +3238,7 @@ enum MCPTools {
   static let reportTriggerResult = MCPBuiltInTool.reportTriggerResult.rawValue
 
   static let notifyUser = MCPBuiltInTool.notifyUser.rawValue
+  static let reportProblem = MCPBuiltInTool.reportProblem.rawValue
 
   static let listThemes = MCPBuiltInTool.listThemes.rawValue
   static let setTheme = MCPBuiltInTool.setTheme.rawValue
@@ -3275,6 +3276,7 @@ enum MCPTools {
   static let storageTools = names(in: .storage)
   static let triggerTools = names(in: .triggers)
   static let notificationTools = names(in: .notifications)
+  static let issueReportingTools = names(in: .issueReporting)
   static let themeTools = [
     MCPBuiltInTool.listThemes,
     .setTheme,
@@ -3758,6 +3760,61 @@ enum MCPTools {
           "target": MCPPropertySchema(type: .string, description: "Required destination: mac or ios.")
         ],
         required: ["text", "target"]
+      )
+    ),
+    MCPToolDefinition(
+      tool: .reportProblem,
+      name: "report_problem",
+      groupID: "issue-reporting",
+      family: .issueReporting,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false, destructiveHint: false,
+        idempotentHint: true, openWorldHint: true
+      ),
+      title: "Report a Threading problem",
+      detail: "File an observed Threading defect with safe diagnostics and a delivery receipt.",
+      symbol: "exclamationmark.bubble",
+      decodeArguments: { container in
+        try container.decodeIfPresent(ReportProblemArguments.self, forKey: .arguments)
+          ?? ReportProblemArguments()
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.reportProblem(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Report a problem in Threading itself to its developer, like Help > Report a Problem
+        for agents. Use for observed Threading defects, including failed Threading MCP calls;
+        problems in the user's project or another provider belong to their own tracker.
+        Supply a concise title and description, with reproduction, expected and actual behavior
+        when known. Optional evidence is sanitized text you explicitly include, never a request
+        to collect the transcript, raw logs, credentials, or project files. Threading adds its
+        version, build, OS and bounded content-free diagnostics automatically.
+        image_paths optionally attaches up to four user-approved PNG or JPEG images on this Mac,
+        at most 8 MiB each. Do not capture or share a screenshot without the user's permission.
+        Remote-host sessions can report text but cannot attach file paths.
+        The composed report must fit 10240 UTF-8 bytes; oversized input is refused, not truncated.
+        Returns JSON with status (delivered, queued, saved, or failed), report_id, optional
+        reference and record_path, duplicate, and message. Saved means kept locally with no
+        confirmed delivery; queued means durable delivery will retry. Only delivered confirms
+        receipt by the private inbox. Identical content and image bytes in this session and
+        build reuse the first record across retries and app restarts. Do not repeatedly file
+        the same defect. One report runs at a time; at most ten new reports per hour per app run.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "title": MCPPropertySchema(type: .string, description: "Required concise title, up to 80 characters."),
+          "description": MCPPropertySchema(type: .string, description: "Required description of the observed Threading problem."),
+          "reproduction_steps": MCPPropertySchema(type: .string, description: "Steps or the exact Threading tool call that reproduces the failure."),
+          "expected_behavior": MCPPropertySchema(type: .string, description: "What Threading should have done."),
+          "actual_behavior": MCPPropertySchema(type: .string, description: "What Threading did, including the relevant error."),
+          "evidence": MCPPropertySchema(type: .string, description: "Optional relevant, sanitized evidence to share with the developer."),
+          "image_paths": MCPPropertySchema(
+            type: .array, description: "Up to four absolute paths to user-approved PNG/JPEG images on this Mac, at most 8 MiB each.",
+            items: MCPArrayItemSchema(type: .string, description: "Absolute PNG/JPEG image path.")
+          ),
+        ],
+        required: ["title", "description"]
       )
     ),
     MCPToolDefinition(

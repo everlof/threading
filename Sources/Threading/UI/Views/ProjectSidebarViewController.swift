@@ -114,6 +114,10 @@ final class ProjectSidebarViewController: NSViewController {
     let projectStore: ProjectStore
     let decorateAccountUsage: AccountUsageMenu.Decorator
     let scheduledMessageStore: ScheduledMessageStore
+    private let triggerStore: TriggerStore
+    private var automationCounts: [ProjectID: Int] = [:]
+    private var automationRefreshRunning = false
+    private var automationRefreshPending = false
     let canAskAgentToRename: (SessionID) -> Bool
     let canAskForReportBack: (SessionID) -> Bool
     private let registeredFactChoicesProvider: RegisteredFactChoicesProvider
@@ -463,6 +467,7 @@ final class ProjectSidebarViewController: NSViewController {
     init(
         projectStore: ProjectStore = .shared,
         scheduledMessageStore: ScheduledMessageStore = .shared,
+        triggerStore: TriggerStore = .shared,
         canAskAgentToRename: @escaping (SessionID) -> Bool = { _ in false },
         canAskForReportBack: @escaping (SessionID) -> Bool = { _ in false },
         registeredFactChoicesProvider: @escaping RegisteredFactChoicesProvider = { _, selected in
@@ -481,6 +486,7 @@ final class ProjectSidebarViewController: NSViewController {
         self.extensionBackdropImageResolver = extensionBackdropImageResolver
         self.projectStore = projectStore
         self.scheduledMessageStore = scheduledMessageStore
+        self.triggerStore = triggerStore
         self.canAskAgentToRename = canAskAgentToRename
         self.canAskForReportBack = canAskForReportBack
         self.registeredFactChoicesProvider = registeredFactChoicesProvider
@@ -508,6 +514,7 @@ final class ProjectSidebarViewController: NSViewController {
         setupHeader()
         setupOutlineView()
         observeStoreChanges()
+        requestAutomationProjectRefresh()
         applySidebarSurface()
         if !defersInitialTreeMount {
             mountInitialTreeIfNeeded()
@@ -712,6 +719,9 @@ private extension ProjectSidebarViewController {
     }
 
     private func observeStoreChanges() {
+        appEvents.observe(.triggersDidChange) { [weak self] in
+            self?.requestAutomationProjectRefresh()
+        }
         appEvents.observe(ProjectsDidChange.self) { [weak self] change in
             self?.projectsDidChange(change)
         }
@@ -781,6 +791,24 @@ private extension ProjectSidebarViewController {
         appEvents.observe(SupervisionDidChange.self) { [weak self] event in
             self?.refreshRow(sessionID: event.managerID)
             self?.refreshRow(sessionID: event.childID)
+        }
+    }
+
+    /// One in-flight projection plus one pending refresh coalesces bursts of run/store events.
+    private func requestAutomationProjectRefresh() {
+        automationRefreshPending = true
+        guard !automationRefreshRunning else { return }
+        automationRefreshRunning = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { automationRefreshRunning = false }
+            while automationRefreshPending {
+                automationRefreshPending = false
+                do { try await refreshAutomationProjects() }
+                catch {
+                    ThreadingLogger.session.error("Could not refresh automation navigation: \(error.localizedDescription, privacy: .private(mask: .hash))")
+                }
+            }
         }
     }
 
@@ -1029,6 +1057,19 @@ enum StorageCleanupToast {
 
 extension ProjectSidebarViewController {
 
+    func refreshAutomationProjects() async throws {
+        let counts = try await triggerStore.projectAutomationCounts()
+        guard counts != automationCounts else { return }
+        let changedProjects = Set(counts.keys).union(automationCounts.keys).filter {
+            counts[$0] != automationCounts[$0]
+        }
+        automationCounts = counts
+        // Apply only the affected checkout subtrees; unrelated sessions keep their rows.
+        for projectID in changedProjects where projectNodesByID[projectID] != nil {
+            applyProjectStructureChange(projectID)
+        }
+    }
+
     /// Installs the persisted tree exactly once, after a host that requested deferral has put
     /// its permanent geometry in force. Idempotence lets a host state the lifecycle point
     /// directly without coupling it to whether AppKit happened to load the view earlier.
@@ -1154,7 +1195,8 @@ extension ProjectSidebarViewController {
             optionValues: optionValues,
             factSnapshot: factSnapshot,
             chatPreviewStages: chatPreviewStages,
-            revealingSessionIDs: sessionIDsToReveal()
+            revealingSessionIDs: sessionIDsToReveal(),
+            automationCounts: automationCounts
         )
         treeSpan.end(metadata: ["roots": String(rebuilt.count)])
         #if DEBUG
@@ -1292,7 +1334,8 @@ extension ProjectSidebarViewController {
                   optionValues: optionValues,
                   factSnapshot: factSnapshot,
                   chatPreviewStage: chatPreviewStage(for: presentedProject.projectID),
-                  revealingSessionIDs: sessionIDsToReveal()
+                  revealingSessionIDs: sessionIDsToReveal(),
+                  automationCounts: automationCounts
               )
         else {
             reload()
@@ -1385,7 +1428,8 @@ extension ProjectSidebarViewController {
                   optionValues: optionValues,
                   factSnapshot: factSnapshot,
                   chatPreviewStage: chatPreviewStage(for: projectID),
-                  revealingSessionIDs: sessionIDsToReveal(including: revealing)
+                  revealingSessionIDs: sessionIDsToReveal(including: revealing),
+                  automationCounts: automationCounts
               )
         else {
             reload()
@@ -1451,6 +1495,11 @@ extension ProjectSidebarViewController {
         applyStructure(steps: steps, wholesale: false)
         var refreshedRows = IndexSet()
         if let row = projectRow(for: projectID) { refreshedRows.insert(row) }
+        // A retained automation destination can change count without changing tree shape.
+        if let automations = adoptedProject.childNodes.first as? ProjectAutomationsNode {
+            let row = outlineView.row(forItem: automations)
+            if row >= 0 { refreshedRows.insert(row) }
+        }
         // A disclosure row that stayed a row can still have changed what it offers.
         if let disclosure = adoptedProject.chatDisclosureNode {
             let row = outlineView.row(forItem: disclosure)
@@ -3081,8 +3130,13 @@ extension ProjectSidebarViewController {
     }
 
     func selectAutomations(projectID: ProjectID) {
-        guard let project = projectNodesByID[projectID],
-              let destination = project.childNodes.first(where: { $0 is ProjectAutomationsNode }) else { return }
+        guard let project = projectNodesByID[projectID] else { return }
+        guard let destination = project.childNodes.first(where: { $0 is ProjectAutomationsNode }) else {
+            cancelPendingSessionPresentation()
+            projectStore.selectedSessionID = nil
+            reveal(projectID: projectID)
+            return
+        }
         if let group = outlineView.parent(forItem: project) { outlineView.expandItem(group) }
         outlineView.expandItem(project)
         let row = outlineView.row(forItem: destination)
@@ -4062,7 +4116,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
         if let node = item as? ProjectAutomationsNode {
             let cell = dequeueCell(NSUserInterfaceItemIdentifier("ProjectAutomationsCell")) { ProjectRowView() }
-            cell.configureAsBranch(named: L10n.string("Automations"), collapsedSessionCount: 0)
+            cell.configureAsBranch(named: L10n.string("Automations"), collapsedSessionCount: node.count)
             cell.onHoverAction = nil
             cell.setAccessibilityIdentifier("project.automations.\(node.projectID.uuidString)")
             return cell
@@ -4167,7 +4221,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
         }
 
         if let node = item as? ProjectAutomationsNode, let cell = view as? ProjectRowView {
-            cell.configureAsBranch(named: L10n.string("Automations"), collapsedSessionCount: 0)
+            cell.configureAsBranch(named: L10n.string("Automations"), collapsedSessionCount: node.count)
             cell.onHoverAction = nil
             cell.setAccessibilityIdentifier("project.automations.\(node.projectID.uuidString)")
             return true
@@ -4615,6 +4669,15 @@ extension ProjectSidebarViewController {
         )))
         entries.append(projectIconEntry(row: row))
         if let projectID {
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Automations"),
+                image: ThemedMenuIcon.symbol("bolt"),
+                representedValue: AppCommands.ID.projectAutomations,
+                onChoose: { [weak self] in
+                    guard let self else { return }
+                    delegate?.projectSidebar(self, didSelectAutomations: projectID)
+                }
+            )))
             entries.append(projectThemeEntry(for: projectID))
             // Beside Theme, not beside Mute below it: presentation, not delivery.
             entries.append(projectSoundEntry(for: projectID))

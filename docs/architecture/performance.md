@@ -847,11 +847,19 @@ and containment of out-of-domain ink. The `ios-usage` evidence entry covers the 
 A usual project has 1–10 definitions; the stress fixture uses the 500-definition ceiling.
 Discovery and verification run on the serial `TriggerStore` worker. A scan stops at 1,000 immediate
 entries and 32 MiB before admitting definitions; each file and automation also has its own byte
-limit. Runtime visits eight folders per 15-second tick. The project sidebar adds one navigation
-value per project and constructs its cell only when the outline needs it. The catalogue admits
+limit. Runtime visits eight folders per 15-second tick. The project sidebar adds a counted navigation
+value only for projects with saved definitions, constructing its cell when the outline needs it.
+Presence/count queries group in SQLite on the store worker (at most 500 projects), decode no
+instructions/files, coalesce notifications, and update only project subtrees whose count changed. The catalogue admits
 25 data rows per page; a single-project global page retains 29 views including sections and
 pagination. History filters in SQLite before its 25-item keyset page. Deleted binding tombstones
 stay indexed and are excluded from the bounded live ownership scan.
+
+The editor loads account discovery before a bounded 32-login menu. A serial catalog worker reads
+at most 512 model choices; the model's effort menu admits 32 levels. Sign-in probes have their
+own serial worker, so its ten-second child deadline never delays a catalog switch. The 160-entry,
+60-second status cache avoids a child per repeated open. Catalog/account generations discard
+answers from previous selections, and closing the sheet cancels remaining probe requests.
 
 One Debug stress run on 2026-10-05, while other builds were active, measured 1.082 s for initial
 500-definition discovery and snapshot/import, and 0.183 s for unchanged discovery. Manufacturing
@@ -1237,6 +1245,15 @@ after 60 seconds if launch never produces one. The client deadline is deliberate
 host's concrete failure wins. Older clients retain the original full response and older Macs retain
 the phone's compatibility fallback; feature negotiation, rather than version guessing, selects the
 new path.
+
+The startup bound is an absolute `ContinuousClock` deadline recorded when the host accepts the
+transaction. Its expiry task sleeps until that deadline, and both waiter admission and surface
+registration check it synchronously before attaching. A busy main actor can delay the timer's
+callback; it cannot extend the wait or let a late surface attach an expired socket. Expiring the
+transaction cancels its task, so a delayed callback cannot retire a replacement transaction.
+The check is one clock read and dictionary lookup per startup edge; no catalogue scan participates.
+`RemoteViewportLeaseGraceTests.testAStartupDeadlineWinsBeforeItsExpiryTaskCanRun` advances the
+host clock without yielding the actor, making the callback-order race deterministic.
 
 Terminal registration happens at `TerminalSessionDelegate.terminalSessionDidStart`, after the PTY
 has published its running process identity. An earlier attempt from the controller's pre-launch
@@ -6155,3 +6172,7 @@ Power Profiler recordings failed waiting for an instrument connection/device boo
 phone also refused the developer-disk-image installation. No energy number is inferred from
 simulator timing, GPU glow timing or an unrelated daily MetricKit payload. The particle cap and
 rendered style evidence are covered; the A7 real-device energy acceptance check remains open.
+
+On 2026-10-05 the owner requested simulator testing and a normal Release installation on the
+iPhone. Further device profiling stopped; the earlier glow measurements remain recorded above.
+Particle energy is still unmeasured and is not inferred from simulator results.

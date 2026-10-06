@@ -11,6 +11,7 @@ struct AppEnvironment {
     let agentRuntime: AgentRuntime
     let settings: AppSettings
     let eventLog: EventLog
+    let triggerStore: TriggerStore
     let remoteTerminals: any RemoteTerminalApplicationCapability
 
     init(
@@ -18,12 +19,14 @@ struct AppEnvironment {
         agentRuntime: AgentRuntime,
         settings: AppSettings,
         eventLog: EventLog,
+        triggerStore: TriggerStore = .shared,
         remoteTerminals: (any RemoteTerminalApplicationCapability)? = nil
     ) {
         self.projectStore = projectStore
         self.agentRuntime = agentRuntime
         self.settings = settings
         self.eventLog = eventLog
+        self.triggerStore = triggerStore
         self.remoteTerminals = remoteTerminals
             ?? Self.makeRemoteTerminalCapability(agentRuntime: agentRuntime)
     }

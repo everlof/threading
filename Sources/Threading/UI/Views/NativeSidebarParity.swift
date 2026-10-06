@@ -34,6 +34,9 @@ enum NativeSidebarHostDependency: String, CaseIterable, Sendable {
     case registeredFactResolution
     /// Local filesystem and shared-git-directory context that cannot cross the extension boundary.
     case localRepositoryContext
+    /// Presence/count of shortcuts into the host's automation authority surface. Trigger
+    /// bindings and activation stay host-owned; this is not navigator session/project data.
+    case automationNavigation
 }
 
 /// A provider method whose output is presentation machinery rather than a durable fact.
@@ -79,6 +82,8 @@ enum NativeSidebarHostInputAlias: String, CaseIterable, Sendable {
     case projectNodeRevealedSessions = "SidebarTreeBuilder.projectNode.revealingSessionIDs"
     case rootFactSnapshot = "SidebarTreeBuilder.rootNodes.factSnapshot"
     case projectNodeFactSnapshot = "SidebarTreeBuilder.projectNode.factSnapshot"
+    case rootAutomationCounts = "SidebarTreeBuilder.rootNodes.automationCounts"
+    case projectNodeAutomationCounts = "SidebarTreeBuilder.projectNode.automationCounts"
     case repositoryIdentity = "GitInfo.repositoryIdentity"
     case repositoryName = "GitInfo.repositoryName"
     case mainWorkingTree = "GitInfo.isMainWorkingTree"
@@ -139,6 +144,8 @@ enum NativeSidebarParity {
         .projectNodeRevealedSessions: .transientDisclosure,
         .rootFactSnapshot: .registeredFactResolution,
         .projectNodeFactSnapshot: .registeredFactResolution,
+        .rootAutomationCounts: .automationNavigation,
+        .projectNodeAutomationCounts: .automationNavigation,
         .repositoryIdentity: .localRepositoryContext,
         .repositoryName: .localRepositoryContext,
         .mainWorkingTree: .localRepositoryContext,

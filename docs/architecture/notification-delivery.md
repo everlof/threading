@@ -288,3 +288,13 @@ Broker protocol 4 adds the optional validated basename; protocol 3 omits it. APN
 trimming retains the validated sound, while `playsSound: false` always wins. Host and broker
 tests cover these gates and basename/path refusals. Hosted deployment and audible device APNs
 delivery are separate from local implementation validation.
+
+## 2026-10-05 — Push environment follows signing
+
+`ThreadingAPNSEnvironment` expands the same `APS_ENVIRONMENT` build setting as the entitlement.
+Token diagnostics and host registration read that value through `MobilePushEnvironment`;
+the registration signature includes the resolved environment. Release optimization does not
+imply distribution signing: a locally installed Release app using a development profile must
+register with sandbox APNs. Distribution archives retain production. Older bundles without
+the metadata retain their configuration-based fallback. Mobile tests cover both mappings and
+the expanded value in the actual built app.

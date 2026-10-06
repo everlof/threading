@@ -218,9 +218,7 @@ final class RemoteThemeAssets {
         if let image = variant.sidebar?.background?.image {
             append(slot: "sidebarImage", asset: image.asset, bound: 1_290, opacity: image.opacity)
         }
-        if case .asset(let name) = variant.sidebar?.brand?.logo {
-            append(slot: "logo", asset: name, bound: 512)
-        }
+        // No logo: the phone has no brand row, and a mascot is the one character it shows.
         for mood in ThemeMascotMood.allCases {
             if let pose = variant.sidebar?.mascot?.poses[mood] {
                 append(slot: "mascot.\(mood.rawValue)", asset: pose.asset, bound: 512)

@@ -224,7 +224,8 @@ final class AutomationDetailHeaderView: NSView {
 
     let summary: AutomationSummary
 
-    init(summary: AutomationSummary) {
+    /// `backTitle` names the list the way back returns to: the app-wide page's, or a project's.
+    init(summary: AutomationSummary, backTitle: String = L10n.string("All automations")) {
         self.summary = summary
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -232,11 +233,11 @@ final class AutomationDetailHeaderView: NSView {
 
         let back = ThemedButton(
             symbol: "chevron.left",
-            accessibility: L10n.string("All automations"),
+            accessibility: backTitle,
             target: self,
             action: #selector(backPressed)
         )
-        back.title = L10n.string("All automations")
+        back.title = backTitle
         back.emphasis = .tertiary
         back.setAccessibilityIdentifier("automation.detail.back")
 

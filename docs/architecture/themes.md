@@ -2442,6 +2442,16 @@ well in the same variant (`remove_navigator_well`). The first Beardie lost its d
 well was inherited from the base theme — while `preview_app_theme`, which drew no well, showed it
 standing there; the preview now stacks ground, mascot, well and rows the way the sidebar does.
 
+**The phone keeps the same plane.** `MobileThemeMascotView` shares the dashboard collection's
+`backgroundView` with the backdrop and stands on the trailing floating pill, so rows scroll over
+it there too. The list's bottom extent grows only by what lifts the last row clear of it, which
+with the floating bar is about 20 points at the very end of the list. It replaced a header strip
+that stood the logo and mascot side by side on an opaque surface under the navigation bar. That
+strip cost a band of every visit, cut the backdrop off at a hard edge, and put a theme's shop-front
+logo under the Mac's name. The logo is no longer projected to the phone, which has no brand row;
+the phone skips a logo an older Mac still names. Poses borrow as on the Mac, attention wearing
+working's before idle's.
+
 **The loop runs in the render server.** A pose's motion is one `CAKeyframeAnimation` repeated
 for ever: the motion in the first `duration / every` of the period, rest for the remainder. A mood
 change is the only main-actor work — swap the picture under a `CATransition` fade, rebuild the
@@ -3104,3 +3114,24 @@ one contribution's 128 fields), never on a value change.
 | Wire form, `appliedBy` omission, option values all-or-none, readings per control, the shared mapping, binding refusals with paths | `ExtensionSettingBindingContractTests` (SDK) |
 | Uniform resolution and read-once caching, fallback, a host-applied toggle flipping a mounted surface with no request and no stop, a hybrid's requests carrying only process fields, publication refusals, the phone's constant | `ExtensionSettingBindingTests` |
 | Theme Options following the active theme and the extension's enablement; light/dark renders at 420 pt and the settings width | `CurrentThemeOptionsTests` |
+
+## 2026-10-05 — Verification and normal phone installation
+
+The complete Mac plan covered 10,202 tests: 10,116 passed and 86 skipped, with no failures.
+The process guard interrupted the first run during UpdateSheetRenderTests; enumeration of the
+plan identified the unfinished cases, and the remaining 457 ran once without repeating the
+complete plan. The complete mobile simulator target ran 1,002 tests with one skip and no
+failures. After fixing local Release push-environment selection, all 17 notification policy
+tests passed separately. The complete rendered catalogues contain 1,367 Mac and 232 phone
+artifacts in `.build/theme-system-optional-mac-final-verified/report/` and
+`.build/theme-system-optional-ios-complete/report/`. The shader capture waits for a prepared,
+visible surface to complete a frame; its final marker confirms drawing within budget.
+Installed Home Screen widget evidence covers small/medium full-color and system-tinted modes.
+Baselines were not approved. The owner requested simulator testing and normal Release use on
+the physical phone; further device profiling stopped. Particle energy and audible hosted APNs
+delivery remain unverified.
+
+The normal Release app was built with the existing development device profile and matching
+sandbox APNs environment, verified with codesign, installed in place on the owner's iPhone,
+and launched without demo or evidence arguments. Release excludes the DEBUG fixtures; the
+existing bundle identity preserves pairing and app data. Subsequent tests use the simulator.

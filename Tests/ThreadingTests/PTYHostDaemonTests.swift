@@ -71,6 +71,35 @@ final class PTYHostDaemonTests: XCTestCase {
     private var daemons: [DaemonProcess] = []
     private var clients: [PTYHostTestClient] = []
 
+    func testALifecycleAttachmentReceivesTheEndingWithoutTheOutputFlood() throws {
+        let daemon = try startDaemon()
+        let producer = try connect(to: daemon)
+        let id = Self.newIdentity()
+        let go = directory.appendingPathComponent("flood")
+        let done = directory.appendingPathComponent("flood-done")
+        _ = try spawn(
+            on: producer, id: id,
+            script: "printf HISTORY; while [ ! -f '\(go.path)' ]; do sleep 0.05; done; "
+                + "dd if=/dev/zero bs=65536 count=512 2>/dev/null; touch '\(done.path)'; sleep 30"
+        )
+        try producer.waitForOutput(containing: "HISTORY", timeout: Fixture.childTimeout)
+        producer.hangUp()
+
+        let lifecycle = try connect(to: daemon)
+        let attached = try attach(on: lifecycle, id: id, receivesOutput: false)
+        XCTAssertEqual(attached.replay, .none)
+        XCTAssertEqual(attached.replayByteCount, 0)
+        try Data().write(to: go)
+        try waitUntil(timeout: Fixture.childTimeout, "the child finishes its output flood") {
+            FileManager.default.fileExists(atPath: done.path)
+        }
+        lifecycle.send(.kill(PTYHostKill(id: id, escalate: true)))
+        let ending = try nextExit(on: lifecycle)
+        XCTAssertEqual(ending.id, id)
+        XCTAssertTrue(ending.signalled)
+        XCTAssertTrue(lifecycle.bytes.isEmpty, "lifecycle commands must not subscribe to terminal output")
+    }
+
     override func setUpWithError() throws {
         try super.setUpWithError()
         // `sockaddr_un.sun_path` holds 104 bytes (108 on Linux) and the system temporary directory
@@ -1053,9 +1082,10 @@ final class PTYHostDaemonTests: XCTestCase {
     private func attach(
         on client: PTYHostTestClient,
         id: PTYHostSessionIdentity,
-        budget: Int? = nil
+        budget: Int? = nil,
+        receivesOutput: Bool? = nil
     ) throws -> PTYHostAttached {
-        client.send(.attach(PTYHostAttach(id: id, replayBudget: budget)))
+        client.send(.attach(PTYHostAttach(id: id, replayBudget: budget, receivesOutput: receivesOutput)))
         let frame = try client.nextControl(timeout: Fixture.replyTimeout) {
             if case .attached = $0 { return true }
             if case .error = $0 { return true }

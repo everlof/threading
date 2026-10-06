@@ -150,6 +150,10 @@ struct MetalSurfaceParityTests {
         // app-side harness runs this same comparison where the bundle exists.
         target.renderContentsScale = 1
         target.renderDrawableSize = CGSize(width: Self.width, height: Self.height)
+        // A windowless view takes NSScreen.main's scale (2 on a Retina display, 1 on an external
+        // monitor or with the display asleep); pin it to the 1x drawable, or every cell is laid
+        // out off the drawable and both frames come back as nothing but the clear colour.
+        terminalView.metalScaleFactorOverride = 1
         guard let renderer = try? MetalTerminalRenderer(target: target) else { return nil }
         renderer.waitForCompletionAfterCommit = true
         renderer.capturesRenderedTexture = true
@@ -232,6 +236,12 @@ struct MetalSurfaceParityTests {
 
         #expect(fromMTK.count == fromLayer.count)
         guard fromMTK.count == fromLayer.count else { return }
+        // Two blank frames match trivially; the comparison only means something over real ink.
+        let ground = Array(fromMTK.prefix(4))
+        let drewSomething = stride(from: 0, to: fromMTK.count, by: 4).contains {
+            Array(fromMTK[$0 ..< $0 + 4]) != ground
+        }
+        #expect(drewSomething, "the fixture drew nothing")
 
         var differing = 0
         for index in stride(from: 0, to: fromMTK.count, by: 4) where

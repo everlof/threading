@@ -414,6 +414,9 @@ Two rules in the pane follow from the file never being read:
   because the user is waiting on that file; the pane's rows run it at `.utility` because they
   are not. Pressing the tile opens the lightbox with the movie in the player, exactly as a
   selected row does, and a name the decoder refuses falls back to a path in the text.
+  A pictures-only composer refuses a named movie before opening any decoder. It must not pass
+  movie bytes to ImageIO as though the missing movie capability made the file a picture: that
+  unnecessary cold codec path can leave the draft waiting to classify a file it cannot accept.
 
 The phone uses two bounded views of the same Mac-owned file. The thumbnail route asks
 `MoviePosterFrame` for one bounded JPEG, so a movie appears in the ledger with the same play mark as

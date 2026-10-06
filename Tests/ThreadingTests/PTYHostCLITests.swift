@@ -559,7 +559,10 @@ final class PTYHostCLITests: XCTestCase {
         XCTAssertTrue(controller.error.contains("stalled") || controller.error.contains("buffer"), controller.error)
         XCTAssertEqual(CLIPlatform.kill(child.pid, 0), 0, "a slow observer must not kill the agent")
         let stopped = try run(helper, ["stop", id.description] + daemon.locationArguments)
-        XCTAssertEqual(stopped.status, 0, stopped.error)
+        if stopped.status != 0 {
+            let journal = try run(helper, ["journal", "10"] + daemon.locationArguments)
+            XCTFail(stopped.error + "\n" + journal.output + "\n" + daemon.diagnosticText)
+        }
     }
 
     func testControlOptionScopesAndTerminalRequirement() throws {

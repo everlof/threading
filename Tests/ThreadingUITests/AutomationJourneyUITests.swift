@@ -21,14 +21,17 @@ final class AutomationJourneyUITests: XCTestCase {
         application = app; sandbox.launch(app)
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 20))
-        let automations = app.outlines.staticTexts["Automations"].firstMatch
-        XCTAssertTrue(automations.waitForExistence(timeout: 10))
-        automations.click()
+        XCTAssertFalse(app.outlines.staticTexts["Automations"].exists)
+        app.menuBars.menuBarItems["View"].click()
+        app.menuItems["Project Automations"].click()
         let create = app.buttons["automation.new"]
         XCTAssertTrue(create.waitForExistence(timeout: 10)); create.click()
         let name = app.textFields["automation.name"]
         XCTAssertTrue(name.waitForExistence(timeout: 10)); name.click(); name.typeText("Morning project report")
         XCTAssertFalse(app.popUpButtons["Project"].isEnabled)
+        XCTAssertTrue(app.popUpButtons["automation.account"].exists)
+        XCTAssertTrue(app.popUpButtons["automation.model"].exists)
+        XCTAssertTrue(app.popUpButtons["automation.effort"].exists)
         let instructions = app.textViews["automation.instructions"]
         instructions.click(); instructions.typeText("Summarize changes from yesterday. Report any failures.")
         try recordScenarioScreenshot(checkpoint: "automation-editor", order: 1, title: "Create a recurring task",

@@ -134,12 +134,19 @@ extension ProjectNode: SidebarOutlineNode {
 /// Navigation only: the outline creates a view only while its project is expanded.
 final class ProjectAutomationsNode: NSObject, SidebarOutlineNode {
     let projectID: ProjectID
-    init(projectID: ProjectID) { self.projectID = projectID }
+    private(set) var count: Int
+    init(projectID: ProjectID, count: Int) {
+        self.projectID = projectID
+        self.count = count
+    }
     var sidebarKey: SidebarNodeKey { .automations(projectID) }
     var sidebarChildren: [NSObject] { [] }
     var sidebarOutlineChildCount: Int { 0 }
     func sidebarOutlineChild(at index: Int) -> NSObject { preconditionFailure("Automations has no children") }
-    func adoptContent(of rebuilt: any SidebarOutlineNode, substituting: SidebarNodeSubstitution) {}
+    func adoptContent(of rebuilt: any SidebarOutlineNode, substituting: SidebarNodeSubstitution) {
+        guard let rebuilt = rebuilt as? ProjectAutomationsNode else { return }
+        count = rebuilt.count
+    }
 }
 
 /// Reference-typed wrapper for a session row.
@@ -473,9 +480,11 @@ enum SidebarTreeBuilder {
         optionValues: NativeSidebarPipelineOptionValues = NativeSidebarPipelineOptions.current,
         factSnapshot: ExtensionFactSnapshot? = nil,
         chatPreviewStages: [ProjectID: SidebarChatPreviewStage] = [:],
-        revealingSessionIDs: Set<SessionID> = []
+        revealingSessionIDs: Set<SessionID> = [],
+        automationCounts: [ProjectID: Int] = [:]
     ) -> [NSObject] {
         let classifiedProjects = NativeSidebarParity.fact(.projectManualOrder, projects)
+        let hostAutomationCounts = NativeSidebarParity.host(.automationNavigation, automationCounts)
         let visibilityScope = NativeSidebarParity.host(.visibilityScope, visibility)
         let transientExclusions = NativeSidebarParity.host(
             .transientExclusion,
@@ -540,7 +549,8 @@ enum SidebarTreeBuilder {
                 chatPreviewStage: previewStages[
                     NativeSidebarParity.host(.entityIdentity, project.id)
                 ] ?? .compact,
-                revealingSessionIDs: revealedSessions
+                revealingSessionIDs: revealedSessions,
+                automationCounts: hostAutomationCounts
             )
 
             guard let identity = context.identity else {
@@ -623,9 +633,11 @@ enum SidebarTreeBuilder {
         optionValues: NativeSidebarPipelineOptionValues = NativeSidebarPipelineOptions.current,
         factSnapshot: ExtensionFactSnapshot? = nil,
         chatPreviewStage: SidebarChatPreviewStage = .compact,
-        revealingSessionIDs: Set<SessionID> = []
+        revealingSessionIDs: Set<SessionID> = [],
+        automationCounts: [ProjectID: Int] = [:]
     ) -> ProjectNode? {
         let classifiedProjectID = NativeSidebarParity.host(.entityIdentity, projectID)
+        let hostAutomationCounts = NativeSidebarParity.host(.automationNavigation, automationCounts)
         let classifiedProjects = NativeSidebarParity.fact(.projectManualOrder, projects)
         let visibilityScope = NativeSidebarParity.host(.visibilityScope, visibility)
         let transientExclusions = NativeSidebarParity.host(
@@ -655,7 +667,8 @@ enum SidebarTreeBuilder {
             revealingSessionIDs: NativeSidebarParity.host(
                 .transientDisclosure,
                 revealingSessionIDs
-            )
+            ),
+            automationCounts: hostAutomationCounts
         )
     }
 
@@ -696,7 +709,8 @@ enum SidebarTreeBuilder {
         checkoutBranch: String? = nil,
         factSnapshot: ExtensionFactSnapshot? = nil,
         chatPreviewStage: SidebarChatPreviewStage = .compact,
-        revealingSessionIDs: Set<SessionID> = []
+        revealingSessionIDs: Set<SessionID> = [],
+        automationCounts: [ProjectID: Int] = [:]
     ) -> ProjectNode {
         let order = optionValues.sessionOrder
         let isReversed = optionValues.sessionOrderReversed
@@ -754,7 +768,9 @@ enum SidebarTreeBuilder {
             checkoutBranch: checkoutBranch,
             factSnapshot: factSnapshot
         )
-        node.childNodes.insert(ProjectAutomationsNode(projectID: projectID), at: 0)
+        if let count = automationCounts[projectID], count > 0 {
+            node.childNodes.insert(ProjectAutomationsNode(projectID: projectID, count: count), at: 0)
+        }
         if let preview = shown.preview {
             node.childNodes.append(ChatDisclosureNode(projectID: projectID, preview: preview))
         }
