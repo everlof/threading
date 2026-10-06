@@ -113,9 +113,30 @@ enum DocumentUIFixture {
         let appDiffViews: Int
         let contextReference: String?
         let contextPreviewRows: Int
+        let stream: StreamState?
     }
+    private struct StreamState: Codable, Sendable {
+        let lines: Int
+        let malformedLines: Int
+        let settledTurns: Int
+        let streamingUpdates: Int
+        let longestStreamingText: Int
+        let streaming: Bool
+        let markdownBlocks: Int
+        let diffRows: Int
+        let outcome: String?
+        let model: String?
+        let failure: String?
+        let exitStatus: Int32?
+        let diagnostic: String?
+    }
+    private static let streamPrompts = [
+        "Stream a reply and an edit through the shared transport.",
+        "Keep the same process for a second turn: é, 中文, 👩🏽‍🚀.",
+    ]
 
     static func run(output: String, automaticRows: Bool = false, diffMode: Bool = false,
+                    streamAgent: [String]? = nil,
                     keyEvent: (TWEvent) -> NSEvent) async throws {
         let source = sample
         let reply = try await Task.detached { try prepareDocumentFixtureReply(source) }.value
@@ -144,7 +165,8 @@ enum DocumentUIFixture {
         let owner = NSWindow(backingScaleFactor: 2)
         owner.contentView = root
         let title = PageTitleView(symbolName: "doc.text", inkSource: .chrome)
-        title.update(title: diffMode ? "Conversation diff" : "Conversation document",
+        title.update(title: streamAgent != nil ? "Conversation stream"
+                        : diffMode ? "Conversation diff" : "Conversation document",
                      symbolName: "doc.text", identity: "document-fixture")
         title.actionsAnchor.isHidden = true
         let header = PaneHeaderView(leading: [title])
@@ -152,7 +174,8 @@ enum DocumentUIFixture {
         let scroll = ThemedScrollView()
         scroll.hasVerticalScroller = true
         scroll.verticalScrollElasticity = .none
-        let rows = diffReply.map { DocumentRowSource(diffLines: $0.lines) }
+        let rows = streamAgent != nil ? DocumentRowSource()
+            : diffReply.map { DocumentRowSource(diffLines: $0.lines) }
             ?? (automaticRows ? DocumentRowSource(sources: reply.blocks) : nil)
         let table: NSTableView? = rows.map { source in
             let table = NSTableView()
@@ -166,6 +189,12 @@ enum DocumentUIFixture {
             return table
         }
         let document: NSView = table ?? MarkdownView(markdown: reply.markdown)
+        let stream = try streamAgent.map { arguments -> StreamConversationDriver in
+            guard let rows, let table else { throw WindowFailure("stream fixture has no table") }
+            return try StreamConversationDriver(arguments: arguments, rows: rows, table: table)
+        }
+        var renderedRevision = -1
+        var sentPrompts = 0
         scroll.documentView = document
         root.addSubview(header)
         root.addSubview(scroll)
@@ -221,6 +250,9 @@ enum DocumentUIFixture {
         }
         while true {
             if dirty {
+                // Read before building the frame: deliveries can run during the awaited state
+                // write below, and must leave the next frame owed rather than marked drawn.
+                let revisionBeingRendered = stream?.revision
                 layout()
                 let bitmap = Bitmap(width: pixelWidth, height: pixelHeight, background: LinuxTheme.components("surface"))
                 root.render(in: NSGraphicsContext(bitmap: bitmap, scale: 2))
@@ -262,7 +294,8 @@ enum DocumentUIFixture {
                 let state = State(serial: serial, dark: LinuxTheme.isDark,
                     documentHeight: Double(document.frame.height), scrollY: Double(scroll.contentView.bounds.minY),
                     documentY: Double(document.frame.minY), viewportHeight: Double(scroll.contentView.bounds.height),
-                    controls: controls, timelineRows: diffReply?.timelineRows ?? reply.timelineRows,
+                    controls: controls,
+                    timelineRows: stream?.timelineRows ?? diffReply?.timelineRows ?? reply.timelineRows,
                     streamingCleared: reply.streamingCleared,
                     totalRows: table?.numberOfRows ?? 0, mountedRows: table?.mountedViewCount ?? 0,
                     constructedCells: rows?.constructed ?? 0,
@@ -270,16 +303,73 @@ enum DocumentUIFixture {
                     liveContents: rows?.live.count ?? 0, navigationActions: navigationActions,
                     diffLines: diffReply?.lines.count ?? 0, addedWash: addedWash, removedWash: removedWash,
                     appDiffViews: rows?.appDiffViewCount ?? 0, contextReference: rows?.contextReference,
-                    contextPreviewRows: rows?.contextPreviewRows ?? 0)
+                    contextPreviewRows: rows?.contextPreviewRows ?? 0,
+                    stream: stream.map { driver in
+                        StreamState(lines: driver.lines, malformedLines: driver.malformedLines,
+                            settledTurns: driver.settledTurns, streamingUpdates: driver.streamingUpdates,
+                            longestStreamingText: driver.longestStreamingText, streaming: driver.isStreaming,
+                            markdownBlocks: rows?.markdownBlocks ?? 0, diffRows: rows?.diffRows ?? 0,
+                            outcome: driver.lastOutcome, model: driver.model, failure: driver.failure,
+                            exitStatus: driver.exitStatus, diagnostic: driver.diagnostic)
+                    })
                 try await Task.detached {
                     try JSONEncoder().encode(state).write(to: directory.appendingPathComponent("state.json"), options: .atomic)
                     try PNGWriter.write(bitmap, to: directory.appendingPathComponent("frame.png"))
                 }.value
                 dirty = false
+                if let stream, let revisionBeingRendered {
+                    renderedRevision = revisionBeingRendered
+                    if sentPrompts == 0 {
+                        stream.send(streamPrompts[0])
+                        sentPrompts = 1
+                    }
+                }
             }
             var event = TWEvent()
-            guard tw_next(native, &event) >= 0 else { throw WindowFailure(String(cString: tw_error())) }
-            if event.kind == 5 { return }
+            if let stream {
+                // Transport deliveries run on the main queue, so the loop polls and yields the
+                // main actor instead of blocking in the native wait.
+                // Yield after every poll, not only after a quiet one: a steady native event
+                // stream would otherwise hold deliveries back until the next frame write.
+                let received = tw_next_timeout(native, &event, 16)
+                guard received >= 0 else { throw WindowFailure(String(cString: tw_error())) }
+                try? await Task.sleep(nanoseconds: 1_000_000)
+                if stream.revision != renderedRevision {
+                    if let table, table.numberOfRows > 0 { table.scrollRowToVisible(table.numberOfRows - 1) }
+                    dirty = true
+                }
+                if received == 0 { continue }
+            } else {
+                guard tw_next(native, &event) >= 0 else { throw WindowFailure(String(cString: tw_error())) }
+            }
+            // F11 ends a stream session the way closing the window does, without relying on a
+            // window manager to deliver the close request.
+            let endsStream = stream != nil && event.kind == 48 && event.action != 3
+                && Int(event.key) == TW_KEY_F11
+            if event.kind == 5 || endsStream {
+                guard let stream else { return }
+                await stream.close()
+                renderedRevision = -1
+                dirty = true
+                let final = State(serial: serial + 1, dark: LinuxTheme.isDark, documentHeight: 0, scrollY: 0,
+                    documentY: 0, viewportHeight: 0, controls: [], timelineRows: stream.timelineRows,
+                    streamingCleared: !stream.isStreaming, totalRows: table?.numberOfRows ?? 0,
+                    mountedRows: table?.mountedViewCount ?? 0, constructedCells: rows?.constructed ?? 0,
+                    configuredCells: rows?.configured ?? 0, releasedCells: rows?.released ?? 0,
+                    liveContents: rows?.live.count ?? 0, navigationActions: navigationActions, diffLines: 0,
+                    addedWash: [], removedWash: [], appDiffViews: rows?.appDiffViewCount ?? 0,
+                    contextReference: nil, contextPreviewRows: 0,
+                    stream: StreamState(lines: stream.lines, malformedLines: stream.malformedLines,
+                        settledTurns: stream.settledTurns, streamingUpdates: stream.streamingUpdates,
+                        longestStreamingText: stream.longestStreamingText, streaming: stream.isStreaming,
+                        markdownBlocks: rows?.markdownBlocks ?? 0, diffRows: rows?.diffRows ?? 0,
+                        outcome: stream.lastOutcome, model: stream.model, failure: stream.failure,
+                        exitStatus: stream.exitStatus, diagnostic: stream.diagnostic))
+                try await Task.detached {
+                    try JSONEncoder().encode(final).write(to: directory.appendingPathComponent("final.json"), options: .atomic)
+                }.value
+                return
+            }
             if event.kind == 1 {
                 pixelWidth = Int(event.width); pixelHeight = Int(event.height); dirty = true
             } else if event.kind == 44, event.action == 0 {
@@ -307,6 +397,13 @@ enum DocumentUIFixture {
             } else if event.kind == 48, event.action != 3 {
                 // Opt-in diagnostic mutations drive the same incremental table API used by
                 // the production transcript. These keys exist only in this fixture.
+                if let stream, Int(event.key) == TW_KEY_F10 {
+                    if sentPrompts == 1 {
+                        stream.send(streamPrompts[1])
+                        sentPrompts = 2
+                    }
+                    continue
+                }
                 if let rows, let table, (TW_KEY_F6...TW_KEY_F9).contains(Int(event.key)) {
                     switch Int(event.key) {
                     case TW_KEY_F6 where !insertedPrefix:

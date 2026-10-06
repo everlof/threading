@@ -88,6 +88,7 @@ private func makeContractTransport(
 @MainActor
 func runStreamTransportContracts() async throws {
     try await runChildProcessContract()
+    try await runSecondTurnContract()
     try await runBoundedOutputContract()
     try await runDetachContract()
     print("PASS production agent stream transport: child process framing, 1 MiB line, stderr flood, "
@@ -148,6 +149,45 @@ private func runChildProcessContract() async throws {
                             && diagnostic.allSatisfy { $0 == "x" },
                          "stderr capture was not bounded to its limit: \(diagnostic.utf8.count) bytes")
     try requireTransport(receipt.failures.isEmpty, "unexpected transport failure: \(receipt.failures)")
+    transport.detach()
+}
+
+/// A long-lived child answers a second stdin turn: one line, a pause, then two lines at once.
+/// This is the shape of a native session's later turns, after output has already flowed.
+@MainActor
+private func runSecondTurnContract() async throws {
+    let script = """
+    IFS= read -r first
+    printf '{"n":1}\\n'
+    sleep 0.1
+    printf '{"n":2}\\n'
+    IFS= read -r second
+    printf '{"n":3}\\n'
+    sleep 0.25
+    printf '{"n":4}\\n{"n":5}\\n'
+    IFS= read -r third
+    """
+    let input = Pipe(), output = Pipe(), error = Pipe()
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/sh")
+    process.arguments = ["-c", script]
+    process.standardInput = input
+    process.standardOutput = output
+    process.standardError = error
+    let receipt = TransportReceipt()
+    let transport = makeContractTransport(
+        input: input.fileHandleForWriting, output: output.fileHandleForReading,
+        error: error.fileHandleForReading, receipt: receipt)
+    transport.start()
+    try process.run()
+    try requireTransport(transport.writeJSONObject(["echo": "first"]), "first turn refused")
+    try await requirePumped({ receipt.lines.count == 2 }, "first turn lines: \(receipt.lines)")
+    try requireTransport(transport.writeJSONObject(["echo": "second"]), "second turn refused")
+    try await requirePumped({ receipt.lines.count == 5 }, "second turn lines: \(receipt.lines)")
+    try requireTransport(receipt.lines == ["n:1", "n:2", "n:3", "n:4", "n:5"],
+                         "second turn changed order: \(receipt.lines)")
+    transport.closeInput()
+    try await requirePumped({ !process.isRunning }, "second-turn child did not exit")
     transport.detach()
 }
 

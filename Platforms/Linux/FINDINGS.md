@@ -5518,3 +5518,78 @@ with it. On macOS the same contract passes in XCTest beside the five existing
 `AgentStreamTransportTests` and the two portable conversation contracts, with no new compiler
 warning. This is the transport only. `ClaudeStreamSession`'s launch planning, child-process
 ownership, control channel and permission brokering are not yet compiled for Linux.
+
+## 175. A live stream-json child feeds the shared conversation rows
+
+`WindowHarness --stream-ui-fixture OUTPUT AGENT [ARGUMENTS...]` launches a child speaking Claude
+Code's headless stream-json wire. Its output passes through the production `AgentStreamTransport`,
+`StreamEvent.parse` and `ConversationTimeline` into the shared `ConversationVirtualRowHost` rows,
+`MarkdownView` blocks and the pinned diff renderer:
+
+- **Streaming tail.** One row, updated in place with `reloadData(forRowIndexes:columnIndexes:)`.
+- **Settled content.** Markdown blocks and a successful Edit's diff insert above the tail through
+  the incremental table APIs from §169.
+- **Not mounted.** User messages, other tool calls and turn outcomes stay in the timeline without
+  a row, because their production row kinds are not compiled for Linux yet.
+
+The loop polls the native window every 16 ms and yields the main actor after every poll, so
+transport deliveries run between frames.
+
+`tests/stream_agent_fixture.py` is a deterministic agent with no network or provider. Its first
+turn emits `system/init`, three text deltas a configurable interval apart, an assistant message
+with Markdown and an Edit `tool_use`, the `tool_result`, and a `result`. A later turn on the
+same process streams a delta and echoes the prompt. On stdin EOF it exits 0 after writing a
+two-line stderr diagnostic. `tests/stream_conversation_smoke.py` checks:
+
+- the partial reply on screen, by an X capture's pixels, while the turn is still unsettled;
+- the settled turn: 7 wire lines, 3 streaming updates, 4 Markdown blocks, one diff row, the
+  reported model and a completed outcome, with no malformed line or transport failure;
+- an exact Unicode copy from a transport-fed paragraph;
+- a second turn on the same child after F10: 10 lines, and the Unicode prompt echoed;
+- after F11, stdin EOF, exit status 0, and the agent's diagnostic returned verbatim by `finish`.
+
+The shared transport contract from §174 also gained a second-turn case: after output has
+flowed, one line, a pause, then two lines at once.
+
+The fixture's first version stalled on the second turn's first delta. It recorded the rendered
+revision after each frame's awaited state write. Deliveries that ran during that await were
+marked drawn and never painted, and with nothing further arriving the window stayed stale. A
+temporarily instrumented copy of the transport, re-vendored afterwards, showed both remaining
+lines read and delivered within milliseconds. The fixture now reads the revision before
+building the frame. That was a fixture bug, not a transport one.
+
+In Debug, frames take long enough that main-queue deliveries wait seconds behind them, and the
+mid-stream capture missed the partial row. Pipe reads still landed within 5 ms of each write.
+Like the document journeys, this one is verified in Release. The 4.5-second first turn
+includes the agent's four one-second pauses, so it is not a latency measurement.
+
+Verification on 2026-10-06: the journey passed in three Release runs on Ubuntu arm64; two more
+runs' results were lost to my log filter. The partial, settled and second-turn captures were
+inspected. The second-turn transport contract passes on Linux (Debug, three runs) and in Mac
+XCTest. Strict runner contracts pass, and the installed runtime suite now runs the journey from
+the packaged binary.
+
+The rebuilt package passes the complete Swift-free, non-root installed runtime suite at
+`out/bundle-smoke/run.B2qVTHkJ`, including this journey from the installed binary. Its installed
+partial-stream capture was inspected and shows the reply mid-arrival. The same run repeats the
+document, automatic-row and diff journeys at 0.424, 0.318 and 0.266 seconds to first frame, along
+with the large outline, terminal restoration, live-child reinstall and the desktop entry. The
+package SHA-256 is `7ef7d721078bb0f744ce98aceb692c2d314b590a3d445b920adac38ec8149e50`.
+
+## 176. The pane-header and page-title Mac references build again
+
+§172 left the `--mac` modes of `tests/pane_header/run.sh` and `tests/page_title/run.sh` failing.
+Production `Design.Surface` is nonisolated: it is nested in the `@MainActor` `Design`, and that
+attribute does not reach nested types. AppKit's compiler also reads `Design.Surface.accent` in
+a nonisolated default argument of `drawKeyboardFocus`. The Linux boundary had declared its
+`Surface` `@MainActor`, which macOS rejects at that default.
+
+The boundary's `Surface` is now nonisolated, matching production. `LinuxTheme`'s palette lookup
+is nonisolated too: its snapshot and named colours are immutable after first use, as
+production's lock-backed palette is. The selected appearance and the helpers that read it stay
+on the main actor.
+
+Verification on 2026-10-06: the pane-header, page-title and subagent-row fixtures pass against
+macOS AppKit. On Linux the focused sweep from §172 passes again, including all four repaired
+fixtures, the layout Harness and the `WindowHarness` row-layout and app-event modes. The
+installed suite was not rerun for this isolation-only change.

@@ -91,6 +91,8 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/document_ui_smoke.py:/document_ui_smoke.py:ro" \
   -v "$PWD/tests/automatic_rows_smoke.py:/automatic_rows_smoke.py:ro" \
   -v "$PWD/tests/diff_ui_smoke.py:/diff_ui_smoke.py:ro" \
+  -v "$PWD/tests/stream_conversation_smoke.py:/stream_conversation_smoke.py:ro" \
+  -v "$PWD/tests/stream_agent_fixture.py:/stream_agent_fixture.py:ro" \
   -v "$PWD/tests/x11_cursor.py:/x11_cursor.py:ro" \
   -v "$PWD/tests/composer_account_smoke.py:/composer_account_smoke.py:ro" \
   -v "$PWD/tests/add_project_button_smoke.py:/add_project_button_smoke.py:ro" \

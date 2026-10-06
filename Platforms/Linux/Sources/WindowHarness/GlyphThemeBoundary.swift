@@ -61,7 +61,7 @@ public enum Design {
             min(control, max(0, min(size.width, size.height) / 2))
         }
     }
-    @MainActor public enum Surface {
+    public enum Surface {
         public static var accent: NSColor { LinuxTheme.color("accent") }
         public static var bevelHighlight: NSColor { LinuxTheme.color("bevelHighlight") }
         public static var bevelShadow: NSColor { LinuxTheme.color("bevelShadow") }

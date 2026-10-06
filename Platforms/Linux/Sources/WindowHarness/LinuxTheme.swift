@@ -3,7 +3,11 @@ import Foundation
 
 /// App-owned bridge from the production Threading style to the Linux AppKit shim. The checked
 /// snapshot is exported by LinuxThemeSnapshotTests on macOS; the shim owns no palette policy.
-@MainActor
+///
+/// The palette is immutable after first use, so named colours resolve from any isolation, as
+/// production's lock-backed palette does; production `Design.Surface` roles are nonisolated and
+/// AppKit reads some of them in nonisolated default arguments. Only the selected appearance is
+/// main-actor state.
 enum LinuxTheme {
     private static let palettes: [String: [String: [Double]]] = {
         guard let url = LinuxThemeSnapshot.url,
@@ -31,11 +35,11 @@ enum LinuxTheme {
         })
     }()
 
-    private(set) static var isDark = false
+    @MainActor private(set) static var isDark = false
 
-    static var appearance: NSAppearance { named(dark: isDark) }
+    @MainActor static var appearance: NSAppearance { named(dark: isDark) }
 
-    static func setDark(_ dark: Bool) {
+    @MainActor static func setDark(_ dark: Bool) {
         isDark = dark
     }
 
@@ -48,12 +52,12 @@ enum LinuxTheme {
         return color
     }
 
-    static func components(_ role: String) -> (CGFloat, CGFloat, CGFloat, CGFloat) {
+    @MainActor static func components(_ role: String) -> (CGFloat, CGFloat, CGFloat, CGFloat) {
         let color = fixedColor(role, dark: isDark)
         return (color.redComponent, color.greenComponent, color.blueComponent, color.alphaComponent)
     }
 
-    static func neutralInk(on ground: NSColor, dark: Bool) -> Specimen.Ink {
+    @MainActor static func neutralInk(on ground: NSColor, dark: Bool) -> Specimen.Ink {
         var result: Specimen.Ink!
         named(dark: dark).performAsCurrentDrawingAppearance {
             result = Specimen.Ink(on: ground)

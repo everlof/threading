@@ -517,6 +517,16 @@ struct WindowHarness {
             try await AppEventContract.run()
             return
         }
+        if mode == "--stream-ui-fixture" {
+            let args = Array(CommandLine.arguments.dropFirst(2))
+            guard args.count >= 2 else {
+                throw WindowFailure("usage: WindowHarness --stream-ui-fixture OUTPUT AGENT [ARGUMENTS...]")
+            }
+            try await DocumentUIFixture.run(output: args[0], automaticRows: true,
+                                            streamAgent: Array(args.dropFirst()),
+                                            keyEvent: composerKeyEvent)
+            return
+        }
         if mode == "--document-ui-fixture" || mode == "--automatic-rows-ui-fixture" || mode == "--diff-ui-fixture" {
             let args = Array(CommandLine.arguments.dropFirst(2))
             guard args.count == 1 else { throw WindowFailure("usage: WindowHarness --document-ui-fixture OUTPUT") }

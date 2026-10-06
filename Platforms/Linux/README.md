@@ -194,6 +194,10 @@ timeline contracts run in CoreSliceHarness and Mac XCTest, including 1,000/10,00
 The installed runtime suite includes this journey. The core slice also carries the production
 `AgentStreamTransport`; its shared contract drives a real child process through framing, a 1 MiB
 line, a stderr flood, a Unicode stdin echo and the EOF diagnostic on both platforms.
+`WindowHarness --stream-ui-fixture OUTPUT AGENT [ARGUMENTS...]` drives a live stream-json child
+through that transport, the production parser and timeline into the shared conversation rows;
+`tests/stream_conversation_smoke.py` runs it against `tests/stream_agent_fixture.py`, with F10
+sending a second turn to the same process and F11 ending the session.
 This remains a diagnostic document surface:
 native conversation transports, the transcript table/controller and web-link activation are still open.
 `WindowHarness --automatic-rows-ui-fixture OUTPUT_DIRECTORY` places assistant blocks in the
