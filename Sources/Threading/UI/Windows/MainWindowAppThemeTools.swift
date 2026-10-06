@@ -1559,29 +1559,9 @@ extension AgentToolCoordinator {
             "terminal_palette_id": terminal.id.rawValue,
             "terminal_colors": TerminalPaletteToolParsing.document(terminal)
         ]
-        if let sidebar = variant?.sidebar {
-            document["sidebar"] = AppThemeToolParsing.document(sidebar)
-        }
+        document.merge(AppThemeToolParsing.characterDocument(of: variant)) { _, new in new }
         if let chrome = variant?.chrome {
             document["chrome"] = appThemeChromeDocument(chrome)
-        }
-        if let transition = variant?.transition {
-            document["transition"] = AppThemeToolParsing.document(transition)
-        }
-        if let sprites = variant?.sprites, !sprites.isEmpty {
-            document["sprites"] = AppThemeToolParsing.document(sprites)
-        }
-        if let moments = variant?.moments {
-            document["moments"] = AppThemeToolParsing.document(moments)
-        }
-        if let words = variant?.words {
-            document["words"] = AppThemeToolParsing.document(words)
-        }
-        if let titleMorph = variant?.titleMorph {
-            document["title_morph"] = AppThemeToolParsing.document(titleMorph)
-        }
-        if let welcome = variant?.welcome {
-            document["welcome"] = AppThemeToolParsing.document(welcome)
         }
         return document
     }

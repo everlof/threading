@@ -768,12 +768,8 @@ public enum Design {
                 for family in overrideFamilies(for: .chrome) {
                     if let resolved = inFamily(family, like: system) { return resolved }
                 }
-                guard typeface != .standard,
-                      let descriptor = system.fontDescriptor.withDesign(typeface.systemDesign),
-                      let themed = NSFont(descriptor: descriptor, size: pointSize) else {
-                    return system
-                }
-                return themed
+                guard typeface != .standard else { return system }
+                return SystemFontFaces.designed(system, design: typeface.systemDesign) ?? system
             }
             guard isHeading else { return prose(system) }
             // A stated weight is the theme's, so it wins over the heading style's own; the

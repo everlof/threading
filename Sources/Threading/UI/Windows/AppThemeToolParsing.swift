@@ -1599,3 +1599,24 @@ enum AppThemeToolParsing {
         return clean.isEmpty ? nil : clean
     }
 }
+
+// MARK: - Variant Document
+
+extension AppThemeToolParsing {
+
+    /// A variant's character blocks as create/update speak them — sidebar, transition, sprites,
+    /// moments, words, title morph and welcome — each present only when the variant states it, so
+    /// a document copied back into a patch changes nothing.
+    static func characterDocument(of variant: AppTheme.Variant?) -> [String: Any] {
+        guard let variant else { return [:] }
+        var document: [String: Any] = [:]
+        if let sidebar = variant.sidebar { document["sidebar"] = Self.document(sidebar) }
+        if let transition = variant.transition { document["transition"] = Self.document(transition) }
+        if !variant.sprites.isEmpty { document["sprites"] = Self.document(variant.sprites) }
+        if let moments = variant.moments { document["moments"] = Self.document(moments) }
+        if let words = variant.words { document["words"] = Self.document(words) }
+        if let titleMorph = variant.titleMorph { document["title_morph"] = Self.document(titleMorph) }
+        if let welcome = variant.welcome { document["welcome"] = Self.document(welcome) }
+        return document
+    }
+}
