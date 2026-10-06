@@ -48,6 +48,7 @@ public enum ExtensionFactSubjectKind: String, Codable, CaseIterable, Equatable, 
     case terminal
     case repository
     case repositoryBranch
+    case application
 }
 
 /// Boundary-safe forge identity. It deliberately contains no URL, credentials, checkout path,
@@ -121,6 +122,10 @@ public enum ExtensionFactSubject: Codable, Equatable, Hashable, Sendable {
     case terminal(String)
     case repository(ExtensionRepositoryKey)
     case repositoryBranch(repository: ExtensionRepositoryKey, branch: String)
+    /// The one subject that names no entity: a value about the person's Mac or world rather
+    /// than a project or repository (the weather, an on-call rota). It is shared by every
+    /// provider, carries no identity, and is written `{"type":"application"}`.
+    case application
 
     public var kind: ExtensionFactSubjectKind {
         switch self {
@@ -129,6 +134,7 @@ public enum ExtensionFactSubject: Codable, Equatable, Hashable, Sendable {
         case .terminal: .terminal
         case .repository: .repository
         case .repositoryBranch: .repositoryBranch
+        case .application: .application
         }
     }
 
@@ -153,6 +159,8 @@ public enum ExtensionFactSubject: Codable, Equatable, Hashable, Sendable {
                 ))
             }
             return issues
+        case .application:
+            return []
         }
     }
 
@@ -169,6 +177,7 @@ public enum ExtensionFactSubject: Codable, Equatable, Hashable, Sendable {
         case terminal
         case repository
         case repositoryBranch
+        case application
     }
 
     public init(from decoder: Decoder) throws {
@@ -192,6 +201,8 @@ public enum ExtensionFactSubject: Codable, Equatable, Hashable, Sendable {
                 ),
                 branch: try container.decode(String.self, forKey: .branch)
             )
+        case .application:
+            self = .application
         }
     }
 
@@ -214,6 +225,8 @@ public enum ExtensionFactSubject: Codable, Equatable, Hashable, Sendable {
             try container.encode(Kind.repositoryBranch, forKey: .type)
             try container.encode(repository, forKey: .repository)
             try container.encode(branch, forKey: .branch)
+        case .application:
+            try container.encode(Kind.application, forKey: .type)
         }
     }
 }

@@ -15,6 +15,7 @@ extension MCPTools {
             "moments": "Sounds and particles for turn_finished and needs_attention.",
             "words": "Working words, composer_placeholder and untitled_session.",
             "title_morph": "Chat-name transition style and optional scramble alphabet.",
+            "welcome": "New-session composer: backdrop, mark, greeting/caption lines with {tokens}, when-conditions and type, scrims.",
         ]
         return Dictionary(uniqueKeysWithValues: appVariantSchema.map { key, schema in
             // Object members stay open; argument decoding and validators remain authoritative.

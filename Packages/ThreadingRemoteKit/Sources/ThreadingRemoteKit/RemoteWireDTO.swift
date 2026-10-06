@@ -182,6 +182,10 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
     public let titleMorph: TitleMorph?
     public let assets: [RemoteThemeAsset]?
     public let surface: RemoteThemeSurface?
+    /// The new-chat screen's welcome, resolved for this variant. Optional in both directions:
+    /// an older phone ignores it, an older Mac sends none, and an unreadable block is absent
+    /// rather than a reason to discard the palette (`RemoteThemeWelcome`).
+    public let welcome: RemoteThemeWelcome?
 
     public init(
         id: String,
@@ -192,7 +196,8 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
         words: Words? = nil,
         titleMorph: TitleMorph? = nil,
         assets: [RemoteThemeAsset]? = nil,
-        surface: RemoteThemeSurface? = nil
+        surface: RemoteThemeSurface? = nil,
+        welcome: RemoteThemeWelcome? = nil
     ) {
         self.id = id
         self.name = name
@@ -203,10 +208,11 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
         self.titleMorph = titleMorph?.isValid == true ? titleMorph : nil
         self.assets = RemoteThemeAsset.admitted(assets)
         self.surface = surface?.isValid == true ? surface : nil
+        self.welcome = welcome?.isEmpty == false ? welcome : nil
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, mode, colors, material, words, titleMorph, assets, surface
+        case id, name, mode, colors, material, words, titleMorph, assets, surface, welcome
     }
 
     public init(from decoder: Decoder) throws {
@@ -224,6 +230,8 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
             (try? values.decode(RemoteThemeAssetList.self, forKey: .assets))?.assets)
         let projected = try? values.decode(RemoteThemeSurface.self, forKey: .surface)
         surface = projected?.isValid == true ? projected : nil
+        let welcome = try? values.decode(RemoteThemeWelcome.self, forKey: .welcome)
+        self.welcome = welcome?.isEmpty == false ? welcome : nil
     }
 }
 

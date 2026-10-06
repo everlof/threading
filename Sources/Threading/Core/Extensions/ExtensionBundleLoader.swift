@@ -87,8 +87,8 @@ struct ThreadingExtensionThemeDocument: Equatable, @unchecked Sendable {
     /// compare equal, and image objects do not.
     let iconMark: Data?
 
-    /// The images the theme document's own `sidebar` blocks and `material.backdrop` reference,
-    /// keyed by the package-relative name as written, decode-gated and re-encoded like the
+    /// The images the theme document's own `sidebar` blocks, `material.backdrop` and
+    /// `welcome.backdrop` reference, keyed by the package-relative name as written, decode-gated and re-encoded like the
     /// mark. Empty for the many themes that state no dressing at all.
     let sidebarAssets: [String: Data]
 
@@ -445,8 +445,8 @@ enum ExtensionBundleInspector {
         }
     }
 
-    /// Reads every image the theme document's own `sidebar` blocks and `material.backdrop`
-    /// reference.
+    /// Reads every image the theme document's own `sidebar` blocks, `material.backdrop` and
+    /// `welcome.backdrop` reference.
     ///
     /// The document names package-relative paths; nothing new appears in the manifest, because
     /// both blocks are part of the same app-theme vocabulary the contribution already ships —
@@ -493,6 +493,9 @@ enum ExtensionBundleInspector {
             if let name = variant.material.backdrop?.image?.asset {
                 want(name, Budget(.backdrop))
             }
+            if let name = variant.welcome?.backdrop?.image?.asset {
+                want(name, Budget(.welcome))
+            }
             if let name = variant.sidebar?.background?.image?.asset {
                 want(name, Budget(.background))
             }
@@ -532,8 +535,8 @@ enum ExtensionBundleInspector {
                   ) else {
                 throw ExtensionBundleError.themeResourceInvalid(
                     path: name,
-                    message: "referenced by \(declarationPath)'s sidebar, backdrop, sprite or "
-                        + "mascot block but not a readable image"
+                    message: "referenced by \(declarationPath)'s sidebar, backdrop, welcome, "
+                        + "sprite or mascot block but not a readable image"
                 )
             }
             assets[name] = normalized

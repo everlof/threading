@@ -787,6 +787,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if plan.startsExtensions {
             let factPipeline = installHostFactPipeline()
             mainWindowController.installWorkspaceNavigatorFactRegistry(factPipeline.registry)
+            // A theme's welcome line may read a fact (`{fact:KEY}`); the composer asks through
+            // this seam, so with extensions held back such lines are simply never eligible.
+            ThemeWelcomeFactSource.shared.resolver = factPipeline.resolver
             ExtensionHostService.shared.installSessionRuntimeShellRootProvider {
                 [weak mainWindowController] sessionID in
                 mainWindowController?.extensionShellRootPid(for: sessionID)

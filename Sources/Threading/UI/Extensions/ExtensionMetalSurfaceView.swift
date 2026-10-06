@@ -39,9 +39,6 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
     /// the field cannot be read — the binding then reads its fallback.
     typealias SettingProvider = @MainActor (_ fieldID: String) -> Double?
 
-    private static let maximumInputs = 8
-    private static let hostVertexFunction = "threadingHostSurfaceVertex"
-    private static let hostFragmentFunction = "threadingHostSurfaceFragment"
     /// Where a textured surface's picture and sampler are bound — the ABI the SDK documents.
     private static let imageTextureIndex = 0
     private static let imageSamplerIndex = 0
@@ -81,6 +78,12 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
     private var imageTexture: MTLTexture?
     /// Whether the package picture — not the placeholder — is what the surface samples.
     private(set) var showsTexture = false
+    /// The host's working regions and the view whose coordinates they are stated in — this view
+    /// itself, or the backdrop plane that hosts it. Held in that space rather than converted
+    /// once, so a surface that layout moves or resizes after the host stated them never draws
+    /// against a stale place: every frame restates them in this view's coordinates.
+    private var focusRegions = ExtensionSurfaceFocus()
+    private weak var focusSpace: NSView?
     /// Whether the view has decided to hold its frames because nobody could see them.
     ///
     /// Separate from `isPaused` so a test can ask *why* the view is paused, and so the
@@ -297,6 +300,24 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         updateVisibilityHold()
     }
 
+    // MARK: - Focus
+
+    /// States the regions the surface should design around, in `space`'s coordinates — this
+    /// view's own when nil. Only an ancestor (or the view itself) is a space the regions can be
+    /// read from; a surface moved out from under the space it was given reads no regions.
+    func setFocus(_ focus: ExtensionSurfaceFocus, in space: NSView? = nil) {
+        focusRegions = focus
+        focusSpace = space ?? self
+    }
+
+    /// The regions in this view's own coordinates, as the next frame uploads them.
+    var focus: ExtensionSurfaceFocus {
+        guard let focusSpace else { return ExtensionSurfaceFocus() }
+        if focusSpace === self { return focusRegions }
+        guard isDescendant(of: focusSpace) else { return ExtensionSurfaceFocus() }
+        return focusRegions.mapped { convert($0, from: focusSpace) }
+    }
+
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
@@ -310,6 +331,7 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
             pass: pass,
             commandBuffer: commandBuffer,
             size: view.drawableSize,
+            focusBounds: bounds,
             time: Design.Motion.reducesMotion
                 ? 0
                 : Float(ProcessInfo.processInfo.systemUptime - beganAt)
@@ -321,7 +343,9 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
     /// Renders the same pipeline into a CPU-readable texture.
     ///
     /// The inspector and extension authoring preview cannot recover an `MTKView` through
-    /// AppKit's `cacheDisplay`, so they use this rather than substituting a fake visual.
+    /// AppKit's `cacheDisplay`, so they use this rather than substituting a fake visual. The
+    /// focus regions are normalized against the view's bounds, as a frame's are; a view that
+    /// has not been laid out is taken to be `size` points across.
     func snapshotImage(size: CGSize, time: Float) -> NSImage? {
         let pixelWidth = max(Int(size.width.rounded(.up)), 1)
         let pixelHeight = max(Int(size.height.rounded(.up)), 1)
@@ -347,6 +371,7 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
             pass: pass,
             commandBuffer: commandBuffer,
             size: CGSize(width: CGFloat(pixelWidth), height: CGFloat(pixelHeight)),
+            focusBounds: bounds.isEmpty ? CGRect(origin: .zero, size: size) : bounds,
             time: time
         ) else { return nil }
 
@@ -398,16 +423,19 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
     private static let snapshotBytesPerPixel = 4
     private static let snapshotBitsPerComponent = 8
 
+    /// `size` is the drawable in pixels (`uniforms.size`); `focusBounds` is the rectangle, in
+    /// this view's coordinates, the focus regions are normalized against.
     private func encode(
         pass: MTLRenderPassDescriptor,
         commandBuffer: MTLCommandBuffer,
         size: CGSize,
+        focusBounds: CGRect,
         time: Float
     ) -> Bool {
         guard let pipeline, let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
             return false
         }
-        var uniforms = uniformFloats(size: size, time: time)
+        var uniforms = uniformFloats(size: size, focusBounds: focusBounds, time: time)
         encoder.setRenderPipelineState(pipeline)
         encoder.setFragmentBytes(
             &uniforms,
@@ -423,22 +451,22 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate, ThemeParticleHo
         return true
     }
 
-    private func uniformFloats(size: CGSize, time: Float) -> [Float] {
+    /// `ThreadingSurfaceUniforms` as the flat floats `ExtensionMetalSource.UniformLayout`
+    /// states: size, time and padding, the declared inputs zero-filled to eight, then the focus
+    /// regions in `uv`.
+    func uniformFloats(size: CGSize, focusBounds: CGRect, time: Float) -> [Float] {
+        typealias Layout = ExtensionMetalSource.UniformLayout
         var result: [Float] = [
             Float(size.width),
             Float(size.height),
             audioDemand != nil && !ThemeParticleHold.motionAllowed ? 0 : time,
             0
         ]
-        result.append(contentsOf: specification.inputs.map { input in
+        result.append(contentsOf: specification.inputs.prefix(Layout.maximumInputs).map { input in
             Float(resolve(input.value))
         })
-        if result.count < 4 + Self.maximumInputs {
-            result.append(contentsOf: repeatElement(
-                Float(0),
-                count: 4 + Self.maximumInputs - result.count
-            ))
-        }
+        result.append(contentsOf: repeatElement(Float(0), count: Layout.focusOffset - result.count))
+        result.append(contentsOf: focus.uniformValues(in: focusBounds, isFlipped: isFlipped))
         return result
     }
 

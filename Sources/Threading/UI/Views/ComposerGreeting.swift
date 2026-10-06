@@ -24,18 +24,9 @@ enum ComposerGreeting {
 
     // MARK: - Dayparts
 
-    enum Daypart: Equatable {
-        case morning, afternoon, evening, lateNight
-
-        static func of(hour: Int) -> Daypart {
-            switch hour {
-            case 5...11: .morning
-            case 12...16: .afternoon
-            case 17...22: .evening
-            default: .lateNight
-            }
-        }
-    }
+    /// The theme's welcome conditions speak in the same four parts of the day, so a theme line
+    /// written for the evening and the app's own evening lines agree on when evening is.
+    typealias Daypart = ThemeWelcome.Daypart
 
     /// Everything the given moment could say, split by how it would say it. The testable core:
     /// specials fire on their dates and are empty on an ordinary day.
@@ -101,7 +92,7 @@ enum ComposerGreeting {
             special.append(L10n.string("The quiet week between the years."))
         case (12, 31):
             special.append(L10n.string("The last hours of the year. Make them count."))
-            if daypart == .lateNight || daypart == .evening {
+            if daypart == .night || daypart == .evening {
                 special.append(L10n.string("Seeing the year out in good company."))
             }
         default:
@@ -157,7 +148,7 @@ enum ComposerGreeting {
                 L10n.string("The evening session — the quiet hours."),
                 L10n.string("Winding down, or winding up?")
             ]
-        case .lateNight:
+        case .night:
             [
                 L10n.string("Late night. The best ideas keep odd hours."),
                 L10n.string("Burning the midnight oil?"),

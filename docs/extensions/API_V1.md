@@ -115,6 +115,10 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   The host decodes and uploads it and passes `texture2d<float> image, sampler imageSampler` as
   the fragment function's third and fourth arguments; the extension never receives the texture
   object, and a surface without `texture` keeps the two-argument signature.
+- `ThreadingSurfaceUniforms` ends with `float4 focus[2]` (bytes 48…79 of 80): host regions as
+  `(x, y, width, height)` in the fragment's top-left-origin `uv`, width 0 meaning none. Only
+  `composer.backdrop@1` states them — `focus[0]` its hero, `focus[1]` its prompt box; every
+  other placement uploads zeros. Only the geometry crosses, never the content it frames.
 - Optional advanced companion apps with independently reviewed OS capabilities, declared
   operations, and bounded remote surfaces rendered inside host-owned views.
 - Brokered HTTPS fetches (`network.brokered`) against origins declared in the manifest's
@@ -131,7 +135,9 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   answered after same-host redirects without breaking decoding from an older host.
 - Domain-keyed fact publication (`facts.provide`) with static manifest and registration
   definitions. Providers may replace bounded values only for canonical repository and
-  repository-branch subjects; this capability grants no opaque project or session identifiers.
+  repository-branch subjects and the identity-free `application` subject; this capability grants
+  no opaque project or session identifiers. Navigators read repository facts; a theme's welcome
+  greeting reads them and application facts through `{fact:KEY}`, worded by Threading.
 - Read-only source-control adapters (`source-control.read`) with static manifest/runtime provider
   parity, correlated discovery and lifecycle requests, and bounded provider-neutral summaries.
   Threading owns exact-host connection selection, Keychain credentials, local Git inspection,

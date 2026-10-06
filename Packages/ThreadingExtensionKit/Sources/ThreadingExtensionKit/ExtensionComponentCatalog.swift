@@ -685,7 +685,9 @@ public enum ThreadingComponentCatalog {
             )
         ),
         ExtensionComponentCatalogEntry(
-            summary: "A picture or live surface beneath the new-session composer's content.",
+            summary: "A picture or live surface beneath the new-session composer's content. A Metal "
+                + "surface reads the hero (mark over greeting) as uniforms.focus[0] and the prompt box "
+                + "as uniforms.focus[1], each (x, y, width, height) in uv; width 0 means absent.",
             contract: composerBackdrop,
             examplePatch: ExtensionComponentPatch(
                 id: "composer-glow",

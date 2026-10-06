@@ -115,7 +115,7 @@ final class RemoteThemeAssets {
         pending?.cancel()
         let variant = theme.variant(for: appearance)
         let sources = Self.sources(theme: theme, variant: variant)
-        let families = variant?.material.fontFamilies ?? []
+        let families = Self.fontFamilies(variant)
         let fontDirectory = ThemeFontStore.folder(for: theme.id)
         let fontURLs = ExtensionAppearanceRegistry.shared.phoneFontURLs(families: families)
         let hook = Self.surfaceHook().map(Self.resolvingSettingInputs)
@@ -203,6 +203,17 @@ final class RemoteThemeAssets {
         return nil
     }
 
+    /// The families a phone may need: the material's, then the welcome's greeting and caption
+    /// families the material does not already name. The worker still sends at most four fonts.
+    static func fontFamilies(_ variant: AppTheme.Variant?) -> [String] {
+        var families = variant?.material.fontFamilies ?? []
+        for family in [variant?.welcome?.greeting?.style?.fontFamily, variant?.welcome?.caption?.style?.fontFamily]
+            .compactMap({ $0 }) where !families.contains(family) {
+            families.append(family)
+        }
+        return families
+    }
+
     private static func sources(theme: AppTheme, variant: AppTheme.Variant?) -> [RemoteThemeRenditionWorker.Source] {
         guard let variant else { return [] }
         var result: [RemoteThemeRenditionWorker.Source] = []
@@ -214,6 +225,11 @@ final class RemoteThemeAssets {
         }
         if let image = variant.material.backdrop?.image {
             append(slot: "backdrop", asset: image.asset, bound: 1_290, opacity: image.opacity)
+        }
+        // The new-chat screen's own picture, in its own slot: a theme may dress the welcome
+        // with art it would never put under the other grounds.
+        if let image = variant.welcome?.backdrop?.image {
+            append(slot: "welcome", asset: image.asset, bound: 1_290, opacity: image.opacity)
         }
         if let image = variant.sidebar?.background?.image {
             append(slot: "sidebarImage", asset: image.asset, bound: 1_290, opacity: image.opacity)

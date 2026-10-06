@@ -197,7 +197,8 @@ enum AppThemeLibrary {
     /// folder is copied under the new id; a contributed source's bytes are lifted out of its
     /// package registry and materialised into the store, with the document's asset names
     /// rewritten to the store's slot names — the copy has to own its images, or removing
-    /// the extension would strip the sidebar and the backdrop off a theme the user now owns.
+    /// the extension would strip the sidebar, the backdrop and the welcome off a theme the user
+    /// now owns.
     static func duplicate(_ source: AppTheme, name: String) throws -> AppTheme {
         guard !AppearanceActivationHost.shared.isChanging else { throw AppearanceActivationError.changeInProgress }
         var copy = try AppThemeEditing.duplicate(
@@ -267,6 +268,21 @@ enum AppThemeLibrary {
                     moments: materialised.moments,
                     words: materialised.words
                 )
+                variants[kind] = materialised
+            }
+
+            if var welcome = materialised.welcome, let layer = welcome.backdrop?.image {
+                guard let data = ExtensionAppearanceRegistry.shared.sidebarAssetData(
+                    named: layer.asset, forThemeID: source.id
+                ), let stored = ThemeAssetStore.store(
+                    imageData: data, for: copy.id, slot: .welcome, variant: kind
+                ) else {
+                    throw AppThemeEditingError.invalid(
+                        "The contributed theme’s welcome picture could not be copied."
+                    )
+                }
+                welcome.backdrop?.image?.asset = stored
+                materialised = materialised.replacingWelcome(welcome)
                 variants[kind] = materialised
             }
 

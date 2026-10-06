@@ -84,7 +84,8 @@ Debug worker tests cannot establish that count.
 
 Theme tuning has a fixed set of controls. Pointer updates assemble a validated variant and
 repaint it without asset/font inventory preparation; release persists one revision. Image
-legibility checks sample at most 20 images at 64×64 on a detached worker, never during layout.
+legibility checks sample at most 30 images at 64×64 on a detached worker, never during layout —
+two variants × three regions (material backdrop, sidebar, welcome) × a picture and four sprites.
 
 Extension Metal compilation now runs through asynchronous Metal APIs on a cache actor. A digest
 of the complete wrapped source coalesces identical preparation, with at most two compilations,
@@ -173,7 +174,9 @@ computed once replace them. Optimized (`swiftc -O`) synthetic replica of that wo
 exact `pow` 948.6 ms, table 269.9 ms, table + hoisted label **181.4 ms**. In the Debug test host
 the table is not faster (20 PNG pictures at 1,600×800 including decode: 3,176 ms table vs 2,865 ms
 exact) because unoptimized Swift array access dominates there; the stress test asserts both paths
-suggest the same opacity. Either way the work is off-main and runs only on create, update or a
+suggest the same opacity. The welcome block (2026-10-05) adds a third region, raising the cap from
+20 to 30 pictures; scaled linearly the optimized worst case is about 270 ms (not re-measured).
+Either way the work is off-main and runs only on create, update or a
 Tune release.
 
 ## One-year token prompt, 2026-10-03

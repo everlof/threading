@@ -140,6 +140,7 @@
 		5DA0B6D200EA4699B8F1B2EA /* MobileProjectDisclosureStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D8ECF66FF7246588661088B /* MobileProjectDisclosureStoreTests.swift */; };
 		CD019F448A9C4E009C2AC210 /* MobileProjectChatPreviewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD019F448A9C4E009C2AC211 /* MobileProjectChatPreviewTests.swift */; };
 		A71100010000000000000001 /* MobileThemeCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71100010000000000000002 /* MobileThemeCacheStoreTests.swift */; };
+		D3A0F1E1000000000000AA01 /* MobileDraftWelcomeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3A0F1E1000000000000AA02 /* MobileDraftWelcomeTests.swift */; };
 		A71200010000000000000001 /* MobileButtonHapticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71200010000000000000002 /* MobileButtonHapticsTests.swift */; };
 		A71300010000000000000001 /* MobileDashboardCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71300010000000000000002 /* MobileDashboardCacheStoreTests.swift */; };
 		A71400010000000000000001 /* RemoteNotificationPresentationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71400010000000000000002 /* RemoteNotificationPresentationPolicyTests.swift */; };
@@ -465,6 +466,7 @@
 		6D8ECF66FF7246588661088B /* MobileProjectDisclosureStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileProjectDisclosureStoreTests.swift; sourceTree = "<group>"; };
 		CD019F448A9C4E009C2AC211 /* MobileProjectChatPreviewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileProjectChatPreviewTests.swift; sourceTree = "<group>"; };
 		A71100010000000000000002 /* MobileThemeCacheStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileThemeCacheStoreTests.swift; sourceTree = "<group>"; };
+		D3A0F1E1000000000000AA02 /* MobileDraftWelcomeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileDraftWelcomeTests.swift; sourceTree = "<group>"; };
 		A71200010000000000000002 /* MobileButtonHapticsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileButtonHapticsTests.swift; sourceTree = "<group>"; };
 		A71300010000000000000002 /* MobileDashboardCacheStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileDashboardCacheStoreTests.swift; sourceTree = "<group>"; };
 		A71400010000000000000002 /* RemoteNotificationPresentationPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteNotificationPresentationPolicyTests.swift; sourceTree = "<group>"; };
@@ -526,6 +528,7 @@
 				ThreadingMobile/MobileConversationQuestionCard.swift,
 				ThreadingMobile/MobileDashboardCacheStore.swift,
 				ThreadingMobile/MobileDiagnosticsBridge.swift,
+				ThreadingMobile/MobileDraftWelcome.swift,
 				ThreadingMobile/MobileDraftChooser.swift,
 				ThreadingMobile/MobileFloatingScrollToEndButton.swift,
 				ThreadingMobile/MobileIdentityPicker.swift,
@@ -924,6 +927,7 @@
 				6D8ECF66FF7246588661088B /* MobileProjectDisclosureStoreTests.swift */,
 				CD019F448A9C4E009C2AC211 /* MobileProjectChatPreviewTests.swift */,
 				A71100010000000000000002 /* MobileThemeCacheStoreTests.swift */,
+				D3A0F1E1000000000000AA02 /* MobileDraftWelcomeTests.swift */,
 				A71200010000000000000002 /* MobileButtonHapticsTests.swift */,
 				D4F83001A8124C5BA937FE11 /* MobilePairingRecoveryTests.swift */,
 				A71300010000000000000002 /* MobileDashboardCacheStoreTests.swift */,
@@ -1851,6 +1855,7 @@
 				5DA0B6D200EA4699B8F1B2EA /* MobileProjectDisclosureStoreTests.swift in Sources */,
 				CD019F448A9C4E009C2AC210 /* MobileProjectChatPreviewTests.swift in Sources */,
 				A71100010000000000000001 /* MobileThemeCacheStoreTests.swift in Sources */,
+				D3A0F1E1000000000000AA01 /* MobileDraftWelcomeTests.swift in Sources */,
 				A71200010000000000000001 /* MobileButtonHapticsTests.swift in Sources */,
 				D4F83001A8124C5BA937FE10 /* MobilePairingRecoveryTests.swift in Sources */,
 				A71300010000000000000001 /* MobileDashboardCacheStoreTests.swift in Sources */,

@@ -3135,3 +3135,228 @@ The normal Release app was built with the existing development device profile an
 sandbox APNs environment, verified with codesign, installed in place on the owner's iPhone,
 and launched without demo or evidence arguments. Release excludes the DEBUG fixtures; the
 existing bundle identity preserves pairing and app data. Subsequent tests use the simulator.
+
+## 2026-10-05 — the welcome is the theme's
+
+The new-session composer (⌘N) was the one broad pane a theme could not reach. A theme could put
+a picture under the display panel and a mascot at the sidebar's foot, and the first thing a
+person saw on starting work was still the app's mark over the app's "Good evening" on the app's
+ground — in a Matrix theme as in a Beardie one. `AppTheme.Variant.welcome` (`ThemeWelcome`,
+symlinked into ThreadingDesignKit beside the variant) gives the pane to the theme without giving
+it the layout: the prompt still hangs from the pane's foot and the hero (mark over greeting,
+plus an optional caption) still floats centred above it. A theme designs *around* that, as the
+sidebar's mascot designs around the list. How the composer draws it is in `USER_GUIDE.md`; how
+an extension's `composer.backdrop@1` surface is told where the hero and the prompt sit is below
+and, in full, in the extension authoring docs.
+
+| Field | What it is | Absent means |
+|---|---|---|
+| `backdrop` | a `ThemeBackdrop` — gradient, picture, particles — filling the pane beneath the extension plane | the app's plain ground |
+| `mark`, `mark_size` | `app` / `logo` (the sidebar brand picture) / `mascot` (the sidebar mascot, in the window's mood) / `none`; 16–160 points | the app's mark at the app's size |
+| `greeting` | a pool of lines, optional `include_app_lines`, a text style | the app's own greeting, set the app's way |
+| `caption` | the same pool beneath it; the app has no caption of its own | no caption |
+| `scrim` | peak opacities of ground-coloured veils behind the hero and the prompt | no veils |
+
+### The words are the author's, the tokens are the host's
+
+A greeting is a *pool*, not a string: one eligible line is picked by weight on each arrival and
+re-picked when the theme changes. Lines are shown as written in every language — the
+`ThemeWords` rule — and every word a person reads to understand state stays the app's, which is
+why the manager brief and every control are outside the block. What the theme cannot know is
+the moment, so a line names it in `{token}`s the host fills when it is shown
+(`ThemeWelcome.Template`): `time`, `date`, `weekday`, `month`, `day`, `year` (formatted by this
+Mac's locale and calendar), `daypart` (the app's localized word), `project`, `user` (the given
+name), `working` and `waiting` (session counts), `days_until:MM-DD` (0 on the day itself; a
+`02-29` target waits for the next leap year rather than landing on 1 March), and `fact:KEY` — an
+extension's published value, below. `{{` and `}}` are
+literal braces. A line whose token has no value — `{project}` in a composer without one — is
+*ineligible* rather than rendered with a hole, and a line using a clock token is re-rendered on
+the minute while it shows. The tool description and the refusal both list the tokens from
+`Token.names` (`ThemeWelcomeText`), so neither can name one the parser refuses.
+
+A line may carry `when`: `dayparts`, `hours {from, to}` (inclusive, wrapping midnight when
+`from` is after `to`), `weekdays`, `dates [{from, to}]` (`MM-DD`, wrapping the new year) and
+`months`. Every stated facet must hold; any value within one does. `weight` (1–10) is relative
+to the other *eligible* lines, so a Christmas line of weight 10 dominates in late December and
+costs nothing in June. With `include_app_lines` the app's own greeting joins the greeting's pool
+as one more line of weight 1; a caption has no app lines, so the flag is ignored there. With no
+eligible line the greeting falls back to the app's and the caption is absent.
+
+`MonthDay(wireValue:)` was tightened while this landed: `split` drops empty pieces and `Int`
+accepts a sign, so `-12-24`, `12--24` and `+1-1` had parsed as dates nobody wrote. Each half is
+now one or two ASCII digits. A `{days_until}` with no day reports a bad argument rather than an
+unknown token, because the author spelled the name right.
+
+### Gates
+
+`AppThemeEditing` holds the block wherever a theme arrives — tools, Settings, a contributed
+package — with every range generated from `ThemeWelcomeLimits`:
+
+- at most 64 lines per pool, each 1–160 characters, parsing in the token grammar, weight 1–10;
+- hours 0–23, at most 12 date spans of real `MM-DD` days, months 1–12;
+- `mark_size` 16–160, `scale` 0.5–3, `font_family` a name of at most 128 characters, scrims
+  0–0.9;
+- **ink is text.** A stated greeting or caption ink must reach 3:1 against the ground the
+  welcome actually draws: each stop of its own gradient composited over the `ground` role, or
+  that ground when it states no gradient. The backdrop goes through the shared
+  `validate(_:prefix:subject:kind:label:ground:)` with the greeting's ink (or the label) as the
+  text it must keep. Scrims are not counted in the theme's favour — a gate that trusted a veil
+  would pass the greeting the veil misses. A picture's pixels cannot be measured here; it takes
+  the sampled advisory below.
+
+Two gates live at the tool edge rather than in the document, as the material's do: a stated
+`font_family` must be one `Design.Typography.availableFamilies` knows (a family the theme carries
+is registered for the process, so it is in that list), and an enum word is refused with the
+accepted list. A hand-edited document naming a family this Mac lacks is not refused; the
+composer falls back to the typeface, then the app's font.
+
+### The tools
+
+`variants.<kind>.welcome` and `remove_welcome` ride `create_app_theme` / `update_app_theme` in the
+merge-and-`remove_*` idiom, snake case on the wire: `backdrop` (exactly `material.backdrop`'s
+vocabulary, so `remove_gradient`, `remove_image`, a restyle without a `source`, and `remove`),
+`remove_backdrop`; `mark`, `mark_size`, `remove_mark` (which also returns the app's size);
+`greeting` and `caption` with `lines` (replacing the list), `include_app_lines`, `style` (merging
+field by field: `scale`, `weight`, `ink`, `font_family`, `typeface`) and `remove_style`;
+`remove_greeting`, `remove_caption`; `scrim {hero, prompt}` (each veil merging) and
+`remove_scrim`. Stating a field and its removal in one patch is refused. `get_app_theme` returns
+the block in the same shape, so it reads back into a patch unchanged, and
+`get_app_theme(section: "welcome")` documents every field. `AppThemeEditing.makeVariant` takes
+`welcome: BlockChange<ThemeWelcome> = .inherit`, so an update that recolours one role keeps the
+welcome — the trap `replacing` exists for. The welcome counts in the **character** layer of the
+create/update report.
+
+### The picture has a slot of its own
+
+`ThemeAssetSlot.welcome` stores `<variant>-welcome.png` at the material backdrop's 2,048 pixels
+and 8 MiB — a pane is a pane — but in its own file, because a theme may dress the welcome with art
+it would never put under the display panel. It follows `.backdrop` everywhere a backdrop picture
+is handled: the store's per-slot cap, the update path's snapshot and restore of a replaced file,
+`AppThemeLibrary.duplicate` materialising a contributed theme's bytes into the slot, deletion with
+the theme's folder, and `ExtensionBundleLoader` reading a package's `welcome.backdrop.image.asset`
+at inspection (a missing file fails the package). `ThemeImageLegibility` samples it as the
+`welcome.backdrop` region against the welcome's grounds and with the greeting's ink, which raises
+the advisory's ceiling from twenty to thirty 64 × 64 thumbnails per adaptive theme, still off the
+main actor. The phone projection carries the picture as its own `welcome` asset slot (1,290 px on
+the long side), fetched through the authenticated asset route — see "On the iPhone" below.
+
+### Where the hero and the prompt sit
+
+A theme's welcome is drawn around a layout it does not move, and so is an extension's: a Metal
+surface on `composer.backdrop@1` reads `uniforms.focus[0]`, the hero (mark, greeting and
+caption; all zeros while the hero is hidden), and `uniforms.focus[1]`, the prompt box. Each is
+`(x, y, width, height)` in the fragment's `uv` space — origin top-left, y down, 0–1 across the
+surface — with a width of 0 meaning no region; a region may extend past 0–1. Every other
+placement, and the phone's projection of a theme's surface, passes zeros. The layout constants
+live in `ExtensionMetalSource.UniformLayout` (the struct is 80 bytes, `focus` at offset 48), so
+the struct a shader compiles against and the floats a renderer uploads read the same numbers.
+The composer hands the plane its regions in the plane's own coordinates, and each mounted
+surface converts them to `uv` per frame.
+The SDK's wording and a worked shader are in
+[`AGENT_AUTHORING.md`](../extensions/AGENT_AUTHORING.md#beneath-the-display-panel-and-the-composer).
+
+### On the iPhone
+
+The phone's new-chat screen draws the same welcome without the layout moving either: the mark
+stands in the draft's glyph, the greeting and caption above its "Agent in Project" sentence,
+the welcome's ground behind it all and the scrims behind the hero and the composer. The grammar
+is shared rather than mirrored — `Template`, `Context`, `Condition`, `Line` and the weighted pick
+moved to ThreadingRemoteKit as `ThemeWelcomeGrammar`, and `ThemeWelcome` names them through
+nested typealiases, so the Mac's spelling and stored bytes did not change. The Mac projects the
+block resolved (`RemoteThemeWelcome`: inks as colours, only families it can use, the picture as
+the `welcome` asset) and the phone picks and renders lines on its own clock, calendar and locale,
+with its own Swedish-translated daypart words. Two differences are deliberate. The phone has no
+greeting of its own, so where the Mac falls back to `ComposerGreeting` — no eligible line, or the
+app's share of `include_app_lines` — the phone shows none. And `{user}` is the Mac owner's given
+name, sent to the owner's connection only; on a guest's phone those lines are ineligible. A clock
+line is re-rendered on the minute only while the screen is visible. The wire, its bounds and the
+name rule are in [Remote access](../REMOTE_ACCESS.md#the-themes-welcome-on-the-new-chat-screen-2026-10-05);
+the tests are `ThemeWelcomeGrammarTests` and `RemoteThemeWelcomeTests` (RemoteKit),
+`RemoteThemeWelcomeBridgeTests` (Mac) and `MobileDraftWelcomeTests` (phone).
+
+### In the preview
+
+`preview_app_theme` draws the welcome: beneath each appearance's window, a variant that states one
+(an empty block states nothing) gets a new-session band — the composer pane at the sample
+window's width, built from the composer's own components (`ThemeWelcomeGroundView`,
+`ThemeWelcomeScrimView`, `ThemeWelcomeMarkView` with a mascot held at its idle pose, the
+`welcomeGreeting`/`welcomeCaption` roles) around a real `PromptView` hanging from the foot. Its
+words go through `ComposerWelcome.pick` as an arrival's do, but from
+`AppThemePreviewService.WelcomeSample`: a fixed moment (Tuesday 10 March 2026, 09:41 UTC), a
+fixed seed and invented values — project "threading", user "Ada", 2 working, 1 waiting — so a
+theme previews the same words every time and the image names nothing of the user's. The tool's
+text quotes the greeting and caption drawn and the mark shown, so a `logo` that fell back to the
+app's mark says so. The band is drawn with the palette narrowed to its one variant, because type
+roles resolve against the application's appearance and would otherwise set an adaptive theme's
+dark greeting in its light style. With `frames: 3` the bands follow the windows at the same
+three drift phases. A theme without a welcome draws the same bytes it drew before the band
+existed.
+
+### Tokens an extension supplies
+
+`{fact:KEY}` (or `{fact:KEY@VERSION}`, version 1 when omitted) shows a value an installed
+extension publishes — this project's CI, its open reviews, the weather — through the facts channel
+the navigator already reads (`ExtensionHostClient.publishFacts`, `ExtensionFactRegistry`), not a
+second one. The grammar holds the key by the SDK's own type and rules (`ExtensionFactKey`: a
+lowercase contribution identifier of at most 128 bytes, a plain-digit version 1–1,000,000), so a
+theme is refused for a malformed key and never for an absent provider. `Context.facts` carries the
+values *already worded* by the host; a key missing there makes its line ineligible, as `{project}`
+without a project is. A dictionary rather than a lookup closure, because the registry is main-actor
+state and the context is not: the composer reads exactly the keys its lines name
+(`ThemeWelcomeGrammar.factKeys`, bounded by the pool's 64 × 160 characters) before it judges or
+renders them, and the grammar stays a pure function of its inputs.
+
+**Lookup.** `ThemeWelcomeFacts.fact` asks the navigator's resolver for the composer's project —
+exact project subject, then its repository branch, then its repository — and then the new
+`application` subject, where a value about no repository lives; a composer with no project reads
+the application alone. Host-owned project facts resolve exactly, so `{fact:project.branch}` reads
+the checkout's branch. The application subject was added to the SDK rather than borrowed: no
+existing subject named "nothing in particular", and pinning the weather to an arbitrary
+repository would have made it vanish in every other project. It is a provider domain like the
+repository subjects (`isFactProviderDomain`), carries no identity (`{"type":"application"}`), and
+keeps every existing bound — 32 facts per generation per subject, 128 resolved across providers,
+replacement semantics, removal with the generation. Navigator rows never read it. The composer
+reaches the resolver through `ThemeWelcomeFactSource.shared`, installed at the composition root
+beside the navigator's registry; Recovery Mode, held-back extensions and XCTest leave it empty.
+
+**Freshness and change.** No second policy: the registry already drops a provider value 15 minutes
+after `min(observedAt, receivedAt)` and posts `ExtensionFactsDidChange` for the expiry as for a
+publication. The composer observes that notice; when the change can move what the *picked* lines
+read — one of their keys, a `.all`, or a structural join key such as `project.branch` — it renders
+them again on the next main-queue turn (`ComposerWelcomeEnvironment.nextTurn`), once for a burst,
+and never re-picks: a line that became eligible waits for the next arrival, and a shown line whose
+value went falls back to the app's greeting (the caption leaves). Words that name no fact ignore
+every notice and read no fact. `followsClock` stays false for facts.
+
+**Wording.** The host words every value (`ThemeWelcomeFacts.text`): the fact's `label` when the
+provider states one (its own presentation, already through its localization table — the
+navigator's label facet), else a string as published, an integer or number in the locale (two
+decimals at most), a boolean as the catalogue's `yes`/`no` (Swedish `ja`/`nej`), and a date as a
+short time on the day and `d MMM` (plus the year in another year) otherwise — never relative,
+which would need the minute tick fact lines do not take. Every result is one line (runs of
+whitespace and control characters collapse to a space) capped at `maximumLength`, 64 characters,
+with an ellipsis: under half the 160-character line it sits in.
+
+**Elsewhere.** The phone states no facts, so a `{fact:…}` line is ineligible there; facts are not
+projected to it. The preview's sample has none either, so its band shows the next eligible line.
+
+### Left deliberately for later
+
+- Projecting fact values to the phone's new-chat screen.
+- A sample fact value in `preview_app_theme`, so a theme whose lines all read facts previews one.
+
+### Tests
+
+| What | Where |
+|---|---|
+| The grammar's tokens and refusals, doubled braces, the strict `MM-DD`, which tokens follow the clock, rendering from a fixed moment in two locales and a named zone, `days_until` on the day, past the day, across the clock change and to a leap day, `{project}` and `{user}` lines ineligible without a value, hour ranges and date spans wrapping, facets combining, the weighted pick under a seeded generator, the stored form's round trip and defaults, and a block this build cannot read dropping only what it spoils | `ThemeWelcomeTests` |
+| Create, get and update round-tripping the whole block from its own document, every refusal by field, the merge and every `remove_*`, an edit elsewhere keeping it, a refused update restoring the picture, a contributed package's picture through inspection into a duplicate, the advisory measuring with the greeting's ink, the character layer, and the schema's limits | `ThemeWelcomeToolTests` |
+| The focus regions: the compiled struct matching the Swift mirror, regions normalised into top-left `uv` and following the surface, a shader drawing exactly inside the prompt box, zero focus painting nothing, a surface mounted later still told, and no regions at other placements | `ExtensionSurfaceFocusTests` |
+| The preview's new-session band, light and dark: stacked under each window, the sample words picked deterministically past ineligible lines, every mark and its fallback and size, the veils, the drift at three phases, the tool's text quoting what was drawn, and a theme without a welcome (or with an empty one) previewing byte for byte as before | `AppThemePreviewWelcomeTests` |
+| `{fact:KEY}` in the shared grammar: keys by the SDK's rules and every refusal, the host's words filling it, ineligible without a value or with a blank one, the version as part of the key, no clock, the keys a line and a bounded pool name | `ThemeWelcomeGrammarTests` (RemoteKit) |
+| The application subject's wire shape, provider-domain admission, the per-subject bound and refusal of opaque subjects | `ExtensionFactContractTests`, `ExtensionFactPublicationContractTests` (ExtensionKit) |
+| The lookup order (project branch, repository, application; no project reads the application alone; a host project fact resolves), the shared subject's aggregate bound and generation lifetime, expiry at 15 minutes announced as a change, and the wording of strings, labels, numbers, booleans and dates with the 64-character cap | `ThemeWelcomeFactTests` |
+| An application fact through the authenticated publication route, refused on a subject its definition does not name, revoked with its generation | `ExtensionFactProviderHostTests` |
+| The composer rendering a fact line, re-rendering it in place on the next turn once per burst without re-picking, ignoring unrelated keys, following a branch move, falling back when the value goes, and asking for the composer's project | `ComposerWelcomeTests` |
+| The refusal naming `{fact:KEY}` and the key rule; a well-formed fact line accepted without a provider | `ThemeWelcomeToolTests` |
+| A `{fact:…}` line never shown on the phone, while the pool's other lines are | `MobileDraftWelcomeTests` |

@@ -66,15 +66,15 @@ final class ComposerGreetingTests: XCTestCase {
     // MARK: - Clock boundaries
 
     func testDaypartBoundaries() {
-        XCTAssertEqual(ComposerGreeting.Daypart.of(hour: 4), .lateNight)
+        XCTAssertEqual(ComposerGreeting.Daypart.of(hour: 4), .night)
         XCTAssertEqual(ComposerGreeting.Daypart.of(hour: 5), .morning)
         XCTAssertEqual(ComposerGreeting.Daypart.of(hour: 11), .morning)
         XCTAssertEqual(ComposerGreeting.Daypart.of(hour: 12), .afternoon)
         XCTAssertEqual(ComposerGreeting.Daypart.of(hour: 16), .afternoon)
         XCTAssertEqual(ComposerGreeting.Daypart.of(hour: 17), .evening)
         XCTAssertEqual(ComposerGreeting.Daypart.of(hour: 22), .evening)
-        XCTAssertEqual(ComposerGreeting.Daypart.of(hour: 23), .lateNight)
-        XCTAssertEqual(ComposerGreeting.Daypart.of(hour: 0), .lateNight)
+        XCTAssertEqual(ComposerGreeting.Daypart.of(hour: 23), .night)
+        XCTAssertEqual(ComposerGreeting.Daypart.of(hour: 0), .night)
     }
 
     // MARK: - Specials

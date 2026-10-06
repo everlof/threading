@@ -31,6 +31,51 @@ public enum ThemeLimitText {
     public static var defaultDriftDistance: String { number(ThemeGradientDrift.defaultDistance) }
 }
 
+/// The welcome grammar in the words its validator and tool description use, generated from
+/// the token list so the prose cannot name a token the parser refuses. Machine-facing English.
+public enum ThemeWelcomeText {
+    /// Every token as an author writes it: `{time}`, …, `{days_until:MM-DD}`, `{fact:KEY}`.
+    public static var tokens: String {
+        ThemeWelcome.Template.Token.names
+            .map { name in
+                switch name {
+                case "days_until": return "{days_until:MM-DD}"
+                case "fact": return "{fact:KEY}"
+                default: return "{\(name)}"
+                }
+            }
+            .joined(separator: ", ")
+    }
+
+    /// The sentence a refused line ends with.
+    public static var grammar: String {
+        "Tokens: \(tokens); write {{ and }} for literal braces."
+    }
+
+    public static func describe(_ error: ThemeWelcome.Template.ParseError) -> String {
+        switch error {
+        case .unknownToken(let token):
+            return "{\(token)} is not a token."
+        case .unterminatedToken:
+            return "a { opens a token that never closes."
+        case .strayClosingBrace:
+            return "a } closes no token."
+        case .badArgument(let token, let argument):
+            if token == "days_until" {
+                return argument.isEmpty
+                    ? "{days_until} needs a day, as {days_until:MM-DD}."
+                    : "{days_until:\(argument)} needs a day written MM-DD."
+            }
+            if token == "fact" {
+                return argument.isEmpty
+                    ? "{fact} needs a fact key, as {fact:KEY} or {fact:KEY@VERSION}."
+                    : "{fact:\(argument)} needs \(ThemeWelcome.Template.Token.factKeyRule)."
+            }
+            return "{\(token)} takes no argument, and was given \"\(argument)\"."
+        }
+    }
+}
+
 public enum AppThemeEditingError: LocalizedError {
     case invalid(String)
 
@@ -151,7 +196,8 @@ public enum AppThemeEditing {
     }
 
     /// The same three-way statement for the newer variant blocks — the sprite library, the
-    /// moments and the words — in one generic shape rather than a fourth, fifth and sixth enum.
+    /// moments, the words, the title morph and the welcome — in one generic shape rather than
+    /// an enum apiece.
     public enum BlockChange<Value> {
         case inherit
         case remove
@@ -179,7 +225,8 @@ public enum AppThemeEditing {
         sprites: BlockChange<[ThemeSprite]> = .inherit,
         moments: BlockChange<ThemeMoments> = .inherit,
         words: BlockChange<ThemeWords> = .inherit,
-        titleMorph: BlockChange<ThemeTitleMorph> = .inherit
+        titleMorph: BlockChange<ThemeTitleMorph> = .inherit,
+        welcome: BlockChange<ThemeWelcome> = .inherit
     ) -> AppTheme.Variant {
         let appearance = kind.appearance ?? NSAppearance.currentDrawing()
         let source = base.variant(kind)
@@ -206,7 +253,8 @@ public enum AppThemeEditing {
             sprites: sprites.applied(to: source?.sprites) ?? [],
             moments: moments.applied(to: source?.moments).flatMap { $0.isEmpty ? nil : $0 },
             words: words.applied(to: source?.words).flatMap { $0.isEmpty ? nil : $0 },
-            titleMorph: titleMorph.applied(to: source?.titleMorph)
+            titleMorph: titleMorph.applied(to: source?.titleMorph),
+            welcome: welcome.applied(to: source?.welcome)
         )
     }
 
@@ -692,6 +740,10 @@ public enum AppThemeEditing {
             try validate(transition, kind: kind)
         }
 
+        if let welcome = variant.welcome {
+            try validate(welcome, kind: kind, resolved: resolved, appearance: appearance)
+        }
+
         try validateCharacter(variant)
     }
 
@@ -800,6 +852,9 @@ public enum AppThemeEditing {
         }
         if let particles = variant.material.backdrop?.particles {
             blocks.append(("material.backdrop.particles", particles))
+        }
+        if let particles = variant.welcome?.backdrop?.particles {
+            blocks.append(("welcome.backdrop.particles", particles))
         }
         if let particles = variant.transition?.particles {
             blocks.append(("transition.particles", particles))
@@ -920,6 +975,181 @@ public enum AppThemeEditing {
                         + "\(ThemeWordsLimits.maximumUntitledSessionLength) characters."
                 )
             }
+        }
+    }
+
+    // MARK: - Welcome
+
+    /// The welcome's gates. The words are held to their grammar and bounds, not their meaning,
+    /// as `words` are. The greeting and caption are text, so a stated ink is held to the label
+    /// floor against the ground the welcome actually draws: its own gradient's stops composited
+    /// over the window ground, or that ground when it states no gradient. The backdrop faces
+    /// the gates every backdrop does, with the greeting's ink (or the label) as the text it
+    /// must keep. A picture's pixels cannot be measured here; it takes the sampled advisory
+    /// (`ThemeImageLegibility`) like every other theme picture. The scrims are not counted in
+    /// a theme's favour — a gate that trusted a veil would pass a greeting the veil misses.
+    nonisolated private static func validate(
+        _ welcome: ThemeWelcome,
+        kind: AppTheme.VariantKind,
+        resolved: AppTheme,
+        appearance: NSAppearance
+    ) throws {
+        if let size = welcome.markSize {
+            guard ThemeWelcomeLimits.markSides.contains(size) else {
+                throw AppThemeEditingError.invalid(
+                    "welcome.mark_size must be \(ThemeLimitText.span(ThemeWelcomeLimits.markSides)) points."
+                )
+            }
+        }
+        if let greeting = welcome.greeting {
+            try validate(greeting, prefix: "welcome.greeting")
+        }
+        if let caption = welcome.caption {
+            try validate(caption, prefix: "welcome.caption")
+        }
+        if let scrim = welcome.scrim {
+            for (field, value) in [("hero", scrim.hero), ("prompt", scrim.prompt)] {
+                guard let value else { continue }
+                guard ThemeWelcomeLimits.scrimOpacities.contains(value) else {
+                    throw AppThemeEditingError.invalid(
+                        "welcome.scrim.\(field) must be "
+                            + "\(ThemeLimitText.span(ThemeWelcomeLimits.scrimOpacities))."
+                    )
+                }
+            }
+        }
+
+        let ground = resolved.resolved(.ground, appearance: appearance)
+        let greetingInk = welcome.greeting?.style?.ink?.resolved(in: resolved, appearance: appearance)
+        let captionInk = welcome.caption?.style?.ink?.resolved(in: resolved, appearance: appearance)
+        let gradient = welcome.backdrop?.gradient
+
+        if let backdrop = welcome.backdrop {
+            try validate(
+                backdrop,
+                prefix: "welcome.backdrop",
+                subject: greetingInk == nil
+                    ? "text on the welcome gradient stop"
+                    : "welcome.greeting ink on the welcome gradient stop",
+                kind: kind,
+                label: greetingInk ?? resolved.resolved(.label, appearance: appearance),
+                ground: ground
+            )
+        }
+        // The greeting on a gradient was measured with the backdrop above; everything else a
+        // stated ink stands on is measured here.
+        for (field, ink) in [("greeting", greetingInk), ("caption", captionInk)] {
+            guard let ink else { continue }
+            if let gradient {
+                guard field != "greeting" else { continue }
+                try validate(
+                    ThemeBackdrop(gradient: gradient),
+                    prefix: "welcome.backdrop",
+                    subject: "welcome.\(field) ink on the welcome gradient stop",
+                    kind: kind,
+                    label: ink,
+                    ground: ground
+                )
+            } else {
+                let ratio = ThemeContrast.ratio(composite(ink, over: ground), ground)
+                guard ratio >= ThemeContrast.minimumRatio else {
+                    throw AppThemeEditingError.invalid(
+                        "\(kind.rawValue) welcome.\(field).style.ink \(ink.hexString) on the window "
+                            + "ground \(ground.hexString) has \(formatted(ratio)):1 contrast; "
+                            + "at least \(Int(ThemeContrast.minimumRatio)):1 is required."
+                    )
+                }
+            }
+        }
+    }
+
+    /// A greeting's or caption's lines and type: how many, how long, written in the token
+    /// grammar, weighted within bounds, and conditions a calendar can answer.
+    nonisolated private static func validate(
+        _ wording: ThemeWelcome.Wording,
+        prefix: String
+    ) throws {
+        guard wording.lines.count <= ThemeWelcomeLimits.maximumLines else {
+            throw AppThemeEditingError.invalid(
+                "\(prefix).lines holds at most \(ThemeWelcomeLimits.maximumLines) lines."
+            )
+        }
+        for (index, line) in wording.lines.enumerated() {
+            let field = "\(prefix).lines[\(index)]"
+            let clean = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !clean.isEmpty, line.text.count <= ThemeWelcomeLimits.maximumLineLength else {
+                throw AppThemeEditingError.invalid(
+                    "\(field).text is 1 to \(ThemeWelcomeLimits.maximumLineLength) characters."
+                )
+            }
+            do {
+                _ = try ThemeWelcome.Template.parse(line.text)
+            } catch let error as ThemeWelcome.Template.ParseError {
+                throw AppThemeEditingError.invalid(
+                    "\(field).text: \(ThemeWelcomeText.describe(error)) "
+                        + ThemeWelcomeText.grammar
+                )
+            }
+            guard ThemeWelcomeLimits.weights.contains(line.weight) else {
+                throw AppThemeEditingError.invalid(
+                    "\(field).weight must be \(ThemeLimitText.span(ThemeWelcomeLimits.weights))."
+                )
+            }
+            if let when = line.when {
+                try validate(when, prefix: "\(field).when")
+            }
+        }
+        if let style = wording.style {
+            if let scale = style.scale {
+                guard ThemeWelcomeLimits.greetingScales.contains(scale) else {
+                    throw AppThemeEditingError.invalid(
+                        "\(prefix).style.scale must be "
+                            + "\(ThemeLimitText.span(ThemeWelcomeLimits.greetingScales))."
+                    )
+                }
+            }
+            if let family = style.fontFamily {
+                let clean = family.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !clean.isEmpty,
+                      clean.count <= ThemeWelcomeLimits.maximumFontFamilyLength,
+                      !clean.contains(where: \.isNewline) else {
+                    throw AppThemeEditingError.invalid(
+                        "\(prefix).style.font_family is a family name of 1 to "
+                            + "\(ThemeWelcomeLimits.maximumFontFamilyLength) characters."
+                    )
+                }
+            }
+        }
+    }
+
+    nonisolated private static func validate(
+        _ condition: ThemeWelcome.Condition,
+        prefix: String
+    ) throws {
+        if let hours = condition.hours, !hours.isValid {
+            throw AppThemeEditingError.invalid(
+                "\(prefix).hours from and to must each be "
+                    + "\(ThemeLimitText.span(ThemeWelcomeLimits.hours))."
+            )
+        }
+        guard condition.dates.count <= ThemeWelcomeLimits.maximumDateSpans else {
+            throw AppThemeEditingError.invalid(
+                "\(prefix).dates holds at most \(ThemeWelcomeLimits.maximumDateSpans) spans."
+            )
+        }
+        for span in condition.dates {
+            // Built in code a day is unchecked; a document only ever decodes real ones.
+            guard ThemeWelcome.MonthDay(wireValue: span.from.wireValue) != nil,
+                  ThemeWelcome.MonthDay(wireValue: span.to.wireValue) != nil else {
+                throw AppThemeEditingError.invalid(
+                    "\(prefix).dates are MM-DD days of the year, from and to."
+                )
+            }
+        }
+        guard condition.months.allSatisfy(ThemeWelcomeLimits.months.contains) else {
+            throw AppThemeEditingError.invalid(
+                "\(prefix).months must each be \(ThemeLimitText.span(ThemeWelcomeLimits.months))."
+            )
         }
     }
 

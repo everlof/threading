@@ -90,7 +90,9 @@ public extension ExtensionComponentID {
     static let displayBackdrop: Self = "display.backdrop"
 
     /// The ground beneath the new-session composer's own content — its greeting, chips, prompt
-    /// box and actions — with the same contract as the sidebar backdrop.
+    /// box and actions — with the same contract as the sidebar backdrop. The one placement that
+    /// states focus regions: a Metal surface reads the hero as `uniforms.focus[0]` and the prompt
+    /// box as `uniforms.focus[1]` (`ExtensionMetalSource.FocusRegion`).
     static let composerBackdrop: Self = "composer.backdrop"
 
     /// The floating corner card over the selected session's content pane.

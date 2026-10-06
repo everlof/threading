@@ -95,6 +95,9 @@ final class MobileOptionalThemeRenderingTests: XCTestCase {
         defaults.set(false, forKey: keys[0])
         surface.configure(theme: theme, workingCount: 3, texture: nil)
         XCTAssertEqual(Array(surface.inputUniformsForTesting.prefix(2)), [0.7, 0.3])
+        // The phone binds the whole shared struct, and states no focus regions in it.
+        XCTAssertEqual(surface.uniformByteCountForTesting, ExtensionMetalSource.UniformLayout.byteCount)
+        XCTAssertEqual(surface.focusUniformsForTesting, [Float](repeating: 0, count: 8))
 
         defaults.set(true, forKey: keys[0])
         defaults.set(100, forKey: keys[1])

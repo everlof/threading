@@ -10,9 +10,10 @@ public enum ExtensionFactProviderLimits {
 }
 
 public extension ExtensionFactSubjectKind {
-    /// Subjects a provider may name without learning Threading's opaque entity identifiers.
+    /// Subjects a provider may name without learning Threading's opaque entity identifiers:
+    /// a canonical repository or repository branch, or the application itself.
     var isFactProviderDomain: Bool {
-        self == .repository || self == .repositoryBranch
+        self == .repository || self == .repositoryBranch || self == .application
     }
 }
 
@@ -39,7 +40,7 @@ public extension ExtensionFactDefinition {
         for kind in subjectKinds where !kind.isFactProviderDomain {
             issues.append(.init(
                 path: "\(path).subjectKinds",
-                message: "may contain only repository and repositoryBranch"
+                message: "may contain only repository, repositoryBranch, and application"
             ))
             break
         }
@@ -107,7 +108,7 @@ public struct ExtensionFactPublication: Codable, Equatable, Sendable {
             if !subject.kind.isFactProviderDomain {
                 issues.append(.init(
                     path: path,
-                    message: "must be a repository or repositoryBranch subject"
+                    message: "must be a repository, repositoryBranch, or application subject"
                 ))
             }
             if !replacementSet.insert(subject).inserted {
@@ -131,7 +132,7 @@ public struct ExtensionFactPublication: Codable, Equatable, Sendable {
             if !fact.subject.kind.isFactProviderDomain {
                 issues.append(.init(
                     path: "\(path).subject",
-                    message: "must be a repository or repositoryBranch subject"
+                    message: "must be a repository, repositoryBranch, or application subject"
                 ))
             }
             if ExtensionHostFactKey.isReserved(fact.key) {
