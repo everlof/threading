@@ -18,17 +18,26 @@ final class UserMessageBubbleView: NSView {
         label.wantsLayer = true
         return label
     }()
-    private lazy var toggleButton = ThemedButton(
-        title: L10n.string("Show full message"),
-        target: self,
-        action: #selector(toggleExpansion)
-    )
+    private lazy var toggleButton: ThemedButton = {
+        let button = ThemedButton()
+        button.title = L10n.string("Show full message")
+#if os(Linux)
+        button.action = { [weak self] in self?.toggleExpansion() }
+#else
+        button.target = self
+        button.action = #selector(toggleExpansion)
+#endif
+        return button
+    }()
     private lazy var copyButton: ThemedButton = {
-        let button = ThemedButton(
-            title: L10n.string("Copy"),
-            target: self,
-            action: #selector(copyMessage)
-        )
+        let button = ThemedButton()
+        button.title = L10n.string("Copy")
+#if os(Linux)
+        button.action = { [weak self] in self?.copyMessage() }
+#else
+        button.target = self
+        button.action = #selector(copyMessage)
+#endif
         button.toolTip = L10n.string("Copy the whole message")
         return button
     }()
@@ -148,12 +157,18 @@ final class UserMessageBubbleView: NSView {
         if notifying { onExpansionChanged?(isExpanded) }
     }
 
-    @objc private func toggleExpansion() {
+#if canImport(ObjectiveC)
+    @objc
+#endif
+    private func toggleExpansion() {
         setExpanded(!isExpanded)
     }
 
     /// The whole message, not the visible prefix.
-    @objc private func copyMessage() {
+#if canImport(ObjectiveC)
+    @objc
+#endif
+    private func copyMessage() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
