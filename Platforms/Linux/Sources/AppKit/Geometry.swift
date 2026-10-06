@@ -54,6 +54,20 @@ public struct CGAffineTransform: Equatable, Sendable {
     public func apply(to point: NSPoint) -> NSPoint {
         NSPoint(x: a * point.x + c * point.y + tx, y: b * point.x + d * point.y + ty)
     }
+
+    /// CoreGraphics returns the transform unchanged when it cannot be inverted.
+    public func inverted() -> CGAffineTransform {
+        let determinant = a * d - b * c
+        guard determinant != 0 else { return self }
+        return CGAffineTransform(a: d / determinant, b: -b / determinant,
+                                 c: -c / determinant, d: a / determinant,
+                                 tx: (c * ty - d * tx) / determinant,
+                                 ty: (b * tx - a * ty) / determinant)
+    }
+}
+
+extension CGPoint {
+    public func applying(_ transform: CGAffineTransform) -> CGPoint { transform.apply(to: self) }
 }
 
 public func NSMakeRect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> NSRect {

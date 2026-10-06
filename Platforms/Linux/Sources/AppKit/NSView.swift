@@ -567,6 +567,15 @@ open class NSView: NSResponder, NSLayoutItem {
             // clip in the saved graphics state so descendants inherit it and siblings do not.
             NSBezierPath(rect: bounds).addClip()
 
+            // A backing layer's mask covers the view's whole drawing, children included, so the
+            // group opens before any of it and closes after the last subview.
+            let mask = layer?.mask
+            if let mask {
+                precondition(mask.sublayers.isEmpty, "a mask with sublayers is not composited")
+                context.beginMaskedGroup()
+            }
+            let deviceToLayer = mask.map { _ in context.transform.inverted() }
+
             layout()
             if let background = layer?.backgroundColor {
                 background.setFill()
@@ -588,6 +597,18 @@ open class NSView: NSResponder, NSLayoutItem {
             }
             draw(bounds)
             for subview in subviews { subview.render(in: context) }
+            if let mask, let deviceToLayer {
+                context.endMaskedGroup { x, y in
+                    let point = CGPoint(x: x, y: y).applying(deviceToLayer)
+                    let frame = mask.frame
+                    guard frame.width > 0, frame.height > 0, frame.contains(point) else { return 0 }
+                    if let gradient = mask as? CAGradientLayer {
+                        return gradient.alpha(atUnit: CGPoint(x: (point.x - frame.minX) / frame.width,
+                                                              y: (point.y - frame.minY) / frame.height))
+                    }
+                    return mask.backgroundColor?.alphaComponent ?? 0
+                }
+            }
         }
     }
 

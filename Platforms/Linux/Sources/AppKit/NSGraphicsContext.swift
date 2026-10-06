@@ -392,7 +392,14 @@ public final class NSGraphicsContext {
         stack.append(local)
     }
 
-    fileprivate func endTransparencyLayer() {
+    /// A masked view's drawing is isolated like a transparency group, then rejoins its parent
+    /// with each device pixel's opacity scaled by `alpha(x, y)`, given that pixel's centre.
+    func beginMaskedGroup() { beginTransparencyLayer() }
+    func endMaskedGroup(alpha: (CGFloat, CGFloat) -> CGFloat) {
+        withoutActuallyEscaping(alpha) { endTransparencyLayer(mask: $0) }
+    }
+
+    fileprivate func endTransparencyLayer(mask: ((CGFloat, CGFloat) -> CGFloat)? = nil) {
         guard let layer = layers.popLast() else {
             preconditionFailure("endTransparencyLayer without a matching begin")
         }
@@ -406,7 +413,10 @@ public final class NSGraphicsContext {
             for y in 0..<min(side, bitmap.height - originY) {
                 for x in 0..<min(side, bitmap.width - originX) {
                     let offset = (y * side + x) * 4
-                    let opacity = CGFloat(tile.pixels[offset + 3]) / 255
+                    var opacity = CGFloat(tile.pixels[offset + 3]) / 255
+                    if let mask, opacity > 0 {
+                        opacity *= min(1, max(0, mask(CGFloat(originX + x) + 0.5, CGFloat(originY + y) + 0.5)))
+                    }
                     guard opacity > 0 else { continue }
                     composite(x: originX + x, y: originY + y,
                         color: (CGFloat(tile.pixels[offset]) / 255,

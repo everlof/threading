@@ -5593,3 +5593,39 @@ Verification on 2026-10-06: the pane-header, page-title and subagent-row fixture
 macOS AppKit. On Linux the focused sweep from §172 passes again, including all four repaired
 fixtures, the layout Harness and the `WindowHarness` row-layout and app-event modes. The
 installed suite was not rerun for this isolation-only change.
+
+## 177. Backing-layer masks composite in the shim
+
+The production long user-message bubble fades its last lines through a `CAGradientLayer` set as
+its label's backing-layer mask. The shim had no gradient layer and no `CALayer.mask`. Storing a
+mask without drawing it would show a full-strength collapsed message: the request accepted and
+something different drawn, which these findings refuse elsewhere (§164).
+
+A view whose backing layer has a mask now renders as an isolated group: its own fill, drawing
+and every subview. Before the group rejoins its parent, under the parent's clip and opacity,
+each device pixel's opacity is scaled by the mask's alpha at that pixel's centre. A pixel maps
+back through the view's own transform into layer coordinates, so unit y = 0 is the top of a
+flipped view and the bottom of an unflipped one. That matches the production fade's own note
+that y = 0 is the first line of its flipped label. The fade is not compared with macOS here.
+AppKit's offscreen caching does not composite layer masks, so no capture was taken.
+
+Two kinds of mask are supported:
+
+- **Axial `CAGradientLayer`:** interpolates its colours' alpha along `startPoint`→`endPoint`,
+  with stated or evenly spaced `locations`.
+- **Plain layer:** contributes its background alpha.
+
+Outside the mask's frame everything is cleared, and a mask with sublayers is refused rather
+than approximated. The group reuses the existing bounded transparency-layer tiles, so a masked
+label allocates only the tiles it touches, within the same pixel cap. Unmasked views take no
+new work beyond a nil check.
+
+The clipping fixture checks the production fade in both orientations, against pixels:
+
+- opaque ink at its start, 70% at the midpoint of its last quarter, and 10% just before its end;
+- a subview faded with its parent, and view alpha applied on top;
+- nothing drawn outside the mask frame;
+- a half-alpha plain mask, and full ink restored after removal.
+
+Verification on 2026-10-06: the fixture passes on Ubuntu arm64, and so does the complete focused
+sweep from §172. The production bubble is not linked yet; that is the next step.

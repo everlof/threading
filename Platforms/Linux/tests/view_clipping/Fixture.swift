@@ -142,6 +142,68 @@ private func checkLayerBackgrounds(flipped: Bool) {
     expect(detached, 5, 5, flipped: flipped, equal: [255, 255, 255, 255], "removed backing layer still painted")
 }
 
+@MainActor
+private func expectNear(_ bitmap: Bitmap, _ x: Int, _ y: Int, flipped: Bool,
+                        _ expected: [Int], _ reason: String) {
+    let actual = pixel(bitmap, x, y, flipped: flipped).map(Int.init)
+    precondition(zip(actual, expected).allSatisfy { abs($0 - $1) <= 1 },
+                 "\(reason) at (\(x), \(y)): \(actual) != \(expected)")
+}
+
+/// The production long-message fade: opaque, then the last quarter falling to clear, along unit
+/// y from 0 to 1. Unit y = 0 is the view's top when it is flipped and its bottom otherwise.
+@MainActor
+private func checkGradientMasks(flipped: Bool) {
+    let root = PaintedView(frame: NSRect(x: 0, y: 0, width: 24, height: 24), flipped: flipped)
+    let masked = PaintedView(frame: NSRect(x: 2, y: 2, width: 20, height: 20), ink: .black, flipped: flipped)
+    let child = PaintedView(frame: NSRect(x: 12, y: 0, width: 8, height: 20),
+                            ink: NSColor(red: 0, green: 0, blue: 1, alpha: 1), flipped: flipped)
+    masked.addSubview(child)
+    root.addSubview(masked)
+    masked.wantsLayer = true
+    let fade = CAGradientLayer()
+    fade.colors = [NSColor.white.cgColor, NSColor.white.cgColor, NSColor.clear.cgColor]
+    fade.locations = [0, 0.75, 1]
+    fade.frame = masked.bounds
+    masked.layer?.mask = fade
+
+    func render() -> Bitmap {
+        let bitmap = Bitmap(width: 24, height: 24, background: (1, 1, 1, 1))
+        root.render(in: NSGraphicsContext(bitmap: bitmap, scale: 1))
+        return bitmap
+    }
+    // Root coordinates grow downward when flipped, so unit y = 0 is at root y 2 either way
+    // for the flipped view, and at root y 2 from the bottom for the unflipped one.
+    var bitmap = render()
+    expect(bitmap, 6, 3, flipped: flipped, equal: [0, 0, 0, 255], "opaque mask start lost ink")
+    expectNear(bitmap, 6, 18, flipped: flipped, [77, 77, 77, 255], "fade midpoint")
+    expectNear(bitmap, 6, 21, flipped: flipped, [230, 230, 230, 255], "fade end")
+    expectNear(bitmap, 16, 18, flipped: flipped, [77, 77, 255, 255], "mask skipped a subview")
+    expect(bitmap, 1, 1, flipped: flipped, equal: [255, 255, 255, 255], "masked view escaped its frame")
+
+    masked.alphaValue = 0.5
+    bitmap = render()
+    expectNear(bitmap, 6, 3, flipped: flipped, [128, 128, 128, 255], "mask ignored view alpha")
+    masked.alphaValue = 1
+
+    fade.frame = NSRect(x: 0, y: 0, width: 10, height: 20)
+    bitmap = render()
+    expect(bitmap, 16, 3, flipped: flipped, equal: [255, 255, 255, 255],
+           "content outside the mask frame was drawn")
+    expect(bitmap, 6, 3, flipped: flipped, equal: [0, 0, 0, 255], "mask frame lost its interior")
+
+    let plain = CALayer()
+    plain.frame = masked.bounds
+    plain.backgroundColor = NSColor(white: 0, alpha: 0.5).cgColor
+    masked.layer?.mask = plain
+    bitmap = render()
+    expectNear(bitmap, 6, 10, flipped: flipped, [128, 128, 128, 255], "plain mask alpha")
+
+    masked.layer?.mask = nil
+    bitmap = render()
+    expect(bitmap, 6, 21, flipped: flipped, equal: [0, 0, 0, 255], "removed mask still faded")
+}
+
 @main
 private struct ViewClippingFixture {
     @MainActor static func main() {
@@ -152,7 +214,9 @@ private struct ViewClippingFixture {
         checkSubviewOrdering()
         checkLayerBackgrounds(flipped: false)
         checkLayerBackgrounds(flipped: true)
+        checkGradientMasks(flipped: false)
+        checkGradientMasks(flipped: true)
         checkScrollViewport()
-        print("PASS view bounds, clipping, ordering, and scroll viewport geometry, rendering and wheel routing")
+        print("PASS view bounds, clipping, ordering, layer masks, and scroll viewport geometry, rendering and wheel routing")
     }
 }
