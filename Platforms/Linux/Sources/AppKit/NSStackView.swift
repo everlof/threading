@@ -12,7 +12,7 @@ public enum NSUserInterfaceLayoutOrientation: Sendable {
 open class NSStackView: NSView {
 
     public enum Distribution: Sendable {
-        case fill, fillEqually
+        case gravityAreas, fill, fillEqually
     }
 
     public enum Gravity: Hashable, Sendable {
@@ -34,7 +34,7 @@ open class NSStackView: NSView {
     open var alignment: NSLayoutConstraint.Attribute = .centerY {
         didSet { rebuildArrangement() }
     }
-    open var distribution: Distribution = .fill {
+    open var distribution: Distribution = .gravityAreas {
         didSet { rebuildArrangement() }
     }
     open var spacing: CGFloat = 8 {
@@ -48,6 +48,8 @@ open class NSStackView: NSView {
     }
 
     private var customSpacings: [ObjectIdentifier: CGFloat] = [:]
+    private var huggingPriorities: [LayoutConstraintOrientation: NSLayoutConstraint.Priority] = [:]
+    private var clippingResistancePriorities: [LayoutConstraintOrientation: NSLayoutConstraint.Priority] = [:]
     private var arrangementConstraints: [NSLayoutConstraint] = []
     // The mounted Design components place one gravity area in each stack. A second area needs
     // separate edge/centre layout equations, which this small solver does not yet provide.
@@ -156,6 +158,30 @@ open class NSStackView: NSView {
         view.translatesAutoresizingMaskIntoConstraints = false
     }
 
+    /// How strongly the stack keeps itself no larger than its arranged views along an axis. These
+    /// are the stack's own edge equations, distinct from a leaf view's content hugging.
+    open func huggingPriority(for orientation: LayoutConstraintOrientation) -> NSLayoutConstraint.Priority {
+        huggingPriorities[orientation] ?? .defaultLow
+    }
+
+    open func setHuggingPriority(_ priority: NSLayoutConstraint.Priority,
+                                 for orientation: LayoutConstraintOrientation) {
+        huggingPriorities[orientation] = priority
+        rebuildArrangement()
+    }
+
+    /// How strongly the stack refuses to become smaller than its arranged views along an axis.
+    open func clippingResistancePriority(for orientation: LayoutConstraintOrientation)
+        -> NSLayoutConstraint.Priority {
+        clippingResistancePriorities[orientation] ?? .required
+    }
+
+    open func setClippingResistancePriority(_ priority: NSLayoutConstraint.Priority,
+                                            for orientation: LayoutConstraintOrientation) {
+        clippingResistancePriorities[orientation] = priority
+        rebuildArrangement()
+    }
+
     open func setCustomSpacing(_ spacing: CGFloat, after view: NSView) {
         precondition(arrangedSubviews.contains(where: { $0 === view }), "view is not arranged in this stack")
         let key = ObjectIdentifier(view)
@@ -183,6 +209,18 @@ open class NSStackView: NSView {
         removeArrangedSubview(view)
     }
 
+    // These follow the equations AppKit installs, read from its constraint identifiers on
+    // macOS 26.5 (`NSStackView.Edge`, `.Edge.Min`, `.Stack`, `.Align`, `.EqualSizing`). What
+    // matters is the priorities: a top-gravity list leaves spare height below its rows only
+    // because a nested stack, hugging each of its children at 250, costs more to stretch than
+    // the list's single 250 trailing hug. AppKit additionally softens the leading edge (750)
+    // and spacing (749.99) behind required inequalities; those two extra rows per view more
+    // than doubled the solve on the Linux document page and no mounted view relies on them
+    // yielding, so here they stay required equalities, as before.
+    private enum Defaults {
+        static let alignment = NSLayoutConstraint.Priority(260)
+    }
+
     private func rebuildArrangement() {
         NSLayoutConstraint.deactivate(arrangementConstraints)
         arrangementConstraints.removeAll(keepingCapacity: true)
@@ -193,60 +231,23 @@ open class NSStackView: NSView {
             return
         }
 
-        switch orientation {
-        case .horizontal:
-            arrangementConstraints.append(
-                visible[0].leadingAnchor.constraint(equalTo: leadingAnchor, constant: edgeInsets.left)
-            )
-            for (first, second) in zip(visible, visible.dropFirst()) {
-                arrangementConstraints.append(second.leadingAnchor.constraint(
-                    equalTo: first.trailingAnchor,
-                    constant: customSpacings[ObjectIdentifier(first)] ?? spacing
-                ))
-            }
-            let last = visible[visible.count - 1]
-            let trailingLimit = last.trailingAnchor.constraint(
-                lessThanOrEqualTo: trailingAnchor, constant: -edgeInsets.right)
-            let trailingFill = last.trailingAnchor.constraint(
-                equalTo: trailingAnchor, constant: -edgeInsets.right)
-            // An un-sized spring absorbs spare width, while fixed/intrinsic children stay at
-            // the leading edge. AppKit's fill distribution does not stretch a fixed child just
-            // because the stack has extra room.
-            trailingFill.priority = .defaultLow
-            arrangementConstraints.append(contentsOf: [trailingLimit, trailingFill])
-            for view in visible { constrainHorizontalCrossAxis(view, baselineView: visible[0]) }
-            if distribution == .fillEqually {
-                for view in visible.dropFirst() {
-                    arrangementConstraints.append(view.widthAnchor.constraint(equalTo: visible[0].widthAnchor))
-                }
-            }
-
-        case .vertical:
-            arrangementConstraints.append(
-                visible[0].topAnchor.constraint(equalTo: topAnchor, constant: edgeInsets.top)
-            )
-            for (first, second) in zip(visible, visible.dropFirst()) {
-                arrangementConstraints.append(second.topAnchor.constraint(
-                    equalTo: first.bottomAnchor,
-                    constant: customSpacings[ObjectIdentifier(first)] ?? spacing
-                ))
-            }
-            let last = visible[visible.count - 1]
-            let bottomLimit = last.bottomAnchor.constraint(
-                lessThanOrEqualTo: bottomAnchor, constant: -edgeInsets.bottom)
-            // A top-gravity list keeps its authored rows at their fitting heights and leaves
-            // unused height below. When the stack is centered without a fixed height, this
-            // weak equality closes its content chain so the solver can find its natural height.
-            arrangementConstraints.append(bottomLimit)
-            let bottomFill = last.bottomAnchor.constraint(
-                equalTo: bottomAnchor, constant: -edgeInsets.bottom)
-            bottomFill.priority = .fittingSizeCompression
-            arrangementConstraints.append(bottomFill)
-            for view in visible { constrainVerticalCrossAxis(view) }
-            if distribution == .fillEqually {
-                for view in visible.dropFirst() {
-                    arrangementConstraints.append(view.heightAnchor.constraint(equalTo: visible[0].heightAnchor))
-                }
+        if orientation == .horizontal {
+            arrangeAlongAxis(visible, axis: .horizontal, leadingInset: edgeInsets.left,
+                             trailingInset: edgeInsets.right,
+                             leading: { $0.leadingAnchor }, trailing: { $0.trailingAnchor })
+            for view in visible { arrangeVerticalCrossAxis(view, baselineView: visible[0]) }
+        } else {
+            arrangeAlongAxis(visible, axis: .vertical, leadingInset: edgeInsets.top,
+                             trailingInset: edgeInsets.bottom,
+                             leading: { $0.topAnchor }, trailing: { $0.bottomAnchor })
+            for view in visible { arrangeHorizontalCrossAxis(view) }
+        }
+        if distribution == .fillEqually {
+            for view in visible.dropFirst() {
+                let equal = orientation == .horizontal
+                    ? view.widthAnchor.constraint(equalTo: visible[0].widthAnchor)
+                    : view.heightAnchor.constraint(equalTo: visible[0].heightAnchor)
+                append(equal, Defaults.alignment)
             }
         }
 
@@ -254,43 +255,94 @@ open class NSStackView: NSView {
         setNeedsLayout()
     }
 
-    private func constrainHorizontalCrossAxis(_ view: NSView, baselineView: NSView) {
-        switch alignment {
-        case .top:
-            arrangementConstraints.append(view.topAnchor.constraint(equalTo: topAnchor, constant: edgeInsets.top))
-        case .bottom:
-            arrangementConstraints.append(view.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -edgeInsets.bottom))
-        case .firstBaseline:
-            if baselineView !== view {
-                arrangementConstraints.append(view.firstBaselineAnchor.constraint(equalTo: baselineView.firstBaselineAnchor))
-            }
-        case .lastBaseline:
-            if baselineView !== view {
-                arrangementConstraints.append(view.lastBaselineAnchor.constraint(equalTo: baselineView.lastBaselineAnchor))
-            }
-        default:
-            arrangementConstraints.append(view.centerYAnchor.constraint(equalTo: centerYAnchor))
+    /// Views sit at the leading inset and their spacing. Gravity areas hug the trailing edge
+    /// only at the stack's hugging priority, so spare room collects after the last view; fill
+    /// distributions make that edge required as well.
+    private func arrangeAlongAxis<Anchor>(
+        _ visible: [NSView], axis: LayoutConstraintOrientation,
+        leadingInset: CGFloat, trailingInset: CGFloat,
+        leading: (NSView) -> NSLayoutAnchor<Anchor>, trailing: (NSView) -> NSLayoutAnchor<Anchor>
+    ) {
+        let first = visible[0]
+        let last = visible[visible.count - 1]
+        arrangementConstraints.append(leading(first).constraint(equalTo: leading(self), constant: leadingInset))
+        for (previous, next) in zip(visible, visible.dropFirst()) {
+            arrangementConstraints.append(leading(next).constraint(
+                equalTo: trailing(previous),
+                constant: customSpacings[ObjectIdentifier(previous)] ?? spacing))
         }
-        let top = view.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: edgeInsets.top)
-        let bottom = view.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -edgeInsets.bottom)
-        top.priority = .defaultHigh
-        bottom.priority = .defaultHigh
-        arrangementConstraints.append(contentsOf: [top, bottom])
+        let trailingEdge = trailing(last).constraint(equalTo: trailing(self), constant: -trailingInset)
+        if distribution == .gravityAreas {
+            append(trailing(last).constraint(lessThanOrEqualTo: trailing(self), constant: -trailingInset),
+                   clippingResistancePriority(for: axis))
+            append(trailingEdge, huggingPriority(for: axis))
+        } else {
+            arrangementConstraints.append(trailingEdge)
+        }
     }
 
-    private func constrainVerticalCrossAxis(_ view: NSView) {
+    /// Across a horizontal stack each view stays inside the stack, hugs both inset edges at the
+    /// stack's vertical hugging priority, and states its alignment just above that hug. An
+    /// alignment that pins an edge replaces that edge's hug: the same equation, stated stronger.
+    private func arrangeVerticalCrossAxis(_ view: NSView, baselineView: NSView) {
+        let hug = huggingPriority(for: .vertical)
+        let clipping = clippingResistancePriority(for: .vertical)
+        append(view.topAnchor.constraint(greaterThanOrEqualTo: topAnchor), clipping)
+        append(view.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor), clipping)
+        let top = view.topAnchor.constraint(equalTo: topAnchor, constant: edgeInsets.top)
+        let bottom = view.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -edgeInsets.bottom)
+        switch alignment {
+        case .top:
+            append(top, Defaults.alignment)
+            append(bottom, hug)
+        case .bottom:
+            append(top, hug)
+            append(bottom, Defaults.alignment)
+        case .height:
+            append(top, Defaults.alignment)
+            append(bottom, Defaults.alignment)
+        case .firstBaseline, .lastBaseline:
+            append(top, hug)
+            append(bottom, hug)
+            if baselineView !== view {
+                let baseline = alignment == .firstBaseline
+                    ? view.firstBaselineAnchor.constraint(equalTo: baselineView.firstBaselineAnchor)
+                    : view.lastBaselineAnchor.constraint(equalTo: baselineView.lastBaselineAnchor)
+                append(baseline, Defaults.alignment)
+            }
+        default:
+            append(top, hug)
+            append(bottom, hug)
+            append(view.centerYAnchor.constraint(equalTo: centerYAnchor), Defaults.alignment)
+        }
+    }
+
+    private func arrangeHorizontalCrossAxis(_ view: NSView) {
+        let hug = huggingPriority(for: .horizontal)
+        let clipping = clippingResistancePriority(for: .horizontal)
+        append(view.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor), clipping)
+        append(view.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor), clipping)
+        let leading = view.leadingAnchor.constraint(equalTo: leadingAnchor, constant: edgeInsets.left)
+        let trailing = view.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -edgeInsets.right)
         switch alignment {
         case .leading, .left:
-            arrangementConstraints.append(view.leadingAnchor.constraint(equalTo: leadingAnchor, constant: edgeInsets.left))
+            append(leading, Defaults.alignment)
+            append(trailing, hug)
         case .trailing, .right:
-            arrangementConstraints.append(view.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -edgeInsets.right))
+            append(leading, hug)
+            append(trailing, Defaults.alignment)
+        case .width:
+            append(leading, Defaults.alignment)
+            append(trailing, Defaults.alignment)
         default:
-            arrangementConstraints.append(view.centerXAnchor.constraint(equalTo: centerXAnchor))
+            append(leading, hug)
+            append(trailing, hug)
+            append(view.centerXAnchor.constraint(equalTo: centerXAnchor), Defaults.alignment)
         }
-        let leading = view.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: edgeInsets.left)
-        let trailing = view.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -edgeInsets.right)
-        leading.priority = .defaultHigh
-        trailing.priority = .defaultHigh
-        arrangementConstraints.append(contentsOf: [leading, trailing])
+    }
+
+    private func append(_ constraint: NSLayoutConstraint, _ priority: NSLayoutConstraint.Priority) {
+        constraint.priority = priority
+        arrangementConstraints.append(constraint)
     }
 }

@@ -9,6 +9,8 @@ import AppKit
     struct Ink {
         let label: NSColor
         let secondary: NSColor
+        let tertiary: NSColor
+        let quaternary: NSColor
         init(on ground: NSColor) {
             let rgb = ground.usingColorSpace(.sRGB) ?? ground
             guard let resolved = NeutralInk.resolve(
@@ -22,6 +24,8 @@ import AppKit
             let base: CGFloat = resolved.base == .white ? 1 : 0
             label = NSColor(white: base, alpha: resolved.label.alpha)
             secondary = NSColor(white: base, alpha: resolved.secondary.alpha)
+            tertiary = NSColor(white: base, alpha: resolved.tertiary.alpha)
+            quaternary = NSColor(white: base, alpha: resolved.quaternary.alpha)
         }
     }
 }

@@ -57,7 +57,11 @@ renders of the same two names. The generated-image cache is capped at 256 names.
 against the Linux shim; `--mac` runs the same fixtures against AppKit. The Linux fixture also
 checks rendered control pixels in `out/control-row-stack.png`. Both runs now cover
 `NSView.fittingSize` without changing live frames and fixed versus flexible children under
-top/leading stack gravity. `tests/subagent_row/run.sh` links the unchanged production
+top/leading stack gravity. The shim's `NSStackView` installs AppKit's own equations: gravity
+areas are the default distribution, each view hugs both cross-axis edges at the stack's hugging
+priority and aligns at 260, and the trailing edge hugs at 250; `.fill` makes the axis edges
+required. Its leading edge and spacing stay required rather than AppKit's 750/749.99 (FINDINGS
+§172). `tests/subagent_row/run.sh` links the unchanged production
 `SubagentNavigatorRowView` in a fixed-palette fixture; `--mac` provides a rendered reference.
 The Mac/Linux captures in `out/subagent-row-{mac,linux}/` align the row's title and detail
 lines, and the fixture checks selection, unavailable help and transcript reveal actions.
@@ -565,7 +569,8 @@ behavior, including attachments and durable drafts, remains open. Other editing 
 full table and outline behavior, animation,
 system services, and the remaining AppKit shims need work. The layout solver still solves a whole
 subtree at a time and can pay a cold cubic cost on structural changes; see FINDINGS sections 8
-and 11. The later sections of FINDINGS record the implemented host and shim slices.
+and 11. It now carries its tiered objective through each pivot and pivots only the nonzero
+columns, which took the production document page from 4.17 to 0.48 seconds (§173). The later sections of FINDINGS record the implemented host and shim slices.
 
 ## Working in the maintained platform tree
 

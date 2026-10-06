@@ -111,6 +111,10 @@ struct Simplex {
         private func dualSimplex(iterationLimit: Int = 5_000) -> Bool {
             lastPivotCount = 0
             var iterations = 0
+            // Ratio tests read these on every pivot, and computing them costs a pass over every
+            // basic row per tier. Compute them once, on the first infeasible row, and then carry
+            // them through each pivot like any other tableau row.
+            var reduced: [[Double]] = []
             while true {
                 iterations += 1
                 guard iterations <= iterationLimit else { return false }
@@ -123,8 +127,10 @@ struct Simplex {
                 }
                 guard leaving >= 0 else { return true }
 
-                let reduced = Simplex.reducedCosts(costs, tableau: tableau, basis: basis,
+                if reduced.isEmpty {
+                    reduced = Simplex.reducedCosts(costs, tableau: tableau, basis: basis,
                                                    pivotable: pivotable)
+                }
 
                 var entering = -1
                 for column in 0..<pivotable where tableau[leaving][column] < -1e-9 {
@@ -137,20 +143,14 @@ struct Simplex {
                 guard entering >= 0 else { return false }
 
                 pivot(row: leaving, column: entering)
+                Simplex.eliminate(column: entering, using: tableau[leaving], from: &reduced,
+                                  pivotable: pivotable)
                 lastPivotCount += 1
             }
         }
 
         private func pivot(row: Int, column: Int) {
-            let divisor = tableau[row][column]
-            for index in 0...rhsColumn { tableau[row][index] /= divisor }
-            for other in 0..<rowCount where other != row {
-                let factor = tableau[other][column]
-                guard factor != 0 else { continue }
-                for index in 0...rhsColumn {
-                    tableau[other][index] -= factor * tableau[row][index]
-                }
-            }
+            Simplex.pivot(&tableau, row: row, column: column, rhsColumn: rhsColumn)
             basis[row] = column
         }
     }
@@ -296,6 +296,41 @@ struct Simplex {
         return result
     }
 
+    /// Gauss-Jordan elimination on one entry. A layout tableau is overwhelmingly zero: each row
+    /// names a handful of frame variables, errors and slacks, beside its column of B⁻¹. The
+    /// leaving row's nonzero columns are found once, and every other row updates only those;
+    /// skipping a product with zero leaves each entry exactly as the dense loop would.
+    fileprivate static func pivot(_ tableau: inout [[Double]], row: Int, column: Int, rhsColumn: Int) {
+        let divisor = tableau[row][column]
+        var support: [Int] = []
+        for index in 0...rhsColumn where tableau[row][index] != 0 {
+            tableau[row][index] /= divisor
+            support.append(index)
+        }
+        let pivotRow = tableau[row]
+        for other in tableau.indices where other != row {
+            let factor = tableau[other][column]
+            guard factor != 0 else { continue }
+            for index in support {
+                tableau[other][index] -= factor * pivotRow[index]
+            }
+        }
+    }
+
+    /// Applies one pivot to the objective rows: the entering column's reduced cost becomes zero
+    /// in every tier. `row` is the leaving row after normalisation, so this is the same update
+    /// the pivot applies to each constraint row, restricted to the pivotable columns.
+    fileprivate static func eliminate(column: Int, using row: [Double], from reduced: inout [[Double]],
+                                      pivotable: Int) {
+        for tier in reduced.indices {
+            let factor = reduced[tier][column]
+            guard factor != 0 else { continue }
+            for index in 0..<pivotable where row[index] != 0 {
+                reduced[tier][index] -= factor * row[index]
+            }
+        }
+    }
+
     private static func improves(_ column: Int, reduced: [[Double]]) -> Bool {
         for tier in reduced {
             let value = tier[column]
@@ -325,11 +360,14 @@ struct Simplex {
         iterationLimit: Int
     ) -> Bool {
         var iterations = 0
+        // Recomputing every tier from the basis on each iteration cost several times the pivot
+        // itself. The rows are carried through each pivot instead, and recomputed exactly only
+        // when they claim optimality, so accumulated rounding cannot end the solve early.
+        var reduced = reducedCosts(costs, tableau: tableau, basis: basis, pivotable: pivotable)
+        var reducedIsExact = true
         while true {
             iterations += 1
             guard iterations <= iterationLimit else { return false }
-
-            let reduced = reducedCosts(costs, tableau: tableau, basis: basis, pivotable: pivotable)
 
             // Bland's rule: the lowest-index improving column, which cannot cycle. Slower than
             // steepest-edge and the only pivot rule worth trusting in code nobody will tune.
@@ -338,7 +376,12 @@ struct Simplex {
                 entering = column
                 break
             }
-            guard entering >= 0 else { return true }
+            if entering < 0 {
+                if reducedIsExact { return true }
+                reduced = reducedCosts(costs, tableau: tableau, basis: basis, pivotable: pivotable)
+                reducedIsExact = true
+                continue
+            }
 
             var leaving = -1
             var bestRatio = Double.greatestFiniteMagnitude
@@ -353,16 +396,10 @@ struct Simplex {
             }
             guard leaving >= 0 else { return false }
 
-            let divisor = tableau[leaving][entering]
-            for column in 0...rhsColumn { tableau[leaving][column] /= divisor }
-            for index in tableau.indices where index != leaving {
-                let factor = tableau[index][entering]
-                guard factor != 0 else { continue }
-                for column in 0...rhsColumn {
-                    tableau[index][column] -= factor * tableau[leaving][column]
-                }
-            }
+            pivot(&tableau, row: leaving, column: entering, rhsColumn: rhsColumn)
             basis[leaving] = entering
+            eliminate(column: entering, using: tableau[leaving], from: &reduced, pivotable: pivotable)
+            reducedIsExact = false
         }
     }
 }

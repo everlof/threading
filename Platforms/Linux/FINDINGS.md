@@ -5369,3 +5369,105 @@ The focused `IconButtonHarness`, `SubagentRowHarness`, `PaneHeaderHarness` and
 `PageTitleHarness` targets do not build. Their shared theme boundary has referred to
 `LinuxTheme` since the live light/dark theme step, but those targets link neither that file nor
 its bundled snapshot. This predates the app-event change and is addressed separately.
+
+## 172. Focused fixtures build again; stacks follow AppKit's equations
+
+`IconButtonHarness`, `SubagentRowHarness`, `PaneHeaderHarness` and `PageTitleHarness` had not
+compiled since the live light/dark theme step: the shared theme boundary they link reads
+`LinuxTheme`, which those targets lacked along with its bundled snapshot. `LinuxTheme` now asks a
+one-line `LinuxThemeSnapshot` locator for the file. The native window's locator returns its
+resource; the fixtures link `LinuxTheme` with a locator that reads the same checked export from
+the source tree. The selected-row fills moved from the sidebar host's vocabulary into the theme
+boundary that reads them, so a target linking that boundary needs nothing else. The fixed-palette
+subagent fixture states its own selection ground. `LinuxTheme` also compiles against macOS
+AppKit now, where `NSAppearance(named:)` is failable and the shim's `components` helper does not
+exist, so the subagent fixture's `--mac` reference renders again.
+
+Once the four built, two fixtures failed. Both failures were older than this session, hidden
+while the targets did not compile, and each was bisected on Linux.
+
+The icon-button fixture expected the deferred `⋯` glyph to draw three dots on the first render.
+It passed until `9b10cca34` (views clip to their bounds), and only because the glyph view, still
+zero-sized, drew outside its frame. The glyph materializes in its button's first `draw`. Its new
+intrinsic size is solved by the next layout pass, as in AppKit, so the fixture now asserts
+materialization on the first display and the three dots on the second. Production rows
+materialize their glyphs on reveal, before display. The native host repaints on its own dirty
+flags, though, not on `needsLayout` raised during a draw, so a glyph left to materialize in a
+draw would wait for the next input event. That gap remains.
+
+The subagent row put its title 22pt below the row's top edge where AppKit puts it 8pt below.
+This started with `8c68bfaca`, which made every vertical stack pull its last view to the bottom
+edge at priority 50 so a centred stack could find its natural height. The row's heading is a
+horizontal stack with no cross-axis hug of its own, so stretching it cost nothing, the solver
+broke the tie by stretching it, and the title centred inside the taller heading. Dumping
+AppKit's own constraints on macOS 26.5 (identifiers `NSStackView.Edge`, `.Edge.Min`, `.Stack`,
+`.Align`, `.Distribution.EqualSizing`) gives the recipe the shim now follows:
+
+- Gravity areas are the default distribution. The trailing edge hugs at the stack's hugging
+  priority (250) inside a required bound; `.fill` and `.fillEqually` make it required, and
+  `.fillEqually` equalizes sizes at 260.
+- Across the axis, every view stays inside the stack's bounds (required), hugs both inset edges
+  at the stack's perpendicular hugging priority (250), and aligns at 260. Baselines align at 260.
+- `huggingPriority(for:)` and `clippingResistancePriority(for:)` exist with AppKit's defaults
+  (250 and required), because production code sets them on stacks.
+
+Within a priority tier the solver minimizes summed error, so a nested stack hugging three children
+costs three times its stretch, against one for the list's bottom hug, and spare height collects
+below the rows. That is the behavior on macOS. A probe of a heading holding one child shows
+AppKit tying in the same way, with the same result as the shim.
+
+Two departures are deliberate. An alignment that pins an edge replaces that edge's hug,
+because it is the same equation stated more strongly. And the leading edge and spacing stay
+required equalities rather than AppKit's 750/749.99 behind required inequalities: those two
+extra rows per view cost 58% more on the document page on the incremental solver (§173), and
+no mounted view depends on them yielding. A layout that needs AppKit's leading edge to give way
+to a stronger constraint will differ.
+
+Verification on 2026-10-06, all in one Ubuntu arm64 container:
+
+- All four fixtures pass, and so do the layout Harness, view clipping, priority tiers, paragraph
+  wrapping, the 5,100-project outline, table heights, text label/editor, search match,
+  Markdown, glyph, floating glyph, and the project/session/terminal row-layout and app-event
+  modes of `WindowHarness`.
+- The stack and production `ControlRow` contracts pass on Linux and against macOS AppKit.
+- The subagent row now matches its Mac reference at `out/llk-subagent-row/rows.png`, and the
+  Mac reference passes again.
+- Release document, automatic-row and diff journeys pass.
+
+The pane-header and page-title `--mac` modes still fail. Production `Design.Surface` is
+nonisolated, nested inside the `@MainActor` `Design`, but the Linux boundary declares its
+`Surface` `@MainActor`, and macOS rejects a default argument that reads it. That predates this
+work.
+
+The default, full `window-smoke.sh` journey also fails, at "selection did not reach Gamma". Its
+click at (100,160) lands on the second project row since the 41-point pane header moved the
+rows down. A Debug build of the original shim fails the same step with identical pixels, so this
+is a stale fixture coordinate, not this change; it is not repaired here. The same capture shows
+the selected-row plate starting 12 pixels right of the project icon, which an earlier installed
+capture also shows. That is a separate, existing navigator geometry defect.
+
+## 173. The layout solver carries its objective and pivots sparsely
+
+The lexicographic simplex recomputed every priority tier's reduced costs from the basis on each
+iteration, in both its primal and its warm dual loop, at several times the cost of the pivot.
+Each pivot also updated every column of each affected row. Reduced costs are now computed once
+per solve and updated with each pivot like any other tableau row. They are recomputed exactly
+before optimality is accepted, so accumulated rounding cannot end a solve early. Each pivot
+collects the leaving row's nonzero columns once and updates only those, which leaves every
+entry exactly as the dense loop would.
+
+Three Release binaries from the same tree, run alternately three times each under `xvfb-run`,
+give these first-presentation medians (detail in `docs/architecture/performance.md`, "Linux
+layout solver objective and sparse pivots"):
+
+| Journey | Original | Incremental objective | Final, with §172 stacks |
+|---|---|---|---|
+| Production document page | 4.169 s | 0.950 s | 0.479 s |
+| Automatic Markdown rows | 0.314 s | 0.315 s | 0.315 s |
+| Native diff row | 0.312 s | 0.311 s | 0.318 s |
+
+The full AppKit stack recipe on the original solver took the document page from a 4.38 to a 9.66
+second median. That measurement is what prompted this work, and it is why §172 keeps the
+leading edge and spacing required. Every layout, priority, clipping, table, outline and stack
+contract listed in §172 passes on the new solver. No per-solve timing assertion was added, and
+Debug journeys were not re-measured.

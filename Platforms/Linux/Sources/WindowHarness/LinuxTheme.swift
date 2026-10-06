@@ -6,8 +6,7 @@ import Foundation
 @MainActor
 enum LinuxTheme {
     private static let palettes: [String: [String: [Double]]] = {
-        guard let url = Bundle.module.url(forResource: "threading", withExtension: "json",
-                                          subdirectory: "Theme"),
+        guard let url = LinuxThemeSnapshot.url,
               let data = try? Data(contentsOf: url),
               let value = try? JSONDecoder().decode(
                 [String: [String: [Double]]].self, from: data) else {
@@ -34,9 +33,7 @@ enum LinuxTheme {
 
     private(set) static var isDark = false
 
-    static var appearance: NSAppearance {
-        NSAppearance(named: isDark ? .darkAqua : .aqua)
-    }
+    static var appearance: NSAppearance { named(dark: isDark) }
 
     static func setDark(_ dark: Bool) {
         isDark = dark
@@ -52,16 +49,24 @@ enum LinuxTheme {
     }
 
     static func components(_ role: String) -> (CGFloat, CGFloat, CGFloat, CGFloat) {
-        fixedColor(role, dark: isDark).components
+        let color = fixedColor(role, dark: isDark)
+        return (color.redComponent, color.greenComponent, color.blueComponent, color.alphaComponent)
     }
 
     static func neutralInk(on ground: NSColor, dark: Bool) -> Specimen.Ink {
-        let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         var result: Specimen.Ink!
-        appearance.performAsCurrentDrawingAppearance {
+        named(dark: dark).performAsCurrentDrawingAppearance {
             result = Specimen.Ink(on: ground)
         }
         return result
+    }
+
+    /// Focused fixtures also compile this file against macOS AppKit for reference renders, where
+    /// the named initializer is failable; the two system appearances it names always exist.
+    private static func named(dark: Bool) -> NSAppearance {
+        let appearance: NSAppearance? = NSAppearance(named: dark ? .darkAqua : .aqua)
+        guard let appearance else { preconditionFailure("Missing system appearance") }
+        return appearance
     }
 
     private static func fixedColor(_ role: String, dark: Bool) -> NSColor {

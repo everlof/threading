@@ -70,12 +70,16 @@ import Foundation
             menu.topAnchor.constraint(equalTo: root.topAnchor, constant: 20)
         ])
 
+        // The first display materializes the deferred glyph from the button's own draw. Its
+        // new intrinsic size is laid out by the next display cycle, as in AppKit: until then
+        // the glyph's frame is empty and the button's bounds clip it.
+        _ = try render(root, to: output.appendingPathComponent("first-draw.png"))
+        require(menu.hasMaterializedGlyph, "visible row glyph did not materialize on draw")
         let rest = try render(root, to: output.appendingPathComponent("rest.png"))
         require(button.frame.width == 30 && button.frame.height == 28,
                 "production target geometry did not solve")
         require(menu.frame.width == 20 && menu.frame.height == 20,
                 "production inline target geometry did not solve")
-        require(menu.hasMaterializedGlyph, "visible row glyph did not materialize on draw")
         require(button.accessibilityRole() == .button, "role is not button")
         require(button.accessibilityTitle() == "Add project", "accessible title was lost")
         require(button.isAccessibilityElement(), "button is absent from accessibility")

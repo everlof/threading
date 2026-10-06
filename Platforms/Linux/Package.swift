@@ -124,6 +124,7 @@ let package = Package(
             sources: ["ThemedControl.swift", "ThemedIconButton.swift", "PointerClaims.swift",
                       "SurfaceDrawing.swift", "GlyphView.swift", "TemplateImageDrawing.swift",
                       "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift", "AppEvent.swift",
+                      "LinuxTheme.swift", "LinuxThemeSnapshot.swift",
                       "NeutralInk.swift", "TextLegibilityPolicy.swift", "SpecimenBoundary.swift",
                       "Fixture.swift"]),
         // Compile the production selectable child row against the fixed diagnostic palette.
@@ -134,6 +135,7 @@ let package = Package(
                       "ThemedControl.swift", "ThemedIconButton.swift", "PointerClaims.swift",
                       "SurfaceDrawing.swift", "GlyphView.swift", "TemplateImageDrawing.swift",
                       "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift", "AppEvent.swift",
+                      "LinuxTheme.swift", "LinuxThemeSnapshot.swift",
                       "NeutralInk.swift", "TextLegibilityPolicy.swift", "SpecimenBoundary.swift",
                       "RowBoundary.swift", "Fixture.swift"]),
         .executableTarget(name: "PaneHeaderHarness", dependencies: ["AppKit"],
@@ -143,6 +145,7 @@ let package = Package(
                       "PointerClaims.swift", "SurfaceDrawing.swift", "GlyphView.swift",
                       "TemplateImageDrawing.swift", "AppKitLifetime.swift",
                       "GlyphThemeBoundary.swift", "IconButtonBoundary.swift", "AppEvent.swift",
+                      "LinuxTheme.swift", "LinuxThemeSnapshot.swift",
                       "NeutralInk.swift", "TextLegibilityPolicy.swift", "SpecimenBoundary.swift",
                       "Fixture.swift"],
             swiftSettings: [.define("THREADING_PANE_HEADER_HARNESS")]),
@@ -154,6 +157,7 @@ let package = Package(
                       "ThemedControl.swift", "ThemedIconButton.swift", "PointerClaims.swift",
                       "SurfaceDrawing.swift", "GlyphView.swift", "TemplateImageDrawing.swift",
                       "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift", "AppEvent.swift",
+                      "LinuxTheme.swift", "LinuxThemeSnapshot.swift",
                       "NeutralInk.swift", "TextLegibilityPolicy.swift", "SpecimenBoundary.swift"]),
         // Exact production glyph drawing with test-only theme vocabulary. Its Linux bitmap
         // contract exercises the shim's image and backing-pixel behavior, not symbol lookup.

@@ -632,6 +632,44 @@ The full source-built X11 suite and the rebuilt Swift-free Ubuntu Release instal
 suite passed with the compact clip representation; its fresh project-list capture was inspected.
 The installed Wayland frame and AT-SPI Actions checks passed, and their captures were inspected.
 
+## Linux layout solver objective and sparse pivots, 2026-10-06
+
+The Linux AppKit shim solves each dirty constraint island with a dense lexicographic simplex.
+Its primal and dual loops recomputed every priority tier's reduced costs from the basis on each
+iteration — tiers × basic rows × columns, several times the pivot itself — and each pivot updated
+every column of every affected row, although a layout row names only a handful of variables.
+
+Porting AppKit's `NSStackView` hugging made this visible (FINDINGS §172): the stack's extra cross-axis
+hug rows took the production document page's first presentation from a 4.38 to a 9.66 second
+median in the same three alternating Release runs. Two exact changes followed. Reduced costs are
+now computed once per solve and carried through each pivot like any other tableau row, and are
+recomputed exactly before optimality is accepted, so rounding cannot end a solve early. Each
+pivot finds the leaving row's nonzero columns once and updates only those in the other rows;
+skipping a product with zero leaves every entry exactly as the dense loop would.
+
+Workload: `WindowHarness --document-ui-fixture` (the unchanged production Markdown page budget
+of 48 blocks), `--automatic-rows-ui-fixture` and `--diff-ui-fixture`, Release with
+`--static-swift-stdlib -enable-testing`, under `xvfb-run` in one Ubuntu arm64 container. Three
+binaries were built from the same tree and run alternately, three times each: the original
+solver and stack, the incremental objective with the original stack, and the final solver with
+the AppKit stack recipe. Medians of the journeys' first-presentation time, which includes process
+start, decoding and the evidence writer:
+
+| Journey | Original | Incremental objective | Final (sparse pivots + stack hugs) |
+|---|---|---|---|
+| Document page | 4.169 s | 0.950 s | 0.479 s |
+| Automatic Markdown rows | 0.314 s | 0.315 s | 0.315 s |
+| Native diff row | 0.312 s | 0.311 s | 0.318 s |
+
+The document page is 8.7× faster; the two single-row journeys, whose solves are small, are
+unchanged within noise. An intermediate stack recipe with AppKit's softened leading edge and
+spacing (750 and 749.99 behind required inequalities) measured 1.515 s on the incremental solver
+against 0.958 s without the stack change, so the shim keeps those two equations required; see
+the stack comments for what that gives up. The regression boundary is behavioural: the layout
+Harness cases, priority-tier, clipping, indexed/automatic/structural table, 5,100-project outline
+and stack contracts all pass on the new solver, and the Mac/Linux stack fixture agrees. No
+per-solve timing assertion was added. Debug journeys were not re-measured.
+
 ## Linux document and changed-row geometry, 2026-10-06
 
 The Linux document compatibility path mounts the production Markdown page budget unchanged:

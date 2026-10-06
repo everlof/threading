@@ -31,6 +31,9 @@ public enum Design {
             surfaceHover = ground.blended(withFraction: 0.22, of: .black)!
             border = ground.blended(withFraction: 0.42, of: .black)!
         }
+
+        /// The fixed selected-row ground this fixture's palette used before live themes.
+        public static var selection: Ink { Ink(on: NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1)) }
     }
 
     public enum Accessibility { public static let focusRingWidth: CGFloat = 2 }

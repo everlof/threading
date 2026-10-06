@@ -26,11 +26,6 @@ enum AppThemeLibrary {
     }
 }
 
-extension Design.Surface {
-    static var selectionFill: NSColor { LinuxTheme.color("accent") }
-    static var selectionFillUnemphasized: NSColor { LinuxTheme.color("accentMuted") }
-}
-
 extension Design.Text {
     static func on(_ background: NSColor) -> Design.Ink { Design.Ink(on: background) }
 }

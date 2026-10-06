@@ -67,6 +67,10 @@ public enum Design {
         public static var bevelShadow: NSColor { LinuxTheme.color("bevelShadow") }
         public static var divider: NSColor { LinuxTheme.color("divider") }
         public static var border: NSColor { LinuxTheme.color("border") }
+        // Owned beside `Ink.selection`, which reads it, so every target linking this boundary
+        // has the selected-row ground without also linking the sidebar host's vocabulary.
+        public static var selectionFill: NSColor { LinuxTheme.color("accent") }
+        public static var selectionFillUnemphasized: NSColor { LinuxTheme.color("accentMuted") }
     }
     public enum Spacing {
         public static let small: CGFloat = 6
