@@ -231,9 +231,13 @@ module names, check that the installed profile's entitlements dict carries it.
 The profile-signed release path is unaffected: the Developer ID profile's entitlements dict
 carries `keychain-access-groups` (see [the Sign in with Apple
 section](#sign-in-with-apple-cannot-be-shipped-by-developer-id) for what that dict actually holds),
-so only the profile-less fallback needs the key dropped. That fallback cannot share a Keychain
-access group across processes, so trigger source credentials require a profile-signed build.
-The same split applies to remote owner-device credentials. A profile-less build reads the login
+so only the profile-less fallback needs the key dropped — for the app. A helper is a bare
+executable that cannot embed that profile, so a profile-backed key on one is an AMFI kill at
+every launch even in a profiled export: `threading-triggerd` never ran from 2026-09-12 to
+2026-10-05 for exactly that reason, and `check_bundle_entitlements.py` now refuses it. Trigger
+secrets live in the login Keychain with an access list naming the app and the listener instead
+([`triggers.md`](triggers.md#the-listener-signature-secrets-and-health)).
+Remote owner-device credentials do split by realm. A profile-less build reads the login
 Keychain while a profile-signed build reads the protected Keychain; switching between them can
 make a phone's saved bearer unavailable while the pinned certificate stays the same. The protected
 store never trusts a newer login-Keychain record over an existing protected item. The first
@@ -1155,6 +1159,16 @@ exists: **Threading Remote** (named "Threading: Remote Terminal" until 2026-09-1
 `SMQ3E8Y57T`. Both bundle IDs carry the App Groups capability, and the app's also carries
 Associated Domains and Push. The Apple Distribution certificate the export signs with expires
 **2026-12-13**; a lapsed one fails `beta` at export, not at archive.
+
+### Local Release installation
+
+A normal optimized app may also be installed locally without a TestFlight upload. Build
+`ThreadingMobile` in Release for the exact paired device with `APS_ENVIRONMENT=development`,
+then install the resulting app with `devicectl device install app`. Keep the existing bundle
+identity and upgrade in place rather than uninstalling, so pairing and app data survive.
+The existing device development profile signs this local build; DEBUG fixtures are absent.
+`ThreadingAPNSEnvironment` carries the override to push registration. Distribution archives
+keep the default production setting and use the export workflow below.
 
 ### Credentials live in `fastlane/.env`, which is not tracked
 

@@ -485,7 +485,7 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   index with a host-vouched header line per message; `mail_ack` records the acknowledging
   execution. An unacknowledged `interrupt` refuses `work_finish` in the finish transaction.
 - **Chains bound loops.** A message continues the chain of what it replies to, or of the mail its
-  execution last acknowledged, so omitting `reply_to` does not escape the depth limit (4). A
+  execution last acknowledged, so omitting `reply_to` does not escape the chain's message fuse. A
   session mailbox has no execution, so its acknowledgements carry into its sends until a person
   starts a new turn: the Mac resets the context (`mail-context-reset`) on a prompt a person wrote
   — a native chat's composer, or a terminal prompt that is neither the mail notice
@@ -501,7 +501,11 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   colliding with it. Wake admission keys on the newest open message that may wake the worker
   and whose chain is within budget, not on whichever message arrived last. Fuses
   that need no reading: 50 messages per chain on a host, 20 sends a minute per sender, 1,000 open
-  messages per inbox. Spend limits belong to admission ([usage ledger](../feature-drafts/agent-usage-ledger.md)).
+  messages per inbox. A chain has no depth limit: the depth a message carries is shown in its
+  header and nothing more. A limit of 4 shipped first and refused ordinary unattended exchanges
+  (ask, answer, follow-up) long before anything looped, while the per-chain count already stops a
+  real loop — every host a cross-host message passes counts it, so a ring of hosts is bounded too.
+  Spend limits belong to admission ([usage ledger](../feature-drafts/agent-usage-ledger.md)).
 - **Notices, not bodies.** `threading-controller agent-notice post-tool-use|stop|session-start` is
   the hook command a recipe installs. It prints one host-authored line naming counts, senders and
   hosts as hook JSON (`hookSpecificOutput.additionalContext`, or `decision: block` once per
@@ -534,7 +538,7 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   replaces the `moved` copy it left under the same id.
 
 Validation: `ControllerMailTests` (11 core cases: grants and revocation, busy recipients, notices,
-interrupts and finish, chain depth, ask/reply, wake coalescing, rate fuse, sessions, push/pull
+interrupts and finish, chain fuse, ask/reply, wake coalescing, rate fuse, sessions, push/pull
 idempotence and spoofing, refused questions, v6 upgrade) and `scripts/tests/test_controller_mail.py`
 (real ptyd and two stores: a question crossing hosts wakes the recipient, its reply is pulled and
 the asker continues; a moved session keeps its unread mail and late mail is forwarded once; a busy agent receives the notice through the real hook command and cannot

@@ -117,7 +117,7 @@ final class TriggerCenterRenderTests: HostedStoreTestCase {
             parsing: AutomationApprovalSheetRenderTests.bevakningRules)
 
         for (appearanceName, appearance) in try Self.appearances() {
-            let editor = AutomationEditorViewController(configuration: configuration, projects: [project])
+            let editor = AutomationEditorViewController(configuration: configuration, projects: [project], choices: AutomationEditorChoicesTests.fixture)
             editor.availableHeight = 1_400
             let view = editor.view
             XCTAssertEqual(view.frame.height, AutomationEditorViewController.Layout.preferredHeight,

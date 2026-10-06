@@ -1471,7 +1471,11 @@ empty set. Nothing is prepared before a client or a push first asks. PNG renditi
 are prepared off the main actor, and are bounded to 1 MB each / 6 MB per theme (1,290 px backdrop,
 512 px character art, 128 px sprites). The phone verifies SHA-256, limits downloads to two, and
 keeps a 32 MB / 128-file disk LRU for offline use; only metadata enters the 256 KB theme archive.
-The dashboard has one fixed logo/mascot slot. It never changes session facts or input controls.
+The dashboard's one character is the theme's mascot. It stands on the trailing floating pill in
+the list's ground, so rows scroll over it and it takes no strip of its own; only the list's end
+grows enough for the last row to rise clear of it. A theme's logo stays on the Mac: the phone has
+no brand row, and its title already names the Mac. The mascot never changes session facts or
+input controls.
 
 Pairing and sharing are deliberately different actions:
 

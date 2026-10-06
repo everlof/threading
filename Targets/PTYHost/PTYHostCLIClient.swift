@@ -155,8 +155,15 @@ final class PTYHostCLIClient {
         return journal.lines
     }
 
-    func attach(_ identity: PTYHostSessionIdentity) throws -> PTYHostAttached {
-        try send(.attach(PTYHostAttach(id: identity, replayBudget: PTYHostReplayDefaults.minimumBudgetBytes)))
+    func attach(
+        _ identity: PTYHostSessionIdentity,
+        receivesOutput: Bool? = nil
+    ) throws -> PTYHostAttached {
+        try send(.attach(PTYHostAttach(
+            id: identity,
+            replayBudget: PTYHostReplayDefaults.minimumBudgetBytes,
+            receivesOutput: receivesOutput
+        )))
         let frame = try waitForControl(timeout: PTYHostCLIDefaults.answerTimeout, what: "the attach") {
             if case .attached = $0 { return true }; return false
         }
@@ -165,7 +172,8 @@ final class PTYHostCLIClient {
     }
 
     func stop(_ identity: PTYHostSessionIdentity) throws -> PTYHostExited? {
-        _ = try attach(identity)
+        // A stop needs the ending, not output that can backpressure its acknowledgement.
+        _ = try attach(identity, receivesOutput: false)
         try send(.kill(PTYHostKill(id: identity, escalate: true)))
         let frame = try waitForControl(timeout: PTYHostCLIDefaults.stopTimeout, what: "the ending") {
             if case .exited = $0 { return true }; return false

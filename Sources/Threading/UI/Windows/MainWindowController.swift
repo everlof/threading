@@ -94,6 +94,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private(set) lazy var splitViewController = SidebarSplitViewController()
     lazy var sidebarViewController = ProjectSidebarViewController(
         projectStore: environment.projectStore,
+        triggerStore: environment.triggerStore,
         canAskAgentToRename: { [weak self] sessionID in
             guard let self else { return false }
             return SessionCoordinator.canAskAgentToRename(
@@ -5477,7 +5478,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         }
         sidebarViewController.setTriggersMode(projectID == nil)
         if let projectID { sidebarViewController.selectAutomations(projectID: projectID) }
-        containerViewController.showTriggers(projectID: projectID)
+        containerViewController.showTriggers(store: environment.triggerStore, projectID: projectID)
         syncDisplayPane(to: nil)
         updateSessionTitleItem()
         recordVisit(projectID.map(NavigationHistory.Page.projectAutomations) ?? .triggers)

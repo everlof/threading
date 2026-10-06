@@ -715,6 +715,10 @@ final class TerminalContainerViewController: NSViewController {
             content.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             content.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+
+        // The destination survives off-screen while Settings can change its theme. Repair
+        // the recorded surfaces and fonts it missed; an unchanged return is O(1).
+        AppThemeRefresh.repaintIfNeeded(content)
     }
 
     /// Shows a settings page centred in the pane, replacing whatever session or composer was on

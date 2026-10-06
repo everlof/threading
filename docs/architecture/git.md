@@ -210,6 +210,12 @@ different session.
 
 ## Git Review
 
+Repository file discovery has its own serial utility queue. The Activity atlas and file browser
+must not wait behind a full patch read in another checkout. `GitRepositoryAdmissionTests` holds a
+real review inside a filesystem-monitor hook and proves that a second checkout's roster still
+arrives before the hook is released. This adds one bounded worker, not one process per row or
+checkout; the Git output cap and child deadline still apply.
+
 A per-session **Review** tab in the display pane (`GitReviewViewController`, hosted as
 `DisplayTab.Body.review` — the browser's live-view-controller shape, reused). View menu ▸
 Git Review, ⇧⌘R.

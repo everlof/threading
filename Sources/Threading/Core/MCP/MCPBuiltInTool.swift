@@ -100,6 +100,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case listSettings
   case notifyUser
   case copyToClipboard
+  case reportProblem
   case listThemes
   case setTheme
   case createTheme
@@ -136,6 +137,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
     case notifications
     case appearance
     case settings
+    case issueReporting
     case extensionAuthoring
   }
 

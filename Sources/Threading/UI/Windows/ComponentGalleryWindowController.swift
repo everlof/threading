@@ -3627,8 +3627,8 @@ final class ComponentGalleryViewController: NSViewController {
         let demos = [
             GalleryHoverPolicyDemo(
                 title: L10n.string("Instant (usage pill)"),
-                message: L10n.string("Visible exactly while the pointer is on the anchor."),
-                policy: AccountUsageItemDefaults.readingPopoverPolicy
+                message: L10n.string("Grants a grace to cross the gap, and holds while the pointer rests here."),
+                policy: AccountUsageItemDefaults.popoverPolicy
             ),
             GalleryHoverPolicyDemo(
                 title: L10n.string("Dwell (sidebar cards)"),

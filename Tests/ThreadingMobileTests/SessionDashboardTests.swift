@@ -40,6 +40,7 @@ final class SessionDashboardTests: XCTestCase {
             XCTAssertEqual(metrics.snapshotItemCount, rows)
             XCTAssertEqual(metrics.backdropLayerCount, 1)
             XCTAssertTrue(metrics.showsBackdropGradient)
+            XCTAssertTrue(metrics.groundStacksMascotOverBackdrop, "rows scroll over the mascot, never past a strip")
             XCTAssertLessThan(metrics.mountedCellCount, 40)
             XCTAssertEqual(metrics.hostedContentCount, 0)
         }

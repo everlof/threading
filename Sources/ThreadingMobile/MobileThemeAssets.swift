@@ -168,11 +168,11 @@ final class MobileThemeAssets: ObservableObject {
         // One picture may serve several slots. Decode for the largest current placement,
         // independent of wire order, and upgrade a smaller rendition retained from an old theme.
         var requests: [String: ImageRequest] = [:]
-        for asset in assets where asset.kind == .image {
+        // The phone has no brand row, so a logo an older Mac still names is never fetched.
+        for asset in assets where asset.kind == .image && asset.slot != "logo" {
             let pointBound: CGFloat
-            if asset.slot.hasPrefix("mascot.") { pointBound = 64 }
+            if asset.slot.hasPrefix("mascot.") { pointBound = MobileDesign.Size.mascot }
             else if asset.slot.hasPrefix("sprite.") { pointBound = 24 }
-            else if asset.slot == "logo" { pointBound = 160 }
             else { pointBound = 1_290 }
             let pixelBound = min(asset.pixelBound ?? 512, Int(ceil(pointBound * max(displayScale, 1))))
             if pixelBound > (requests[asset.digest]?.pixels ?? 0) {
@@ -633,59 +633,6 @@ extension RemoteThemePalette {
     }
 }
 
-/// One decorative slot, outside the row reuse pool. Host catalogue state selects the pose;
-/// themes supply pictures only. Missing assets collapse the entire slot.
-struct MobileThemeCharacterHeader: View {
-    let theme: RemoteThemePalette
-    let mood: String
-    @ObservedObject private var assets = MobileThemeAssets.shared
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
-    @AppStorage(MobileThemeMotionPreferences.motionKey) private var permitsMotion = true
-    @State private var previousMood: String?
-    @State private var celebratesCompletion = false
-
-    private var pose: RemoteThemeAsset? {
-        let displayedMood = celebratesCompletion ? "celebrating" : mood
-        return theme.asset("mascot.\(displayedMood)") ?? theme.asset("mascot.idle")
-    }
-
-    var body: some View {
-        let logo = assets.image(theme.asset("logo"))
-        let mascot = assets.image(pose)
-        if logo != nil || mascot != nil {
-            HStack(spacing: MobileDesign.Spacing.inset) {
-                if let logo {
-                    Image(uiImage: logo).resizable().scaledToFit().frame(maxWidth: 160, maxHeight: 48)
-                }
-                if let mascot {
-                    Image(uiImage: mascot).resizable().scaledToFit().frame(width: 64, height: 64)
-                        .id(pose?.digest)
-                        .transition(.opacity)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 64)
-            .padding(.vertical, MobileDesign.Spacing.small)
-            .background(theme.surface)
-            .animation(permitsMotion && !reduceMotion && scenePhase == .active && !ProcessInfo.processInfo.isLowPowerModeEnabled
-                ? .easeInOut(duration: 0.18) : nil, value: pose?.digest)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-            .task(id: mood) {
-                let finished = previousMood == "working" && mood == "idle"
-                previousMood = mood
-                celebratesCompletion = finished && permitsMotion && !reduceMotion && scenePhase == .active
-                    && !ProcessInfo.processInfo.isLowPowerModeEnabled
-                    && theme.asset("mascot.celebrating") != nil
-                guard celebratesCompletion else { return }
-                do { try await Task.sleep(for: .seconds(1)) } catch { return }
-                celebratesCompletion = false
-            }
-        }
-    }
-}
-
 #if DEBUG
 extension MobileThemeAssets {
     // Reviewed SDK RainWindowExtension fixture, using the same public fragment ABI.
@@ -879,10 +826,10 @@ extension MobileThemeAssets {
     /// Small deterministic fixture pictures: exercises the shipping digest/image lookup without
     /// depending on a running Mac or downloading artwork during evidence capture.
     static func evidenceAssets() -> [RemoteThemeAsset] {
-        let slots = ["backdrop", "logo", "mascot.idle", "mascot.working", "mascot.attention", "sprite.0"]
+        let slots = ["backdrop", "mascot.idle", "mascot.working", "mascot.attention", "sprite.0"]
         return slots.compactMap { slot in
             let format = UIGraphicsImageRendererFormat(); format.scale = 1
-            let size = CGSize(width: slot == "logo" ? 160 : 128, height: slot == "logo" ? 48 : 128)
+            let size = CGSize(width: 128, height: 128)
             let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
                 let ink = UIColor(remoteHex: "#66FFAA")!
                 ink.setFill()
@@ -892,10 +839,6 @@ extension MobileThemeAssets {
                         ink.withAlphaComponent(0.4).setFill()
                         context.fill(CGRect(x: index * 32, y: index * 20, width: 16, height: 128))
                     }
-                } else if slot == "logo" {
-                    ("THREADING" as NSString).draw(at: CGPoint(x: 8, y: 10), withAttributes: [
-                        .font: UIFont.monospacedSystemFont(ofSize: 24, weight: .bold), .foregroundColor: ink
-                    ])
                 } else if slot == "sprite.0" {
                     UIBezierPath(roundedRect: CGRect(x: 32, y: 16, width: 64, height: 96), cornerRadius: 12).fill()
                 } else {

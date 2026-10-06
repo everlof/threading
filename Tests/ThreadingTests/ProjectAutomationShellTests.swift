@@ -47,7 +47,13 @@ final class ProjectAutomationShellTests: HostedStoreTestCase {
         addTeardownBlock { await store.close(); try? FileManager.default.removeItem(at: root) }
         let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: root))
         _ = ProjectStore.shared.renameProject(id: project.id, to: "Evidence project")
-        let shell = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+        for name in ["Empty checkout A", "Empty checkout B"] {
+            let folder = root.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let empty = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: folder))
+            _ = ProjectStore.shared.renameProject(id: empty.id, to: name)
+        }
+        let shell = makeMainWindowController(initialFramePlan: .useDefaultFrame, triggerStore: store)
         let window = try XCTUnwrap(shell.window)
         window.setContentSize(NSSize(width: 1400, height: 900))
         let oldPalette = AppThemePalette.current
@@ -67,10 +73,12 @@ final class ProjectAutomationShellTests: HostedStoreTestCase {
         let automationID = try XCTUnwrap(TriggerID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000001"))
         for (name, theme) in themes {
             AppThemeLibrary.installResolved(theme)
-            // Empty state is an ordinary navigable project destination.
+            // The empty page is reachable without adding an empty destination to the tree.
             try await center.prepareEvidencePage(index: 0)
+            try await shell.sidebarViewController.refreshAutomationProjects()
             shell.sidebarViewController.selectAutomations(projectID: project.id)
-            XCTAssertEqual(shell.sidebarViewController.selectedRowKey, .automations(project.id))
+            XCTAssertEqual(shell.sidebarViewController.selectedRowKey, .project(project.id))
+            XCTAssertFalse(shell.sidebarViewController.presentedRowKeys.contains(.automations(project.id)))
             try capture(window, in: output, named: "trigger-center-project-empty-\(name)")
         }
         let saved = try await store.saveProjectAutomation(config, id: automationID, expectedRevision: nil, checkout: root.path)
@@ -87,13 +95,28 @@ final class ProjectAutomationShellTests: HostedStoreTestCase {
         for (name, theme) in themes {
             AppThemeLibrary.installResolved(theme)
             try await center.prepareEvidenceDetail(automationID)
+            try await shell.sidebarViewController.refreshAutomationProjects()
             shell.sidebarViewController.selectAutomations(projectID: project.id)
             XCTAssertEqual(shell.sidebarViewController.selectedRowKey, .automations(project.id))
             try capture(window, in: output, named: "trigger-center-project-detail-\(name)")
-            let editor = AutomationEditorViewController(configuration: config, projects: [project])
+            var editorConfig = config
+            editorConfig.model = nil
+            let editor = AutomationEditorViewController(configuration: editorConfig, projects: [project], choices: AutomationEditorChoicesTests.fixture)
             editor.lockedProjectID = project.id
+            editor.availableHeight = window.contentLayoutRect.height - Design.Spacing.pane * 2
+            await editor.prepareAgentChoices()
             let submitted = try editor.submissionAfterLoadingForProjectEvidence()
             XCTAssertEqual(submitted.projectID, project.id)
+            center.presentAsSheet(editor)
+            let sheet = try XCTUnwrap(editor.view.window)
+            XCTAssertTrue(window.attachedSheet === sheet, "Evidence must use the shipping attached editor")
+            try capture(sheet, in: output, named: "trigger-center-project-editor-\(name)")
+            let login = try XCTUnwrap(descendants(editor.view).compactMap { $0 as? ThemedPopUp }
+                .first { $0.accessibilityIdentifier() == "automation.account" })
+            XCTAssertTrue(login.performPrimaryAction())
+            try capture(sheet, in: output, named: "trigger-center-project-editor-accounts-\(name)")
+            login.dismissMenu()
+            center.dismiss(editor)
         }
         let folder = try await store.projectAutomationBinding(automationID)?.checkoutPath
         let instructions = URL(fileURLWithPath: try XCTUnwrap(folder)).appendingPathComponent(".threading/automations/\(automationID.uuidString.lowercased())/instructions.md")
@@ -101,11 +124,82 @@ final class ProjectAutomationShellTests: HostedStoreTestCase {
         for (name, theme) in themes {
             AppThemeLibrary.installResolved(theme)
             try await center.prepareEvidencePage(index: 0)
+            try await shell.sidebarViewController.refreshAutomationProjects()
             shell.sidebarViewController.selectAutomations(projectID: project.id)
             XCTAssertEqual(shell.sidebarViewController.selectedRowKey, .automations(project.id))
             XCTAssertEqual(center.drawnRowCount, 3, "An invalid imported definition must appear once, with its diagnostic on the automation row")
             try capture(window, in: output, named: "trigger-center-project-error-\(name)")
         }
+    }
+
+    func testSidebarCountsSavedAutomationsAndMenuOpensAnEmptyProject() async throws {
+        let oldPalette = AppThemePalette.current
+        AppThemeLibrary.installResolved(.system)
+        defer { AppThemeLibrary.installResolved(oldPalette) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("automation-navigation-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = TriggerStore(url: root.appendingPathComponent("triggers.db"))
+        addTeardownBlock { await store.close(); try? FileManager.default.removeItem(at: root) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: root))
+        let otherFolder = root.appendingPathComponent("other")
+        try FileManager.default.createDirectory(at: otherFolder, withIntermediateDirectories: true)
+        let unrelated = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: otherFolder))
+        let shell = makeMainWindowController(initialFramePlan: .useDefaultFrame, triggerStore: store)
+        let sidebar = shell.sidebarViewController
+        try await sidebar.refreshAutomationProjects()
+        XCTAssertFalse(sidebar.presentedRowKeys.contains(.automations(project.id)))
+        let projectRow = try XCTUnwrap(sidebar.presentedRowKeys.firstIndex(of: .project(project.id)))
+        let menuItem = try XCTUnwrap(sidebar.projectMenuEntries(row: projectRow).compactMap { entry -> ThemedMenuItem? in
+            guard case .item(let item) = entry,
+                  item.representedValue as? String == AppCommands.ID.projectAutomations else { return nil }
+            return item
+        }.first)
+        menuItem.onChoose?()
+        XCTAssertTrue(shell.containerViewController.isShowingTriggers)
+        XCTAssertEqual(shell.containerViewController.automationProjectID, project.id)
+        XCTAssertEqual(sidebar.selectedRowKey, .project(project.id))
+
+        var config = AutomationConfiguration(projectID: project.id)
+        config.name = "Morning report"; config.instructions = "Summarize the project."
+        let firstID = TriggerID()
+        let first = try await store.saveProjectAutomation(config, id: firstID, expectedRevision: nil, checkout: root.path)
+        try await sidebar.refreshAutomationProjects()
+        sidebar.selectAutomations(projectID: project.id)
+        XCTAssertEqual(sidebar.selectedRowKey, .automations(project.id))
+        XCTAssertFalse(sidebar.presentedRowKeys.contains(.automations(unrelated.id)))
+        func displayedCount() throws -> String? {
+            shell.window?.contentView?.layoutSubtreeIfNeeded()
+            shell.window?.contentView?.displayIfNeeded()
+            let cell = try XCTUnwrap(sidebar.presentedRowView(of: .automations(project.id)))
+            return descendants(cell).compactMap { ($0 as? NSTextField)?.stringValue }.first { Int($0) != nil }
+        }
+        XCTAssertEqual(try displayedCount(), "1")
+
+        let secondID = TriggerID()
+        let second = try await store.saveProjectAutomation(config, id: secondID, expectedRevision: nil, checkout: root.path)
+        try await sidebar.refreshAutomationProjects()
+        XCTAssertEqual(try displayedCount(), "2")
+        XCTAssertEqual(sidebar.selectedRowKey, .automations(project.id))
+        let counts = try await store.projectAutomationCounts()
+        XCTAssertEqual(counts, [project.id: 2], "Paused drafts count; empty projects do not")
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(to: project.id, kind: .codex))
+        ProjectStore.shared.update(sessionID: session.id) { $0.branch = "automation-result" }
+        XCTAssertEqual(sidebar.selectedRowKey, .automations(project.id))
+        sidebar.reload()
+        XCTAssertEqual(sidebar.selectedRowKey, .automations(project.id))
+
+        try await store.removeAutomation(firstID, expectedRevision: first.id)
+        try await sidebar.refreshAutomationProjects()
+        XCTAssertEqual(try displayedCount(), "1")
+        try await store.removeAutomation(secondID, expectedRevision: second.id)
+        try await sidebar.refreshAutomationProjects()
+        XCTAssertFalse(sidebar.presentedRowKeys.contains(.automations(project.id)))
+        XCTAssertEqual(sidebar.selectedRowKey, .project(project.id))
+        XCTAssertEqual(shell.containerViewController.automationProjectID, project.id)
+    }
+
+    private func descendants(_ view: NSView) -> [NSView] {
+        [view] + view.subviews.flatMap(descendants)
     }
 
     private func capture(_ window: NSWindow, in output: URL, named name: String) throws {

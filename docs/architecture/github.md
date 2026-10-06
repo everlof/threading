@@ -188,6 +188,16 @@ than queued, and does not post — which is the everyday state of a developer bu
 previously indistinguishable from a delivery that had failed. Because the queue only exists when
 somewhere to send exists, its bound is never what stops a report being filed.
 
+## Reports from agents
+
+The MCP `report_problem` tool uses the same private submitter and outbox as the manual form.
+It provides structured prose, optional explicitly approved image evidence, host-supplied safe
+diagnostics and a JSON receipt. Its bounded worker, rate limit and durable content identity are
+specified in [mcp-and-display.md](mcp-and-display.md#agent-problem-reports). The report trigger
+stays `manual` for intake compatibility; a fixed opening line identifies the MCP source.
+The local record's attachment links point at the originals copied into its own folder, including
+when the input was a temporary worker snapshot. Receipt lookup is by the exact report UUID.
+
 ## The sheet's one action (`DeveloperReportSubmitControl`)
 
 Copy Report, Send to Chat and Send to Developer were three buttons in a row, ranked by a layout

@@ -117,7 +117,7 @@ final class MobileThemeCacheStoreTests: XCTestCase {
         XCTAssertNil(reloaded.theme(for: "host:mac-b"))
     }
 
-    func testAPictureCachedForAMascotUpgradesForALogoWithoutNetworkAccess() async throws {
+    func testAPictureCachedForAMascotUpgradesForABackdropWithoutNetworkAccess() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -134,7 +134,7 @@ final class MobileThemeCacheStoreTests: XCTestCase {
             .init(slot: slot, digest: digest, byteCount: data.count, pixelWidth: 512, pixelHeight: 512)
         }
         let mascot = asset("mascot.idle")
-        let logo = asset("logo")
+        let backdrop = asset("backdrop")
         let images = MobileThemeAssets(worker: MobileThemeAssetCache(directory: directory))
         func receive(_ assets: [RemoteThemeAsset]) async {
             let source = RemoteThemeDTO(id: "shared-picture", name: "Shared picture", mode: .dark,
@@ -144,16 +144,16 @@ final class MobileThemeCacheStoreTests: XCTestCase {
         }
         func expectWidth(_ width: Int) async throws {
             let deadline = ContinuousClock.now.advanced(by: .seconds(3))
-            while images.image(logo)?.cgImage?.width != width, ContinuousClock.now < deadline {
+            while images.image(backdrop)?.cgImage?.width != width, ContinuousClock.now < deadline {
                 try await Task.sleep(for: .milliseconds(10))
             }
-            XCTAssertEqual(images.image(logo)?.cgImage?.width, width)
+            XCTAssertEqual(images.image(backdrop)?.cgImage?.width, width)
         }
         await receive([mascot])
-        try await expectWidth(192)
+        try await expectWidth(Int(MobileDesign.Size.mascot) * 3)
         // Deliberately keep the smaller slot first, and retain the original digest.
-        await receive([mascot, logo])
-        try await expectWidth(480)
+        await receive([mascot, backdrop])
+        try await expectWidth(512)
         XCTAssertEqual(images.revision, 2)
     }
 
@@ -394,20 +394,20 @@ final class MobileThemeCacheStoreTests: XCTestCase {
                 UIColor.blue.setFill()
                 context.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
             }.pngData())
-        let logo = RemoteThemeAsset(slot: "logo", digest: Self.digest(png), byteCount: png.count,
+        let mascot = RemoteThemeAsset(slot: "mascot.idle", digest: Self.digest(png), byteCount: png.count,
             pixelWidth: 32, pixelHeight: 32)
-        try png.write(to: directory.appendingPathComponent(logo.digest))
+        try png.write(to: directory.appendingPathComponent(mascot.digest))
         let assets = MobileThemeAssets(worker: MobileThemeAssetCache(directory: directory), defaults: defaults)
 
-        await assets.receive(Self.theme(id: "pictures", assets: [logo]), client: nil, displayScale: 1)
-        try await Self.waitUntil { assets.image(logo) != nil }
+        await assets.receive(Self.theme(id: "pictures", assets: [mascot]), client: nil, displayScale: 1)
+        try await Self.waitUntil { assets.image(mascot) != nil }
         assets.images.removeAllObjects()
-        XCTAssertNotNil(assets.image(logo), "a wanted picture is held, not merely cached")
+        XCTAssertNotNil(assets.image(mascot), "a wanted picture is held, not merely cached")
 
         await assets.receive(Self.theme(id: "plain"), client: nil, displayScale: 1)
-        XCTAssertNotNil(assets.image(logo), "a dropped picture moves to history")
+        XCTAssertNotNil(assets.image(mascot), "a dropped picture moves to history")
         assets.images.removeAllObjects()
-        XCTAssertNil(assets.image(logo))
+        XCTAssertNil(assets.image(mascot))
     }
 
     func testAFailedSoundRetriesOnReconnectAndReceiptsArePerMacAndSurviveATransientTheme() async throws {

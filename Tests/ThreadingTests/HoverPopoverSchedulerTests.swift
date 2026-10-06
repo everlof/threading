@@ -120,8 +120,7 @@ final class HoverPopoverSchedulerTests: XCTestCase {
     }
 
     func testAPolicySwapAppliesFromTheNextPointerReport() {
-        // The usage pill swaps policies with its content: a reading closes with the pointer,
-        // extension-composed content earns the grace and the hold.
+        // An owner can switch from a reading policy to one that holds reachable actions.
         let (scheduler, owner) = makeScheduler(
             openDelay: 0, closeGrace: 0, holdsWhilePointerOnPopover: false
         )

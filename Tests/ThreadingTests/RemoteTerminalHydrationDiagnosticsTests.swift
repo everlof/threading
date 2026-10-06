@@ -65,7 +65,7 @@ final class RemoteTerminalHydrationDiagnosticsTests: HostedStoreTestCase {
     /// The Codex shape: output that never pauses long enough to count as quiet. It is revealed
     /// once the settle window after its first output ends, not at the ceiling.
     func testOutputThatNeverGoesQuietEndsWhenTheSettleWindowCloses() async throws {
-        let fixture = try makeFixture()
+        let fixture = try makeFixture(quiet: .seconds(2))
         let phone = try attachedPhone(to: fixture)
         let requestedAt = ContinuousClock.now
         fixture.registry.requestViewport(
@@ -75,6 +75,7 @@ final class RemoteTerminalHydrationDiagnosticsTests: HostedStoreTestCase {
             rows: 20,
             hydrationRequestID: "animated"
         )
+        fixture.capability.emit(Data("frame".utf8), to: fixture.sessionID)
 
         let drawing = Task { @MainActor in
             while !Task.isCancelled {
@@ -93,10 +94,9 @@ final class RemoteTerminalHydrationDiagnosticsTests: HostedStoreTestCase {
         )
     }
 
-    /// The ceiling still bounds everything: with a settle window configured longer than it, the
-    /// ceiling is what ends the hold.
+    /// The ceiling still bounds everything when both quiet and settle windows extend past it.
     func testOutputThatNeverGoesQuietEndsAtTheCeilingWhenThatComesFirst() async throws {
-        let fixture = try makeFixture(settle: .seconds(2))
+        let fixture = try makeFixture(quiet: .seconds(2), settle: .seconds(2))
         let phone = try attachedPhone(to: fixture)
         fixture.registry.requestViewport(
             from: phone,
@@ -105,6 +105,7 @@ final class RemoteTerminalHydrationDiagnosticsTests: HostedStoreTestCase {
             rows: 20,
             hydrationRequestID: "animated-past-settle"
         )
+        fixture.capability.emit(Data("frame".utf8), to: fixture.sessionID)
 
         let drawing = Task { @MainActor in
             while !Task.isCancelled {
@@ -154,9 +155,12 @@ final class RemoteTerminalHydrationDiagnosticsTests: HostedStoreTestCase {
         scope: .allSessions
     )
 
-    /// Short, well-separated delays: quiet 40 ms, first output 80 ms, settle 120 ms, ceiling
-    /// 250 ms. The animated cases emit every 10 ms, well inside the quiet window.
-    private func makeFixture(settle: Duration = .milliseconds(120)) throws -> Fixture {
+    /// Default delays are quiet 40 ms, first output 80 ms, settle 120 ms and ceiling 250 ms.
+    /// Animated cases put quiet beyond the deadline under test, independent of task cadence.
+    private func makeFixture(
+        quiet: Duration = .milliseconds(40),
+        settle: Duration = .milliseconds(120)
+    ) throws -> Fixture {
         let store = ProjectStore.shared
         let project = try XCTUnwrap(store.addProject(
             folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
@@ -167,7 +171,7 @@ final class RemoteTerminalHydrationDiagnosticsTests: HostedStoreTestCase {
         let ends = Ends()
         let registry = RemoteSessionMirrorRegistry(
             terminalApplication: capability,
-            terminalHydrationOutputQuietDelay: .milliseconds(40),
+            terminalHydrationOutputQuietDelay: quiet,
             terminalHydrationFirstOutputMaximumDelay: .milliseconds(80),
             terminalHydrationOutputSettleDelay: settle,
             terminalHydrationMaximumDelay: Fixture.ceiling,

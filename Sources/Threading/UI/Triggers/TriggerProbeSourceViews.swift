@@ -33,9 +33,12 @@ enum TriggerProbePresentation {
         return .listening(daemonStatus?.health ?? source.health)
     }
 
+    /// `listener` decides whether an approved, enabled probe is checked at all: while the
+    /// listener is not running its last receipt (or "Checking") would claim more than is true.
     static func row(
         _ source: TriggerSourceInstallation,
         daemonStatus: TriggerDaemonSourceStatus?,
+        listener: TriggerListenerState = .running,
         relativeTo now: Date = Date()
     ) -> Row {
         let state = state(of: source, daemonStatus: daemonStatus)
@@ -53,7 +56,7 @@ enum TriggerProbePresentation {
             stateWords = L10n.string("Paused")
             primary = L10n.string("Resume")
         case .listening(let health):
-            stateWords = health.displayTitle
+            stateWords = listener.isListening ? health.displayTitle : L10n.string("Not checked")
             primary = L10n.string("Pause")
         }
         var facts = [timing(probe?.spec), stateWords]
@@ -62,7 +65,9 @@ enum TriggerProbePresentation {
             facts.append(relative.localizedString(for: checked, relativeTo: now))
         }
         var detail = facts.joined(separator: "  ·  ")
-        if let diagnostic = daemonStatus?.boundedDiagnostic ?? source.boundedDiagnostic, !diagnostic.isEmpty {
+        if case .listening = state, !listener.isListening {
+            detail += "\n" + listener.sourceConsequence
+        } else if let diagnostic = daemonStatus?.boundedDiagnostic ?? source.boundedDiagnostic, !diagnostic.isEmpty {
             detail += "\n" + diagnostic
         }
         return Row(

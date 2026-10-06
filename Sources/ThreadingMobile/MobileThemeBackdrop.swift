@@ -245,6 +245,126 @@ final class MobileThemeBackdropView: UIView {
 }
 
 
+/// A theme's mascot at the dashboard's foot: the Mac's `SidebarMascotView` stated for the
+/// phone. It fills the dashboard's ground above the backdrop and stands its figure on the
+/// trailing floating control, so rows scroll over it as they scroll over the backdrop and it
+/// never takes a strip of its own. Host catalogue state selects the pose; the theme supplies
+/// pictures only, and a theme without them draws nothing here.
+///
+/// A mood change is the only work: resolve one pose, swap one picture. Under Reduce Motion, the
+/// Theme motion switch or Low Power Mode the pose still changes — that is information — but
+/// without the fade, and a finished turn is not celebrated.
+@MainActor
+final class MobileThemeMascotView: UIView {
+    static let restingMood = "resting"
+    /// How long a finished turn's pose stands before the catalogue's own mood returns.
+    private static let celebration: Duration = .seconds(1)
+    private static let poseFade: TimeInterval = 0.18
+
+    private let figure = UIImageView()
+    private var theme = RemoteThemePalette(nil)
+    private var celebrates = false
+    private var celebrationTask: Task<Void, Never>?
+
+    /// The catalogue's mood: "resting", "idle", "working" or "attention".
+    var mood = MobileThemeMascotView.restingMood {
+        didSet {
+            guard mood != oldValue else { return }
+            celebrate(finishedTurn: oldValue == "working" && mood == "idle")
+        }
+    }
+
+    /// Where the figure's feet and trailing edge stand, from the ground's bottom and trailing
+    /// edges.
+    var foot = NSDirectionalEdgeInsets.zero {
+        didSet { if foot != oldValue { setNeedsLayout() } }
+    }
+
+    /// Whether `theme` puts a mascot here, known before any picture arrives. Idle is the pose
+    /// every Mac mascot must have, so it stands for the whole set.
+    static func stands(in theme: RemoteThemePalette) -> Bool {
+        theme.asset("mascot.idle") != nil
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+        accessibilityElementsHidden = true
+        figure.contentMode = .scaleAspectFit
+        addSubview(figure)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(assetsChanged), name: MobileThemeAssets.didLoad, object: nil
+        )
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func apply(_ theme: RemoteThemePalette) {
+        guard theme != self.theme else { return }
+        self.theme = theme
+        showPose(animated: false)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard let size = figure.image?.size, size.width > 0, size.height > 0 else { return }
+        // Fitted into the square and standing on its floor, so the feet meet the control
+        // whatever the picture's proportions.
+        let scale = min(MobileDesign.Size.mascot / size.width, MobileDesign.Size.mascot / size.height)
+        let width = size.width * scale
+        let height = size.height * scale
+        let x = effectiveUserInterfaceLayoutDirection == .rightToLeft
+            ? foot.trailing : bounds.width - foot.trailing - width
+        figure.frame = CGRect(x: x, y: bounds.height - foot.bottom - height, width: width, height: height)
+    }
+
+    /// The Mac's borrowing: attention wears working's pose before idle's, every other mood idle's.
+    private var pose: RemoteThemeAsset? {
+        let shown = celebrates ? "celebrating" : mood
+        let candidates = [shown] + (shown == "attention" ? ["working"] : []) + ["idle"]
+        return candidates.lazy.compactMap { self.theme.asset("mascot.\($0)") }.first
+    }
+
+    private var permitsMotion: Bool {
+        MobileThemeMotionPreferences.decorativeMotionEnabled && !UIAccessibility.isReduceMotionEnabled
+            && window?.windowScene?.activationState == .foregroundActive
+    }
+
+    private func celebrate(finishedTurn: Bool) {
+        celebrationTask?.cancel()
+        celebrates = finishedTurn && permitsMotion && theme.asset("mascot.celebrating") != nil
+        showPose(animated: true)
+        guard celebrates else { return }
+        celebrationTask = Task { [weak self] in
+            do { try await Task.sleep(for: Self.celebration) } catch { return }
+            self?.celebrates = false
+            self?.showPose(animated: true)
+        }
+    }
+
+    private func showPose(animated: Bool) {
+        let image = MobileThemeAssets.shared.image(pose)
+        guard image !== figure.image else { return }
+        if animated, permitsMotion {
+            UIView.transition(with: figure, duration: Self.poseFade,
+                              options: [.transitionCrossDissolve, .beginFromCurrentState]) {
+                self.figure.image = image
+            }
+        } else {
+            figure.image = image
+        }
+        setNeedsLayout()
+    }
+
+    @objc private func assetsChanged() { showPose(animated: true) }
+
+#if DEBUG
+    var figureForTesting: (image: UIImage?, frame: CGRect) { (figure.image, figure.frame) }
+#endif
+}
+
 /// A window has one decorative motion owner. A pushed/covered screen relinquishes its lease;
 /// a pop can restore the previous attached screen without allocating another animator.
 @MainActor

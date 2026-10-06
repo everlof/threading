@@ -211,7 +211,23 @@ final class TerminalBoldTextRenderTests: XCTestCase {
         if feedSample { view.feed(text: Sheet.sample) }
         view.prepareFrameForSnapshot()
 
-        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+        // Not `bitmapImageRepForCachingDisplay`: its scale and colour profile follow whichever
+        // display is main, while `colorAt(x:y:)` reads the pixels back as Generic RGB — which
+        // pulled Cyberpunk's saturated yellow out of tolerance on a Retina or external display.
+        // A fixed device-RGB rep at the sheet's scale measures the same pixels everywhere.
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(view.bounds.width * Sheet.scale),
+            pixelsHigh: Int(view.bounds.height * Sheet.scale),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
+        rep.size = view.bounds.size
         view.cacheDisplay(in: view.bounds, to: rep)
         view.cacheDisplay(in: view.bounds, to: rep)
         return rep

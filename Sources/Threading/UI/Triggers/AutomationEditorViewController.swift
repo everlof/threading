@@ -17,9 +17,32 @@ final class AutomationEditorViewController: NSViewController {
     private let agent = ThemedPopUp()
     private let mode = ThemedPopUp()
     private let checkout = ThemedPopUp()
-    private let account = ThemedTextField()
-    private let model = ThemedTextField()
-    private let effort = ThemedTextField()
+    private let account = ThemedPopUp()
+    private let model = ThemedPopUp()
+    private let effort = ThemedPopUp()
+    private let choices: AutomationAgentChoiceProvider
+    private let events = AppEventObservations()
+    private var accountValues: [String?] = [nil]
+    private var modelValues: [String?] = [nil]
+    private var effortValues: [String?] = [nil]
+    private var discoveredAccounts: [AgentAccount] = []
+    private var signInStatuses: [AccountID: AgentAccountSignInStatus] = [:]
+    private var catalog = AutomationAgentCatalog(models: [], defaultModel: nil)
+    private var accountTask: Task<Void, Never>?
+    private var catalogTask: Task<Void, Never>?
+    private var statusTask: Task<Void, Never>?
+    private var accountGeneration = 0
+    private var catalogGeneration = 0
+    /// The agent choices the automation was saved with. While their agent is selected each stays
+    /// in its menu, as a custom entry when this Mac's catalog does not list it, so choosing
+    /// something else and back never loses an identifier the catalog does not know.
+    private struct SavedChoices {
+        let agent: AgentKind
+        let account: String?
+        let model: String?
+        let effort: String?
+    }
+    private let savedChoices: SavedChoices?
     private let runtime = ThemedTextField()
     private let scheduleFields: AutomationScheduleFields
     private let unattended = ThemedPopUp()
@@ -37,10 +60,15 @@ final class AutomationEditorViewController: NSViewController {
     private let remoteMode: Bool
     var lockedProjectID: ProjectID?
 
-    init(configuration: AutomationConfiguration? = nil, remoteSpec: ControllerAutomationSpec? = nil, remote: Bool = false, sources: [TriggerSourceInstallation] = [], workers: [ControllerWorker] = [], projects: [Project]? = nil) {
+    init(configuration: AutomationConfiguration? = nil, remoteSpec: ControllerAutomationSpec? = nil, remote: Bool = false, sources: [TriggerSourceInstallation] = [], workers: [ControllerWorker] = [], projects: [Project]? = nil, choices: AutomationAgentChoiceProvider = .live) {
+        self.choices = choices
         self.workers = workers
         self.sources = sources
         self.configuration = configuration; self.remoteSpec = remoteSpec; self.remoteMode = remote
+        savedChoices = configuration.map {
+            SavedChoices(agent: $0.agent, account: AccountHandle(storedName: $0.account).persistedSessionName,
+                         model: $0.model, effort: $0.reasoningEffort)
+        }
         self.projects = projects ?? ProjectStore.shared.projects
         scheduleFields = AutomationScheduleFields(
             schedule: configuration?.options.schedule ?? remoteSpec?.schedule,
@@ -64,7 +92,7 @@ final class AutomationEditorViewController: NSViewController {
         static let controlWidth = Design.Size.readableWidth
         /// "Assess, then fix if straightforward", the longest choice, whole at the control size.
         static let choiceWidth: CGFloat = 320
-        /// An account, a model or an effort name.
+        /// A time zone or a provider event kind.
         static let fieldWidth = SettingsUIDefaults.controlWidth
         /// A time, a count of minutes.
         static let numberWidth: CGFloat = 96
@@ -188,16 +216,22 @@ final class AutomationEditorViewController: NSViewController {
             addSection("Agent", to: form)
             for value in agents { agent.addItem(withTitle: value.displayName) }
             agent.selectItem(at: agents.firstIndex(of: configuration?.agent ?? .codex) ?? 0)
+            agent.setAccessibilityIdentifier("automation.agent")
+            agent.target = self; agent.action = #selector(agentChanged)
             addRow("Agent", agent, width: Layout.choiceWidth, to: form)
-            account.stringValue = configuration?.account ?? ""
-            model.stringValue = configuration?.model ?? ""
-            effort.stringValue = configuration?.reasoningEffort ?? ""
-            account.placeholderString = L10n.string("Default login")
-            model.placeholderString = L10n.string("Default model")
-            effort.placeholderString = L10n.string("Default effort")
-            addRow("Account", account, width: Layout.fieldWidth, to: form)
-            addRow("Model", model, width: Layout.fieldWidth, to: form)
-            addRow("Reasoning effort", effort, width: Layout.fieldWidth, to: form)
+            account.setAccessibilityIdentifier("automation.account")
+            model.setAccessibilityIdentifier("automation.model")
+            effort.setAccessibilityIdentifier("automation.effort")
+            account.target = self; account.action = #selector(accountChanged)
+            model.target = self; model.action = #selector(modelChanged)
+            // Preserve stored identifiers while their bounded asynchronous lookup is pending.
+            accountValues = fillChoices(account, values: [], titles: [], selected: saved(\.account),
+                                        unlistedTitle: Self.missingLoginTitle)
+            modelValues = fillChoices(model, values: [], titles: [], selected: saved(\.model))
+            effortValues = fillChoices(effort, values: [], titles: [], selected: saved(\.effort))
+            addRow("Account", account, width: Layout.choiceWidth, to: form)
+            addRow("Model", model, width: Layout.choiceWidth, to: form)
+            addRow("Reasoning effort", effort, width: Layout.choiceWidth, to: form)
 
             // Permissions: what a run may do with nobody there to ask.
             addSection("Permissions", to: form)
@@ -283,8 +317,181 @@ final class AutomationEditorViewController: NSViewController {
         }
         cadenceChanged()
         unattendedChanged()
+        if !remoteMode {
+            events.observe(AgentModelsDidChange.self) { [weak self] _ in self?.loadCatalog() }
+            events.observe(AccountUsageDidChange.self) { [weak self] _ in self?.updateAccounts() }
+            loadAccounts()
+        }
     }
     override func viewDidAppear() { super.viewDidAppear(); view.window?.makeFirstResponder(name) }
+
+    override func viewDidDisappear() {
+        super.viewDidDisappear()
+        accountTask?.cancel(); catalogTask?.cancel(); statusTask?.cancel()
+    }
+
+    private var selectedAgent: AgentKind { agents[agent.indexOfSelectedItem] }
+
+    private func selectedValue(_ control: ThemedPopUp, values: [String?]) -> String? {
+        values.indices.contains(control.indexOfSelectedItem) ? values[control.indexOfSelectedItem] : nil
+    }
+
+    /// The saved choice for the selected agent, or nil once another agent is chosen.
+    private func saved(_ choice: KeyPath<SavedChoices, String?>) -> String? {
+        guard let savedChoices, savedChoices.agent == selectedAgent else { return nil }
+        return savedChoices[keyPath: choice]
+    }
+
+    /// A model or effort the catalog does not list may still be one the CLI accepts.
+    nonisolated private static func customTitle(_ identifier: String) -> String {
+        L10n.format("%@ — Custom", identifier)
+    }
+
+    /// A login is either on this Mac or not.
+    nonisolated private static func missingLoginTitle(_ identifier: String) -> String {
+        L10n.format("%@ — Unavailable", identifier)
+    }
+
+    /// Default always comes first. The saved choice and the current one stay in the menu, with
+    /// their machine ids, even when the catalog does not list them: merely opening and saving an
+    /// old automation must not rewrite it, and a saved custom entry stays selectable.
+    private func fillChoices(_ control: ThemedPopUp, values: [String], titles: [String], selected: String?,
+                             saved: String? = nil,
+                             unlistedTitle: (String) -> String = AutomationEditorViewController.customTitle,
+                             defaultTitle: String = L10n.string("Default")) -> [String?] {
+        control.removeAllItems()
+        control.addItem(withTitle: defaultTitle)
+        var identifiers: [String?] = [nil]
+        for (value, title) in zip(values, titles) {
+            identifiers.append(value); control.addItem(withTitle: title)
+        }
+        for extra in [saved, selected].compactMap({ $0 }) where !identifiers.contains(extra) {
+            identifiers.append(extra)
+            control.addItem(withTitle: unlistedTitle(extra))
+        }
+        control.selectItem(at: identifiers.firstIndex(of: selected) ?? 0)
+        return identifiers
+    }
+
+    @objc private func agentChanged() {
+        accountValues = fillChoices(account, values: [], titles: [], selected: nil, saved: saved(\.account),
+                                    unlistedTitle: Self.missingLoginTitle)
+        modelValues = fillChoices(model, values: [], titles: [], selected: nil, saved: saved(\.model))
+        effortValues = fillChoices(effort, values: [], titles: [], selected: nil, saved: saved(\.effort))
+        catalog = .init(models: [], defaultModel: nil)
+        loadAccounts()
+    }
+
+    @objc private func accountChanged() { loadCatalog() }
+
+    @objc private func modelChanged() { updateEfforts(preservingUnavailable: false) }
+
+    private func loadAccounts() {
+        accountTask?.cancel(); catalogTask?.cancel(); statusTask?.cancel()
+        accountGeneration += 1; catalogGeneration += 1
+        let generation = accountGeneration
+        let kind = selectedAgent
+        discoveredAccounts = []; signInStatuses = [:]
+        account.isEnabled = false; model.isEnabled = false; effort.isEnabled = false
+        accountTask = Task { [weak self] in
+            guard let self else { return }
+            let accounts = await choices.accounts(kind)
+            guard !Task.isCancelled, generation == accountGeneration else { return }
+            let kept = Set([selectedValue(account, values: accountValues), saved(\.account)].compactMap { $0 })
+            // Admit the standard, current and saved logins before the ordinary 32-account bound.
+            let prioritized = accounts.filter { $0.isDefault || kept.contains($0.handle.name) }
+                + accounts.filter { !$0.isDefault && !kept.contains($0.handle.name) }
+            discoveredAccounts = Array(prioritized.prefix(32))
+            updateAccounts()
+            account.isEnabled = true
+            loadCatalog()
+            loadSignInStatuses(generation: generation)
+        }
+    }
+
+    private func updateAccounts() {
+        let selected = selectedValue(account, values: accountValues)
+        let savedLogin = saved(\.account)
+        let offered = discoveredAccounts.filter {
+            $0.isEnabled || $0.handle.name == selected || $0.handle.name == savedLogin || ($0.isDefault && selected == nil)
+        }
+        let named = offered.filter { !$0.isDefault }
+        let defaultTitle = offered.first(where: \.isDefault)
+            .map { $0.displayName == AgentAccountDefaults.defaultDisplayName
+                ? accountTitle($0) : L10n.format("Default — %@", accountTitle($0)) } ?? L10n.string("Default")
+        accountValues = fillChoices(account, values: named.map { $0.handle.name },
+                                    titles: named.map(accountTitle), selected: selected, saved: savedLogin,
+                                    unlistedTitle: Self.missingLoginTitle, defaultTitle: defaultTitle)
+    }
+
+    private func accountTitle(_ value: AgentAccount) -> String {
+        var title = value.displayName
+        if choices.authenticationRefused(value) || signInStatuses[value.id] == .signedOut {
+            title = L10n.format("%@ — Signed out", title)
+        }
+        if !value.isEnabled { title = L10n.format("%@ — Disabled", title) }
+        return title
+    }
+
+    private func loadSignInStatuses(generation: Int) {
+        let shell = AgentLauncher.loginShellPath
+        let accounts = discoveredAccounts.filter(\.isEnabled)
+        statusTask = Task { [weak self] in
+            guard let self else { return }
+            for value in accounts {
+                guard !Task.isCancelled, generation == accountGeneration else { return }
+                let status = await choices.signInStatus(value, shell)
+                guard !Task.isCancelled, generation == accountGeneration else { return }
+                signInStatuses[value.id] = status
+                updateAccounts()
+            }
+        }
+    }
+
+    private func loadCatalog() {
+        catalogTask?.cancel(); catalogGeneration += 1
+        let generation = catalogGeneration
+        let kind = selectedAgent
+        let handle = selectedValue(account, values: accountValues)
+        let login = discoveredAccounts.first { handle == nil ? $0.isDefault : $0.handle.name == handle }
+        model.isEnabled = false; effort.isEnabled = false
+        catalogTask = Task { [weak self] in
+            guard let self else { return }
+            // A removed named login must not inherit another login's model catalog.
+            let result = handle != nil && login == nil
+                ? AutomationAgentCatalog(models: [], defaultModel: nil)
+                : await choices.catalog(kind, login)
+            guard !Task.isCancelled, generation == catalogGeneration else { return }
+            catalog = result
+            let selected = selectedValue(model, values: modelValues)
+            let accountID = AccountID(provider: kind, handle: login?.handle ?? .standard)
+            let savedModel = saved(\.model)
+            let preserved = Set([selected, savedModel, result.defaultModel].compactMap { $0 })
+            let options = AgentModels.applyingVisibility(to: result.models,
+                hidden: AccountPreferencesStore.shared.hiddenModelIDs(for: accountID), preserving: preserved)
+            modelValues = fillChoices(model, values: options.map(\.identifier),
+                                      titles: options.map(\.displayName), selected: selected, saved: savedModel)
+            updateEfforts(preservingUnavailable: true)
+            model.isEnabled = true; effort.isEnabled = true
+        }
+    }
+
+    private func updateEfforts(preservingUnavailable: Bool) {
+        let identifier = selectedValue(model, values: modelValues) ?? catalog.defaultModel
+        let levels = Array((catalog.models.first { $0.identifier == identifier }?.reasoningLevels ?? []).prefix(32))
+        let selected = selectedValue(effort, values: effortValues)
+        let retained = preservingUnavailable || levels.contains { $0.effort == selected } ? selected : nil
+        effortValues = fillChoices(effort, values: levels.map(\.effort), titles: levels.map(\.displayName),
+                                   selected: retained, saved: saved(\.effort))
+    }
+
+    /// Shipping evidence and behavioral tests await the same preparation used by the sheet.
+    func prepareAgentChoices() async {
+        _ = view
+        await accountTask?.value
+        await catalogTask?.value
+        await statusTask?.value
+    }
 
     /// A quiet caption over a group of rows, a section's breath above it.
     private func addSection(_ title: String, to form: NSStackView) {
@@ -389,9 +596,9 @@ final class AutomationEditorViewController: NSViewController {
         config.executionMode = modes[mode.indexOfSelectedItem]
         config.checkoutPolicy = checkout.indexOfSelectedItem == 2 ? .automationWorkspace : checkout.indexOfSelectedItem == 1 ? .managedWorktree : .projectCheckout
         config.maximumRuntimeMinutes = maximum
-        config.account = account.stringValue.isEmpty ? nil : account.stringValue
-        config.model = model.stringValue.isEmpty ? nil : model.stringValue
-        config.reasoningEffort = effort.stringValue.isEmpty ? nil : effort.stringValue
+        config.account = selectedValue(account, values: accountValues)
+        config.model = selectedValue(model, values: modelValues)
+        config.reasoningEffort = selectedValue(effort, values: effortValues)
         config.permissions = unattended.indexOfSelectedItem == 1
             ? .full
             : try AutomationPermissionPolicy.allowList(parsing: rules.textView.string.components(separatedBy: .newlines))

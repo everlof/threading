@@ -394,8 +394,10 @@ PYTHON
 # file — the command line must not override the setting that names it, because one value there
 # would replace every helper's declaration and disable their sandboxes — so the only place a
 # helper's profile-backed key can be dropped is the file itself, inside this disposable checkout.
-# `threading-triggerd` shares a Keychain access group with the app and was the first helper to ask
-# for one.
+# `threading-triggerd` was the first helper to ask for one (a Keychain access group). A bare helper
+# cannot embed a profile, so AMFI killed it at every launch even from a profiled export; it now
+# carries no entitlement, and `check_bundle_entitlements.py` refuses a profile-backed key on any
+# helper.
 derive_entitlements() {
     python3 - "$CHECKOUT" "$ENTITLEMENTS_IN_REPO" <<'PYTHON'
 import plistlib

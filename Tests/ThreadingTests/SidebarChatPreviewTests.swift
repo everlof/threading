@@ -228,8 +228,7 @@ final class SidebarChatPreviewTests: XCTestCase {
 
         XCTAssertEqual(presentedSessionIDs(of: node), project.sessions.prefix(5).map(\.id))
         XCTAssertEqual(node.sessionNodes.count, 12)
-        XCTAssertTrue(node.childNodes.first is ProjectAutomationsNode)
-        XCTAssertTrue(node.childNodes[6] is TerminalNode)
+        XCTAssertTrue(node.childNodes[5] is TerminalNode)
         let disclosure = try XCTUnwrap(node.childNodes.last as? ChatDisclosureNode)
         XCTAssertTrue(node.chatDisclosureNode === disclosure)
         XCTAssertEqual(disclosure.preview.hiddenCount, 7)

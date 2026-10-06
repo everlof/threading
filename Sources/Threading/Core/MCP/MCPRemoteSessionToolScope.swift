@@ -79,7 +79,8 @@ enum MCPRemoteSessionToolScope {
              .proposeTriggerActivation, .reportTriggerAssessment, .reportTriggerResult:
             return false
 
-        case .listSettings, .notifyUser, .copyToClipboard:
+        // Report text travels in the call. The handler refuses image_paths on remote sessions.
+        case .listSettings, .notifyUser, .copyToClipboard, .reportProblem:
             return true
 
         case .listThemes, .setTheme, .createTheme, .listAppThemes, .getAppTheme, .setAppTheme,

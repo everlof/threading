@@ -2136,3 +2136,108 @@ private struct WorkspaceSheetHost: View {
         .mobileTheme(theme)
     }
 }
+
+@MainActor
+final class MobileThemeMascotTests: XCTestCase {
+    private var digests: [String] = []
+
+    override func tearDown() async throws {
+        for digest in digests { MobileThemeAssets.shared.images.removeObject(forKey: digest as NSString) }
+        digests = []
+        try await super.tearDown()
+    }
+
+    func testPoseFollowsTheCatalogueMoodAndBorrowsLikeTheMac() {
+        let idle = pose("mascot.idle")
+        let working = pose("mascot.working")
+        let celebrating = pose("mascot.celebrating")
+        let mascot = MobileThemeMascotView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        mascot.apply(theme([idle, working, celebrating]))
+
+        XCTAssertTrue(shown(mascot) === image(idle), "resting has no pose of its own and wears idle's")
+        mascot.mood = "working"
+        XCTAssertTrue(shown(mascot) === image(working))
+        mascot.mood = "attention"
+        XCTAssertTrue(shown(mascot) === image(working), "attention wears working's pose before idle's")
+        mascot.mood = "working"
+        mascot.mood = "idle"
+        XCTAssertTrue(shown(mascot) === image(idle), "without motion a finished turn is not celebrated")
+    }
+
+    func testFigureStandsOnTheTrailingPillAndMirrorsForRightToLeft() throws {
+        let wide = pose("mascot.idle", size: CGSize(width: 128, height: 64))
+        let mascot = MobileThemeMascotView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        mascot.foot = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 94, trailing: 20)
+        mascot.apply(theme([wide]))
+        mascot.layoutIfNeeded()
+
+        let side = MobileDesign.Size.mascot
+        let standing = CGRect(x: 390 - 20 - side, y: 844 - 94 - side / 2, width: side, height: side / 2)
+        XCTAssertEqual(mascot.figureForTesting.frame, standing, "fitted to the square, feet on the pill")
+        XCTAssertFalse(mascot.isUserInteractionEnabled)
+        XCTAssertNil(mascot.hitTest(CGPoint(x: standing.midX, y: standing.midY), with: nil))
+        XCTAssertTrue(mascot.accessibilityElementsHidden)
+
+        let rendered = UIGraphicsImageRenderer(bounds: mascot.bounds).image { mascot.layer.render(in: $0.cgContext) }
+        XCTAssertEqual(try alpha(in: rendered, at: CGPoint(x: standing.midX, y: standing.midY)), 255)
+        XCTAssertEqual(try alpha(in: rendered, at: CGPoint(x: 20, y: 20)), 0, "the rest of the ground is the backdrop's")
+
+        mascot.semanticContentAttribute = .forceRightToLeft
+        mascot.setNeedsLayout()
+        mascot.layoutIfNeeded()
+        XCTAssertEqual(mascot.figureForTesting.frame.minX, 20)
+    }
+
+    func testAThemeSwitchStandsOrClearsTheFigure() {
+        let idle = pose("mascot.idle")
+        let plain = RemoteThemePalette(nil)
+        XCTAssertFalse(MobileThemeMascotView.stands(in: plain))
+        XCTAssertTrue(MobileThemeMascotView.stands(in: theme([idle])))
+        XCTAssertFalse(MobileThemeMascotView.stands(in: theme([pose("mascot.working")])),
+            "the list reserves room only for a set the Mac would accept")
+
+        let mascot = MobileThemeMascotView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        mascot.apply(theme([idle]))
+        XCTAssertNotNil(mascot.figureForTesting.image)
+        mascot.apply(plain)
+        XCTAssertNil(mascot.figureForTesting.image)
+    }
+
+    // MARK: - Fixtures
+
+    /// A pose picture in the shared cache, the way a finished download leaves it.
+    private func pose(_ slot: String, size: CGSize = CGSize(width: 64, height: 64)) -> RemoteThemeAsset {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let picture = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.systemGreen.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+        let digest = (0..<4).map { _ in String(format: "%016llx", UInt64.random(in: .min ... .max)) }.joined()
+        MobileThemeAssets.shared.images.setObject(picture, forKey: digest as NSString)
+        digests.append(digest)
+        return RemoteThemeAsset(slot: slot, digest: digest, byteCount: 1,
+            pixelWidth: Int(size.width), pixelHeight: Int(size.height))
+    }
+
+    private func theme(_ assets: [RemoteThemeAsset]) -> RemoteThemePalette {
+        RemoteThemePalette(RemoteThemeDTO(id: "mascot-\(assets.map(\.digest).joined())", name: "Mascot",
+            mode: .dark, colors: [:], material: .init(panelRadius: 8, controlRadius: 4, borderWidth: 1),
+            assets: assets))
+    }
+
+    private func image(_ asset: RemoteThemeAsset) -> UIImage? { MobileThemeAssets.shared.image(asset) }
+    private func shown(_ mascot: MobileThemeMascotView) -> UIImage? { mascot.figureForTesting.image }
+
+    private func alpha(in image: UIImage, at point: CGPoint) throws -> UInt8 {
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let context = try XCTUnwrap(CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8,
+            bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let x = point.x * image.scale
+        let y = point.y * image.scale
+        context.draw(cgImage, in: CGRect(x: -x, y: y - CGFloat(cgImage.height) + 1,
+            width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
+        return try XCTUnwrap(context.data?.assumingMemoryBound(to: UInt8.self))[3]
+    }
+}

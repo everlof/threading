@@ -111,14 +111,33 @@ receipts to the UI.
 
 ## Surfaces
 
-The sidebar's **Triggers** destination has three pages:
+The destination has two entry points, titled apart: **All automations** (View ▸ All Automations,
+the sidebar's bolt button) and a project's **<project> · Automations** (View ▸ Project
+Automations, the project's row and action menu). Until 2026-10-05 both were titled
+"Automations" and only the app-wide one had Sources, so a person on the project page could not
+find where to approve the probe their Active automation was waiting on. Pages:
 
-- **Triggers** shows drafts, the active event kind and execution authority, and provides exact
+- **Automations** shows drafts, the active event kind and execution authority, and provides exact
   activation plus pause/resume controls.
 - **Activity** shows durable run state and bounded results even when no session started.
-- **Sources** connects the first adapter, overlays daemon health, and pauses or resumes polling.
-  Its **Probe sources** section lists probes with schedule, approval/health, hash prefix and the
-  bounded diagnostic, and offers Review & Approve, Pause/Resume, Run now, Edit and Secrets.
+- **Sources** shows the background listener's state, connects the first adapter, overlays daemon
+  health, and pauses or resumes polling. Its **Probe sources** section lists probes with
+  schedule, approval/health, hash prefix and the bounded diagnostic, and offers Review & Approve,
+  Pause/Resume, Run now, Edit and Secrets. On a project's page it lists only the sources that
+  project's event automations wait on, with the same row controls and no Connect Source or New
+  Probe (a source belongs to the Mac, not to a project).
+- **Remote** (app-wide only) drives an SSH host's controller.
+
+**A source's problem is shown where its automations are.** `TriggerSourceAttention` turns a
+source, its current receipt and the listener's state into at most one problem — needs approval,
+changed since approval, paused, disconnected, failing, or not checked because the listener is
+down — with the consequence in words and the host action that fixes it: the probe's approval
+sheet, Resume, Reconnect, Login Items or a fresh registration. A project's Automations tab opens
+with a **Needs attention** section of one row per such source (naming the automations that wait
+on it), and an event automation's own page shows its source's row under the header. The action
+opens the same flow as the Sources page; nothing approves or enables a probe on the way. The
+reads are one `store.sources()` and one `TriggerSourceReceipts.read()` per page, and only when
+the page has an event automation.
 
 The destination is hosted at the pane's full width, but it draws one centred column at
 `Design.Size.settingsContentWidth` plus the inset `PanelListView` keeps its rows on, installed
@@ -133,6 +152,16 @@ stands beside the tabs it counts, and a row's copy asks for the row the way `Con
 does, since a wrapping label has no intrinsic width to hug with and a spacer beside it broke the
 detail line after two words. `TriggerCenterRenderTests` renders at a real wide pane and asserts
 both measures.
+
+The destination is retained while another page occupies the pane. On return,
+`TerminalContainerViewController.showTriggers` runs `AppThemeRefresh.repaintIfNeeded` after
+attachment: a theme, font or accessibility change sweeps windows and cannot reach a detached
+tree. The refresh restores recorded surfaces, silhouettes and font roles without rebuilding
+the page or losing its selected tab and rows. Its generation check makes an unchanged return
+O(1); a missed change walks only the bounded page (25 catalogue rows or ten recent runs).
+`AutomationShellRenderTests.testReturningToAutomationsRefreshesAMissedThemeChange` exercises
+Settings navigation and theme installation in the shipping shell, including a dark-to-dark
+switch, and captures the returned page without an extra test-owned repaint.
 
 **An automation has a page of its own.** A row says its state in the state's ink (Active, Paused,
 Draft — not active), when it runs and with what authority, and when it runs next and how it last
@@ -153,6 +182,19 @@ chosen schedule reads are on it (`AutomationScheduleFields.reads…`): a daily r
 weekdays, an event rule no time, and the rules field and its grammar leave when Full permission
 is chosen, which shows its caution instead. A refusal stands beside Save, not at the end of a
 form that may be scrolled away from it.
+
+Account, Model and Reasoning effort are host-owned `ThemedPopUp` choices. Account discovery is
+asynchronous; the model catalog and resolved default are read on one serial worker, while a
+separate serial worker checks the providers' own login status (one child, ten seconds and 64 KiB
+per check, a 60-second cache capped at 160 identities). Menus admit at most 32 logins, 512 models
+and 32 effort levels. The account menu also observes cached usage authentication refusals;
+missing usage credentials and network failures never imply logout. No probe output is retained.
+Default model and effort serialize as nil. Efforts come from the selected model, or the account's
+resolved default. The saved account, model and effort stay in their menus while the saved agent
+is selected, even after another choice and a catalog reload: a model or effort the local catalog
+does not list reads "<id> — Custom" (the catalog is a cache, so the CLI may well accept it), a
+login missing from this Mac "<id> — Unavailable", and either round-trips unchanged. Changing agents
+resets account/model/effort, and generation checks discard late catalog answers.
 
 Opening the destination clears the project sidebar's selection (`setTriggersMode(true)` calls
 `clearSelection()`). The page belongs to no row, and a session left highlighted beside it was
@@ -215,7 +257,8 @@ whether or not the probe is still approved by then.
 **Polling.** `Targets/TriggerDaemon/TriggerProbeSources.swift` holds the pipeline and is compiled
 into both the daemon and the app, so the app's tests run what the daemon runs. Per poll it checks
 the hash first (a mismatch reports health `changed` and runs nothing), resolves secrets by name
-from Keychain service `codes.threading.trigger-probe-secret` into the probe's environment only
+from login-Keychain service `codes.threading.trigger-probe-secret` (see
+[The listener](#the-listener-signature-secrets-and-health)) into the probe's environment only
 (and redacts their values from the diagnostic), runs the probe, writes each event to the inbox,
 and only then commits the cursor (`probe-cursors.json`); a failure between them redelivers and
 acceptance is idempotent. The probe loop is independent of the Sonda long-poll: each five-second
@@ -257,9 +300,13 @@ daemon reading the spec's run fields as `TriggerProbeRunSpec` (same JSON shape).
 - `Models/TriggerModels.swift` — identities, typed events, revisions and run states
 - `Core/Triggers/TriggerStore.swift` — SQLite ownership and durable idempotence
 - `Core/Triggers/TriggerEngine.swift` — matching, holds, recovery and app dispatch
-- `Core/Triggers/TriggerDaemonBridge.swift` — config/inbox/status/Keychain/launch-agent seams
+- `Core/Triggers/TriggerDaemonBridge.swift` — config/inbox/status/launch-agent seams
+- `Core/Triggers/TriggerSecretStore.swift` — writing trigger secrets with the listener's access list
+- `Core/Triggers/TriggerListenerHealth.swift` — heartbeat, `launchctl print` and the listener state
+- `UI/Triggers/TriggerSourceAttention.swift` — a source's problem, its words and its fix
 - `Targets/TriggerDaemon/` — the polling helper and launch-agent property list;
-  `TriggerProbeSources.swift` is the probe pipeline shared with the app
+  `TriggerProbeSources.swift` is the probe pipeline and `TriggerDaemonContract.swift` the secret
+  read and heartbeat, both shared with the app
 - `Core/Triggers/TriggerProbeSourceCommands.swift` — configure/approve/enable/run-now for probes
 - `UI/Triggers/TriggerProbeSourceViews.swift` — probe rows, approval facts and the editor form
 - `UI/Triggers/TriggerCenterViewController.swift` — the host-owned destination
@@ -272,9 +319,14 @@ daemon reading the spec's run fields as `TriggerProbeRunSpec` (same JSON shape).
 
 ## Project-owned automations
 
-The expanded project has an **Automations** navigation row, including for an empty project.
+A project with saved definitions has an **Automations** navigation row with its positive count.
+Empty checkouts add no row. The project action menu and View command still open the empty page.
+The sidebar reads a grouped, 500-project identity/count projection on the store worker, coalesces
+notifications to one in-flight query plus one pending refresh, and updates only changed project
+subtrees. Paused drafts and invalid imported definitions count; deleted history does not.
 It reuses `TriggerCenterViewController` with a project filter and locked project in the editor.
-The global catalogue groups its bounded page by project; Sources and Remote stay global.
+The global catalogue groups its bounded page by project; Remote stays global, and a project's
+Sources tab lists only the sources its own event automations use.
 Both destinations and the editor remain host-only: Threading owns identity, local login/source
 bindings, activation, permission resolution, immutable revisions and execution truth.
 
@@ -334,20 +386,71 @@ other local state return only from their separate backups. The Sonda move is exp
 of its existing trigger identity, left paused; no general migration UI or remote-controller
 format change is introduced.
 
-The cross-process Keychain access group is a signed-Release contract. Unsigned/ad-hoc Debug builds
-can compile and render the feature but cannot prove ServiceManagement registration or credential
-sharing; validate those two behaviors on a signed build.
+## The listener: signature, secrets and health
 
-**A locally auto-installed build is not that build either.** `keychain-access-groups` is
-profile-backed, and the auto-installer deliberately names no provisioning profile, so it derives
-the app's and the daemon's entitlement files with the group removed — the build the developer runs
-all day therefore cannot read a source credential across the process boundary, and
-`TriggerSourceCredentialStore` asks for a group it does not have. Credential sharing is provable
-only on a profile-signed release from `scripts/release.sh`. The release path carries the group
-without any change: the Developer ID profile's entitlements dict already lists it. See
-[`releasing.md`](releasing.md#keeping-applications-on-master) — the first version of
-this entitlement broke the auto-install loop for three days because the derivation matched only
-`com.apple.developer.*`.
+**`threading-triggerd` carries no entitlement.** From 2026-09-12 to 2026-10-05 it carried
+`keychain-access-groups` so it could read source credentials and probe secrets from a shared
+group, and it never ran: the key is profile-backed, AMFI honours it only when an embedded
+provisioning profile authorizes it, and a bare executable in `Contents/Helpers` cannot embed one.
+launchd's every spawn ended in `OS_REASON_CODESIGNING` ("Code has restricted entitlements, but the
+validation of its code signature failed"), more than 150 times by the evening it was found, while `codesign --verify`
+passed and ServiceManagement reported the job enabled. A profiled export did not help, since the
+profile is embedded in the app, not the helper. `check_bundle_entitlements.py` now refuses any
+profile-backed key on a bundled helper. Shipping the helper as a bundle with its own profile was
+the alternative; it needs a second App ID and Developer ID profile that do not exist, a new
+export mapping and LoginItems registration, all of it provable only on a signed release, for a
+capability the login Keychain already provides.
+
+**Secrets are login-Keychain items whose access list names the app and the listener.** The access
+group never held them anyway: `kSecAttrAccessGroup` without `kSecUseDataProtectionKeychain` lands
+in the login Keychain with an access list naming only the creating app (measured with a
+profile-signed bundle). `TriggerSecretStore` (app) replaces an item rather than updating it, so its
+`SecAccess` trusts this app and `Contents/Helpers/threading-triggerd`, each by designated
+requirement (identifier, Apple anchor, team), and marks it with `kSecAttrGeneric`
+`threading-triggerd-acl/1`. `TriggerSecretKeychain.read` (`TriggerDaemonContract.swift`, shared)
+is the listener's only read: login Keychain, no access group. The daemon switches Keychain user
+interaction off for its process, so an item it may not read answers `errSecAuthFailed` and the
+source reports authentication required with the secret's name, never a dialog from a background
+helper. Measured on 2026-10-05 with Developer ID–signed binaries: the trusted helper read without
+a prompt, a rebuilt helper with the same requirement still did, and an untrusted same-team
+binary was refused. Another process running as the person can overwrite an item's value (the
+encrypt authorization is open), as it can rewrite `sources.json`; it cannot read one.
+
+At every launch `TriggerRuntime` rewrites, on a detached worker, every item without the marker:
+the app is on those items' lists, so it reads each value without a prompt and stores it again with
+the listener's access. The whole pass runs with keychain interaction switched off through
+`KeychainInteractionGate`, the app's one owner of that process-global switch (the Claude usage
+reader goes through it too, so neither can undo the other's setting). An item it cannot read
+silently (one stored by a differently signed Debug build, or any item while the keychain is
+locked) is counted and left alone, never put in front of the person and never re-signed for this
+build; the listener names it as one to set again, and the next launch retries it. Once every item
+carries the marker a pass is one attribute query per service. Automated runs never migrate. The app keeps
+its own `TEAM.codes.threading.triggers` entitlement: it is the default access group of every
+protected item the app already stores, and the auto-installer's credential-realm check reads it.
+
+Because the identities are designated requirements, a Debug build (Apple Development) and a
+Developer ID build cannot read each other's items; signed launch and sharing are still provable
+only on a Developer ID build (`scripts/release.sh` or the profiled auto-install).
+
+**Health says whether the listener runs, not whether it is registered.** The daemon writes
+`listener.json` (pid, start, beat) every 30 seconds. `TriggerSourceReceipts.read()` reads the
+status files, the SMAppService status and the heartbeat on a worker, and runs one bounded
+`launchctl print gui/<uid>/codes.threading.triggerd` (2 s, 64 KiB) only when the heartbeat is
+missing or older than 120 s. `TriggerListenerState.classify` is pure: a fresh beat is running;
+launchd's `last exit reason` or `job state = spawn failed` with no pid is **refused** (the reason
+is shown verbatim); a pid without a beat is a listener from before heartbeats; a stale beat or an
+exit code is **stopped**; plus requires-approval, not-registered and missing-helper. The app
+unregisters the listener when `sources.json` gives it nothing to do
+(`TriggerDaemonConfiguration.needsListener`: no connected source, enabled probe or schedule), so
+not-registered with nothing needed is **idle** ("Off", no repair offered) rather than a failure;
+an unreadable configuration counts as needed, so a real failure is never explained away. The Sources
+page's listener row shows the state, its reason and the fix (Open Login Items…, Restart Listener —
+not offered for a refusal, which only a different build fixes), and while the listener is down an
+enabled source reads **Not checked** instead of its last receipt or a perpetual "Checking".
+`list_trigger_sources` returns `background_listener` (`running`, `starting`, `refused`,
+`stopped`, `requires_approval`, `not_registered`, `idle`, `missing_helper`) with
+`background_listener_detail`, and each source's `health` is `not_checked` with the listener's
+reason in `diagnostic` while it is down.
 
 ## Recurring automations and controller ownership
 

@@ -162,6 +162,7 @@ enum MCPToolCatalog {
     authoredTriggers,
     authoredSettings,
     authoredNotifications,
+    authoredIssueReporting,
     authoredAppearance,
     authoredExtensionAuthoring,
   ]
@@ -187,6 +188,7 @@ enum MCPToolCatalog {
   static let triggers = group(id: "triggers")
   static let settings = group(id: "settings-directory")
   static let notifications = group(id: "notifications")
+  static let issueReporting = group(id: "issue-reporting")
   static let appearance = group(id: "appearance")
   static let extensionAuthoring = group(id: "extension-authoring")
 
@@ -203,6 +205,21 @@ enum MCPToolCatalog {
   static var allGroups: [MCPToolGroup] {
     groups + MCPExternalToolRegistry.shared.groups.map(externalGroup)
   }
+
+  private static let authoredIssueReporting = MCPToolGroup(
+    id: "issue-reporting",
+    family: .issueReporting,
+    title: "Issue reporting",
+    summary: "Let agents report observed Threading problems to its private support inbox.",
+    symbol: "exclamationmark.bubble",
+    tools: [],
+    instruction: """
+      report_problem files an observed problem in Threading itself through the same private
+      report outbox as Help > Report a Problem. Describe the reproduction and the exact failure.
+      Include only relevant, sanitized evidence; images require the user's permission to share.
+      Report each problem once and distinguish delivered, queued, and saved locally in your reply.
+      """
+  )
 
   private static let authoredContinuation = MCPToolGroup(
     id: "conversation-continuation",

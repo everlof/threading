@@ -353,25 +353,26 @@ final class AgentWorkHydrationTests: XCTestCase {
     /// comparison, so a turn ending, an activity edge and a tab opening can all ask freely.
     @MainActor
     func testALongTranscriptFoldsInOnceAndCostsNothingWhenAskedAgain() async throws {
+        let rootPath = try await makeHydrationRepository().path
         let session = AgentSession(kind: .claude, title: "Long")
         let projectID = ProjectID()
         let store = AgentWorkTraceStore(directory: directory)
         let target = AgentWorkTarget.session(
-            projectID: projectID, sessionID: session.id, rootPath: repositoryRoot, detailed: false
+            projectID: projectID, sessionID: session.id, rootPath: rootPath, detailed: false
         )
         let calls = 2_000
         let url = try write((0..<calls).map { index in
             claudeToolRecord(
                 id: "c\(index)",
                 name: "Read",
-                input: ["file_path": repositoryRoot + "/Sources/file-\(index % 200).swift"]
+                input: ["file_path": rootPath + "/Sources/file-\(index % 200).swift"]
             )
         })
 
         _ = store.presentation(for: target)
         store.record(
             transcriptAt: url, kind: .claude, projectID: projectID,
-            session: session, rootPath: repositoryRoot
+            session: session, rootPath: rootPath
         )
         let folded = try await eventually(timeout: .seconds(20)) {
             let presentation = store.presentation(for: target)
@@ -386,7 +387,7 @@ final class AgentWorkHydrationTests: XCTestCase {
         for _ in 0..<20 {
             store.record(
                 transcriptAt: url, kind: .claude, projectID: projectID,
-                session: session, rootPath: repositoryRoot
+                session: session, rootPath: rootPath
             )
         }
         let mainActorMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
@@ -755,6 +756,23 @@ final class AgentWorkHydrationTests: XCTestCase {
     }
 
     // MARK: - Fixtures
+
+    /// Keep the transcript workload independent of the developer's checkout and other Git work.
+    @MainActor
+    private func makeHydrationRepository() async throws -> URL {
+        let root = directory.appendingPathComponent("hydration-repository", isDirectory: true)
+        return try await Task.detached(priority: .userInitiated) {
+            let sources = root.appendingPathComponent("Sources", isDirectory: true)
+            try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+            for index in 0..<200 {
+                try Data().write(to: sources.appendingPathComponent("file-\(index).swift"))
+            }
+            for arguments in [["init", "--quiet"], ["add", "Sources"]] {
+                _ = try GitProcess.run(arguments, in: root, maximumOutput: 1_024, timeout: 5)
+            }
+            return root
+        }.value
+    }
 
     private func checkpoint(checkout: String, claims: [String]) -> GitTurnCheckpoint {
         GitTurnCheckpoint(

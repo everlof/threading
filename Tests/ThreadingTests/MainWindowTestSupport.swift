@@ -43,6 +43,7 @@ extension HostedStoreTestCase {
     @MainActor
     func makeMainWindowController(
         initialFramePlan: MainWindowInitialFramePlan = .restoreSavedFrame,
+        triggerStore: TriggerStore = .shared,
         workspaceNavigatorRouting: any ExtensionWorkspaceNavigatorRouting = ExtensionManager.shared,
         nativeWorkspaceNavigatorRegistry: NativeWorkspaceNavigatorRegistry = .shared,
         nativeWorkspaceNavigatorPluginLoader:
@@ -57,7 +58,8 @@ extension HostedStoreTestCase {
             projectStore: ProjectStore.shared,
             agentRuntime: AgentRuntime.shared,
             settings: AppSettings.shared,
-            eventLog: EventLog(directory: directory.appendingPathComponent("Logs"))
+            eventLog: EventLog(directory: directory.appendingPathComponent("Logs")),
+            triggerStore: triggerStore
         )
         let controller = MainWindowController(
             environment: environment,

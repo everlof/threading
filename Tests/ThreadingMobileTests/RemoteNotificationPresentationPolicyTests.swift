@@ -4,6 +4,17 @@ import ThreadingRemoteKit
 @testable import ThreadingMobile
 
 final class RemoteNotificationPresentationPolicyTests: XCTestCase {
+    func testPushEnvironmentFollowsSigningRatherThanOptimization() {
+        XCTAssertEqual(MobilePushEnvironment.resolve("development"), .sandbox)
+        XCTAssertEqual(MobilePushEnvironment.resolve("production"), .production)
+    }
+
+    func testBuiltAppStatesItsAPNSSigningEnvironment() throws {
+        let setting = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "ThreadingAPNSEnvironment") as? String)
+        XCTAssertTrue(["development", "production"].contains(setting), "the build must expand APS_ENVIRONMENT")
+        XCTAssertEqual(MobilePushEnvironment.current, MobilePushEnvironment.resolve(setting))
+    }
+
     func testARegistrationReturningToAnEarlierSignatureRegistersAgain() {
         var ledger = RemoteNotificationRegistrationLedger()
         XCTAssertTrue(ledger.needsRegistration("chime", for: "mac-a"))

@@ -251,8 +251,6 @@ final class MailAgentCommandService {
             case .invalidInput(let field):
                 switch field {
                 case "unknown_host", "mail_address", "mail_recipient": return unknownRecipientWords
-                case "chain_depth":
-                    return "This reply chain is already \(MailLimits.maximumDepth) messages deep, so it ends here. Answer in your own conversation instead."
                 case "chain_limit":
                     return "This conversation between agents has reached its \(MailLimits.chainMessages)-message limit."
                 case "send_rate":

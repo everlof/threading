@@ -11,6 +11,9 @@ import sys
 from pathlib import Path
 from typing import Callable, Dict, List, Mapping, Sequence
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from profile_backed_entitlements import profile_backed_entitlements  # noqa: E402
+
 
 HELPER_ENTITLEMENTS = {
     "threading-extension-helper": Path(
@@ -158,6 +161,15 @@ def verify_bundle(
             continue
         if differences:
             problems.append(f"{name}: " + "; ".join(differences))
+        # A bare executable cannot embed a provisioning profile, so AMFI kills it at launch for
+        # any key only a profile can authorize — while its signature still verifies. That is how
+        # threading-triggerd never ran from 2026-09-12 to 2026-10-05.
+        restricted = sorted(profile_backed_entitlements(expected) | profile_backed_entitlements(observed))
+        if restricted:
+            problems.append(
+                f"{name}: bare helper carries profile-backed entitlements it cannot embed a "
+                f"profile for: {', '.join(restricted)}"
+            )
     return problems
 
 

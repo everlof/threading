@@ -71,11 +71,6 @@ enum ClaudeKeychainCredentials {
     /// the CLI last cached and nothing said why.
     private static let observed = OSAllocatedUnfairLock(initialState: [String: Availability]())
 
-    /// All keychain traffic is serialised here because the no-prompt guarantee rests on a
-    /// process-global switch (`SecKeychainSetUserInteractionAllowed`); two concurrent reads
-    /// toggling it independently could re-enable interaction under the other's feet.
-    private static let keychainQueue = DispatchQueue(label: "codes.threading.claude-keychain")
-
     // MARK: - Public Methods
 
     /// A token for the usage API, or nil — silently — when the setting is off duty for this
@@ -268,25 +263,13 @@ enum ClaudeKeychainCredentials {
     /// The one place secret data is requested. With `allowingPrompt` false the read runs
     /// under keychain user interaction disabled — the deprecated `SecKeychain` switch, kept
     /// deliberately: it is the mechanism *verified* to hold the prompt back for the CLI's
-    /// file-based item (`kSecUseAuthenticationUI` documents the same promise but was not
-    /// provable without risking a live prompt on the machine doing the proving). The prior
-    /// value is restored so an interactive flow elsewhere is never left switched off.
+    /// file-based item. The switch is process-global, so `KeychainInteractionGate` serialises
+    /// it with every other caller and restores the prior value.
     private static func copyItemData(
         service: String,
         allowingPrompt: Bool
     ) -> (OSStatus, Data?) {
-        keychainQueue.sync {
-            var restore: DarwinBoolean = true
-            if !allowingPrompt {
-                SecKeychainGetUserInteractionAllowed(&restore)
-                SecKeychainSetUserInteractionAllowed(false)
-            }
-            defer {
-                if !allowingPrompt {
-                    SecKeychainSetUserInteractionAllowed(restore.boolValue)
-                }
-            }
-
+        KeychainInteractionGate.run(allowingPrompt: allowingPrompt) {
             let query: [String: Any] = [
                 kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: service,

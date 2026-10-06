@@ -117,6 +117,7 @@ final class RemoteSessionMirrorRegistry {
     private let terminalHydrationOutputSettleDelay: Duration
     private let terminalHydrationMaximumDelay: Duration
     private let sessionStartupMaximumWait: Duration
+    private let sessionStartupNow: @MainActor () -> ContinuousClock.Instant
     /// Read at every release rather than cached, so a `defaults write` takes effect without a
     /// relaunch and a test can hand this registry milliseconds — or zero, which is the
     /// release-immediately behaviour the grace replaced.
@@ -144,6 +145,9 @@ final class RemoteSessionMirrorRegistry {
             RemoteTerminalHydrationDefaults.outputSettleDelay,
         terminalHydrationMaximumDelay: Duration = RemoteTerminalHydrationDefaults.maximumDelay,
         sessionStartupMaximumWait: Duration = RemoteSessionStartupDefaults.maximumWait,
+        sessionStartupNow: @escaping @MainActor () -> ContinuousClock.Instant = {
+            ContinuousClock.now
+        },
         viewportLeaseGrace: @escaping @MainActor () -> Duration = {
             .seconds(AppSettings.shared.remoteViewportLeaseGraceSeconds)
         },
@@ -161,6 +165,7 @@ final class RemoteSessionMirrorRegistry {
         self.terminalHydrationOutputSettleDelay = terminalHydrationOutputSettleDelay
         self.terminalHydrationMaximumDelay = terminalHydrationMaximumDelay
         self.sessionStartupMaximumWait = sessionStartupMaximumWait
+        self.sessionStartupNow = sessionStartupNow
         self.viewportLeaseGrace = viewportLeaseGrace
         self.catalogueCacheLifetime = catalogueCacheLifetime
         self.catalogueCacheNow = catalogueCacheNow
@@ -403,6 +408,7 @@ final class RemoteSessionMirrorRegistry {
     }
 
     private struct StartingSession {
+        let deadline: ContinuousClock.Instant
         var waiters: [ObjectIdentifier: StartupWaiter] = [:]
         var expiry: Task<Void, Never>?
     }
@@ -1123,11 +1129,12 @@ final class RemoteSessionMirrorRegistry {
     /// The marker belongs to the host transaction, so a client cannot make an arbitrary dormant
     /// session wait indefinitely merely by opening its socket.
     func noteSessionStarting(_ sessionID: SessionID) {
+        expireOverdueSessionStartup(sessionID)
         guard startingSessions[sessionID] == nil else { return }
-        var starting = StartingSession()
-        let maximumWait = sessionStartupMaximumWait
+        let deadline = sessionStartupNow() + sessionStartupMaximumWait
+        var starting = StartingSession(deadline: deadline)
         starting.expiry = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: maximumWait)
+            try? await Task.sleep(until: deadline, clock: .continuous)
             guard !Task.isCancelled else { return }
             self?.expireSessionStartup(sessionID)
         }
@@ -1144,6 +1151,7 @@ final class RemoteSessionMirrorRegistry {
         authorizationIsCurrent: @escaping () -> Bool,
         didAttach: @escaping () -> Void
     ) -> InitialSessionAttach {
+        expireOverdueSessionStartup(sessionID)
         if attach(connection, to: sessionID, authorization: authorization) {
             didAttach()
             // The surface may have become attachable before its normal readiness callback ran.
@@ -1178,6 +1186,7 @@ final class RemoteSessionMirrorRegistry {
     }
 
     private func attachStartupWaiters(_ sessionID: SessionID) {
+        expireOverdueSessionStartup(sessionID)
         guard var starting = startingSessions[sessionID], !starting.waiters.isEmpty else {
             return
         }
@@ -1211,8 +1220,16 @@ final class RemoteSessionMirrorRegistry {
         if attachedAny { broadcastSessionRow(sessionID) }
     }
 
+    private func expireOverdueSessionStartup(_ sessionID: SessionID) {
+        guard let starting = startingSessions[sessionID], sessionStartupNow() >= starting.deadline else {
+            return
+        }
+        expireSessionStartup(sessionID)
+    }
+
     private func expireSessionStartup(_ sessionID: SessionID) {
         guard let starting = startingSessions.removeValue(forKey: sessionID) else { return }
+        starting.expiry?.cancel()
         for (key, waiter) in starting.waiters {
             startupSessionByConnection[key] = nil
             // Startup exhaustion is terminal for this route, not a healthy-socket action

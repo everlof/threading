@@ -163,6 +163,9 @@ enum MobileDesign {
         /// above the home indicator. Taller than the minimum tap target because they are the
         /// page's primary actions and float over content rather than sitting in a chrome row.
         static let floatingBarControl: CGFloat = 52
+        /// The square a theme's mascot is fitted into where it stands on those pills. Also the
+        /// point bound its picture is decoded for, so the two cannot drift apart.
+        static let mascot: CGFloat = 56
         static let toggleTrackWidth: CGFloat = 52
         static let toggleTrackHeight: CGFloat = 32
         static let toggleThumb: CGFloat = 26

@@ -13,7 +13,7 @@ final class AutomationEditorPermissionTests: XCTestCase {
         var config = AutomationConfiguration(projectID: project.id)
         config.name = "Bevakning daglig genomgång"; config.instructions = "Triage the watches."
         config.agent = .claude; config.executionMode = .taskLocalEdits; config.permissions = policy
-        let editor = AutomationEditorViewController(configuration: config, projects: [project])
+        let editor = AutomationEditorViewController(configuration: config, projects: [project], choices: AutomationEditorChoicesTests.fixture)
         _ = editor.view
         return editor
     }

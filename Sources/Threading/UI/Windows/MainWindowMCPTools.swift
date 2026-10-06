@@ -223,6 +223,7 @@ final class AgentToolCoordinator: AgentCommandHandling, MCPBuiltInToolExecuting 
 
   let displayPaneController: DisplayPaneController
   var conversationRepairHandler: ConversationRepairHandler?  // see MainWindowLaunchRecovery
+  var problemReporter: AgentProblemReportService?
   /// Where this session's browser actually is, across every pane that can hold one. The panel
   /// stays a separate dependency because `display_*` and `panel_*` are panel-scoped by
   /// contract; only the `browser_*` family follows the browser.

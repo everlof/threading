@@ -2,9 +2,24 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>keychain-access-groups</key>
-	<array>
-		<string>$(AppIdentifierPrefix)codes.threading.triggers</string>
-	</array>
+	<!-- Deliberately empty, and that is the decision this file records.
+
+	     keychain-access-groups is ABSENT. It was here from 2026-09-12 so the listener could read
+	     source credentials and probe secrets from a shared access group, and it stopped the
+	     listener from ever running: the key is profile-backed, AMFI honours it only when an
+	     embedded provisioning profile authorizes it, and this is a bare executable in
+	     Contents/Helpers, which cannot embed one. launchd's every spawn ended with
+	     OS_REASON_CODESIGNING ("Code has restricted entitlements, but the validation of its code
+	     signature failed") while the signature itself verified and ServiceManagement still
+	     reported the job enabled.
+
+	     Trigger secrets are login-Keychain items whose access list names the app and this helper
+	     by designated requirement instead (TriggerDaemonContract.swift), which needs no
+	     entitlement on either side. scripts/check_bundle_entitlements.py refuses any
+	     profile-backed key on a bundled helper, so this cannot come back unnoticed.
+
+	     com.apple.security.app-sandbox is ABSENT for the same reason as threading-ptyd's: a probe
+	     is the person's own unsandboxed program, run as them. Hardened runtime is on with no
+	     exceptions. -->
 </dict>
 </plist>

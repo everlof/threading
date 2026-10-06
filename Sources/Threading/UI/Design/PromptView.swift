@@ -1267,8 +1267,8 @@ final class PromptView: NSView, ThemedComponent {
                 // Decided by the name before a decoder is spent, and confirmed by the decoder:
                 // a `.mov` that is not a movie gives up no poster and falls back to a path, the
                 // same way bytes that are not a picture do.
-                let kind: PromptMediaAttachment.Kind = self?.showsMovieAttachments == true
-                    && AttachmentReferenceDetector.isMovie(url)
+                let allowsMovies = self?.showsMovieAttachments == true
+                let kind: PromptMediaAttachment.Kind = AttachmentReferenceDetector.isMovie(url)
                     ? .movie
                     : .image
                 let frame: CGImage? = await Task.detached(priority: .userInitiated) {
@@ -1281,6 +1281,7 @@ final class PromptView: NSView, ThemedComponent {
                         ) else { return nil }
                         return BoundedImageDecoder.thumbnailFrame(data, policy: policy)
                     case .movie:
+                        guard allowsMovies else { return nil }
                         // Nothing is read into memory: a movie streams off disk, so the byte
                         // ceiling that bounds a decoded picture has nothing to bound here — the
                         // rule the attachments pane keeps for its own preview ceiling.

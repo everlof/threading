@@ -1665,6 +1665,28 @@
         }
       }
     },
+    "%@ — Custom" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — Anpassad"
+          }
+        }
+      }
+    },
+    "%@ — Disabled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — Inaktiverad"
+          }
+        }
+      }
+    },
     "%@ — Markdown" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1672,6 +1694,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ — Markdown"
+          }
+        }
+      }
+    },
+    "%@ — Signed out" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — Utloggad"
+          }
+        }
+      }
+    },
+    "%@ — Unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — Inte tillgänglig"
           }
         }
       }
@@ -7383,6 +7427,17 @@
         }
       }
     },
+    "All Automations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alla automatiseringar"
+          }
+        }
+      }
+    },
     "All Settings…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7605,6 +7660,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tillåt det här tillägget…"
+          }
+        }
+      }
+    },
+    "Allow Threading in System Settings ▸ General ▸ Login Items so it can check sources." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt Threading i Systeminställningar ▸ Allmänt ▸ Inloggningsobjekt så att den kan kontrollera källor."
           }
         }
       }
@@ -10666,6 +10732,17 @@
         }
       }
     },
+    "Blocked by macOS" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blockerad av macOS"
+          }
+        }
+      }
+    },
     "Blocked on an approval" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12889,6 +12966,17 @@
         }
       }
     },
+    "Checks sources while Threading is closed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollerar källor medan Threading är stängt"
+          }
+        }
+      }
+    },
     "Checks the tools on your login shell’s PATH and their official release sources. You can check here even when automatic updates are off." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12913,6 +13001,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kontroller är inte tillgängliga"
+          }
+        }
+      }
+    },
+    "Checks your sources even while Threading is closed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollerar dina källor även när Threading är stängt."
           }
         }
       }
@@ -19461,6 +19560,17 @@
         }
       }
     },
+    "Default — %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standard — %@"
+          }
+        }
+      }
+    },
     "Delete" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21985,6 +22095,17 @@
         }
       }
     },
+    "Event source “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Händelsekälla ”%@”"
+          }
+        }
+      }
+    },
     "Event sources" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23463,6 +23584,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Filaktivitetskartans exempel"
+          }
+        }
+      }
+    },
+    "File an observed Threading defect with safe diagnostics and a delivery receipt." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rapportera ett upptäckt fel i Threading med säkra diagnostikuppgifter och ett leveranskvitto."
           }
         }
       }
@@ -28190,6 +28322,17 @@
         }
       }
     },
+    "Issue reporting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Problemrapportering"
+          }
+        }
+      }
+    },
     "It applies when a chat starts or resumes, and only inside Threading: your Claude settings are not changed. Turn it off to keep the theme you chose in Claude." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28201,6 +28344,17 @@
         }
       }
     },
+    "It does not run until you approve it, so no events arrive." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den körs inte förrän du godkänner den, så inga händelser kommer in."
+          }
+        }
+      }
+    },
     "It grants only the selected chat, with view, collaboration and approval rights chosen separately. The invitation points at a way in above, so the person needs the Threading app and a way onto that network." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28208,6 +28362,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den ger endast åtkomst till den valda chatten, med visning, samarbete och godkännande valda var för sig. Inbjudan pekar på en väg in ovan, så personen behöver Threading-appen och en väg in på det nätverket."
+          }
+        }
+      }
+    },
+    "It has no credential, so no events arrive." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den saknar inloggningsuppgift, så inga händelser kommer in."
+          }
+        }
+      }
+    },
+    "It has tried %lld times." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den har försökt %lld gånger."
           }
         }
       }
@@ -28251,6 +28427,17 @@
         }
       }
     },
+    "It last reported %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den rapporterade senast %@."
+          }
+        }
+      }
+    },
     "It reaches %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28258,6 +28445,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det når %@"
+          }
+        }
+      }
+    },
+    "It reports no events while paused." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den rapporterar inga händelser medan den är pausad."
           }
         }
       }
@@ -28493,6 +28691,17 @@
         }
       }
     },
+    "Its files changed after you approved them, so it does not run until you approve it again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dess filer ändrades efter att du godkände dem, så den körs inte förrän du godkänner den igen."
+          }
+        }
+      }
+    },
     "Its folder is missing: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28517,6 +28726,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dess nyckel är %@. iPhonen visar samma nyckel under Face ID-godkännanden."
+          }
+        }
+      }
+    },
+    "Its last check failed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den senaste kontrollen misslyckades."
           }
         }
       }
@@ -28994,6 +29214,17 @@
         }
       }
     },
+    "Keychain refused to store this secret (error %lld)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nyckelringen vägrade spara hemligheten (fel %lld)."
+          }
+        }
+      }
+    },
     "Keywords" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29122,6 +29353,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Senast använd"
+          }
+        }
+      }
+    },
+    "Last exit code: %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senaste slutkod: %@."
           }
         }
       }
@@ -29551,6 +29793,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Låter agenter läsa vilka inställningssidor som finns, för att peka dig till rätt sida."
+          }
+        }
+      }
+    },
+    "Let agents report observed Threading problems to its private support inbox." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Låt agenter rapportera upptäckta problem i Threading till dess privata supportinkorg."
           }
         }
       }
@@ -32804,6 +33057,17 @@
         }
       }
     },
+    "Needs approval in Login Items" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Behöver godkännande under Inloggningsobjekt"
+          }
+        }
+      }
+    },
     "Needs attention" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34507,6 +34771,17 @@
         }
       }
     },
+    "No source is checked until a build that macOS accepts is installed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen källa kontrolleras förrän en version som macOS godtar är installerad."
+          }
+        }
+      }
+    },
     "No sources" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34859,6 +35134,17 @@
         }
       }
     },
+    "None of this project’s automations waits for an event source." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen av projektets automatiseringar väntar på en händelsekälla."
+          }
+        }
+      }
+    },
     "None yet. New chats follow the app's own choice." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34971,6 +35257,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inte kontrollerat än"
+          }
+        }
+      }
+    },
+    "Not checked: macOS refuses to start the background listener." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte kontrollerad: macOS vägrar starta bakgrundslyssnaren."
+          }
+        }
+      }
+    },
+    "Not checked: the background listener is not running." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte kontrollerad: bakgrundslyssnaren körs inte."
+          }
+        }
+      }
+    },
+    "Not checked: the background listener is waiting for approval in Login Items." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte kontrollerad: bakgrundslyssnaren väntar på godkännande under Inloggningsobjekt."
           }
         }
       }
@@ -35190,6 +35509,17 @@
         }
       }
     },
+    "Not registered" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte registrerad"
+          }
+        }
+      }
+    },
     "Not run yet" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35197,6 +35527,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Har inte körts än"
+          }
+        }
+      }
+    },
+    "Not running" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körs inte"
           }
         }
       }
@@ -35401,6 +35742,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inget lyssnar."
+          }
+        }
+      }
+    },
+    "Nothing needs it yet. Threading starts it when you enable a source or schedule an automation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget behöver den än. Threading startar den när du aktiverar en källa eller schemalägger en automatisering."
           }
         }
       }
@@ -43518,6 +43870,17 @@
         }
       }
     },
+    "Report a Threading problem" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rapportera ett problem i Threading"
+          }
+        }
+      }
+    },
     "Report a bug or share this conversation" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44174,6 +44537,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Responsivt viewport · %lld×%lld"
+          }
+        }
+      }
+    },
+    "Restart Listener" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starta om lyssnaren"
           }
         }
       }
@@ -49493,6 +49867,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa bild"
+          }
+        }
+      }
+    },
+    "Show in Sources" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa i Källor"
           }
         }
       }
@@ -56494,6 +56879,28 @@
         }
       }
     },
+    "The listener is not registered, so no source is checked." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lyssnaren är inte registrerad, så ingen källa kontrolleras."
+          }
+        }
+      }
+    },
+    "The listener is registered but not running, so no source is checked." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lyssnaren är registrerad men körs inte, så ingen källa kontrolleras."
+          }
+        }
+      }
+    },
     "The local mirror is ready on 127.0.0.1:%lld. Waiting for %@…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59841,6 +60248,17 @@
         }
       }
     },
+    "This build has no background listener, so no source is checked." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här versionen har ingen bakgrundslyssnare, så ingen källa kontrolleras."
+          }
+        }
+      }
+    },
     "This build of Threading can’t run sessions on remote hosts." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -61093,6 +61511,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading kunde inte hitta Xcodes Python 3, som behövs för att installera iPhone-verktyget."
+          }
+        }
+      }
+    },
+    "Threading could not let its background listener read this secret (error %lld)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kunde inte ge bakgrundslyssnaren åtkomst till hemligheten (fel %lld)."
           }
         }
       }
@@ -63563,6 +63992,17 @@
         }
       }
     },
+    "Unavailable in this build" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte tillgänglig i den här versionen"
+          }
+        }
+      }
+    },
     "Unavailable project" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -64855,6 +65295,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använd med paketet ”%@”"
+          }
+        }
+      }
+    },
+    "Used by %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Används av %@"
           }
         }
       }
@@ -70128,6 +70579,17 @@
         }
       }
     },
+    "macOS is starting the listener." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS startar lyssnaren."
+          }
+        }
+      }
+    },
     "macOS knows the background host but it is switched off. Turning the setting off and on again registers it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -70146,6 +70608,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "macOS spelar upp aviseringsljud i AIFF, WAV och CAF. Den här filen är %@."
+          }
+        }
+      }
+    },
+    "macOS refuses to start the listener (%@)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS vägrar starta lyssnaren (%@)."
+          }
+        }
+      }
+    },
+    "macOS refuses to start the listener because it rejected its code signature (%@)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS vägrar starta lyssnaren eftersom kodsignaturen underkändes (%@)."
           }
         }
       }

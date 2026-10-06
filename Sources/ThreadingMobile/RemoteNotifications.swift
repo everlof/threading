@@ -4,6 +4,26 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
+enum MobilePushEnvironment {
+    static var current: RemoteNotificationEnvironment {
+        resolve(Bundle.main.object(forInfoDictionaryKey: "ThreadingAPNSEnvironment") as? String)
+    }
+
+    /// Optimization and signing are independent: a local Release install still uses sandbox APNs.
+    static func resolve(_ signingEnvironment: String?) -> RemoteNotificationEnvironment {
+        switch signingEnvironment {
+        case "development": return .sandbox
+        case "production": return .production
+        default:
+#if DEBUG
+            return .sandbox
+#else
+            return .production
+#endif
+        }
+    }
+}
+
 enum RemoteNotificationBridge {
     static let eventNotification = Notification.Name("ThreadingRemoteNotificationEvent")
     static let retractionNotification = Notification.Name(
@@ -438,11 +458,7 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
-#if DEBUG
-        let pushEnvironment = RemoteNotificationEnvironment.sandbox
-#else
-        let pushEnvironment = RemoteNotificationEnvironment.production
-#endif
+        let pushEnvironment = MobilePushEnvironment.current
         MobileDiagnostics.record(.apnsRegistrationSucceeded, fields: [
             .environment: pushEnvironment.rawValue
         ])
@@ -1660,20 +1676,17 @@ final class RemoteNotificationManager: ObservableObject {
         }
         let kinds = enabledKinds
         let soundKinds = soundEnabledKinds
+        let pushEnvironment = MobilePushEnvironment.current
         // An empty list is a launch still loading its pairings, not an unpairing.
         if !hosts.isEmpty {
             MobileThemeAssets.shared.retainSoundReceipts(forHostIDs: Set(hosts.map { $0.hostID ?? $0.id }))
         }
         for host in hosts {
             let themeSoundNames = MobileThemeAssets.shared.confirmedSounds(for: host.hostID ?? host.id)
-#if DEBUG
-            let pushEnvironment = RemoteNotificationEnvironment.sandbox
-#else
-            let pushEnvironment = RemoteNotificationEnvironment.production
-#endif
             let signature = [
                 host.id,
                 deviceToken,
+                pushEnvironment.rawValue,
                 kinds.map(\.rawValue).sorted().joined(separator: ","),
                 soundKinds.map(\.rawValue).sorted().joined(separator: ","),
                 includesResponsePreviews.description,

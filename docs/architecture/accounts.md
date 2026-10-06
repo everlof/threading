@@ -495,7 +495,9 @@ The toolbar's trailing pill (`AccountUsageItemView`) shows the selected session'
 rate-limit pressure: a ring gauging the peak window beside every window's own value
 (`5h 43% · 7d 73%` — Claude's own status-line vocabulary), monochrome until 75%, orange then
 red past 92%, each value tinted by its own window's severity. Hovering opens the compact current-
-account reading, a plain click pins it, and Option-click opens the pinned, scrollable all-account
+account reading. The hover popup grants a short grace to cross from the pill and stays open while
+the pointer is inside, so native keychain grants and scrollable windows remain reachable even
+without extension content. A plain click pins it, and Option-click opens the pinned, scrollable all-account
 fleet also used at the top of Usage settings. Option is deliberate: Control-click remains the
 platform's secondary-click convention. The fleet shows active windows only and, when the current
 conversation passes `SessionMigration`'s provider/transcript safety checks, offers the existing

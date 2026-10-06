@@ -58,6 +58,34 @@ enum AgentAccountSetupProvider: String, CaseIterable, Sendable {
         }
     }
 
+    /// Existing logins honor their configured credential store. The file-store override above
+    /// belongs to setup's newly created homes, not to a standard login kept in the Keychain.
+    var existingLoginStatusArguments: [String] {
+        switch self {
+        case .claude: return statusArguments
+        case .codex: return ["login", "status"]
+        }
+    }
+
+    /// A failed command alone does not prove logout: a missing CLI or malformed response is
+    /// unavailable. Retain only the provider's explicit sign-in fact, never its raw output.
+    func signInStatus(_ result: BoundedChildResult) -> AgentAccountSignInStatus {
+        guard !result.outputWasTruncated,
+              result.termination == .exited(0) || result.termination == .exited(1) else { return .unavailable }
+        switch self {
+        case .claude:
+            struct Status: Decodable { let loggedIn: Bool }
+            guard let status = try? JSONDecoder().decode(Status.self, from: result.output) else { return .unavailable }
+            return status.loggedIn ? .signedIn : .signedOut
+        case .codex:
+            if result.termination == .exited(0) { return .signedIn }
+            let answer = String(decoding: result.output, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return result.termination == .exited(1) && answer.lowercased() == "not logged in"
+                ? .signedOut : .unavailable
+        }
+    }
+
     var installationGuide: URL {
         switch self {
         case .claude:

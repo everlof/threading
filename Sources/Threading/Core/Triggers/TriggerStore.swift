@@ -231,6 +231,29 @@ actor TriggerStore {
         try selectTriggerPairs(sql: Self.selectDefinitions)
     }
 
+    /// Sidebar presence is a bounded identity projection, without decoding instructions or files.
+    /// Drafts and paused definitions count; deleted history has no current revision and does not.
+    func projectAutomationCounts() throws -> [ProjectID: Int] {
+        let query = try readyDatabase().prepare("""
+            SELECT COALESCE(bindings.project_id, revisions.project_id), COUNT(*)
+            FROM trigger_definition definitions
+            JOIN trigger_revision revisions
+              ON revisions.id = COALESCE(definitions.draft_revision_id, definitions.active_revision_id)
+            LEFT JOIN project_automation_binding bindings ON bindings.trigger_id = definitions.id
+            GROUP BY COALESCE(bindings.project_id, revisions.project_id)
+            LIMIT 500
+            """)
+        defer { query.finalize() }
+        var projects: [ProjectID: Int] = [:]
+        while try query.step() {
+            guard let value = query.text(0), let id = ProjectID(uuidString: value) else {
+                throw StoreError.invalidRecord("automation project identity")
+            }
+            projects[id] = query.int(1)
+        }
+        return projects
+    }
+
     /// Runtime definitions deliberately ignore pending drafts. Drafts are visible to the
     /// editor and MCP inspection tools, but cannot affect source events until host activation.
     func activeTriggers() throws -> [(definition: TriggerDefinition, revision: TriggerRevision)] {
