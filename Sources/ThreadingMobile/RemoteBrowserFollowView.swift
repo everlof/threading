@@ -1,6 +1,7 @@
 import ThreadingRemoteKit
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// A read-only view of the browser the agent is driving on the Mac.
 ///
@@ -12,6 +13,7 @@ struct RemoteBrowserFollowView: View {
     @ObservedObject var activity: MobileWorkspaceActivity
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @Environment(\.remoteTheme) private var theme
     @State private var workspace = RemoteWorkspaceDTO(browserTabs: [])
     @State private var selectedTabID: String?
@@ -20,6 +22,9 @@ struct RemoteBrowserFollowView: View {
     @State private var isLoading = false
     @State private var isDeciding = false
     @State private var permissionError: String?
+    @State private var isLoadingLink = false
+    @State private var linkError: String?
+    @State private var sharePayload: MobileSharePayload?
     private let loadsRemotely: Bool
     private let showsCloseButton: Bool
 
@@ -102,6 +107,18 @@ struct RemoteBrowserFollowView: View {
             guard loadsRemotely else { return }
             await refresh()
         }
+        .sheet(item: $sharePayload) { payload in
+            MobileSystemShareSheet(items: payload.items)
+        }
+        .themedAlert(
+            "Couldn’t use browser link",
+            message: linkError ?? "",
+            isPresented: Binding(
+                get: { linkError != nil },
+                set: { if !$0 { linkError = nil } }
+            ),
+            actions: [ThemedDialogAction("OK")]
+        )
     }
 
     private var browserHeader: some View {
@@ -112,12 +129,40 @@ struct RemoteBrowserFollowView: View {
                     .foregroundStyle(theme.label)
                     .lineLimit(1)
 
-                if let displayURL = selectedTab?.displayURL {
-                    Text(displayURL)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(theme.secondaryLabel)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                if let tab = selectedTab, let displayURL = tab.displayURL {
+                    HStack(spacing: MobileDesign.Spacing.tight) {
+                        Text(displayURL)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(theme.secondaryLabel)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+
+                        if tab.canPreview && !tab.isPrivate &&
+                            (displayURL.hasPrefix("http://") || displayURL.hasPrefix("https://")) {
+                            Menu {
+                                Button("Open in Browser", systemImage: "safari") {
+                                    useLink(.open, from: tab)
+                                }
+                                Button("Share Link", systemImage: "square.and.arrow.up") {
+                                    useLink(.share, from: tab)
+                                }
+                                Button("Copy Link", systemImage: "link") {
+                                    useLink(.copy, from: tab)
+                                }
+                            } label: {
+                                Image(systemName: isLoadingLink ? "hourglass" : "ellipsis.circle")
+                                    .font(.title3)
+                                    .frame(
+                                        width: MobileDesign.Size.minimumTapTarget,
+                                        height: MobileDesign.Size.minimumTapTarget
+                                    )
+                                    .contentShape(Rectangle())
+                            }
+                            .foregroundStyle(theme.secondaryLabel)
+                            .disabled(isLoadingLink)
+                            .accessibilityLabel(MobileL10n.string("Link actions"))
+                        }
+                    }
                 }
 
                 Label("Following your Mac · Read only", systemImage: "eye")
@@ -291,6 +336,38 @@ struct RemoteBrowserFollowView: View {
         loadError = nil
         activity.markBrowserSeen()
         Task { await refreshPreview(for: tab) }
+    }
+
+    private enum LinkAction {
+        case open
+        case share
+        case copy
+    }
+
+    private func useLink(_ action: LinkAction, from tab: RemoteBrowserTabDTO) {
+        guard !isLoadingLink else { return }
+        isLoadingLink = true
+        Task {
+            defer { isLoadingLink = false }
+            do {
+                let url = try await client.browserLink(sessionID: session.id, tabID: tab.id)
+                guard selectedTab?.id == tab.id else { return }
+                switch action {
+                case .open:
+                    openURL(url)
+                case .share:
+                    sharePayload = MobileSharePayload(items: [url])
+                case .copy:
+                    UIPasteboard.general.setItems(
+                        [[UTType.utf8PlainText.identifier: url.absoluteString]],
+                        options: [.localOnly: true]
+                    )
+                }
+            } catch {
+                guard selectedTab?.id == tab.id else { return }
+                linkError = error.localizedDescription
+            }
+        }
     }
 
     private func refresh() async {

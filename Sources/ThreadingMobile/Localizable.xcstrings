@@ -3744,6 +3744,17 @@
         }
       }
     },
+    "Copy Link" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera länk"
+          }
+        }
+      }
+    },
     "Copy code" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4038,6 +4049,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det gick inte att starta sessionen"
+          }
+        }
+      }
+    },
+    "Couldn’t use browser link" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att använda webblänken"
           }
         }
       }
@@ -6390,6 +6412,17 @@
         }
       }
     },
+    "Link actions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Länkåtgärder"
+          }
+        }
+      }
+    },
     "Link ready" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7967,6 +8000,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppna bilder och PDF-filer som agenten har nämnt."
+          }
+        }
+      }
+    },
+    "Open in Browser" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna i webbläsare"
           }
         }
       }
@@ -10603,6 +10647,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dela"
+          }
+        }
+      }
+    },
+    "Share Link" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela länk"
           }
         }
       }

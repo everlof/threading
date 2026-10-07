@@ -1396,6 +1396,10 @@ final class RemoteProtocolTests: XCTestCase {
             "https://quiet-river.trycloudflare.com/api/session/abc/browser-preview?tab=tab-1"
         )
         XCTAssertEqual(
+            link.browserLinkURL(sessionID: "abc", tabID: "tab-1")?.absoluteString,
+            "https://quiet-river.trycloudflare.com/api/session/abc/browser-link?tab=tab-1"
+        )
+        XCTAssertEqual(
             link.extensionPanelURL(
                 sessionID: "abc",
                 extensionIdentifier: "codes.threading.progress",

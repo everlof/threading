@@ -3073,6 +3073,16 @@ public struct RemoteBrowserTabDTO: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+/// Returned only for an explicit owner action on a shared tab. Workspace metadata keeps using
+/// the redacted display URL so ordinary refreshes never disclose credential-bearing links.
+public struct RemoteBrowserLinkDTO: Codable, Equatable, Sendable {
+    public let url: URL
+
+    public init(url: URL) {
+        self.url = url
+    }
+}
+
 /// An app-owned browser grant, separate from a provider's tool permission.
 public struct RemoteBrowserPermissionDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String

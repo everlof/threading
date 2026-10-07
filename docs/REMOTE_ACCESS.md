@@ -904,8 +904,12 @@ bounded preview, with no new polling or page-sized view tree. Browser follows th
 Mac-owned tab through bounded, read-only snapshots; clicks, scrolling, and form entry continue to
 run only on the Mac and merely refresh an already visible follow view. The pixels are the Mac's
 own, so a page the phone could never reach, such as a dev server on the Mac's localhost or a host
-inside a VPN only the Mac is on, previews like any other; the phone never resolves the page's
-URL. Routine browser mutations
+inside a VPN only the Mac is on, previews like any other; the follow preview never resolves the
+page's URL. An explicit link-menu action asks the authenticated Mac for the
+selected shared tab's current HTTP(S) URL, then opens it in the iPhone browser, presents the
+system share sheet, or copies it locally. The browser may need its own sign-in and network route;
+the follow preview remains Mac-owned.
+Routine browser mutations
 do not repeatedly animate the badge. Private tabs remain generic in the list and never send
 pixels to the phone. Browser state, checkout reads, and attachment previews are owner-only.
 Attachment metadata is fetched first and the selected image or PDF body is fetched on demand.

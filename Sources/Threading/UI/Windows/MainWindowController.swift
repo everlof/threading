@@ -4109,6 +4109,18 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         return capture.data
     }
 
+    func remoteBrowserLink(for sessionID: SessionID, tabID: UUID) -> URL? {
+        guard let browser = browserResolver.locations(for: sessionID)
+            .first(where: { $0.tabID == tabID })?.browser
+        else {
+            return nil
+        }
+        return RemoteBrowserLinkPolicy.exportableURL(
+            browser.currentURL,
+            contextKind: browser.contextKind
+        )
+    }
+
     private func boundedRemoteBrowserTitle(_ title: String) -> String {
         let collapsed = title
             .split(whereSeparator: \.isWhitespace)

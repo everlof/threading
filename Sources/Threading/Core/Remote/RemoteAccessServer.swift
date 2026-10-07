@@ -874,6 +874,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         if request.method == "GET",
+           let sessionID = RemoteRouter.browserLinkSessionID(forPath: path)
+        {
+            handleBrowserLink(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
+        if request.method == "GET",
            let sessionID = RemoteRouter.extensionPanelSessionID(forPath: path)
         {
             handleExtensionPanel(request, sessionID: sessionID, respond: respond)
@@ -3561,6 +3568,32 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             respond(.respond(RemoteRouter.data(data, contentType: "image/png")))
+        }
+    }
+
+    private func handleBrowserLink(
+        _ request: HTTPRequest,
+        sessionID rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let sessionID = authorizeOwnerSessionRead(
+            request,
+            rawSessionID: rawSessionID,
+            respond: respond
+        ) else { return }
+        guard let rawTabID = RemoteRouter.queryValue(named: "tab", in: request.path),
+              let tabID = UUID(uuidString: rawTabID)
+        else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        DispatchQueue.main.async {
+            guard let link = RemoteWorkspaceBridge.browserLink(for: sessionID, tabID: tabID) else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            respond(.respond(RemoteRouter.json(link)))
         }
     }
 

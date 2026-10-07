@@ -3437,6 +3437,11 @@ navigation and interaction, and private
 tabs never send a preview. The picture is taken on the Mac, so a page only the Mac can reach, such
 as a dev server on its own localhost, shows on the phone like any other. Ask the agent to open
 its local URL using `browser_navigate`; no LAN address is needed for this preview. If the agent
+opens a shared web page, tap the menu beside its address to **Open in Browser**, **Share Link**,
+or **Copy Link**. These actions use the exact URL at the moment you choose one; the address shown
+in the reader may omit credentials. Opening uses the iPhone's browser, with its own sign-in and
+network access. A Mac-only localhost page can still be previewed here even if the iPhone's
+browser cannot reach it. Links from private tabs are unavailable on the iPhone. If the agent
 needs browser permission, a prompt appears automatically over the open chat with the same
 approval choices as the Mac. Workspace → Browser also keeps the pending question available. You can approve or deny from your paired owner iPhone; answering there also dismisses
 the Mac's prompt. Sensitive browser actions and website-data clearing work the same way. Requests

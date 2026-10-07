@@ -254,9 +254,16 @@ animating the badge for every click or scroll. The follow route fetches bounded 
 of only the currently visible shared tab on demand. It does not construct a second `WKWebView`,
 send input back to WebKit, or run a continuous pixel stream. Because the pixels are the Mac's, a
 page on the Mac's own `localhost` previews like any other: the phone never resolves the tab's
-URL, and shows it as text rather than a link. Page titles are bounded, URLs use the
+URL for the preview, and shows it as text rather than a link. Page titles are bounded, URLs use the
 same redactor as other remote diagnostics, and private tabs expose only a generic placeholder
-with no preview. The toolbar badge stays wholly inside the account disc: `UINavigationBar` clips a
+with no preview. A link menu beside the displayed address lets the owner open the page in the
+iPhone's browser, share its URL, or copy it to the device-local pasteboard. An exact URL is
+fetched only for that explicit action through a separate owner-only route, never included in
+Workspace metadata or the activity feed. The host resolves the requested tab again at action
+time and offers only a current HTTP(S) URL from a shared tab; a private tab, closed tab, or
+unsupported URL fails without disclosure. The phone's browser has its own cookies and network
+reachability, so this action does not change the Mac-owned follow preview. The toolbar badge
+stays wholly inside the account disc: `UINavigationBar` clips a
 menu label to its own bounds, so a decorative overhang is shaved rather than granted more room.
 Opening that menu carries the same state onto its Workspace action as the same ringed activity
 dot. The action keeps the stable, one-line Workspace name; activity remains in its VoiceOver label

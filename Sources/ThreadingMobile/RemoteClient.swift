@@ -1632,6 +1632,18 @@ struct RemoteClient {
         return data
     }
 
+    func browserLink(sessionID: String, tabID: String) async throws -> URL {
+        guard let endpoint = link.browserLinkURL(sessionID: sessionID, tabID: tabID) else {
+            throw RemoteClientError.invalidResponse
+        }
+        let response: RemoteBrowserLinkDTO = try await get(RemoteBrowserLinkDTO.self, from: endpoint)
+        guard let scheme = response.url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            throw RemoteClientError.invalidResponse
+        }
+        return response.url
+    }
+
     func extensionPanel(
         sessionID: String,
         extensionIdentifier: String,

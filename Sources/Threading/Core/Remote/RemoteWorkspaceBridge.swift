@@ -6,6 +6,24 @@ enum RemoteWorkspaceDefaults {
     static let maximumPreviewBytes = 8 * 1_024 * 1_024
 }
 
+/// Exact URLs may leave the Mac only after an owner asks for one shared, loaded web tab.
+enum RemoteBrowserLinkPolicy {
+    static let maximumURLBytes = 16_384
+
+    static func exportableURL(_ url: URL?, contextKind: BrowserContextKind) -> URL? {
+        guard contextKind == .shared,
+              let url,
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              url.host != nil,
+              url.absoluteString.utf8.count <= maximumURLBytes
+        else {
+            return nil
+        }
+        return url
+    }
+}
+
 /// The narrow UI seam behind the owner-only remote Workspace.
 ///
 /// Remote Access never reaches into a `WKWebView` or a tab host directly. The window projects
@@ -15,6 +33,7 @@ enum RemoteWorkspaceDefaults {
 protocol RemoteWorkspaceProviding: AnyObject {
     func remoteBrowserTabs(for sessionID: SessionID) -> [RemoteBrowserTabDTO]
     func remoteBrowserPreview(for sessionID: SessionID, tabID: UUID) async -> Data?
+    func remoteBrowserLink(for sessionID: SessionID, tabID: UUID) -> URL?
 }
 
 @MainActor
@@ -54,5 +73,15 @@ enum RemoteWorkspaceBridge {
             return nil
         }
         return await provider.remoteBrowserPreview(for: sessionID, tabID: tabID)
+    }
+
+    static func browserLink(for sessionID: SessionID, tabID: UUID) -> RemoteBrowserLinkDTO? {
+        guard let provider,
+              RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
+              let url = provider.remoteBrowserLink(for: sessionID, tabID: tabID)
+        else {
+            return nil
+        }
+        return RemoteBrowserLinkDTO(url: url)
     }
 }

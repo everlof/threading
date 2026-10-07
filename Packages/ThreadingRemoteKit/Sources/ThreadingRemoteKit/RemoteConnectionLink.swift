@@ -424,6 +424,15 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         return components?.url
     }
 
+    public func browserLinkURL(sessionID: String, tabID: String) -> URL? {
+        var components = URLComponents(
+            url: sessionActionURL(sessionID: sessionID, action: .browserLink),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "tab", value: tabID)]
+        return components?.url
+    }
+
     public func extensionPanelURL(
         sessionID: String,
         extensionIdentifier: String,

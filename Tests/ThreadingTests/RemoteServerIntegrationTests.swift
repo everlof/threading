@@ -3423,6 +3423,14 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             403,
             "sharing one conversation must not expose browser pixels"
         )
+        XCTAssertEqual(
+            try XCTUnwrap(get(
+                "/api/session/\(sessionID.uuidString)/browser-link?tab=\(UUID().uuidString)",
+                bearer: "guesttoken"
+            )).status,
+            403,
+            "sharing one conversation must not expose exact browser URLs"
+        )
         let panelPath = "/api/session/\(sessionID.uuidString)/extension-panel?extension=codes.threading.progress&panel=build-status"
         XCTAssertEqual(
             try XCTUnwrap(get(panelPath, bearer: "guesttoken")).status,
@@ -3445,6 +3453,16 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             )).status,
             403,
             "sharing one conversation must not invoke extension actions"
+        )
+    }
+
+    func testBrowserLinkRejectsMalformedAndUnavailableTabs() throws {
+        let sessionID = SessionID()
+        let path = "/api/session/\(sessionID.uuidString)/browser-link"
+        XCTAssertEqual(try XCTUnwrap(get(path, bearer: "goodtoken")).status, 400)
+        XCTAssertEqual(
+            try XCTUnwrap(get("\(path)?tab=\(UUID().uuidString)", bearer: "goodtoken")).status,
+            404
         )
     }
 
@@ -4273,6 +4291,12 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(
             RemoteRouter.browserPreviewSessionID(
                 forPath: "/api/session/abc/browser-preview"
+            ),
+            "abc"
+        )
+        XCTAssertEqual(
+            RemoteRouter.browserLinkSessionID(
+                forPath: "/api/session/abc/browser-link"
             ),
             "abc"
         )
