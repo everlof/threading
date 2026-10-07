@@ -972,10 +972,11 @@ extension ControllerStore {
     private func countChain(_ chainID: UUID) throws {
         let id = chainID.uuidString.lowercased()
         let prior: MailChain? = try optional("mailChain", id)
-        let count = (prior?.count ?? 0) + 1
-        guard count <= MailLimits.chainMessages else { throw ControllerError.invalidInput("chain_limit") }
-        if prior == nil { try insert("mailChain", id, value: MailChain(count: count)) }
-        else { try update("mailChain", id, value: MailChain(count: count)) }
+        var chain = prior ?? MailChain(count: 0)
+        chain.count += 1
+        guard chain.count <= MailLimits.chainMessages else { throw ControllerError.invalidInput("chain_limit") }
+        if prior == nil { try insert("mailChain", id, value: chain) }
+        else { try update("mailChain", id, value: chain) }
     }
     func hostName(_ id: HostID) throws -> String {
         if id == (try host().id) { return "this host" }

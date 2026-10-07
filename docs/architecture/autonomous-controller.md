@@ -729,7 +729,9 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   colliding with it. Wake admission keys on the newest open message that may wake the worker
   and whose chain is within budget, not on whichever message arrived last. Fuses
   that need no reading: 50 messages and 16 wakes per chain on a host, 20 sends a minute
-  per sender, 1,000 open messages per inbox. A chain has no depth limit: the depth a message carries is shown in its
+  per sender, 1,000 open messages per inbox. Updating the message count preserves the wake count;
+  replacing the chain record would reset the wake fuse on every message. A chain has no depth
+  limit: the depth a message carries is shown in its
   header and nothing more. A limit of 4 shipped first and refused ordinary unattended exchanges
   (ask, answer, follow-up) long before anything looped, while the per-chain count already stops a
   real loop — every host a cross-host message passes counts it, so a ring of hosts is bounded too.

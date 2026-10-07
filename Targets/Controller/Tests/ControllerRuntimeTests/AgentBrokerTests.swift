@@ -103,4 +103,3 @@ struct AgentBrokerTests {
         #expect(FileManager.default.contents(atPath: path) == Data("keep".utf8))
     }
 }
-
