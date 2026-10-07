@@ -38,6 +38,9 @@ reshuffling it is a line move.
 
 ### Now — in active design
 
+- [Host and agent diagnostics](host-agent-diagnostics.md) — agreed implementation plan for
+  portable controller/ptyd health, Rindabox task explanations and incidents, Mac remote-host
+  inspection, and independent Cloudflare outage emails for the VPS and an opted-in Mac.
 - [Usage-aware accounts](usage-aware-accounts.md) — tell an agent what its budget is, let the user
   rank which logins may be spent automatically, move work to the next best one before a
   weekly window strands it, and keep a drained fleet's anchored windows cycling at reset. It is
