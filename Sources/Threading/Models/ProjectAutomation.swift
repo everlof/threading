@@ -3,8 +3,7 @@ import Foundation
 /// Portable, project-owned configuration. Machine identities and activation never enter it.
 struct ProjectAutomation: Codable, Equatable, Sendable {
     static func validID(_ id: String) -> Bool {
-        !id.isEmpty && id.utf8.count <= 80 && id != "." && id != ".."
-            && id.utf8.allSatisfy { (97...122).contains($0) || (48...57).contains($0) || $0 == 45 || $0 == 95 }
+        ProjectAutomationIdentifier.isValid(id)
     }
 
     var formatVersion = 1
@@ -66,32 +65,6 @@ struct ProjectAutomationRevision: Codable, Equatable, Sendable {
     let resourcesPath: String
     let workspacePath: String
     let resources: [String]
-}
-
-struct AutomationWorkspace: Codable, Equatable, Sendable {
-    let automationID: String
-    let checkoutPath: String
-
-    init(automationID: String, checkoutPath: String) {
-        self.automationID = automationID
-        self.checkoutPath = checkoutPath
-    }
-
-    private enum CodingKeys: String, CodingKey { case automationID, checkoutPath }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        automationID = try container.decode(String.self, forKey: .automationID)
-        checkoutPath = try container.decode(String.self, forKey: .checkoutPath)
-        guard ProjectAutomation.validID(automationID), checkoutPath.hasPrefix("/"), !checkoutPath.contains("\0") else {
-            throw DecodingError.dataCorruptedError(forKey: .automationID, in: container, debugDescription: "Invalid automation workspace")
-        }
-    }
-
-    var executionPath: String {
-        URL(fileURLWithPath: checkoutPath).appendingPathComponent(
-            ".threading/local/automations/\(automationID)", isDirectory: true).path
-    }
 }
 
 /// Raw portable rules are resolved and parsed at the host boundary, before becoming authority.

@@ -42,7 +42,6 @@ Sources/Threading/Core/Agent/CodexPatch.swift
 Sources/Threading/UI/Views/EditDiff.swift
 Sources/Threading/Core/Agent/ToolOutcome.swift
 Sources/Threading/Core/Agent/WireList.swift
-Sources/Threading/Core/Agent/WireInteger.swift
 Sources/Threading/Models/ChartSpec.swift
 Sources/Threading/Models/ProjectExecutionHost.swift
 Sources/Threading/Models/RemoteHostRecord.swift
@@ -72,3 +71,7 @@ Sources/Threading/Core/Agent/CodeContextPreview.swift
 Sources/Threading/Core/Agent/ConversationContextAttachment.swift
 Sources/Threading/Core/Agent/GitReviewDefaults.swift
 Sources/Threading/Core/Agent/AgentStreamTransport.swift
+
+Sources/Threading/Core/Agent/AgentCredentialEnvironment.swift
+Sources/Threading/Core/Agent/ProjectAccountList.swift
+Sources/Threading/Models/AutomationWorkspace.swift

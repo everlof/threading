@@ -19,6 +19,11 @@ bridge_map=$(swift build --show-bin-path)/AppKitTextBridge.build/module.modulema
 swiftc -typecheck -swift-version 6 -I "$modules" -Xcc "-fmodule-map-file=$bridge_map" \
   /repo/Platforms/Linux/tests/glyph_view/ShimDependencies.swift \
   /repo/Sources/Threading/UI/Design/TemplateImageDrawing.swift \
-  /repo/Sources/Threading/UI/Design/GlyphView.swift
+  /repo/Sources/Threading/UI/Design/GlyphView.swift \
+  /repo/Sources/Threading/UI/Design/LabelLegibilityInk.swift \
+  /repo/Sources/Threading/Extensions/NSColor+Terminal.swift \
+  /repo/Sources/Threading/Core/Theme/ThemeContrast.swift \
+  /repo/Sources/Threading/Core/Theme/PerceptualColor.swift \
+  /repo/Sources/Threading/Core/Theme/TextLegibilityPolicy.swift
 echo 'PASS exact production GlyphView + TemplateImageDrawing typecheck on shim AppKit'
 INNER

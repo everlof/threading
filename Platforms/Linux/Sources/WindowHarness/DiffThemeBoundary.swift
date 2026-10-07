@@ -14,7 +14,6 @@ extension Design {
         static var number: NSColor { LinuxTheme.color("syntaxNumber") }
     }
 }
-extension Design.Accessibility { static let increasesContrast = false }
 extension Design.Typography {
     static func code() -> NSFont { .monospacedSystemFont(ofSize: 11) }
 }

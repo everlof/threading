@@ -8,10 +8,19 @@ extension Design.Surface {
     static var panel: NSColor { LinuxTheme.color("panel") }
 }
 extension Design {
-    enum Chat { static let blockSpacing = Design.Spacing.small }
+    enum Chat {
+        static let blockSpacing = Design.Spacing.small
+        static let arrivalRise = Design.Spacing.medium
+    }
 }
 extension Design.Typography {
     enum FontSurface { case chrome, conversation }
+    static let scale: CGFloat = 1
+    static func documentHeading(level: Int, from base: NSFont, surface: FontSurface) -> NSFont {
+        let steps: [CGFloat] = [11, 7, 3, 1]
+        let step = steps[min(max(level, 1), steps.count) - 1]
+        return .systemFont(ofSize: base.pointSize + step, weight: level <= 2 ? .bold : .semibold)
+    }
     static func body(surface: FontSurface) -> NSFont { body() }
     static func inlineCode() -> NSFont { .monospacedSystemFont(ofSize: 12) }
     static func markdownHeading(from font: NSFont, surface: FontSurface) -> NSFont {
@@ -46,4 +55,10 @@ extension ThemedScrollView {
         get { forwardsVerticalScroll ? .always : .never }
         set { forwardsVerticalScroll = newValue == .always }
     }
+}
+
+extension Design.Motion {
+    // This host retains Core Animation values but has no animation compositor.
+    static let reducesMotion = true
+    static let transcriptArrive: TimeInterval = 0.26
 }

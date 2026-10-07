@@ -57,7 +57,7 @@ enum ConversationTranscriptDefaults {
     static let markdownBlockCacheLimit = 64
     static let columnIdentifier = "ConversationTranscriptContent"
     static let rowReuseIdentifier = "ConversationTranscriptRow"
-    static let arrivalAnimationKey = "conversationArrival"
+    static let arrivalAnimationKey = ConversationRowDefaults.arrivalAnimationKey
 }
 
 #if DEBUG

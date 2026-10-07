@@ -104,6 +104,7 @@ open class NSScrollView: NSView {
 
     open var drawsBackground = false
     open var hasVerticalScroller = false
+    open var autohidesScrollers = false
     open var hasHorizontalScroller = false
     /// Elasticity is a request; this renderer currently keeps the viewport clamped.
     open var horizontalScrollElasticity: Elasticity = .none

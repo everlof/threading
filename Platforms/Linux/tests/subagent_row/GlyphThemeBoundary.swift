@@ -36,7 +36,10 @@ public enum Design {
         public static var selection: Ink { Ink(on: NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1)) }
     }
 
-    public enum Accessibility { public static let focusRingWidth: CGFloat = 2 }
+    public enum Accessibility {
+        public static let focusRingWidth: CGFloat = 2
+        public static let increasesContrast = false
+    }
     public enum Spacing {
         public static let small: CGFloat = 5
         public static let hairline: CGFloat = 1

@@ -56,7 +56,7 @@ struct WorkingWordCycle {
 
     // MARK: - Properties
 
-    private let words: [String]
+    private var words: [String]
 
     /// Words not yet dealt from the current bag, in the order they will be dealt.
     private var remaining: [String] = []
@@ -73,6 +73,18 @@ struct WorkingWordCycle {
     }
 
     // MARK: - Public Methods
+
+    /// The next word from `source` — a theme's own list, or the app's. A different list than
+    /// the bag was filled from starts a fresh bag, so switching to a theme with words of its own
+    /// changes the very next turn's word rather than after the old bag runs out.
+    mutating func next(drawingFrom source: [String]) -> String {
+        let source = source.isEmpty ? WorkingWords.all : source
+        if source != words {
+            words = source
+            remaining = []
+        }
+        return next()
+    }
 
     /// The next word, refilling and reshuffling when the bag runs out.
     mutating func next() -> String {

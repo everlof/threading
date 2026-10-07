@@ -50,6 +50,8 @@ struct RemoteHostRecord: Equatable, Codable, Sendable, Identifiable {
     /// `/home/me/src` again for every checkout is the sort of friction that makes a person keep one
     /// project per machine.
     var defaultDirectory: String?
+    var controllerExecutable: String? = nil
+    var controllerDatabase: String? = nil
     let addedAt: Date
 
     init(
@@ -73,6 +75,8 @@ struct RemoteHostRecord: Equatable, Codable, Sendable, Identifiable {
     /// it.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        controllerExecutable = try container.decodeIfPresent(String.self, forKey: .controllerExecutable)
+        controllerDatabase = try container.decodeIfPresent(String.self, forKey: .controllerDatabase)
         id = (try? container.decode(RemoteHostID.self, forKey: .id)) ?? RemoteHostID()
         label = (try? container.decodeIfPresent(String.self, forKey: .label)) ?? ""
         destination = (try? container.decodeIfPresent(String.self, forKey: .destination)) ?? ""

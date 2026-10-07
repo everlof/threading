@@ -44,18 +44,6 @@ enum L10n {
 }
 
 @MainActor extension NSColor {
-    func composited(over background: NSColor) -> NSColor {
-        let foreground = usingColorSpace(.sRGB) ?? self
-        let backdrop = background.usingColorSpace(.sRGB) ?? background
-        let alpha = foreground.alphaComponent
-        return NSColor(
-            red: foreground.redComponent * alpha + backdrop.redComponent * (1 - alpha),
-            green: foreground.greenComponent * alpha + backdrop.greenComponent * (1 - alpha),
-            blue: foreground.blueComponent * alpha + backdrop.blueComponent * (1 - alpha),
-            alpha: 1
-        )
-    }
-
     private var luminance: CGFloat {
         let rgb = usingColorSpace(.sRGB) ?? self
         func linear(_ channel: CGFloat) -> CGFloat {

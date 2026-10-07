@@ -43,6 +43,8 @@ open class NSResponder: Equatable {
 /// separate measurements.
 @MainActor
 open class NSView: NSResponder, NSLayoutItem {
+    public enum BackgroundStyle { case normal, emphasized }
+
     // Key-view edges do not own controls. A pane supplies its semantic loop; traversal skips
     // disabled, hidden and detached members without walking an externally sized view tree.
     private weak var precedingKeyView: NSView?
@@ -859,6 +861,7 @@ public enum NSAccessibility {
     }
 
     public enum Role: String, Hashable, Sendable {
+        case image
         case staticText
         case textArea
         case button

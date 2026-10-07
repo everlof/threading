@@ -19,6 +19,14 @@ public final class NSTableColumn {
 
 @MainActor
 open class NSTableCellView: NSView {
+    private var statedBackgroundStyle: BackgroundStyle = .normal
+    open var backgroundStyle: BackgroundStyle {
+        get {
+            guard let row = superview as? NSTableRowView else { return statedBackgroundStyle }
+            return row.isSelected && row.isEmphasized ? .emphasized : .normal
+        }
+        set { statedBackgroundStyle = newValue; needsDisplay = true }
+    }
     open func prepareForReuse() {}
 }
 

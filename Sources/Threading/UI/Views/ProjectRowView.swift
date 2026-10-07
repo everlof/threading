@@ -367,6 +367,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     // MARK: - Private Methods
 
     private func setupViews() {
+        iconView.contrastGround = { [weak self] in self?.rowGround() ?? Design.Surface.background }
         rowVisuals.translatesAutoresizingMaskIntoConstraints = false
         addSubview(rowVisuals)
         NSLayoutConstraint.activate([

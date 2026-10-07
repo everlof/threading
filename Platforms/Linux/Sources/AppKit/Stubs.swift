@@ -195,6 +195,11 @@ public struct NSFontTraitMask: OptionSet, Sendable {
 public final class NSFontManager: Sendable {
     public static let shared = NSFontManager()
 
+    public func convert(_ font: NSFont, toSize size: CGFloat) -> NSFont {
+        NSFont(familyName: font.fontDescriptor.familyName, pointSize: size,
+               weight: font.weight, italic: font.isItalic)
+    }
+
     public func traits(of font: NSFont) -> NSFontTraitMask {
         var traits: NSFontTraitMask = []
         if font.isItalic { traits.insert(.italicFontMask) }

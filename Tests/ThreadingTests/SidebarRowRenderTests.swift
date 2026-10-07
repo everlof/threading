@@ -853,7 +853,7 @@ final class SidebarRowRenderTests: XCTestCase {
                 as? ThemedTerminalRowContentView
         )
         let icon = try XCTUnwrap(
-            row.descendant(identified: "sidebar.terminal.identity") as? NSImageView
+            row.descendant(identified: "sidebar.terminal.identity") as? GlyphView
         )
         let title = try XCTUnwrap(
             row.descendant(identified: "sidebar.terminal.title") as? MorphingTitleLabel

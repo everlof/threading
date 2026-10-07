@@ -770,10 +770,14 @@ public enum ThemedMenuMetrics {
         var heights = [CGFloat](repeating: 0, count: entries.count)
         var run: [Int] = []
 
-        func closeRun() {
+        @MainActor func closeRun() {
             guard !run.isEmpty else { return }
-            let tall = run.contains { index in
-                entries[index].item?.subtitle?.isEmpty == false
+            var tall = false
+            for index in run {
+                if entries[index].item?.subtitle?.isEmpty == false {
+                    tall = true
+                    break
+                }
             }
             for index in run { heights[index] = tall ? subtitleRowHeight : rowHeight }
             run.removeAll()
@@ -879,4 +883,3 @@ public enum ThemedMenuMetrics {
     /// a name and its footnote rather than as a two-word name.
     public static let titleDetailGap = "   "
 }
-

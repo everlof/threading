@@ -50,7 +50,10 @@ public enum Design {
         public static var selection: Ink { Ink(on: Design.Surface.selectionFill) }
     }
 
-    public enum Accessibility { public static let focusRingWidth: CGFloat = 2 }
+    public enum Accessibility {
+        public static let focusRingWidth: CGFloat = 2
+        public static let increasesContrast = false
+    }
     public enum Opacity { public static let disabledControl: CGFloat = 0.42 }
     public enum Radius {
         public static let border: CGFloat = 1

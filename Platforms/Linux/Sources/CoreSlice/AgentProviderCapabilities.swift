@@ -198,6 +198,13 @@ struct AgentCapabilities: OptionSet {
   /// losing Undo or being misrepresented as the destructive delete they also expose.
   static let providerArchive = Self(rawValue: 1 << 24)
 
+  /// The runtime's command hooks can *answer*: a `PostToolUse` or `SessionStart` hook's
+  /// `additionalContext` reaches the model mid-turn, and a `Stop` hook's `decision: "block"`
+  /// continues the same turn. That is what lets a working terminal agent be told mail is waiting
+  /// (`docs/feature-drafts/agent-mail.md`, "Codex hooks, measured"). Claude and Codex. A runtime
+  /// without it gets mail notices only at turn boundaries.
+  static let answeringMailHooks = Self(rawValue: 1 << 41)
+
   /// A terminal interruption is written as a structured transcript record that **names the turn
   /// it aborted**, while the lifecycle hook that ordinarily closes a reported turn is omitted.
   /// Codex only: 0.147.0 appends `event_msg / turn_aborted / reason: interrupted` and returns to
@@ -375,6 +382,20 @@ struct AgentCapabilities: OptionSet {
   /// reading this Mac's files or running their CLI here, which a remote child is not visible to.
   /// See `docs/feature-drafts/remote-execution-hosts.md`.
   static let remoteExecutionHostLaunch = Self(rawValue: 1 << 39)
+
+  /// A login can be signed in with a long-lived token instead of the browser sign-in, delivered
+  /// to that login's processes through `AgentKind.longLivedToken`. Claude only: `claude
+  /// setup-token` mints a one-year token the CLI reads from `CLAUDE_CODE_OAUTH_TOKEN`. Codex has
+  /// API keys, but those bill differently and are not a substitute for a subscription login.
+  static let longLivedAccountToken = Self(rawValue: 1 << 40)
+}
+
+/// How a runtime accepts a long-lived sign-in token: the variable its CLI reads, what every such
+/// token starts with, and the command that mints one.
+struct AgentLongLivedTokenSpec: Equatable, Sendable {
+  let environmentKey: String
+  let prefix: String
+  let mintCommand: String
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -467,7 +488,8 @@ enum AgentKind: String, Codable, CaseIterable {
         .anchoredUsageWindow, .transcriptUsageLimitRecord, .transcriptRefusedTurnRecord,
         .transcriptInterruptedMessageRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .checkoutScopedConversationStorage, .lifecycleReportedWorkingDirectory,
-        .modelAliasResolution, .selectableTerminalRenderer, .remoteExecutionHostLaunch
+        .modelAliasResolution, .selectableTerminalRenderer, .remoteExecutionHostLaunch,
+        .longLivedAccountToken, .answeringMailHooks
       ]
     case .codex:
       return [
@@ -476,7 +498,8 @@ enum AgentKind: String, Codable, CaseIterable {
         .headlessResearch, .providerTitleMetadata, .providerArchive, .transcriptUsageIndex,
         .transcriptInterruptedTurnRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .inlineTerminalViewport, .lifecycleReportedTranscriptPath,
-        .lifecycleReportedWorkingDirectory, .detectableExternalResume, .bankedUsageReset
+        .lifecycleReportedWorkingDirectory, .detectableExternalResume, .bankedUsageReset,
+        .answeringMailHooks
       ]
     case .grok:
       return [
@@ -610,6 +633,25 @@ enum AgentKind: String, Codable, CaseIterable {
     case .grok: return "GROK_HOME"
     case .openCode: return "OPENCODE_CONFIG_DIR"
     case .cursor: return nil
+    }
+  }
+
+  /// The long-lived token this runtime accepts, where it claims `.longLivedAccountToken`.
+  ///
+  /// Claude's was measured against 2.1.287: `CLAUDE_CODE_OAUTH_TOKEN` outranks the stored browser
+  /// login, and `claude auth status` then reports `authMethod: oauth_token` with no email —
+  /// without checking the token, so status cannot prove one works.
+  var longLivedToken: AgentLongLivedTokenSpec? {
+    guard supports(.longLivedAccountToken) else { return nil }
+    switch self {
+    case .claude:
+      return AgentLongLivedTokenSpec(
+        environmentKey: "CLAUDE_CODE_OAUTH_TOKEN",
+        prefix: "sk-ant-oat01-",
+        mintCommand: "claude setup-token"
+      )
+    case .codex, .grok, .openCode, .cursor:
+      return nil
     }
   }
 }

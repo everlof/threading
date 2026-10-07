@@ -41,3 +41,5 @@ extension NSView {
 }
 
 @MainActor public class ThemedScrollView: NSScrollView {}
+
+@MainActor class ThemedSecureField: ThemedTextField {}

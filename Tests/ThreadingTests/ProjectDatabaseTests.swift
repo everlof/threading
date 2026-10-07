@@ -1315,7 +1315,7 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertFalse(try database.updateTerminalDirectory(id: terminal.id, in: project.id,
             directory: "/tmp/resurrected", expectedCurrentDirectory: "/tmp/newer"))
         XCTAssertTrue(try XCTUnwrap(database.projectRecord(id: project.id)).terminals.isEmpty)
-        try database.removeProject(id: project.id, at: 0, selectedSessionID: nil)
+        try database.removeProject(id: project.id, holding: [], at: 0, selectedSessionID: nil)
         XCTAssertFalse(try database.updateTerminalDirectory(id: terminal.id, in: project.id,
             directory: "/tmp/resurrected", expectedCurrentDirectory: "/tmp/newer"))
         XCTAssertNil(try database.projectRecord(id: project.id))

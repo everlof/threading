@@ -9,6 +9,7 @@ public protocol ThemeDerivedContent {
 
 @MainActor
 public enum Design {
+    public enum Accessibility { static let increasesContrast = false }
     public enum Symbol {
         public enum Role {
             case control

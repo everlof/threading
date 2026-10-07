@@ -24,7 +24,15 @@ for file in "${sources[@]:0:3}"; do
 done
 if [[ $mode == macos ]]; then
   mkdir -p out/markdown-macos
-  swiftc -parse-as-library "${sources[@]}" -o out/markdown-macos/fixture
+  package_sources=(../../Packages/ThreadingMarkdownKit/Sources/ThreadingMarkdownKit/Markdown.swift
+                   ../../Packages/ThreadingMarkdownKit/Sources/ThreadingMarkdownKit/MarkdownInline.swift
+                   ../../Packages/ThreadingMarkdownKit/Sources/ThreadingMarkdownKit/MarkdownStyle.swift)
+  swiftc -emit-library -emit-module -module-name ThreadingMarkdownKit \
+    "${package_sources[@]}" -emit-module-path out/markdown-macos/ThreadingMarkdownKit.swiftmodule \
+    -o out/markdown-macos/libThreadingMarkdownKit.dylib
+  swiftc -parse-as-library -I out/markdown-macos -L out/markdown-macos \
+    -lThreadingMarkdownKit -Xlinker -rpath -Xlinker "$PWD/out/markdown-macos" \
+    "${sources[@]}" -o out/markdown-macos/fixture
   out/markdown-macos/fixture out/markdown-macos
   exit
 fi

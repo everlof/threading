@@ -100,6 +100,10 @@ struct Project: Codable, Identifiable {
   /// Hidden from native project navigation on Mac and iPhone until Show Hidden Projects is enabled.
   var isHidden: Bool = false
 
+  /// Human writing and observed work, never process restoration or sidebar metadata refreshes.
+  /// Older projects also resolve activity from their chats and terminal creation dates.
+  var lastInteractionAt: Date?
+
   /// Sounds this checkout overrides, in the same stored shape `AgentSession` carries — and for
   /// the same reason it is a raw map rather than a typed one. Its chats and terminals follow
   /// unless they answered for themselves. See `SoundResolution`.
@@ -109,6 +113,13 @@ struct Project: Codable, Identifiable {
   /// inherits the Settings choice; a chat with an answer of its own overrides it either way.
   /// See `LimitRecoveryResolution`.
   var limitRecoveryPolicy: LimitRecoveryPolicy?
+
+  /// The logins a new chat here starts on, in the order the user ranked them: the first one that
+  /// is not out of usage wins. Provider-qualified, so one list can fall back from one runtime to
+  /// another. Nil — never empty — means no list, and the app-wide rule applies. A login that is
+  /// not listed is never chosen for this checkout on the user's behalf. See
+  /// `ProjectAccountOrder`.
+  var defaultAccounts: [AccountID]?
 
   /// Whether this checkout's chats are exempt from the standing quiet hours. Nil inherits the
   /// Settings answer; a chat with an answer of its own overrides it either way. See
@@ -166,6 +177,7 @@ struct Project: Codable, Identifiable {
     self.notificationsMuted = nil
     self.soundOverrides = nil
     self.limitRecoveryPolicy = nil
+    self.defaultAccounts = nil
     self.curfewRule = nil
     self.isScratchpad = nil
     self.isAdoptedForCheckoutMove = nil
@@ -174,10 +186,11 @@ struct Project: Codable, Identifiable {
 
   private enum CodingKeys: String, CodingKey {
     case id, name, folderPath, sessions, terminals, isExpanded, createdAt, icon, themeID, themeName
-    case isHidden
+    case isHidden, lastInteractionAt
     case notificationsMuted, soundOverrides, limitRecoveryPolicy, isScratchpad
     case curfewRule, isAdoptedForCheckoutMove
     case executionHost, lastKnownRepositoryIdentity
+    case defaultAccounts
   }
 
   init(from decoder: Decoder) throws {
@@ -212,6 +225,7 @@ struct Project: Codable, Identifiable {
       themeID = .migratedFromName(legacyName)
     }
     isHidden = try container.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
+    lastInteractionAt = try container.decodeIfPresent(Date.self, forKey: .lastInteractionAt)
     notificationsMuted = try container.decodeIfPresent(
       Bool.self,
       forKey: .notificationsMuted
@@ -226,6 +240,14 @@ struct Project: Codable, Identifiable {
       String.self,
       forKey: .limitRecoveryPolicy
     ).flatMap(LimitRecoveryPolicy.init(rawValue:))
+    // Leniently and entry by entry, for the reason `AgentSession` states: a runtime this build
+    // has never heard of costs that entry, never the checkout. Normalised so an empty list and
+    // an absent key are the same stored answer.
+    let storedAccounts =
+      (try? container.decodeIfPresent([String].self, forKey: .defaultAccounts)) ?? nil
+    defaultAccounts = ProjectAccountList.normalized(
+      storedAccounts?.compactMap(AccountID.init(rawValue:))
+    )
     // Through the stored form, leniently, for the reason `AgentSession` states: a rule kind
     // this build has never heard of reads as "never chose" instead of costing the checkout and
     // every session inside it.
@@ -262,9 +284,11 @@ struct Project: Codable, Identifiable {
     try container.encodeIfPresent(icon, forKey: .icon)
     try container.encodeIfPresent(themeID, forKey: .themeID)
     if isHidden { try container.encode(true, forKey: .isHidden) }
+    try container.encodeIfPresent(lastInteractionAt, forKey: .lastInteractionAt)
     try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
     try container.encodeIfPresent(soundOverrides, forKey: .soundOverrides)
     try container.encodeIfPresent(limitRecoveryPolicy, forKey: .limitRecoveryPolicy)
+    try container.encodeIfPresent(defaultAccounts, forKey: .defaultAccounts)
     try container.encodeIfPresent(curfewRule, forKey: .curfewRule)
     try container.encodeIfPresent(isScratchpad, forKey: .isScratchpad)
     try container.encodeIfPresent(isAdoptedForCheckoutMove, forKey: .isAdoptedForCheckoutMove)

@@ -3,6 +3,7 @@ import AppKit
 // The Linux host links the production ThemedTextView unchanged. Its theme vocabulary is
 // resolved from the checked Threading snapshot; the generic AppKit shim has no palette.
 extension Design.Surface {
+    static var background: NSColor { LinuxTheme.color("surface") }
     static var ground: NSColor { LinuxTheme.color("ground") }
 }
 
@@ -17,6 +18,15 @@ extension SelectionSurface {
 
 @MainActor
 public class ThemedScrollView: NSScrollView {
+    var fittedDocumentHeight: CGFloat? {
+        didSet { invalidateIntrinsicContentSize() }
+    }
+    // This preview uses overlay scrolling; no reserved track consumes document height.
+    func heightToFitContent(_ height: CGFloat, overflowsHorizontally: Bool? = nil) -> CGFloat { height }
+    public override var intrinsicContentSize: NSSize {
+        guard let fittedDocumentHeight else { return super.intrinsicContentSize }
+        return NSSize(width: NSView.noIntrinsicMetric, height: fittedDocumentHeight)
+    }
     var forwardsVerticalScroll = false
     public override func scrollWheel(with event: NSEvent) {
         if forwardsVerticalScroll, abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX) {
@@ -31,3 +41,6 @@ public class ThemedScrollView: NSScrollView {
 class ThemedTextField: NSTextField {
     func textSelectionGround() -> NSColor { LinuxTheme.color("controlResting") }
 }
+
+@MainActor
+class ThemedSecureField: ThemedTextField {}

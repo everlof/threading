@@ -85,6 +85,7 @@ struct ScheduledSessionPlan: Codable, Sendable, Equatable {
     let usesNativeUI: Bool
     let permissionMode: AgentPermissionMode?
     let managedWorkspacePlan: ManagedWorkspacePlan?
+    let automationWorkspace: AutomationWorkspace?
     /// Optional so schedules written before roles existed continue to decode as ordinary chats.
     let role: SessionRole?
 
@@ -111,6 +112,7 @@ struct ScheduledSessionPlan: Codable, Sendable, Equatable {
         usesNativeUI: Bool,
         permissionMode: AgentPermissionMode?,
         managedWorkspacePlan: ManagedWorkspacePlan? = nil,
+        automationWorkspace: AutomationWorkspace? = nil,
         role: SessionRole = .chat,
         curfew: ScheduledCurfewPlan? = nil
     ) {
@@ -125,6 +127,7 @@ struct ScheduledSessionPlan: Codable, Sendable, Equatable {
         self.usesNativeUI = usesNativeUI
         self.permissionMode = permissionMode
         self.managedWorkspacePlan = managedWorkspacePlan
+        self.automationWorkspace = automationWorkspace
         self.role = role
         self.curfew = curfew
     }

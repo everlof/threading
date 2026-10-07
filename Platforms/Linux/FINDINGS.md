@@ -5629,3 +5629,54 @@ The clipping fixture checks the production fade in both orientations, against pi
 
 Verification on 2026-10-06: the fixture passes on Ubuntu arm64, and so does the complete focused
 sweep from §172. The production bubble is not linked yet; that is the next step.
+
+## 178. Shared-source integration with master on 2026-10-07
+
+The branch is based on master `38c3cf104`. Its newer credential routing and project-cascade
+write guard remain authoritative; partial Linux reads retain their separate whole-graph write
+fence. The Linux core manifest contains 66 byte-identical production files, including credential
+environment values, stored account-list normalization and automation workspace identity. The
+last two values now have Foundation-only source boundaries; account selection and automation
+activation stay in their existing host services. `ThreadingUsage` is the real local package.
+
+Markdown grammar, inline styling and resolved style values come from three exact shared
+`ThreadingMarkdownKit` sources compiled against the shim. This does not port Quick Look or its
+HTML renderer. Updated menu metrics/rows, document table resizing, row arrival ownership and
+sidebar glyphs retain master's implementations in the shared Design files. Glyph contrast repair
+is an exact shared leaf; the app's theme registry and cached rung resolution remain on macOS.
+The Linux preview keeps its checked palette, natural identity marks and overlay scrolling. It
+retains animation values without claiming a Core Animation animation compositor. The dormant
+compression probe is named `LinuxCompression`, so SwiftTerm cannot mistake it for Apple's
+complete optional `Compression` framework.
+
+The UI structure ratchet is reconciled against committed-tree inventories, rather than against
+master's moving working tree. Master has 98 controllers, 125 platform views, 3,160 constraints
+and 106 drawing sites outside Design; the rebased branch has 98, 124, 3,108 and 106. Its checked
+ceilings match those actual counts. The previous branch's 85/118/2,805/96 counts predated the
+additional master features.
+
+Source Release validation passed core storage/recovery/migration contracts, conversation
+reduction at 1,000/10,000 turns, stream transport and AppEvent delivery. Native diff, document,
+automatic-height/incremental-row and live stream-json journeys passed in
+`out/rebase-20261007.kieTFs`; document light, narrow diff dark and settled stream screenshots were
+inspected. The Mac Markdown reference passed. These are source-binary checks; this integration
+has not yet rebuilt or verified an installed Debian package.
+
+The complete Linux Release product build passed. Icon-button, pane-header, subagent-row,
+page-title, glyph, table/outline, priority, clipping, editor, wrapping and generic layout contracts
+also passed. Fresh Linux and Mac Markdown snapshots match in all eight grammar cases.
+
+The required `scripts/test.sh all` attempt compiled the Mac app and tests and recorded 2270
+passed cases with no failed case receipt before the process guard interrupted it. The guarded
+`proc_listchildpids` capture exceeded its inspection deadline; cleanup reported its directly
+owned command still exiting. The complete Mac sweep and subsequent iOS simulator run therefore
+remain unverified. No guard or test deadline was relaxed.
+
+Focused Mac validation completed 144 tests (two skipped). It found one stale structural assertion
+that still cast the shared terminal identity to `NSImageView` after master's migration to
+`GlyphView`; the assertion now requires the actual shared glyph, preserving its identity, image
+and geometry checks. Core database/account/automation, glyph legibility, Markdown, AppEvent
+and conversation contracts in that selection passed.
+
+The final Mac sidebar/project-create selection passed all 19 tests after the assertion update
+and preservation of the project host's actual selection-ground callback.

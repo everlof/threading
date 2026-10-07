@@ -245,7 +245,7 @@ struct Project: Codable, Identifiable {
     // an absent key are the same stored answer.
     let storedAccounts =
       (try? container.decodeIfPresent([String].self, forKey: .defaultAccounts)) ?? nil
-    defaultAccounts = ProjectAccountOrder.normalized(
+    defaultAccounts = ProjectAccountList.normalized(
       storedAccounts?.compactMap(AccountID.init(rawValue:))
     )
     // Through the stored form, leniently, for the reason `AgentSession` states: a rule kind

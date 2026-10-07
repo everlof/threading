@@ -70,6 +70,18 @@ extension CGPoint {
     public func applying(_ transform: CGAffineTransform) -> CGPoint { transform.apply(to: self) }
 }
 
+extension NSAffineTransform {
+    /// Foundation owns the affine value; AppKit applies it to the current drawing context.
+    @MainActor
+    public func concat() {
+        let value = transformStruct
+        NSGraphicsContext.current?.concat(CGAffineTransform(
+            a: value.m11, b: value.m12, c: value.m21, d: value.m22,
+            tx: value.tX, ty: value.tY
+        ))
+    }
+}
+
 public func NSMakeRect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> NSRect {
     NSRect(x: x, y: y, width: w, height: h)
 }

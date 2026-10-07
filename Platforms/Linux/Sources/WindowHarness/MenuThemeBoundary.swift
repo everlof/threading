@@ -5,6 +5,8 @@ import AppKit
 @MainActor
 public enum AppTheme {
     public struct Material {
+        public enum IdentityMarks { case natural, tinted }
+        public enum BadgeStyle { case none, sticker }
         public enum ChoiceStyle: Equatable {
             case chip, dropdown, popup, doubleArrowPopup, aquaPopup, cycle
 
@@ -19,6 +21,8 @@ public enum AppTheme {
 }
 
 extension AppThemePalette.Material {
+    var identityMarks: AppTheme.Material.IdentityMarks { .natural }
+    var badgeStyle: AppTheme.Material.BadgeStyle { .none }
     var menuAppearance: AppTheme.Material.MenuAppearance { .automatic }
     var choiceStyle: AppTheme.Material.ChoiceStyle { .chip }
 }
@@ -89,7 +93,7 @@ extension Design {
         static func controlRegular() -> NSFont { control(weight: .regular) }
         static func caption() -> NSFont { NSFont.systemFont(ofSize: 11, weight: .semibold) }
         static func detail() -> NSFont { NSFont.systemFont(ofSize: 11) }
-        static func numericDetail() -> NSFont { NSFont.monospacedSystemFont(ofSize: 11) }
+        static func numericDetail(weight: NSFont.Weight = .regular) -> NSFont { NSFont.monospacedSystemFont(ofSize: 11, weight: weight) }
         static func lineHeight(of font: NSFont) -> CGFloat {
             font.boundingRectForFont.height
         }
