@@ -1,8 +1,111 @@
+import AppKit
 import XCTest
 
 @testable import Threading
 
 final class BrowserViewportLayoutTests: XCTestCase {
+
+    @MainActor
+    func testAutomaticViewportCannotRemainPannedOutsideItsHost() throws {
+        let (browser, window, scroll) = try browserWindow()
+        defer { window.contentViewController = nil }
+        // AppKit can retain a bounds origin independently of the document's frame. In fill
+        // mode the page itself owns scrolling; its outer canvas has no valid panning range.
+        scroll.contentView.scroll(to: CGPoint(x: 180, y: 80))
+        browser.view.needsLayout = true
+        browser.view.layoutSubtreeIfNeeded()
+        XCTAssertNil(browser.responsiveViewport)
+        XCTAssertEqual(scroll.contentView.bounds.origin, .zero)
+        XCTAssertEqual(browser.webView.convert(.zero, to: browser.view).x, 0, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testResponsiveViewportPreservesValidPanningDuringLayout() throws {
+        let (browser, window, scroll) = try browserWindow()
+        defer { window.contentViewController = nil }
+        browser.setResponsiveViewport(width: 1_440, height: 900)
+        window.setContentSize(CGSize(width: 760, height: 600))
+        browser.view.layoutSubtreeIfNeeded()
+        scroll.contentView.scroll(to: CGPoint(x: 180, y: 80))
+        browser.view.needsLayout = true
+        browser.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(browser.responsiveViewport, CGSize(width: 1_440, height: 900))
+        XCTAssertEqual(scroll.contentView.bounds.origin, CGPoint(x: 180, y: 80))
+    }
+
+    @MainActor
+    func testAutomaticViewportFollowsItsTabHostAfterReturningToANarrowerWindow() throws {
+        let host = DetachedBrowserHostViewController(sessionID: SessionID())
+        let window = NSWindow(
+            contentRect: CGRect(x: 0, y: 0, width: 1_440, height: 600),
+            styleMask: [.borderless], backing: .buffered, defer: false
+        )
+        window.contentViewController = host
+        defer { window.contentViewController = nil }
+        let browser = try XCTUnwrap(host.addBrowserTab(contextKind: .private))
+        host.view.layoutSubtreeIfNeeded()
+        _ = try XCTUnwrap(host.addBrowserTab(contextKind: .private))
+        window.setContentSize(CGSize(width: 430, height: 600))
+        host.view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(host.selectTab(atIndex: 0))
+        host.view.layoutSubtreeIfNeeded()
+        let scroll = try XCTUnwrap(browser.view.subviews.compactMap { $0 as? NSScrollView }.first)
+        XCTAssertEqual(browser.webView.frame.size, scroll.contentView.bounds.size)
+        XCTAssertEqual(scroll.contentView.bounds.origin, .zero)
+        XCTAssertEqual(browser.webView.convert(.zero, to: browser.view).x, 0, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testAutomaticViewportKeepsItsOriginDuringHostResizes() throws {
+        let (browser, window, scroll) = try browserWindow(fixedSize: false)
+        defer { window.contentViewController = nil }
+
+        for width: CGFloat in [760, 1_440, 430, 760] {
+            window.setContentSize(CGSize(width: width, height: 600))
+            browser.view.layoutSubtreeIfNeeded()
+            XCTAssertEqual(scroll.contentView.bounds.origin, .zero)
+            XCTAssertEqual(browser.webView.frame.size, scroll.contentView.bounds.size)
+            XCTAssertEqual(browser.webView.convert(.zero, to: browser.view).x, 0, accuracy: 0.5)
+        }
+    }
+
+    @MainActor
+    func testReturningFromPannedResponsiveViewportFillsTheHost() throws {
+        let (browser, window, scroll) = try browserWindow()
+        defer { window.contentViewController = nil }
+        browser.setResponsiveViewport(width: 1_440, height: 900)
+        window.setContentSize(CGSize(width: 760, height: 600))
+        browser.view.layoutSubtreeIfNeeded()
+        scroll.contentView.scroll(to: CGPoint(x: 600, y: 200))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        browser.resetResponsiveViewportToHost()
+        window.setContentSize(CGSize(width: 760, height: 600))
+        browser.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(scroll.contentView.bounds.origin, .zero)
+        XCTAssertEqual(browser.webView.frame.size, scroll.contentView.bounds.size)
+        XCTAssertEqual(browser.webView.convert(.zero, to: browser.view).x, 0, accuracy: 0.5)
+    }
+
+    @MainActor
+    private func browserWindow(fixedSize: Bool = true) throws -> (BrowserViewController, NSWindow, NSScrollView) {
+        let browser = BrowserViewController(contextKind: .private)
+        let window = NSWindow(
+            contentRect: CGRect(x: 0, y: 0, width: 760, height: 600),
+            styleMask: [.borderless], backing: .buffered, defer: false
+        )
+        window.contentViewController = browser
+        if fixedSize {
+            // A split pane supplies a measure independently of its child's fitting size.
+            // State that same contract on this unshown fixture instead of letting it refit.
+            NSLayoutConstraint.activate([
+                browser.view.widthAnchor.constraint(equalToConstant: 760),
+                browser.view.heightAnchor.constraint(equalToConstant: 600)
+            ])
+        }
+        browser.view.layoutSubtreeIfNeeded()
+        let scroll = try XCTUnwrap(browser.view.subviews.compactMap { $0 as? NSScrollView }.first)
+        return (browser, window, scroll)
+    }
 
     func testAutomaticViewportFillsItsHost() throws {
         let layout = try XCTUnwrap(BrowserViewportLayout.resolve(

@@ -5,6 +5,31 @@ import XCTest
 
 @MainActor
 final class BrowserAnnotationEditingTests: XCTestCase {
+    func testBrowserCanvasContainmentPreservesThePageScrollPosition() throws {
+        let (browser, host, window) = try fixture(width: 760)
+        defer { browser.webView.stopLoading(); window.orderOut(nil); window.contentViewController = nil }
+        let scroll = try XCTUnwrap(browser.view.subviews.compactMap { $0 as? NSScrollView }.first)
+        _ = try script(browser, "document.body.style.minWidth = '1800px'; window.scrollTo(240, 400)")
+        try waitUntil { try self.script(browser, "window.scrollX === 240 && window.scrollY === 400") as? Bool == true }
+
+        scroll.contentView.scroll(to: CGPoint(x: 180, y: 80))
+        browser.view.needsLayout = true
+        host.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(scroll.contentView.bounds.origin, .zero)
+        XCTAssertNil(browser.responsiveViewport)
+        XCTAssertEqual(try script(browser, "window.scrollX") as? Double, 240)
+        XCTAssertEqual(try script(browser, "window.scrollY") as? Double, 400)
+
+        _ = try script(browser, "document.body.style.minWidth = ''; window.scrollTo(0, 0)")
+        browser.showFind()
+        for width: CGFloat in [430, 760] {
+            window.setContentSize(CGSize(width: width, height: 520))
+            host.view.layoutSubtreeIfNeeded()
+            XCTAssertEqual(browser.webView.frame.size, scroll.contentView.bounds.size)
+            XCTAssertEqual(scroll.contentView.bounds.origin, .zero)
+        }
+    }
+
     func testAnnotationDeliveryNamesTheElementAndKeepsItsPosition() throws {
         let (browser, _, window) = try fixture(width: 430)
         defer { browser.webView.stopLoading(); window.orderOut(nil); window.contentViewController = nil }
@@ -401,6 +426,13 @@ final class BrowserAnnotationEditingTests: XCTestCase {
                 window.appearance = NSAppearance(named: appearance)
                 AppThemeRefresh.repaint(host.view)
                 host.view.layoutSubtreeIfNeeded()
+                // Exercise the retained-canvas regression in the shipping tab host before
+                // every canonical render. The page and editor must stay inside this pane.
+                let scroll = try XCTUnwrap(browser.view.subviews.compactMap { $0 as? NSScrollView }.first)
+                scroll.contentView.scroll(to: CGPoint(x: 180, y: 80))
+                browser.view.needsLayout = true
+                host.view.layoutSubtreeIfNeeded()
+                XCTAssertEqual(scroll.contentView.bounds.origin, .zero)
                 XCTAssertTrue(overlay.bounds.contains(editor.frame), "Editor must stay inside compact viewports")
                 XCTAssertGreaterThan(editor.noteField.bounds.width, 200)
                 XCTAssertEqual(ThemeBoundaryAudit.violations(in: editor), [])

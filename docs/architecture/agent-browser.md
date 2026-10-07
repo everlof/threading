@@ -309,6 +309,15 @@ document origin stays against the top edge; spare height follows below it. Centr
 vertically detached the page from the address bar and made the ordinary page look like two failed
 black render bands.
 
+WebKit owns document scrolling, including elastic overscroll. The outer canvas enables its
+scrollers only for an explicit responsive viewport and has no elasticity of its own. Layout
+constrains its retained pan offset to the current canvas range: filling the host has no outer
+panning range, while an oversized responsive viewport keeps every still-valid offset. Resizing
+or rehosting therefore cannot leave the whole page shifted outside its pane, and correcting the
+canvas never resets the website's own scroll position or the selected CSS dimensions. This is
+host-owned geometry, independent of theme or extension presentation. Each layout adds only
+constant-time range arithmetic; it neither inspects the DOM nor scales with page content.
+
 The native address field is content before it is an input. At rest the URL draws directly on the
 browser strip with no permanent field silhouette; pointer hover raises a `controlHover` plate over
 the field's unchanged frame, and editing restores the ordinary themed well, focus ring, field editor,

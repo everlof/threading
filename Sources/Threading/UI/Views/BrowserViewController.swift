@@ -565,9 +565,11 @@ final class BrowserViewController: NSViewController {
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.borderType = .noBorder
         scroll.drawsBackground = false
-        scroll.hasHorizontalScroller = true
-        scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
+        // WebKit owns document scrolling and elasticity. This outer surface only pans an
+        // explicit responsive viewport; bouncing it shifts the whole page away from its chrome.
+        scroll.horizontalScrollElasticity = .none
+        scroll.verticalScrollElasticity = .none
         scroll.documentView = webViewHost
         return scroll
     }()
@@ -1104,7 +1106,15 @@ final class BrowserViewController: NSViewController {
     /// see the requested CSS dimensions, while the user can pan a desktop-sized test surface
     /// inside a narrow panel without the app window being resized under them.
     private func layoutWebViews(resetScrollPosition: Bool = false) {
-        let visible = viewportScrollView.contentView.bounds.size
+        let pansViewport = agentViewportSize != nil
+        if viewportScrollView.hasHorizontalScroller != pansViewport {
+            viewportScrollView.hasHorizontalScroller = pansViewport
+        }
+        if viewportScrollView.hasVerticalScroller != pansViewport {
+            viewportScrollView.hasVerticalScroller = pansViewport
+        }
+        let clipView = viewportScrollView.contentView
+        let visible = clipView.bounds.size
         guard let layout = BrowserViewportLayout.resolve(
             visibleSize: visible,
             requestedViewport: agentViewportSize
@@ -1116,9 +1126,21 @@ final class BrowserViewController: NSViewController {
         baselineOverlay.frame = layout.viewportFrame
         updateAnnotationOverlay()
 
-        if resetScrollPosition {
-            viewportScrollView.contentView.scroll(to: .zero)
-            viewportScrollView.reflectScrolledClipView(viewportScrollView.contentView)
+        // A retained clip origin is separate from the document frame. Keep valid responsive
+        // panning, but never let an old offset clip a page that now fills its host. This does
+        // not touch WebKit's document scroll position or the user's selected CSS viewport.
+        let currentOrigin = clipView.bounds.origin
+        let maximumOrigin = CGPoint(
+            x: max(0, layout.canvasSize.width - visible.width),
+            y: max(0, layout.canvasSize.height - visible.height)
+        )
+        let constrainedOrigin = resetScrollPosition ? .zero : CGPoint(
+            x: min(max(0, currentOrigin.x), maximumOrigin.x),
+            y: min(max(0, currentOrigin.y), maximumOrigin.y)
+        )
+        if currentOrigin != constrainedOrigin {
+            clipView.scroll(to: constrainedOrigin)
+            viewportScrollView.reflectScrolledClipView(clipView)
         }
     }
 
