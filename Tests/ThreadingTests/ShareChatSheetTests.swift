@@ -116,6 +116,51 @@ final class ShareChatSheetTests: XCTestCase {
         XCTAssertEqual(RemoteInvitation(payload: text), .connection(link))
     }
 
+    func testCopyExportsOneCompleteInvitationToURLAndTextReaders() throws {
+        let link = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: URL(string: "https://192.168.1.2:8760")!,
+            token: String(repeating: "aB09-_", count: 8),
+            pinnedFingerprintCode: String(repeating: "A", count: 26)))
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+
+        ShareInvitationText.copy(link.shareURL, to: pasteboard)
+
+        XCTAssertEqual(pasteboard.pasteboardItems?.count, 1)
+        let urls = try XCTUnwrap(pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL])
+        XCTAssertEqual(urls.count, 1)
+        let url = try XCTUnwrap(urls.first)
+        XCTAssertTrue([
+            RemoteInvitationWebLink.productionOrigin.host,
+            RemoteInvitationWebLink.developmentOrigin.host
+        ].contains(url.host))
+        XCTAssertEqual(RemoteInvitation(payload: url.absoluteString), .connection(link))
+        XCTAssertEqual(pasteboard.string(forType: .string), url.absoluteString)
+    }
+
+    func testCopyPreservesTheCompleteHostedInvitationForURLAndTextReaders() throws {
+        let link = try XCTUnwrap(HostedPairingLink(
+            serviceURL: RemoteInvitationWebLink.developmentOrigin,
+            hostID: "mac", deviceID: "invite-1",
+            rendezvousCredential: String(repeating: "transport-_", count: 16),
+            bootstrapToken: String(repeating: "chat-only-_", count: 8),
+            expiresAt: Date(timeIntervalSince1970:
+                Date().addingTimeInterval(600).timeIntervalSince1970.rounded(.down))))
+        let minted = try XCTUnwrap(RemoteInvitationWebLink.url(
+            appPayload: link.scannablePayload, origin: RemoteInvitationWebLink.developmentOrigin))
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+
+        ShareInvitationText.copy(minted, to: pasteboard)
+
+        XCTAssertEqual(pasteboard.pasteboardItems?.count, 1)
+        let urls = try XCTUnwrap(pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL])
+        XCTAssertEqual(urls, [minted])
+        let copied = try XCTUnwrap(pasteboard.string(forType: .string))
+        XCTAssertEqual(copied, minted.absoluteString)
+        XCTAssertEqual(RemoteInvitation(payload: copied), .hostedPairing(link))
+    }
+
     /// Render the shipping alert content, including its chrome and button row, not an isolated
     /// accessory. The same request and presenter construct the modal used by the sidebar.
     func testRendersTheGrantsLightAndDark() throws {

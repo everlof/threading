@@ -402,10 +402,9 @@ final class SessionSharingViewController: NSViewController {
                 emphasis: .secondary,
                 action: { [weak self] in
                     if let onCopyInvitation = self?.onCopyInvitation {
-                        onCopyInvitation(url.absoluteString)
+                        onCopyInvitation(ShareInvitationText.pasteboard(for: url))
                     } else {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                        ShareInvitationText.copy(url)
                     }
                 }
             ))

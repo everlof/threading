@@ -1541,6 +1541,10 @@ Pairing and sharing are deliberately different actions:
   The iPhone supplies that complete invitation as a `URL` to `ShareLink` and the pasteboard;
   a text share can leave Messages carrying the preview and the `#…` capability as separate
   content. Copying also retains the plain-text URL for destinations that accept text.
+  On Mac, fresh chat/terminal invitations and the Sharing pane's Copy action use the same
+  `ShareInvitationText` writer: one pasteboard item exposes both `public.url` and plain text,
+  each containing the identical complete invitation. Copying a stored private-route invitation
+  applies the public wrapper too; copying an already-hosted invitation preserves it unchanged.
 
 - **Hosted Direct admits guest memberships.** When the hosted listener is ready, the asynchronous
   chat-share preparation issues a transport credential under `invite-<share ID>` for at most

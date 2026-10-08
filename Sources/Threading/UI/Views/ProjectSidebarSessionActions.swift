@@ -518,6 +518,17 @@ enum ShareInvitationText {
         return RemoteInvitationWebLink.url(appPayload: link.appOpenPayload, origin: origin)?.absoluteString
             ?? link.appOpenPayload
     }
+
+    /// Keep the complete invitation in one item. URL-aware destinations can import its fragment
+    /// directly, while text-only destinations receive the identical link.
+    static func copy(_ shareURL: URL, to pasteboard: NSPasteboard = .general) {
+        let text = self.pasteboard(for: shareURL)
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .URL)
+        item.setString(text, forType: .string)
+        pasteboard.clearContents()
+        pasteboard.writeObjects([item])
+    }
 }
 
 @MainActor
@@ -550,8 +561,7 @@ enum ShareChatSheet {
                 guard !Task.isCancelled else { return }
                 switch result {
                 case .success(let created):
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(ShareInvitationText.pasteboard(for: created.url), forType: .string)
+                    ShareInvitationText.copy(created.url)
                     alert.dismiss()
                 case .failure(let error):
                     form.setPreparing(false, error: error.localizedDescription)
@@ -714,11 +724,7 @@ enum ShareTerminalSheet {
             capability: grants[chosen].capability
         ) {
         case .success(let created):
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(
-                ShareInvitationText.pasteboard(for: created.url),
-                forType: .string
-            )
+            ShareInvitationText.copy(created.url)
         case .failure(let error):
             let unavailable = ThemedAlert()
             unavailable.messageText = L10n.string("This terminal cannot be shared yet")

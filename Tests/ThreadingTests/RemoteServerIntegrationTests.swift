@@ -873,6 +873,9 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
 
         let ownerSocket = NSObject()
         let guestSocket = NSObject()
+        let invitationLink = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: URL(string: "https://192.168.1.2:8760")!,
+            token: "unused-invitation", pinnedFingerprintCode: String(repeating: "A", count: 26)))
         let followers = [
             RemoteSessionMirrorRegistry.Follower(
                 id: ObjectIdentifier(ownerSocket),
@@ -930,7 +933,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 canApprovePermissions: false,
                 createdAt: Date(timeIntervalSinceNow: -300),
                 expiresAt: Date(timeIntervalSinceNow: 3_600),
-                url: URL(string: "https://share.example/invite")
+                url: invitationLink.shareURL
             )]
         )
 
@@ -1031,7 +1034,9 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         try XCTUnwrap(button(titled: "Copy", in: invitation)).performClick()
         try XCTUnwrap(button(titled: "Revoke", in: invitation)).performClick()
         XCTAssertEqual(revokedMember, "member-jonas")
-        XCTAssertEqual(copied, "https://share.example/invite")
+        let copiedInvitation = try XCTUnwrap(copied)
+        XCTAssertEqual(RemoteInvitation(payload: copiedInvitation), .connection(invitationLink))
+        XCTAssertEqual(URL(string: copiedInvitation)?.path, "/join")
         XCTAssertEqual(revokedLink, "unused-link")
 
         let copy = try XCTUnwrap(button(titled: "Copy", in: invitation))
