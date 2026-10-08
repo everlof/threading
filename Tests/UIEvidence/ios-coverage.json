@@ -273,6 +273,7 @@
     {"id": "settings-mac-appearance-custom-dark", "entryID": "ios-settings", "demo": "mac-appearance-settings", "appearance": "dark", "theme": "custom"},
     {"id": "settings-diagnostics-custom-dark", "entryID": "ios-settings", "demo": "diagnostics", "appearance": "dark", "theme": "custom"},
     {"id": "shared-link-custom-dark", "entryID": "ios-share-link", "demo": "shared-link", "appearance": "dark", "theme": "custom", "captureMode": "display"},
+    {"id": "shared-link-share-sheet-custom-dark", "entryID": "ios-share-link", "demo": "shared-link", "appearance": "dark", "theme": "custom", "captureMode": "stable-display", "interaction": {"tapAccessibilityLabel": "Share link", "waitForAccessibilityLabels": ["dismiss popup"]}},
     {"id": "share-chat-roles-custom-dark", "entryID": "ios-share-link", "demo": "share-chat-roles", "appearance": "dark", "theme": "custom", "captureMode": "display"},
     {"id": "share-chat-blocked-custom-dark", "entryID": "ios-share-link", "demo": "share-chat-blocked", "appearance": "dark", "theme": "custom", "captureMode": "display"},
     {"id": "share-chat-link-custom-dark", "entryID": "ios-share-link", "demo": "share-chat-link", "appearance": "dark", "theme": "custom", "captureMode": "display"},
@@ -671,7 +672,7 @@
       "priority": "important",
       "title": "Share chat",
       "description": "One sheet with two stages: the three grants as themed rows, and the one-use invite the chosen grant mints.",
-      "states": ["Choose a grant", "Dormant chat cannot be watched", "Link ready", "Link stage on its own"],
+      "states": ["Choose a grant", "Dormant chat cannot be watched", "Link ready", "Link stage on its own", "System share sheet with the complete invitation"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/share*-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}

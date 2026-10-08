@@ -3005,6 +3005,8 @@ press **Copy Link**. The copied invitation is one HTTPS link. It opens Threading
 webpage with **Continue in browser** and **Open in Threading**. Browser guests do not need an
 account or installed app. Keep the link or bookmark the joined page to return to that chat from
 the same browser; clearing its site data removes the saved access.
+On iPhone, **Share link** hands the complete invitation to the system share sheet, and
+**Copy link** copies the same URL, including its invitation code.
 
 With **Hosted Direct** ready, a chat invitation works across networks
 without Tailscale. Otherwise, and always in release, beta and nightly builds, the sheet says the

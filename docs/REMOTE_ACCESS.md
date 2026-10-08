@@ -1538,6 +1538,9 @@ Pairing and sharing are deliberately different actions:
   custom port, and at most 8 KiB. `RemoteInvitationWebLink` builds them, and both platforms share
   one link instead of a guidance paragraph followed by two competing URLs. UIKit's scene
   delegate handles both warm and cold `NSUserActivity` delivery.
+  The iPhone supplies that complete invitation as a `URL` to `ShareLink` and the pasteboard;
+  a text share can leave Messages carrying the preview and the `#…` capability as separate
+  content. Copying also retains the plain-text URL for destinations that accept text.
 
 - **Hosted Direct admits guest memberships.** When the hosted listener is ready, the asynchronous
   chat-share preparation issues a transport credential under `invite-<share ID>` for at most

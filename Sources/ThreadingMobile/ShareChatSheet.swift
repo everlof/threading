@@ -511,7 +511,7 @@ private struct SharedSessionLinkStage: View {
             )
 
             VStack(spacing: MobileDesign.Spacing.medium) {
-                ShareLink(item: sharedText) {
+                ShareLink(item: sharedURL) {
                     actionLabel(
                         MobileL10n.string("Share link"),
                         systemImage: "square.and.arrow.up"
@@ -525,7 +525,7 @@ private struct SharedSessionLinkStage: View {
                 )
 
                 Button {
-                    UIPasteboard.general.string = sharedText
+                    UIPasteboard.general.url = sharedURL
                     copied = true
                 } label: {
                     actionLabel(
@@ -581,8 +581,8 @@ private struct SharedSessionLinkStage: View {
         )
     }
 
-    private var sharedText: String {
-        SharedSessionLinkCopy.sharedText(for: link.url)
+    private var sharedURL: URL {
+        SharedSessionLinkCopy.sharedURL(for: link.url)
     }
 }
 
@@ -635,6 +635,12 @@ enum SharedSessionLinkCopy {
     /// actions so the two cannot drift.
     static func sharedText(for shareURL: URL) -> String {
         RemoteInvitationShare.text(shareURL: shareURL, guidance: guidance)
+    }
+
+    /// Sharing a String lets messaging extensions separate its link preview from the fragment.
+    /// Supply the complete invitation as a URL to both the share sheet and pasteboard instead.
+    static func sharedURL(for shareURL: URL) -> URL {
+        URL(string: sharedText(for: shareURL)) ?? shareURL
     }
 
     static var guidance: String {

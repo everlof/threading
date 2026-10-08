@@ -1,6 +1,9 @@
+import CoreTransferable
 import Foundation
 import ThreadingPeerTransport
 import ThreadingRemoteKit
+import UIKit
+import UniformTypeIdentifiers
 import XCTest
 @testable import ThreadingMobile
 
@@ -166,6 +169,54 @@ final class MobileInvitationRouteTests: XCTestCase {
     }
 
     // MARK: - What the recipient is sent
+
+    func testSharingAndCopyingUseOneURLWithTheCompleteInvitationFragment() throws {
+        let link = try makeLink(token: String(repeating: "aB09-_", count: 8))
+        let url = SharedSessionLinkCopy.sharedURL(for: link.shareURL)
+        XCTAssertEqual(url.absoluteString, SharedSessionLinkCopy.sharedText(for: link.shareURL))
+        XCTAssertEqual(url.host, "remote.threading.codes")
+        guard case .connection(let parsed)? = MobileInvitationRoute(url: url) else {
+            return XCTFail("the shared URL must carry the complete pinned invitation")
+        }
+        XCTAssertEqual(parsed, link)
+
+        let pasteboard = UIPasteboard.withUniqueName()
+        defer { UIPasteboard.remove(withName: pasteboard.name) }
+        pasteboard.url = url
+
+        XCTAssertTrue(pasteboard.hasURLs)
+        XCTAssertEqual(pasteboard.url, url)
+        let copied = try XCTUnwrap(pasteboard.string)
+        XCTAssertEqual(copied, url.absoluteString)
+        XCTAssertEqual(RemoteInvitation(payload: copied), .connection(link))
+    }
+
+    func testHostedInvitationSharingExportsAURLWithTheWholeEnvelope() async throws {
+        let hosted = try XCTUnwrap(HostedPairingLink(
+            serviceURL: RemoteInvitationWebLink.developmentOrigin,
+            hostID: "mac", deviceID: "invite-1",
+            rendezvousCredential: String(repeating: "transport-_", count: 16),
+            bootstrapToken: String(repeating: "chat-only-_", count: 8),
+            expiresAt: Date(timeIntervalSince1970:
+                Date().addingTimeInterval(600).timeIntervalSince1970.rounded(.down))))
+        let minted = try XCTUnwrap(RemoteInvitationWebLink.url(
+            appPayload: hosted.scannablePayload, origin: RemoteInvitationWebLink.developmentOrigin))
+        let shared = SharedSessionLinkCopy.sharedURL(for: minted)
+        XCTAssertEqual(shared, minted)
+        guard case .hostedPairing(let parsed)? = MobileInvitationRoute(url: shared) else {
+            return XCTFail("the shared URL must carry the complete hosted invitation")
+        }
+        XCTAssertEqual(parsed, hosted)
+
+        let provider = NSItemProvider()
+        provider.register(shared)
+        XCTAssertTrue(provider.hasItemConformingToTypeIdentifier(UTType.url.identifier))
+        let exported: URL = try await withCheckedThrowingContinuation { continuation in
+            _ = provider.loadTransferable(type: URL.self) { continuation.resume(with: $0) }
+        }
+        XCTAssertEqual(exported, minted)
+        XCTAssertEqual(RemoteInvitation(payload: exported.absoluteString), .hostedPairing(hosted))
+    }
 
     func testSharedHTTPSLinkOpensThePairingScreenAndPreservesThePin() throws {
         let link = try makeLink()
