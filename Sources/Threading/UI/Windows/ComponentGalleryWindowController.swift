@@ -171,6 +171,8 @@ final class ComponentGalleryViewController: NSViewController {
         "SidebarEdgeRevealCoordinator",
         "SimulatorRecordingBadge",
         "SimulatorScreenView",
+        "SimulatorWorkspaceCanvas",
+        "SimulatorHardwareControlsView",
         "SplitButtonView",
         "SplitIconButtonView",
         "StorageProposalOutlineView",
@@ -3081,6 +3083,16 @@ final class ComponentGalleryViewController: NSViewController {
                     makeSimulatorScreenSample()
                 ),
                 story(
+                    "SimulatorWorkspaceCanvas",
+                    "Select a device and compare Auto, Row, Column, Grid and Focus without opening a Simulator.",
+                    makeSimulatorWorkspaceSample()
+                ),
+                story(
+                    "SimulatorHardwareControlsView",
+                    "Full-size device targets wrap together in a narrow viewport.",
+                    makeSimulatorHardwareSample()
+                ),
+                story(
                     "SimulatorRecordingBadge",
                     "A running recording over the device it records, and its stop control; "
                         + "saving refuses a second stop.",
@@ -3498,6 +3510,65 @@ final class ComponentGalleryViewController: NSViewController {
             screen.heightAnchor.constraint(equalToConstant: 390)
         ])
         return screen
+    }
+
+    private func makeSimulatorWorkspaceSample() -> NSView {
+        let canvas = SimulatorWorkspaceCanvas()
+        var tiles: [SimulatorWorkspaceCanvas.Tile] = []
+        for _ in 0..<2 {
+            let screen = makeSimulatorScreenSample()
+            NSLayoutConstraint.deactivate(screen.constraints.filter {
+                $0.firstAttribute == .width || $0.firstAttribute == .height
+            })
+            let id = UUID()
+            if let screen = screen as? SimulatorScreenView {
+                screen.onFocus = { [weak canvas] in canvas?.selectedID = id }
+            }
+            tiles.append(.init(id: id, content: screen, aspect: SimulatorWorkspaceGeometry.defaultPortraitAspect))
+        }
+        canvas.setTiles(tiles)
+        canvas.selectedID = tiles.first?.id
+        let picker = ChipView()
+        picker.configure(symbolName: SimulatorWorkspaceLayout.automatic.symbolName,
+                         title: SimulatorWorkspaceLayout.automatic.displayTitle)
+        picker.itemsProvider = { [weak canvas] in
+            SimulatorWorkspaceLayout.allCases.map { layout in
+                .item(ThemedMenuItem(title: layout.displayTitle, representedValue: layout.rawValue,
+                                     isSelected: canvas?.arrangement == layout))
+            }
+        }
+        picker.onSelect = { [weak canvas, weak picker] item in
+            guard let raw = item.representedValue as? String, let layout = SimulatorWorkspaceLayout(rawValue: raw) else { return }
+            canvas?.arrangement = layout
+            picker?.configure(symbolName: layout.symbolName, title: layout.displayTitle)
+        }
+        canvas.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            canvas.widthAnchor.constraint(equalToConstant: 360),
+            canvas.heightAnchor.constraint(equalToConstant: 280),
+        ])
+        let content = NSStackView(views: [picker, canvas])
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = Design.Spacing.medium
+        return content
+    }
+
+    private func makeSimulatorHardwareSample() -> NSView {
+        let symbols = ["house", "lock", "power", "speaker.minus", "speaker.plus", "circle.lefthalf.filled"]
+        let titles = ["Home", "Lock", "Side button", "Volume down", "Volume up", "Toggle appearance"]
+        let controls = zip(symbols, titles).map { symbol, title in
+            let button = ThemedIconButton(symbolName: symbol, accessibility: L10n.string(title), target: .device, inkSource: .chrome)
+            button.onPress = { [weak self] in self?.showReceipt(L10n.string(title)) }
+            return button
+        }
+        let bar = SimulatorHardwareControlsView(buttons: controls)
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            bar.widthAnchor.constraint(equalToConstant: 180),
+            bar.heightAnchor.constraint(equalToConstant: bar.preferredHeight(for: 180)),
+        ])
+        return bar
     }
 
     private func makeStickerBadgeSample() -> NSView {

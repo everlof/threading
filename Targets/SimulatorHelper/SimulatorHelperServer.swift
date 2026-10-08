@@ -54,23 +54,25 @@ final class SimulatorHelperServer: @unchecked Sendable {
     private var bridge: SimulatorPrivateBridge?
     private var inputSender: SimulatorInputSender?
     private var encoder: (any SimulatorFrameEncoding)?
+    private var orientedFrameSurface: SimulatorOrientedFrameSurface?
     /// Non-nil when the app negotiated the shared-memory transport; the capture loop then copies
     /// each surface into a shared buffer instead of encoding it.
     private var sharedProvider: SimulatorSharedMemoryProvider?
-    /// The surface dimensions the fixed-geometry transports (shared memory, H.264) were negotiated
-    /// for. The app under test rotating changes the surface size, which those buffers and the
-    /// encoder cannot accept — copying a rotated surface under the old stride/height renders
-    /// garbage. When it changes the capture loop ends the stream so the app reconnects and
-    /// re-negotiates the new size. Nil for JPEG, which re-reads dimensions from every frame.
+    /// A rotation often changes only screen properties, leaving the native surface unchanged.
+    /// Both size and orientation belong to one negotiation, including its input coordinate map.
     private var captureGeometry: CaptureGeometry?
     private struct CaptureGeometry: Equatable {
         let width: Int
         let height: Int
-        init(_ surface: IOSurface) {
+        let orientation: Int
+        init(_ surface: IOSurface, orientation: Int) {
             width = IOSurfaceGetWidth(surface)
             height = IOSurfaceGetHeight(surface)
+            self.orientation = orientation
         }
     }
+    private static let geometryChangedDetail =
+        "The Simulator screen rotated or resized; the stream is reconnecting. Retry the request."
     private var framesPerSecond = 30
     private var timer: DispatchSourceTimer?
     private var nextSequence: UInt64 = 1
@@ -85,9 +87,11 @@ final class SimulatorHelperServer: @unchecked Sendable {
         replacedFrames: 0,
         encodedBytes: 0
     )
+    private var peerProtocolVersion = 1
     private var hasHello = false
     private var isVisible = false
     private var isStopped = false
+    private var isGeometryChanging = false
 
     func run() -> Int32 {
         guard SimulatorPrivateBridge.hostProcessIsTrusted() else {
@@ -155,6 +159,7 @@ final class SimulatorHelperServer: @unchecked Sendable {
                 writeControl(.failure(.malformedMessage, detail: "A helper connection has one hello."))
                 return
             }
+            peerProtocolVersion = hello.protocolVersion
             hasHello = true
             establish(hello)
 
@@ -174,6 +179,10 @@ final class SimulatorHelperServer: @unchecked Sendable {
                 writeControl(.inputResult(requestID: requestID, error: "Direct Simulator input is unavailable."))
                 return
             }
+            guard !geometryChangedSinceNegotiation() else {
+                writeControl(.inputResult(requestID: requestID, error: Self.geometryChangedDetail))
+                return
+            }
             inputQueue.async { [weak self] in
                 do {
                     try inputSender.send(command)
@@ -187,7 +196,8 @@ final class SimulatorHelperServer: @unchecked Sendable {
             }
 
         case .accessibilitySnapshot(let requestID):
-            guard let bridge else {
+            guard let bridge, let geometry = captureGeometry,
+                  let orientation = SimulatorScreenOrientation(rawValue: geometry.orientation) else {
                 writeControl(.accessibilitySnapshotResult(
                     requestID: requestID,
                     root: nil,
@@ -195,14 +205,38 @@ final class SimulatorHelperServer: @unchecked Sendable {
                 ))
                 return
             }
+            guard !geometryChangedSinceNegotiation() else {
+                writeControl(.accessibilitySnapshotResult(requestID: requestID, root: nil,
+                                                          error: Self.geometryChangedDetail))
+                return
+            }
             // Off the state queue: a cold read is 1–2 orders slower than a warm one, and the bridge
             // serializes every translator interaction on its own queue anyway.
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 do {
                     let tree = try bridge.accessibilitySnapshot()
+                    let live = SimulatorScreenOrientation(rawValue: bridge.screenUIOrientation) ?? orientation
+                    guard live == orientation else {
+                        self?.writeControl(.accessibilitySnapshotResult(requestID: requestID, root: nil,
+                            error: "The Simulator screen rotated during the accessibility read. Retry the snapshot."))
+                        return
+                    }
+                    let bounds = (tree["frame"] as? [NSNumber]).flatMap { $0.count == 4 ? $0 : nil }
+                    let rootWidth = bounds?[2].doubleValue ?? 0
+                    let rootHeight = bounds?[3].doubleValue ?? 0
+                    guard let transform = orientation.accessibilityTransform(
+                        rootWidth: rootWidth, rootHeight: rootHeight,
+                        nativeWidth: Double(geometry.width), nativeHeight: Double(geometry.height)) else {
+                        self?.writeControl(.accessibilitySnapshotResult(requestID: requestID, root: nil,
+                            error: "The foreground app's accessibility frame does not cover the rotated "
+                                + "Simulator screen, so its element positions cannot be mapped. "
+                                + "Use simulator_screenshot coordinates instead."))
+                        return
+                    }
                     let sent = self?.writeControl(.accessibilitySnapshotResult(
                         requestID: requestID,
-                        root: Self.element(from: tree),
+                        root: Self.element(from: tree, orientation: transform,
+                                           nativeWidth: rootWidth, nativeHeight: rootHeight),
                         error: nil
                     ))
                     if sent == false {
@@ -232,13 +266,18 @@ final class SimulatorHelperServer: @unchecked Sendable {
 
     /// Convert the helper bridge's plain-dictionary tree into the wire value tree. Unknown or missing
     /// keys degrade to sensible defaults rather than failing the whole snapshot.
-    private static func element(from node: [AnyHashable: Any]) -> SimulatorAccessibilityElement {
+    private static func element(from node: [AnyHashable: Any], orientation: SimulatorScreenOrientation,
+                                nativeWidth: Double, nativeHeight: Double) -> SimulatorAccessibilityElement {
         let frameArray = node["frame"] as? [Any] ?? []
         func number(_ index: Int) -> Double {
             guard index < frameArray.count, let value = frameArray[index] as? NSNumber else { return 0 }
             return value.doubleValue
         }
-        let children = (node["children"] as? [[AnyHashable: Any]] ?? []).map { element(from: $0) }
+        let frame = orientation.uprightRect(x: number(0), y: number(1), width: number(2), height: number(3),
+                                           nativeWidth: nativeWidth, nativeHeight: nativeHeight)
+        let children = (node["children"] as? [[AnyHashable: Any]] ?? []).map {
+            element(from: $0, orientation: orientation, nativeWidth: nativeWidth, nativeHeight: nativeHeight)
+        }
         return SimulatorAccessibilityElement(
             role: node["role"] as? String ?? "AXUnknown",
             subrole: node["subrole"] as? String,
@@ -247,7 +286,7 @@ final class SimulatorHelperServer: @unchecked Sendable {
             identifier: node["identifier"] as? String,
             enabled: (node["enabled"] as? NSNumber)?.boolValue ?? true,
             frame: SimulatorAccessibilityElement.Frame(
-                x: number(0), y: number(1), width: number(2), height: number(3)
+                x: frame.x, y: frame.y, width: frame.width, height: frame.height
             ),
             children: children
         )
@@ -303,6 +342,9 @@ final class SimulatorHelperServer: @unchecked Sendable {
             refuse(.screenUnavailable, detail: "The adopted device did not publish a framebuffer surface.")
             return
         }
+        // An Xcode that publishes no screen orientation streams in native axes, exactly as every
+        // helper did before orientation was read at all.
+        let orientation = SimulatorScreenOrientation(rawValue: bridge.screenUIOrientation) ?? .portrait
 
         // Prefer the shared-memory transport when the app can consume it: it copies each surface
         // into shared buffers with no codec, which is dramatically lower latency for the local
@@ -316,11 +358,11 @@ final class SimulatorHelperServer: @unchecked Sendable {
             maximumFramesPerSecond: Limits.maximumFramesPerSecond
         )
         if hello.supportsSharedMemory,
-           let provider = SimulatorSharedMemoryProvider(surface: firstSurface, bufferCount: 3) {
+           let provider = SimulatorSharedMemoryProvider(surface: firstSurface, bufferCount: 3, orientation: orientation) {
             self.bridge = bridge
             self.sharedProvider = provider
-            self.captureGeometry = CaptureGeometry(firstSurface)
-            self.inputSender = bridge.supportsInput ? SimulatorInputSender(bridge: bridge) : nil
+            self.captureGeometry = CaptureGeometry(firstSurface, orientation: orientation.rawValue)
+            self.inputSender = bridge.supportsInput ? SimulatorInputSender(bridge: bridge, orientation: orientation) : nil
             framesPerSecond = hello.requestedFramesPerSecond
             writeControl(.hello(SimulatorBridgeHelloReply(
                 selectedCodec: nil,
@@ -328,17 +370,23 @@ final class SimulatorHelperServer: @unchecked Sendable {
                 capabilities: capabilities,
                 refusal: nil,
                 coreSimulatorVersion: bridge.coreSimulatorVersion,
-                simulatorKitVersion: bridge.simulatorKitVersion
+                simulatorKitVersion: bridge.simulatorKitVersion,
+                screenOrientation: orientation
             )))
             return
         }
 
+        guard let oriented = SimulatorOrientedFrameSurface(surface: firstSurface, orientation: orientation) else {
+            refuse(.screenUnavailable, detail: "The Simulator frame format cannot be displayed upright.")
+            return
+        }
+        let size = SimulatorSurfaceRotation.dimensions(firstSurface, orientation: orientation)
         let selectedEncoder: (any SimulatorFrameEncoding)? = hello.preferredCodecs.compactMap {
             switch $0 {
             case .h264:
                 return try? SimulatorH264FrameEncoder(
-                    width: IOSurfaceGetWidth(firstSurface),
-                    height: IOSurfaceGetHeight(firstSurface),
+                    width: size.width,
+                    height: size.height,
                     framesPerSecond: hello.requestedFramesPerSecond
                 )
             case .jpeg:
@@ -352,16 +400,17 @@ final class SimulatorHelperServer: @unchecked Sendable {
 
         self.bridge = bridge
         self.encoder = selectedEncoder
-        // H.264 is created for one fixed size; JPEG re-reads each frame, so only guard the former.
-        self.captureGeometry = selectedEncoder.codec == .h264 ? CaptureGeometry(firstSurface) : nil
-        self.inputSender = bridge.supportsInput ? SimulatorInputSender(bridge: bridge) : nil
+        self.orientedFrameSurface = oriented
+        self.captureGeometry = CaptureGeometry(firstSurface, orientation: orientation.rawValue)
+        self.inputSender = bridge.supportsInput ? SimulatorInputSender(bridge: bridge, orientation: orientation) : nil
         framesPerSecond = hello.requestedFramesPerSecond
         writeControl(.hello(SimulatorBridgeHelloReply(
             selectedCodec: selectedEncoder.codec,
             capabilities: capabilities,
             refusal: nil,
             coreSimulatorVersion: bridge.coreSimulatorVersion,
-            simulatorKitVersion: bridge.simulatorKitVersion
+            simulatorKitVersion: bridge.simulatorKitVersion,
+            screenOrientation: orientation
         )))
     }
 
@@ -376,7 +425,7 @@ final class SimulatorHelperServer: @unchecked Sendable {
     }
 
     private func startTimer() {
-        guard isVisible, timer == nil, bridge != nil,
+        guard isVisible, !isGeometryChanging, timer == nil, bridge != nil,
               encoder != nil || sharedProvider != nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: stateQueue)
         timer.schedule(
@@ -397,19 +446,44 @@ final class SimulatorHelperServer: @unchecked Sendable {
         }
     }
 
-    /// Ends the stream when a fixed-geometry transport is running and the live surface no longer
-    /// matches the size it was negotiated for (the app under test rotated). The app receives the
-    /// failure through the same path as a lost helper — a reason, the screenshot fallback and a
-    /// retry — and the retry re-negotiates the stream at the new size. Returns true when it ended
-    /// the stream so the caller stops processing this capture.
+    /// Ends capture once for a confirmed geometry change. The app renegotiates this same lease;
+    /// ordinary failures continue through the fallback path.
     private func endStreamIfGeometryChanged(_ surface: IOSurface) -> Bool {
-        guard let captureGeometry, captureGeometry != CaptureGeometry(surface) else { return false }
-        writeControl(.failure(
-            .internalFailure,
-            detail: "The Simulator surface size changed (the app rotated); reconnecting at the new size."
-        ))
-        stop()
+        guard let captureGeometry, let bridge,
+              captureGeometry != CaptureGeometry(surface, orientation: liveOrientation(of: bridge, negotiated: captureGeometry))
+        else { return false }
+        guard !isGeometryChanging else { return true }
+        isGeometryChanging = true
+        stopTimer(clearPending: true)
+        let sender = inputSender
+        inputQueue.async { [weak self] in
+            sender?.stop()
+            self?.stateQueue.async { [weak self] in
+                guard let self else { return }
+                if self.peerProtocolVersion >= 4 {
+                    self.writeControl(.geometryChanged)
+                } else {
+                    self.writeControl(.failure(.internalFailure, detail: "The Simulator surface size changed; retry at the new size."))
+                }
+                self.stop()
+            }
+        }
         return true
+    }
+
+    /// A transient unreadable orientation (0) is not a rotation; keep the negotiated axes.
+    private func liveOrientation(of bridge: SimulatorPrivateBridge, negotiated: CaptureGeometry) -> Int {
+        SimulatorScreenOrientation(rawValue: bridge.screenUIOrientation)?.rawValue ?? negotiated.orientation
+    }
+
+    /// The capture loop only runs while frames are wanted. A stream opened for an agent while its
+    /// pane is hidden still carries input and element reads, so those check the geometry too:
+    /// otherwise a rotation goes unnoticed, input is mapped through stale axes and every
+    /// accessibility read is refused without anything ever renegotiating.
+    private func geometryChangedSinceNegotiation() -> Bool {
+        if isGeometryChanging { return true }
+        guard let surface = bridge?.copyCurrentSurface() else { return false }
+        return endStreamIfGeometryChanged(surface)
     }
 
     private func capture() {
@@ -445,6 +519,11 @@ final class SimulatorHelperServer: @unchecked Sendable {
         guard !isEncoding, let encoder,
               let surface = bridge.copyCurrentSurface() else { return }
         if endStreamIfGeometryChanged(surface) { return }
+        guard let normalized = orientedFrameSurface?.normalized(surface) else {
+            writeControl(.failure(.internalFailure, detail: "The Simulator frame could not be displayed upright."))
+            stop()
+            return
+        }
         isEncoding = true
         let sequence = nextSequence
         nextSequence &+= 1
@@ -456,7 +535,7 @@ final class SimulatorHelperServer: @unchecked Sendable {
             encodedBytes: statistics.encodedBytes
         )
         encoder.encode(
-            surface: surface,
+            surface: normalized,
             sequence: sequence,
             presentationTimeNanoseconds: timestamp
         ) { [weak self] result in
@@ -533,6 +612,7 @@ final class SimulatorHelperServer: @unchecked Sendable {
     private func stop() {
         guard !isStopped else { return }
         isStopped = true
+        inputSender?.stop()
         isVisible = false
         stopTimer(clearPending: true)
         encoder?.finish()

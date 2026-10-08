@@ -266,6 +266,40 @@ final class SimulatorAgentToolTests: HostedStoreTestCase {
         XCTAssertTrue(fixture.stream.session.inputs.isEmpty)
     }
 
+    func testMultipleDevicesRefuseAmbiguousInputAndTargetTheExactHelper() async throws {
+        let fixture = makeFixture(visible: true, multipleDevices: true)
+        defer { fixture.cleanup() }
+        for device in [simulatorAgentTestDevice, simulatorAgentSecondDevice] {
+            let prepared = await execute(.simulatorPrepare(SimulatorPrepareArguments(deviceID: device.id.rawValue)),
+                                         with: fixture.coordinator, sessionID: fixture.sessionID)
+            XCTAssertFalse(prepared.isError, prepared.text)
+        }
+        let workspace = try XCTUnwrap(fixture.pane.simulatorWorkspace(for: fixture.sessionID))
+        XCTAssertEqual(workspace.state.members.count, 2)
+        let ambiguous = await execute(.simulatorTap(SimulatorTapArguments(x: 0.25, y: 0.75, ref: nil, role: nil, label: nil, identifier: nil)),
+                                      with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertTrue(ambiguous.isError)
+        XCTAssertTrue(ambiguous.text.contains("device_id"))
+        XCTAssertTrue(fixture.authorizer.authorizedDeviceIDs.isEmpty)
+        let firstID = try XCTUnwrap(workspace.state.members.first?.id)
+        workspace.select(firstID)
+        let tap = SimulatorTapArguments(x: 0.25, y: 0.75, ref: nil, role: nil, label: nil, identifier: nil,
+                                       deviceID: simulatorAgentSecondDevice.id.rawValue)
+        let result = await execute(.simulatorTap(tap), with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains(simulatorAgentSecondDevice.id.rawValue))
+        let firstInputs = await fixture.stream.inputs(for: simulatorAgentTestDevice.id)
+        let secondInputs = await fixture.stream.inputs(for: simulatorAgentSecondDevice.id)
+        XCTAssertEqual(firstInputs, [])
+        XCTAssertEqual(secondInputs, [.tap(x: 0.25, y: 0.75)])
+        XCTAssertEqual(fixture.authorizer.authorizedDeviceIDs, [simulatorAgentSecondDevice.id])
+        let invalid = await execute(.simulatorPressButton(SimulatorPressButtonArguments(button: "home", deviceID: UUID().uuidString)),
+                                    with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertTrue(invalid.isError)
+        let unchangedInputs = await fixture.stream.inputs(for: simulatorAgentSecondDevice.id)
+        XCTAssertEqual(unchangedInputs, secondInputs)
+    }
+
     private func execute(
         _ command: AgentCommand,
         with coordinator: AgentToolCoordinator,
@@ -278,9 +312,9 @@ final class SimulatorAgentToolTests: HostedStoreTestCase {
         }
     }
 
-    private func makeFixture(visible: Bool) -> SimulatorAgentFixture {
+    private func makeFixture(visible: Bool, multipleDevices: Bool = false) -> SimulatorAgentFixture {
         let sessionID = SessionID()
-        let control = SimulatorAgentControlFake()
+        let control = SimulatorAgentControlFake(multipleDevices: multipleDevices)
         let stream = SimulatorAgentStreamCoordinatorFake()
         let authorizer = SimulatorAgentInputAuthorizerFake()
         let pane = DisplayPaneController(
@@ -340,6 +374,13 @@ private let simulatorAgentTestDevice = SimulatorDevice(
     lastBootedAt: nil
 )
 
+private let simulatorAgentSecondDevice = SimulatorDevice(
+    id: SimulatorDeviceID("CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!, name: "iPhone SE",
+    runtimeIdentifier: simulatorAgentTestDevice.runtimeIdentifier, runtimeName: simulatorAgentTestDevice.runtimeName,
+    deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-SE", family: .iPhone,
+    state: .booted, lastBootedAt: nil
+)
+
 private actor SimulatorAgentControlFake: SimulatorControlling {
     struct Launch: Sendable {
         let applicationURL: URL
@@ -355,19 +396,20 @@ private actor SimulatorAgentControlFake: SimulatorControlling {
     }
 
     private var state = Snapshot()
+    private let multipleDevices: Bool
+    init(multipleDevices: Bool = false) { self.multipleDevices = multipleDevices }
 
     func snapshot() -> Snapshot { state }
 
     func availableDevices() async throws -> [SimulatorDevice] {
-        [simulatorAgentTestDevice]
+        multipleDevices ? [simulatorAgentTestDevice, simulatorAgentSecondDevice] : [simulatorAgentTestDevice]
     }
 
     func prepare(deviceID: SimulatorDeviceID?) async throws -> SimulatorDeviceLease {
-        if let deviceID, deviceID != simulatorAgentTestDevice.id {
-            throw SimulatorControlError.deviceNotFound(deviceID)
-        }
+        let device = deviceID == simulatorAgentSecondDevice.id && multipleDevices ? simulatorAgentSecondDevice : simulatorAgentTestDevice
+        if let deviceID, deviceID != device.id { throw SimulatorControlError.deviceNotFound(deviceID) }
         state.prepares += 1
-        return SimulatorDeviceLease(device: simulatorAgentTestDevice, bootOwnership: .user)
+        return SimulatorDeviceLease(device: device, bootOwnership: .user)
     }
 
     func installAndLaunch(
@@ -403,11 +445,17 @@ private actor SimulatorAgentControlFake: SimulatorControlling {
 
 private actor SimulatorAgentStreamCoordinatorFake: SimulatorLiveStreamCoordinating {
     nonisolated let session = SimulatorAgentStreamSessionFake()
+    private var sessions: [SimulatorDeviceID: SimulatorAgentStreamSessionFake] = [:]
+
+    func inputs(for device: SimulatorDeviceID) -> [SimulatorBridgeInput] { sessions[device]?.inputs ?? [] }
 
     func openStream(
         for deviceID: SimulatorDeviceID
     ) async throws -> any SimulatorLiveStreamSession {
-        session
+        if let existing = sessions[deviceID] { return existing }
+        let created = sessions.isEmpty ? session : SimulatorAgentStreamSessionFake()
+        sessions[deviceID] = created
+        return created
     }
 }
 

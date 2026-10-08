@@ -96,12 +96,16 @@ final class SimulatorPaneViewController: NSViewController {
         }
     }
 
+    private let isWorkspaceMember: Bool
     private let control: any SimulatorControlling
     private let leaseManager: any SimulatorLeaseManaging
     private let streamCoordinator: any SimulatorLiveStreamCoordinating
     private let inputAuthorizer: any SimulatorInputAuthorizing
     private var preferredDeviceID: SimulatorDeviceID?
-    private var devices: [SimulatorDevice] = []
+    private var devices: [SimulatorDevice] = [] {
+        // The workspace's Add menu and chooser read this catalogue.
+        didSet { if devices != oldValue { onWorkspaceIdentityChange?() } }
+    }
     private var lease: SimulatorDeviceLease?
     private var preparationTask: Task<Void, Never>?
     private var preparationGeneration = 0
@@ -152,6 +156,28 @@ final class SimulatorPaneViewController: NSViewController {
     var canAnnotateNotes: Bool { isPresented && lease != nil && screenView.image != nil }
 
     var onSelectedDeviceChange: ((SimulatorDeviceID) -> Void)?
+    var onFocusRequest: (() -> Void)?
+    var onFrameAspectChange: ((CGFloat) -> Void)?
+    var onGestureEnd: (() -> Void)?
+    /// Workspace actions about this member, appended to its menus (Remove from Workspace).
+    var workspaceMenuExtras: (() -> [ThemedMenuEntry])?
+    /// The member's own actions for the workspace's shared header row.
+    var workspaceActions: NSView { workspaceActionButtons }
+    var workspaceHardwareControls: NSView { hardwareButtonRow }
+    var availableWorkspaceDevices: [SimulatorDevice] { devices }
+    var workspaceFrameSize: NSSize? { screenView.image?.size }
+    var hasActiveWorkspaceGesture: Bool { touchStreamActive }
+
+    /// How a member presents itself among its peers. A lone member looks exactly like the single
+    /// pane; with several, each names its device above its screen and the selected one — the
+    /// target of the shared header and hardware controls — wears the selected plate.
+    enum WorkspaceRole: Equatable { case solo, selected, unselected }
+    var workspaceRole: WorkspaceRole = .solo {
+        didSet {
+            guard workspaceRole != oldValue, isViewLoaded else { return }
+            applyWorkspaceRole()
+        }
+    }
     var onOpenDeviceLogs: ((SimulatorDeviceID) -> Void)?
 
     private lazy var deviceChip: ChipView = {
@@ -382,9 +408,68 @@ final class SimulatorPaneViewController: NSViewController {
     /// Whether the band currently offers Clear All — rebuilt only when that changes.
     private var annotationBandOffersClear = false
     private lazy var screenTopToControlRow = screenView.topAnchor.constraint(
-        equalTo: controlRow.bottomAnchor,
-        constant: Design.Spacing.medium
+        equalTo: isWorkspaceMember ? workspaceContentTop.bottomAnchor : controlRow.bottomAnchor,
+        constant: isWorkspaceMember ? 0 : Design.Spacing.medium
     )
+
+    /// Where a member's content starts: under its device name beside peers, at its top alone.
+    /// The screen and the annotation band both hang from this, so a role change never has to
+    /// know which of them is showing.
+    private let workspaceContentTop = NSLayoutGuide()
+    /// One band for the name whether or not it wears the selected plate, so selecting a member
+    /// never moves its screen relative to its neighbours'.
+    private let workspaceTitleBand = NSLayoutGuide()
+    private lazy var workspaceTitleBandHeight = workspaceTitleBand.heightAnchor.constraint(
+        equalToConstant: Design.Size.choiceHeight
+    )
+    private var workspaceTitledConstraints: [NSLayoutConstraint] = []
+    private var workspaceUntitledConstraints: [NSLayoutConstraint] = []
+    private var workspaceAspectConstraint: NSLayoutConstraint?
+    private var workspaceScreenAspect: CGFloat = SimulatorWorkspaceGeometry.defaultPortraitAspect
+    private var reportedWorkspaceName: String?
+
+    /// The device's name above its screen beside peers. A click selects the member without
+    /// sending the device a tap; the selected one wears the control plate.
+    private lazy var workspaceTitle: ThemedButton = {
+        let button = ThemedButton(title: "", target: self, action: #selector(selectFromWorkspaceTitle))
+        button.emphasis = .tertiary
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        button.setAccessibilityIdentifier("simulator.workspace.member")
+        button.isHidden = true
+        return button
+    }()
+
+    /// Called when the name the workspace shows for this member changes.
+    var onWorkspaceIdentityChange: (() -> Void)?
+
+    /// The name the workspace shows for this member, whatever state its lease is in.
+    var workspaceDeviceName: String {
+        switch presentationState {
+        case .ready(let device): return device.name
+        case .preparing(let id): return devices.first(where: { $0.id == id })?.name ?? L10n.string("iPhone")
+        case .idle, .discovering, .failed:
+            if let id = selectedDeviceID, let device = devices.first(where: { $0.id == id }) { return device.name }
+            return L10n.string("Choose Simulator")
+        }
+    }
+
+    /// Height a member spends beside its screen: its name and status line. The workspace uses it
+    /// to compare arrangements by the screen each one would actually leave.
+    var workspaceChromeHeight: CGFloat {
+        let title = workspaceRole == .solo ? 0 : Design.Size.choiceHeight + Design.Spacing.small
+        return title + Design.Spacing.small + statusLabel.intrinsicContentSize.height
+    }
+
+    /// The name band follows the theme's control height; the workspace calls this on a switch.
+    func refreshWorkspaceMetrics() {
+        guard isWorkspaceMember, isViewLoaded else { return }
+        if workspaceTitleBandHeight.constant != Design.Size.choiceHeight {
+            workspaceTitleBandHeight.constant = Design.Size.choiceHeight
+        }
+    }
+
+    @objc private func selectFromWorkspaceTitle() { onFocusRequest?() }
 
     private lazy var noteSendBar: AnnotationSendBar = {
         let bar = AnnotationSendBar()
@@ -417,6 +502,51 @@ final class SimulatorPaneViewController: NSViewController {
         leading: [deviceChip],
         trailing: [actionButtons]
     )
+
+    /// The shared workspace header must also fit the protected 260-point pane. Keep the two
+    /// capture controls and Device Logs visible; expose the remaining actions through the menu.
+    private lazy var workspaceActionButtons = ControlButtonGroupView(
+        buttons: [captureButton, recordButton, logsButton, workspaceMenuButton],
+        spacing: Design.Spacing.hairline
+    )
+
+    private lazy var workspaceMenuButton: ThemedIconButton = {
+        let button = ThemedIconButton(symbolName: "ellipsis", accessibility: L10n.string("Simulator Options"),
+                                      target: .inline, inkSource: .chrome)
+        button.presentsMenu = true
+        button.setAccessibilityIdentifier("simulator.workspace.options")
+        button.onPress = { [weak self] in self?.showWorkspaceMenu() }
+        return button
+    }()
+
+    private var workspaceMenuSession: AnyObject?
+
+    private func showWorkspaceMenu() {
+        if noteEditor != nil { commitNoteEditor() }
+        let request = SimulatorScreenView.ContextMenuRequest(anchor: .control, point: nil, noteID: nil)
+        var entries = screenMenuEntries(for: request, includesNotes: true, includesWorkspaceActions: false)
+        entries.append(.separator)
+        // Device Logs keeps its own button in the header; these two have none there.
+        for button in [controlButton, retryButton] {
+            guard let title = button.accessibilityLabel() else { continue }
+            entries.append(.item(ThemedMenuItem(
+                title: title,
+                isSelected: button.isSelected,
+                isEnabled: button.isEnabled,
+                onChoose: { [weak button] in button?.onPress?() }
+            )))
+        }
+        if let extras = workspaceMenuExtras?(), !extras.isEmpty {
+            entries.append(.separator)
+            entries += extras
+        }
+        workspaceMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: Self.menuWidth),
+            from: workspaceMenuButton, selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.workspaceMenuSession = nil }
+        )
+    }
 
     private func makeHardwareButton(
         symbol: String,
@@ -483,7 +613,12 @@ final class SimulatorPaneViewController: NSViewController {
     /// The device's hardware buttons, then its appearance. A press converges on the same consented
     /// input path as a tap, so it asks for control the first time and fails closed when the lease
     /// or consent is gone. Appearance is a device setting rather than HID input, and sits apart.
-    private lazy var hardwareButtonRow: NSStackView = {
+    private lazy var hardwareButtonRow: NSView = {
+        if isWorkspaceMember {
+            let group = SimulatorHardwareControlsView(buttons: hardwareButtons + [appearanceButton])
+            group.setAccessibilityIdentifier("simulator.hardwareButtons")
+            return group
+        }
         let stack = NSStackView(views: hardwareButtons + [appearanceButton])
         stack.orientation = .horizontal
         stack.spacing = Design.Spacing.large
@@ -495,6 +630,7 @@ final class SimulatorPaneViewController: NSViewController {
 
     private lazy var screenView: SimulatorScreenView = {
         let preview = SimulatorScreenView()
+        preview.onFocus = { [weak self] in self?.onFocusRequest?() }
         preview.setAccessibilityLabel(L10n.string("Simulator screen"))
         preview.setAccessibilityIdentifier("simulator.screen")
         preview.onTap = { [weak self] point in
@@ -504,9 +640,10 @@ final class SimulatorPaneViewController: NSViewController {
         preview.onTouchMoved = { [weak self] point in self?.moveTouchStream(to: point) }
         preview.onTouchEnded = { [weak self] point in self?.endTouchStream(at: point) }
         preview.onScroll = { [weak self] point, deltaX, deltaY in
+            self?.onFocusRequest?()
             self?.scrollDevice(at: point, deltaX: deltaX, deltaY: deltaY)
         }
-        preview.onText = { [weak self] text in self?.submitInput(.text(text)) }
+        preview.onText = { [weak self] text in self?.onFocusRequest?(); self?.submitInput(.text(text)) }
         preview.onAddNote = { [weak self] point in self?.addNote(at: point) }
         preview.onSelectNote = { [weak self] id in self?.selectNote(id) }
         preview.onDeleteNote = { [weak self] id in self?.deleteHoveredNote(id) }
@@ -533,6 +670,7 @@ final class SimulatorPaneViewController: NSViewController {
 
     init(
         preferredDeviceID: SimulatorDeviceID? = nil,
+        isWorkspaceMember: Bool = false,
         control: any SimulatorControlling,
         leaseManager: (any SimulatorLeaseManaging)? = nil,
         streamCoordinator: any SimulatorLiveStreamCoordinating = SimulatorLiveStreamCoordinator.shared,
@@ -544,6 +682,7 @@ final class SimulatorPaneViewController: NSViewController {
         revealCapture: (@MainActor (URL) -> Void)? = nil,
         showPresenterWindow: (@MainActor (SimulatorPresenterWindowController) -> Void)? = nil
     ) {
+        self.isWorkspaceMember = isWorkspaceMember
         self.preferredDeviceID = preferredDeviceID
         self.control = control
         self.leaseManager = leaseManager ?? SimulatorLeaseManager(control: control)
@@ -570,7 +709,8 @@ final class SimulatorPaneViewController: NSViewController {
         view = root
     }
 
-    private func performSimulatorShortcut(_ event: NSEvent) -> Bool {
+    func performSimulatorShortcut(_ event: NSEvent) -> Bool {
+        onFocusRequest?()
         let modifiers = event.modifierFlags.intersection(KeyboardShortcut.eventModifierMask)
         if event.keyCode == 53, modifiers.isEmpty {
             if noteEditor != nil { cancelNoteEditor(); return true }
@@ -608,6 +748,10 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private func setupUI() {
+        if isWorkspaceMember {
+            setupWorkspaceMemberUI()
+            return
+        }
         view.addSubview(controlRow)
         view.addSubview(screenView)
         view.addSubview(hardwareButtonRow)
@@ -680,6 +824,83 @@ final class SimulatorPaneViewController: NSViewController {
         ])
     }
 
+    /// A member hugs its device: the screen view is exactly the frame's aspect, as wide as the
+    /// tile allows, with the name above it and the status line under it. The pixels are therefore
+    /// never letterboxed inside the view, so the status line cannot strand itself at the bottom of
+    /// a tall tile and the selected name sits directly over the screen it names.
+    private func setupWorkspaceMemberUI() {
+        view.addLayoutGuide(workspaceContentTop)
+        view.addLayoutGuide(workspaceTitleBand)
+        for child in [workspaceTitle, screenView, statusLabel, noteSendBar, recordingBadge] { view.addSubview(child) }
+        let fillsWidth = screenView.widthAnchor.constraint(equalTo: view.widthAnchor)
+        fillsWidth.priority = .defaultHigh - 10
+        // Just below required: a tile briefly smaller than its own chrome clips rather than
+        // breaking the aspect, and the width wish yields to it first.
+        let staysInside = statusLabel.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor)
+        staysInside.priority = .required - 1
+        workspaceTitledConstraints = [
+            workspaceContentTop.bottomAnchor.constraint(equalTo: workspaceTitleBand.bottomAnchor, constant: Design.Spacing.small),
+        ]
+        workspaceUntitledConstraints = [workspaceContentTop.heightAnchor.constraint(equalToConstant: 0)]
+        NSLayoutConstraint.activate([
+            workspaceContentTop.topAnchor.constraint(equalTo: view.topAnchor),
+            workspaceTitleBand.topAnchor.constraint(equalTo: view.topAnchor),
+            workspaceTitleBandHeight,
+            workspaceTitle.centerYAnchor.constraint(equalTo: workspaceTitleBand.centerYAnchor),
+            workspaceTitle.centerXAnchor.constraint(equalTo: screenView.centerXAnchor),
+            workspaceTitle.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor),
+            workspaceTitle.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor),
+            screenTopToControlRow,
+            screenView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            screenView.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor),
+            fillsWidth,
+            statusLabel.topAnchor.constraint(equalTo: screenView.bottomAnchor, constant: Design.Spacing.small),
+            statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            staysInside,
+            recordingBadge.centerXAnchor.constraint(equalTo: screenView.centerXAnchor),
+            recordingBadge.topAnchor.constraint(equalTo: screenView.topAnchor, constant: Design.Spacing.small),
+            recordingBadge.widthAnchor.constraint(lessThanOrEqualTo: screenView.widthAnchor),
+            noteSendBar.trailingAnchor.constraint(equalTo: screenView.trailingAnchor, constant: -Design.Spacing.medium),
+            noteSendBar.bottomAnchor.constraint(equalTo: screenView.bottomAnchor, constant: -Design.Spacing.medium),
+        ])
+        applyWorkspaceScreenAspect()
+        applyWorkspaceRole()
+    }
+
+    private func applyWorkspaceRole() {
+        guard isWorkspaceMember else { return }
+        let titled = workspaceRole != .solo
+        workspaceTitle.isHidden = !titled
+        NSLayoutConstraint.deactivate(titled ? workspaceUntitledConstraints : workspaceTitledConstraints)
+        NSLayoutConstraint.activate(titled ? workspaceTitledConstraints : workspaceUntitledConstraints)
+        let selected = workspaceRole == .selected
+        workspaceTitle.emphasis = selected ? .secondary : .tertiary
+        workspaceTitle.setAccessibilityValue(selected ? L10n.string("Selected") : nil)
+        refreshWorkspaceMetrics()
+        renderState()
+    }
+
+    /// Re-made only when the confirmed frame's shape changes (a rotation), never per frame.
+    private func applyWorkspaceScreenAspect() {
+        guard isWorkspaceMember, isViewLoaded else { return }
+        workspaceAspectConstraint?.isActive = false
+        let constraint = screenView.heightAnchor.constraint(
+            equalTo: screenView.widthAnchor, multiplier: 1 / workspaceScreenAspect
+        )
+        constraint.isActive = true
+        workspaceAspectConstraint = constraint
+    }
+
+    /// A workspace yields dormant helpers immediately when another session needs its capacity.
+    /// Recording and presenter viewers retain their exact device and are never preempted.
+    func relinquishUnwatchedTransport() {
+        guard !wantsFrames, agentCommandTasks.isEmpty else { return }
+        hiddenTransportReleaseTask?.cancel()
+        hiddenTransportReleaseTask = nil
+        stopTransport()
+    }
+
     /// The display host states visibility explicitly because AppKit keeps tab controllers as
     /// children while their views are detached. Hidden means zero framebuffer requests.
     func setPresented(_ presented: Bool) {
@@ -716,6 +937,7 @@ final class SimulatorPaneViewController: NSViewController {
                 prepare(preferredDeviceID)
             }
         } else {
+            cancelWorkspaceTouch()
             captureModifierMonitor.remove()
             releaseFramesIfUnwatched()
         }
@@ -752,6 +974,7 @@ final class SimulatorPaneViewController: NSViewController {
         agentCommandTasks.removeAll()
         stopTransport()
         let releasedLease = lease
+        if let releasedLease { SimulatorDeviceTransactions.shared.unregister(self, from: releasedLease.device.id) }
         lease = nil
         guard let releasedLease else { return }
         Task { await leaseManager.release(releasedLease) }
@@ -816,13 +1039,8 @@ final class SimulatorPaneViewController: NSViewController {
             // while simctl never answers. Quiesce the one pane-owned transport for the bounded
             // public mutation, then establish a fresh stream against the launched process.
             self.stopTransport()
-            self.publicTransactionCount += 1
-            defer {
-                self.publicTransactionCount -= 1
-                if self.wantsFrames, self.lease?.device.id == deviceID {
-                    self.startFrameLoop()
-                }
-            }
+            SimulatorDeviceTransactions.shared.begin(on: deviceID)
+            defer { SimulatorDeviceTransactions.shared.end(on: deviceID) }
             do {
                 let receipt = try await control.installAndLaunch(
                     applicationURL: applicationURL,
@@ -874,26 +1092,23 @@ final class SimulatorPaneViewController: NSViewController {
             // A public screenshot is another CoreSimulator service transaction. It must not
             // overlap the adopted private framebuffer stream for the same device; after the
             // capture, reconnect so subsequent input stays on the direct pane transport.
+            let orientation = self.streamSession?.screenOrientation ?? self.lastConfirmedOrientation
             self.stopTransport()
-            self.publicTransactionCount += 1
-            defer {
-                self.publicTransactionCount -= 1
-                if self.wantsFrames, self.lease?.device.id == device.id {
-                    self.startFrameLoop()
-                }
-            }
+            SimulatorDeviceTransactions.shared.begin(on: device.id)
+            defer { SimulatorDeviceTransactions.shared.end(on: device.id) }
             do {
                 let data = try await control.screenshot(of: device.id)
                 try Task.checkCancellation()
-                guard let image = NSImage(data: data) else {
+                guard let capture = await SimulatorUprightCapture.upright(data, orientation: orientation) else {
                     throw SimulatorControlError.invalidScreenshot
                 }
+                try Task.checkCancellation()
                 guard self.lease?.device.id == device.id else {
                     completion(.failure("The selected Simulator changed during capture."))
                     return
                 }
-                self.showFrame(image)
-                completion(.success(SimulatorPaneScreenshot(data: data, device: device)))
+                self.showFrame(NSImage(cgImage: capture.image, size: .zero), orientation: orientation)
+                completion(.success(SimulatorPaneScreenshot(data: capture.png, device: device)))
             } catch is CancellationError {
                 completion(.failure("The Simulator capture was cancelled."))
             } catch {
@@ -1032,7 +1247,10 @@ final class SimulatorPaneViewController: NSViewController {
         preparationFailureDetail = nil
         let leaseManager = leaseManager
         let currentLease = (releasingCurrentLease || refreshingCurrentLease) ? lease : nil
-        if currentLease != nil { lease = nil }
+        if let currentLease {
+            SimulatorDeviceTransactions.shared.unregister(self, from: currentLease.device.id)
+            lease = nil
+        }
         preparationGeneration += 1
         let generation = preparationGeneration
 
@@ -1074,6 +1292,7 @@ final class SimulatorPaneViewController: NSViewController {
                     return
                 }
                 self.lease = preparedLease
+                SimulatorDeviceTransactions.shared.register(self, for: preparedLease.device.id)
                 self.requiresLeaseRefresh = false
                 self.preferredDeviceID = preparedLease.device.id
                 self.presentationState = .ready(preparedLease.device)
@@ -1186,6 +1405,7 @@ final class SimulatorPaneViewController: NSViewController {
                 self.streamSession = session
                 session.setVisible(self.wantsFrames)
 
+                var geometryChanged = false
                 var terminalFailure: String?
                 for await event in session.events {
                     guard !Task.isCancelled else { break }
@@ -1193,6 +1413,7 @@ final class SimulatorPaneViewController: NSViewController {
                           self.lease?.device.id == deviceID else { break }
                     switch event {
                     case .ready(let backend, let capabilities, _, _):
+                        if let orientation = session.screenOrientation { self.lastConfirmedOrientation = orientation }
                         self.liveBackend = backend
                         self.liveCapabilities = capabilities
                         self.setScreenInteraction(.ready(
@@ -1203,18 +1424,22 @@ final class SimulatorPaneViewController: NSViewController {
                             self.presentationState = .ready(device)
                         }
                     case .frame(let frame):
-                        self.showFrame(NSImage(cgImage: frame.image, size: .zero))
+                        let orientation = session.screenOrientation ?? .portrait
+                        self.lastConfirmedOrientation = orientation
+                        self.showFrame(NSImage(cgImage: frame.image, size: .zero), orientation: orientation)
                         self.feedStreamRecorder(frame.image)
                         self.resumeLiveFrameWaiters(with: frame)
                     case .statistics:
                         break
+                    case .geometryChanged:
+                        geometryChanged = true
                     case .failed(let message):
                         terminalFailure = message
                         break
                     case .ended:
                         terminalFailure = SimulatorLiveStreamError.disconnected.localizedDescription
                     }
-                    if terminalFailure != nil { break }
+                    if terminalFailure != nil || geometryChanged { break }
                 }
 
                 session.stop()
@@ -1223,6 +1448,18 @@ final class SimulatorPaneViewController: NSViewController {
                       self.lease?.device.id == deviceID else { return }
                 self.streamSession = nil
                 self.streamTask = nil
+                if geometryChanged {
+                    self.cancelWorkspaceTouch()
+                    self.liveBackend = nil
+                    self.liveCapabilities = nil
+                    self.screenView.annotations = []
+                    self.setScreenInteraction(.recoverable)
+                    self.resumeLiveFrameWaiters(with: nil)
+                    // Exactly one renegotiation per confirmed size change. Ordinary failures still
+                    // use the fallback, so this cannot turn a refused helper into a retry loop.
+                    self.startFrameLoop()
+                    return
+                }
                 let reason = terminalFailure ?? L10n.string("The direct Simulator stream ended.")
                 // A hidden pane takes no fallback; the reason still answers the agent command
                 // that is waiting on this transport.
@@ -1263,13 +1500,26 @@ final class SimulatorPaneViewController: NSViewController {
             }
             while !Task.isCancelled {
                 do {
+                    // Another viewer streaming this exact device directly (another session, a
+                    // presenter) must not be torn down by a poll: suspending it on every interval
+                    // reconnected it forever. Hold the last picture until it lets the device go.
+                    guard let gate = self.map({ (
+                        orientation: $0.lastConfirmedOrientation,
+                        yields: SimulatorDeviceTransactions.shared.hasDirectViewer(of: deviceID, besides: $0)
+                    ) }) else { return }
+                    if gate.yields {
+                        try await Task.sleep(nanoseconds: Timing.fallbackFrameInterval)
+                        continue
+                    }
+                    let orientation = gate.orientation
                     let data = try await control.screenshot(of: deviceID)
                     try Task.checkCancellation()
-                    guard let image = NSImage(data: data) else {
+                    guard let capture = await SimulatorUprightCapture.upright(data, orientation: orientation) else {
                         throw SimulatorControlError.invalidScreenshot
                     }
+                    try Task.checkCancellation()
                     guard let self, self.lease?.device.id == deviceID else { return }
-                    self.showFrame(image)
+                    self.showFrame(NSImage(cgImage: capture.image, size: .zero), orientation: orientation)
                     if let device = self.lease?.device { self.presentationState = .ready(device) }
                     try await Task.sleep(nanoseconds: Timing.fallbackFrameInterval)
                 } catch is CancellationError {
@@ -1302,6 +1552,7 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private func stopTransport() {
+        cancelWorkspaceTouch()
         scrollGeneration += 1
         scrollAuthorizationInFlight = false
         scrollSession = nil
@@ -1323,9 +1574,47 @@ final class SimulatorPaneViewController: NSViewController {
         screenView.annotations = []
     }
 
+    func suspendDeviceTransaction() {
+        publicTransactionCount += 1
+        cancelWorkspaceTouch()
+        streamTask?.cancel()
+        streamTask = nil
+        streamGeneration += 1
+        streamSession?.stop()
+        streamSession = nil
+        liveCapabilities = nil
+        if fallbackTask == nil { liveBackend = nil }
+        resumeLiveFrameWaiters(with: nil)
+        setScreenInteraction(.unavailable)
+    }
+
+    func resumeDeviceTransaction() {
+        guard publicTransactionCount > 0 else { return }
+        publicTransactionCount -= 1
+        if publicTransactionCount == 0 {
+            if fallbackTask != nil { setScreenInteraction(.recoverable) }
+            else { startFrameLoop() }
+        }
+    }
+
+    func clearDeviceTransactions() { publicTransactionCount = 0 }
+
+    /// Whether this viewer holds, or is opening, a direct stream of its device.
+    var holdsDirectStream: Bool { streamSession != nil || streamTask != nil }
+
     // MARK: - Continuous touch streaming
 
     private var touchStreamActive = false
+    private var touchStreamGeneration = 0
+    /// The latest contact point, in the displayed frame's axes, so a cancellation lifts the finger
+    /// where it is and the touch overlay ends the mark it is drawing.
+    private var lastTouchPoint: CGPoint?
+    private var displayedFrameOrientation: SimulatorScreenOrientation = .portrait
+    /// The axes the last helper confirmed. Public `simctl` captures arrive in the framebuffer's
+    /// native axes, so they are turned upright by this before the pane or an agent sees them;
+    /// otherwise a landscape app's fallback or hidden-pane screenshot comes back sideways while
+    /// input and element frames are upright.
+    private var lastConfirmedOrientation: SimulatorScreenOrientation = .portrait
     /// The session captured at `began`, so moves stream straight to it — no consent/authorization
     /// path per move, and no per-move round-trip at all.
     private var touchStreamSession: (any SimulatorLiveStreamSession)?
@@ -1334,6 +1623,7 @@ final class SimulatorPaneViewController: NSViewController {
     private var scrollSession: (any SimulatorLiveStreamSession)?
     private var pendingScroll: CGPoint = .zero
     private var pendingScrollOrigin = CGPoint(x: 0.5, y: 0.5)
+    private var pendingScrollOrientation: SimulatorScreenOrientation = .portrait
     private var scrollAuthorizationInFlight = false
     private var scrollGeneration = 0
 
@@ -1354,6 +1644,7 @@ final class SimulatorPaneViewController: NSViewController {
         pendingScroll.x = min(64, max(-64, pendingScroll.x + delta.x))
         pendingScroll.y = min(64, max(-64, pendingScroll.y + delta.y))
         pendingScrollOrigin = point
+        pendingScrollOrientation = displayedFrameOrientation
         guard !scrollAuthorizationInFlight else { return }
         scrollAuthorizationInFlight = true
         let generation = scrollGeneration
@@ -1383,8 +1674,10 @@ final class SimulatorPaneViewController: NSViewController {
                 while self.pendingScroll != .zero {
                     let delta = self.pendingScroll
                     let origin = self.pendingScrollOrigin
+                    let orientation = self.pendingScrollOrientation
                     self.pendingScroll = .zero
-                    try await session.sendInput(Self.wheelDrag(at: origin, delta: delta))
+                    try await session.sendInput(Self.wheelDrag(at: origin, delta: delta)
+                        .convertingCoordinates(from: orientation, to: session.screenOrientation ?? .portrait))
                     guard self.scrollGeneration == generation,
                           self.lease?.device.id == device.id,
                           self.streamSession === session else { return }
@@ -1425,28 +1718,37 @@ final class SimulatorPaneViewController: NSViewController {
         guard let device = lease?.device else { return }
         feedTouchOverlay { $0.contactBegan(at: point) }
         touchStreamActive = true
+        lastTouchPoint = point
+        touchStreamGeneration += 1
+        let generation = touchStreamGeneration
+        let orientation = displayedFrameOrientation
         touchStreamSession = nil
         bufferedTouchMove = nil
         runAgentCommand { [weak self] in
             guard let self else { return }
             do {
                 let session = try await self.authorizedInputSession(for: device)
-                try await session.sendInput(
-                    .touch(phase: .began, x: Double(point.x), y: Double(point.y))
-                )
-                guard self.touchStreamActive else {
-                    session.streamInput(.touch(phase: .cancelled, x: Double(point.x), y: Double(point.y)))
+                guard self.touchStreamActive, self.touchStreamGeneration == generation else { return }
+                let began = SimulatorBridgeInput.touch(phase: .began, x: Double(point.x), y: Double(point.y))
+                    .convertingCoordinates(from: orientation, to: session.screenOrientation ?? .portrait)
+                try await session.sendInput(began)
+                guard self.touchStreamActive, self.touchStreamGeneration == generation else {
+                    session.streamInput(SimulatorBridgeInput.touch(phase: .cancelled, x: Double(point.x), y: Double(point.y))
+                        .convertingCoordinates(from: orientation, to: session.screenOrientation ?? .portrait))
                     return
                 }
                 self.touchStreamSession = session
                 if let buffered = self.bufferedTouchMove {
                     self.bufferedTouchMove = nil
                     session.streamInput(
-                        .touch(phase: .moved, x: Double(buffered.x), y: Double(buffered.y))
+                        SimulatorBridgeInput.touch(phase: .moved, x: Double(buffered.x), y: Double(buffered.y))
+                            .convertingCoordinates(from: orientation, to: session.screenOrientation ?? .portrait)
                     )
                 }
             } catch {
+                guard self.touchStreamGeneration == generation else { return }
                 self.touchStreamActive = false
+                self.onGestureEnd?()
             }
         }
     }
@@ -1454,30 +1756,55 @@ final class SimulatorPaneViewController: NSViewController {
     private func moveTouchStream(to point: CGPoint) {
         guard touchStreamActive else { return }
         feedTouchOverlay { $0.contactMoved(to: point) }
+        lastTouchPoint = point
         guard let session = touchStreamSession else {
             bufferedTouchMove = point // authorization still in flight; send the latest once ready
             return
         }
-        session.streamInput(.touch(phase: .moved, x: Double(point.x), y: Double(point.y)))
+        session.streamInput(SimulatorBridgeInput.touch(phase: .moved, x: Double(point.x), y: Double(point.y))
+            .convertingCoordinates(from: displayedFrameOrientation, to: session.screenOrientation ?? .portrait))
+    }
+
+    private func cancelWorkspaceTouch() {
+        guard touchStreamActive else { return }
+        let point = lastTouchPoint ?? CGPoint(x: 0.5, y: 0.5)
+        if let session = touchStreamSession {
+            session.streamInput(SimulatorBridgeInput.touch(phase: .cancelled, x: Double(point.x), y: Double(point.y))
+                .convertingCoordinates(from: displayedFrameOrientation, to: session.screenOrientation ?? .portrait))
+        }
+        feedTouchOverlay { $0.contactEnded(at: point) }
+        touchStreamActive = false
+        touchStreamGeneration += 1
+        touchStreamSession = nil
+        bufferedTouchMove = nil
+        lastTouchPoint = nil
+        onGestureEnd?()
     }
 
     private func endTouchStream(at point: CGPoint) {
         guard touchStreamActive else { return }
         feedTouchOverlay { $0.contactEnded(at: point) }
+        lastTouchPoint = nil
         touchStreamActive = false
+        touchStreamGeneration += 1
+        onGestureEnd?()
         bufferedTouchMove = nil
         let session = touchStreamSession
         touchStreamSession = nil
-        session?.streamInput(.touch(phase: .ended, x: Double(point.x), y: Double(point.y)))
+        if let session {
+            session.streamInput(SimulatorBridgeInput.touch(phase: .ended, x: Double(point.x), y: Double(point.y))
+                .convertingCoordinates(from: displayedFrameOrientation, to: session.screenOrientation ?? .portrait))
+        }
     }
 
     private func submitInput(_ input: SimulatorBridgeInput) {
+        let orientation = displayedFrameOrientation
         showInputInOverlay(input)
         if liveCapabilities == nil || effectiveControlDecision != true {
             controlActivity = .connecting
             renderState()
         }
-        sendInput(input) { [weak self] result in
+        sendInput(input, sourceOrientation: orientation) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
@@ -1532,6 +1859,7 @@ final class SimulatorPaneViewController: NSViewController {
 
     private func sendInput(
         _ input: SimulatorBridgeInput,
+        sourceOrientation: SimulatorScreenOrientation? = nil,
         completion: @escaping @MainActor @Sendable (SimulatorPaneAgentResult<Void>) -> Void
     ) {
         guard let device = lease?.device else {
@@ -1542,7 +1870,10 @@ final class SimulatorPaneViewController: NSViewController {
             guard let self else { return }
             do {
                 let session = try await self.authorizedInputSession(for: device)
-                try await session.sendInput(input)
+                let mapped = sourceOrientation.map {
+                    input.convertingCoordinates(from: $0, to: session.screenOrientation ?? .portrait)
+                } ?? input
+                try await session.sendInput(mapped)
                 try Task.checkCancellation()
                 guard self.lease?.device.id == device.id,
                       self.streamSession === session else {
@@ -1966,7 +2297,9 @@ final class SimulatorPaneViewController: NSViewController {
         NSLayoutConstraint.activate([
             band.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             band.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            band.topAnchor.constraint(equalTo: controlRow.bottomAnchor, constant: Design.Spacing.medium),
+            isWorkspaceMember
+                ? band.topAnchor.constraint(equalTo: workspaceContentTop.bottomAnchor)
+                : band.topAnchor.constraint(equalTo: controlRow.bottomAnchor, constant: Design.Spacing.medium),
             screenView.topAnchor.constraint(equalTo: band.bottomAnchor, constant: Design.Spacing.medium),
         ])
         annotationBand = band
@@ -2013,8 +2346,8 @@ final class SimulatorPaneViewController: NSViewController {
         editor.onDelete = { [weak self] in self?.deleteEditedNote() }
         editingNoteID = id
         noteEditor = editor
-        view.addSubview(editor)
         positionNoteEditor()
+        view.addSubview(editor)
         editor.focusNote()
     }
 
@@ -2173,8 +2506,19 @@ final class SimulatorPaneViewController: NSViewController {
 
     /// Every picture of the device goes through here, so the pane and its presenter window never
     /// disagree about what the device shows.
-    private func showFrame(_ image: NSImage) {
+    private func showFrame(_ image: NSImage, orientation: SimulatorScreenOrientation = .portrait) {
+        if orientation != displayedFrameOrientation { cancelWorkspaceTouch() }
+        displayedFrameOrientation = orientation
+        let previousSize = screenView.image?.size
         screenView.image = image
+        if previousSize != image.size, image.size.width > 0, image.size.height > 0 {
+            let aspect = image.size.width / image.size.height
+            if abs(aspect - workspaceScreenAspect) > 0.001 {
+                workspaceScreenAspect = aspect
+                applyWorkspaceScreenAspect()
+            }
+            onFrameAspectChange?(aspect)
+        }
         guard let presenter else { return }
         presenter.screenView.image = image
         presenter.adoptFrameSize(image.size)
@@ -2707,7 +3051,8 @@ final class SimulatorPaneViewController: NSViewController {
     /// list of about fifteen rows, so there is nothing to cache.
     func screenMenuEntries(
         for request: SimulatorScreenView.ContextMenuRequest,
-        includesNotes: Bool
+        includesNotes: Bool,
+        includesWorkspaceActions: Bool = true
     ) -> [ThemedMenuEntry] {
         var entries: [ThemedMenuEntry] = []
 
@@ -2784,6 +3129,11 @@ final class SimulatorPaneViewController: NSViewController {
                 title: L10n.string("Close Presenter Window"),
                 onChoose: { [weak self] in self?.closePresenterWindow() }
             )))
+        }
+        if includesNotes, includesWorkspaceActions,
+           let extras = workspaceMenuExtras?(), !extras.isEmpty {
+            entries.append(.separator)
+            entries += extras
         }
         return entries
     }
@@ -2911,13 +3261,18 @@ final class SimulatorPaneViewController: NSViewController {
             // The chip already names the device, and a live stream under granted control is the
             // default: the line stays quiet then and speaks up only for what needs attention.
             // Which transport carries the pixels is a diagnostic, so it moves to the tooltip.
-            var status = [device.runtimeName]
+            var status: [String] = []
             switch liveBackend {
             case .screenshotFallback: status.append(L10n.string("Disconnected"))
             case nil: status.append(L10n.string("Connecting…"))
             case .direct, .sharedMemory: break
             }
             if let control = controlStatus() { status.append(control) }
+            // A tile beside peers is narrow: what needs attention leads, and the runtime (also in
+            // the name's tooltip) is the quiet line only when there is nothing else to say.
+            if !(isWorkspaceMember && workspaceRole != .solo && !status.isEmpty) {
+                status.insert(device.runtimeName, at: 0)
+            }
             statusLabel.stringValue = status.joined(separator: " · ")
             statusLabel.textColor = isDisconnected ? Design.Status.negative : Design.Text.tertiary
             retryButton.isEnabled = true
@@ -2954,6 +3309,15 @@ final class SimulatorPaneViewController: NSViewController {
             tooltipLines.append(String(preparationFailureDetail.prefix(1_000)))
         }
         statusLabel.toolTip = tooltipLines.joined(separator: "\n")
+        if isWorkspaceMember {
+            let name = workspaceDeviceName
+            workspaceTitle.title = name
+            workspaceTitle.toolTip = [name, adoptedDevice?.runtimeName].compactMap { $0 }.joined(separator: " · ")
+            if name != reportedWorkspaceName {
+                reportedWorkspaceName = name
+                onWorkspaceIdentityChange?()
+            }
+        }
     }
 
     /// Red is kept for a pane that lost its device route: on the view-only fallback, or when
@@ -2993,6 +3357,7 @@ final class SimulatorPaneViewController: NSViewController {
     }
     var screenViewForTesting: SimulatorScreenView { screenView }
     var statusForTesting: String { statusLabel.stringValue }
+    var statusViewForTesting: NSView { statusLabel }
     var statusTooltipForTesting: String { statusLabel.toolTip ?? "" }
     var controlButtonForTesting: ThemedIconButton { controlButton }
     var logsButtonForTesting: ThemedIconButton { logsButton }

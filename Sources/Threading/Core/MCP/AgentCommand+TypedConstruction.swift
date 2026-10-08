@@ -128,6 +128,9 @@ extension AgentCommand {
     builtIn(.simulatorSnapshot, value)
   }
   static func simulatorAnnotations(_ value: EmptyToolArguments) -> Self {
+    simulatorAnnotations(SimulatorTargetArguments())
+  }
+  static func simulatorAnnotations(_ value: SimulatorTargetArguments) -> Self {
     builtIn(.simulatorAnnotations, value)
   }
   static func simulatorWait(_ value: SimulatorWaitArguments) -> Self {

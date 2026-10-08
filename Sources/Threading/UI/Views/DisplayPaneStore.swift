@@ -24,7 +24,13 @@ extension PersistedPanel {
       case .terminal: return "t"
       case .files: return "f"
       case .attachments: return "a"
-      case .simulator: return "m:\(tab.simulatorDeviceID ?? "automatic")"
+      case .simulator:
+        // Only what the brief tells the agent: its exact devices. Selection and layout are the
+        // person's and agents never follow them, so clicking between devices must not re-brief.
+        if let workspace = tab.simulatorWorkspace {
+          return "m:" + workspace.members.map { $0.deviceID?.rawValue ?? "automatic" }.joined(separator: ",")
+        }
+        return "m:\(tab.simulatorDeviceID ?? "automatic")"
       case .realDevice: return "p:\(tab.physicalDeviceID ?? "automatic")"
       case .deviceLog: return "l"
       case .extensionPanel:
@@ -79,7 +85,8 @@ extension PersistedPanel {
       case .simulator:
         detail =
           "the in-panel iOS Simulator (prefer this device surface instead of opening "
-          + "Apple Simulator in a separate window)"
+          + "Apple Simulator in a separate window); "
+          + Self.simulatorDeviceDetail(tab)
       case .realDevice:
         detail =
           "a paired physical iPhone the user can control after an explicit device grant "
@@ -103,6 +110,17 @@ extension PersistedPanel {
         + "If this differs from what you last did, the user changed it while you were away."
     )
     return lines.joined(separator: "\n")
+  }
+
+  private static func simulatorDeviceDetail(_ tab: PersistedTab) -> String {
+    let devices = tab.simulatorWorkspace?.members.compactMap { $0.deviceID?.rawValue }
+      ?? tab.simulatorDeviceID.map { [$0] } ?? []
+    switch devices.count {
+    case 0: return "automatic device"
+    case 1: return "device \(devices[0])"
+    default:
+      return "devices \(devices.joined(separator: ", ")) (pass device_id to every simulator tool)"
+    }
   }
 }
 

@@ -31,6 +31,76 @@ final class SimulatorPaneRecoveryTests: XCTestCase {
         XCTAssertEqual(duration, 140)
     }
 
+    func testGeometryChangeReconnectsWithoutReplacingTheDeviceLease() async throws {
+        let first = SimulatorRecoveryStreamSessionFake()
+        let second = SimulatorRecoveryStreamSessionFake()
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([.success(first), .success(second)])
+        let control = SimulatorRecoveryControlFake()
+        let controller = makeController(control: control, coordinator: coordinator)
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        let original = controller.selectedDeviceID
+        first.emit(.geometryChanged)
+        try await eventually { await coordinator.openCount == 2 }
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        XCTAssertTrue(first.didStop)
+        XCTAssertEqual(controller.selectedDeviceID, original)
+        let prepares = await control.prepareCount
+        let screenshots = await control.screenshotCount
+        XCTAssertEqual(prepares, 1)
+        XCTAssertEqual(screenshots, 0, "A confirmed size change renegotiates instead of polling screenshots.")
+        let capture = second.emitFramesContinuously(width: 8, height: 4)
+        defer { capture.cancel() }
+        try await eventually { controller.frameImageForTesting?.size == NSSize(width: 8, height: 4) }
+    }
+
+    func testPublicTransactionSuspendsEveryViewerOfOnlyTheExactDevice() async throws {
+        let first = SimulatorRecoveryStreamSessionFake()
+        let second = SimulatorRecoveryStreamSessionFake()
+        let unrelated = SimulatorRecoveryStreamSessionFake()
+        let control = SimulatorRecoveryControlFake()
+        let a = makeController(control: control, coordinator: SimulatorRecoveryStreamCoordinatorFake([.success(first)]))
+        let b = makeController(control: control, coordinator: SimulatorRecoveryStreamCoordinatorFake([.success(second)]))
+        let c = makeController(control: control, coordinator: SimulatorRecoveryStreamCoordinatorFake([.success(unrelated)]))
+        _ = a.view; _ = b.view; _ = c.view
+        c.selectDevice(simulatorRecoverySecondDevice.id)
+        defer { a.terminate(); b.terminate(); c.terminate() }
+        a.setPresented(true); b.setPresented(true); c.setPresented(true)
+        try await eventually { [a, b, c].allSatisfy { $0.liveBackendForTesting == .direct(codec: .h264) } }
+        SimulatorDeviceTransactions.shared.begin(on: simulatorRecoveryFirstDevice.id)
+        defer { SimulatorDeviceTransactions.shared.end(on: simulatorRecoveryFirstDevice.id) }
+        XCTAssertTrue(first.didStop)
+        XCTAssertTrue(second.didStop)
+        XCTAssertFalse(unrelated.didStop)
+        XCTAssertEqual(c.liveBackendForTesting, .direct(codec: .h264))
+    }
+
+    func testFallbackPollLeavesAnotherViewersDirectStreamAlone() async throws {
+        let live = SimulatorRecoveryStreamSessionFake()
+        let control = SimulatorRecoveryControlFake()
+        let peer = makeController(control: control, coordinator: SimulatorRecoveryStreamCoordinatorFake([.success(live)]))
+        let fallback = makeController(control: control,
+                                      coordinator: SimulatorRecoveryStreamCoordinatorFake([.failure(.disconnected)]))
+        _ = peer.view; _ = fallback.view
+        defer { fallback.terminate() }
+        peer.setPresented(true)
+        try await eventually { peer.liveBackendForTesting == .direct(codec: .h264) }
+        fallback.setPresented(true)
+        try await eventually {
+            if case .screenshotFallback = fallback.liveBackendForTesting { return true }
+            return false
+        }
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertFalse(live.didStop, "A poll suspended the device's other direct viewer, which then reconnects forever.")
+        XCTAssertEqual(peer.liveBackendForTesting, .direct(codec: .h264))
+        let heldShots = await control.screenshotCount
+        XCTAssertEqual(heldShots, 0, "The fallback holds its picture while a peer streams the device directly.")
+        peer.terminate()
+        try await eventually { await control.screenshotCount > 0 }
+    }
+
     func testHelperCrashFallsBackInsideTheAdoptedPane() async throws {
         let session = SimulatorRecoveryStreamSessionFake()
         let coordinator = SimulatorRecoveryStreamCoordinatorFake([.success(session)])

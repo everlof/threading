@@ -14,10 +14,14 @@ extension AgentToolCoordinator {
             completion(result)
             return
         }
-        let simulator = displayPaneController.activateSimulator(
-            for: sessionID,
-            deviceID: requestedID
-        )
+        if requestedID == nil, let workspace = displayPaneController.simulatorWorkspace(for: sessionID),
+           workspace.state.members.count > 1 {
+            completion(.failure("Provide device_id when the workspace contains multiple Simulators."))
+            return
+        }
+        let simulator: SimulatorPaneViewController
+        do { simulator = try displayPaneController.activateSimulator(for: sessionID, deviceID: requestedID) }
+        catch { completion(.failure(error.localizedDescription)); return }
         revealDisplayPane(for: sessionID)
         simulator.prepareForAgent(deviceID: requestedID) { result in
             switch result {
@@ -41,12 +45,10 @@ extension AgentToolCoordinator {
             if case .rejected(let result) = request { completion(result) }
             return
         }
-        guard let simulator = adoptedSimulator(for: sessionID) else {
-            completion(.failure("Call simulator_prepare before installing an app."))
-            return
-        }
+        guard let simulator = resolveSimulatorTarget(arguments.deviceID, for: sessionID,
+            missingMessage: "Call simulator_prepare before installing an app.", completion: completion) else { return }
 
-        _ = displayPaneController.activateSimulator(for: sessionID)
+        _ = try? displayPaneController.activateSimulator(for: sessionID)
         revealDisplayPane(for: sessionID)
         simulator.installAndLaunchForAgent(
             applicationURL: launch.applicationURL,
@@ -67,12 +69,9 @@ extension AgentToolCoordinator {
         for sessionID: SessionID,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
-        guard let simulator = adoptedSimulator(for: sessionID) else {
-            completion(.failure("Call simulator_prepare before capturing the Simulator."))
-            return
-        }
+        guard let simulator = resolveSimulatorTarget(arguments.deviceID, for: sessionID, completion: completion) else { return }
 
-        _ = displayPaneController.activateSimulator(for: sessionID)
+        _ = try? displayPaneController.activateSimulator(for: sessionID)
         revealDisplayPane(for: sessionID)
         let includeImage = arguments.includeImage ?? true
         let deliver: @MainActor @Sendable (SimulatorPaneAgentResult<SimulatorPaneScreenshot>) -> Void = {
@@ -98,12 +97,9 @@ extension AgentToolCoordinator {
         for sessionID: SessionID,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
-        guard let simulator = adoptedSimulator(for: sessionID) else {
-            completion(.failure("Call simulator_prepare before reading the Simulator's elements."))
-            return
-        }
+        guard let simulator = resolveSimulatorTarget(arguments.deviceID, for: sessionID, completion: completion) else { return }
 
-        _ = displayPaneController.activateSimulator(for: sessionID)
+        _ = try? displayPaneController.activateSimulator(for: sessionID)
         revealDisplayPane(for: sessionID)
         simulator.snapshotForAgent { result in
             switch result {
@@ -128,12 +124,12 @@ extension AgentToolCoordinator {
         case .rejected(let result):
             completion(result)
         case .accepted(let request):
-            guard let simulator = adoptedSimulator(for: sessionID),
-                  let device = simulator.adoptedDevice else {
+            guard let simulator = resolveSimulatorTarget(arguments.deviceID, for: sessionID, completion: completion) else { return }
+            guard let device = simulator.adoptedDevice else {
                 completion(.failure("Call simulator_prepare before waiting for an element."))
                 return
             }
-            _ = displayPaneController.activateSimulator(for: sessionID)
+            _ = try? displayPaneController.activateSimulator(for: sessionID)
             revealDisplayPane(for: sessionID)
             SimulatorWaitPoller.run(
                 request, simulator: simulator, device: device, completion: completion
@@ -142,11 +138,11 @@ extension AgentToolCoordinator {
     }
 
     func simulatorAnnotations(
-        for sessionID: SessionID,
+        _ arguments: SimulatorTargetArguments, for sessionID: SessionID,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
-        guard let simulator = adoptedSimulator(for: sessionID),
-              let device = simulator.adoptedDevice else {
+        guard let simulator = resolveSimulatorTarget(arguments.deviceID, for: sessionID, completion: completion) else { return }
+        guard let device = simulator.adoptedDevice else {
             completion(.failure("Call simulator_prepare before reading the Simulator's notes."))
             return
         }
@@ -154,10 +150,31 @@ extension AgentToolCoordinator {
         completion(SimulatorAnnotationRenderer.result(annotations: notes, device: device))
     }
 
-    private func adoptedSimulator(for sessionID: SessionID) -> SimulatorPaneViewController? {
-        displayPaneController.tabs(for: sessionID)
-            .compactMap(\.simulator)
-            .first
+    func resolveSimulatorTarget(
+        _ rawDeviceID: String?, for sessionID: SessionID,
+        missingMessage: String = "Call simulator_prepare before addressing a Simulator.",
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) -> SimulatorPaneViewController? {
+        guard let workspace = displayPaneController.simulatorWorkspace(for: sessionID) else {
+            completion(.failure(missingMessage))
+            return nil
+        }
+        if let rawDeviceID {
+            guard let id = SimulatorDeviceID(rawDeviceID) else {
+                completion(.failure("device_id must be an exact Simulator UDID."))
+                return nil
+            }
+            guard let controller = workspace.simulators.first(where: { $0.selectedDeviceID == id }) else {
+                completion(.failure("That device is not adopted in this session. Call simulator_prepare with its device_id."))
+                return nil
+            }
+            return controller
+        }
+        guard workspace.simulators.count == 1 else {
+            let devices = workspace.state.members.compactMap { $0.deviceID?.rawValue }.joined(separator: ", ")
+            completion(.failure("Provide device_id: this workspace has multiple Simulators (\(devices))."))
+            return nil
+        }
+        return workspace.selectedSimulator
     }
 }
-

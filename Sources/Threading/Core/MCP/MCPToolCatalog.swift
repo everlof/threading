@@ -430,7 +430,7 @@ enum MCPToolCatalog {
     instruction: """
       When developing or testing an iOS app, prefer Threading's adopted Simulator in the \
       right display panel over opening Apple Simulator.app in a separate window. Start with \
-      simulator_prepare. It creates or focuses this session's single Simulator tab, boots or \
+      simulator_prepare. It adds or reuses an exact device in this session's Simulator workspace, boots or \
       adopts one device, and returns its exact UDID. Use that UDID for xcodebuild with \
       -destination id=<device_id>, then call simulator_install_launch with the built .app and \
       bundle identifier. Use simulator_screenshot when you need the current pixels in your \
@@ -442,7 +442,8 @@ enum MCPToolCatalog {
       user once before direct input reaches each exact adopted device. If the pane reports that \
       it is using screenshot fallback, interaction tools fail closed instead of opening another \
       window. Keep build output in the session's project or DerivedData and never guess a device \
-      identifier.
+      identifier. When several devices are adopted, pass device_id to every simulator operation; \
+      omission is ambiguous and refused. panel_list_tabs lists the workspace's device IDs.
       """
   )
 

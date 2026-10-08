@@ -13,7 +13,7 @@ struct PersistedPanel: Codable {
   /// them cannot show a `window:` tab, and the version is what makes it say so — refusing the
   /// document with the error this decoder was built to give, rather than reading a layout it
   /// only partly understands and writing that back.
-  static let currentFormatVersion = 4
+  static let currentFormatVersion = 5
 
   var tabs: [PersistedTab]
   var activeTabID: String?
@@ -143,6 +143,7 @@ extension PersistedPanel {
   /// every window slice. Stamping the version by what the document contains keeps the bump
   /// costing only the sessions that actually used the feature.
   var requiredFormatVersion: Int {
+    if tabs.contains(where: { $0.simulatorWorkspace != nil }) { return 5 }
     if tabs.contains(where: { $0.kind == .realDevice }) { return 4 }
     if tabs.contains(where: { $0.kind == .simulator }) { return 3 }
     return detachedWindows.isEmpty && !tabs.contains(where: \.namesADetachedWindow) ? 1 : 2
@@ -201,6 +202,7 @@ struct PersistedTab: Codable {
   var extensionIdentifier: String? = nil
   var extensionPanelID: String? = nil
   var simulatorDeviceID: String? = nil
+  var simulatorWorkspace: SimulatorWorkspaceState? = nil
   var physicalDeviceID: String? = nil
   var compareOldPath: String? = nil
   var compareNewPath: String? = nil

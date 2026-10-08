@@ -167,11 +167,106 @@ refused by its own slot. `SimulatorHelperClient.stop()` now releases the reserva
 caller's thread; the budget sits behind a lock for that reason. The teardown's own release is
 idempotent.
 
+### Frame geometry changes
+
+Wire v4 adds `geometryChanged`. A helper stops capture when its native dimensions or screen UI
+orientation change, releases any active contact on the ordered input queue, then emits the
+typed event and closes. The pane invalidates input/inspection geometry and establishes one fresh
+stream against the same device lease. The first confirmed new frame updates the workspace's aspect.
+Generic failures still enter screenshot fallback; they are not retried in a loop. Helper teardown
+closes input admission and releases any retained contact under the same lock as touch sends, so
+an unwatched workspace can return its stream without leaving a held finger in the guest. A peer below v4
+receives the earlier geometry failure and can Retry. This also applies to JPEG because the input
+coordinate mapping belongs to the same negotiation. Auto follows the upright delivered frame;
+it does not add a Rotate-device HID operation.
+
+Real UIKit rotation on iOS 26.5 leaves the native IOSurface dimensions unchanged. The bridge reads
+`screenProperties.uiOrientation` (1/2/3/4) rather than inferring orientation from size. An Xcode
+that publishes no orientation (0) streams in native axes, exactly as helpers did before orientation
+was read; refusing the stream there turned a missing selector into a pane with no direct input, and
+a transient 0 mid-stream is not treated as a rotation. The capture loop runs only while frames are
+wanted, so input and accessibility requests check the geometry too: a stream opened for an agent
+behind a hidden pane otherwise mapped input through stale axes and refused every element read
+without anything renegotiating. Shared
+delivery rotates directly into its three mapped buffers; codecs reuse one oriented IOSurface.
+The optional hello orientation metadata tags the displayed axes. Touch and drag inputs map back
+to native digitizer axes, including a user point captured on a raw public fallback before a
+recovered stream publishes different axes. A changed published axis cancels an outstanding
+continuous contact, and touch generations prevent a cancelled authorization from injecting a
+late down into a new gesture. A cancellation lifts the finger where the helper holds it, never at
+the point it carries: a `(0, 0)` cancel used to jump the contact to a corner and fling a scroll
+view. Closing the helper for a geometry change also closes input admission on the ordered input
+queue, so a move already queued cannot press again before the stream ends.
+
+Public `simctl` screenshots are the framebuffer in native axes. A fallback poll and a hidden pane's
+agent screenshot are turned upright on a worker by the last orientation a helper confirmed
+(`SimulatorUprightCapture`), so the pane, the agent's PNG and agent coordinates all share the
+direct stream's axes; a user point on that picture still maps back through the orientation it was
+drawn in.
+
+UIKit application accessibility trees already use upright logical bounds. Some system-owned
+portrait scenes over a landscape app use native bounds. Without a quarter turn both spaces share
+one set of axes, so the tree is used as it is whatever its root covers (an iPad app in a
+multitasking frame, a root with no frame). With one, the helper compares the whole root with the
+two known full-display spaces within 2% (point sizes are not an exact division of every buffer:
+375×812 points on 1080×2340 pixels), leaves an upright tree alone and converts native bounds once.
+Unknown/partial landscape spaces are refused with their own explanation rather than guessed or
+reported as a geometry change to retry. Orientation changing during a read also
+returns an explicit retry. The live fixture tests landscape element targeting against actual
+guest buttons, not only rectangle arithmetic.
+
 ## Device and session ownership
 
-One simulator tab has one stable session-owned identity and one selected UDID. The initial product
-limit is one device per session and four active live streams app-wide; the model must not encode
-one as the permanent maximum.
+One Simulator workspace tab has one stable session-owned identity and an ordered collection of
+exact-device members. The current admission limit is four members per workspace and four live
+helpers app-wide. Adding an already-adopted UDID selects its existing member; adding a different
+UDID retains the other members. Device members keep their controllers and leases through layout
+and focus changes. Removing a member releases only its lease; closing the tab releases them all.
+
+`SimulatorWorkspaceViewController` hosts one header row for its selected member and a bounded
+`SimulatorWorkspaceCanvas`. The row is the device chooser, **+**, the layout chooser (only with two
+or more members, and only while the header is at least 340 points wide), then the member's own
+screenshot, recording, Device Logs and options buttons. A lone member therefore looks like the
+single pane plus one **+**; the first version stacked a layout row and an "N Simulators" chooser
+above it, said "1 Simulators", and truncated both choosers to a letter at 260 points. Alone, the
+chooser switches the device as the single pane's did; beside peers it selects a member. The
+options and screen menus carry **Layout** and **Remove … from Workspace**; removal selects the
+neighbour. The six hardware controls retain their full targets and wrap into rows as width shrinks.
+
+A member hugs its device: its screen view is constrained to the confirmed frame's aspect, as wide
+as the cell allows, with the name in a fixed band above it and the status line directly under it.
+The pixels are never letterboxed, so the status line cannot strand itself at the bottom of a tall
+cell (the first renders showed it 400 points below a landscape screen), and the selected name's
+plate cannot push its screen below its neighbours'. Beside peers the status line leads with what
+needs attention and keeps the runtime for the name's tooltip, because a narrow tile truncated the
+part that mattered. `SimulatorPaneRenderTests` asserts each of these.
+Auto scores rows, columns and a grid from confirmed frame aspects and
+the actual viewport, preferring the greatest minimum screen short side and retaining the current
+arrangement on near ties. Portrait pairs normally sit beside each other; landscape pairs normally
+stack. Row, Column, Grid and Focus are explicit persisted choices. Focus keeps only the selected
+tile presented, while recordings and presenter windows remain independent stream owners. Keyboard
+focus selects the originating device; layout is deferred during a continuous touch. A workspace
+left hidden yields unwatched transports immediately, so its four grace-held helpers cannot block
+the newly visible workspace. It never preempts a recording, presenter or running agent command.
+
+Persistence retains tab identity, member identities/UDIDs, order, selection and layout. A one-device
+Auto workspace still writes the legacy `simulatorDeviceID` representation and needs panel format 3;
+a multi-device workspace or a manual layout writes `simulatorWorkspace` and requires format 5.
+Legacy layouts restore as one-member workspaces. Validation refuses duplicate device/member IDs,
+missing selections and membership above the named ceiling rather than partially restoring state.
+
+A public transaction suspends every registered direct viewer of its exact UDID through
+`SimulatorDeviceTransactions`, including viewers in other sessions. Nested transactions keep that
+device suspended until the last completion; another device's streams are unaffected. Boot-lease
+reference counting and framebuffer exclusion have the same device scope, but separate owners.
+Install/launch and an agent's public screenshot take a transaction. The screenshot fallback's poll
+does not: suspending the device's other direct viewers once a second reconnected them forever, so
+the poll holds its last picture while another viewer streams that device directly and resumes when
+it lets go.
+
+The agent's panel brief (`PersistedPanel.signature`) names only the workspace's device IDs.
+Selection and layout are the person's and agents never follow them, so clicking between devices
+does not re-brief the agent.
 
 Preparing a device returns `SimulatorDeviceLease`:
 
@@ -195,7 +290,10 @@ running. This prevents both an endless stale-lease retry loop and ownership laun
 
 The built-in **iOS Simulator** tool group is session-scoped. Its preferred sequence is:
 
-1. `simulator_prepare` chooses or adopts a device and reveals the stable in-panel tab.
+1. `simulator_prepare` adds or reuses an exact device and reveals the stable workspace tab.
+   With several members, every Simulator command requires `device_id`; omission is refused as
+   ambiguous instead of following human focus. `panel_list_tabs` publishes the workspace's member
+   UDIDs and selected member. Element refs remain scoped to the explicitly targeted device.
 2. The agent runs `xcodebuild` through its ordinary shell permission flow, using the returned UDID
    and a session-specific DerivedData directory.
 3. `simulator_install_launch` installs the resulting `.app` and launches it in that same device.

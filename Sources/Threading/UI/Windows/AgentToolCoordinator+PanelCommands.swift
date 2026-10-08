@@ -50,7 +50,16 @@ extension AgentToolCoordinator {
                 id: tab.id.uuidString,
                 kind: kind,
                 title: title,
-                active: tab.id == activeID
+                active: tab.id == activeID,
+                simulatorDevices: tab.simulatorWorkspace.map { workspace in
+                    workspace.state.members.map { member in
+                        PanelTabsPayload.Tab.SimulatorDeviceReceipt(
+                            deviceID: member.deviceID?.rawValue,
+                            name: workspace.simulators.first(where: { $0.selectedDeviceID == member.deviceID })?.adoptedDevice?.name,
+                            selected: member.id == workspace.state.selectedID
+                        )
+                    }
+                }
             )
         }
 

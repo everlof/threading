@@ -77,7 +77,7 @@ final class PaneTab {
     case subagents(SubagentTranscriptViewController)
     case sharing(SessionSharingViewController)
     case supervision(SupervisionListViewController)
-    case simulator(SimulatorPaneViewController)
+    case simulator(SimulatorWorkspaceViewController)
     case realDevice(RealDevicePaneViewController)
     case notificationTest(NotificationTestViewController)
     case nativePlugin(NativePluginPaneViewController)
@@ -179,7 +179,12 @@ final class PaneTab {
   }
 
   var simulator: SimulatorPaneViewController? {
-    if case .simulator(let simulator) = body { return simulator }
+    if case .simulator(let workspace) = body { return workspace.selectedSimulator }
+    return nil
+  }
+
+  var simulatorWorkspace: SimulatorWorkspaceViewController? {
+    if case .simulator(let workspace) = body { return workspace }
     return nil
   }
 

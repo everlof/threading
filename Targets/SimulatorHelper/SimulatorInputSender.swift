@@ -21,14 +21,19 @@ final class SimulatorInputSender: @unchecked Sendable {
         }
     }
 
+    private let inputLock = NSLock()
+    private var stopped = false
+    private var activeContact: (x: Double, y: Double)?
     private let bridge: SimulatorPrivateBridge
+    private let orientation: SimulatorScreenOrientation
 
-    init(bridge: SimulatorPrivateBridge) {
+    init(bridge: SimulatorPrivateBridge, orientation: SimulatorScreenOrientation = .portrait) {
         self.bridge = bridge
+        self.orientation = orientation
     }
 
     func send(_ command: SimulatorBridgeInput) throws {
-        guard bridge.supportsInput else { throw InputError.unavailable }
+        guard bridge.supportsInput, inputLock.withLock({ !stopped }) else { throw InputError.unavailable }
         switch command {
         case .tap(let x, let y):
             try validate(x, y)
@@ -76,8 +81,12 @@ final class SimulatorInputSender: @unchecked Sendable {
                 // non-blocking: waiting on each one's HID completion serialized panning at the HID
                 // rate. A dropped move is harmless — the next one corrects the position.
                 try touch(x: x, y: y, down: true, wait: false)
-            case .ended, .cancelled:
+            case .ended:
                 try touch(x: x, y: y, down: false)
+            case .cancelled:
+                // A cancellation carries no meaningful point: lift the finger where it is, so the
+                // guest never sees the contact jump to a corner and fling.
+                try releaseActiveContact()
             }
 
         case .text(let text):
@@ -125,6 +134,27 @@ final class SimulatorInputSender: @unchecked Sendable {
         }
     }
 
+    private func releaseActiveContact() throws {
+        try inputLock.withLock {
+            guard let contact = activeContact else { return }
+            activeContact = nil
+            try bridge.sendTouch(x: contact.x, y: contact.y, down: false, wait: true)
+        }
+    }
+
+    /// Closes input admission and lifts any held finger. Idempotent; a geometry change calls it on
+    /// the ordered input queue, so a move already queued behind it cannot press again before the
+    /// helper closes.
+    func stop() {
+        inputLock.withLock {
+            stopped = true
+            if let contact = activeContact {
+                try? bridge.sendTouch(x: contact.x, y: contact.y, down: false, wait: false)
+            }
+            activeContact = nil
+        }
+    }
+
     private func validate(_ x: Double, _ y: Double) throws {
         guard x.isFinite, y.isFinite, (0...1).contains(x), (0...1).contains(y) else {
             throw InputError.invalidCoordinate
@@ -132,10 +162,19 @@ final class SimulatorInputSender: @unchecked Sendable {
     }
 
     private func touch(x: Double, y: Double, down: Bool, wait: Bool = true) throws {
-        try bridge.sendTouch(x: x, y: y, down: down, wait: wait)
+        let point = orientation.nativePoint(x: x, y: y)
+        try inputLock.withLock {
+            guard !stopped || !down else { throw InputError.unavailable }
+            // Retain an attempted down even if its acknowledgement fails: the guest may have
+            // received it, so stop must still issue the matching release.
+            if down { activeContact = (point.x, point.y) }
+            try bridge.sendTouch(x: point.x, y: point.y, down: down, wait: wait)
+            if !down { activeContact = nil }
+        }
     }
 
     private func key(usage: UInt32, down: Bool) throws {
+        guard !down || inputLock.withLock({ !stopped }) else { throw InputError.unavailable }
         try bridge.sendKeyboard(usage: usage, down: down)
     }
 

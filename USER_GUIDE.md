@@ -3684,20 +3684,39 @@ commands, work on the shell drawer's tabs.
 
 When an agent builds an iPhone app, it can adopt an already-installed Simulator device as an
 **iOS Simulator** tab in this panel. The live screen, screenshots, taps, swipes, typing and button
-presses all address that one tab and one exact device. Apple Simulator does not need to open as a
+presses address an exact device in that workspace. You can keep up to four Simulators together. Apple Simulator does not need to open as a
 separate window: Threading reads the device framebuffer directly through its signed helper and
 uses a slower screenshot preview if that live connection is unavailable.
 
 Agents are told to prefer this route. They choose the device in the panel, build for the exact
 destination Threading returns, install and launch the resulting app there, and inspect it in the
-same place. Input asks for permission once per exact device for this Threading launch. Hiding the
-tab pauses live capture (unless its presenter window is open or a recording is running), and a tab left hidden for about fifteen seconds lets its live connection
-go, so the sessions you are looking at always get one; showing it again reconnects. An agent can
+same place. With several devices, agents pass the exact device ID to each operation; they cannot
+silently follow your selection. Input asks for permission per exact device, and an allowed grant
+is remembered across launches. Hiding the workspace pauses live capture and releases unwatched
+connections, while an open presenter or recording keeps its own device live; returning reconnects. An agent can
 keep using a tab in a session you are not looking at, which reconnects for as long as it needs to.
 An agent's screenshot of a visible tab is read from the live picture, so it does not interrupt the
 connection. Closing the tab releases Threading's lease. A device that was already running
 is left running. If Threading itself started the device, it may stop it when the final lease is
 deliberately released.
+
+**Several devices.** Use **+** beside the device chooser to add another installed Simulator.
+With one device, the chooser switches it, as before; with several, each device's name sits above
+its screen and the chooser picks which one the shared toolbar and hardware controls act on. Click a
+device's name (or its screen, which also performs the tap) to select it; the selected name wears a
+plate. **Remove … from Workspace** in the **…** menu, or in the device's right-click menu, removes
+only that device and selects its neighbour. Close the tab to remove the last one. Device order,
+selection and layout come back after relaunch.
+
+**Layouts.** **Auto** considers the available pane space and each device's current screen shape:
+portrait phones normally sit side by side, landscape phones normally stack above and below.
+Choose **Row**, **Column** or **Grid** to hold an arrangement, or **Focus** to show the selected
+device at full pane size; the device chooser switches between members in Focus. The layout chooser
+appears beside **+** once there are two devices, and moves into the **…** menu (**Layout**) when the
+pane is narrow. Manual layouts stay selected through resizing and rotation. These actions are also
+available in the command palette and can receive shortcuts in Keyboard Settings. Threading admits at most four live device
+connections across all sessions, recordings and presenter windows; unavailable capacity is
+reported in the affected device rather than opening Apple Simulator automatically.
 
 You can use the screen directly too: click for a tap, drag for a swipe, then type while the screen
 has keyboard focus. While it does, Apple Simulator's own shortcuts work here: **⇧⌘H** Home,
@@ -3712,15 +3731,16 @@ the live connection is gone. Hover it to see which transport is carrying the pic
 
 A click on a visible fallback frame asks to reconnect and preserves the intended tap, but Threading
 does not send it until the direct device connection and permission are
-both in place. The pointer control beside Refresh enables control without spending a tap. If you
-previously chose not to allow control, its glyph is crossed out; press it explicitly to ask again;
+both in place. **Enable Simulator Control** in the **…** menu enables control without spending a tap. If you
+previously chose not to allow control, choose the control option explicitly to ask again;
 repeated screen clicks do not keep presenting the permission sheet.
 
-**The toolbar, left to right:** the camera saves a screenshot, the record button records a video,
-the hand shows touches, the speech bubble annotates, the accessibility figure outlines the screen's
-elements, the window button opens the presenter window, the log-list button opens this Simulator's
-Device Logs in the bottom pane, then device control and Refresh. The device's appearance toggle
-sits with the hardware buttons under the screen.
+**The shared toolbar:** the camera saves a screenshot, the record button records a video,
+and the log-list button opens this Simulator's Device Logs in the bottom pane.
+The **…** menu offers touches, annotations, element inspection, the presenter window,
+device control and Refresh. The device's appearance
+toggle sits with the hardware buttons under the screen. Hardware buttons wrap into rows when
+the pane is narrow.
 
 **Right-click the device** (or Control-click) for everything the pane can do to it: copy, save or
 save-as a screenshot, start or stop a recording, add a note exactly where you clicked, send, copy or
@@ -3738,16 +3758,16 @@ the screen wears a red ring, the status line reads **Recording** with the time, 
 becomes a stop button. Click the badge or the button to stop; the movie lands in Movies ▸ Threading
 and is revealed in Finder. Right-click the record button for **Record High-Quality Video**, which
 captures full resolution from Simulator itself but without touch marks. A recording keeps the
-device's live picture flowing even if you switch to another session, and closing the tab or
-choosing another device finishes the movie rather than leaving it unplayable.
+device's live picture flowing even if you select another member or switch to another session.
+Removing the recorded device or closing the tab finishes the movie rather than leaving it unplayable.
 
-**Touches.** The hand button draws your taps and swipes — and the agent's — over the device. The
-choice is remembered, so touches stay on for the next session you present. Right-click the hand
-(or use **Touch Style** in the screen's menu) to pick a colour, a size, and whether swipes leave a
+**Touches.** **Show Touches** in the **…** menu draws your taps and swipes — and the agent's — over
+the device. The choice is remembered, so touches stay on for the next session you present. Use
+**Touch Style** in that menu or the screen's menu to pick a colour, a size, and whether swipes leave a
 trail. The same style is drawn in the pane, in the presenter window and in recordings, and marks are
 sized relative to the screen, so a finger in the saved movie is the size it was on screen.
 
-**Presenter window, for Meet, Zoom and screen recordings.** The window button opens the device alone
+**Presenter window, for Meet, Zoom and screen recordings.** **Open Presenter Window** in the **…** menu opens the device alone
 in a window of its own, sized to the device and titled with its name (for example "Threading:
 iPhone 17 Pro"), so it is the obvious choice in a share picker. It mirrors the pane: touches show there
 when they are on, and you can click, drag, scroll and type on it as on the pane, including the
@@ -3757,14 +3777,14 @@ too. Closing the Simulator tab closes it.
 
 **Notes.** **Option-click** the device to add a note without switching modes, or right-click and
 choose **Add Note Here**. Save or cancel the note and continue interacting with the device. To place
-several notes, press the annotate button: a band under the toolbar says that clicks now pin notes,
+several notes, choose **Annotate Device** in the **…** menu: a band under the toolbar says that clicks now pin notes,
 that pointing at a pin and pressing **Delete** removes it, and offers **Clear All** once there are
 notes; its ✕ ends annotation mode. Press **Escape** to cancel an open editor, then again to leave
-annotation mode. The annotate button's
-tooltip counts the notes still waiting to be sent. **Enable Simulator Annotations** and **Disable
+annotation mode. **Send Notes** in the menu
+counts the notes still waiting to be sent. **Enable Simulator Annotations** and **Disable
 Simulator Annotations** are available in the command palette and View menu; assign shortcuts in
 **Settings → Keyboard**. The screen's keyboard/accessibility press places a centered pin while
-annotation mode is enabled. Right-click the annotate button to send, copy the annotated screenshot
+annotation mode is enabled. Use the **…** menu to send, copy the annotated screenshot
 or clear all notes. **Send** (or **⌘Return** in the pane) sends the pending notes. Delivered pins
 disappear once the message is sent or queued; failed sends and notes added or edited during
 delivery stay pending.

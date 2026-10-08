@@ -263,7 +263,7 @@ enum SimulatorCompatibilityProbe {
                         throw ProbeError.failed(detail)
                     case .ended:
                         throw ProbeError.endedBeforeFrames
-                    case .statistics:
+                    case .statistics, .geometryChanged:
                         continue
                     }
                 }

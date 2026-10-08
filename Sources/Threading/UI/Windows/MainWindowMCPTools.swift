@@ -8,6 +8,17 @@ struct PanelTabsPayload: Encodable {
     let kind: String
     let title: String
     let active: Bool
+    var simulatorDevices: [SimulatorDeviceReceipt]? = nil
+    struct SimulatorDeviceReceipt: Encodable {
+      let deviceID: String?
+      let name: String?
+      let selected: Bool
+      private enum CodingKeys: String, CodingKey { case deviceID = "device_id", name, selected }
+    }
+    private enum CodingKeys: String, CodingKey {
+      case index, id, kind, title, active
+      case simulatorDevices = "simulator_devices"
+    }
   }
 
   let count: Int

@@ -1,3 +1,4 @@
+import Accelerate
 import CoreImage
 import CoreMedia
 import CoreVideo
@@ -7,6 +8,71 @@ import IOSurface
 import ThreadingSimulatorKit
 import UniformTypeIdentifiers
 import VideoToolbox
+
+/// One bounded pixel transform shared by the mapped-buffer and codec transports. Landscape
+/// writes directly into a mapped destination; it does not allocate a bitmap for each frame.
+enum SimulatorSurfaceRotation {
+    static func dimensions(_ surface: IOSurface, orientation: SimulatorScreenOrientation) -> (width: Int, height: Int, bytesPerRow: Int) {
+        let nativeWidth = IOSurfaceGetWidth(surface)
+        let nativeHeight = IOSurfaceGetHeight(surface)
+        let width = orientation.swapsAxes ? nativeHeight : nativeWidth
+        let height = orientation.swapsAxes ? nativeWidth : nativeHeight
+        let bytesPerRow = orientation.swapsAxes ? ((width * 4 + 63) / 64) * 64 : IOSurfaceGetBytesPerRow(surface)
+        return (width, height, bytesPerRow)
+    }
+
+    static func copy(_ surface: IOSurface, orientation: SimulatorScreenOrientation,
+                     to destination: UnsafeMutableRawPointer, bytesPerRow: Int) -> Bool {
+        guard IOSurfaceLock(surface, .readOnly, nil) == kIOReturnSuccess else { return false }
+        defer { IOSurfaceUnlock(surface, .readOnly, nil) }
+        let size = dimensions(surface, orientation: orientation)
+        let source = IOSurfaceGetBaseAddress(surface)
+        guard IOSurfaceGetPixelFormat(surface) == 0x42_47_52_41,
+              bytesPerRow >= size.width * 4 else { return false }
+        if orientation == .portrait {
+            guard bytesPerRow == IOSurfaceGetBytesPerRow(surface) else { return false }
+            memcpy(destination, source, bytesPerRow * size.height)
+            return true
+        }
+        var input = vImage_Buffer(data: source, height: vImagePixelCount(IOSurfaceGetHeight(surface)),
+                                  width: vImagePixelCount(IOSurfaceGetWidth(surface)), rowBytes: IOSurfaceGetBytesPerRow(surface))
+        var output = vImage_Buffer(data: destination, height: vImagePixelCount(size.height),
+                                   width: vImagePixelCount(size.width), rowBytes: bytesPerRow)
+        return withUnsafeBytes(of: (UInt8(0), UInt8(0), UInt8(0), UInt8(0))) { background in
+            vImageRotate90_ARGB8888(&input, &output, orientation.counterclockwiseQuarterTurns,
+                                   background.baseAddress!.assumingMemoryBound(to: UInt8.self), vImage_Flags(kvImageNoFlags)) == kvImageNoError
+        }
+    }
+}
+
+/// Codecs need an IOSurface rather than the mapped destination. Reuse one surface for the
+/// negotiated geometry; the helper already allows only one encode in flight.
+final class SimulatorOrientedFrameSurface {
+    private let orientation: SimulatorScreenOrientation
+    private let output: IOSurface?
+    init?(surface: IOSurface, orientation: SimulatorScreenOrientation) {
+        self.orientation = orientation
+        if orientation == .portrait { output = nil; return }
+        guard IOSurfaceGetPixelFormat(surface) == 0x42_47_52_41 else { return nil }
+        let size = SimulatorSurfaceRotation.dimensions(surface, orientation: orientation)
+        guard let created = IOSurfaceCreate([
+            kIOSurfaceWidth: size.width, kIOSurfaceHeight: size.height,
+            kIOSurfaceBytesPerRow: size.bytesPerRow, kIOSurfaceBytesPerElement: 4,
+            kIOSurfacePixelFormat: IOSurfaceGetPixelFormat(surface),
+            kIOSurfaceAllocSize: size.bytesPerRow * size.height
+        ] as CFDictionary) else { return nil }
+        output = created
+    }
+    func normalized(_ surface: IOSurface) -> IOSurface? {
+        guard let output else { return surface }
+        guard IOSurfaceLock(output, [], nil) == kIOReturnSuccess else { return nil }
+        defer { IOSurfaceUnlock(output, [], nil) }
+        let destination = IOSurfaceGetBaseAddress(output)
+        guard SimulatorSurfaceRotation.copy(surface, orientation: orientation, to: destination,
+                                            bytesPerRow: IOSurfaceGetBytesPerRow(output)) else { return nil }
+        return output
+    }
+}
 
 protocol SimulatorFrameEncoding: AnyObject {
     var codec: SimulatorBridgeCodec { get }

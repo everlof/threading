@@ -2311,6 +2311,11 @@ struct DeviceLogPrepareArguments: Codable, Sendable {
   }
 }
 
+struct SimulatorTargetArguments: Codable, Sendable {
+  var deviceID: String? = nil
+  private enum CodingKeys: String, CodingKey { case deviceID = "device_id" }
+}
+
 struct SimulatorPrepareArguments: Codable, Sendable {
   let deviceID: String?
 
@@ -2324,7 +2329,10 @@ struct SimulatorInstallLaunchArguments: Codable, Sendable {
   let bundleIdentifier: String?
   let arguments: [String]?
 
+  var deviceID: String? = nil
+
   private enum CodingKeys: String, CodingKey {
+    case deviceID = "device_id"
     case applicationPath = "application_path"
     case bundleIdentifier = "bundle_identifier"
     case arguments
@@ -2340,7 +2348,10 @@ struct SimulatorScreenshotArguments: Codable, Sendable {
   let label: String?
   let identifier: String?
 
+  var deviceID: String? = nil
+
   private enum CodingKeys: String, CodingKey {
+    case deviceID = "device_id"
     case includeImage = "include_image"
     case ref, role, label, identifier
   }
@@ -2351,7 +2362,10 @@ struct SimulatorSnapshotArguments: Codable, Sendable {
   /// node in the tree.
   let interactiveOnly: Bool?
 
+  var deviceID: String? = nil
+
   private enum CodingKeys: String, CodingKey {
+    case deviceID = "device_id"
     case interactiveOnly = "interactive_only"
   }
 }
@@ -2365,6 +2379,12 @@ struct SimulatorTapArguments: Codable, Sendable {
   let role: String?
   let label: String?
   let identifier: String?
+  var deviceID: String? = nil
+
+  private enum CodingKeys: String, CodingKey {
+    case x, y, ref, role, label, identifier
+    case deviceID = "device_id"
+  }
 }
 
 struct SimulatorSwipeArguments: Codable, Sendable {
@@ -2374,7 +2394,10 @@ struct SimulatorSwipeArguments: Codable, Sendable {
   let toY: Double?
   let durationMilliseconds: Int?
 
+  var deviceID: String? = nil
+
   private enum CodingKeys: String, CodingKey {
+    case deviceID = "device_id"
     case fromX = "from_x"
     case fromY = "from_y"
     case toX = "to_x"
@@ -2391,7 +2414,10 @@ struct SimulatorWaitArguments: Codable, Sendable {
   let until: String?
   let timeoutMilliseconds: Int?
 
+  var deviceID: String? = nil
+
   private enum CodingKeys: String, CodingKey {
+    case deviceID = "device_id"
     case role, label, identifier, until
     case timeoutMilliseconds = "timeout_ms"
   }
@@ -2405,10 +2431,22 @@ struct SimulatorTypeTextArguments: Codable, Sendable {
   let role: String?
   let label: String?
   let identifier: String?
+  var deviceID: String? = nil
+
+  private enum CodingKeys: String, CodingKey {
+    case text, ref, role, label, identifier
+    case deviceID = "device_id"
+  }
 }
 
 struct SimulatorPressButtonArguments: Codable, Sendable {
   let button: String?
+  var deviceID: String? = nil
+
+  private enum CodingKeys: String, CodingKey {
+    case button
+    case deviceID = "device_id"
+  }
 }
 
 struct EmptyToolArguments: Codable, Sendable {}
@@ -6605,11 +6643,13 @@ enum MCPTools {
         handler.simulatorPrepare(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Create or focus this session's single adopted iOS Simulator in Threading's right \
-        display panel, then boot or adopt a device and return its exact UDID. Call this before \
+        Add or reuse an exact iOS Simulator in this session's workspace in Threading's right \
+        display panel, then boot or adopt the device and return its exact UDID. Call this before \
         building when the user should see the app in Threading instead of a separate Apple \
         Simulator window. Omit device_id to prefer an already booted device, then the most \
-        recently used available iPhone. The returned device_id is the authority for an \
+        recently used available iPhone, when the workspace has at most one device. With several \
+        devices, provide device_id; another exact UDID adds a member up to the four-device limit. \
+        Pass device_id to every operation when several devices are adopted. The returned UDID is the authority for an \
         xcodebuild -destination id=<device_id> invocation.
         """,
       inputSchema: MCPInputSchema(
@@ -6658,6 +6698,7 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
           "application_path": MCPPropertySchema(
             type: .string,
             description: "Existing built .app path, absolute or relative to the session project."
@@ -6709,6 +6750,7 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
           "include_image": MCPPropertySchema(
             type: .boolean,
             description: "Include the PNG in the result. Defaults to true."
@@ -6767,6 +6809,7 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
           "interactive_only": MCPPropertySchema(
             type: .boolean,
             description: "List only labelled or interactive elements. Defaults to true."
@@ -6790,12 +6833,12 @@ enum MCPTools {
       detail: "Read the user's own pinned notes on the adopted device.",
       symbol: "note.text",
       decodeArguments: { container in
-        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
-          ?? EmptyToolArguments()
+        try container.decodeIfPresent(SimulatorTargetArguments.self, forKey: .arguments)
+          ?? SimulatorTargetArguments()
       },
       observesPanel: true,
-      executeArguments: { handler, _, sessionID, completion in
-        handler.simulatorAnnotations(for: sessionID, completion: completion)
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.simulatorAnnotations(arguments, for: sessionID, completion: completion)
       },
       description: """
         Read the user's own notes pinned on the exact Simulator adopted in Threading's right panel. \
@@ -6805,7 +6848,9 @@ enum MCPTools {
         accessibility tree. This tool is read-only; only the user creates, edits, or deletes notes. \
         Call simulator_prepare first.
         """,
-      inputSchema: MCPInputSchema(properties: [:], required: [])
+      inputSchema: MCPInputSchema(properties: [
+        "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices.")
+      ], required: [])
     ),
     MCPToolDefinition(
       tool: .simulatorWait,
@@ -6841,6 +6886,7 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
           "label": MCPPropertySchema(type: .string, description: "Element label to wait for."),
           "identifier": MCPPropertySchema(
             type: .string,
@@ -6894,6 +6940,7 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
           "ref": MCPPropertySchema(
             type: .string,
             description: "An element ref from a recent simulator_snapshot, like \"e12\"."
@@ -6947,6 +6994,7 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
           "from_x": MCPPropertySchema(type: .number, description: "Starting x from 0 to 1."),
           "from_y": MCPPropertySchema(type: .number, description: "Starting y from 0 to 1."),
           "to_x": MCPPropertySchema(type: .number, description: "Ending x from 0 to 1."),
@@ -6994,6 +7042,7 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
           "text": MCPPropertySchema(
             type: .string,
             description: "Bounded printable US-keyboard text, tab, newline, or backspace."
@@ -7046,6 +7095,7 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
           "button": MCPPropertySchema(
             type: .string,
             description: "One of: home, lock, side."

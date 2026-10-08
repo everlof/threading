@@ -6316,6 +6316,23 @@
         }
       }
     },
+    "Add Simulator" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Simulator"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till simulator"
+          }
+        }
+      }
+    },
     "Add Window" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14750,6 +14767,23 @@
         }
       }
     },
+    "Close the tab to remove the last Simulator." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close the tab to remove the last Simulator."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stäng fliken för att ta bort den sista simulatorn."
+          }
+        }
+      }
+    },
     "Close “%@”?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15385,6 +15419,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Färg & tema"
+          }
+        }
+      }
+    },
+    "Column" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Column"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kolumn"
           }
         }
       }
@@ -24396,6 +24447,23 @@
         }
       }
     },
+    "Focus" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Focus"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fokus"
+          }
+        }
+      }
+    },
     "Focus Window" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24938,6 +25006,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Full upplösning från Simulator, utan tryck"
+          }
+        }
+      }
+    },
+    "Full-size device targets wrap together in a narrow viewport." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Full-size device targets wrap together in a narrow viewport."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enhetens reglage behåller sin fulla storlek och bryts till flera rader i ett smalt utrymme."
           }
         }
       }
@@ -43077,6 +43162,23 @@
         }
       }
     },
+    "Remove %@ from Workspace" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove %@ from Workspace"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta bort %@ från arbetsytan"
+          }
+        }
+      }
+    },
     "Remove %@ from the order" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43211,6 +43313,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ta bort värdbaserad åtkomst?"
+          }
+        }
+      }
+    },
+    "Remove selected Simulator" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove selected Simulator"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta bort vald simulator"
           }
         }
       }
@@ -45379,6 +45498,23 @@
         }
       }
     },
+    "Row" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Row"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rad"
+          }
+        }
+      }
+    },
     "Rows %lld–%lld of %lld · columns %lld–%lld of %lld" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -47412,6 +47548,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj ett Markdown-dokument först."
+          }
+        }
+      }
+    },
+    "Select a device and compare Auto, Row, Column, Grid and Focus without opening a Simulator." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select a device and compare Auto, Row, Column, Grid and Focus without opening a Simulator."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj en enhet och jämför Auto, Rad, Kolumn, Rutnät och Fokus utan att öppna en simulator."
           }
         }
       }
@@ -50674,6 +50827,108 @@
         }
       }
     },
+    "Simulator Layout: Automatic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulator Layout: Automatic"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorlayout: Automatisk"
+          }
+        }
+      }
+    },
+    "Simulator Layout: Column" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulator Layout: Column"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorlayout: Kolumn"
+          }
+        }
+      }
+    },
+    "Simulator Layout: Focus" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulator Layout: Focus"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorlayout: Fokus"
+          }
+        }
+      }
+    },
+    "Simulator Layout: Grid" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulator Layout: Grid"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorlayout: Rutnät"
+          }
+        }
+      }
+    },
+    "Simulator Layout: Row" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulator Layout: Row"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorlayout: Rad"
+          }
+        }
+      }
+    },
+    "Simulator Options" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulator Options"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatoralternativ"
+          }
+        }
+      }
+    },
     "Simulator control is unavailable." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50714,6 +50969,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Simulatorskärm"
+          }
+        }
+      }
+    },
+    "SimulatorHardwareControlsView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SimulatorHardwareControlsView"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SimulatorHardwareControlsView"
           }
         }
       }
@@ -50802,6 +51074,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "SimulatorScreenView matade in %@."
+          }
+        }
+      }
+    },
+    "SimulatorWorkspaceCanvas" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SimulatorWorkspaceCanvas"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SimulatorWorkspaceCanvas"
           }
         }
       }
@@ -61292,6 +61581,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Detta tar vanligtvis bara några sekunder."
+          }
+        }
+      }
+    },
+    "This workspace already has four Simulators. Remove one before adding another." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This workspace already has four Simulators. Remove one before adding another."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här arbetsytan har redan fyra simulatorer. Ta bort en innan du lägger till en annan."
           }
         }
       }

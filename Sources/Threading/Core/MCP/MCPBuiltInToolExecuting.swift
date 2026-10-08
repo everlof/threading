@@ -176,7 +176,7 @@ protocol MCPBuiltInToolExecuting: AnyObject {
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
   func simulatorAnnotations(
-    for sessionID: SessionID,
+    _ arguments: SimulatorTargetArguments, for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
   func simulatorWait(

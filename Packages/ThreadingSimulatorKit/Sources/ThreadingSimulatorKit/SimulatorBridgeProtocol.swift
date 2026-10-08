@@ -8,7 +8,8 @@ public enum SimulatorBridgeProtocol {
     // minimum stays 1 so an older peer simply never uses the newer capabilities. A snapshot request
     // to a peer that does not understand it is answered with a `notSupported`-shaped failure by the
     // app-side timeout, not a protocol break.
-    public static let current = 3
+    // v4 adds a typed geometry-change event so a viewer can renegotiate fixed-size transports.
+    public static let current = 4
     public static let minimumSupported = 1
 }
 
@@ -238,6 +239,7 @@ public struct SimulatorBridgeHelloReply: Codable, Equatable, Sendable {
     public let refusal: SimulatorBridgeRefusal?
     public let coreSimulatorVersion: String?
     public let simulatorKitVersion: String?
+    public let screenOrientation: SimulatorScreenOrientation?
 
     public init(
         protocolVersion: Int = SimulatorBridgeProtocol.current,
@@ -247,7 +249,8 @@ public struct SimulatorBridgeHelloReply: Codable, Equatable, Sendable {
         capabilities: SimulatorBridgeCapabilities?,
         refusal: SimulatorBridgeRefusal?,
         coreSimulatorVersion: String?,
-        simulatorKitVersion: String?
+        simulatorKitVersion: String?,
+        screenOrientation: SimulatorScreenOrientation? = nil
     ) {
         self.protocolVersion = protocolVersion
         self.minimumSupported = minimumSupported
@@ -257,11 +260,13 @@ public struct SimulatorBridgeHelloReply: Codable, Equatable, Sendable {
         self.refusal = refusal
         self.coreSimulatorVersion = coreSimulatorVersion
         self.simulatorKitVersion = simulatorKitVersion
+        self.screenOrientation = screenOrientation
     }
 
     private enum CodingKeys: String, CodingKey {
         case protocolVersion, minimumSupported, selectedCodec, sharedSurface
         case capabilities, refusal, coreSimulatorVersion, simulatorKitVersion
+        case screenOrientation
     }
 
     public init(from decoder: Decoder) throws {
@@ -284,6 +289,7 @@ public struct SimulatorBridgeHelloReply: Codable, Equatable, Sendable {
         simulatorKitVersion = try container.decodeIfPresent(
             String.self, forKey: .simulatorKitVersion
         )
+        screenOrientation = try container.decodeIfPresent(SimulatorScreenOrientation.self, forKey: .screenOrientation)
     }
 }
 
@@ -349,5 +355,6 @@ public enum SimulatorBridgeHelperMessage: Codable, Equatable, Sendable {
         root: SimulatorAccessibilityElement?,
         error: String?
     )
+    case geometryChanged
     case failure(SimulatorBridgeRefusal, detail: String)
 }

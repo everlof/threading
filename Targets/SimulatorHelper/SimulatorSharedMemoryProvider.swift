@@ -19,12 +19,14 @@ final class SimulatorSharedMemoryProvider {
     private let directory: URL
     private let pointers: [UnsafeMutableRawPointer]
     private let bufferByteLength: Int
+    private let orientation: SimulatorScreenOrientation
     private var ring: SimulatorSharedFrameRing
 
-    init?(surface: IOSurface, bufferCount: Int) {
-        let width = IOSurfaceGetWidth(surface)
-        let height = IOSurfaceGetHeight(surface)
-        let bytesPerRow = IOSurfaceGetBytesPerRow(surface)
+    init?(surface: IOSurface, bufferCount: Int, orientation: SimulatorScreenOrientation = .portrait) {
+        let size = SimulatorSurfaceRotation.dimensions(surface, orientation: orientation)
+        let width = size.width
+        let height = size.height
+        let bytesPerRow = size.bytesPerRow
         let pixelFormat = IOSurfaceGetPixelFormat(surface)
         guard width > 0, height > 0, bytesPerRow >= width * 4, bufferCount > 0,
               pixelFormat == Self.expectedPixelFormat else { return nil }
@@ -71,6 +73,7 @@ final class SimulatorSharedMemoryProvider {
         }
 
         self.directory = directory
+        self.orientation = orientation
         self.pointers = pointers
         self.bufferByteLength = bufferByteLength
         self.ring = SimulatorSharedFrameRing(bufferCount: bufferCount)
@@ -89,14 +92,11 @@ final class SimulatorSharedMemoryProvider {
     /// still holds every buffer (the capture is dropped, latest-frame-wins).
     func write(surface: IOSurface) -> UInt32? {
         guard let index = ring.claim() else { return nil }
-        guard IOSurfaceLock(surface, .readOnly, nil) == kIOReturnSuccess else {
+        guard SimulatorSurfaceRotation.copy(surface, orientation: orientation,
+            to: pointers[Int(index)], bytesPerRow: descriptor.bytesPerRow) else {
             ring.release(index)
             return nil
         }
-        defer { IOSurfaceUnlock(surface, .readOnly, nil) }
-        let base = IOSurfaceGetBaseAddress(surface)
-        let count = min(bufferByteLength, IOSurfaceGetAllocSize(surface))
-        memcpy(pointers[Int(index)], base, count)
         return index
     }
 

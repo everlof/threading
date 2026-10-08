@@ -221,7 +221,7 @@ final class DisplayPaneController: NSViewController {
   /// The live tab's view controller currently parented into `hostedView` — the browser or a
   /// review — so switching tabs can swap it out without rebuilding its state.
   private weak var installedController: NSViewController?
-  private weak var presentedSimulator: SimulatorPaneViewController?
+  private weak var presentedSimulator: SimulatorWorkspaceViewController?
   private weak var presentedRealDevice: RealDevicePaneViewController?
 
   /// The hosted controller *this pane* built, when the tab holds a value rather than a
@@ -308,6 +308,11 @@ final class DisplayPaneController: NSViewController {
   var currentSimulator: SimulatorPaneViewController? {
     guard !isShowingCurrentTheme else { return nil }
     return activeTab(for: currentSessionID)?.simulator
+  }
+
+  var currentSimulatorWorkspace: SimulatorWorkspaceViewController? {
+    guard !isShowingCurrentTheme else { return nil }
+    return activeTab(for: currentSessionID)?.simulatorWorkspace
   }
 
   /// The physical iPhone actually visible in the selected session.
@@ -592,7 +597,7 @@ final class DisplayPaneController: NSViewController {
   func performPanelCommand(_ target: PanelCommandTarget, title: String, for sessionID: SessionID) -> Bool {
     guard panelCommandRefusal(target, for: sessionID) == nil else { return false }
     switch target {
-    case .simulator: activateSimulator(for: sessionID); return true
+    case .simulator: _ = try? activateSimulator(for: sessionID); return true
     case .realDevice: activateRealDevice(for: sessionID); return true
     case .deviceLogs: return activateDeviceLog(for: sessionID) != nil
     case .notificationTest: return activateNotificationTest(for: sessionID) != nil
@@ -1470,63 +1475,58 @@ final class DisplayPaneController: NSViewController {
 
   // MARK: - Public — Simulator Tab
 
-  /// Reveals the session's one adopted iOS Simulator device in the right panel.
-  ///
-  /// Singleton by session: agents and people always converge on one stable tab and lease instead
-  /// of accumulating framebuffer viewers that disagree about which device a build targets.
+  /// One stable workspace tab per session, with exact-device members inside it.
   @discardableResult
   func activateSimulator(
     for sessionID: SessionID,
     deviceID: SimulatorDeviceID? = nil
-  ) -> SimulatorPaneViewController {
+  ) throws -> SimulatorPaneViewController {
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
-    if let existing = tabs.first(where: { $0.simulator != nil }),
-      let controller = existing.simulator
-    {
-      if let deviceID { controller.selectDevice(deviceID) }
+    if let existing = tabs.first(where: { $0.simulatorWorkspace != nil }),
+       let workspace = existing.simulatorWorkspace {
+      let simulator = try workspace.adopt(deviceID)
       activeTabIDBySession[sessionID] = existing.id
       persist(sessionID)
       if sessionID == currentSessionID { render() }
-      return controller
+      return simulator
     }
-
-    let controller = makeSimulator(
-      for: sessionID,
-      preferredDeviceID: deviceID
+    let id = UUID()
+    let workspace = makeSimulatorWorkspace(
+      for: sessionID, state: SimulatorWorkspaceState(deviceID: deviceID, memberID: id)
     )
-    let tab = DisplayTab(
-      body: .simulator(controller),
-      owningSessionID: sessionID
-    )
+    let tab = DisplayTab(id: id, body: .simulator(workspace), owningSessionID: sessionID)
     tabs.append(tab)
     tabsBySession[sessionID] = tabs
     activeTabIDBySession[sessionID] = tab.id
     persist(sessionID)
     if sessionID == currentSessionID { render() }
-    return controller
+    return workspace.selectedSimulator
   }
 
-  private func makeSimulator(
-    for sessionID: SessionID,
-    preferredDeviceID: SimulatorDeviceID?
-  ) -> SimulatorPaneViewController {
-    let controller = SimulatorPaneViewController(
-      preferredDeviceID: preferredDeviceID,
-      control: simulatorControl,
-      leaseManager: simulatorLeaseManager,
-      streamCoordinator: simulatorStreamCoordinator,
-      inputAuthorizer: simulatorInputAuthorizer
-    )
-    controller.annotationSessionID = sessionID
-    addChild(controller)
-    controller.onSelectedDeviceChange = { [weak self] _ in
-      self?.persist(sessionID)
+  func simulatorWorkspace(for sessionID: SessionID) -> SimulatorWorkspaceViewController? {
+    tabs(for: sessionID).compactMap(\.simulatorWorkspace).first
+  }
+
+  private func makeSimulatorWorkspace(
+    for sessionID: SessionID, state: SimulatorWorkspaceState
+  ) -> SimulatorWorkspaceViewController {
+    let workspace = SimulatorWorkspaceViewController(state: state) { [weak self] device in
+      guard let self else { preconditionFailure("The display host must outlive its workspace.") }
+      let controller = SimulatorPaneViewController(
+        preferredDeviceID: device, isWorkspaceMember: true,
+        control: self.simulatorControl, leaseManager: self.simulatorLeaseManager,
+        streamCoordinator: self.simulatorStreamCoordinator, inputAuthorizer: self.simulatorInputAuthorizer
+      )
+      controller.annotationSessionID = sessionID
+      controller.onOpenDeviceLogs = { [weak self] device in
+        self?.onOpenDeviceLogs?(sessionID, device.rawValue)
+      }
+      return controller
     }
-    controller.onOpenDeviceLogs = { [weak self] deviceID in
-      self?.onOpenDeviceLogs?(sessionID, deviceID.rawValue)
-    }
-    return controller
+    addChild(workspace)
+    workspace.onChange = { [weak self] in self?.persist(sessionID) }
+    return workspace
   }
 
   // MARK: - Public — Physical iPhone Tab
@@ -2273,9 +2273,9 @@ final class DisplayPaneController: NSViewController {
   /// has to kill the shell, or the process outlives every view that could reach it.
   private func teardownHosted(_ tab: DisplayTab) {
     tab.terminal?.terminate()
-    tab.simulator?.terminate()
+    tab.simulatorWorkspace?.terminate()
     tab.realDevice?.terminate()
-    if presentedSimulator === tab.simulator { presentedSimulator = nil }
+    if presentedSimulator === tab.simulatorWorkspace { presentedSimulator = nil }
     if presentedRealDevice === tab.realDevice { presentedRealDevice = nil }
 
     guard let controller = tab.hostedController else { return }
@@ -2317,7 +2317,7 @@ final class DisplayPaneController: NSViewController {
     let active = isShowingCurrentTheme
       ? nil
       : activeTab(for: currentSessionID) ?? fallback
-    updateSimulatorPresentation(active?.simulator)
+    updateSimulatorPresentation(active?.simulatorWorkspace)
     updateRealDevicePresentation(active?.realDevice)
     let performanceSpan = PerformanceRecorder.shared.begin(
       "display-pane.render",
@@ -2639,7 +2639,7 @@ final class DisplayPaneController: NSViewController {
     }
   }
 
-  private func updateSimulatorPresentation(_ simulator: SimulatorPaneViewController?) {
+  private func updateSimulatorPresentation(_ simulator: SimulatorWorkspaceViewController?) {
     guard presentedSimulator !== simulator else { return }
     presentedSimulator?.setPresented(false)
     presentedSimulator = simulator
@@ -2916,9 +2916,9 @@ final class DisplayPaneController: NSViewController {
 
       case .simulator:
         let deviceID = persisted.simulatorDeviceID.flatMap(SimulatorDeviceID.init)
-        let controller = makeSimulator(
+        let controller = makeSimulatorWorkspace(
           for: sessionID,
-          preferredDeviceID: deviceID
+          state: persisted.simulatorWorkspace ?? SimulatorWorkspaceState(deviceID: deviceID, memberID: id)
         )
         tabs.append(DisplayTab(
           id: id,
@@ -3122,7 +3122,8 @@ final class DisplayPaneController: NSViewController {
       )
     }
 
-    if let simulator = tab.simulator {
+    if let workspace = tab.simulatorWorkspace {
+      let simulator = workspace.selectedSimulator
       return PersistedTab(
         id: tab.id.uuidString,
         kind: .simulator,
@@ -3131,7 +3132,8 @@ final class DisplayPaneController: NSViewController {
         url: nil,
         html: nil,
         cacheFile: nil,
-        simulatorDeviceID: simulator.selectedDeviceID?.rawValue
+        simulatorDeviceID: simulator.selectedDeviceID?.rawValue,
+        simulatorWorkspace: workspace.state.members.count > 1 || workspace.state.layout != .automatic ? workspace.state : nil
       )
     }
 

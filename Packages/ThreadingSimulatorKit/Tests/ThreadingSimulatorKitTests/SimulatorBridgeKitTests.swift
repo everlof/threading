@@ -2,6 +2,12 @@ import XCTest
 @testable import ThreadingSimulatorKit
 
 final class SimulatorBridgeKitTests: XCTestCase {
+    func testGeometryChangeHasATypedWireRoundTrip() throws {
+        let event = SimulatorBridgeHelperMessage.geometryChanged
+        XCTAssertEqual(try JSONDecoder().decode(SimulatorBridgeHelperMessage.self, from: JSONEncoder().encode(event)), event)
+        XCTAssertEqual(SimulatorBridgeCompatibility.evaluate(peerVersion: 3, peerMinimum: 1), .compatible)
+    }
+
     func testCompatibilityIsDirectional() {
         XCTAssertEqual(
             SimulatorBridgeCompatibility.evaluate(peerVersion: 1, peerMinimum: 1),

@@ -30,6 +30,9 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
     private let startedAt = DispatchTime.now().uptimeNanoseconds
 
     private var process: Process?
+    private let orientationLock = NSLock()
+    private var negotiatedOrientation: SimulatorScreenOrientation?
+    var screenOrientation: SimulatorScreenOrientation? { orientationLock.withLock { negotiatedOrientation } }
     private var readDescriptor: Int32 = -1
     private var writeDescriptor: Int32 = -1
     private var handshake: CheckedContinuation<Void, Error>?
@@ -353,6 +356,7 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
                 return
             }
             didCompleteHandshake = true
+            orientationLock.withLock { negotiatedOrientation = reply.screenOrientation }
             didStartDiagnostics = true
             handshakeSpan = nil
             ThreadingLogger.simulator.info(
@@ -411,6 +415,10 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
             // The shared-memory analogue of acknowledging a frame: the app has copied this buffer
             // out, so the helper may reuse it.
             send(.releaseSharedFrame(bufferIndex))
+
+        case .geometryChanged:
+            eventContinuation.yield(.geometryChanged)
+            stopLocked()
 
         case .failure(let refusal, let detail):
             let error = SimulatorLiveStreamError.refused(refusal, detail)

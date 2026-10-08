@@ -65,6 +65,10 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 fixture.simulator.logsButtonForTesting.window,
                 "the Device Logs shortcut must ship in the visible Simulator toolbar"
             )
+            let soloHeader = try XCTUnwrap(fixture.panel.currentSimulatorWorkspace?.headerForTesting)
+            XCTAssertEqual(soloHeader.leadingViews.map { $0.accessibilityIdentifier() },
+                           ["simulator.device", "simulator.workspace.add"],
+                           "One device has nothing to arrange: the header is the single pane's row plus Add.")
             var representation = try XCTUnwrap(
                 content.bitmapImageRepForCachingDisplay(in: content.bounds)
             )
@@ -187,7 +191,105 @@ final class SimulatorPaneRenderTests: XCTestCase {
             )
         }
 
+        try renderWorkspaceLayouts()
         print("Rendered the adopted Simulator pane to \(Render.directory.path)")
+    }
+
+    private func renderWorkspaceLayouts() throws {
+        let variants: [(String, AppTheme, NSAppearance.Name, Int, Bool, Bool, SimulatorWorkspaceLayout)] = [
+            ("portraits-light", .system, .aqua, 2, false, false, .automatic),
+            ("portraits-dark", .system, .darkAqua, 2, false, false, .automatic),
+            ("landscapes-light", .system, .aqua, 2, true, false, .automatic),
+            ("landscapes-dark", .system, .darkAqua, 2, true, false, .automatic),
+            ("mixed-light", .system, .aqua, 2, false, true, .automatic),
+            ("three-light", .system, .aqua, 3, false, false, .automatic),
+            ("grid-light", .system, .aqua, 4, false, false, .grid),
+            ("focus-light", .system, .aqua, 4, false, false, .focus),
+            ("focus-narrow", .system, .aqua, 4, false, false, .focus),
+            ("portraits-cyberpunk", AppThemeStyles.cyberpunk, .darkAqua, 2, false, false, .automatic),
+            ("grid-swiss", AppThemeStyles.swissMinimalist, .aqua, 4, false, false, .grid),
+        ]
+        for (name, theme, appearance, count, landscape, mixed, layout) in variants {
+            AppThemePalette.set(theme)
+            let frame = try landscape ? makeLandscapeFramePNG() : makeDeviceFramePNG()
+            let fixture = try makeFixture(appearance: appearance, deviceFrame: frame,
+                additionalDeviceCount: count - 1, alternateFrame: mixed ? makeLandscapeFramePNG() : nil,
+                panelWidth: name == "focus-narrow" ? 260 : Render.panelWidth)
+            defer { fixture.tearDown() }
+            let workspace = try XCTUnwrap(fixture.panel.currentSimulatorWorkspace)
+            eventually { workspace.simulators.allSatisfy { $0.frameImageForTesting != nil } }
+            workspace.setLayout(layout)
+            settle(fixture.window)
+            XCTAssertEqual(workspace.state.members.count, count)
+            XCTAssertEqual(fixture.panel.view.bounds.width,
+                name == "focus-narrow" ? 260 : Render.panelWidth, accuracy: 2)
+            let hardware = workspace.selectedSimulator.workspaceHardwareControls
+            for button in hardware.subviews {
+                XCTAssertEqual(button.bounds.height, ThemedIconButton.Target.device.size.height, accuracy: 0.1)
+                XCTAssertTrue(hardware.bounds.contains(button.frame), "A hardware target escaped its shared viewport.")
+            }
+            if layout == .automatic, !mixed, count == 2 {
+                XCTAssertEqual(workspace.canvasForTesting.plan?.layout, landscape ? .column : .row)
+            }
+            if layout == .focus {
+                XCTAssertEqual(workspace.simulators.filter(\.isPresentedForTesting).count, 1)
+            }
+            assertTilesHugTheirDevices(workspace, compact: name == "focus-narrow")
+            let root = try XCTUnwrap(fixture.window.contentView)
+            let bitmap = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+            root.cacheDisplay(in: root.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent("simulator-pane-workspace-\(name).png"))
+        }
+    }
+
+    /// What the first workspace renders showed and no assertion caught: a letterboxed screen left
+    /// its status line stranded at the bottom of a tall tile, the selected name's plate pushed its
+    /// screen below its neighbours', and a 260pt header truncated two choosers to a letter each.
+    private func assertTilesHugTheirDevices(_ workspace: SimulatorWorkspaceViewController, compact: Bool,
+                                            file: StaticString = #filePath, line: UInt = #line) {
+        let canvas = workspace.canvasForTesting
+        var tops: [CGFloat: CGFloat] = [:]
+        for (index, simulator) in workspace.simulators.enumerated() where !simulator.view.isHidden {
+            let screen = simulator.screenViewForTesting
+            XCTAssertEqual(screen.imageRect.width, screen.bounds.width, accuracy: 1.5,
+                           "The screen view is the frame's own aspect, never letterboxed.", file: file, line: line)
+            XCTAssertEqual(screen.imageRect.height, screen.bounds.height, accuracy: 1.5,
+                           "The screen view is the frame's own aspect, never letterboxed.", file: file, line: line)
+            let status = simulator.statusViewForTesting
+            let gap = screen.convert(screen.bounds, to: canvas).maxY - status.convert(status.bounds, to: canvas).minY
+            XCTAssertLessThanOrEqual(abs(gap), Design.Spacing.medium,
+                                     "The status line hangs from its screen.", file: file, line: line)
+            guard let cell = canvas.plan?.frames[index] else { continue }
+            let top = screen.convert(screen.bounds, to: canvas).minY
+            if let rowTop = tops[cell.minY] {
+                XCTAssertEqual(top, rowTop, accuracy: 0.5, "Screens in one row share a top edge.", file: file, line: line)
+            } else {
+                tops[cell.minY] = top
+            }
+        }
+        let header = workspace.headerForTesting
+        let showsLayout = header.leadingViews.contains { $0.accessibilityIdentifier() == "simulator.workspace.layout" }
+        XCTAssertEqual(showsLayout, !compact,
+                       "The layout chooser stands in a header with room and moves to the options menu without.",
+                       file: file, line: line)
+    }
+
+    private func makeLandscapeFramePNG() throws -> Data {
+        let image = NSImage(size: NSSize(width: 852, height: 393))
+        image.lockFocus()
+        NSColor(red: 0.16, green: 0.08, blue: 0.3, alpha: 1).setFill()
+        NSBezierPath(rect: NSRect(origin: .zero, size: image.size)).fill()
+        drawText("9:41", at: NSPoint(x: 32, y: 352), size: 15, weight: .semibold, color: .white)
+        drawText("Welcome back", at: NSPoint(x: 48, y: 266), size: 32, weight: .bold, color: .white)
+        drawText("Your workspace is ready.", at: NSPoint(x: 48, y: 225), size: 18, weight: .regular, color: .white)
+        drawText("3 focused tasks", at: NSPoint(x: 48, y: 125), size: 24, weight: .semibold, color: .white)
+        NSColor.orange.setFill()
+        NSBezierPath(roundedRect: NSRect(x: 520, y: 100, width: 250, height: 70), xRadius: 18, yRadius: 18).fill()
+        drawText("Continue", at: NSPoint(x: 600, y: 124), size: 18, weight: .semibold, color: .black)
+        image.unlockFocus()
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: image.tiffRepresentation ?? Data()))
+        return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
     }
 
     func testRendersPhysicalIPhoneInRightPanel() throws {
@@ -571,7 +673,10 @@ final class SimulatorPaneRenderTests: XCTestCase {
     private func makeFixture(
         appearance appearanceName: NSAppearance.Name,
         deviceFrame: Data,
-        bootFailure: String? = nil
+        bootFailure: String? = nil,
+        additionalDeviceCount: Int = 0,
+        alternateFrame: Data? = nil,
+        panelWidth: CGFloat = Render.panelWidth
     ) throws -> SimulatorPaneRenderFixture {
         let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
         let device = SimulatorDevice(
@@ -586,8 +691,15 @@ final class SimulatorPaneRenderTests: XCTestCase {
             state: .booted,
             lastBootedAt: nil
         )
+        let additionalDevices = (0..<additionalDeviceCount).map { index in
+            SimulatorDevice(id: SimulatorDeviceID(String(format: "00000000-0000-0000-0000-%012d", index + 1))!,
+                name: ["iPhone SE", "iPhone 16", "iPhone 17"][index],
+                runtimeIdentifier: device.runtimeIdentifier, runtimeName: device.runtimeName,
+                deviceTypeIdentifier: device.deviceTypeIdentifier, family: .iPhone,
+                state: .booted, lastBootedAt: nil)
+        }
         let control = SimulatorPaneRenderControl(
-            device: device,
+            device: device, additionalDevices: additionalDevices,
             frame: deviceFrame,
             bootFailure: bootFailure
         )
@@ -612,9 +724,13 @@ final class SimulatorPaneRenderTests: XCTestCase {
         )
         applyConversationFixture(to: conversation)
 
+        var framesByDevice: [SimulatorDeviceID: CGImage] = [:]
+        if let alternateFrame, let second = additionalDevices.first,
+           let image = NSImage(data: alternateFrame),
+           let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) { framesByDevice[second.id] = cg }
         let panel = DisplayPaneController(
             simulatorControl: control,
-            simulatorStreamCoordinator: SimulatorPaneRenderStreamCoordinator(frame: liveFrame)
+            simulatorStreamCoordinator: SimulatorPaneRenderStreamCoordinator(frame: liveFrame, framesByDevice: framesByDevice)
         )
         let split = SidebarSplitViewController()
         let conversationItem = NSSplitViewItem(viewController: conversation)
@@ -623,7 +739,8 @@ final class SimulatorPaneRenderTests: XCTestCase {
         // The real main window applies its opening width when it reveals this item. This direct
         // shell fixture has no window coordinator to perform that reveal, so hold the same
         // review width here rather than accepting NSSplitViewController's fitting-size answer.
-        panelItem.minimumThickness = Render.panelWidth
+        panelItem.minimumThickness = panelWidth
+        panelItem.maximumThickness = panelWidth
         split.addSplitViewItem(conversationItem)
         split.addSplitViewItem(panelItem)
 
@@ -651,13 +768,14 @@ final class SimulatorPaneRenderTests: XCTestCase {
         host.view.layoutSubtreeIfNeeded()
 
         let dividerPosition = split.splitView.bounds.width
-            - Render.panelWidth
+            - panelWidth
             - split.splitView.dividerThickness
         split.splitView.setPosition(dividerPosition, ofDividerAt: 0)
         host.view.layoutSubtreeIfNeeded()
 
         panel.showSession(session.id)
-        let simulator = panel.activateSimulator(for: session.id, deviceID: device.id)
+        let simulator = try panel.activateSimulator(for: session.id, deviceID: device.id)
+        for extra in additionalDevices { _ = try panel.activateSimulator(for: session.id, deviceID: extra.id) }
         conversation.scrollToConversationEnd()
         AppThemeRefresh.repaint(host.view)
         settle(window)
@@ -984,7 +1102,10 @@ private struct SimulatorPaneRenderFixture {
     let simulator: SimulatorPaneViewController
 
     func tearDown() {
-        simulator.terminate()
+        if let session = panel.currentSessionID {
+            panel.removeSession(session)
+            DisplayPaneStore.shared.removeSession(session)
+        }
         window.orderOut(nil)
         window.contentViewController = nil
         window.close()
@@ -1036,16 +1157,18 @@ private actor PhysicalDevicePaneRenderControl: PhysicalDeviceControlling {
 
 private actor SimulatorPaneRenderControl: SimulatorControlling {
     private let device: SimulatorDevice
+    private let additionalDevices: [SimulatorDevice]
     private let frame: Data
     private let bootFailure: String?
 
-    init(device: SimulatorDevice, frame: Data, bootFailure: String? = nil) {
+    init(device: SimulatorDevice, additionalDevices: [SimulatorDevice] = [], frame: Data, bootFailure: String? = nil) {
         self.device = device
+        self.additionalDevices = additionalDevices
         self.frame = frame
         self.bootFailure = bootFailure
     }
 
-    func availableDevices() async throws -> [SimulatorDevice] { [device] }
+    func availableDevices() async throws -> [SimulatorDevice] { [device] + additionalDevices }
 
     func prepare(deviceID: SimulatorDeviceID?) async throws -> SimulatorDeviceLease {
         if let bootFailure {
@@ -1054,7 +1177,7 @@ private actor SimulatorPaneRenderControl: SimulatorControlling {
                 detail: bootFailure
             )
         }
-        return SimulatorDeviceLease(device: device, bootOwnership: .user)
+        return SimulatorDeviceLease(device: additionalDevices.first { $0.id == deviceID } ?? device, bootOwnership: .user)
     }
 
     func installAndLaunch(
@@ -1083,16 +1206,18 @@ private final class SimulatorPaneRenderStreamCoordinator:
     SimulatorLiveStreamCoordinating,
     @unchecked Sendable
 {
-    private let session: SimulatorPaneRenderStreamSession
+    private let frame: CGImage
+    private let framesByDevice: [SimulatorDeviceID: CGImage]
 
-    init(frame: CGImage) {
-        session = SimulatorPaneRenderStreamSession(frame: frame)
+    init(frame: CGImage, framesByDevice: [SimulatorDeviceID: CGImage] = [:]) {
+        self.frame = frame
+        self.framesByDevice = framesByDevice
     }
 
     func openStream(
         for deviceID: SimulatorDeviceID
     ) async throws -> any SimulatorLiveStreamSession {
-        session
+        SimulatorPaneRenderStreamSession(frame: framesByDevice[deviceID] ?? frame)
     }
 }
 

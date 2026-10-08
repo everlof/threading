@@ -31,8 +31,24 @@
         "value" : "$(THREADING_LOTTIE_CORPUS)"
       },
       {
+        "key" : "THREADING_SIMULATOR_WORKSPACE_CONTAINERS",
+        "value" : "$(THREADING_SIMULATOR_WORKSPACE_CONTAINERS)"
+      },
+      {
+        "key" : "THREADING_SIMULATOR_WORKSPACE_UDIDS",
+        "value" : "$(THREADING_SIMULATOR_WORKSPACE_UDIDS)"
+      },
+      {
+        "key" : "THREADING_SIMULATOR_WORKSPACE_OUT",
+        "value" : "$(THREADING_SIMULATOR_WORKSPACE_OUT)"
+      },
+      {
         "key" : "THREADING_SIMULATOR_INTEGRATION_UDID",
         "value" : "$(THREADING_SIMULATOR_INTEGRATION_UDID)"
+      },
+      {
+        "key" : "THREADING_SIMULATOR_INTEGRATION_SECOND_UDID",
+        "value" : "$(THREADING_SIMULATOR_INTEGRATION_SECOND_UDID)"
       },
       {
         "key" : "THREADING_SIMULATOR_DOGFOOD_APP_PATH",

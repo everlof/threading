@@ -14,6 +14,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly) NSString *coreSimulatorVersion;
 @property(nonatomic, readonly) NSString *simulatorKitVersion;
 @property(nonatomic, readonly) BOOL supportsInput;
+/// 1 portrait, 2 upside down, 3 landscape left, 4 landscape right; 0 when unavailable.
+@property(nonatomic, readonly) NSInteger screenUIOrientation;
 /// Whether the host-side accessibility-translation path loaded and this Xcode exposes the private
 /// selectors the snapshot needs. When NO, `-copyAccessibilitySnapshotWithError:` refuses.
 @property(nonatomic, readonly) BOOL supportsAccessibility;

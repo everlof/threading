@@ -27,6 +27,7 @@ enum SimulatorLiveStreamEvent: Sendable {
     )
     case frame(SimulatorLiveFrame)
     case statistics(SimulatorBridgeStatistics)
+    case geometryChanged
     case failed(String)
     case ended
 }
@@ -61,6 +62,7 @@ enum SimulatorLiveStreamError: LocalizedError, Equatable, Sendable {
 
 protocol SimulatorLiveStreamSession: AnyObject, Sendable {
     var events: AsyncStream<SimulatorLiveStreamEvent> { get }
+    var screenOrientation: SimulatorScreenOrientation? { get }
     func setVisible(_ visible: Bool)
     func sendInput(_ input: SimulatorBridgeInput) async throws
     /// Send an input in order without waiting for its acknowledgement. This is the low-latency
@@ -75,6 +77,7 @@ protocol SimulatorLiveStreamSession: AnyObject, Sendable {
 }
 
 extension SimulatorLiveStreamSession {
+    var screenOrientation: SimulatorScreenOrientation? { nil }
     // The default keeps test doubles simple; the real client overrides with a genuine
     // fire-and-forget send.
     func streamInput(_ input: SimulatorBridgeInput) {

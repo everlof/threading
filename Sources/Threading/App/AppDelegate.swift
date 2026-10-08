@@ -3296,6 +3296,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             guard mainWindowController?.isShowingConversation == true else {
                 return .unavailable(L10n.string("The active surface is not a conversation."))
             }
+        case AppCommands.ID.simulatorAutomaticLayout, AppCommands.ID.simulatorRowLayout, AppCommands.ID.simulatorColumnLayout, AppCommands.ID.simulatorGridLayout, AppCommands.ID.simulatorFocusLayout, AppCommands.ID.addSimulator, AppCommands.ID.removeSimulator:
+            guard let workspace = mainWindowController?.displayPaneController.currentSimulatorWorkspace else {
+                return .unavailable(L10n.string("Show an adopted Simulator first."))
+            }
+            if command.id == AppCommands.ID.addSimulator, !workspace.canAddSimulator {
+                return .unavailable(L10n.string("This workspace already has four Simulators. Remove one before adding another."))
+            }
+            if command.id == AppCommands.ID.removeSimulator, workspace.state.members.count <= 1 {
+                return .unavailable(L10n.string("Close the tab to remove the last Simulator."))
+            }
         case AppCommands.ID.enableSimulatorAnnotations, AppCommands.ID.disableSimulatorAnnotations:
             guard mainWindowController?.displayPaneController.currentSimulator?.canAnnotateNotes == true else {
                 return .unavailable(L10n.string("Show an adopted Simulator first."))
@@ -3625,6 +3635,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.review: mainWindowController?.showReview()
         case AppCommands.ID.attachments: mainWindowController?.showAttachments()
         case AppCommands.ID.jumpToReviewFile: mainWindowController?.showReviewFileJump()
+        case AppCommands.ID.simulatorAutomaticLayout:
+            mainWindowController?.displayPaneController.currentSimulatorWorkspace?.setLayout(.automatic)
+        case AppCommands.ID.simulatorRowLayout:
+            mainWindowController?.displayPaneController.currentSimulatorWorkspace?.setLayout(.row)
+        case AppCommands.ID.simulatorColumnLayout:
+            mainWindowController?.displayPaneController.currentSimulatorWorkspace?.setLayout(.column)
+        case AppCommands.ID.simulatorGridLayout:
+            mainWindowController?.displayPaneController.currentSimulatorWorkspace?.setLayout(.grid)
+        case AppCommands.ID.simulatorFocusLayout:
+            mainWindowController?.displayPaneController.currentSimulatorWorkspace?.setLayout(.focus)
+        case AppCommands.ID.addSimulator:
+            mainWindowController?.displayPaneController.currentSimulatorWorkspace?.showAddMenu()
+        case AppCommands.ID.removeSimulator:
+            mainWindowController?.displayPaneController.currentSimulatorWorkspace?.removeSelected()
         case AppCommands.ID.enableSimulatorAnnotations:
             mainWindowController?.displayPaneController.currentSimulator?.setAnnotatingNotes(true)
         case AppCommands.ID.disableSimulatorAnnotations:

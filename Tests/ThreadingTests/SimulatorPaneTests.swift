@@ -213,8 +213,8 @@ final class SimulatorPaneTests: HostedStoreTestCase {
         defer { DisplayPaneStore.shared.removeSession(sessionID) }
 
         let pane = DisplayPaneController(simulatorControl: control)
-        let first = pane.activateSimulator(for: sessionID, deviceID: simulatorPaneTestDevice.id)
-        let second = pane.activateSimulator(for: sessionID, deviceID: simulatorPaneTestDevice.id)
+        let first = try pane.activateSimulator(for: sessionID, deviceID: simulatorPaneTestDevice.id)
+        let second = try pane.activateSimulator(for: sessionID, deviceID: simulatorPaneTestDevice.id)
 
         XCTAssertTrue(first === second)
         XCTAssertEqual(pane.tabs(for: sessionID).filter { $0.simulator != nil }.count, 1)

@@ -6199,3 +6199,60 @@ rendered style evidence are covered; the A7 real-device energy acceptance check 
 On 2026-10-05 the owner requested simulator testing and a normal Release installation on the
 iPhone. Further device profiling stopped; the earlier glow measurements remain recorded above.
 Particle energy is still unmeasured and is not inferred from simulator results.
+
+## Simulator workspace viewport contract, 2026-10-07
+
+The session-owned workspace admits at most four device members before constructing their views.
+The live-helper budget remains four across the app. A member's stream demand follows a nonzero,
+attached, unhidden viewport, its presenter window, or its recording. Hidden workspaces return
+unwatched transports immediately; active agent operations, presenters and recordings retain
+their own demand. Layout and image callbacks neither enumerate devices nor run public commands.
+Only a changed frame aspect invalidates the arrangement; ordinary frames replace one image.
+Row/column/grid changes retain controller identity and defer reflow through a continuous touch.
+
+`SimulatorWorkspaceTests/testStressViewportResizingKeepsBoundedStableDeviceViews` is the opt-in
+fixture (`THREADING_STRESS=1`). It resizes the production workspace 500 times at each of one,
+two and four mounted members, with sixteen background members whose views stay unloaded.
+Fixture construction is outside the measured loop. Matched Debug results on 2026-10-07:
+
+| Mounted members | Median resize/layout | p95 | Maximum |
+| --- | --- | --- | --- |
+| 1 | 0.263 ms | 0.333 ms | 4.045 ms |
+| 2 | 0.319 ms | 0.372 ms | 2.471 ms |
+| 4 | 0.405 ms | 0.493 ms | 3.184 ms |
+
+These measure AppKit viewport mutation with synthetic device models, not framebuffer processing,
+guest CPU, energy or Release performance. The regression boundary checks retained controller
+identity, the admitted tile count, unmounted background views and a p95 below 16 ms.
+
+The opt-in two-device live integration lane also verified consecutive decoded frames from both
+exact devices through the shipping signed client/helper. It released the second device's boot
+lease afterward and did not send guest input. Higher concurrent capacity requires matched guest,
+helper and copy-buffer measurements; small on-screen thumbnails do not reduce those costs.
+
+Rendered evidence caught a 26-point host containing 40-point hardware controls. The shared bar
+now reserves their full target height and wraps at narrow widths. Device roots and note editors
+receive their viewport before mounting, avoiding zero-height autoresizing constraints. The
+canonical simulator evidence entry includes these narrow, portrait, landscape, mixed and grid
+states in the production conversation/window shell.
+
+The four-device live fixture (`scripts/simulator_workspace_verify.sh`) also ran on Xcode 26.5 /
+iOS 26.5 with an animated clock in three iPhones and one iPad. During a 30-second grid workload,
+each of six five-second intervals delivered new decoded frames from every guest. The lane
+verified four helper processes, rejected a fifth reservation, retained the same device/controller
+identities through real phone rotation and restored four transports after Focus. It used zero
+public screenshots and reported no stream failures. Its actual shell captures were inspected.
+
+Six `ps` samples recorded the following ranges during that workload:
+
+| Process group | Reported CPU percentage | Summed RSS |
+| --- | --- | --- |
+| Debug hosted app | 123.0–130.8% | 531.2–565.3 MiB |
+| Four signed helpers | 22.9–29.7% | 749.9–750.0 MiB |
+| Four animated guest fixture processes | 2.4–3.7% | 661.9–662.5 MiB |
+
+These are Debug observations while the broad fast suite was running separately, not isolated
+Release benchmarks. RSS includes shared framework pages and is not private footprint; guest
+totals exclude SpringBoard and other simulated OS services. The four-member/helper cap remains
+load-bearing. For landscape shared-memory delivery, vImage rotates into the existing three
+mapped buffers; codecs reuse one additional oriented surface rather than allocating per frame.

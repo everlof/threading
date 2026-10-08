@@ -23,12 +23,12 @@ enum SimulatorAgentInputRouter {
             send(
                 .accepted(.tap(x: x, y: y)),
                 action: "tap",
-                sessionID: sessionID,
+                deviceID: arguments.deviceID, sessionID: sessionID,
                 through: coordinator,
                 completion
             )
         case .locator(let locator):
-            resolve(locator, sessionID: sessionID, through: coordinator, completion) {
+            resolve(locator, deviceID: arguments.deviceID, sessionID: sessionID, through: coordinator, completion) {
                 simulator, device, point in
                 simulator.sendInputForAgent(.tap(x: Double(point.x), y: Double(point.y))) { result in
                     finish(result, action: "tap", device: device, completion)
@@ -46,7 +46,7 @@ enum SimulatorAgentInputRouter {
         send(
             SimulatorAgentCommandService.swipeInput(from: arguments),
             action: "swipe",
-            sessionID: sessionID,
+            deviceID: arguments.deviceID, sessionID: sessionID,
             through: coordinator,
             completion
         )
@@ -65,13 +65,13 @@ enum SimulatorAgentInputRouter {
             send(
                 .accepted(.text(text)),
                 action: "type_text",
-                sessionID: sessionID,
+                deviceID: arguments.deviceID, sessionID: sessionID,
                 through: coordinator,
                 completion
             )
         case .located(let locator, let text):
             // Focus the located field with a tap, then type into it.
-            resolve(locator, sessionID: sessionID, through: coordinator, completion) {
+            resolve(locator, deviceID: arguments.deviceID, sessionID: sessionID, through: coordinator, completion) {
                 simulator, device, point in
                 simulator.sendInputForAgent(.tap(x: Double(point.x), y: Double(point.y))) { tap in
                     switch tap {
@@ -96,7 +96,7 @@ enum SimulatorAgentInputRouter {
         send(
             SimulatorAgentCommandService.buttonInput(from: arguments),
             action: "press_button",
-            sessionID: sessionID,
+            deviceID: arguments.deviceID, sessionID: sessionID,
             through: coordinator,
             completion
         )
@@ -105,7 +105,7 @@ enum SimulatorAgentInputRouter {
     private static func send(
         _ request: SimulatorAgentCommandService.Request<SimulatorAgentCommandService.Input>,
         action: String,
-        sessionID: SessionID,
+        deviceID: String?, sessionID: SessionID,
         through coordinator: AgentToolCoordinator,
         _ completion: @escaping Completion
     ) {
@@ -114,7 +114,7 @@ enum SimulatorAgentInputRouter {
             return
         }
         guard let (simulator, device) = resolvedSimulator(
-            for: sessionID, through: coordinator, completion
+            deviceID: deviceID, for: sessionID, through: coordinator, completion
         ) else { return }
         simulator.sendInputForAgent(bridgeInput(input)) { result in
             finish(result, action: action, device: device, completion)
@@ -124,17 +124,17 @@ enum SimulatorAgentInputRouter {
     /// Resolve the session's visible Simulator pane and adopted device, revealing and activating it,
     /// or complete with the standard "prepare first" failure and return nil.
     private static func resolvedSimulator(
-        for sessionID: SessionID,
+        deviceID: String?, for sessionID: SessionID,
         through coordinator: AgentToolCoordinator,
         _ completion: @escaping Completion
     ) -> (SimulatorPaneViewController, SimulatorDevice)? {
-        guard let simulator = coordinator.displayPaneController.tabs(for: sessionID)
-            .compactMap(\.simulator).first,
+        guard let simulator = coordinator.resolveSimulatorTarget(deviceID, for: sessionID, completion: completion) else { return nil }
+        guard
               let device = simulator.adoptedDevice else {
             completion(.failure("Call simulator_prepare before controlling the Simulator."))
             return nil
         }
-        _ = coordinator.displayPaneController.activateSimulator(for: sessionID)
+        _ = try? coordinator.displayPaneController.activateSimulator(for: sessionID)
         coordinator.revealDisplayPane(for: sessionID)
         return (simulator, device)
     }
@@ -143,7 +143,7 @@ enum SimulatorAgentInputRouter {
     /// A miss or an ambiguity fails with a helpful message rather than a silent guess.
     private static func resolve(
         _ locator: SimulatorAgentCommandService.ElementLocator,
-        sessionID: SessionID,
+        deviceID: String?, sessionID: SessionID,
         through coordinator: AgentToolCoordinator,
         _ completion: @escaping Completion,
         onResolved: @escaping @MainActor @Sendable (
@@ -151,7 +151,7 @@ enum SimulatorAgentInputRouter {
         ) -> Void
     ) {
         guard let (simulator, device) = resolvedSimulator(
-            for: sessionID, through: coordinator, completion
+            deviceID: deviceID, for: sessionID, through: coordinator, completion
         ) else { return }
         simulator.snapshotForAgent { result in
             switch result {

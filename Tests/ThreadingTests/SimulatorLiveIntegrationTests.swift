@@ -45,6 +45,59 @@ final class SimulatorLiveIntegrationTests: XCTestCase {
     /// Read-only: the stream must keep moving after its first picture. The shipped H.264
     /// encoder once held the second frame for lookahead, which left every helper idle and the
     /// pane frozen under a live label while the first-frame checks all passed.
+    /// Explicit two-device lane. The first device must already be booted; preparing the second
+    /// returns a boot-ownership lease, which is released on both success and failure.
+    func testTwoExactDevicesDeliverIndependentLiveFrames() async throws {
+        let firstID = try integrationDeviceID()
+        guard let rawSecond = ProcessInfo.processInfo.environment["THREADING_SIMULATOR_INTEGRATION_SECOND_UDID"],
+              let secondID = SimulatorDeviceID(rawSecond), secondID != firstID else {
+            throw XCTSkip("Set THREADING_SIMULATOR_INTEGRATION_SECOND_UDID to another installed device.")
+        }
+        let control = SimctlSimulatorControl()
+        let secondLease = try await control.prepare(deviceID: secondID)
+        let coordinator = SimulatorLiveStreamCoordinator(maximumStreams: 2)
+        do {
+            let first = try await coordinator.openStream(for: firstID)
+            defer { first.stop() }
+            let second = try await coordinator.openStream(for: secondID)
+            defer { second.stop() }
+            first.setVisible(true)
+            second.setVisible(true)
+            let counts = try await withThrowingTaskGroup(of: Int.self) { group in
+                for session in [first, second] {
+                    group.addTask {
+                        var count = 0
+                        for await event in session.events {
+                            switch event {
+                            case .frame(let frame):
+                                guard frame.image.width > 0, frame.image.height > 0 else { throw IntegrationError.endedBeforeFrame }
+                                count += 1
+                                if count == Self.consecutiveFrameCount { return count }
+                            case .failed(let detail): throw IntegrationError.streamFailed(detail)
+                            case .ended, .geometryChanged: throw IntegrationError.endedBeforeFrame
+                            case .ready, .statistics: continue
+                            }
+                        }
+                        throw IntegrationError.endedBeforeFrame
+                    }
+                }
+                group.addTask {
+                    try await Task.sleep(for: .seconds(12))
+                    throw IntegrationError.timedOut
+                }
+                defer { group.cancelAll() }
+                var counts: [Int] = []
+                for _ in 0..<2 { counts.append(try await group.next()!) }
+                return counts
+            }
+            XCTAssertEqual(counts, [Self.consecutiveFrameCount, Self.consecutiveFrameCount])
+        } catch {
+            try? await control.release(secondLease)
+            throw error
+        }
+        try await control.release(secondLease)
+    }
+
     func testDirectStreamDeliversConsecutiveFrames() async throws {
         let deviceID = try integrationDeviceID()
         let coordinator = SimulatorLiveStreamCoordinator(maximumStreams: 1)
@@ -60,7 +113,7 @@ final class SimulatorLiveIntegrationTests: XCTestCase {
                 var observed: [UInt64] = []
                 for await event in session.events {
                     switch event {
-                    case .ready, .statistics:
+                    case .ready, .statistics, .geometryChanged:
                         continue
                     case .frame(let frame):
                         observed.append(frame.sequence)
@@ -118,7 +171,7 @@ final class SimulatorLiveIntegrationTests: XCTestCase {
                         throw IntegrationError.streamFailed(detail)
                     case .ended:
                         throw IntegrationError.endedBeforeFrame
-                    case .statistics:
+                    case .statistics, .geometryChanged:
                         continue
                     }
                 }

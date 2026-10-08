@@ -213,6 +213,13 @@ enum AppCommands {
         static let review = "view.review"
         static let attachments = "view.attachments"
         static let jumpToReviewFile = "review.jumpToFile"
+        static let simulatorAutomaticLayout = "simulator.layout.automatic"
+        static let simulatorRowLayout = "simulator.layout.row"
+        static let simulatorColumnLayout = "simulator.layout.column"
+        static let simulatorGridLayout = "simulator.layout.grid"
+        static let simulatorFocusLayout = "simulator.layout.focus"
+        static let addSimulator = "simulator.workspace.add"
+        static let removeSimulator = "simulator.workspace.remove"
         static let enableSimulatorAnnotations = "simulator.annotations.enable"
         static let disableSimulatorAnnotations = "simulator.annotations.disable"
         static let toggleSimulatorRecording = "simulator.recording.toggle"
@@ -403,6 +410,18 @@ enum AppCommands {
                    detail: "Searches the files changed in the active Git Review.",
                    defaultShortcut: KeyboardShortcut(key: "j", modifiers: .command), isEditable: true,
                    scope: .session),
+        AppCommand(id: ID.simulatorAutomaticLayout, group: .view, title: "Simulator Layout: Automatic",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "rectangle.split.2x2"),
+        AppCommand(id: ID.simulatorRowLayout, group: .view, title: "Simulator Layout: Row",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "rectangle.split.2x2"),
+        AppCommand(id: ID.simulatorColumnLayout, group: .view, title: "Simulator Layout: Column",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "rectangle.split.2x2"),
+        AppCommand(id: ID.simulatorGridLayout, group: .view, title: "Simulator Layout: Grid",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "rectangle.split.2x2"),
+        AppCommand(id: ID.simulatorFocusLayout, group: .view, title: "Simulator Layout: Focus",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "rectangle.split.2x2"),
+        AppCommand(id: ID.addSimulator, group: .view, title: "Add Simulator", defaultShortcut: nil, isEditable: true, scope: .session),
+        AppCommand(id: ID.removeSimulator, group: .view, title: "Remove selected Simulator", defaultShortcut: nil, isEditable: true, scope: .session),
         AppCommand(id: ID.enableSimulatorAnnotations, group: .view, title: "Enable Simulator Annotations",
                    defaultShortcut: nil, isEditable: true, scope: .session, iconName: "plus.bubble"),
         AppCommand(id: ID.disableSimulatorAnnotations, group: .view, title: "Disable Simulator Annotations",

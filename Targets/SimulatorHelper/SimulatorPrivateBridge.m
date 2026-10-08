@@ -418,6 +418,17 @@ static BOOL StaticCodeIsAppleSigned(NSString *path, NSError **error) {
     }
 }
 
+- (NSInteger)screenUIOrientation {
+    @try {
+        id properties = SendObject(_screenProxy, @"screenProperties");
+        SEL selector = NSSelectorFromString(@"uiOrientation");
+        if (properties == nil || ![properties respondsToSelector:selector]) { return 0; }
+        return ((NSInteger (*)(id, SEL))objc_msgSend)(properties, selector);
+    } @catch (__unused NSException *exception) {
+        return 0;
+    }
+}
+
 - (BOOL)sendTouchAtX:(double)x y:(double)y down:(BOOL)down error:(NSError **)error {
     return [self sendTouchAtX:x y:y down:down wait:YES error:error];
 }

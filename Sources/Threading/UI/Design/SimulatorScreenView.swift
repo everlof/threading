@@ -221,6 +221,14 @@ final class SimulatorScreenView: ThemedControl {
         NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
     }
 
+    var onFocus: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocus?() }
+        return accepted
+    }
+
     override var acceptsFirstResponder: Bool {
         isEnabled
             && image != nil
@@ -531,6 +539,7 @@ final class SimulatorScreenView: ThemedControl {
     }
 
     override func mouseDown(with event: NSEvent) {
+        onFocus?()
         let location = convert(event.locationInWindow, from: nil)
 
         // Control-click is the Mac's secondary click; the device has no use for the modifier.

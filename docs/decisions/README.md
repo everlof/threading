@@ -38,6 +38,7 @@ idea that comes back every six months.
 
 | Record | Recommendation |
 |---|---|
+| [Multiple simulators in the display pane](multiple-simulator-layouts.md) — adaptive rows, columns, grids and focus beside one conversation | **Implemented first slice**: one to four members, adaptive/manual layouts and exact agent targets; higher live capacity follows measurements |
 | [Phone theme rendering](phone-theme-rendering.md) — carry fonts, glow, reviewed shaders, sounds and widget accent to paired devices | **Implement** bounded presentation with host-owned consent, lifecycle, rendering and transfer budgets |
 | [Render-only Embedded Swift SDK](render-only-embedded-swift.md) — avoid Foundation's module cost for extensions that only publish a patch | **Prototype** a bounded protocol-only target; the 21 KB compile probe is not yet a compatible SDK |
 | [Revert to this message](revert-to-message.md) — put the files back to where a turn started, and the separate question of rewinding the provider conversation | **Prototype** the workspace-only half; **reject** the conversation-revert claim |
