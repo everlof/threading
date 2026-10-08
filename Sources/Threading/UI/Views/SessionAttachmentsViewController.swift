@@ -165,6 +165,7 @@ final class SessionAttachmentsViewController: NSViewController {
     /// `extensionPreviewPlayers` because that dictionary belongs to whichever extension body is
     /// currently accepted, and this one belongs to the pane.
     private var videoPlayer: MediaDocumentPlayerView?
+    private var mermaidPreview: MermaidPreviewView?
     /// The movie the pane's own player may resolve a file for — exactly one, and only while it is
     /// the row on screen. The same scoping rule the extension handle follows, for the same
     /// reason: a resolver that answered for any attachment would be a resolver that answers after
@@ -1283,6 +1284,18 @@ final class SessionAttachmentsViewController: NSViewController {
             timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
 
         case .diagram:
+            let suffix = attachment.url.pathExtension.lowercased()
+            if suffix == "mmd" || suffix == "mermaid" {
+                if let preview = mermaidPreview, !preview.isHidden, preview.currentURL == attachment.url {
+                    preview.refreshFile()
+                    return
+                }
+                hideInstalledPreviews()
+                let preview = installedMermaidPreview()
+                preview.isHidden = false
+                preview.display(attachment.url)
+                return
+            }
             // A tighter cap than the general one: this lands in a text view, and a text view
             // handed tens of megabytes is a stall, not a preview.
             let prepareStarted = DispatchTime.now().uptimeNanoseconds
@@ -1663,6 +1676,14 @@ final class SessionAttachmentsViewController: NSViewController {
         return scroll
     }
 
+    private func installedMermaidPreview() -> MermaidPreviewView {
+        if let mermaidPreview { return mermaidPreview }
+        let preview = MermaidPreviewView()
+        installPreviewSurface(preview)
+        mermaidPreview = preview
+        return preview
+    }
+
     /// Installs the selected body into the preview's flexible rectangle. Media renderers preserve
     /// their document inside that rectangle; they do not turn the document's aspect into a second
     /// owner of the attachment fold.
@@ -1698,6 +1719,8 @@ final class SessionAttachmentsViewController: NSViewController {
         documentView?.isHidden = true
         clearHTMLPreview()
         clearSourcePreview()
+        mermaidPreview?.clear()
+        mermaidPreview?.isHidden = true
         clearVideoPreview()
     }
 

@@ -945,14 +945,14 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         )
     }
 
-    /// Diagram source previews as itself: the pane carries no Graphviz or Mermaid engine, and
+    /// Graphviz source previews as itself: the pane carries no Graphviz engine, and
     /// the source — short, legible, and what gets dragged into a chat box next — beats an icon
     /// card claiming there is nothing to see.
     func testADiagramPreviewsItsOwnSource() throws {
-        let source = "graph TD; Composer-->Terminal"
-        let mermaid = root.appendingPathComponent("flow.mmd")
-        try Data(source.utf8).write(to: mermaid)
-        let pane = try laidOutPane(showing: mermaid, size: NSSize(width: 353, height: 700))
+        let source = "digraph { Composer -> Terminal }"
+        let diagram = root.appendingPathComponent("flow.dot")
+        try Data(source.utf8).write(to: diagram)
+        let pane = try laidOutPane(showing: diagram, size: NSSize(width: 353, height: 700))
 
         let text = try XCTUnwrap(
             descendants(of: pane.view).compactMap { $0 as? ThemedTextView }.first,

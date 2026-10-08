@@ -20183,6 +20183,40 @@
         }
       }
     },
+    "Diagram" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagram"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagram"
+          }
+        }
+      }
+    },
+    "Diagram source" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagram source"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagramkälla"
+          }
+        }
+      }
+    },
     "Diff options" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24311,6 +24345,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anpassa"
+          }
+        }
+      }
+    },
+    "Fit diagram to width" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fit diagram to width"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anpassa diagrammet till bredden"
           }
         }
       }
@@ -56106,6 +56157,23 @@
         }
       }
     },
+    "The diagram could not be rendered. Showing source." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The diagram could not be rendered. Showing source."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagrammet kunde inte renderas. Visar källan."
+          }
+        }
+      }
+    },
     "The direct Simulator stream ended." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60832,6 +60900,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här enheten förlorar ägaråtkomsten omedelbart. Parkoppla den igen med en ny kod om du vill återställa åtkomsten."
+          }
+        }
+      }
+    },
+    "This diagram is too large to render. Showing source." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This diagram is too large to render. Showing source."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagrammet är för stort för att rendera. Visar källan."
           }
         }
       }
@@ -68666,6 +68751,40 @@
     "Zoom Out" : {
       "extractionState" : "manual",
       "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zooma ut"
+          }
+        }
+      }
+    },
+    "Zoom in" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zoom in"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zooma in"
+          }
+        }
+      }
+    },
+    "Zoom out" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zoom out"
+          }
+        },
         "sv" : {
           "stringUnit" : {
             "state" : "translated",

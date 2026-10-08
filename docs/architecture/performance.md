@@ -4,6 +4,34 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## Mermaid attachment rendering — 2026-10-08
+
+Expected input is a 1–8 KiB architecture diagram. The regression fixture has 201 nodes / 200
+edges, rendered through the production attachment controller at 420×700 points. Source reading,
+UTF-8 validation, line/byte admission and a SHA-256 fingerprint run on one serial actor. An
+unchanged-file refresh compares only the 32-byte fingerprint on main, keeps the same canvas and
+preserves zoom. Parsing and graph layout run in WebKit's content process, never the app's main
+actor. Hiding or detaching a reader cancels pending results and releases its renderer; a hidden
+file update does not start a reader. Only one selected document is mounted, with 91 native views
+in this fixture regardless of graph-node count.
+
+The source-only DOT control uses the same graph text and the unchanged pre-Mermaid source path.
+Three Debug mount/layout samples were 11.41, 12.06 and 11.22 ms (median 11.41). The new diagram
+became ready in 836.88 ms on initial pane construction, then 827.92 and 791.61 ms on two reloads.
+The engine phase was 433, 546 and 424 ms; deferred native WebKit construction/navigation took
+35.30, 39.06 and 38.36 ms. These are added rendering costs, not a source-preview speedup or
+Release launch measurements. The pane's loading state is committed before the worker/renderer
+handoff, and unchanged attachment-list refreshes pay neither renderer startup nor graph layout.
+Measured on Apple silicon, macOS 26.5 / Xcode 26.5.
+
+Input is capped at 512 KiB of readable source, with a 64 KiB / 1,000-line rendering budget and
+Mermaid's locked 500-edge ceiling. A ten-second renderer timeout falls back to source. Budget
+refusal precedes WebKit construction, and stale file/theme results cannot replace the current
+selection. `MermaidAttachmentPreviewTests` covers source/canvas reuse, visibility teardown,
+theme/zoom preservation, failure and oversized-input fallback, navigation/resource denial and
+the repeated stress case. `attachment-mermaid-preview` captures the real main-window tab in
+System light/dark, Cyberpunk and Windows 98, plus source and failure states.
+
 ## Toast text bounds — 2026-10-06
 
 Toast prose is externally sized: ordinary receipts carry a short heading and a few sentences,

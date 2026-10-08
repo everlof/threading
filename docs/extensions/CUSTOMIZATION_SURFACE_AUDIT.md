@@ -634,6 +634,13 @@ destructive or primary action belongs, and the contract says so by allowing neit
 
 ## Attachment-preview precedent
 
+The native Mermaid attachment reader is part of the existing host-owned fallback. Its entity
+is the currently selected attachment. Threading owns file admission and bounded UTF-8 reading,
+source, renderer configuration, network/navigation denial, render timeout, Diagram/Source choice,
+zoom and selection teardown. Themes supply presentation through Design roles. No extension gains
+file bytes, execution or navigation authority and no new public component is introduced; the
+existing `attachments.preview@1` offer/decline contract remains unchanged.
+
 Every other surface in this table is *published to*: an extension declares a patch and the host
 applies it. `attachments.preview@1` is the first that is **asked**, and the difference is the point.
 

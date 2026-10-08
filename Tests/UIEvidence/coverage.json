@@ -1348,6 +1348,42 @@
       }
     },
     {
+      "id": "attachment-mermaid-preview",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Mermaid attachment preview",
+      "description": "The real Attachments tab inside the shipping main window, with offline diagram rendering, source and error fallback.",
+      "states": [
+        "Rendered diagram",
+        "Read-only source",
+        "Parse failure",
+        "Shipping shell"
+      ],
+      "matrix": {
+        "themes": [
+          "System",
+          "Cyberpunk",
+          "Windows 98"
+        ],
+        "appearances": [
+          "Light",
+          "Dark",
+          "Theme-authored"
+        ],
+        "sizes": [
+          "Shipping display-pane width"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/MermaidAttachmentPreviewTests.swift",
+        "test": "ThreadingTests/MermaidAttachmentPreviewTests/testRendersMermaidAttachmentInShippingShell"
+      },
+      "capture": {
+        "glob": "attachment-mermaid-*.png"
+      }
+    },
+    {
       "id": "attachment-video-playback",
       "kind": "surface",
       "status": "implemented",

@@ -1417,16 +1417,31 @@ and the real one was never recorded. Previews route by kind: images through
 `ThemedImagePreview`, PDFs through PDFKit, archives and documents through Quick Look — the
 latter two inside `MediaInspectorDocumentView`, the one named system-chrome boundary, so an
 archive previews as the same icon-and-metadata card the space bar shows in Finder. Diagram
-source previews as *itself*, in a read-only `ThemedTextView` capped at
-`maximumSourcePreviewBytes`: the app carries no Graphviz or Mermaid engine, and rendering one
-would mean either the pane fetching a CDN library on row-selection or vendoring the renderer —
-both deliberate decisions, neither taken here; the display panel already renders a diagram when
-an agent writes `display_html` that pulls the library in. Only images and PDFs join the media
+source has two native fallbacks: DOT/GV stays in a read-only `ThemedTextView`, while MMD/Mermaid
+uses `MermaidPreviewView` with the bundled Mermaid 12.1.0 standalone renderer. The latter opens
+as a diagram fitted to width, with scrolling, native zoom controls and a Diagram/Source choice.
+Source stays available when parsing fails or the rendering budget is exceeded; `.mmd` containing
+MultiMarkdown consequently remains readable. Neither route edits a file. Only images and PDFs join the media
 inspector's rail; only images can be a side of a comparison. A
 persisted row whose `kind` this build does not know re-derives it from the file's own
 extension, and drops alone when both are unknown — decoding used to be all-or-nothing per
 session, and the next admission then persisted the fresh rows over a payload that still held
 every older one.
+
+**Mermaid is an offline host-owned reader.** `Resources/Mermaid/SOURCE.md` records the upstream
+pin, reproduction and hashes. A serial actor reads at most 512 KiB and validates UTF-8; rendering
+admits a 64 KiB / 1,000-line budget and locks Mermaid's 500-edge ceiling. Only one
+selected diagram owns a WebKit canvas, initialized after the asynchronous read. Parsing/layout
+runs in WebKit's content process. A ten-second timeout releases a failed canvas and shows source.
+Selection cancellation invalidates worker/render results before another file may mount.
+
+The nonpersistent web view can navigate only to its bundled entry. CSP blocks remote resources,
+local document content, connections and authored scripts; source crosses as JavaScript arguments.
+Strict Mermaid mode and the secure configuration list cannot be relaxed by front matter or init
+directives. Source-authored link callbacks are never bound and rendered anchors lose their targets.
+Themes supply ink, ground and fonts; live refresh retains zoom and scroll. The native attachment
+surface retains file admission, selection, actions and source fallback. This introduces no new
+extension capability or component slot and does not change the iPhone's source preview.
 
 **Space on a row is Finder's preview key, answered by the app's own inspector.** The list itself
 carries no policy: `ThemedTableView.onQuickLook` reports the bare key and the trackpad's preview

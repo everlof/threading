@@ -4169,6 +4169,12 @@ playing in the lightbox when you press Space or double-click. It stops when you 
 another tab, a collapsed pane, a window behind another one, or the Dock. Under **Reduce Motion**
 it opens paused; press Play and it plays.
 
+**Mermaid diagrams render on the Mac** — select an `.mmd` or `.mermaid` attachment to see its
+diagram. Use **Diagram / Source** to inspect the original text, the magnifying glasses to zoom,
+and **Fit diagram to width** to reset the scale. Scroll to explore a large diagram. Rendering
+works offline with the renderer bundled in Threading. Invalid or oversized diagrams show their
+source with a notice. DOT/GV files continue to show source, and the iPhone shows diagram source.
+
 **Movies play here too** — a screen recording, a simulator capture, a clip an agent produced.
 Selecting the row shows the first frame with a timeline under it, plus a speaker button when the
 movie has sound. It opens **paused**, with Play in the middle of the picture: a row you arrived at

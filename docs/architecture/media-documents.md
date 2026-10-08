@@ -39,9 +39,15 @@ companion surface is deliberately not projected.
 
 This is the same altitude `display_chart` picked when it took data rather than geometry. It is also
 the call already made once for attachments and now reversed **deliberately, once, behind a
-registry**: `SessionAttachment.Kind.diagram` exists because "rendering would take a diagram engine
-the app does not carry." `MediaDocumentRendererRegistry` is the one place an engine is carried, so
+registry**: `SessionAttachment.Kind.diagram` originally showed only source because no diagram
+engine was carried. `MediaDocumentRendererRegistry` is the one place a playback engine is carried, so
 every format after the first is an implementation of a protocol rather than a new extension API.
+
+Static Mermaid attachments now have a bundled, offline document reader in `MermaidPreviewView`
+([attachments](mcp-and-display.md#attachments)). It has no timeline, playback session or media
+transport and therefore does not enter this playback registry or add an extension media format.
+The host keeps source, zoom, file bounds and navigation policy; the existing preview capability
+and offer/decline contract are unchanged. DOT/GV remains source-only.
 
 ## The public contract
 
