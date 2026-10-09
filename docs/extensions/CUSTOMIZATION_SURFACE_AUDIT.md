@@ -761,6 +761,12 @@ an always-asked `ConfirmationAlert` (`changeMailAccess`) whose accessory is `The
 `ThemedPopUp`; Threading owns validation, the store written and revocation, and no extension can
 read, replace or pre-fill them.
 
+Historical session names extend the existing host-only Universal Search surface. Threading owns
+title precedence, accepted-change timestamps, bounded durable history, match ranking, scope and
+archive filtering, current-project navigation and remote authorization. Themes style the existing
+result title and snippet through shared Design components. This adds no public component,
+extension data access or naming authority; the native Search overlay remains the fallback.
+
 Before adding a component:
 
 1. Name the durable semantic surface and its entity context. For a popover, register its stable

@@ -224,7 +224,7 @@ final class UniversalSearchSessionController {
                     .result(UniversalSearchResultRow(
                         id: hit.id,
                         title: hit.title,
-                        detail: detail(for: hit)
+                        detail: Self.detail(for: hit)
                     ))
                 }
                 if group.isCapped {
@@ -334,7 +334,7 @@ final class UniversalSearchSessionController {
         return snapshot.isComplete ? nil : L10n.string("Searching…")
     }
 
-    private func detail(for hit: SearchHit) -> String? {
+    static func detail(for hit: SearchHit) -> String? {
         var values: [String] = []
         if let project = hit.provenance.projectName { values.append(project) }
         if let provider = hit.provenance.provider, provider != "Threading" { values.append(provider) }

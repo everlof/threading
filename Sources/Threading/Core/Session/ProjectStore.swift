@@ -1744,7 +1744,9 @@ final class ProjectStore {
         let stored = (trimmed?.isEmpty ?? true) ? nil : trimmed
         guard projects[location.projectIndex].sessions[location.sessionIndex].customTitle != stored
         else { return .unchanged }
+        let previousName = nameForHistory(projects[location.projectIndex].sessions[location.sessionIndex])
         projects[location.projectIndex].sessions[location.sessionIndex].customTitle = stored
+        recordNameChange(at: location, from: previousName)
         let sidebarImpact: ProjectsDidChange.SidebarImpact = .sessionTitle(
             sessionID,
             reorders: NativeSidebarPipelineOptions.sessionOrder == .name
@@ -1778,6 +1780,7 @@ final class ProjectStore {
         else { return .unchanged }
 
         projects[location.projectIndex].sessions[location.sessionIndex].title = title
+        recordNameChange(at: location, from: nameForHistory(session))
         let sidebarImpact: ProjectsDidChange.SidebarImpact = .sessionTitle(
             sessionID,
             reorders: NativeSidebarPipelineOptions.sessionOrder == .name
@@ -1865,6 +1868,7 @@ final class ProjectStore {
         // A cleared title has no provenance left to defend.
         projects[location.projectIndex].sessions[location.sessionIndex].agentTitleSource =
             cleaned == nil ? nil : source
+        recordNameChange(at: location, from: nameForHistory(session))
         if source == .chosen {
             guard saveSessionRecord(at: location) else { return .persistenceRefused }
         } else {
@@ -1900,6 +1904,7 @@ final class ProjectStore {
         else { return }
 
         projects[location.projectIndex].sessions[location.sessionIndex].title = title
+        recordNameChange(at: location, from: nameForHistory(session))
         _ = saveSessionRecord(at: location)
         notifyChanged(
             sidebarImpact: .sessionTitle(
@@ -2034,9 +2039,39 @@ final class ProjectStore {
         _ mutate: (inout AgentSession) -> Void
     ) -> ProjectMutationResult {
         guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        let previousName = nameForHistory(projects[location.projectIndex].sessions[location.sessionIndex])
         mutate(&projects[location.projectIndex].sessions[location.sessionIndex])
+        recordNameChange(at: location, from: previousName)
         guard saveSessionRecord(at: location) else { return .persistenceRefused }
+        if previousName != nameForHistory(projects[location.projectIndex].sessions[location.sessionIndex]) {
+            notifyChanged(sidebarImpact: .sessionTitle(
+                sessionID,
+                reorders: NativeSidebarPipelineOptions.sessionOrder == .name
+            ))
+        }
         return .applied
+    }
+
+    private func nameForHistory(_ session: AgentSession) -> String {
+        let name = AgentSessionRowPresentation(
+            session: session,
+            usesAgentTitle: AppSettings.usesAgentTitleInSidebar,
+            untitledTitle: ""
+        ).title
+        guard session.customTitle != nil || !SessionNaming.isPlaceholderTitle(
+            name, kind: session.kind, accountDisplayName: nil
+        ) else { return "" }
+        return name
+    }
+
+    private func recordNameChange(
+        at location: (projectIndex: Int, sessionIndex: Int),
+        from previousName: String
+    ) {
+        let name = nameForHistory(projects[location.projectIndex].sessions[location.sessionIndex])
+        projects[location.projectIndex].sessions[location.sessionIndex].nameHistory.recordChange(
+            from: previousName, to: name, at: Date()
+        )
     }
 
     /// Work timestamps use the exact-session coalesced save path. Consumers receive the one

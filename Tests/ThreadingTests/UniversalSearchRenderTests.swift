@@ -28,7 +28,7 @@ final class UniversalSearchRenderTests: XCTestCase {
         let appearance: NSAppearance.Name
     }
 
-    func testRendersGroupedScopedResultsInTheShippingOverlay() throws {
+    func testRendersGroupedScopedResultsInTheShippingOverlay() async throws {
         try FileManager.default.createDirectory(
             at: Render.directory,
             withIntermediateDirectories: true
@@ -41,16 +41,26 @@ final class UniversalSearchRenderTests: XCTestCase {
             Variant(name: "cyberpunk", theme: AppThemeStyles.cyberpunk, appearance: .darkAqua),
             Variant(name: "swiss", theme: AppThemeStyles.swissMinimalist, appearance: .aqua),
         ]
+        let historicalNames = try await Self.historicalNamePresentation()
         for variant in variants {
             AppThemePalette.set(variant.theme)
             let data = try XCTUnwrap(image(appearance: variant.appearance))
             try data.write(to: Render.directory.appendingPathComponent(
                 "universal-search-results-\(variant.name).png"
             ))
+            let historicalData = try XCTUnwrap(image(
+                appearance: variant.appearance, state: historicalNames
+            ))
+            try historicalData.write(to: Render.directory.appendingPathComponent(
+                "universal-search-name-history-\(variant.name).png"
+            ))
         }
     }
 
-    private func image(appearance name: NSAppearance.Name) -> Data? {
+    private func image(
+        appearance name: NSAppearance.Name,
+        state: UniversalSearchOverlayState? = nil
+    ) -> Data? {
         guard let appearance = NSAppearance(named: name) else { return nil }
         var data: Data?
         appearance.performAsCurrentDrawingAppearance {
@@ -67,7 +77,8 @@ final class UniversalSearchRenderTests: XCTestCase {
 
             let controller = UniversalSearchOverlayViewController()
             let presentation = InWindowOverlay.install(controller.view, in: window, onDismiss: {})
-            controller.apply(Self.presentation)
+            let renderedState = state ?? Self.presentation
+            controller.apply(renderedState)
             guard let root = window.contentView else { return }
             AppThemeRefresh.repaint(root)
             root.layoutSubtreeIfNeeded()
@@ -75,7 +86,12 @@ final class UniversalSearchRenderTests: XCTestCase {
             // the adjacency that regressed: selection belonged to the table row while hover was
             // a full-height cell fill, so the two plates met and read as overlapping.
             if let table = firstTable(in: controller.view),
-               let hovered = table.view(atColumn: 0, row: 4, makeIfNecessary: true)
+               let selectedRow = renderedState.rows.firstIndex(where: { row in
+                   if case let .result(result) = row { return result.id == renderedState.selectedHitID }
+                   return false
+               }),
+               selectedRow + 1 < table.numberOfRows,
+               let hovered = table.view(atColumn: 0, row: selectedRow + 1, makeIfNecessary: true)
                     as? SearchResultRowView
             {
                 hovered.mouseEntered(with: NSEvent())
@@ -86,6 +102,54 @@ final class UniversalSearchRenderTests: XCTestCase {
             presentation?.remove()
         }
         return data
+    }
+
+    private static func historicalNamePresentation() async throws -> UniversalSearchOverlayState {
+        let projectID = ProjectID()
+        let records = [
+            NavigationSearchRecord(
+                destination: .session(projectID: projectID, sessionID: SessionID()),
+                title: "MIRRORING", projectName: "Threading", providerName: "Claude",
+                updatedAt: Date(timeIntervalSince1970: 1)
+            ),
+            NavigationSearchRecord(
+                destination: .session(projectID: projectID, sessionID: SessionID()),
+                title: "IPHONE", projectName: "Threading", providerName: "Codex",
+                nameHistory: [.init(name: "MIRRORING", lastSeenAt: Date(timeIntervalSince1970: 30))],
+                updatedAt: Date(timeIntervalSince1970: 2)
+            ),
+            NavigationSearchRecord(
+                destination: .session(projectID: projectID, sessionID: SessionID()),
+                title: "DEVICECAST", projectName: "Threading", providerName: "Codex",
+                nameHistory: [.init(name: "MIRRORING", lastSeenAt: Date(timeIntervalSince1970: 10))],
+                updatedAt: Date(timeIntervalSince1970: 100)
+            ),
+        ]
+        let provider = NavigationSearchProvider(index: NavigationSearchIndex(records: records))
+        let query = try SearchQueryParser.parse("MIRRORING", scope: .everywhere, generation: 1).get()
+        var hits: [SearchHit] = []
+        for await batch in provider.search(SearchProviderRequest(query: query, clientCapabilities: .macOS)) {
+            hits.append(contentsOf: batch.hits)
+        }
+        XCTAssertEqual(hits.map(\.title), ["MIRRORING", "IPHONE", "DEVICECAST"])
+        let selectedID = try XCTUnwrap(hits.first { $0.title == "IPHONE" }?.id)
+        return UniversalSearchOverlayState(
+            query: query.text,
+            scopes: [
+                UniversalSearchScopeOption(id: "view", title: "View"),
+                UniversalSearchScopeOption(id: "project", title: "Project"),
+                UniversalSearchScopeOption(id: "everywhere", title: "Everywhere"),
+            ],
+            selectedScopeID: "everywhere",
+            rows: [.group(id: "destinations", title: "Destinations")] + hits.map { hit in
+                .result(UniversalSearchResultRow(
+                    id: hit.id, title: hit.title, detail: UniversalSearchSessionController.detail(for: hit)
+                ))
+            },
+            selectedHitID: selectedID,
+            status: nil,
+            queryError: nil
+        )
     }
 
     private func installShell(in window: NSWindow) {

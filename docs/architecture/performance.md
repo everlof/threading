@@ -4753,6 +4753,42 @@ the reported title's foreground-process owner on every report—even an identica
 retirement depends on the most recent claimant; only the expensive presentation notification is
 deduplicated.
 
+## Navigation search with historical session names
+
+Expected use is 200 sessions with a few prior names; stress is 5,000 sessions with eight names
+each, with a hard retained bound of 64 names × 512 UTF-8 bytes per session. Accepted title
+transitions update one value record and its existing exact/coalesced SQLite write. Unchanged,
+hidden and rejected titles add no history. Index construction remains on the existing single
+utility worker with one latest pending catalogue generation; opening Search consumes the warm
+immutable index and never scans provider transcripts.
+
+Exact-name and partial-name postings prioritize current names and each historical name's own
+recency before candidate admission. A query examines at most four 512-entry posting prefixes,
+deduplicates to at most 512 scored destinations and materializes at most 64 hits per navigation
+group. Localization, provenance and snippet ranges are created after that result cap, rather
+than for every scored candidate. ASCII names use cached normalized offsets; Unicode names retain
+the original-string collation path and UTF-16 range checks. Result views remain viewport-owned.
+
+`NavigationSearchProviderTests.testCandidateCapAdmitsCurrentAndRecentlyUsedNamesBeforeUnrelatedChatActivity`
+holds capped admission and ranking under 5,001 destinations. The opt-in production-provider
+timing fixture separates record manufacture, cold construction and warm queries:
+
+```bash
+THREADING_NAME_HISTORY_PROFILE=1 scripts/test.sh fast \
+  -only-testing:ThreadingTests/NavigationSearchProviderTests/testProfileNavigationNameHistoryWhenEnabled
+```
+
+On 2026-10-09, an optimized standalone probe of the unchanged HEAD provider and current production
+provider used identical 5,000-record values, five interleaved cold builds and 100 interleaved warm
+queries. Record manufacture, compiler and framework bootstrap were outside the timed phases.
+Baseline → current with no history: cold-build median 437 → 742 ms (max 645 → 1,027 ms), warm
+common-query median 1.05 → 1.37 ms (max 1.30 → 1.60 ms). Adding eight prior names per session
+gave a 1,662 ms cold build and a 9.24 ms historical-prefix query median, 23.93 ms max. The complete
+probe process peaked at about 70 MiB RSS; that includes both before/after indexes and is not an
+app-footprint or launch measurement. The extra posting preparation is an acknowledged background
+cost; warm matching remains bounded independently of catalogue size and conversation activity.
+Generated probe source and results are private under `.build/name-history-performance/`.
+
 ## Archive mutation is an exact row write
 
 A 2026-09-02 live incident contained 686 retained sessions, 630 of them archived. Ten quick archive

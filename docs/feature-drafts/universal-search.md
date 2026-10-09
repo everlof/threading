@@ -208,6 +208,16 @@ Default ordering inside each result group is:
 4. Metadata fuzzy match.
 5. Recency as a tie-breaker only.
 
+Session destinations also search their durable prior visible names. Within an equal match tier,
+current metadata wins over historical names; historical ties use when the matched name was last
+visible, rather than the session's latest activity. A historical hit keeps the current title and
+locator and adds localized `Previously …` snippet provenance. Each session retains at most 64
+distinct previous names of at most 512 UTF-8 bytes. Exact-name and partial-name posting lists admit
+current and recently used historical names into the candidate budget before generic metadata;
+queries inspect at most four 512-entry posting prefixes and score at most 512 unique destinations.
+This avoids an old name being ranked highly merely because its chat was active today, and keeps
+one result per destination. The same ordered hits and snippets reach the remote companion.
+
 The parser ships these textual filters:
 
 - `type:conversation`, `type:file`, `type:command`, `type:session`;

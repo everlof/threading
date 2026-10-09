@@ -871,6 +871,22 @@ Linux preview follows agent titles by default, including in saved and newly admi
 Truncation, account decoration and accessibility geometry stay with each renderer. The value
 does not read a store, rename a session or synchronize a catalogue.
 
+`SessionNameHistory` preserves the 64 most recent distinct previous visible names, each bounded
+to 512 UTF-8 bytes at whole-character boundaries. The timestamp is when a name stopped being
+visible, so returning to a name removes its old alias and leaving it again refreshes its recency.
+Repeated title reports, rejected/noisy names, authority-only upgrades and agent updates hidden
+behind a custom title create no history. `ProjectStore` records each accepted visible transition
+before its existing exact or coalesced write, including manual rename/clear, prompt-title changes
+and generic session updates. A refused write rolls history back with the title. Archive, restore
+and checkout moves keep history on the same session record; an older record decodes with empty
+history, without fabricating dates or scanning provider transcripts.
+
+Navigation Search projects the bounded history with the current session identity. Old-name hits
+show the current title and localized `Previously …` provenance, and navigate to the session's
+current owning project. Within the same match tier, current metadata outranks historical names;
+historical ties use the matched name's last-visible timestamp rather than conversation activity.
+This remains host-owned search metadata, with no extension data or mutation capability.
+
 The explicit rename is also the registry command `session.rename`, editable and bound to ⌘R by
 default. The Project menu routes it to the selected session. With no session selected, the command
 palette advances to a searchable session input and targets the chosen id directly; Close Session

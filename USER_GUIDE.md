@@ -4982,11 +4982,16 @@ it — which is the one case that can report "the index is in use".
 
 ## Find
 
-Find belongs to the visible surface. It is available when a Browser or Git Review tab is on
-screen; it does not place a bar over the terminal or the window chrome.
+**Cmd+F** starts in the visible surface when it supports Find, and otherwise opens Search
+Everywhere. **Cmd+Shift+F** opens Search Everywhere directly. Choose **Project** or **Everywhere**
+to find a chat by its current name or a previous name. A historical-name result shows the current
+chat title with **Previously …** underneath; Return opens that same chat in its current project.
+Equally good current-name matches rank first, then historical matches by when that name was last
+visible. Archive/restore and app relaunch preserve the history. Threading keeps the 64 most recent
+distinct previous names, up to 512 UTF-8 bytes each; history starts being recorded with this version.
 
-- **Cmd+F**: open Find in the visible Browser or Git Review tab
-- **Enter / Shift+Enter**: next / previous match
+- **Cmd+F**: open contextual Find or Search
+- In Browser and Git Review, **Enter / Shift+Enter** selects the next / previous match
 - **Esc**: close Find
 - Git Review searches file paths, displayed hunk headings, and the diff lines the pane can reveal
 - The counter shows "N of M"; an exceptionally large result set shows `M+` after the first

@@ -40062,6 +40062,17 @@
         }
       }
     },
+    "Previously %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tidigare %@"
+          }
+        }
+      }
+    },
     "Price catalog %@" : {
       "extractionState" : "manual",
       "localizations" : {

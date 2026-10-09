@@ -377,6 +377,8 @@ enum SearchScoreTier: Int, CaseIterable, Comparable, Hashable, Sendable {
 struct SearchStableOrder: Hashable, Sendable, Comparable {
     let group: SearchResultGroup
     let scoreTier: SearchScoreTier
+    /// Current metadata wins an equally good historical-name match before recency is compared.
+    let isHistoricalNameMatch: Bool
     /// A UNIX timestamp. Higher values sort first, but only after group and score tier.
     let recency: TimeInterval
     let normalizedTitle: String
@@ -385,12 +387,14 @@ struct SearchStableOrder: Hashable, Sendable, Comparable {
     init(
         group: SearchResultGroup,
         scoreTier: SearchScoreTier,
+        isHistoricalNameMatch: Bool = false,
         recency: Date?,
         title: String,
         stableID: SearchHitID
     ) {
         self.group = group
         self.scoreTier = scoreTier
+        self.isHistoricalNameMatch = isHistoricalNameMatch
         self.recency = recency?.timeIntervalSince1970 ?? 0
         normalizedTitle = title.folding(
             options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
@@ -402,6 +406,9 @@ struct SearchStableOrder: Hashable, Sendable, Comparable {
     static func < (lhs: SearchStableOrder, rhs: SearchStableOrder) -> Bool {
         if lhs.group != rhs.group { return lhs.group < rhs.group }
         if lhs.scoreTier != rhs.scoreTier { return lhs.scoreTier < rhs.scoreTier }
+        if lhs.isHistoricalNameMatch != rhs.isHistoricalNameMatch {
+            return !lhs.isHistoricalNameMatch
+        }
         if lhs.recency != rhs.recency { return lhs.recency > rhs.recency }
         if lhs.normalizedTitle != rhs.normalizedTitle {
             return lhs.normalizedTitle < rhs.normalizedTitle

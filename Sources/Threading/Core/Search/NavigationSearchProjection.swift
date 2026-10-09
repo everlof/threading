@@ -42,6 +42,7 @@ enum NavigationSearchProjection {
                 session.externalIdentifier,
                 session.id.uuidString,
             ].compactMap { $0 },
+            nameHistory: session.nameHistory.entries,
             updatedAt: session.archivedAt ?? session.lastUsedAt
         )
     }

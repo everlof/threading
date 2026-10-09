@@ -1910,6 +1910,7 @@
         "Literal match emphasis",
         "Selected result",
         "Adjacent hover and selection remain separate",
+        "Historical name matches show the current title and previous name",
         "Visible cap and partial coverage"
       ],
       "matrix": {
