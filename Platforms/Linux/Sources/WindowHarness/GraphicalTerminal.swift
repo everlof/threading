@@ -251,7 +251,7 @@ final class GraphicalTerminal: @unchecked Sendable {
         environment["LANG"] = environment["LANG"] ?? "C.UTF-8"
         return environment.map { "\($0.key)=\($0.value)" }
     }
-    private static func accountPath(for kind: AgentKind, handle: AccountHandle) throws -> String {
+    static func accountPath(for kind: AgentKind, handle: AccountHandle) throws -> String {
         guard let home = ProcessInfo.processInfo.environment["HOME"], home.hasPrefix("/") else {
             throw WindowFailure("an absolute HOME is required for agent account routing")
         }

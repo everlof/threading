@@ -139,3 +139,4 @@ Sources/Threading/Core/MCP/MCPServerBinding.swift
 Sources/Threading/Core/MCP/ConversationMCPAdmission.swift
 
 Sources/Threading/Core/Agent/ConversationCallbackDelivery.swift
+Sources/Threading/Core/Agent/ConversationPreparedChild.swift

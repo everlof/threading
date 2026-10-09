@@ -37,6 +37,7 @@ final class ClaudeStreamSession:
 
     let sessionID: SessionID
 
+    private let preparedChild: ConversationPreparedChild?
     private let callbackDelivery: ConversationCallbackDelivery
     private let plan: () throws -> AgentLaunchPlan
     private let effort: String?
@@ -147,12 +148,14 @@ final class ClaudeStreamSession:
     init(
         sessionID: SessionID,
         callbackDelivery: ConversationCallbackDelivery = .main,
+        preparedChild: ConversationPreparedChild? = nil,
         effort: String? = nil,
         subagentTranscriptPlan: @escaping () -> ClaudeSubagentTranscriptPlan? = { nil },
         hostPlan: @escaping () throws -> PTYHostChildPlan? = { nil },
         controlTimeouts: ClaudeControlTimeouts = .standard,
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
+        self.preparedChild = preparedChild
         self.callbackDelivery = callbackDelivery
         self.sessionID = sessionID
         self.effort = effort
@@ -184,16 +187,20 @@ final class ClaudeStreamSession:
         let process: AgentChildProcess
         do {
             let plan = try plan()
-            process = try AgentChildProcess.launch(
-                executable: plan.executable,
-                arguments: plan.arguments,
-                environment: plan.launchEnvironment(),
-                sessionID: sessionID,
-                host: try hostPlan()
-            ) { [weak self] status in
+            let onExit: @Sendable (Int32) -> Void = { [weak self] status in
                 delivery.enqueue { [weak self] in
                     self?.handleTermination(status: status)
                 }
+            }
+            if let preparedChild { process = try preparedChild.take(onExit: onExit) }
+            else {
+                process = try AgentChildProcess.launch(
+                    executable: plan.executable,
+                    arguments: plan.arguments,
+                    environment: plan.launchEnvironment(),
+                    sessionID: sessionID,
+                    host: try hostPlan(),
+                    onExit: onExit)
             }
         } catch {
             ThreadingLogger.agent.error(

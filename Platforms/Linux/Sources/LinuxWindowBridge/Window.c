@@ -444,7 +444,7 @@ int tw_workspace_editor_focus(TWWindow *w, int focused) {
         tw_reset_text_input(w, w->terminal);
         return 0;
     }
-    if (!w->sidebarWidth || !w->placeholderMode) return -1;
+    if (!w->sidebarWidth || (!w->placeholderMode && !w->composerMode)) return -1;
     tw_workspace_focus(w, 0);
     if (w->editorFocused) return 0;
     w->editorFocused = 1;
@@ -453,7 +453,7 @@ int tw_workspace_editor_focus(TWWindow *w, int focused) {
 }
 int tw_workspace_editor_focused(TWWindow *w) { return w && w->editorFocused; }
 int tw_workspace_composer_mode(TWWindow *w, int enabled) {
-    if (!w || (enabled && (!w->sidebarWidth || !w->placeholderMode))) return -1;
+    if (!w || (enabled && !w->sidebarWidth)) return -1;
     const int next = enabled != 0;
     if (w->composerMode == next) return 0;
     w->composerMode = next;

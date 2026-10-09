@@ -105,7 +105,20 @@ permission presentation and MCP catalogue admission. The Mac keeps its existing 
 Linux denies permissions and exposes no MCP tools until its host supplies those boundaries.
 Deterministic peers exercise two turns, Unicode, permission replies and exactly one exit both
 locally and through the real Linux daemon. This is transport evidence: the ordinary Linux
-workspace still needs the conversation controller, composer and launch plans.
+workspace still needs the complete production conversation controller and its permission and
+extension host integration.
+
+The Linux preview's ordinary workspace now honors `usesNativeUI` for saved records. Its native
+pane shares header/menu ownership with the terminal pane and mounts production Design message,
+prompt and content-table components. The preview host uses the shared transports and timeline;
+it does not yet mount the complete Mac conversation controller or its extension presentation.
+Worker preparation owns account/history lookup, Markdown partitioning, child launch and durable
+metadata. `ConversationPreparedChild` transfers a worker-created child once to the UI transport,
+retaining an exit that arrives before installation. The ordinary Codex journey checks native
+selection, persistent turns, draft retention across a terminal switch, restart replay and
+same-thread resume. Claude's workspace plan is available but its ordinary journey is not yet
+verified. Full tool disclosures, permission presentation and the other provider launch routes
+remain open. MCP admission and permission decisions still use the previously stated host boundary.
 
 `ConversationCallbackDelivery` makes the host's UI executor explicit. The Mac default keeps
 MainActor tasks for deferred lifecycle callbacks and main-queue delivery for worker results.

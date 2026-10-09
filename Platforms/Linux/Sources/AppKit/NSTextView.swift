@@ -205,6 +205,25 @@ open class NSTextView: NSText {
     }
 
     open func selectedRange() -> NSRange { selected }
+    open func selectAll(_ sender: Any?) {
+        guard isSelectable else { return }
+        setSelectedRange(NSRange(location: 0, length: textStorage?.length ?? 0))
+    }
+    open func copy(_ sender: Any?) { _ = writeSelectionToPasteboard() }
+    open func cut(_ sender: Any?) {
+        guard isEditable, writeSelectionToPasteboard() else { return }
+        insertText("", replacementRange: selected)
+    }
+    open func paste(_ sender: Any?) {
+        guard isEditable, let value = NSPasteboard.general.string(forType: .string) else { return }
+        insertText(value, replacementRange: selected)
+    }
+    private func writeSelectionToPasteboard() -> Bool {
+        // The native pasteboard's 64 KiB budget bounds editable text transfer.
+        guard selected.length > 0, selected.length <= 65_536 else { return false }
+        let value = ((textStorage?.string ?? "") as NSString).substring(with: selected)
+        return NSPasteboard.general.setString(value, forType: .string)
+    }
     open func setSelectedRange(_ range: NSRange) {
         let length = textStorage?.length ?? 0
         let start = min(max(0, range.location), length)
@@ -357,6 +376,13 @@ open class NSTextView: NSText {
         if marked != nil { return }
         let characters = event.charactersIgnoringModifiers ?? ""
         if event.modifierFlags.contains(.control) || event.modifierFlags.contains(.command) {
+            switch characters.lowercased() {
+            case "a": selectAll(nil); return
+            case "c": copy(nil); return
+            case "x": cut(nil); return
+            case "v": paste(nil); return
+            default: break
+            }
             if characters.lowercased() == "z" || event.keyCode == 29 {
                 if event.modifierFlags.contains(.shift) { redo(nil) }
                 else { undo(nil) }

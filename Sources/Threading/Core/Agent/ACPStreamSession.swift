@@ -46,6 +46,7 @@ final class ACPStreamSession:
     private let handshakeTimeout: TimeInterval
     private let commandCatalogTimeout: TimeInterval
     private let mcpBinding: MCPServerBinding?
+    private let preparedChild: ConversationPreparedChild?
     private let callbackDelivery: ConversationCallbackDelivery
     private let plan: () throws -> AgentLaunchPlan
 
@@ -101,6 +102,7 @@ final class ACPStreamSession:
     init(
         sessionID: SessionID,
         callbackDelivery: ConversationCallbackDelivery = .main,
+        preparedChild: ConversationPreparedChild? = nil,
         workingDirectory: String,
         profile: ACPProviderProfile,
         handshakeTimeout: TimeInterval = ACPDefaults.handshakeTimeout,
@@ -109,6 +111,7 @@ final class ACPStreamSession:
         hostPlan: @escaping () throws -> PTYHostChildPlan? = { nil },
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
+        self.preparedChild = preparedChild
         self.callbackDelivery = callbackDelivery
         self.sessionID = sessionID
         self.workingDirectory = workingDirectory
@@ -130,14 +133,18 @@ final class ACPStreamSession:
         do {
             let launchPlan = try plan()
             resetForLaunch(resumeState: launchPlan.resumeState)
-            process = try AgentChildProcess.launch(
-                executable: launchPlan.executable,
-                arguments: launchPlan.arguments,
-                environment: launchPlan.launchEnvironment(),
-                sessionID: sessionID,
-                host: try hostPlan()
-            ) { [weak self] status in
+            let onExit: @Sendable (Int32) -> Void = { [weak self] status in
                 delivery.enqueue { [weak self] in self?.handleTermination(status: status) }
+            }
+            if let preparedChild { process = try preparedChild.take(onExit: onExit) }
+            else {
+                process = try AgentChildProcess.launch(
+                    executable: launchPlan.executable,
+                    arguments: launchPlan.arguments,
+                    environment: launchPlan.launchEnvironment(),
+                    sessionID: sessionID,
+                    host: try hostPlan(),
+                    onExit: onExit)
             }
         } catch {
             let label = profile.diagnosticsLabel

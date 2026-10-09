@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Agent Launch Plan
 
 /// A fully resolved command line for starting or resuming an agent session.
-struct AgentLaunchPlan {
+struct AgentLaunchPlan: Sendable {
     let executable: String
     let arguments: [String]
 

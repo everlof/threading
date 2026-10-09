@@ -370,17 +370,7 @@ enum AgentLauncher {
         appendModelFlag(for: session, flag: AgentDefaults.claudeModelFlag, to: &command)
         appendReasoningEffort(for: session, to: &command)
         appendPermissionMode(for: session, to: &command)
-        command.append(flag: "--print")
-        command.append(flag: "--input-format", value: "stream-json")
-        command.append(flag: "--output-format", value: "stream-json")
-        command.append(flag: "--include-partial-messages")
-        command.append(flag: "--verbose")
-        command.append(flag: "--forward-subagent-text")
-
-        // Purely diagnostic, and the only view of the one failure this app cannot see: a hook
-        // that never reaches the listener leaves nothing here, while the agent silently waits
-        // on a blocked tool. `HookOutcomeLog` reads what this adds; nothing renders it.
-        command.append(flag: "--include-hook-events")
+        command.append(contentsOf: ClaudeLaunchCommand.streamProtocolFlags())
 
         let resumeState: ResumeState
 
@@ -424,28 +414,13 @@ enum AgentLauncher {
         for session: AgentSession,
         in project: Project
     ) -> AgentLaunchPlan {
-        var command = ShellCommand()
-        appendManagedCodexInvocation(to: &command)
-        appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
-        appendCodexConversationOverrides(for: session, to: &command)
-
-        // A stated mode replaces the sandbox this transport otherwise fixes, rather than adding
-        // a second `--sandbox`. Unstated it stays `workspace-write`, which is not a default so
-        // much as this surface's own requirement: a natively rendered session that suddenly
-        // inherited a read-only `config.toml` would stop being able to edit anything, and would
-        // say so only through failing tools.
-        if permissionMode(for: session) != nil {
-            appendPermissionMode(for: session, to: &command)
-        } else {
-            command.append(
-                flag: AgentDefaults.codexSandboxFlag,
-                value: AgentDefaults.codexSandboxWorkspaceWrite
-            )
-        }
-
-        appendCodexHookFlags(for: session, to: &command)
-        command.append(word: "app-server")
-        command.append(flag: "--listen", value: "stdio://")
+        var overrides = ShellCommand()
+        appendCodexConversationOverrides(for: session, to: &overrides)
+        var hookFlags = ShellCommand()
+        appendCodexHookFlags(for: session, to: &hookFlags)
+        let command = CodexLaunchCommand.appServer(model: session.model,
+            conversationOverrides: overrides, permissionMode: permissionMode(for: session),
+            hookFlags: hookFlags)
 
         return launchPlan(
             route: routed(command, for: session, brokersPermissions: true),

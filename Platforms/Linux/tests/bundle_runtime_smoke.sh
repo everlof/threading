@@ -106,7 +106,10 @@ mkdir -p /evidence/restart-out
 chmod 0777 /evidence/restart-out
 rm /tmp/out
 ln -s /evidence/restart-out /tmp/out
-runuser -u threading-preview-test -- xvfb-run -a bash -s -- "$installed/bin" "$restart_fixture" <<'RESTART'
+# This lane deliberately shares one display across short-lived clients. Keep it alive between
+# journeys; an X server reset can race the next client's SDL video-driver discovery.
+runuser -u threading-preview-test -- xvfb-run -a -s '-screen 0 1280x1024x24 -noreset' \
+  bash -s -- "$installed/bin" "$restart_fixture" <<'RESTART'
 set -euo pipefail
 bin=$1
 fixture=$2
@@ -152,6 +155,8 @@ timeout 15 "$bin/WindowHarness" --app-event-contract
 timeout 30 "$bin/WindowHarness" --ui-worker-contract
 timeout 60 "$bin/WindowHarness" --native-conversation-delivery-contract /native-conversation-providers.py
 dbus-run-session -- python3 /short_user_row_smoke.py "$bin/WindowHarness" /evidence/restart-out/short-user-row
+dbus-run-session -- python3 /native_workspace_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture" /evidence/restart-out/native-workspace
 dbus-run-session -- python3 /composer_account_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/composer-account.sock" "$fixture" \
   /evidence/restart-out/composer-account

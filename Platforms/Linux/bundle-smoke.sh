@@ -108,6 +108,7 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/composer_smoke.py:/composer_smoke.py:ro" \
   -v "$PWD/tests/document_ui_smoke.py:/document_ui_smoke.py:ro" \
   -v "$PWD/tests/short_user_row_smoke.py:/short_user_row_smoke.py:ro" \
+  -v "$PWD/tests/native_workspace_smoke.py:/native_workspace_smoke.py:ro" \
   -v "$PWD/tests/native_conversation/providers.py:/native-conversation-providers.py:ro" \
   -v "$PWD/tests/user_bubble_smoke.py:/user_bubble_smoke.py:ro" \
   -v "$PWD/tests/automatic_rows_smoke.py:/automatic_rows_smoke.py:ro" \

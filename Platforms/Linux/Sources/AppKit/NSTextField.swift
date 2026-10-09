@@ -517,6 +517,9 @@ open class NSTextField: NSView {
     /// The raster host can observe settling without touching a Pango handle or scanning source.
     public var isCompleteTextLayoutReady: Bool { completeLabel?.isReady ?? false }
     public var isCompleteTextViewportReady: Bool { completeLabel?.isViewportReady ?? false }
+    public var isWaitingForCompleteTextViewport: Bool {
+        usesCompletePlainText && !preparedUTF8.isEmpty && !(completeLabel?.isViewportReady ?? false)
+    }
 
     private func completePlainText(at scale: CGFloat) -> CompletePlainLabelState? {
         guard usesCompletePlainText, !preparedUTF8.isEmpty else { return nil }

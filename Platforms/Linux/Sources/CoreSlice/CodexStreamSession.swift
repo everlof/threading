@@ -88,6 +88,7 @@ final class CodexStreamSession:
         return process.processIdentifier
     }
 
+    private let preparedChild: ConversationPreparedChild?
     private let callbackDelivery: ConversationCallbackDelivery
     private let plan: () throws -> AgentLaunchPlan
     private let configurationProvider: () -> CodexTurnConfiguration
@@ -167,11 +168,13 @@ final class CodexStreamSession:
     init(
         sessionID: SessionID,
         callbackDelivery: ConversationCallbackDelivery = .main,
+        preparedChild: ConversationPreparedChild? = nil,
         workingDirectory: String = FileManager.default.currentDirectoryPath,
         configurationProvider: @escaping () -> CodexTurnConfiguration = { .inherited },
         hostPlan: @escaping () throws -> PTYHostChildPlan? = { nil },
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
+        self.preparedChild = preparedChild
         self.callbackDelivery = callbackDelivery
         self.sessionID = sessionID
         self.workingDirectory = workingDirectory
@@ -206,16 +209,20 @@ final class CodexStreamSession:
         do {
             let launchPlan = try plan()
             resetForLaunch(resumeState: launchPlan.resumeState)
-            process = try AgentChildProcess.launch(
-                executable: launchPlan.executable,
-                arguments: launchPlan.arguments,
-                environment: launchPlan.launchEnvironment(),
-                sessionID: sessionID,
-                host: try hostPlan()
-            ) { [weak self] status in
+            let onExit: @Sendable (Int32) -> Void = { [weak self] status in
                 delivery.enqueue { [weak self] in
                     self?.handleTermination(status: status)
                 }
+            }
+            if let preparedChild { process = try preparedChild.take(onExit: onExit) }
+            else {
+                process = try AgentChildProcess.launch(
+                    executable: launchPlan.executable,
+                    arguments: launchPlan.arguments,
+                    environment: launchPlan.launchEnvironment(),
+                    sessionID: sessionID,
+                    host: try hostPlan(),
+                    onExit: onExit)
             }
         } catch {
             ThreadingLogger.agent.error(

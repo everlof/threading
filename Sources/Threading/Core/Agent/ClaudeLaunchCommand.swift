@@ -4,6 +4,20 @@ import Foundation
 /// permission mode and any host-owned integration flags; this value never discovers accounts,
 /// writes settings or decides whether a transcript exists on its machine.
 enum ClaudeLaunchCommand {
+    /// The persistent bidirectional protocol, shared by native platform hosts. Hook settings,
+    /// account routing and fresh/resume admission remain the host's responsibility.
+    static func streamProtocolFlags() -> ShellCommand {
+        var command = ShellCommand()
+        command.append(flag: "--print")
+        command.append(flag: "--input-format", value: "stream-json")
+        command.append(flag: "--output-format", value: "stream-json")
+        command.append(flag: "--include-partial-messages")
+        command.append(flag: "--verbose")
+        command.append(flag: "--forward-subagent-text")
+        command.append(flag: "--include-hook-events")
+        return command
+    }
+
     static func terminalPair(
         for session: AgentSession,
         executable: String,

@@ -1,0 +1,212 @@
+#if os(Linux)
+import AppKit
+import Foundation
+import LinuxWindowBridge
+@testable import CoreSlice
+
+/// Native conversation content in the ordinary workspace. The same chrome serves a terminal;
+/// transcript cells and prompt controls come from the production Design sources.
+@MainActor
+final class WorkspaceConversationPane: WorkspacePane {
+    let runtime: NativeWorkspaceSession
+    let chrome: WorkspacePaneChrome
+    private let owner = NSWindow(backingScaleFactor: 2)
+    private let root = NSView(frame: .zero)
+    private let scroll = ThemedScrollView()
+    private let table = ConversationContentTable.make()
+    private let rows = DocumentRowSource()
+    private let editor = PromptTextView.scrollingPrompt()
+    private let submit = ThemedButton()
+    private let status: NSTextField
+    private var needsPresentation = true
+    private var presentedSize = NSSize.zero
+    private var displayRevision: UInt64 = 0
+    private var followTail = true
+    private var focused = false
+    var title: String { "Threading conversation · \(runtime.status)" }
+    var needsPolling: Bool { false }
+    func takeInitialViewport() -> (Int, Int)? { nil }
+
+    init(runtime: NativeWorkspaceSession, pageName: String, icon: NSImage?, onReveal: @escaping () -> Void) {
+        self.runtime = runtime
+        chrome = WorkspacePaneChrome(pageName: pageName, pageIdentity: runtime.id.uuidString,
+            symbolName: "text.bubble", icon: icon, showsSessionActions: true, onReveal: onReveal)
+        status = ConversationRowView.streaming(runtime.status)
+        // These four peers are positioned by this bounded host, while each peer's own
+        // internal constraints still own its content. Do not feed their intrinsic fits back
+        // into the root as unconstrained Auto Layout siblings.
+        let positionedViews: [NSView] = [scroll, status, editor, submit]
+        for view in positionedViews { view.translatesAutoresizingMaskIntoConstraints = true }
+        table.dataSource = rows
+        table.delegate = rows
+        scroll.documentView = table
+        scroll.hasVerticalScroller = true
+        editor.textView.placeholder = "Reply to this conversation"
+        editor.textView.textContainerInset = NSSize(width: Design.Spacing.medium, height: Design.Spacing.small)
+        editor.textView.submitsOnReturn = { true }
+        editor.textView.onSubmit = { [weak self] _ in self?.send() }
+        submit.title = "Send"
+        submit.isProminent = true
+        submit.setAccessibilityIdentifier("composer.conversation-reply.submit")
+        submit.action = { [weak self] in
+            guard let self else { return }
+            if self.runtime.canInterrupt { self.runtime.interrupt() }
+            else { self.send() }
+        }
+        editor.textView.nextKeyView = submit
+        submit.nextKeyView = editor.textView
+        root.addSubview(scroll)
+        root.addSubview(status)
+        root.addSubview(editor)
+        root.addSubview(submit)
+        owner.contentView = root
+        runtime.onRow = { [weak self] index, row, blocks in
+            guard let self else { return }
+            self.rows.updateNativeRow(row, at: index, blocks: blocks, in: self.table)
+            self.needsPresentation = true
+        }
+        runtime.onStreaming = { [weak self] text in
+            guard let self else { return }
+            self.rows.setStreaming(text.flatMap { $0.isEmpty ? nil : $0 }, in: self.table, native: true)
+            self.needsPresentation = true
+        }
+        runtime.onChange = { [weak self] in self?.updateState() }
+        setThemeAppearance()
+        updateState()
+    }
+
+    private func updateState() {
+        status.stringValue = runtime.status
+        status.textColor = runtime.failure == nil ? Design.Text.secondary : Design.Status.negative
+        submit.title = runtime.canInterrupt ? "Stop" : "Send"
+        submit.isEnabled = runtime.canInterrupt || (runtime.canSend
+            && !editor.textView.hasMarkedText()
+            && !editor.textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        needsPresentation = true
+    }
+
+    private func send() {
+        guard !editor.textView.hasMarkedText(), runtime.send(editor.textView.string) else { updateState(); return }
+        editor.textView.string = ""
+        followTail = true
+        updateState()
+    }
+
+    func setThemeAppearance() {
+        chrome.setThemeAppearance()
+        root.appearance = LinuxTheme.appearance
+        root.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+        editor.applySurface(fill: Design.Surface.elevated, radius: .control)
+        rows.refreshTheme()
+        needsPresentation = true
+    }
+
+    func focus(_ focused: Bool, window: OpaquePointer) {
+        self.focused = focused
+        chrome.focus(focused, window: window)
+        owner.isKeyWindow = focused
+        _ = tw_workspace_composer_mode(window, 1)
+        if focused { _ = owner.makeFirstResponder(editor.textView) }
+        else { owner.cancelPointerGesture(); _ = owner.makeFirstResponder(nil) }
+        _ = tw_workspace_editor_focus(window, focused ? 1 : 0)
+        needsPresentation = true
+    }
+
+    func refresh(window: OpaquePointer, width: Int, height: Int, originX: Int, focused: Bool) throws {
+        try chrome.refresh(window: window, width: width, height: height, originX: originX)
+        let contentHeight = max(1, height - WorkspacePaneChrome.headerPixelHeight)
+        let size = NSSize(width: CGFloat(width) / 2, height: CGFloat(contentHeight) / 2)
+        guard needsPresentation || size != presentedSize || displayRevision != owner.displayRevision else { return }
+        root.frame = NSRect(origin: .zero, size: size)
+        let inset = min(Design.Spacing.inset, size.width / 8)
+        let actionHeight = min(28, max(1, size.height / 5))
+        let actionWidth = min(72, max(1, size.width / 4))
+        submit.frame = NSRect(x: max(inset, size.width - inset - actionWidth), y: inset,
+            width: actionWidth, height: actionHeight)
+        let editorHeight = min(72, max(1, size.height / 4))
+        editor.frame = NSRect(x: inset, y: inset + actionHeight + Design.Spacing.small,
+            width: max(1, size.width - 2 * inset), height: editorHeight)
+        status.frame = NSRect(x: inset, y: inset, width: max(1, size.width - 3 * inset - actionWidth), height: actionHeight)
+        let bottom = editor.frame.maxY + Design.Spacing.medium
+        scroll.frame = NSRect(x: inset, y: bottom, width: max(1, size.width - 2 * inset),
+            height: max(1, size.height - bottom - inset))
+        if table.frame.width != scroll.bounds.width {
+            table.tableColumns.first?.width = scroll.bounds.width
+            table.frame.size.width = scroll.bounds.width
+            ConversationVirtualRowHost.stateColumnWidth(in: table)
+            table.noteHeightOfRows(withIndexesChanged: table.visibleRowIndexes)
+        }
+        owner.layoutIfNeeded()
+        if followTail {
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, table.frame.height - scroll.contentView.bounds.height)))
+        }
+        let bitmap = Bitmap(width: width, height: contentHeight, background: LinuxTheme.components("ground"))
+        root.render(in: NSGraphicsContext(bitmap: bitmap, scale: 2))
+        let result = bitmap.pixels.withUnsafeBufferPointer {
+            tw_present_pane(window, $0.baseAddress, Int32(width), Int32(contentHeight), 0)
+        }
+        guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
+        if focused {
+            tw_title(window, title)
+            let caret = editor.textView.convert(editor.textView.insertionPointRect, to: root)
+            tw_text_input_rect(window, Int32(originX + Int(caret.minX * 2)),
+                Int32(WorkspacePaneChrome.headerPixelHeight + Int((size.height - caret.maxY) * 2)),
+                Int32(max(1, caret.width * 2)), Int32(max(1, caret.height * 2)))
+        }
+        tw_accessibility_show_terminal(window, title)
+        needsPresentation = false
+        presentedSize = size
+        displayRevision = owner.displayRevision
+        func waiting(_ view: NSView) -> Bool {
+            (view as? NSTextField)?.isWaitingForCompleteTextViewport == true || view.subviews.contains(where: waiting)
+        }
+        let prepared = runtime.rowsPrepared && !waiting(table) && !status.isWaitingForCompleteTextViewport
+        print("CONVERSATION_FRAME \(runtime.id.uuidString) rows=\(table.numberOfRows) mounted=\(table.mountedViewCount) turns=\(runtime.completedTurns) prepared=\(prepared) dark=\(LinuxTheme.isDark) status=\(runtime.status)")
+        fflush(nil)
+    }
+
+    func handle(_ input: TWEvent, window: OpaquePointer) {
+        var input = input
+        switch input.kind {
+        case 6, 46:
+            if let text = String(validatingCString: tw_event_text(&input)) {
+                editor.textView.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+            }
+        case 19, 47:
+            if let text = String(validatingCString: tw_event_text(&input)) {
+                let lengths = text.unicodeScalars.map { String($0).utf16.count }
+                let start = min(max(0, Int(input.textCursor)), lengths.count)
+                let end = min(start + max(0, Int(input.textSelectionLength)), lengths.count)
+                editor.textView.setMarkedText(text, selectedRange: NSRange(location: lengths.prefix(start).reduce(0, +),
+                    length: lengths[start..<end].reduce(0, +)), replacementRange: NSRange(location: NSNotFound, length: 0))
+            }
+        case 7, 48:
+            guard input.action != 3 else { return }
+            let event = WindowHarness.composerKeyEvent(input)
+            if input.modifiers & (4 | 8) != 0, Int(input.key) == 118 { paste() }
+            else if input.modifiers & (4 | 8) != 0, Int(input.key) == 97 {
+                editor.textView.selectAll(nil)
+            }
+            else { _ = owner.dispatchToContent(event) }
+        case 14: paste()
+        case 15, 17, 16:
+            let type: NSEvent.EventType = input.kind == 16 ? .scrollWheel
+                : input.kind == 17 ? .leftMouseDragged
+                : input.action == 3 ? .leftMouseUp : .leftMouseDown
+            let point = NSPoint(x: CGFloat(input.x) / 2, y: root.bounds.height - CGFloat(input.y) / 2)
+            _ = owner.dispatchToContent(NSEvent(type: type, locationInWindow: point,
+                scrollingDeltaY: input.kind == 16 ? CGFloat(input.key) : 0))
+            if input.kind == 16 {
+                followTail = scroll.contentView.bounds.maxY >= table.frame.maxY - 1
+            }
+            _ = tw_workspace_editor_focus(window, owner.firstResponder === editor.textView ? 1 : 0)
+        default: break
+        }
+        updateState()
+    }
+
+    private func paste() {
+        editor.textView.paste(nil)
+    }
+}
+#endif

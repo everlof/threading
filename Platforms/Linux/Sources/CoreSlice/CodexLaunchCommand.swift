@@ -3,6 +3,30 @@ import Foundation
 /// Portable Codex command composition. Hosts resolve accounts, model metadata, hook installation
 /// and policy before supplying these values; this type does not inspect settings or credentials.
 enum CodexLaunchCommand {
+    static func appServer(
+        executable: String = AgentDefaults.codexExecutable,
+        model: String?, conversationOverrides: ShellCommand = ShellCommand(),
+        permissionMode: AgentPermissionMode?, hookFlags: ShellCommand = ShellCommand()
+    ) -> ShellCommand {
+        var command = invocation(executable: executable)
+        if let model, !model.isEmpty {
+            command.append(flag: AgentDefaults.codexModelFlag, value: model)
+        }
+        command.append(contentsOf: conversationOverrides)
+        if let permissionMode {
+            for flag in permissionMode.launchFlags(for: .codex) {
+                command.append(flag: flag.name, value: flag.value)
+            }
+        } else {
+            command.append(flag: AgentDefaults.codexSandboxFlag,
+                           value: AgentDefaults.codexSandboxWorkspaceWrite)
+        }
+        command.append(contentsOf: hookFlags)
+        command.append(word: "app-server")
+        command.append(flag: "--listen", value: "stdio://")
+        return command
+    }
+
     static func invocation(executable: String = AgentDefaults.codexExecutable) -> ShellCommand {
         var command = ShellCommand(word: executable)
         command.append(flag: AgentDefaults.codexConfigFlag,

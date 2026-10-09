@@ -254,9 +254,16 @@ without changing process-wide disposition. `NativeRemoteContractHarness` checks 
 encrypted secret envelopes and compressed Unicode ZIP/gzip with independent readers.
 These contracts run in the canonical bundle build lane. Swift Crypto 5.0.0 supplies the Linux
 cryptography implementation; its license, notice and pinned BoringSSL license ship in the bundle.
-The native conversation classes are not yet mounted in the ordinary workspace. That host still
-needs the conversation controller, composer/permission presentation and provider launch plans;
-the existing stream UI fixture continues to use its narrower diagnostic transport path.
+Saved sessions now retain their `usesNativeUI` choice. Native records open a conversation pane in
+the ordinary workspace; terminal records keep the emulator. Both use the same pane chrome and
+share the eight-runtime limit. The native host prepares account routing, history and child launch
+on a serial worker, then mounts the shared production rows and prompt editor. Codex and Claude
+launch plans are available; the ordinary Codex journey is verified against a deterministic peer.
+Permission presentation, full tool-row interaction, other providers' workspace launch routes and
+the complete production conversation controller remain open. Resized evidence also exposes
+narrow user bubbles and inconsistent colors after a dark switch; those visual defects remain open.
+The existing stream UI fixture
+continues to use its narrower diagnostic transport path.
 `WindowHarness --native-conversation-delivery-contract tests/native_conversation/providers.py`
 checks all four production profiles while SDL occupies MainActor, including persistent turns,
 permission replies, EOF, output admission limits, silent handshake expiry and deferred planning
@@ -265,6 +272,11 @@ transport and reports one typed failure on overflow.
 `WindowHarness --short-user-bubble-ui-fixture OUTPUT_DIRECTORY` mounts the production short-user
 row factory. Its installed journey checks compact right alignment, Unicode selection and bright
 text after a dark switch; the long-message journey uses the same factory's expandable branch.
+`tests/native_workspace_smoke.py` selects a saved native record through the ordinary agent picker,
+sends Unicode and multiline turns to the production Codex app-server wrapper over the real daemon,
+switches to a project terminal and back with its draft and child intact, changes theme, restarts,
+replays the account's transcript and resumes the same provider thread. It also checks prompt
+clipboard transfer and waits for row preparation and plain-text viewport pixels before capture.
 
 `tests/search_match/run.sh` links unchanged production `SearchMatchLabel` through the same
 Pango-backed label path and checks highlighted attributed pixels, a one-line ellipsis, cell

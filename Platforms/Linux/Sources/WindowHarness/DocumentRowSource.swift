@@ -18,6 +18,9 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
         /// A reply still arriving. It can span several blocks, so it renders as a whole page.
         case streaming(String)
         case user(String)
+        case thinking(String)
+        case native(ConversationTimeline.Row)
+        case nativeStreaming(String)
     }
     private var entries: [Entry]
     private var nextID: Int
@@ -29,6 +32,7 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
     private(set) var live: Set<Int> = []
     private var activeDiffs: [Int: DiffView] = [:]
     private var expandedUsers: Set<Int> = []
+    private var nativeLocations: [Int: (start: Int, count: Int)] = [:]
     private let identifier = NSUserInterfaceItemIdentifier("ConversationDiagnosticRow")
 
     var appDiffViewCount: Int { activeDiffs.count }
@@ -68,16 +72,45 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
     func appendDiff(_ lines: [DiffLine], in table: NSTableView) {
         appendSettled([.diff(lines)], in: table)
     }
+    /// Stable timeline identity survives a tool result replacing its pending row. Markdown
+    /// partitions arrive from the host's worker, and only viewport cells become views.
+    func updateNativeRow(_ row: ConversationTimeline.Row, at index: Int,
+                         blocks: [String]?, in table: NSTableView) {
+        let contents: [Content]
+        switch row {
+        case .assistant(let text): contents = (blocks ?? [text]).map(Content.markdown)
+        case .thinking(let text): contents = (blocks ?? [text]).map(Content.thinking)
+        case .userMessage(let message): contents = [.user(message.text)]
+        default: contents = [.native(row)]
+        }
+        if let location = nativeLocations[index] {
+            let start = location.start, count = location.count
+            if count == contents.count {
+                for offset in 0..<count {
+                    entries[start + offset] = Entry(id: entries[start + offset].id, content: contents[offset])
+                }
+                table.reloadData(forRowIndexes: IndexSet(integersIn: start..<(start + count)), columnIndexes: IndexSet(integer: 0))
+                return
+            }
+            // Only pending tool results update a settled native row. Its one-row anatomy is
+            // stable; do not search/reindex the transcript on each streamed tool update.
+            preconditionFailure("native result update changed its settled row anatomy")
+        }
+        let start = streamingIndex ?? entries.count
+        appendSettled(contents, in: table)
+        nativeLocations[index] = (start, contents.count)
+    }
     /// Shows, updates or retires the one streaming row. An update reloads only that row.
-    func setStreaming(_ text: String?, in table: NSTableView) {
+    func setStreaming(_ text: String?, in table: NSTableView, native: Bool = false) {
+        func content(_ value: String) -> Content { native ? .nativeStreaming(value) : .streaming(value) }
         switch (text, streamingIndex) {
         case (let text?, nil):
-            entries.append(Entry(id: nextID, content: .streaming(text)))
+            entries.append(Entry(id: nextID, content: content(text)))
             nextID += 1
             streamingIndex = entries.count - 1
             table.insertRows(at: IndexSet(integer: entries.count - 1), withAnimation: [])
         case (let text?, let index?):
-            entries[index] = Entry(id: entries[index].id, content: .streaming(text))
+            entries[index] = Entry(id: entries[index].id, content: content(text))
             table.reloadData(forRowIndexes: IndexSet(integer: index), columnIndexes: IndexSet(integer: 0))
         case (nil, let index?):
             entries.remove(at: index)
@@ -135,6 +168,18 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
             content = diff
         case .streaming(let text):
             content = MarkdownView(markdown: text)
+        case .nativeStreaming(let text): content = ConversationRowView.streaming(text)
+        case .thinking(let source): content = MarkdownView(markdown: source, style: .thinking)
+        case .native(let row):
+            switch row {
+            case .turnOutcome(let outcome): content = ConversationRowView.turnOutcome(outcome)
+            case .notice(let text, let kind): content = ConversationRowView.notice(text, kind: kind)
+            case .toolCall(let call):
+                let result = call.result.map { "\n" + $0.text } ?? ""
+                content = ConversationRowView.notice(call.name + " · " + call.summary + result,
+                    kind: call.result?.isError == true ? .error : .muted)
+            default: preconditionFailure("native row has a dedicated content case")
+            }
         case .user(let text):
             content = ConversationUserRow.make(text, expanded: expandedUsers.contains(entry.id), onExpansionChanged: { [weak self, weak tableView, weak host] expanded in
                 guard let self else { return }

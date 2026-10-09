@@ -16,6 +16,7 @@ struct ProjectSnapshot: Sendable {
         let title: String
         var kind: AgentKind? = nil
         var account: String? = nil
+        var usesNativeUI = false
         var attention: AgentSessionRowPresentation.Attention? = nil
 
         var snoozedUntil: Date? = nil
@@ -89,6 +90,9 @@ private final class NavigatorKeyEvent: NSEvent {
 
 /// Stable outline identity survives a project reorder or a newly prepended saved runtime.
 /// Position is carried only to avoid searching the catalogue while mounting visible cells.
+@MainActor
+private final class WorkspacePageRevealRequest { var target: NavigatorOutlineItem? }
+
 private struct NavigatorOutlineItem: Hashable {
     enum Kind: Hashable { case project, agent, terminal }
     let kind: Kind
@@ -465,6 +469,7 @@ struct WindowHarness {
 
     private static func savedAgent(_ session: AgentSession) -> ProjectSnapshot.SavedRuntime {
         var saved = savedAgent(agentRow(session))
+        saved.usesNativeUI = session.usesNativeUI
         // Retain durable facts, not a clock-derived state which can expire while the picker
         // stays open. Invalid/archived snooze records follow AgentSession.isSnoozed semantics.
         if !session.isArchived, let start = session.snoozedAt,
@@ -1115,7 +1120,7 @@ struct WindowHarness {
         return result
     }
 
-    @MainActor private static func composerKeyEvent(_ input: TWEvent) -> NSEvent {
+    @MainActor static func composerKeyEvent(_ input: TWEvent) -> NSEvent {
         let keyCode: UInt16
         let characters: String
         switch Int(input.key) {
@@ -1505,6 +1510,17 @@ struct WindowHarness {
         defer { tw_close(window) }
         let uiWork = NativeUIWorkLoop(window: window)
         defer { uiWork.close() }
+        NSPasteboard.general.writeString = { value in
+            let bytes = Array(value.utf8)
+            guard bytes.count <= 1_048_576 else { return false }
+            return bytes.withUnsafeBufferPointer { tw_clipboard_write($0.baseAddress, Int32($0.count)) == 0 }
+        }
+        NSPasteboard.general.readString = {
+            var bytes = [UInt8](repeating: 0, count: 65_536)
+            let count = bytes.withUnsafeMutableBufferPointer { tw_clipboard_read($0.baseAddress, Int32($0.count)) }
+            return count > 0 ? String(bytes: bytes.prefix(Int(count)), encoding: .utf8) : nil
+        }
+        defer { NSPasteboard.general.writeString = nil; NSPasteboard.general.readString = nil }
         NativeCursorBoundary.install(for: window)
         defer { NativeCursorBoundary.uninstall() }
         // The raster surface is two device pixels per AppKit point. Keep one content owner and
@@ -1687,6 +1703,7 @@ struct WindowHarness {
         }
         var terminals: [String: GraphicalTerminal] = [:]
         var restoredRuntimes: [SavedRuntimeKey: GraphicalTerminal] = [:]
+        var nativeRuntimes: [SavedRuntimeKey: WorkspaceConversationPane] = [:]
         var pendingAgentProjects: [String: ProjectID] = [:]
         // At most one commit count per retained agent runtime, within the shared eight-slot cap.
         var publishedAgentCounts: [String: Int] = [:]
@@ -1714,6 +1731,8 @@ struct WindowHarness {
         defer {
             for terminal in terminals.values { terminal.stop() }
             for terminal in restoredRuntimes.values { terminal.stop() }
+            let deadline = Date().addingTimeInterval(1)
+            for pane in nativeRuntimes.values { pane.runtime.closeForQuit(by: deadline) }
         }
         var width = initialWidth, height = 480,
             selected = snapshot.selectedProjectIndex, first = 0
@@ -1751,7 +1770,7 @@ struct WindowHarness {
                 project = projects.indices.contains(selected) ? projects[selected] : nil
             }
             let shell = project.flatMap { terminals[$0.id] }
-            let runtimeCount = terminals.count + restoredRuntimes.count
+            let runtimeCount = terminals.count + restoredRuntimes.count + nativeRuntimes.count
             return .init(projectID: project.flatMap { ProjectID(uuidString: $0.id) },
                 canOpenShell: shell != nil || runtimeCount < maximumOpenRuntimes,
                 canCreateShell: (shell == nil || shell!.canReplace)
@@ -1764,6 +1783,7 @@ struct WindowHarness {
         }
         defer { pendingFolderImport?.cancel() }
         var dirty = true
+        var navigatorDisplayRevision: UInt64 = 0
         var nextVisibleAttentionExpiry: Date?
         func configureOutlineRow(_ row: Specimen.Row, item: NavigatorOutlineItem,
                                  frame: NSRect) {
@@ -1923,9 +1943,9 @@ struct WindowHarness {
                     dirty = true
                 })
         }
-        var activePane: WorkspaceTerminalPane?
+        var activePane: (any WorkspacePane)?
         var activePageTarget: NavigatorOutlineItem?
-        var pendingPageReveal: NavigatorOutlineItem?
+        let pageReveal = WorkspacePageRevealRequest()
         var openInCatalogue = LinuxExternalApps.Catalogue(apps: [], defaultID: nil)
         var pendingOpenInCatalogue: OpenInCatalogueGate?
         var pendingOpenInMenuPage: String?
@@ -1945,19 +1965,19 @@ struct WindowHarness {
         }
         func configureOpenInPane() {
             guard let pane = activePane else { return }
-            guard let target = activePageTarget, target.id == pane.pageIdentity,
+            guard let target = activePageTarget, target.id == pane.chrome.pageIdentity,
                   let index = projectIndexes[target.projectID], projects.indices.contains(index),
                   projects[index].id == target.projectID else {
-                pane.configureOpenIn(preferredID: nil, icon: nil, choices: [])
+                pane.chrome.configureOpenIn(preferredID: nil, icon: nil, choices: [])
                 return
             }
             let choices = openInCatalogue.apps.map {
-                WorkspaceTerminalPane.OpenInChoice(id: $0.id, name: $0.name)
+                WorkspacePaneChrome.OpenInChoice(id: $0.id, name: $0.name)
             }
             let preferredID = preferredOpenInID()
             let selected = openInCatalogue.apps.first { $0.id == preferredID }
             let icon = selected.flatMap { openInIcons.selectedImage(for: $0) }
-            pane.configureOpenIn(preferredID: preferredID, icon: icon, choices: choices)
+            pane.chrome.configureOpenIn(preferredID: preferredID, icon: icon, choices: choices)
         }
         func startOpenInDiscovery() {
             guard pendingOpenInCatalogue == nil else { return }
@@ -1969,7 +1989,7 @@ struct WindowHarness {
         }
         func launchOpenIn(_ appID: String, remember: Bool) {
             guard pendingOpenInLaunch == nil, let pane = activePane,
-                  let target = activePageTarget, pane.pageIdentity == target.id,
+                  let target = activePageTarget, pane.chrome.pageIdentity == target.id,
                   let index = projectIndexes[target.projectID], projects.indices.contains(index),
                   projects[index].id == target.projectID,
                   openInCatalogue.apps.contains(where: { $0.id == appID }) else {
@@ -1988,23 +2008,23 @@ struct WindowHarness {
                 })
             }
         }
-        func drainOpenInRequests(_ pane: WorkspaceTerminalPane) {
-            if let appID = pane.takeOpenInPressRequest() {
+        func drainOpenInRequests(_ pane: any WorkspacePane) {
+            if let appID = pane.chrome.takeOpenInPressRequest() {
                 launchOpenIn(appID, remember: false)
             }
-            if pane.takeOpenInChooserToggleRequest() {
-                if pane.hasOpenInMenu {
-                    pane.toggleOpenInMenu(window: window, paneWidth: terminalWidth)
-                } else if pendingOpenInMenuPage == pane.pageIdentity {
+            if pane.chrome.takeOpenInChooserToggleRequest() {
+                if pane.chrome.hasOpenInMenu {
+                    pane.chrome.toggleOpenInMenu(window: window, paneWidth: terminalWidth)
+                } else if pendingOpenInMenuPage == pane.chrome.pageIdentity {
                     pendingOpenInMenuPage = nil
                 } else {
-                    pendingOpenInMenuPage = pane.pageIdentity
+                    pendingOpenInMenuPage = pane.chrome.pageIdentity
                     startOpenInDiscovery()
                 }
             }
-            if let appID = pane.takeOpenInChoiceRequest() {
+            if let appID = pane.chrome.takeOpenInChoiceRequest() {
                 launchOpenIn(appID, remember: true)
-                pane.dismissMenu(window: window)
+                pane.chrome.dismissMenu(window: window)
             }
         }
         startOpenInDiscovery()
@@ -2106,7 +2126,7 @@ struct WindowHarness {
         }
         func invokeSessionMenuCommand(_ command: SessionMenuCommand) {
             guard let pane = activePane, let target = activePageTarget,
-                  target.kind == .agent, pane.pageIdentity == target.id,
+                  target.kind == .agent, pane.chrome.pageIdentity == target.id,
                   let projectIndex = projectIndexes[target.projectID],
                   projects.indices.contains(projectIndex),
                   projects[projectIndex].id == target.projectID,
@@ -2136,6 +2156,10 @@ struct WindowHarness {
             fflush(nil)
         }
         func routeTerminalInput(_ event: TWEvent) -> Bool {
+            if let pane = activePane as? WorkspaceConversationPane, [46, 47, 48, 49].contains(event.kind) {
+                pane.handle(event, window: window)
+                return true
+            }
             if event.kind == 50 || event.kind == 51 {
                 guard activePane == nil, let idlePane, idlePane.isComposing,
                       let identity = idlePane.composerIdentity else { return true }
@@ -2257,21 +2281,21 @@ struct WindowHarness {
             if event.kind == 41 || event.kind == 42 || event.kind == 43 {
                 guard let pane = activePane else { return true }
                 switch event.kind {
-                case 41: pane.handleMenu(event, window: window)
+                case 41: pane.chrome.handleMenu(event, window: window)
                 case 42:
-                    _ = pane.pressSessionActions()
+                    _ = pane.chrome.pressSessionActions()
                 default:
                     var identityEvent = event
                     let identity = String(validatingCString: tw_event_text(&identityEvent)) ?? ""
-                    pane.chooseMenuRow(Int(event.key), identity: identity)
+                    pane.chrome.chooseMenuRow(Int(event.key), identity: identity)
                 }
-                if pane.takeMenuToggleRequest() {
+                if pane.chrome.takeMenuToggleRequest() {
                     focusSidebar(false)
-                    pane.toggleMenu(window: window, paneWidth: terminalWidth)
+                    pane.chrome.toggleMenu(window: window, paneWidth: terminalWidth)
                 }
-                if let command = pane.takeMenuCommand() {
+                if let command = pane.chrome.takeMenuCommand() {
                     invokeSessionMenuCommand(command)
-                    pane.dismissMenu(window: window)
+                    pane.chrome.dismissMenu(window: window)
                 }
                 drainOpenInRequests(pane)
                 dirty = true
@@ -2306,18 +2330,18 @@ struct WindowHarness {
             if event.kind == 37 || event.kind == 38 {
                 if event.kind == 37 {
                     if event.action == 1 { focusSidebar(false) }
-                    activePane?.handleHeader(event)
+                    activePane?.chrome.handleHeader(event)
                 } else {
-                    _ = activePane?.pressPageTitle()
+                    _ = activePane?.chrome.pressPageTitle()
                 }
-                if let pane = activePane, pane.takeMenuToggleRequest() {
+                if let pane = activePane, pane.chrome.takeMenuToggleRequest() {
                     focusSidebar(false)
-                    pane.toggleMenu(window: window, paneWidth: terminalWidth)
+                    pane.chrome.toggleMenu(window: window, paneWidth: terminalWidth)
                     dirty = true
                 }
                 if let pane = activePane { drainOpenInRequests(pane) }
-                if let target = pendingPageReveal {
-                    pendingPageReveal = nil
+                if let target = pageReveal.target {
+                    pageReveal.target = nil
                     guard let projectIndex = projectIndexes[target.projectID],
                           projects.indices.contains(projectIndex) else { return true }
                     selected = projectIndex
@@ -2339,9 +2363,16 @@ struct WindowHarness {
             activePane?.handle(event, window: window)
             return true
         }
-        func activate(_ session: GraphicalTerminal, pageName: String,
+        @MainActor func activate(_ session: GraphicalTerminal, pageName: String,
                       pageIdentity: String, pageIcon: NSImage? = nil,
                       pageTarget: NavigatorOutlineItem) throws {
+            let pane = WorkspaceTerminalPane(session, pageName: pageName,
+                pageIdentity: pageIdentity, icon: pageIcon,
+                showsSessionActions: pageTarget.kind == .agent && pageTarget.childIndex >= 0,
+                onReveal: { pageReveal.target = pageTarget })
+            try activatePane(pane, pageTarget: pageTarget)
+        }
+        @MainActor func activatePane(_ pane: any WorkspacePane, pageTarget: NavigatorOutlineItem) throws {
             // Standalone coordinates become a 320px sidebar when the terminal appears. Clear
             // any held control gesture and hover before those same pixels name another pane.
             contentWindow.cancelPointerGesture()
@@ -2354,10 +2385,7 @@ struct WindowHarness {
             }
             idlePane?.focus(false)
             idlePane = nil
-            activePane = WorkspaceTerminalPane(session, pageName: pageName,
-                pageIdentity: pageIdentity, icon: pageIcon,
-                showsSessionActions: pageTarget.kind == .agent && pageTarget.childIndex >= 0,
-                onReveal: { pendingPageReveal = pageTarget })
+            activePane = pane
             activePane?.setThemeAppearance()
             activePageTarget = pageTarget
             configureOpenInPane()
@@ -2377,8 +2405,32 @@ struct WindowHarness {
             }
             tw_accessibility_show_terminal(window, "Terminal starting")
             tw_accessibility_terminal_text(window, nil, 0, -1, nil, 0)
-            tw_title(window, "Threading terminal - starting")
+            pane.focus(true, window: window)
+            tw_title(window, pane.title)
             dirty = true
+        }
+        @MainActor func activateNative(_ runtime: ProjectSnapshot.SavedRuntime,
+                                       projectIndex: Int, childIndex: Int) throws {
+            guard let launch, let id = SessionID(uuidString: runtime.id) else {
+                throw WindowFailure("Saved conversation identity is invalid.")
+            }
+            let key = SavedRuntimeKey.agent(runtime.id)
+            let target = NavigatorOutlineItem(kind: .agent, projectID: projects[projectIndex].id,
+                id: runtime.id, projectIndex: projectIndex, childIndex: childIndex)
+            let pane: WorkspaceConversationPane
+            if let existing = nativeRuntimes[key] { pane = existing }
+            else {
+                guard terminals.count + restoredRuntimes.count + nativeRuntimes.count < maximumOpenRuntimes else {
+                    throw WindowFailure("The workspace's open-runtime limit was reached.")
+                }
+                let session = NativeWorkspaceSession(store: launch[0], socket: launch[1], id: id,
+                    shell: launch[2], codex: agentExecutable, claude: claudeExecutable)
+                pane = WorkspaceConversationPane(runtime: session, pageName: readableNavigatorText(runtime.title),
+                    icon: ProviderMarks.image(for: runtime.kind, selected: false),
+                    onReveal: { pageReveal.target = target })
+                nativeRuntimes[key] = pane
+            }
+            try activatePane(pane, pageTarget: target)
         }
         func beginAgent(_ kind: AgentKind, prompt: String?,
                         accountOverride: AccountHandle? = nil) throws {
@@ -2386,7 +2438,7 @@ struct WindowHarness {
             let executable = kind == .codex ? agentExecutable : claudeExecutable
             guard let executable else { return }
             let accountHandle = accountOverride ?? (kind == .codex ? codexAccount : claudeAccount)
-            guard terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
+            guard terminals.count + restoredRuntimes.count + nativeRuntimes.count < maximumOpenRuntimes else {
                 tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                 return
             }
@@ -2455,17 +2507,23 @@ struct WindowHarness {
         }
         if let id = snapshot.restoreAgentID, let launch,
            let row = projects[selected].recentAgents.firstIndex(where: { $0.id == id }) {
+            let runtime = projects[selected].recentAgents[row]
+            savedPicker = .agents(selected)
+            savedSelected = row
+            if runtime.usesNativeUI {
+                try activateNative(runtime, projectIndex: selected, childIndex: row)
+            } else {
             let session = GraphicalTerminal()
             restoredRuntimes[.agent(id)] = session
             restoredProjectIDs.insert(projects[selected].id)
             savedPicker = .agents(selected)
             savedSelected = row
             session.attachAgent(store: launch[0], socket: launch[1], sessionID: id)
-            let runtime = projects[selected].recentAgents[row]
             try activate(session, pageName: readableNavigatorText(runtime.title),
                 pageIdentity: id, pageIcon: ProviderMarks.image(for: runtime.kind, selected: false),
                 pageTarget: NavigatorOutlineItem(kind: .agent,
                     projectID: projects[selected].id, id: id, projectIndex: selected, childIndex: row))
+            }
         } else if let id = snapshot.restoreTerminalID, let launch,
                   projects.indices.contains(selected),
                   let row = projects[selected].recentTerminals.firstIndex(where: { $0.id == id }) {
@@ -2483,7 +2541,8 @@ struct WindowHarness {
                     projectID: projects[selected].id, id: id, projectIndex: selected, childIndex: row))
         }
         while true {
-            if uiWork.drain() { dirty = true }
+            _ = uiWork.drain()
+            if contentWindow.displayRevision != navigatorDisplayRevision { dirty = true }
             if let gate = pendingOpenInCatalogue, let catalogue = gate.take() {
                 pendingOpenInCatalogue = nil
                 openInCatalogue = catalogue
@@ -2491,8 +2550,8 @@ struct WindowHarness {
                 configureOpenInPane()
                 if let requestedPage = pendingOpenInMenuPage {
                     pendingOpenInMenuPage = nil
-                    if let pane = activePane, pane.pageIdentity == requestedPage {
-                        pane.toggleOpenInMenu(window: window, paneWidth: terminalWidth)
+                    if let pane = activePane, pane.chrome.pageIdentity == requestedPage {
+                        pane.chrome.toggleOpenInMenu(window: window, paneWidth: terminalWidth)
                     }
                 }
                 dirty = true
@@ -2545,7 +2604,7 @@ struct WindowHarness {
                 dirty = true
             }
             if let activePane {
-                if let adopted = activePane.session.takeInitialViewport() {
+                if let adopted = activePane.takeInitialViewport() {
                     width = adopted.0 + sidebarWidth
                     height = min(900, adopted.1 + WorkspaceTerminalPane.headerPixelHeight)
                     guard tw_resize(window, Int32(width), Int32(height)) == 0 else {
@@ -3108,6 +3167,7 @@ struct WindowHarness {
                 trace("accessibility-title.end")
                 traceFirstFrame = false
                 fflush(nil)
+                navigatorDisplayRevision = contentWindow.displayRevision
                 dirty = false
             }
             var event = TWEvent()
@@ -3203,10 +3263,10 @@ struct WindowHarness {
                 } else if let pane = activePane {
                     var identityEvent = event
                     let identity = String(validatingCString: tw_event_text(&identityEvent)) ?? ""
-                    if identity == pane.pageIdentity {
+                    if identity == pane.chrome.pageIdentity {
                         focusSidebar(false)
-                        if event.action == 1 { _ = pane.pressOpenInAction() }
-                        if event.action == 2 { _ = pane.pressOpenInChooser() }
+                        if event.action == 1 { _ = pane.chrome.pressOpenInAction() }
+                        if event.action == 2 { _ = pane.chrome.pressOpenInChooser() }
                         drainOpenInRequests(pane)
                         dirty = true
                     }
@@ -3650,6 +3710,16 @@ struct WindowHarness {
                     guard saved.indices.contains(destination.index) else { break }
                     let runtime = saved[destination.index]
                     let key: SavedRuntimeKey = picker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
+                    if picker.isAgent && runtime.usesNativeUI {
+                        if !selectionWasCommitted {
+                            pendingSelection = recordSelection(runtime.id, terminalID: nil,
+                                terminalProjectID: nil, store: launch[0], after: event)
+                            break
+                        }
+                        try activateNative(runtime, projectIndex: picker.projectIndex, childIndex: destination.index)
+                        dirty = true
+                        break
+                    }
                     let session: GraphicalTerminal
                     let mayResume = picker.isAgent && (agentExecutable != nil || claudeExecutable != nil)
                     let mayStartAgain = mayResume || !picker.isAgent
@@ -3660,7 +3730,7 @@ struct WindowHarness {
                             && !(!picker.isAgent && $0.canReopenSavedTerminal)
                     } ?? false
                     guard reuses || existing != nil
-                            || terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
+                            || terminals.count + restoredRuntimes.count + nativeRuntimes.count < maximumOpenRuntimes else {
                         tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                         break
                     }
@@ -3705,7 +3775,7 @@ struct WindowHarness {
                 }
                 let project = projects[selected]
                 guard terminals[project.id] != nil
-                        || terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
+                        || terminals.count + restoredRuntimes.count + nativeRuntimes.count < maximumOpenRuntimes else {
                     tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                     break
                 }
@@ -3720,7 +3790,7 @@ struct WindowHarness {
                 let session: GraphicalTerminal
                 if let existing = terminals[project.id] { session = existing }
                 else {
-                    guard terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
+                    guard terminals.count + restoredRuntimes.count + nativeRuntimes.count < maximumOpenRuntimes else {
                         tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                         break
                     }
@@ -3742,7 +3812,7 @@ struct WindowHarness {
                 // A failed creation can have persisted just after this loop's reconciliation.
                 // Its row must survive discarding the finished surface for an explicit new shell.
                 if reconcileTerminals() { dirty = true }
-                guard terminals.count + restoredRuntimes.count
+                guard terminals.count + restoredRuntimes.count + nativeRuntimes.count
                         - (terminals[project.id] == nil ? 0 : 1) < maximumOpenRuntimes else {
                     tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                     break

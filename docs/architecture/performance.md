@@ -1642,6 +1642,15 @@ behind a parser have a separate 32 MiB per-transport admission budget, alongside
 SDL contract deliberately occupies the UI while a real child floods output, then verifies the
 bounded failure; the Mac transport contract verifies ordered callbacks behind a held receipt.
 
+The ordinary Linux native pane shares the workspace's eight-runtime cap with terminals. Each
+retained native runtime has one serial preparation/persistence worker. Account and history reads
+leave the database lock before directory walking or transcript parsing. Markdown partitions are
+prepared on that worker; live row preparation admits 64 jobs and 32 MiB of source, while UI receipts
+pace the lane. Stable timeline-to-table locations make tool-result replacement constant-time.
+Only viewport cells are built. Stream text uses the shared plain streaming label rather than
+parsing Markdown per token. Child launch also happens on the worker through a one-time prepared
+child handover. Native wakes repaint the navigator only when its own display revision changed.
+
 The Linux complete plain-text backend's initial gate uses 85 KB/850 KB multi-paragraph
 documents, an 850 KB single paragraph and a 100,000-character token. Full preparation runs on
 a dedicated worker; retained text/line geometry scales with content, while a viewport tile is

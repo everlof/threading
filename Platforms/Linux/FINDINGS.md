@@ -6048,3 +6048,68 @@ native callback profiles and the UI-worker wake contract. The installed package 
 predates this rebase. A focused Mac rerun was stopped after its build made no progress in the
 boundary-check phase for several minutes; those post-rebase Mac tests did not run. The full Mac
 result above is the completed pre-rebase evidence; it was not repeated in a loop.
+
+## 185. Saved native conversations mount in the ordinary workspace
+
+The saved runtime snapshot now retains usesNativeUI. Selecting a native record opens a
+WorkspaceConversationPane; terminal records still open WorkspaceTerminalPane. Both delegate
+header, session menus and Open In to WorkspacePaneChrome and share the existing eight-runtime
+cap. Retained native panes keep their draft, scroll position, timeline and child when switching
+to another pane. This preview surface is deliberately host-only. The host continues to own durable
+selection, account routing, launch admission,
+provider identity and lifecycle; no extension replacement or execution authority was added.
+
+NativeWorkspaceSession uses the production transports and timeline. Its serial worker reads the
+saved record, then releases the store lock before account/history lookup and transcript parsing.
+Markdown partitions are prepared on that worker; stable timeline locations replace tool results
+without searching the transcript. Views are materialized only for the table viewport. Live row
+preparation is capped at 64 jobs and 32 MiB; stream text uses the production plain streaming label.
+Native wake receipts only invalidate the navigator when its own display revision changes.
+
+Child launch, daemon admission and launch-record persistence run on the worker. The shared
+ConversationPreparedChild hands pipe ownership to a transport once and retains an early exit
+until its handler is installed. An abandoned preparation terminates its child. Existing Mac
+callers keep their default launch path. Metadata writes check project, provider, account, native
+surface and launch activity so an old pane cannot overwrite a later incarnation. Quit shares one
+bounded detach deadline across retained native children.
+
+The native pane mounts the production user-row factory, Markdown blocks, streaming/outcome rows,
+PromptTextView and ThemedButton. Its table comes from ConversationContentTable in Design.
+The shim now implements bounded editable select/copy/cut/paste through the native pasteboard.
+Editor insets and the real caret feed the native input-method rectangle. Two defects were found
+through real-shell evidence: the text.bubble symbol lacked adapter artwork and trapped, and an
+unconstrained Auto Layout status label displaced a manually positioned pane. Explicit symbol
+artwork and consistent layout ownership fixed those causes. Captures now wait for worker row
+preparation and plain-text viewport pixels, including after a dark switch.
+
+The deterministic ordinary Codex journey passed three Unicode/multiline turns on one real daemon
+child, native prompt copy, draft/pane retention across a terminal switch, dark appearance, durable
+provider identity, restart replay and same-thread resume. The peer writes the provider's admitted
+dialogue records rather than response-item copies, which the production replay reader deliberately
+ignores. Evidence: out/native-workspace-prepared-child. Ninety focused Mac launch/lifecycle/ACP
+and prepared-child tests pass, as do the 12 Linux runner contracts and all 125 exact core copies.
+
+The final package's focused native journey passed at out/native-workspace-packaged-stop. Captures
+are 1120×900: the fixture now resizes after selection and moves the window onto the Xvfb screen,
+because ImageMagick silently clipped an enlarged centered window. Inspected full-height evidence
+exposed a narrow user bubble and inconsistent dark-switch colors in the sidebar/status/user text.
+These are outstanding visual defects; the functional fixture is not visual parity evidence.
+
+The installed suite first failed to discover an SDL window after reusing an X display. Fresh and
+sequential focused Actions checks passed. Keeping that shared test display alive with -noreset
+let the rerun pass startup, live reinstall, workspace, session Actions, Open In, catalogue,
+project Actions and composer journeys. It then failed document_ui_smoke.py's native arrow-in-gap
+assertion. That failure remains unresolved, and the later installed lanes did not run.
+Manifest: 9ea2ab6a9e9aeefe9bff8ac2452c700cf0cb8905, source_dirty=true. Final Debian SHA-256:
+ce577d33835ef4f4224df0af2fcb087412df79cfb9276a9635ef17637f847980.
+
+The required scripts/test.sh all attempt caught stock table construction in the new Design
+factory. It now constructs ThemedTableView, with the Linux transparent table adapter. The corrected
+run passed repository boundaries and the Mac app build and started tests, then was stopped with
+exit 143 at the user's requested pause. It did not complete the Mac suite or enter iOS. The prior
+full suite's gallery failure remains recorded in §184; the ninety focused tests above passed.
+
+The ordinary Claude plan is available but its UI journey is not verified. Full tool disclosures,
+permission presentation, questions, the other providers' workspace launch routes, complete native
+accessibility, worker-side replay reduction and the full production conversation controller remain
+open. This checkpoint does not claim production UI parity.

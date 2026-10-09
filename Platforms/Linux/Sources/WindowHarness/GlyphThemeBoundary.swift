@@ -109,7 +109,8 @@ public enum Design {
         public static func image(_ name: String, slot: CGFloat, pointSize: CGFloat,
                                  weight: NSFont.Weight) -> NSImage? {
             precondition(name == "ellipsis" || name == "plus" || name == "terminal"
-                         || name == "chevron.down" || name == "folder" || name == "doc.text",
+                         || name == "chevron.down" || name == "folder" || name == "doc.text"
+                         || name == "text.bubble",
                          "No Linux diagnostic symbol artwork for \(name)")
             precondition(slot.isFinite && pointSize.isFinite && slot > 0 && pointSize > 0)
             // Keep the artwork at its optical point size inside the requested layout slot.
@@ -123,7 +124,27 @@ public enum Design {
             let size = NSSize(width: canvasSide, height: canvasSide)
             let image = NSImage(size: size, flipped: false) { canvas in
                 NSColor.white.setFill()
-                if name == "doc.text" {
+                if name == "text.bubble" {
+                    let bubble = NSBezierPath()
+                    bubble.move(to: NSPoint(x: origin + side * 0.15, y: origin + side * 0.25))
+                    bubble.line(to: NSPoint(x: origin + side * 0.15, y: origin + side * 0.82))
+                    bubble.line(to: NSPoint(x: origin + side * 0.85, y: origin + side * 0.82))
+                    bubble.line(to: NSPoint(x: origin + side * 0.85, y: origin + side * 0.25))
+                    bubble.line(to: NSPoint(x: origin + side * 0.42, y: origin + side * 0.25))
+                    bubble.line(to: NSPoint(x: origin + side * 0.25, y: origin + side * 0.10))
+                    bubble.line(to: NSPoint(x: origin + side * 0.25, y: origin + side * 0.25))
+                    bubble.close()
+                    bubble.lineWidth = max(1, side * 0.07 * weightFactor)
+                    NSColor.white.setStroke()
+                    bubble.stroke()
+                    let text = NSBezierPath()
+                    for height: CGFloat in [0.65, 0.49] {
+                        text.move(to: NSPoint(x: origin + side * 0.28, y: origin + side * height))
+                        text.line(to: NSPoint(x: origin + side * 0.72, y: origin + side * height))
+                    }
+                    text.lineWidth = bubble.lineWidth
+                    text.stroke()
+                } else if name == "doc.text" {
                     let paper = NSBezierPath()
                     paper.move(to: NSPoint(x: origin + side * 0.22, y: origin + side * 0.08))
                     paper.line(to: NSPoint(x: origin + side * 0.78, y: origin + side * 0.08))
