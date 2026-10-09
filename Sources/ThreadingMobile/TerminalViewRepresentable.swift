@@ -154,6 +154,11 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         }
         view.terminalDelegate = context.coordinator
         view.dropBuiltInKeyboardAccessory()
+        // UIKit follows the downward drag for both direct input and the sibling Compose editor.
+        // Keep dismissal on the scroll view so terminal scrolling retains its native gesture.
+        view.keyboardDismissMode = .interactive
+        // Even a fresh terminal with no scrollback must be able to start that drag.
+        view.alwaysBounceVertical = true
         view.autocorrectionType = .no
         view.autocapitalizationType = .none
         view.smartQuotesType = .no

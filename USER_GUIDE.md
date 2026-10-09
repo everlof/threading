@@ -3368,6 +3368,9 @@ bar is the only one over the keyboard: the terminal emulator's own fixed accesso
 removed, and the key row's trailing edge carries the control that puts the keyboard away and
 brings it back.
 
+You can also drag down through the terminal's local scrollback toward the keyboard to push it
+away interactively, in both Direct and Compose. A Compose draft stays in the editor.
+
 **Tapping a mirrored terminal clicks it.** A full-screen TUI that draws something to click —
 Claude Code's "click to go to bottom", its option lists — receives a tap as a left click at that
 cell, whether or not the keyboard is up. Because a single tap belongs to the program, it no

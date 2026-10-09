@@ -2310,6 +2310,14 @@ nearest the keyboard it controls — where it appears only while a keyboard is a
 terminal is a first responder rather than a focusable SwiftUI field, so there is no other way
 back from the keyboard.
 
+The terminal scroll view opts into UIKit's interactive keyboard dismissal. A downward local
+scroll toward the keyboard moves it with the finger, including when the sibling Compose editor
+owns first responder. UIKit keeps cancellation and scroll routing; no additional pan recognizer
+or per-frame transcript work is installed. Vertical bounce stays enabled so a terminal with no
+scrollback can begin the gesture too. This remains host-owned input behavior, with the
+existing key-bar control as its accessible alternative. The terminal layout host continues to
+hold one grid during keyboard motion and commits the settled height once.
+
 That control shipped doing nothing. It broadcast `resignFirstResponder` through
 `UIApplication.sendAction(_:to:from:for:)`, the idiom that dismisses a `UITextField`, and the
 broadcast does not reach this terminal — `TerminalKeyboardDismissalTests` measures exactly that
