@@ -5680,3 +5680,63 @@ and conversation contracts in that selection passed.
 
 The final Mac sidebar/project-create selection passed all 19 tests after the assertion update
 and preservation of the project host's actual selection-ground callback.
+
+## 179. Installed selection ink uses the row's painted face
+
+The clean `cb3b113c2` archive and Debian package passed the complete Swift-free Ubuntu 24.04
+arm64 runtime suite on 2026-10-09, including non-root desktop launch, live-child reinstall,
+saved-terminal recovery, menus, composer, Markdown/diff/stream rendering and native input.
+Rendered inspection still found an error those older assertions missed: in the dark saved-agent
+picker the selected Codex mark measured only 1.060:1 at its strongest pixel; its title measured
+3.734:1. Both were drawn against the picker's blue selection, while ink resolution was using
+the theme's orange selection or the ancestor's ordinary surface.
+
+The Linux navigator cell now uses `NSTableCellView` and passes the production
+`SidebarHoverRowView.contentGround(for:)` to its shared project/session/terminal glyphs.
+Standalone diagnostic rows that paint their own selection supply that explicit composited face.
+The session and terminal Linux palette leaves resolve title and mark ink through `Design.Text.on`
+using the same face. Template marks retain full opacity; dormant artwork keeps its existing
+dimming. Selection, hover, runtime identity and actions remain host-owned; no new extension
+surface is introduced.
+
+The existing viewport bounds are unchanged: configuration touches mounted rows only, and one
+weak ground callback per visible glyph reads its parent row. It performs no file, asset, process
+or history work. The shared glyph's existing one-entry contrast cache still owns repair.
+
+The new selected-title pixel assertion failed on the preserved clean package at 3.734:1. Source
+Release saved-session Actions and provider/fallback journeys passed after the repair, and the
+inspected matching dark screenshot measured glyph 4.862:1 and title 4.893:1. The provider journey
+now asserts a 3:1 glyph floor and 4.5:1 title floor and changes light → dark → light while keeping
+selection. Generic layout/render contracts, row layout, theme boundaries, architecture gates
+and all 11 runner failure contracts passed.
+
+The saved-terminal picker had the same title error: its selected title measured 3.734:1. The
+terminal-content Linux leaf now accepts the actual row face without changing the Mac default
+path. Its new pixel assertion passed through the 513-record/eight-runtime saved-shell journey;
+the inspected title measured 4.893:1. The source row-layout and generic render contracts passed.
+The session repair also passed a full installed runtime run in
+`out/bundle-smoke/selection-installed.wh8e0a_g`, including the new light/dark/live-switch and
+missing-resource contrast checks. The package containing both repairs passed the complete
+installed runtime suite in `out/bundle-smoke/runtime-ink-final.61jpebbz` (Debian package SHA-256
+`361c1071ec8be0543e1852fa06e5a9caf22fc9bc4bc353a310ecab00c1bb8031`). Its selected agent and
+terminal screenshots were inspected. All 16 focused Mac sidebar render/icon-reuse tests passed.
+
+Inspecting the live-switch provider screenshots then exposed an unselected-title regression:
+the row had supplied a fixed composited light face when deriving both appearance variants.
+The stronger all-title assertion reproduced it at 1.133:1. A weak appearance-aware row-ground
+provider now resolves the painted face separately under each appearance before deriving ink.
+The matched Release provider/fallback journey passed all title assertions through light → dark
+→ light in `out/live-ground-after.AccCQu`; its dark product-shell screenshot was inspected.
+
+The full Mac run also caught two integration gaps: the project-role fixture still cast the
+shared identity mark to `NSImageView`, and extracting session content had dropped the provider
+glyph's explicit accessible-image role. The fixture now looks up the semantic identity view,
+and the shared session component restores the image role; the host still supplies its label.
+The final Linux Release provider/fallback journey and shared session layout passed with that repair.
+
+The complete Mac attempt ran 10,449 tests with 90 skips. Besides those two repaired cases,
+`ThemedControlTests.testComponentGalleryCataloguesEveryConcreteDesignComponent` remains failing:
+the gallery has no recorded coverage for `ConversationVirtualRowHost`, `ThemedProjectRowView`,
+`ThemedMenuRowView`, `DiffView`, `PromptTextView`, `PromptTextScrollView`,
+`ThemedTerminalRowContentView` and `ThemedSessionRowContentView`. That existing branch coverage
+gap remains open. The complete iOS target passed 1,021 tests with one skip.

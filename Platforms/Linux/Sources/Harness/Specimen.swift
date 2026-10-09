@@ -412,7 +412,7 @@ enum Specimen {
         }
     }
 
-    final class Row: NSView {
+    final class Row: NSTableCellView {
         private static let selectionRadius: CGFloat = 5
         #if THREADING_WINDOW_HARNESS
         /// The outline's production SidebarHoverRowView owns its own selection capsule.
@@ -434,6 +434,20 @@ enum Specimen {
         private var productionProjectActionsRevealed = false
         private var projectCreateButton: ThemedIconButton?
         private var projectActionButton: ThemedIconButton?
+
+        /// The production row paints selection and hover independently of recorded layer fills.
+        /// Standalone specimens still paint their own explicit selection background.
+        private var contentGround: NSColor {
+            if selected && drawsSelectionBackground {
+                return accent.composited(over: Specimen.bodyGround)
+            }
+            return SidebarHoverRowView.contentGround(for: self)
+        }
+
+        /// Resolve the painted face separately in each appearance before deriving live ink.
+        private lazy var inkGround = NSColor(name: NSColor.Name("threading.linux.row-ground")) { [weak self] _ in
+            self?.contentGround ?? Specimen.bodyGround
+        }
         #endif
         var onPress: (() -> Void)?
         var onNavigation: ((Int) -> Void)?
@@ -619,7 +633,8 @@ enum Specimen {
             if content.frame != frame { content.frame = frame }
             content.setTitle(title)
             content.setIcon(icon)
-            content.setSelection(selected)
+            content.iconView.contrastGround = { [weak self] in self?.contentGround ?? Specimen.bodyGround }
+            content.setSelection(selected, on: inkGround)
             content.isHidden = false
             iconView?.isHidden = true
         }
@@ -646,7 +661,8 @@ enum Specimen {
             if content.frame != frame { content.frame = frame }
             content.setTitle(title)
             content.setIcon(icon)
-            content.setInk(selected: selected, running: running)
+            content.iconView.contrastGround = { [weak self] in self?.contentGround ?? Specimen.bodyGround }
+            content.setInk(selected: selected, running: running, on: inkGround)
             content.isHidden = false
             iconView?.isHidden = true
         }
@@ -706,6 +722,7 @@ enum Specimen {
             content.configure(presentation, icon: icon, count: count,
                               moreSymbol: projectID == nil ? nil : SidebarRowDefaults.actionSymbol,
                               showsCreate: projectID != nil)
+            content.iconView.contrastGround = { [weak self] in self?.contentGround ?? Specimen.bodyGround }
             content.setSelection(selected)
             content.setHoverControlsVisible(revealed, animated: false)
             productionProjectActionsRevealed = revealed

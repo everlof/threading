@@ -7,12 +7,16 @@ extracted one ownership boundary at a time.
 
 `scripts/check_ui_structure.py --report` inventories direct AppKit controller and view/window
 subclasses, constraint construction, and drawing references outside `UI/Design`. Its checked-in
-ceilings run in the ordinary architecture build phase: 85 direct controllers, 119 platform
-views/windows, 2,852 constraint sites, and 96 drawing sites on 2026-09-30. The current counts
-include the master UI changes brought into the Linux branch; the same inventory on master
-produces identical totals. A reduction must
+ceilings run in the ordinary architecture build phase: 99 direct controllers, 124 platform
+views/windows, 3,156 constraint sites, and 107 drawing sites on 2026-10-09. A reduction must
 lower the corresponding ceiling. This prevents growth while the semantic structural seam is
 built; it does not make the remaining feature-owned sites portable or certify their layout.
+
+Rebasing onto master `cfc19d12a` added existing upstream sites: one controller and 17 constraints
+in `SimulatorWorkspaceViewController`, 25 constraints in `SimulatorPaneViewController`, six
+constraints in `ComponentGalleryWindowController`, and one drawing site in
+`SimulatorUprightCapture`. Those exact additions account for the refreshed inventory. The Linux
+row-ink repair adds no sites to it; new feature work remains subject to the Design boundary.
 
 The completed stabilization measurements and rationale are preserved in
 [`docs/archive/reviews/ARCHITECTURE_STABILIZATION-2026-08-15.md`](../archive/reviews/ARCHITECTURE_STABILIZATION-2026-08-15.md).

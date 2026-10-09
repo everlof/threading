@@ -114,8 +114,12 @@ count sits behind hover controls. A project with saved runtimes now exposes an i
 in the same bounded list. Its visible agent rows mount the production
 `ThemedSessionRowContentView` used by Mac session cells. Visible saved terminals now mount the
 same `ThemedTerminalRowContentView` icon/title subtree as the Mac terminal cell, with a bounded
-Linux terminal symbol. Project selection, runtime activation, attention, retained state and
-AT-SPI identities stay host-owned. The saved-runtime pickers remain available; the account picker
+Linux terminal symbol. Project selection, runtime activation, attention, retained state,
+selection-ground measurement and AT-SPI identities stay host-owned. Shared glyphs measure against
+the actual painted row, and session/terminal title ink resolves from that same face. The
+provider-mark journey checks selected glyphs and all row titles in light and dark appearances
+and through a live theme switch.
+The saved-runtime pickers remain available; the account picker
 mounts the production `ThemedMenuRowView` with the same row measurement as command menus while
 the host retains exact account identity and launch admission. The shim has a clipped
 `NSScrollView`/`NSClipView` viewport and view-based `NSTableView`/`NSOutlineView` with bounded
@@ -216,7 +220,8 @@ row host. Its palette uses the production `DiffInk`, `PerceptualColor`, `ThemeCo
 theme adapter over the checked Threading theme export. The native journey verifies row-wash
 pixels, Unicode copy, read-only text, live light/dark changes and width reflow. `vendor-diff.sh`
 verifies the renderer and license against their recorded revision; the package includes that license.
-This does not yet mount `ToolCallView`, the full app `DiffView` adapter or native session transports.
+The shared app `DiffView` adapter is mounted, including its source-reference and context-preview
+construction. Contextual action menus, `ToolCallView` and native session transports remain open.
 Labels retain the current 4096-byte/64-span/eight-line drawing limits; long individual paragraphs
 and code blocks still need complete viewport rendering before full transcript coverage is claimed.
 `tests/search_match/run.sh` links unchanged production `SearchMatchLabel` through the same

@@ -8,7 +8,7 @@ final class NavigatorProjectRowPresentationTests: XCTestCase {
         let project = Project(name: "Threading", folderURL: URL(fileURLWithPath: "/tmp/Threading"))
         let row = ProjectRowView(customizationLookup: { _ in .empty })
         let title = try XCTUnwrap(descendant("sidebar.project.title", in: row) as? MorphingTitleLabel)
-        let icon = try XCTUnwrap(descendant("sidebar.project.identity", in: row) as? NSImageView)
+        let icon = try XCTUnwrap(descendant("sidebar.project.identity", in: row))
 
         row.configure(with: project)
         XCTAssertEqual(title.stringValue, "Threading")

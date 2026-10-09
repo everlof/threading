@@ -60,14 +60,14 @@ final class ThemedSessionRowContentView: NSStackView {
     #if os(Linux)
     /// The diagnostic shell's fixed palette is supplied by its Design boundary. Mac rows
     /// continue to resolve live theme and selection ink from their table cell.
-    func setSelection(_ selected: Bool, dormant: Bool = false) {
-        titleLabel.textColor = selected
-            ? Design.Text.selected
-            : (dormant ? Design.Text.secondary : Design.Text.label)
+    func setSelection(_ selected: Bool, dormant: Bool = false, on ground: NSColor? = nil) {
+        let face = ground ?? (selected ? Design.Surface.selectionFill : Design.Surface.background)
+        let ink = Design.Text.on(face)
+        titleLabel.textColor = dormant && !selected ? ink.secondary : ink.label
         iconView.tint = selected
-            ? Design.Ink.selection.label
-            : (dormant ? Design.Text.tertiary : Design.Text.secondary)
-        iconView.alphaValue = dormant ? 0.6 : 1
+            ? ink.label
+            : (dormant ? ink.tertiary : ink.secondary)
+        iconView.alphaValue = dormant && iconView.image?.isTemplate == false ? 0.6 : 1
     }
     #endif
 
@@ -83,6 +83,8 @@ final class ThemedSessionRowContentView: NSStackView {
         iconView.slot = NSSize(width: SidebarRowDefaults.iconSlotWidth, height: SidebarRowDefaults.iconSlotWidth)
         iconView.contrastGround = { [weak self] in self?.resolvedGround() ?? Design.Surface.background }
         iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.setAccessibilityElement(true)
+        iconView.setAccessibilityRole(.image)
         iconView.setAccessibilityIdentifier("sidebar.session.identity")
 
         nativeIdentityContent.translatesAutoresizingMaskIntoConstraints = false

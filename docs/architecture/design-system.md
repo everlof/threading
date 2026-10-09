@@ -10,6 +10,19 @@ this file is the vocabulary and the reasoning behind it.
 the default, not a preference: a screen assembled from `NSPopUpButton`, `NSBox` and bezelled
 buttons will not match anything else in the app.
 
+Linux navigator cells pass their actual row ground to the shared session/terminal-content ink and to
+`GlyphView.contrastGround`. Selection and hover are painted by `SidebarHoverRowView`, so an
+ancestor walk of layer fills cannot recover that face. The navigator cell is an `NSTableCellView`
+and asks the same `contentGround(for:)` boundary as the Mac cells. A standalone diagnostic row
+that paints its own explicit selection supplies that composited face instead. Ink derivation
+receives an appearance-aware ground: caching a composited light face makes unselected titles
+black after a dark-mode switch. The native provider-mark journey measures selected glyphs and
+every row title in both appearances; recording
+a tint or inspecting the ancestor background is insufficient.
+
+The shared session-content provider glyph opts into accessibility as an image. Its host supplies
+the provider/account label, so the generic glyph's decorative default would discard identity.
+
 `ThemedControl` supplies accessibility hit testing for its drawn, cell-free controls. AppKit's
 default `NSControl` implementation returns the cell; without one, a button could appear in the
 accessibility tree with the correct title, frame and enabled state while returning no hit. The

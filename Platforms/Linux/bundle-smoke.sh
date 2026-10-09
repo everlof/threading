@@ -82,6 +82,7 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/agent_catalogue_smoke.py:/agent_catalogue_smoke.py:ro" \
   -v "$PWD/out/gtk-present-delay.so:/gtk-present-delay.so:ro" \
   -v "$PWD/tests/provider_marks_smoke.py:/provider_marks_smoke.py:ro" \
+  -v "$PWD/tests/runtime_pixel_contract.py:/runtime_pixel_contract.py:ro" \
   -v "$PWD/tests/account_picker_rows_smoke.py:/account_picker_rows_smoke.py:ro" \
   -v "$PWD/tests/project_count_smoke.py:/project_count_smoke.py:ro" \
   -v "$PWD/tests/native_outline_smoke.py:/native_outline_smoke.py:ro" \

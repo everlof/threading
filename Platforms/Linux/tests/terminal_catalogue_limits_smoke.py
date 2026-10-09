@@ -10,6 +10,8 @@ import sys
 import time
 import uuid
 
+from runtime_pixel_contract import pixel_contrast
+
 import gi
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
@@ -137,6 +139,20 @@ def assert_picker():
     eventually(read, 'capped saved picker admits new retained row first')
 
 
+def assert_selected_title_ink(path):
+    row = listed().get_selection_iface().get_selected_child(0)
+    rect = row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+    background = subprocess.check_output(
+        ['convert', str(path), '-crop', f'1x1+{rect.x + 6}+{rect.y + 4}',
+         '-depth', '8', 'rgba:-'], timeout=5)
+    title = subprocess.check_output(
+        ['convert', str(path), '-crop', f'120x24+{rect.x + 52}+{rect.y + 7}',
+         '-depth', '8', 'rgba:-'], timeout=5)
+    pixels = [title[index:index + 4] for index in range(0, len(title), 4)]
+    contrast = max(pixel_contrast(pixel, background) for pixel in pixels)
+    assert contrast >= 4.5, ('selected saved-terminal title lost its contrast', contrast)
+
+
 def assert_project_count(index, count):
     def read():
         listing = listed()
@@ -201,6 +217,7 @@ with log_path.open('w+') as log:
         assert_picker()
         subprocess.run(['import', '-window', window, 'out/terminal-catalogue-cap.png'],
                        check=True, timeout=5)
+        assert_selected_title_ink('out/terminal-catalogue-cap.png')
         # Reopening this freshly admitted saved row must not allocate a second runtime slot.
         key('Return')
         ready(1)

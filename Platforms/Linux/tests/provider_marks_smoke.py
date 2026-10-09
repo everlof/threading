@@ -10,6 +10,8 @@ import subprocess
 import sys
 import time
 
+from runtime_pixel_contract import pixel_contrast
+
 import gi
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
@@ -193,8 +195,10 @@ def capture(name):
     subprocess.run(['import', '-window', window, str(destination)], check=True, timeout=5)
     crops = []
     listed, _ = panes()
+    selected_id = listed.get_selection_iface().get_selected_child(0).get_accessible_id()
     for index in range(2):
-        rect = listed.get_child_at_index(index).get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        row = listed.get_child_at_index(index)
+        rect = row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
         # The shared Mac session content owns a 16pt icon slot, inset 4pt in the row.
         # Two pixels around its 32px bounds make the corner-transparency check meaningful.
         geometry = f'36x36+{rect.x + 6}+{rect.y + 4}'
@@ -206,6 +210,9 @@ def capture(name):
         mask = tuple(pixel != background for pixel in pixels)
         assert 20 < sum(mask) < 36 * 36 - 20, (name, index, 'empty or opaque-square mark', sum(mask))
         assert not any(mask[y * 36 + x] for x, y in [(0, 0), (35, 0), (0, 35), (35, 35)])
+        if row.get_accessible_id() == selected_id:
+            contrast = max(pixel_contrast(pixel, background) for pixel in pixels)
+            assert contrast >= 3, (name, index, 'selected provider mark lost its contrast', contrast)
         # The production title is one line beside the mark. The older diagnostic identity
         # line must not overlap it; complete identity remains in the AT-SPI row label above.
         title_geometry = f'120x24+{rect.x + 52}+{rect.y + 7}'
@@ -213,6 +220,9 @@ def capture(name):
                                 '-depth', '8', 'rgba:-'], check=True, capture_output=True, timeout=5).stdout
         assert any(title[i:i + 4] != background for i in range(0, len(title), 4)), \
             (name, index, 'production session title was not painted')
+        title_pixels = [title[i:i + 4] for i in range(0, len(title), 4)]
+        contrast = max(pixel_contrast(pixel, background) for pixel in title_pixels)
+        assert contrast >= 4.5, (name, index, 'session title lost its contrast', contrast)
         detail_geometry = f'120x8+{rect.x + 52}+{rect.y + 34}'
         detail = subprocess.run(['convert', str(destination), '-crop', detail_geometry, '+repage',
                                  '-depth', '8', 'rgba:-'], check=True, capture_output=True, timeout=5).stdout
@@ -221,6 +231,11 @@ def capture(name):
             (name, index, 'diagnostic detail overlapped the production title')
         crops.append(mask)
     return crops
+
+
+def navigator_background():
+    return subprocess.check_output(
+        ['import', '-window', window, '-crop', '1x1+10+300', '-depth', '8', 'rgba:-'], timeout=5)
 
 
 try:
@@ -292,6 +307,13 @@ try:
                 select(identifiers[1])
                 eventually(lambda: labels(identifiers[1]), 'provider/account/ID in selected Codex row')
                 capture('provider-marks-' + label + '-codex-selected')
+                light_background = navigator_background()
+                key('ctrl+shift+t')
+                eventually(lambda: navigator_background() != light_background, 'dark provider palette frame')
+                capture('provider-marks-' + label + '-codex-selected-dark')
+                key('ctrl+shift+t')
+                eventually(lambda: navigator_background() == light_background, 'restored provider palette frame')
+                capture('provider-marks-' + label + '-codex-selected-light-restored')
                 if missing:
                     expected[provider_ids['codex']] = expected[provider_ids['codex']].removesuffix(' Snoozed')
                     # No input or selection change drives this update. The visible expiry must

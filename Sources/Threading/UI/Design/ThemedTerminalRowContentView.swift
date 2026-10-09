@@ -13,6 +13,9 @@ final class ThemedTerminalRowContentView: NSStackView {
 
     private var isSelected = false
     private var isRunning = false
+    #if os(Linux)
+    private var contentGround: NSColor?
+    #endif
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -36,10 +39,11 @@ final class ThemedTerminalRowContentView: NSStackView {
         iconView.image = image
     }
 
-    func setInk(selected: Bool, running: Bool) {
+    func setInk(selected: Bool, running: Bool, on ground: NSColor? = nil) {
         isSelected = selected
         isRunning = running
         #if os(Linux)
+        contentGround = ground
         titleLabel.textColor = resolvedInk
         #else
         titleLabel.refreshTextColor()
@@ -48,6 +52,12 @@ final class ThemedTerminalRowContentView: NSStackView {
     }
 
     private var resolvedInk: NSColor {
+        #if os(Linux)
+        if let contentGround {
+            let ink = Design.Text.on(contentGround)
+            return isSelected || isRunning ? ink.label : ink.secondary
+        }
+        #endif
         if isSelected { return Design.Text.selected }
         return isRunning ? Design.Text.label : Design.Text.secondary
     }
