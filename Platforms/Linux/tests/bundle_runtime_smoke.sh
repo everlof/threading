@@ -150,6 +150,8 @@ dbus-run-session -- python3 /stream_conversation_smoke.py "$bin/WindowHarness" /
   /evidence/restart-out/stream
 timeout 15 "$bin/WindowHarness" --app-event-contract
 timeout 30 "$bin/WindowHarness" --ui-worker-contract
+timeout 60 "$bin/WindowHarness" --native-conversation-delivery-contract /native-conversation-providers.py
+dbus-run-session -- python3 /short_user_row_smoke.py "$bin/WindowHarness" /evidence/restart-out/short-user-row
 dbus-run-session -- python3 /composer_account_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/composer-account.sock" "$fixture" \
   /evidence/restart-out/composer-account

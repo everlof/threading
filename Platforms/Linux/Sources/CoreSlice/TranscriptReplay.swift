@@ -105,16 +105,17 @@ enum TranscriptReplay {
     static func load(
         _ request: SessionTranscript.ReadRequest,
         kind: AgentKind,
+        callbackDelivery: ConversationCallbackDelivery = .main,
         completion: @escaping @MainActor @Sendable ([StreamEvent], Bool) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
             guard let url = request.resolve(), FileManager.default.fileExists(atPath: url.path) else {
-                DispatchQueue.main.async { completion([], false) }
+                callbackDelivery.receive { completion([], false) }
                 return
             }
 
             let (events, isTruncated) = read(at: url, kind: kind)
-            DispatchQueue.main.async { completion(events, isTruncated) }
+            callbackDelivery.receive { completion(events, isTruncated) }
         }
     }
 

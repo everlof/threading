@@ -11,7 +11,3 @@ extension NSView {
         }
     }
 }
-
-// Core/Views/ConversationDefaults also references app-only transcript/controller policy.
-// This is its exact long-message label limit, consumed by the unchanged production bubble.
-enum ConversationDefaults { static let longMessageLineCap = 8 }

@@ -20,6 +20,7 @@ enum ClaudeSubagentTranscriptReplay {
 
     static func loadIndex(
         plan: ClaudeSubagentTranscriptPlan,
+        callbackDelivery: ConversationCallbackDelivery = .main,
         completion: @escaping @MainActor @Sendable ([SubagentEvent]) -> Void
     ) {
         let span = PerformanceRecorder.shared.begin(
@@ -32,12 +33,13 @@ enum ClaudeSubagentTranscriptReplay {
                 directory: plan.directory
             )
             span.end(metadata: ["events": "\(events.count)"])
-            DispatchQueue.main.async { completion(events) }
+            callbackDelivery.receive { completion(events) }
         }
     }
 
     static func loadConversation(
         at url: URL,
+        callbackDelivery: ConversationCallbackDelivery = .main,
         completion: @escaping @MainActor @Sendable (
             _ events: [StreamEvent], _ isTruncated: Bool
         ) -> Void
@@ -52,7 +54,7 @@ enum ClaudeSubagentTranscriptReplay {
                 "events": "\(replay.events.count)",
                 "truncated": replay.isTruncated ? "true" : "false"
             ])
-            DispatchQueue.main.async { completion(replay.events, replay.isTruncated) }
+            callbackDelivery.receive { completion(replay.events, replay.isTruncated) }
         }
     }
 

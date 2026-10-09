@@ -203,7 +203,7 @@ through that transport, the production parser and timeline into the shared conve
 `tests/stream_conversation_smoke.py` runs it against `tests/stream_agent_fixture.py`, with F10
 sending a second turn to the same process and F11 ending the session.
 This remains a diagnostic document surface:
-native conversation transports, the transcript table/controller and web-link activation are still open.
+ordinary native conversation hosting, the transcript table/controller and web-link activation are still open.
 `WindowHarness --automatic-rows-ui-fixture OUTPUT_DIRECTORY` places assistant blocks in the
 shared conversation cell host with shim-owned automatic heights. Its native journey checks
 viewport-only materialization, released/reused content, Unicode copy, resize and return navigation,
@@ -240,8 +240,9 @@ The ordinary workspace now installs a native worker-delivery loop. Full-text res
 then run on the UI owner before its next frame; idle waits remain blocking. The serial text
 worker waits for that receipt, limiting pending UI delivery to one. The installed
 `--ui-worker-contract` checks metrics and pixels while MainActor is occupied in SDL's wait,
-including expired-window wake refusal. Other MainActor task sources still need their own host
-integration; this boundary currently serves complete plain labels.
+including expired-window wake refusal. Native conversation callbacks now share this delivery
+boundary through a 64-slot mailbox; worker receipts pace transport, replay and deadline delivery.
+Other MainActor task sources still need their own host integration.
 The CoreSlice now compiles the shared Claude, Codex app-server and ACP native conversation
 transports, including their production child ownership, replay, permission and execution adapters.
 `NativeConversationHarness` drives all four provider profiles through deterministic Python peers:
@@ -254,8 +255,16 @@ encrypted secret envelopes and compressed Unicode ZIP/gzip with independent read
 These contracts run in the canonical bundle build lane. Swift Crypto 5.0.0 supplies the Linux
 cryptography implementation; its license, notice and pinned BoringSSL license ship in the bundle.
 The native conversation classes are not yet mounted in the ordinary workspace. That host still
-needs conversation callback delivery, composer/permission presentation and provider launch plans;
+needs the conversation controller, composer/permission presentation and provider launch plans;
 the existing stream UI fixture continues to use its narrower diagnostic transport path.
+`WindowHarness --native-conversation-delivery-contract tests/native_conversation/providers.py`
+checks all four production profiles while SDL occupies MainActor, including persistent turns,
+permission replies, EOF, output admission limits, silent handshake expiry and deferred planning
+failure. The installed runtime suite runs it under Xvfb. Raw read backlog defaults to 32 MiB per
+transport and reports one typed failure on overflow.
+`WindowHarness --short-user-bubble-ui-fixture OUTPUT_DIRECTORY` mounts the production short-user
+row factory. Its installed journey checks compact right alignment, Unicode selection and bright
+text after a dark switch; the long-message journey uses the same factory's expandable branch.
 
 `tests/search_match/run.sh` links unchanged production `SearchMatchLabel` through the same
 Pango-backed label path and checks highlighted attributed pixels, a one-line ellipsis, cell

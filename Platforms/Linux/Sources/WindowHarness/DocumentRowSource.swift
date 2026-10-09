@@ -62,6 +62,9 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
     func appendBlocks(_ sources: [String], in table: NSTableView) {
         appendSettled(sources.map(Content.markdown), in: table)
     }
+    func appendUser(_ text: String, in table: NSTableView) {
+        appendSettled([.user(text)], in: table)
+    }
     func appendDiff(_ lines: [DiffLine], in table: NSTableView) {
         appendSettled([.diff(lines)], in: table)
     }
@@ -133,16 +136,13 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
         case .streaming(let text):
             content = MarkdownView(markdown: text)
         case .user(let text):
-            let bubble = UserMessageBubbleView(text: text)
-            bubble.setExpanded(expandedUsers.contains(entry.id), notifying: false)
-            bubble.onExpansionChanged = { [weak self, weak tableView, weak host] expanded in
+            content = ConversationUserRow.make(text, expanded: expandedUsers.contains(entry.id), onExpansionChanged: { [weak self, weak tableView, weak host] expanded in
                 guard let self else { return }
                 if expanded { expandedUsers.insert(entry.id) } else { expandedUsers.remove(entry.id) }
                 guard let tableView, let host else { return }
                 let row = tableView.row(for: host)
                 if row >= 0 { tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row)) }
-            }
-            content = bubble
+            })
         }
         configured += 1
         live.insert(entry.id)

@@ -1,7 +1,8 @@
 import AppKit
 
-// The installed preview uses a checked production palette. These two font roles are the
-// narrow host leaves needed by the unchanged production idle placeholder.
+// The installed preview uses a checked production palette. These are the
+// geometry leaves needed by the unchanged production idle placeholder. Fonts use the shared
+// host FontRole boundary.
 extension Design.Spacing {
     static let pane: CGFloat = 32
 }
@@ -11,18 +12,5 @@ extension Design {
         static let afterIcon = Spacing.inset
         static let line = Spacing.small
         static let section = Spacing.pane
-    }
-}
-
-enum SessionPlaceholderFontRole {
-    case placeholderTitle, subheading
-}
-
-extension NSTextField {
-    func applyFont(_ role: SessionPlaceholderFontRole) {
-        switch role {
-        case .placeholderTitle: font = NSFont.systemFont(ofSize: 15, weight: .medium)
-        case .subheading: font = NSFont.systemFont(ofSize: 12, weight: .regular)
-        }
     }
 }

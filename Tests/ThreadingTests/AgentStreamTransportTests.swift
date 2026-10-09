@@ -24,6 +24,48 @@ final class AgentStreamTransportTests: XCTestCase {
         transport.detach()
     }
 
+    func testSlowUIDeliveryBoundsQueuedPipeBytesAndReportsOneFailure() throws {
+        let pipes = TransportPipes()
+        let entered = expectation(description: "worker waits for first UI receipt")
+        let failed = expectation(description: "bounded delivery backlog")
+        let release = DispatchSemaphore(value: 0)
+        let firstReceipt = LockedState(initialState: true)
+        var lines: [String] = []
+        var failures: [AgentStreamTransportFailure] = []
+        let delivery = ConversationCallbackDelivery(enqueue: ConversationCallbackDelivery.main.enqueue, receive: { operation in
+            let first = firstReceipt.withLock { value in
+                let first = value
+                value = false
+                return first
+            }
+            if first {
+                entered.fulfill()
+                _ = release.wait(timeout: .now() + 2)
+            }
+            ConversationCallbackDelivery.main.receive(operation)
+        })
+        let transport = AgentStreamTransport<String>(
+            label: "codes.threading.tests.slow-ui", input: pipes.input.fileHandleForWriting,
+            output: pipes.output.fileHandleForReading, error: pipes.error.fileHandleForReading,
+            callbackDelivery: delivery, maximumPendingReadBytes: 128, maximumErrorBytes: 1_024,
+            parser: { String(data: $0, encoding: .utf8) },
+            onLine: { lines.append($0) }, onMalformedLine: {}, onFailure: {
+                failures.append($0)
+                failed.fulfill()
+            })
+        defer { transport.detach(); release.signal() }
+        transport.start()
+        try pipes.output.fileHandleForWriting.write(contentsOf: Data("first\n".utf8))
+        wait(for: [entered], timeout: 1)
+        try pipes.output.fileHandleForWriting.write(contentsOf: Data(repeating: 0x78, count: 1_024))
+        // Callback admission runs independently of the blocked parser/UI receipt lane.
+        Thread.sleep(forTimeInterval: 0.03)
+        release.signal()
+        wait(for: [failed], timeout: 1)
+        XCTAssertEqual(lines, ["first"])
+        XCTAssertEqual(failures, [.outputBackpressure])
+    }
+
     func testNewlineFreeOutputIsBounded() throws {
         let pipes = TransportPipes()
         let failed = expectation(description: "bounded output failure")

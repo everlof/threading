@@ -517,6 +517,11 @@ struct WindowHarness {
             try await AppEventContract.run()
             return
         }
+        if mode == "--native-conversation-delivery-contract" {
+            guard CommandLine.arguments.count == 3 else { throw WindowFailure("usage: WindowHarness --native-conversation-delivery-contract PROVIDER_SCRIPT") }
+            try NativeConversationDeliveryContract.run(script: CommandLine.arguments[2])
+            return
+        }
         if mode == "--ui-worker-contract" {
             try NativeUIWorkerContract.run()
             return
@@ -531,12 +536,13 @@ struct WindowHarness {
                                             keyEvent: composerKeyEvent)
             return
         }
-        if mode == "--document-ui-fixture" || mode == "--automatic-rows-ui-fixture" || mode == "--diff-ui-fixture" || mode == "--user-bubble-ui-fixture" {
+        if mode == "--document-ui-fixture" || mode == "--automatic-rows-ui-fixture" || mode == "--diff-ui-fixture" || mode == "--user-bubble-ui-fixture" || mode == "--short-user-bubble-ui-fixture" {
             let args = Array(CommandLine.arguments.dropFirst(2))
             guard args.count == 1 else { throw WindowFailure("usage: WindowHarness --document-ui-fixture OUTPUT") }
             try await DocumentUIFixture.run(output: args[0], automaticRows: mode == "--automatic-rows-ui-fixture",
                                             diffMode: mode == "--diff-ui-fixture",
-                                            userBubbleMode: mode == "--user-bubble-ui-fixture",
+                                            userBubbleMode: mode == "--user-bubble-ui-fixture" || mode == "--short-user-bubble-ui-fixture",
+                                            userBubbleText: mode == "--short-user-bubble-ui-fixture" ? "Short prompt é 日本語 👩🏽‍🚀" : nil,
                                             keyEvent: composerKeyEvent)
             return
         }

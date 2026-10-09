@@ -139,10 +139,11 @@ enum DocumentUIFixture {
 
     static func run(output: String, automaticRows: Bool = false, diffMode: Bool = false,
                     userBubbleMode: Bool = false,
+                    userBubbleText: String? = nil,
                     streamAgent: [String]? = nil,
                     keyEvent: (TWEvent) -> NSEvent) async throws {
         let source = userBubbleMode ? await Task.detached {
-            "FIRST user message é 👩🏽‍🚀\n" + (0..<300).map { "User line \($0): Unicode 日本語 العربية 👩🏽‍🚀\n" }.joined() + "TAIL USER MESSAGE é 👩🏽‍🚀"
+            userBubbleText ?? "FIRST user message é 👩🏽‍🚀\n" + (0..<300).map { "User line \($0): Unicode 日本語 العربية 👩🏽‍🚀\n" }.joined() + "TAIL USER MESSAGE é 👩🏽‍🚀"
         }.value : sample
         let reply = try await Task.detached {
             if userBubbleMode {
@@ -332,8 +333,9 @@ enum DocumentUIFixture {
                             exitStatus: driver.exitStatus, diagnostic: driver.diagnostic)
                     })
                 try await Task.detached {
-                    try JSONEncoder().encode(state).write(to: directory.appendingPathComponent("state.json"), options: .atomic)
+                    // Publish pixels before their state. Readers use state as the ready marker.
                     try PNGWriter.write(bitmap, to: directory.appendingPathComponent("frame.png"))
+                    try JSONEncoder().encode(state).write(to: directory.appendingPathComponent("state.json"), options: .atomic)
                 }.value
                 dirty = false
                 renderedDisplayRevision = displayRevisionBeingRendered

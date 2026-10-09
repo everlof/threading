@@ -9,6 +9,9 @@ extension Design.Surface {
 }
 extension Design {
     enum Chat {
+        static var turnDivider: NSColor { LinuxTheme.color("divider") }
+        static let turnDividerHeight = ConversationUserRowDefaults.turnDividerHeight
+        static let bubbleMaxWidthFraction = ConversationUserRowDefaults.bubbleMaxWidthFraction
         static var bubbleFill: NSColor { LinuxTheme.color("accentMuted") }
         static let blockSpacing = Design.Spacing.small
         static let arrivalRise = Design.Spacing.medium
@@ -38,19 +41,29 @@ extension NSView {
     }
     func applyLayerBackground(_ fill: NSColor) { setAppliedSurface(fill: fill, radius: 0, border: nil) }
 }
-extension NSTextField {
-    enum DocumentFontRole {
-        case detail
-        case body
+extension Design {
+    // Recipes used by the shared conversation/Markdown rows in this fixed-theme host.
+    enum FontRole: Equatable {
+        case detail, body, subheading, caption, placeholderTitle
+        case code(weight: NSFont.Weight = .regular)
         static func detail() -> Self { .detail }
     }
-    func applyFont(_ role: DocumentFontRole) {
-        font = role == .body ? Design.Typography.body() : Design.Typography.detail()
-    }
-    func applyFont(_ role: DocumentFontRole, in surface: Design.Typography.FontSurface) {
-        font = role == .body ? Design.Typography.body(surface: surface) : Design.Typography.detail()
+}
+extension NSTextField {
+    typealias DocumentFontRole = Design.FontRole
+    func applyFont(_ role: Design.FontRole) { applyFont(role, in: .chrome) }
+    func applyFont(_ role: Design.FontRole, in surface: Design.Typography.FontSurface) {
+        switch role {
+        case .body: font = Design.Typography.body(surface: surface)
+        case .detail: font = Design.Typography.detail()
+        case .placeholderTitle: font = .systemFont(ofSize: 15, weight: .medium)
+        case .subheading: font = .systemFont(ofSize: 12, weight: .regular)
+        case .caption: font = .systemFont(ofSize: 11, weight: .semibold)
+        case .code(let weight): font = .monospacedSystemFont(ofSize: 11, weight: weight)
+        }
     }
 }
+
 extension L10n {
     static func format(_ value: String, _ arguments: CVarArg...) -> String {
         String(format: value, arguments: arguments)

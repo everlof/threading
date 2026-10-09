@@ -37,6 +37,7 @@ final class ClaudeStreamSession:
 
     let sessionID: SessionID
 
+    private let callbackDelivery: ConversationCallbackDelivery
     private let plan: () throws -> AgentLaunchPlan
     private let effort: String?
     private let subagentTranscriptPlan: () -> ClaudeSubagentTranscriptPlan?
@@ -145,12 +146,14 @@ final class ClaudeStreamSession:
 
     init(
         sessionID: SessionID,
+        callbackDelivery: ConversationCallbackDelivery = .main,
         effort: String? = nil,
         subagentTranscriptPlan: @escaping () -> ClaudeSubagentTranscriptPlan? = { nil },
         hostPlan: @escaping () throws -> PTYHostChildPlan? = { nil },
         controlTimeouts: ClaudeControlTimeouts = .standard,
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
+        self.callbackDelivery = callbackDelivery
         self.sessionID = sessionID
         self.effort = effort
         self.subagentTranscriptPlan = subagentTranscriptPlan
@@ -177,6 +180,7 @@ final class ClaudeStreamSession:
         capabilityInitializationFinished = onComposerCapabilitiesChange == nil
         replaceComposerCapabilities([])
 
+        let delivery = callbackDelivery
         let process: AgentChildProcess
         do {
             let plan = try plan()
@@ -187,7 +191,7 @@ final class ClaudeStreamSession:
                 sessionID: sessionID,
                 host: try hostPlan()
             ) { [weak self] status in
-                Task { @MainActor [weak self] in
+                delivery.enqueue { [weak self] in
                     self?.handleTermination(status: status)
                 }
             }
@@ -195,7 +199,7 @@ final class ClaudeStreamSession:
             ThreadingLogger.agent.error(
                 "Stream session failed to start: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            Task { @MainActor [weak self] in
+            delivery.enqueue { [weak self] in
                 guard let self else { return }
                 if let handler = self.onLaunchFailure { handler(error) }
                 else { self.onExit?(AgentChildProcessDefaults.spawnFailureStatus) }
@@ -208,6 +212,7 @@ final class ClaudeStreamSession:
             input: process.standardInput,
             output: process.standardOutput,
             error: process.standardError,
+            callbackDelivery: callbackDelivery,
             maximumErrorBytes: ClaudeStreamDefaults.maximumErrorBytes,
             parser: { ClaudeParsedLine.parse($0) },
             onLine: { [weak self] line in self?.received(line) },
@@ -485,10 +490,10 @@ final class ClaudeStreamSession:
         completion: @escaping @MainActor @Sendable ([SubagentEvent]) -> Void
     ) {
         guard let plan = subagentTranscriptPlan() else {
-            DispatchQueue.main.async { completion([]) }
+            callbackDelivery.enqueue { completion([]) }
             return
         }
-        ClaudeSubagentTranscriptReplay.loadIndex(plan: plan, completion: completion)
+        ClaudeSubagentTranscriptReplay.loadIndex(plan: plan, callbackDelivery: callbackDelivery, completion: completion)
     }
 
     func loadSubagentTranscript(
@@ -496,11 +501,12 @@ final class ClaudeStreamSession:
         completion: @escaping @MainActor @Sendable ([StreamEvent], Bool) -> Void
     ) {
         guard let path = descriptor.path, !path.isEmpty else {
-            DispatchQueue.main.async { completion([], false) }
+            callbackDelivery.enqueue { completion([], false) }
             return
         }
         ClaudeSubagentTranscriptReplay.loadConversation(
             at: URL(fileURLWithPath: path),
+            callbackDelivery: callbackDelivery,
             completion: completion
         )
     }
@@ -644,7 +650,7 @@ final class ClaudeStreamSession:
     private func scheduleControlExpiry(for requestID: String) {
         guard let request = pendingControl[requestID] else { return }
         let delay = max(0, controlDeadline(for: request) - ProcessInfo.processInfo.systemUptime)
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        _ = callbackDelivery.after(delay) { [weak self] in
             self?.expireControlRequestIfDue(requestID)
         }
     }

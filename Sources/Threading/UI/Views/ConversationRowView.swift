@@ -1,4 +1,7 @@
 import AppKit
+#if os(Linux)
+@testable import CoreSlice
+#endif
 
 // MARK: - Conversation Row View
 
@@ -17,60 +20,9 @@ enum ConversationRowView {
 
     // MARK: - Rows
 
-    /// The user's turn: a right-aligned bubble, capped so a short instruction is not a
-    /// full-width banner. A bubble suits an instruction; flowing text suits a long answer, and
-    /// forcing either into the other's shape is what makes agent UIs read as log viewers.
-    ///
-    /// A *long* message — a pasted log, a briefing — collapses behind a fade instead
-    /// (`UserMessageBubbleView`): the user wrote it, so drawn in full it drowns the answer it
-    /// was written to get.
+    /// The shared design component owns short/long bubble selection and right alignment.
     static func userBubble(_ text: String) -> NSView {
-        if ConversationDefaults.collapsesUserMessage(text) {
-            return rightAligned(UserMessageBubbleView(text: text))
-        }
-
-        let bubble = NSView()
-        bubble.translatesAutoresizingMaskIntoConstraints = false
-        bubble.applySurface(fill: Design.Chat.bubbleFill, radius: .panel)
-
-        let label = ProseLabel(text: text)
-        bubble.addSubview(label)
-
-        // A bubble is padded tighter than a card — `medium`, measured against the conversation's
-        // rhythm — and its corner is the panel's, which under a broad theme is 40pt. At that
-        // radius the arc has crossed x=13 by the height of the first line, so a 10pt padding put
-        // the opening word *outside* the shape. The corner pushes it in; nothing pulls it back.
-        let pad = Design.Spacing.medium
-        let padding = [
-            label.topAnchor.constraint(equalTo: bubble.topAnchor, constant: pad),
-            label.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -pad),
-            label.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: pad),
-            label.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -pad)
-        ]
-        NSLayoutConstraint.activate(padding)
-        bubble.holdAtContentInset(padding, from: pad)
-
-        return rightAligned(bubble)
-    }
-
-    /// The row wrapper both bubble shapes share: trailing-aligned, capped to the bubble
-    /// fraction of the pane.
-    private static func rightAligned(_ bubble: NSView) -> NSView {
-        let row = NSView()
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(bubble)
-        NSLayoutConstraint.activate([
-            bubble.topAnchor.constraint(equalTo: row.topAnchor),
-            bubble.bottomAnchor.constraint(equalTo: row.bottomAnchor),
-            bubble.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-            bubble.leadingAnchor.constraint(greaterThanOrEqualTo: row.leadingAnchor),
-            bubble.widthAnchor.constraint(
-                lessThanOrEqualTo: row.widthAnchor,
-                multiplier: Design.Chat.bubbleMaxWidthFraction
-            )
-        ])
-
-        return row
+        ConversationUserRow.make(text)
     }
 
     /// The rule drawn above a user's turn.

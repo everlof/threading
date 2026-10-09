@@ -105,7 +105,24 @@ permission presentation and MCP catalogue admission. The Mac keeps its existing 
 Linux denies permissions and exposes no MCP tools until its host supplies those boundaries.
 Deterministic peers exercise two turns, Unicode, permission replies and exactly one exit both
 locally and through the real Linux daemon. This is transport evidence: the ordinary Linux
-workspace still needs the conversation controller, callback delivery, composer and launch plans.
+workspace still needs the conversation controller, composer and launch plans.
+
+`ConversationCallbackDelivery` makes the host's UI executor explicit. The Mac default keeps
+MainActor tasks for deferred lifecycle callbacks and main-queue delivery for worker results.
+Linux supplies its installed native window mailbox: worker receipts wake SDL and pace the
+producer, while lifecycle callbacks enter a bounded deferred queue. ACP handshake/catalogue
+deadlines, Claude control deadlines and transcript replay use the same delivery boundary.
+The installed Linux contract holds MainActor in SDL's blocking wait while all four profiles
+complete two turns, permission replies and EOF; it also checks a silent handshake deadline and
+asynchronous planning failure. Read admission caps queued raw output at 32 MiB per transport
+before its parser/UI receipt lane; overflow terminates through one typed failure. The native
+contract deliberately holds the UI while a flood reaches a smaller test budget.
+
+The production user-row factory lives in `UI/Design/ConversationUserRow.swift`, with its
+Foundation-only shape defaults shared by ThreadingDesignKit and the Linux host. Both short
+selectable prompts and expandable long messages therefore use the same bubble anatomy.
+Linux's document fixture publishes its PNG before the ready-state marker, and the installed
+short-row journey checks bright text pixels after changing to dark appearance.
 
 Codex native rendering uses the CLI's **app-server**, not the one-shot `codex exec --json`
 surface. `CodexStreamSession` launches one `codex app-server --listen stdio://` process,

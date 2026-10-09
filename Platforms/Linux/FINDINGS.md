@@ -5949,3 +5949,102 @@ session-history, sharing, lifecycle and ACP tests passed (69), and the updated r
 Mac suite passed (277). The full installed UI evidence above predates this rebase; the rebuilt
 window and focused contracts are the post-rebase evidence. The full Mac/iOS lane was not repeated
 for these upstream changes.
+
+## 184. Native conversation UI delivery and shared user-message anatomy
+
+The normal workspace occupies MainActor in SDL's blocking wait. The native transports previously
+queued their parsed lines, exit callbacks, deadlines and replay completions on the main executor,
+which cannot run there. ConversationCallbackDelivery now names that host boundary explicitly.
+The default keeps Mac main-queue/Task delivery; the Linux host can use its native wake mailbox.
+Deadline cancellation covers both an unfired timer and an already queued UI receipt. Transcript
+and subagent readers use the same injected boundary.
+
+NSWindowWorkerDelivery now admits at most 64 pending operations. Worker receipt delivery waits
+for capacity and then for the UI owner to run its operation, pacing each serial stream reader and
+the shared deadline lane. Deferred launch/permission callbacks share that mailbox without waiting
+on the UI owner. The workspace still admits at most eight running instances. Shutdown releases
+pending receipts before removing the native window owner. This extends the text-worker-only
+boundary from §182; a complete-text worker still owes only one receipt at a time.
+
+Receipt pacing exposed an existing read-admission gap: FileHandle callbacks could keep queuing
+raw chunks while their serial parser waited for the UI. AgentStreamTransport now bounds those
+queued bytes at 32 MiB per transport and reports one typed outputBackpressure failure on overflow.
+Framing's existing 16 MiB line limit and bounded diagnostic suffix still apply. This is explicit
+failure rather than silently losing conversation events. The Mac contract holds the first UI
+receipt while later bytes arrive and checks ordered delivery plus one fault. The native-window
+contract drives a real child flood while SDL occupies the UI, then verifies the same bounded fault.
+
+The native-window contract also drives the actual Claude, Codex, Grok ACP and Cursor ACP sessions
+through two persistent Unicode turns, Codex permission replies, EOF, a silent ACP handshake
+deadline and a deferred planning failure. These are native-loop callbacks, with no main-executor
+poll or Task.yield in the occupied loop. The contract is included in the installed runtime lane.
+
+ConversationUserRow now owns the unchanged production short/long bubble factory and its trailing
+alignment. Its Foundation-only geometry/source thresholds are shared with ThreadingDesignKit and
+Linux. The 600-character/8-line decision stops counting after the character threshold, rather than
+walking an entire long message before choosing its collapsed presentation. The Linux document
+source now uses this factory and preserves expansion by row identity. The production conversation
+row factory also compiles against the shim; the host's fixed-theme font boundary supplies its
+named roles. Eleven feature-owned constraint sites moved into Design, and the structural ratchet
+was lowered from 3156 to 3145.
+
+The long-message native journey passes collapse, full copy, expansion, head/tail, automatic height
+and dark mode. A short-message journey checks right alignment, compact height, selectable Unicode,
+absence of long-message controls and a live dark switch. Their current dark screenshots were
+inspected in out/user-row-native-delivery and out/short-user-row-native-delivery. Focused Mac
+transport/lifecycle/ACP/replay/content contracts pass (83), including the new bounded-backlog test;
+all 124 CoreSlice copies and the 12 runner contracts pass.
+
+The ordinary saved-session route still opens GraphicalTerminal: mounting the native conversation
+controller/composer, preserving usesNativeUI in its runtime snapshot, launch-plan preparation,
+permission presentation and full tool-row interaction remain next steps. These prerequisites do
+not claim that native Chat is already selected in that workspace. Timeline ordering, launch and
+permission authority remain host-owned; no extension capability or replacement slot was added.
+
+Mac conversation evidence was captured with the ui-evidence-review workflow and compared to an
+isolated checkout of e630f882819f2c775cea28e167ef8a141110eb44 using the same command. All ten
+static fixture images match decoded RGBA exactly. The two live-plan images differ only in the
+animated ThinkingOrb glyph (35×35 pixels in dark, 12×24 in light), which was inspected. The
+stored baselines are older: their differences and missing newer captures were not approved or
+rewritten. Current report: .build/ui-evidence-reports/20261009-094510-25102/report; comparison
+report: /tmp/threading-before-native-delivery-e630/.build/ui-evidence-reports/20261009-095636-47772/report.
+
+The corrected package/archive passed the full installed runtime suite in fresh Swift-free Ubuntu
+24.04 arm64, including the new native conversation delivery/output-budget contract and short-row
+journey. Evidence: out/bundle-smoke/native-callbacks.egLHw2hv. Manifest revision:
+e630f882819f2c775cea28e167ef8a141110eb44, source_dirty=true. Debian SHA-256:
+f7b4255c9bb644ac6c4d0340d3cf8caf602bf4c3813bde2ff6e910243c6ce190.
+The initial package had an incorrect manually supplied provenance value; it was rebuilt with the
+actual checked-out revision before this installed suite. The full Mac/iOS suite was not repeated
+or a commit made at this iteration; the preceding checkpoint's gallery failure remains recorded
+in §183. The ordinary native-conversation workspace route is still incomplete.
+
+Inspecting the installed short-dark screenshot caught a fixture publication race after those
+structural checks passed: state.json advertised the dark ready state before frame.png was replaced,
+so the journey sometimes copied the previous text tile over the newly dark surface. The fixture
+now publishes pixels before their ready-state marker. The short-row journey additionally requires
+bright text pixels in the label region rather than trusting readiness flags alone. It passed again
+in out/short-user-row-publication-fixed and its dark frame was inspected. The package above predates
+this capture-order fix and is not final evidence for the strengthened journey; it must be rebuilt
+and rerun at the next shipping checkpoint.
+
+The package was rebuilt with the capture-order fix and tested again in fresh Swift-free Ubuntu.
+The installed native callback/output-budget contract, long-message journey and strengthened
+short-row pixel journey passed in out/bundle-smoke/native-callbacks.hz9CxYXT. The installed short
+dark and expanded long-message dark screenshots were inspected: both have readable text, and the
+long message retains its full tail and controls. Debian SHA-256:
+7fafc2ce987819088f1bfa76b6e67ae91d39492c6e8ddb3c8118fc546dfcbf60.
+Its manifest still names e630f882819f2c775cea28e167ef8a141110eb44 with source_dirty=true.
+ThreadingDesignKit's nine tests and the 12 Linux runner contracts also pass.
+The complete installed runtime suite finished successfully, including non-root startup, live
+reinstall, saved-terminal recovery, native workspace/actions/accessibility and desktop entry.
+The required pre-commit scripts/test.sh all completed 10,538 Mac tests with 94 skips and one
+failure: the same nine-component Gallery catalogue gap recorded above. No other test failed.
+The runner therefore did not enter its iOS stage; iOS remains unverified at this checkpoint.
+The branch was rebased without conflicts onto 18c48627d (sidebar preference test isolation).
+The changed PreferenceStore comment was synchronized into CoreSlice; all 124 copies match.
+Post-rebase verification passed the static WindowHarness build, CoreSlice contracts, all four
+native callback profiles and the UI-worker wake contract. The installed package evidence above
+predates this rebase. A focused Mac rerun was stopped after its build made no progress in the
+boundary-check phase for several minutes; those post-rebase Mac tests did not run. The full Mac
+result above is the completed pre-rebase evidence; it was not repeated in a loop.

@@ -88,6 +88,7 @@ final class CodexStreamSession:
         return process.processIdentifier
     }
 
+    private let callbackDelivery: ConversationCallbackDelivery
     private let plan: () throws -> AgentLaunchPlan
     private let configurationProvider: () -> CodexTurnConfiguration
     private let workingDirectory: String
@@ -165,11 +166,13 @@ final class CodexStreamSession:
 
     init(
         sessionID: SessionID,
+        callbackDelivery: ConversationCallbackDelivery = .main,
         workingDirectory: String = FileManager.default.currentDirectoryPath,
         configurationProvider: @escaping () -> CodexTurnConfiguration = { .inherited },
         hostPlan: @escaping () throws -> PTYHostChildPlan? = { nil },
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
+        self.callbackDelivery = callbackDelivery
         self.sessionID = sessionID
         self.workingDirectory = workingDirectory
         self.configurationProvider = configurationProvider
@@ -198,6 +201,7 @@ final class CodexStreamSession:
     func start() {
         guard !isRunning else { return }
 
+        let delivery = callbackDelivery
         let process: AgentChildProcess
         do {
             let launchPlan = try plan()
@@ -209,7 +213,7 @@ final class CodexStreamSession:
                 sessionID: sessionID,
                 host: try hostPlan()
             ) { [weak self] status in
-                Task { @MainActor [weak self] in
+                delivery.enqueue { [weak self] in
                     self?.handleTermination(status: status)
                 }
             }
@@ -217,7 +221,7 @@ final class CodexStreamSession:
             ThreadingLogger.agent.error(
                 "Codex app-server failed to start: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            Task { @MainActor [weak self] in
+            delivery.enqueue { [weak self] in
                 guard let self else { return }
                 if let handler = self.onLaunchFailure { handler(error) }
                 else { self.onExit?(AgentChildProcessDefaults.spawnFailureStatus) }
@@ -230,6 +234,7 @@ final class CodexStreamSession:
             input: process.standardInput,
             output: process.standardOutput,
             error: process.standardError,
+            callbackDelivery: callbackDelivery,
             maximumErrorBytes: CodexStreamDefaults.maximumErrorBytes,
             parser: { JSONRPCLineEnvelope.parse($0) },
             onLine: { [weak self] envelope in self?.route(envelope) },
@@ -1143,7 +1148,7 @@ final class CodexStreamSession:
             return
         }
 
-        Task { @MainActor [weak self] in
+        callbackDelivery.enqueue { [weak self] in
             ConversationPermissionDecision.decide(request) { decision in
                 guard let self else { return }
                 self.answerApproval(

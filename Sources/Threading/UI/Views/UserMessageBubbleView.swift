@@ -12,9 +12,23 @@ final class UserMessageBubbleView: NSView {
 
     private let text: String
 
-    private lazy var label: ProseLabel = {
+    #if os(Linux)
+    private typealias MessageLabel = NSTextField
+    #else
+    private typealias MessageLabel = ProseLabel
+    #endif
+
+    private lazy var label: MessageLabel = {
+        #if os(Linux)
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.applyFont(.body, in: .conversation)
+        label.textColor = Design.Text.label
+        label.isSelectable = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        #else
         let label = ProseLabel(text: text)
-        label.maximumNumberOfLines = ConversationDefaults.longMessageLineCap
+        #endif
+        label.maximumNumberOfLines = ConversationUserRowDefaults.longMessageLineCap
         label.wantsLayer = true
         return label
     }()
@@ -136,7 +150,7 @@ final class UserMessageBubbleView: NSView {
         guard expanded != isExpanded else { return }
         isExpanded = expanded
 
-        label.maximumNumberOfLines = isExpanded ? 0 : ConversationDefaults.longMessageLineCap
+        label.maximumNumberOfLines = isExpanded ? 0 : ConversationUserRowDefaults.longMessageLineCap
         if isExpanded {
             label.layer?.mask = nil
             fade = nil

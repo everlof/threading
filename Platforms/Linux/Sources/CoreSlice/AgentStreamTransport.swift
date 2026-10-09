@@ -4,6 +4,7 @@ import CNativeAgentProcess
 #endif
 
 enum AgentStreamTransportFailure: Error, Equatable, Sendable {
+    case outputBackpressure
     case inputBackpressure
     case invalidOutboundJSON
     case outboundLineTooLarge(Int)
@@ -12,6 +13,8 @@ enum AgentStreamTransportFailure: Error, Equatable, Sendable {
 
     var userFacingDescription: String {
         switch self {
+        case .outputBackpressure:
+            return "The agent output exceeded the interface delivery budget."
         case .inputBackpressure:
             return "The agent input stream stopped accepting messages."
         case .invalidOutboundJSON:
@@ -30,6 +33,7 @@ enum AgentStreamTransportDefaults {
     /// Tool results can legitimately be large, but a newline-free stream must not grow forever.
     static let maximumLineBytes = 16 * 1_024 * 1_024
     static let maximumPendingWrites = 64
+    static let maximumPendingReadBytes = 32 * 1_024 * 1_024
 }
 
 /// Bounded pipe ownership shared by every persistent native agent transport.
@@ -53,7 +57,9 @@ final class AgentStreamTransport<Line: Sendable>: @unchecked Sendable {
     private let error: FileHandle
     private let maximumLineBytes: Int
     private let maximumErrorBytes: Int
+    private let maximumPendingReadBytes: Int
     private let maximumPendingWrites: Int
+    private let callbackDelivery: ConversationCallbackDelivery
     private let parser: Parser
     private let onLine: @MainActor @Sendable (Line) -> Void
     private let onMalformedLine: @MainActor @Sendable () -> Void
@@ -63,6 +69,7 @@ final class AgentStreamTransport<Line: Sendable>: @unchecked Sendable {
     private let writeQueue: DispatchQueue
     private let admissionLock = NSLock()
     private let callbackLock = NSLock()
+    private var pendingReadBytes = 0
     private var pendingWriteCount = 0
     private var acceptsWrites = true
     private var acceptsCallbacks = true
@@ -79,7 +86,9 @@ final class AgentStreamTransport<Line: Sendable>: @unchecked Sendable {
         input: FileHandle,
         output: FileHandle,
         error: FileHandle,
+        callbackDelivery: ConversationCallbackDelivery = .main,
         maximumLineBytes: Int = AgentStreamTransportDefaults.maximumLineBytes,
+        maximumPendingReadBytes: Int = AgentStreamTransportDefaults.maximumPendingReadBytes,
         maximumErrorBytes: Int,
         maximumPendingWrites: Int = AgentStreamTransportDefaults.maximumPendingWrites,
         parser: @escaping Parser,
@@ -87,10 +96,12 @@ final class AgentStreamTransport<Line: Sendable>: @unchecked Sendable {
         onMalformedLine: @escaping @MainActor @Sendable () -> Void,
         onFailure: @escaping @MainActor @Sendable (AgentStreamTransportFailure) -> Void
     ) {
+        self.callbackDelivery = callbackDelivery
         self.input = input
         self.output = output
         self.error = error
         self.maximumLineBytes = max(1, maximumLineBytes)
+        self.maximumPendingReadBytes = max(1, maximumPendingReadBytes)
         self.maximumErrorBytes = max(0, maximumErrorBytes)
         self.maximumPendingWrites = max(1, maximumPendingWrites)
         self.parser = parser
@@ -164,10 +175,11 @@ final class AgentStreamTransport<Line: Sendable>: @unchecked Sendable {
         acceptsCallbacks = false
         output.readabilityHandler = nil
         error.readabilityHandler = nil
+        let delivery = callbackDelivery
         readQueue.async { [weak self] in
             guard let self else {
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated { completion("") }
+                delivery.receive {
+                    completion("")
                 }
                 return
             }
@@ -179,8 +191,8 @@ final class AgentStreamTransport<Line: Sendable>: @unchecked Sendable {
             }
             let diagnostic = String(decoding: errorBuffer, as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { completion(diagnostic) }
+            callbackDelivery.receive {
+                completion(diagnostic)
             }
         }
         callbackLock.unlock()
@@ -203,8 +215,22 @@ final class AgentStreamTransport<Line: Sendable>: @unchecked Sendable {
             callbackLock.unlock()
             return
         }
+        guard chunk.count <= maximumPendingReadBytes - pendingReadBytes else {
+            acceptsCallbacks = false
+            readQueue.async { [weak self] in self?.fail(.outputBackpressure) }
+            callbackLock.unlock()
+            output.readabilityHandler = nil
+            error.readabilityHandler = nil
+            return
+        }
+        pendingReadBytes += chunk.count
         readQueue.async { [weak self] in
             guard let self else { return }
+            defer {
+                callbackLock.lock()
+                pendingReadBytes -= chunk.count
+                callbackLock.unlock()
+            }
             if isError { captureError(chunk) } else { consume(chunk) }
         }
         callbackLock.unlock()
@@ -293,23 +319,23 @@ final class AgentStreamTransport<Line: Sendable>: @unchecked Sendable {
         admissionLock.lock()
         acceptsWrites = false
         admissionLock.unlock()
-        DispatchQueue.main.async { [weak self] in
+        callbackDelivery.receive { [weak self] in
             guard let self, callbacksRemainDeliverable else { return }
-            MainActor.assumeIsolated { self.onFailure(failure) }
+            self.onFailure(failure)
         }
     }
 
     private func deliver(_ line: Line) {
-        DispatchQueue.main.async { [weak self] in
+        callbackDelivery.receive { [weak self] in
             guard let self, callbacksRemainDeliverable else { return }
-            MainActor.assumeIsolated { self.onLine(line) }
+            self.onLine(line)
         }
     }
 
     private func deliverMalformedLine() {
-        DispatchQueue.main.async { [weak self] in
+        callbackDelivery.receive { [weak self] in
             guard let self, callbacksRemainDeliverable else { return }
-            MainActor.assumeIsolated { self.onMalformedLine() }
+            self.onMalformedLine()
         }
     }
 

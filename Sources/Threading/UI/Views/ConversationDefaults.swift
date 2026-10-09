@@ -57,16 +57,14 @@ enum ConversationDefaults {
     /// The check counts characters and hard newlines rather than measuring wrapped lines,
     /// so the decision is pure and the same for every pane width; the visual cap of
     /// `longMessageLineCap` rendered lines is the label's own `maximumNumberOfLines`.
-    static let longMessageCharacterCap = 600
-    static let longMessageLineCap = 8
+    static let longMessageCharacterCap = ConversationUserRowDefaults.longMessageCharacterCap
+    static let longMessageLineCap = ConversationUserRowDefaults.longMessageLineCap
 
     /// Whether a user message is long enough to collapse: a pasted log or a briefing is
     /// context the user already knows — they wrote it — and drawn in full it drowns the
     /// answer it was written to get.
     static func collapsesUserMessage(_ text: String) -> Bool {
-        text.count > longMessageCharacterCap
-            || text.split(separator: "\n", omittingEmptySubsequences: false).count
-                > longMessageLineCap
+        ConversationUserRowDefaults.collapsesUserMessage(text)
     }
 
     /// How long after the last gesture event a bounds change is still read as the user's.

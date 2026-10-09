@@ -2081,7 +2081,7 @@ public enum Design {
 
         /// A user bubble never spans the pane — a short reply in a full-width box reads as
         /// shouting, and a wide box makes the eye travel for nothing.
-        public static let bubbleMaxWidthFraction: CGFloat = 0.78
+        public static let bubbleMaxWidthFraction: CGFloat = ConversationUserRowDefaults.bubbleMaxWidthFraction
 
         /// The bubble fill: the user's accent, dropped well below full so its own text stays
         /// legible and it does not compete with the agent's reply for attention.
@@ -2192,7 +2192,7 @@ public enum Design {
         /// a fold in the page rather than as a border drawn around something.
         public static var turnDivider: NSColor { AppThemePalette.color(.divider) }
 
-        public static let turnDividerHeight: CGFloat = 1
+        public static let turnDividerHeight: CGFloat = ConversationUserRowDefaults.turnDividerHeight
 
         /// How far a newly arrived row rises into its place — see `Motion.transcriptArrive`.
         /// One `medium` step: enough to read as coming *up* from the reply box, short enough

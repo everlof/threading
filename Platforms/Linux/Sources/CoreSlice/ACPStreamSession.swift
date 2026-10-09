@@ -46,6 +46,7 @@ final class ACPStreamSession:
     private let handshakeTimeout: TimeInterval
     private let commandCatalogTimeout: TimeInterval
     private let mcpBinding: MCPServerBinding?
+    private let callbackDelivery: ConversationCallbackDelivery
     private let plan: () throws -> AgentLaunchPlan
 
     /// Whether this conversation's CLI belongs in `threading-ptyd`, asked once per launch.
@@ -88,8 +89,8 @@ final class ACPStreamSession:
     /// `finishToolIfNeeded`.
     private var deniedToolCallIDs: Set<String> = []
 
-    private var handshakeDeadline: Task<Void, Never>?
-    private var commandCatalogDeadline: Task<Void, Never>?
+    private var handshakeDeadline: ConversationCallbackDeadline?
+    private var commandCatalogDeadline: ConversationCallbackDeadline?
 
     // MARK: - Initialization
 
@@ -99,6 +100,7 @@ final class ACPStreamSession:
     ///   of waiting out the real bound; production never passes it.
     init(
         sessionID: SessionID,
+        callbackDelivery: ConversationCallbackDelivery = .main,
         workingDirectory: String,
         profile: ACPProviderProfile,
         handshakeTimeout: TimeInterval = ACPDefaults.handshakeTimeout,
@@ -107,6 +109,7 @@ final class ACPStreamSession:
         hostPlan: @escaping () throws -> PTYHostChildPlan? = { nil },
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
+        self.callbackDelivery = callbackDelivery
         self.sessionID = sessionID
         self.workingDirectory = workingDirectory
         self.profile = profile
@@ -122,6 +125,7 @@ final class ACPStreamSession:
     func start() {
         guard !isRunning else { return }
 
+        let delivery = callbackDelivery
         let process: AgentChildProcess
         do {
             let launchPlan = try plan()
@@ -133,7 +137,7 @@ final class ACPStreamSession:
                 sessionID: sessionID,
                 host: try hostPlan()
             ) { [weak self] status in
-                Task { @MainActor [weak self] in self?.handleTermination(status: status) }
+                delivery.enqueue { [weak self] in self?.handleTermination(status: status) }
             }
         } catch {
             let label = profile.diagnosticsLabel
@@ -143,7 +147,7 @@ final class ACPStreamSession:
             )
             // Match every other native transport: start never calls an external lifecycle
             // callback re-entrantly before its caller has finished installing the surface.
-            Task { @MainActor [weak self] in
+            delivery.enqueue { [weak self] in
                 guard let self else { return }
                 if let handler = self.onLaunchFailure { handler(error) }
                 else { self.onExit?(AgentChildProcessDefaults.spawnFailureStatus) }
@@ -156,6 +160,7 @@ final class ACPStreamSession:
             input: process.standardInput,
             output: process.standardOutput,
             error: process.standardError,
+            callbackDelivery: callbackDelivery,
             maximumErrorBytes: ACPDefaults.maximumErrorBytes,
             parser: { JSONRPCLineEnvelope.parse($0) },
             onLine: { [weak self] envelope in self?.route(envelope) },
@@ -308,9 +313,7 @@ final class ACPStreamSession:
     private func armHandshakeDeadline() {
         handshakeDeadline?.cancel()
         let seconds = handshakeTimeout
-        handshakeDeadline = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
-            guard !Task.isCancelled else { return }
+        handshakeDeadline = callbackDelivery.after(seconds) { [weak self] in
             self?.handshakeDeadlineExpired()
         }
     }
@@ -328,9 +331,7 @@ final class ACPStreamSession:
         guard !isComposerCapabilityCatalogReady else { return }
         commandCatalogDeadline?.cancel()
         let seconds = commandCatalogTimeout
-        commandCatalogDeadline = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
-            guard !Task.isCancelled else { return }
+        commandCatalogDeadline = callbackDelivery.after(seconds) { [weak self] in
             self?.commandCatalogDeadlineExpired()
         }
     }
