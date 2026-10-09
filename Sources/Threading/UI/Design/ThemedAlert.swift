@@ -72,9 +72,9 @@ final class ThemedAlert {
     private weak var previousKeyWindow: NSWindow?
     private weak var previousFirstResponder: NSResponder?
     private var sheetCompletion: ((NSApplication.ModalResponse) -> Void)?
-    private var parentIgnoredMouseEvents: Bool?
     private var parentIsClosing = false
     private let attachmentEvents = AppEventObservations()
+    private let parentInputMonitor = LocalEventMonitor()
     private var isModal = false
 
     init() {}
@@ -157,8 +157,10 @@ final class ThemedAlert {
         // panel as a child window so the theme's authored corner survives in every alert stage.
         window.addChildWindow(panel, ordered: .above)
         positionAttachedPanel()
-        parentIgnoredMouseEvents = window.ignoresMouseEvents
-        window.ignoresMouseEvents = true
+        installParentInputMonitor()
+        attachmentEvents.observe(NSWindow.didBecomeKeyNotification, object: window) { [weak self] in
+            self?.presentedWindow?.makeKeyAndOrderFront(nil)
+        }
         attachmentEvents.observe(NSWindow.didResizeNotification, object: window) { [weak self] in
             self?.positionAttachedPanel()
         }
@@ -170,6 +172,32 @@ final class ThemedAlert {
         panel.refreshPresentedShapeAndShadow()
         focusInitialResponder(in: panel)
         NSAccessibility.post(element: panel, notification: .created)
+    }
+
+    private func installParentInputMonitor() {
+        // `ignoresMouseEvents` makes a window transparent to WindowServer hit testing: a click
+        // intended to activate this app lands in the app behind it. Keep the parent hittable,
+        // but consume its input before AppKit dispatches it to the blocked content.
+        parentInputMonitor.install(matching: [
+            .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+            .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+            .otherMouseDown, .otherMouseUp, .otherMouseDragged,
+            .mouseMoved, .mouseEntered, .cursorUpdate,
+            .scrollWheel, .magnify, .rotate, .swipe, .smartMagnify,
+            .beginGesture, .endGesture, .pressure,
+            .keyDown, .keyUp, .flagsChanged
+        ]) { [weak self] event in
+            guard let self, let parent = self.parentWindow,
+                  event.window === parent, let panel = self.presentedWindow else { return event }
+            switch event.type {
+            case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+                parent.orderFront(nil)
+                panel.makeKeyAndOrderFront(nil)
+            default:
+                break
+            }
+            return nil
+        }
     }
 
     private func positionAttachedPanel() {
@@ -264,10 +292,9 @@ final class ThemedAlert {
             NSApp.stopModal(withCode: response)
             panel.orderOut(nil)
         } else if let parentWindow {
+            parentInputMonitor.remove()
             attachmentEvents.removeAll()
             parentWindow.removeChildWindow(panel)
-            parentWindow.ignoresMouseEvents = parentIgnoredMouseEvents ?? false
-            parentIgnoredMouseEvents = nil
             let completion = sheetCompletion
             sheetCompletion = nil
             cleanup(panel: panel, restoring: parentIsClosing ? nil : parentWindow)

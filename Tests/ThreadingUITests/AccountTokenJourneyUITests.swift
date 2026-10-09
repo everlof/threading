@@ -20,18 +20,32 @@ final class AccountTokenJourneyUITests: XCTestCase {
         accounts.click()
         let use = app.buttons["Use Token…"].firstMatch
         XCTAssertTrue(use.waitForExistence(timeout: 10))
+        let parentClickPoint = CGPoint(x: accounts.frame.midX, y: accounts.frame.midY)
 
         for iteration in 1...2 {
             use.click()
             let field = app.secureTextFields["account-token.value"]
             XCTAssertTrue(field.waitForExistence(timeout: 5))
             field.click()
-            field.typeText("sk-ant-oat01-FAKE-FIXTURE-VALUE")
+            // Anchor the screen click to the foreground app. A coordinate derived from `app`
+            // would let XCTest activate Threading first, hiding the click-through regression.
+            let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
+            finder.activate()
+            XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+            let finderOrigin = finder.frame.origin
+            finder.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: parentClickPoint.x - finderOrigin.x,
+                dy: parentClickPoint.y - finderOrigin.y
+            )).click()
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5),
+                          "clicking the blocked parent must activate Threading")
+            // No second click on the field: the sheet must recover keyboard ownership itself.
+            app.typeText("sk-ant-oat01-FAKE-FIXTURE-VALUE")
             XCTAssertFalse((field.value as? String ?? "").isEmpty)
             try recordScenarioScreenshot(
                 checkpoint: "token-prompt-\(iteration)", order: iteration,
                 title: "One-year token prompt accepts secure input",
-                description: "The production Accounts action opens a masked field and remains dismissible after typing.",
+                description: "After switching to Finder, clicking the blocked parent brings Threading and its prompt forward. Typing reaches the secure field without clicking the dialog.",
                 journey: "One-year sign-in", in: sandbox,
                 of: app.windows.firstMatch
             )

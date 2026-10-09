@@ -949,7 +949,17 @@ cannot draw its authored face or edge outside that mask. Trying a transparent gu
 AppKit's dark sheet backing instead. The child panel keeps the theme's own radius and native
 shadow, follows its parent, recenters on resize, and blocks mouse interaction with that parent
 until dismissal. The alert restores focus and completes through the same API as a sheet. Its
-surface uses `applySurface`'s continuous layer corner, and a rounded theme insets classic title
+parent remains a WindowServer hit target: `ignoresMouseEvents` would send activation clicks
+through to another application. A presentation-owned local event monitor consumes parent mouse,
+gesture and keyboard input before content dispatch; a parent press fronts the window and its
+dialog, and a parent becoming key immediately returns keyboard ownership to that dialog. The
+monitor and key observer leave before focus restoration or completion, including parent closure.
+`ThemedAlertInputTests` exercises application dispatch and teardown; the Accounts token journey
+switches to Finder, clicks the blocked parent and types without clicking the prompt first.
+This is fixed-size presentation work: one monitor and three observers per attached dialog,
+constant-time routing per input, with no session or content traversal.
+
+The surface uses `applySurface`'s continuous layer corner, and a rounded theme insets classic title
 hardware by that radius. The real-window update captures check both square and rounded stock
 themes; the content-only storybook remains the theme and copy matrix.
 Those WindowServer captures require the hosted XCTest app to become active. An inactive host

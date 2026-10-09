@@ -141,7 +141,7 @@ final class UpdateSheetRenderTests: XCTestCase {
         XCTAssertTrue(panel.hasShadow)
         XCTAssertTrue(panel.parent === parent)
         XCTAssertNil(panel.sheetParent)
-        XCTAssertTrue(parent.ignoresMouseEvents)
+        XCTAssertFalse(parent.ignoresMouseEvents, "the parent must remain a window activation target")
         let rep = try capture(panel)
         for y in [0, rep.pixelsHigh - 1] {
             for x in [0, rep.pixelsWide - 1] {

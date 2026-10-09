@@ -1501,6 +1501,10 @@ a second agent. This action applies to chats using the Terminal interface.
   agent's own transcript stays on disk and can be imported again, which is what the sheet says
 
 ### Confirmations
+When a prompt is open, clicking its parent window brings Threading and the prompt forward,
+even after switching to another app. The window's content stays blocked until you answer or
+dismiss the prompt.
+
 Some actions stop and ask first. The ones you can safely undo carry a **Don't ask again**
 checkbox, and it is remembered **for that one prompt only** — ticking it on the close sheet
 does not stop the account-move sheet asking. It is also only remembered **when you go ahead**:
