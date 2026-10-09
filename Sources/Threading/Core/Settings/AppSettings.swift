@@ -649,26 +649,25 @@ final class AppSettings {
         return AppSettingDefinitions.usesAgentTitleInSidebar.read(from: .standard) ?? true
     }
 
-    /// Likewise for the sidebar's branch grouping, which `SidebarTreeBuilder` consults while
-    /// building nodes from plain model values.
+    /// The arrangement is a recorded user choice, including reads made before the singleton
+    /// exists. Hosted tests must use the same scratch domain on both sides of this boundary;
+    /// otherwise their grouping/sorting fixtures replace what the real app restores at launch.
     nonisolated static var groupsSessionsByBranch: Bool {
-        _ = registerStandardDefaults
-        return AppSettingDefinitions.groupsSessionsByBranch.read(from: .standard) ?? true
+        return AppSettingDefinitions.groupsSessionsByBranch.read(from: PreferenceStore.shared) ?? true
     }
 
     /// Whether the sidebar gathers a project's sessions under the branch they ran on,
     /// where a branch has more than one.
     var groupsSessionsByBranch: Bool {
-        get { Self.groupsSessionsByBranch }
+        get { AppSettingDefinitions.groupsSessionsByBranch.read(from: userChoiceDefaults) ?? true }
         set {
-            AppSettingDefinitions.groupsSessionsByBranch.write(newValue, to: defaults)
+            AppSettingDefinitions.groupsSessionsByBranch.write(newValue, to: userChoiceDefaults)
         }
     }
 
     /// Same access pattern as `groupsSessionsByBranch`, for the same reader.
     nonisolated static var groupsLoneBranches: Bool {
-        _ = registerStandardDefaults
-        return AppSettingDefinitions.groupsLoneBranches.read(from: .standard) ?? true
+        return AppSettingDefinitions.groupsLoneBranches.read(from: PreferenceStore.shared) ?? true
     }
 
     /// Whether a branch with a single session still earns a heading, once the project shows
@@ -682,9 +681,9 @@ final class AppSettings {
     /// so the common one-branch project never pays an extra level for a heading that would
     /// only repeat itself.
     var groupsLoneBranches: Bool {
-        get { Self.groupsLoneBranches }
+        get { AppSettingDefinitions.groupsLoneBranches.read(from: userChoiceDefaults) ?? true }
         set {
-            AppSettingDefinitions.groupsLoneBranches.write(newValue, to: defaults)
+            AppSettingDefinitions.groupsLoneBranches.write(newValue, to: userChoiceDefaults)
         }
     }
 
@@ -695,9 +694,9 @@ final class AppSettings {
     /// which is main-actor code throughout — `SidebarTreeBuilder` never consults it, because
     /// the compact tree is the same tree presented differently.
     var compactsSidebarTree: Bool {
-        get { AppSettingDefinitions.compactsSidebarTree.read(from: defaults) ?? false }
+        get { AppSettingDefinitions.compactsSidebarTree.read(from: userChoiceDefaults) ?? false }
         set {
-            AppSettingDefinitions.compactsSidebarTree.write(newValue, to: defaults)
+            AppSettingDefinitions.compactsSidebarTree.write(newValue, to: userChoiceDefaults)
         }
     }
 
@@ -721,7 +720,7 @@ final class AppSettings {
     /// as `.recentActivity`, which is the documented default: the order the iPhone app lists a
     /// project's chats in, so the one worked on last leads on both.
     nonisolated static var sidebarSessionOrder: SidebarSessionOrder {
-        let raw = AppSettingDefinitions.sidebarSessionOrder.read(from: .standard)
+        let raw = AppSettingDefinitions.sidebarSessionOrder.read(from: PreferenceStore.shared)
         return raw.flatMap(SidebarSessionOrder.init(rawValue:)) ?? .recentActivity
     }
 
@@ -733,31 +732,34 @@ final class AppSettings {
     /// next order chosen is a reversal nobody asked for. Enforced here rather than at the menu
     /// so every route to the setting keeps the invariant.
     var sidebarSessionOrder: SidebarSessionOrder {
-        get { Self.sidebarSessionOrder }
+        get {
+            let raw = AppSettingDefinitions.sidebarSessionOrder.read(from: userChoiceDefaults)
+            return raw.flatMap(SidebarSessionOrder.init(rawValue:)) ?? .recentActivity
+        }
         set {
-            if newValue != Self.sidebarSessionOrder {
+            if newValue != sidebarSessionOrder {
                 AppSettingDefinitions.sidebarSessionOrderIsReversed.write(
                     false,
-                    to: defaults,
+                    to: userChoiceDefaults,
                     notifying: false
                 )
             }
-            AppSettingDefinitions.sidebarSessionOrder.write(newValue.rawValue, to: defaults)
+            AppSettingDefinitions.sidebarSessionOrder.write(newValue.rawValue, to: userChoiceDefaults)
         }
     }
 
     /// Same access pattern; an absent key reads as `false`, which is the natural direction of
     /// whichever order is chosen.
     nonisolated static var sidebarSessionOrderIsReversed: Bool {
-        AppSettingDefinitions.sidebarSessionOrderIsReversed.read(from: .standard) ?? false
+        AppSettingDefinitions.sidebarSessionOrderIsReversed.read(from: PreferenceStore.shared) ?? false
     }
 
     /// Whether the chosen order runs backwards: newest added first, least recently active
     /// first, Z to A, or terminals before chats.
     var sidebarSessionOrderIsReversed: Bool {
-        get { Self.sidebarSessionOrderIsReversed }
+        get { AppSettingDefinitions.sidebarSessionOrderIsReversed.read(from: userChoiceDefaults) ?? false }
         set {
-            AppSettingDefinitions.sidebarSessionOrderIsReversed.write(newValue, to: defaults)
+            AppSettingDefinitions.sidebarSessionOrderIsReversed.write(newValue, to: userChoiceDefaults)
         }
     }
 
@@ -765,13 +767,13 @@ final class AppSettings {
     /// staged preview the iPhone app's dashboard uses. On by default; the chat that is selected
     /// is always revealed, whatever the stage. See `SidebarChatPreview`.
     nonisolated static var previewsSidebarChats: Bool {
-        AppSettingDefinitions.previewsSidebarChats.read(from: .standard) ?? true
+        AppSettingDefinitions.previewsSidebarChats.read(from: PreferenceStore.shared) ?? true
     }
 
     var previewsSidebarChats: Bool {
-        get { Self.previewsSidebarChats }
+        get { AppSettingDefinitions.previewsSidebarChats.read(from: userChoiceDefaults) ?? true }
         set {
-            AppSettingDefinitions.previewsSidebarChats.write(newValue, to: defaults)
+            AppSettingDefinitions.previewsSidebarChats.write(newValue, to: userChoiceDefaults)
         }
     }
 
@@ -779,31 +781,31 @@ final class AppSettings {
     /// lives with the native navigator adapter, keeping the settings layer independent of the
     /// extension SDK while these descriptors remain the single durable persistence authority.
     nonisolated static var nativeSidebarGroupByFact: String? {
-        AppSettingDefinitions.nativeSidebarGroupByFact.read(from: .standard)
+        AppSettingDefinitions.nativeSidebarGroupByFact.read(from: PreferenceStore.shared)
     }
 
     var nativeSidebarGroupByFact: String? {
-        get { Self.nativeSidebarGroupByFact }
+        get { AppSettingDefinitions.nativeSidebarGroupByFact.read(from: userChoiceDefaults) }
         set {
             if let newValue {
-                AppSettingDefinitions.nativeSidebarGroupByFact.write(newValue, to: defaults)
+                AppSettingDefinitions.nativeSidebarGroupByFact.write(newValue, to: userChoiceDefaults)
             } else {
-                AppSettingDefinitions.nativeSidebarGroupByFact.remove(from: defaults)
+                AppSettingDefinitions.nativeSidebarGroupByFact.remove(from: userChoiceDefaults)
             }
         }
     }
 
     nonisolated static var nativeSidebarSortByFact: String? {
-        AppSettingDefinitions.nativeSidebarSortByFact.read(from: .standard)
+        AppSettingDefinitions.nativeSidebarSortByFact.read(from: PreferenceStore.shared)
     }
 
     var nativeSidebarSortByFact: String? {
-        get { Self.nativeSidebarSortByFact }
+        get { AppSettingDefinitions.nativeSidebarSortByFact.read(from: userChoiceDefaults) }
         set {
             if let newValue {
-                AppSettingDefinitions.nativeSidebarSortByFact.write(newValue, to: defaults)
+                AppSettingDefinitions.nativeSidebarSortByFact.write(newValue, to: userChoiceDefaults)
             } else {
-                AppSettingDefinitions.nativeSidebarSortByFact.remove(from: defaults)
+                AppSettingDefinitions.nativeSidebarSortByFact.remove(from: userChoiceDefaults)
             }
         }
     }

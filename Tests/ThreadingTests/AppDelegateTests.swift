@@ -235,8 +235,8 @@ final class AppDelegateTests: XCTestCase {
         // therefore reads off, and invoking it means "switch to Branch" rather than toggling
         // that hidden preference off and accidentally landing on no grouping.
         let factPreferenceKey = "nativeSidebarGroupByFact"
-        let previousFactPreference = UserDefaults.standard.object(forKey: factPreferenceKey)
-        UserDefaults.standard.set(
+        let previousFactPreference = PreferenceStore.shared.object(forKey: factPreferenceKey)
+        PreferenceStore.shared.set(
             NativeSidebarPipelineOptions.registeredFactWire(
                 ExtensionFactKey(id: "example.group")
             ),
@@ -244,9 +244,9 @@ final class AppDelegateTests: XCTestCase {
         )
         defer {
             if let previousFactPreference {
-                UserDefaults.standard.set(previousFactPreference, forKey: factPreferenceKey)
+                PreferenceStore.shared.set(previousFactPreference, forKey: factPreferenceKey)
             } else {
-                UserDefaults.standard.removeObject(forKey: factPreferenceKey)
+                PreferenceStore.shared.removeObject(forKey: factPreferenceKey)
             }
         }
         XCTAssertTrue(delegate.validateMenuItem(grouping))
@@ -261,8 +261,8 @@ final class AppDelegateTests: XCTestCase {
         XCTAssertTrue(NativeSidebarPipelineOptions.current.branchGrouping)
 
         // With grouping off the refinement validates false — disabled, not hidden.
-        UserDefaults.standard.set(false, forKey: "groupsSessionsByBranch")
-        defer { UserDefaults.standard.removeObject(forKey: "groupsSessionsByBranch") }
+        PreferenceStore.shared.set(false, forKey: "groupsSessionsByBranch")
+        defer { PreferenceStore.shared.removeObject(forKey: "groupsSessionsByBranch") }
         XCTAssertFalse(delegate.validateMenuItem(lone))
     }
 

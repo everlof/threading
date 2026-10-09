@@ -25,7 +25,7 @@ final class SidebarChatPreviewTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
         // Deterministic arrangement: store order, no branch headings, preview on.
-        let defaults = UserDefaults.standard
+        let defaults = PreferenceStore.shared
         defaults.set(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder")
         defaults.set(false, forKey: "sidebarSessionOrderIsReversed")
         defaults.set(true, forKey: "previewsSidebarChats")
@@ -45,7 +45,7 @@ final class SidebarChatPreviewTests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
         }
         directories = []
-        for key in Self.preferenceKeys { UserDefaults.standard.removeObject(forKey: key) }
+        for key in Self.preferenceKeys { PreferenceStore.shared.removeObject(forKey: key) }
         try await super.tearDown()
     }
 
@@ -429,7 +429,7 @@ final class SidebarChatPreviewTests: XCTestCase {
     /// Under Recent Activity — the default — a new chat arrives on top and the fifth leaves the
     /// page, while the project's row count still includes every chat.
     func testANewChatUnderRecentActivityTakesThePageFromTheOldest() throws {
-        UserDefaults.standard.set(
+        PreferenceStore.shared.set(
             SidebarSessionOrder.recentActivity.rawValue,
             forKey: "sidebarSessionOrder"
         )

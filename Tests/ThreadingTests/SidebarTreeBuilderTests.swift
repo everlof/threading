@@ -22,13 +22,13 @@ final class SidebarTreeBuilderTests: XCTestCase {
     /// so with `withDefault`.
     override func setUp() async throws {
         try await super.setUp()
-        UserDefaults.standard.set(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder")
-        UserDefaults.standard.set(false, forKey: "previewsSidebarChats")
+        PreferenceStore.shared.set(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder")
+        PreferenceStore.shared.set(false, forKey: "previewsSidebarChats")
     }
 
     override func tearDown() async throws {
-        UserDefaults.standard.removeObject(forKey: "sidebarSessionOrder")
-        UserDefaults.standard.removeObject(forKey: "previewsSidebarChats")
+        PreferenceStore.shared.removeObject(forKey: "sidebarSessionOrder")
+        PreferenceStore.shared.removeObject(forKey: "previewsSidebarChats")
         try await super.tearDown()
     }
 
@@ -231,8 +231,8 @@ final class SidebarTreeBuilderTests: XCTestCase {
     /// Written straight to `UserDefaults` rather than through `AppSettings.shared`, whose
     /// setter posts `AppSettingsDidChange` into whatever observers the test host has live.
     private func withDefault(_ value: Any?, forKey key: String, run: () throws -> Void) rethrows {
-        UserDefaults.standard.set(value, forKey: key)
-        defer { UserDefaults.standard.removeObject(forKey: key) }
+        PreferenceStore.shared.set(value, forKey: key)
+        defer { PreferenceStore.shared.removeObject(forKey: key) }
         try run()
     }
 
@@ -1900,7 +1900,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
             "Set THREADING_SIDEBAR_STRESS=1 to run the project-sidebar sweep."
         )
 
-        let defaults = UserDefaults.standard
+        let defaults = PreferenceStore.shared
         let registeredFactSetting = ProcessInfo.processInfo.environment[
             "THREADING_SIDEBAR_STRESS_REGISTERED_FACT"
         ]

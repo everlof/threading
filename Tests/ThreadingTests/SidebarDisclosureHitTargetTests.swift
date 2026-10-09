@@ -34,18 +34,18 @@ final class SidebarDisclosureHitTargetTests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
         }
         directories = []
-        UserDefaults.standard.removeObject(forKey: "compactsSidebarTree")
-        UserDefaults.standard.removeObject(forKey: "groupsSessionsByBranch")
-        UserDefaults.standard.removeObject(forKey: "groupsLoneBranches")
+        PreferenceStore.shared.removeObject(forKey: "compactsSidebarTree")
+        PreferenceStore.shared.removeObject(forKey: "groupsSessionsByBranch")
+        PreferenceStore.shared.removeObject(forKey: "groupsLoneBranches")
         try await super.tearDown()
     }
 
     /// One project whose sessions gather under branch headings, and one flat project, so the list
     /// holds both chevron depths and rows with nothing to disclose.
     private func makeSidebar(compact: Bool) -> ProjectSidebarViewController {
-        UserDefaults.standard.set(compact, forKey: "compactsSidebarTree")
-        UserDefaults.standard.set(true, forKey: "groupsSessionsByBranch")
-        UserDefaults.standard.set(true, forKey: "groupsLoneBranches")
+        PreferenceStore.shared.set(compact, forKey: "compactsSidebarTree")
+        PreferenceStore.shared.set(true, forKey: "groupsSessionsByBranch")
+        PreferenceStore.shared.set(true, forKey: "groupsLoneBranches")
 
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "threading-sidebar-disclosure-\(UUID().uuidString)",

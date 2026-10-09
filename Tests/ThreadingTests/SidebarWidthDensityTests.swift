@@ -39,9 +39,9 @@ final class SidebarWidthDensityTests: XCTestCase {
                 try? FileManager.default.removeItem(at: directory)
             }
             directories = []
-            UserDefaults.standard.removeObject(forKey: "compactsSidebarTree")
-            UserDefaults.standard.removeObject(forKey: "groupsSessionsByBranch")
-            UserDefaults.standard.removeObject(forKey: "groupsLoneBranches")
+            PreferenceStore.shared.removeObject(forKey: "compactsSidebarTree")
+            PreferenceStore.shared.removeObject(forKey: "groupsSessionsByBranch")
+            PreferenceStore.shared.removeObject(forKey: "groupsLoneBranches")
         }
         super.tearDown()
     }
@@ -54,9 +54,9 @@ final class SidebarWidthDensityTests: XCTestCase {
         width: CGFloat,
         compact: Bool = false
     ) -> (controller: ProjectSidebarViewController, store: ProjectStore) {
-        UserDefaults.standard.set(compact, forKey: "compactsSidebarTree")
-        UserDefaults.standard.set(true, forKey: "groupsSessionsByBranch")
-        UserDefaults.standard.set(true, forKey: "groupsLoneBranches")
+        PreferenceStore.shared.set(compact, forKey: "compactsSidebarTree")
+        PreferenceStore.shared.set(true, forKey: "groupsSessionsByBranch")
+        PreferenceStore.shared.set(true, forKey: "groupsLoneBranches")
 
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "threading-sidebar-density-\(UUID().uuidString)",

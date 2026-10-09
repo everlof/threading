@@ -34,9 +34,9 @@ final class SidebarCompactTreeTests: XCTestCase {
                 try? FileManager.default.removeItem(at: directory)
             }
             directories = []
-            UserDefaults.standard.removeObject(forKey: "compactsSidebarTree")
-            UserDefaults.standard.removeObject(forKey: "groupsSessionsByBranch")
-            UserDefaults.standard.removeObject(forKey: "groupsLoneBranches")
+            PreferenceStore.shared.removeObject(forKey: "compactsSidebarTree")
+            PreferenceStore.shared.removeObject(forKey: "groupsSessionsByBranch")
+            PreferenceStore.shared.removeObject(forKey: "groupsLoneBranches")
         }
         super.tearDown()
     }
@@ -46,11 +46,11 @@ final class SidebarCompactTreeTests: XCTestCase {
     /// therefore where the compact edge is furthest from the indented one — and one flat
     /// project beside it, so both shapes are in every assertion and every render.
     private func makeSidebar(compact: Bool) -> ProjectSidebarViewController {
-        UserDefaults.standard.set(compact, forKey: "compactsSidebarTree")
+        PreferenceStore.shared.set(compact, forKey: "compactsSidebarTree")
         // Stated rather than assumed, so a test elsewhere overriding the grouping defaults
         // cannot decide how deep this fixture's tree is.
-        UserDefaults.standard.set(true, forKey: "groupsSessionsByBranch")
-        UserDefaults.standard.set(true, forKey: "groupsLoneBranches")
+        PreferenceStore.shared.set(true, forKey: "groupsSessionsByBranch")
+        PreferenceStore.shared.set(true, forKey: "groupsLoneBranches")
 
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "threading-sidebar-compact-\(UUID().uuidString)",

@@ -251,13 +251,30 @@ receipts. Managed-workspace publication also persists its richer provider-neutra
 the session model before local worktree disposal; see
 [source-control.md](source-control.md) and [managed-workspaces.md](managed-workspaces.md).
 
-A related ordering trap lives one layer up. `AppSettings`'s **`nonisolated static` readers go
+A related ordering trap lives one layer up. `AppSettings`'s **`nonisolated static` readers went
 straight to `UserDefaults.standard`**, while the seeded defaults were registered only in its
 `init` — so a read that happened before anything touched `AppSettings.shared` saw an
 unregistered key, and `bool(forKey:)` answers `false`, which for every seeded setting is the
 *opposite* of its documented default. The sidebar's branch grouping is what showed it. The seeds
-are registered by the readers themselves now; registration is idempotent, and an invariant that
-depends on instantiation order is not an invariant.
+are registered by the behavioral readers themselves now; typed descriptors also supply their
+declared absence value, including for redirected sidebar choices. Registration is idempotent,
+and an invariant that depends on instantiation order is not an invariant.
+
+### Sidebar arrangement choices
+
+The native sidebar's eight arrangement values (order, direction, branch grouping, lone-branch
+headings, compact tree, chat preview, and registered-fact grouping/sorting) use
+`PreferenceStore.shared`. Both the static tree readers and the shared `AppSettings` writer use
+that domain. Injected `AppSettings` instances read and write their own `userChoiceDefaults`.
+The production keys are unchanged, so existing choices require no migration.
+
+These are recorded choices, even though they live in `AppSettings`. Hosted sidebar fixtures
+previously wrote `.standard` and removed keys during teardown, erasing the developer's chosen
+arrangement; the reset became visible at the next app launch. Fixtures now use the redirected
+domain too. `SidebarPreferencePersistenceTests` checks reopening, independent injected stores,
+the static production reader, and preservation of the real defaults.
+`SidebarPersistenceJourneyUITests` changes the arrangement through the shipping menu and checks
+its selected values after terminating and relaunching the isolated app.
 
 ### Inactive project visibility
 

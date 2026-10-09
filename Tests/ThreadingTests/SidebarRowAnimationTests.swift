@@ -491,7 +491,7 @@ final class SidebarRowAnimationTests: XCTestCase {
     /// session that has just done something is hoisted to the top of its project. The row has to
     /// travel there, not be redrawn there.
     func testARowThatChangedPlaceTravelsToItAndIsNotRebuilt() throws {
-        let defaults = UserDefaults.standard
+        let defaults = PreferenceStore.shared
         let previousOrder = defaults.object(forKey: "sidebarSessionOrder")
         defaults.set(SidebarSessionOrder.recentActivity.rawValue, forKey: "sidebarSessionOrder")
         defer {
@@ -543,7 +543,7 @@ final class SidebarRowAnimationTests: XCTestCase {
     /// Branch grouping moves sessions between the project and a heading under it — the one
     /// change that names a row twice, leaving one parent and arriving in another.
     func testRegroupingLandsEveryRowInItsNewPlace() throws {
-        let defaults = UserDefaults.standard
+        let defaults = PreferenceStore.shared
         let key = "groupsSessionsByBranch"
         let previous = defaults.object(forKey: key)
         defer {
@@ -596,7 +596,7 @@ final class SidebarRowAnimationTests: XCTestCase {
     /// under it faded out, a closed heading arrived, and it re-expanded — the branch visibly
     /// disappearing from the sidebar for a moment on every `git checkout`. Nothing may move here.
     func testSwitchingTheCheckoutsBranchRenamesTheHeadingWithoutMovingARow() throws {
-        let defaults = UserDefaults.standard
+        let defaults = PreferenceStore.shared
         let key = "groupsSessionsByBranch"
         let previous = defaults.object(forKey: key)
         defer {

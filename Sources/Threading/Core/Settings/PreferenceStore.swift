@@ -22,7 +22,8 @@ import Foundation
 /// read `.standard` directly, because several tests set one of those keys and then assert that
 /// the app read it. A General-tab value may still be a recorded choice: the provider a new
 /// session opens on is changed by the composer itself, so hosted picker tests must not answer it
-/// for the developer.
+/// for the developer. The sidebar's arrangement is also a recorded choice: its grouping,
+/// sorting and density fixtures must never replace the configuration restored at launch.
 enum PreferenceStore {
 
     /// The family every hosted test bundle's scratch suite belongs to. `scripts/test.sh` sweeps

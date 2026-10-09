@@ -125,7 +125,7 @@ final class NativeSidebarPipelineOptionsTests: XCTestCase {
     }
 
     func testRecentActivityKeepsItsLegacyPersistenceWire() {
-        let defaults = UserDefaults.standard
+        let defaults = PreferenceStore.shared
         let key = "sidebarSessionOrder"
         let previous = defaults.object(forKey: key)
         defer {
@@ -149,7 +149,7 @@ final class NativeSidebarPipelineOptionsTests: XCTestCase {
     /// With nothing chosen, the Mac lists a project's chats the way the iPhone app does: the
     /// most recently used first, five at a time.
     func testAnUnchosenArrangementMatchesTheIPhoneApp() {
-        let defaults = UserDefaults.standard
+        let defaults = PreferenceStore.shared
         let keys = ["sidebarSessionOrder", "sidebarSessionOrderIsReversed", "previewsSidebarChats"]
         let previous = keys.map { ($0, defaults.object(forKey: $0)) }
         defer {
@@ -168,7 +168,7 @@ final class NativeSidebarPipelineOptionsTests: XCTestCase {
     /// Choosing an order from Settings or the Sort menu gives a registered fact sort way and lands
     /// on the order's natural direction; choosing a direction keeps the order.
     func testChoosingAnOrderClearsAFactSortAndItsReversal() {
-        let defaults = UserDefaults.standard
+        let defaults = PreferenceStore.shared
         let keys = ["sidebarSessionOrder", "sidebarSessionOrderIsReversed", "nativeSidebarSortByFact"]
         let previous = keys.map { ($0, defaults.object(forKey: $0)) }
         defer {

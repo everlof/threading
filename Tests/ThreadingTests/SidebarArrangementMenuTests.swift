@@ -11,16 +11,15 @@ import XCTest
 @MainActor
 final class SidebarArrangementMenuTests: XCTestCase {
 
-    /// Restores what was there rather than removing the key: the bundle is hosted in the app,
-    /// so these writes land in the developer's own preferences.
+    /// Preserve earlier fixture choices in the redirected domain, including nested overrides.
     private func withDefault(_ value: Any?, forKey key: String, run: () throws -> Void) rethrows {
-        let previous = UserDefaults.standard.object(forKey: key)
-        UserDefaults.standard.set(value, forKey: key)
+        let previous = PreferenceStore.shared.object(forKey: key)
+        PreferenceStore.shared.set(value, forKey: key)
         defer {
             if let previous {
-                UserDefaults.standard.set(previous, forKey: key)
+                PreferenceStore.shared.set(previous, forKey: key)
             } else {
-                UserDefaults.standard.removeObject(forKey: key)
+                PreferenceStore.shared.removeObject(forKey: key)
             }
         }
         try run()
@@ -105,7 +104,7 @@ final class SidebarArrangementMenuTests: XCTestCase {
                                 false
                             )
                             // Unchosen, the preview is on — the iPhone app's arrangement.
-                            UserDefaults.standard.removeObject(forKey: "previewsSidebarChats")
+                            PreferenceStore.shared.removeObject(forKey: "previewsSidebarChats")
                             XCTAssertEqual(
                                 ProjectSidebarViewController().arrangementMenuEntries()
                                     .compactMap(\.item)
@@ -147,8 +146,8 @@ final class SidebarArrangementMenuTests: XCTestCase {
     /// row's own closure, which is the route the menu takes.
     func testChoosingAnOrderWritesTheSetting() throws {
         defer {
-            UserDefaults.standard.removeObject(forKey: "sidebarSessionOrder")
-            UserDefaults.standard.removeObject(forKey: "sidebarSessionOrderIsReversed")
+            PreferenceStore.shared.removeObject(forKey: "sidebarSessionOrder")
+            PreferenceStore.shared.removeObject(forKey: "sidebarSessionOrderIsReversed")
         }
 
         try withCleanNativeFactSelections {

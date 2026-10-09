@@ -457,6 +457,9 @@ not inherited by a sort about dates or row kinds.
 The order and its direction are also in **Settings > Sidebar > Sort sessions by** and **Sort
 direction**. To put the newest chats on top under Order Added, pick **Newest First**.
 
+Grouping, sorting, direction, Compact Tree and Show Five Chats per Project are saved automatically
+and restored when you restart Threading.
+
 A pinned session carries a filled pin beside its title and leads the list under every order and
 either direction — pinning is a stronger statement than any sort, and reversing reverses the
 sort rather than the list. Sorting rearranges branch groups too: a group sits where its first
