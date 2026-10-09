@@ -18,6 +18,11 @@ The paired iPhone's Workspace Browser mirrors Mac-rendered snapshots, including 
 pages. Agents use `browser_navigate` with the same local URL they use on the Mac; they do not
 need to expose a development server on the LAN. The iPhone reader is full screen and read-only,
 and the Mac retains navigation, cookies and interaction (see `docs/REMOTE_ACCESS.md`).
+Its **Browse on iPhone** action opens a separate interactive browser. Public pages use the
+system Safari presentation; local pages use a phone WebKit store and an owner-authorized CONNECT
+capability restricted to the selected tab's loopback host and port. It forwards website traffic,
+not browser state or Mac cookies. The Follow view suspends captures while this browser covers it.
+The transport, lifetime, bounds and route limitations are documented in `docs/REMOTE_ACCESS.md`.
 App-owned origin grants, sensitive-action confirmations and website-data clearing can also be
 answered from the paired owner's iPhone in an automatic themed prompt over the open chat,
 or in Workspace → Browser. `BrowserPermissionRequests`

@@ -323,6 +323,9 @@ screen's bar enumerates normally). After two seconds without a listed match the 
 along the centreline of each labelless group no taller than two tap targets, at a 12-point pitch,
 and uses the first element whose label matches; the run log notes when that path found the
 control. It is a bounded walk over bar-shaped groups, not a screen scan.
+The same fallback resolves post-interaction labels in flattened bars. The independent browser
+waits for its Reload action, which appears when loading ends, instead of treating already-visible
+navigation chrome as proof that WebKit painted the page.
 
 Text-entry captures may declare `keyboardState` as `closed`, `open`, or
 `dismissed-after-open`. The coordinator sends one semantic focus request through each real
@@ -338,7 +341,7 @@ The canonical iPhone 17 Pro capture is 402×874 points / 1206×2622 pixels. Ever
 must have that exact native scale. The ordinary capture is app-owned, so it does not start a
 full-display recording or require the macOS Screen Recording grant. A fixture whose
 `captureMode` is `display` uses `simctl io screenshot` after the app publishes its ready marker;
-this is reserved for the keyboard-open state where OS-owned pixels are required and still captures
+this covers keyboard-open and WebKit states where out-of-process pixels are required and still captures
 only the simulator display. `stable-display` performs the ordinary app-window pixel-stability gate
 before that same display capture; the marketing set uses it so every frame has identical Simulator
 status furniture. Keyboard-dismissed evidence returns to app-owned, pixel-stable capture. Simulator

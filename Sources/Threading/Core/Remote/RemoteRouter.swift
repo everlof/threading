@@ -284,6 +284,10 @@ struct RemoteRouter {
         sessionID(forPath: path, action: .browserLink)
     }
 
+    static func browserTunnelSessionID(forPath path: String) -> String? {
+        sessionID(forPath: path, action: .browserTunnel)
+    }
+
     static func extensionPanelSessionID(forPath path: String) -> String? {
         sessionID(forPath: path, action: .extensionPanel)
     }

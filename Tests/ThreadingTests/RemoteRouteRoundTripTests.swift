@@ -265,6 +265,9 @@ final class RemoteRouteRoundTripTests: XCTestCase {
                     XCTUnwrap(link.browserLinkURL(sessionID: sessionID, tabID: "tab-1"))
                 )
                 matched = RemoteRouter.browserLinkSessionID(forPath: built)
+            case .browserTunnel:
+                built = try wirePath(link.browserTunnelURL(sessionID: sessionID))
+                matched = RemoteRouter.browserTunnelSessionID(forPath: built)
             case .extensionPanel:
                 built = try wirePath(XCTUnwrap(link.extensionPanelURL(
                     sessionID: sessionID,

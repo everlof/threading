@@ -909,6 +909,33 @@ page's URL. An explicit link-menu action asks the authenticated Mac for the
 selected shared tab's current HTTP(S) URL, then opens it in the iPhone browser, presents the
 system share sheet, or copies it locally. The browser may need its own sign-in and network route;
 the follow preview remains Mac-owned.
+
+**Browse on iPhone** opens an independent interactive browser above that reader; closing it
+returns to the unchanged Follow view. Public URLs use the system Safari browser presentation.
+Localhost URLs use an iPhone `WKWebView` whose Network proxy configuration matches the original
+host. A loopback-only phone forwarder carries CONNECT through the current Mac route, retaining
+the Mac certificate pin in the app process. The Mac issues a random preview capability only to
+the paired owner, for the selected shared tab's exact local host and port. CONNECT validates that
+capability and consumes the proxy headers before forwarding site bytes. Page assets, forms and
+WebSockets keep the original origin; HTML is not rewritten and Mac cookies are never exported.
+Other local ports are refused. Public subresources go directly from the phone. Local previews
+use a fresh website data store so separate Macs cannot share localhost cookies.
+
+This is a host-only surface: Threading owns destination admission, proxy credentials, TLS trust,
+privacy, navigation and lifetime; the remote theme owns the local browser's application chrome,
+while Safari and WebKit retain their system/page controls. A preview ends when dismissed, the
+session becomes unavailable, owner authority is revoked, or its one-hour lifetime expires.
+Unclaimed capabilities expire after 30 seconds. At most 16 capabilities and eight connections per
+capability are retained, within the remote server's existing connection ceiling. One cancellable
+two-second monitor checks at most 16 in-memory authority/session records; explicit dismissal
+revokes immediately. Each byte direction waits for the previous write before reading another
+bounded chunk. No site response is collected or decoded by the host UI actor.
+
+Local previews require a native TCP route (LAN/VPN, Tailscale or Hosted Direct); an HTTP-only
+relay cannot carry CONNECT. The Mac must stay awake, and dev servers that use another hard-coded
+localhost port need their own tab/preview. Self-signed website HTTPS keeps WebKit's normal trust
+checks. This feature does not add a website preview to the browser-only remote client.
+
 Routine browser mutations
 do not repeatedly animate the badge. Private tabs remain generic in the list and never send
 pixels to the phone. Browser state, checkout reads, and attachment previews are owner-only.

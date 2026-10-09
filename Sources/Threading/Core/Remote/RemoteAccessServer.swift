@@ -261,6 +261,7 @@ final class RemoteAccessServer: @unchecked Sendable {
     }
 
     private var connectionsByID: [ObjectIdentifier: RemoteConnection] = [:]
+    private let browserTunnels = RemoteBrowserTunnelStore()
     private var authLimiter = RemoteAuthRateLimiter()
     private var mutationReplayCache: [MutationReplayKey: MutationReplayEntry] = [:]
     /// Files a composer handed over but has not yet named in a prompt. Queue-confined, like the
@@ -351,6 +352,7 @@ final class RemoteAccessServer: @unchecked Sendable {
     }
 
     func stop() {
+        Task { @MainActor in browserTunnels.removeAll() }
         queue.sync {
             // `cancel()` synchronously reports `didClose`, which removes its entry. Snapshot
             // and clear first so shutdown never mutates a Dictionary while iterating its live
@@ -402,6 +404,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         from connection: RemoteConnection,
         respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
+        if request.method == "CONNECT" {
+            handleBrowserConnect(request, respond: respond)
+            return
+        }
         // Approvals never go through the general mutation replay cache: revocation and one-use
         // consumption are rechecked on every request, and a lost answer is not replayed.
         if RemoteRouter.normalizedPath(request.path) == RemoteSecretApproval.path {
@@ -877,6 +883,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
            let sessionID = RemoteRouter.browserLinkSessionID(forPath: path)
         {
             handleBrowserLink(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
+        if request.method == "POST",
+           let sessionID = RemoteRouter.browserTunnelSessionID(forPath: path) {
+            handleBrowserTunnel(request, rawSessionID: sessionID, respond: respond)
             return
         }
 
@@ -3594,6 +3606,73 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             respond(.respond(RemoteRouter.json(link)))
+        }
+    }
+
+    private func handleBrowserTunnel(
+        _ request: HTTPRequest,
+        rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.principal == .ownerDevice, authorization.scope == .allSessions else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden"))); return
+        }
+        guard request.body.count <= RemoteBrowserTunnelDefaults.maximumRequestBytes,
+              let sessionID = SessionID(uuidString: rawSessionID),
+              let body = try? JSONDecoder().decode(RemoteBrowserTunnelRequest.self, from: request.body),
+              let tabID = UUID(uuidString: body.tabID) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request"))); return
+        }
+        Task { @MainActor in
+            guard let authorizer = self.authorizer, authorizer.isCurrent(authorization) else {
+                respond(.respond(RemoteRouter.error(401, "Unauthorized"))); return
+            }
+            if let token = body.closingToken {
+                browserTunnels.close(token: token, sessionID: sessionID, authorization: authorization)
+                respond(.respond(RemoteRouter.json(["closed": true])))
+                return
+            }
+            guard let link = RemoteWorkspaceBridge.browserLink(for: sessionID, tabID: tabID),
+                  let origin = RemoteBrowserLocalOrigin(url: link.url) else {
+                respond(.respond(RemoteRouter.error(404, "Local browser tab unavailable"))); return
+            }
+            guard body.expectedOrigin == origin.key else {
+                respond(.respond(RemoteRouter.error(409, "Browser origin changed"))); return
+            }
+            guard let tunnel = browserTunnels.issue(
+                sessionID: sessionID, tabID: tabID, authorization: authorization,
+                url: link.url, authorizer: authorizer
+            ) else {
+                respond(.respond(RemoteRouter.error(503, "Too many browser previews"))); return
+            }
+            respond(.respond(RemoteRouter.json(tunnel)))
+        }
+    }
+
+    private func handleBrowserConnect(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let token = RemoteBrowserTunnelStore.token(from: request.header("Proxy-Authorization")) else {
+            var response = RemoteRouter.error(407, "Proxy Authentication Required")
+            response.extraHeaders["Proxy-Authenticate"] = "Basic realm=\"Threading preview\""
+            respond(.respond(response)); return
+        }
+        Task { @MainActor in
+            guard let authorizer = self.authorizer,
+                  let grant = browserTunnels.resolve(token: token, authority: request.path, authorizer: authorizer) else {
+                self.queue.async {
+                    if self.authLimiter.shouldReject(device: nil) {
+                        respond(.respond(RemoteRouter.error(429, "Too Many Requests")))
+                    } else {
+                        self.recordFailedAuth(reason: "bad preview capability", device: nil)
+                        respond(.respond(RemoteRouter.error(403, "Preview unavailable")))
+                    }
+                }
+                return
+            }
+            respond(.browserTunnel(grant))
         }
     }
 

@@ -116,6 +116,11 @@ The exception is UI whose presentation and trust boundary belong to iOS. Notific
 camera, microphone and tracking permission prompts, the share sheet, document picker, and
 similar operating-system surfaces remain native and are not imitated or themed.
 
+`MobileSystemBrowser` contains Safari's independent public-site browsing. Safari owns its
+navigation, website authentication, and dismissal chrome. Localhost previews instead use
+`MobileBrowserView` with themed host controls around WebKit; website JavaScript dialogs use
+`themedAlert`, while WebKit owns page content and editing.
+
 `MobileSystemShareSheet` is the containment boundary for file exports. A caller stages only the
 device-local URLs it intends to offer; `UIActivityViewController` continues to own destinations,
 previews, cancellation, and completion. The temporary file remains host custody and is removed

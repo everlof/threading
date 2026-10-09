@@ -2376,6 +2376,23 @@
         }
       }
     },
+    "Browse on iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Browse on iPhone"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surfa på iPhone"
+          }
+        }
+      }
+    },
     "Browse text files in this session’s repository." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3403,6 +3420,23 @@
         }
       }
     },
+    "Connected through your Mac · Separate browsing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connected through your Mac · Separate browsing"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ansluten via din Mac · Separat surfning"
+          }
+        }
+      }
+    },
     "Connected · %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3950,6 +3984,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det gick inte att öppna bilagan"
+          }
+        }
+      }
+    },
+    "Couldn’t open page" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t open page"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte öppna sidan"
           }
         }
       }
@@ -5608,6 +5659,23 @@
         }
       }
     },
+    "Forward" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Forward"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Framåt"
+          }
+        }
+      }
+    },
     "Forward Delete" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6606,6 +6674,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lokal diagnostik är avstängd som standard och måste också aktiveras på den parkopplade Mac-datorn. Om du stänger av den stoppas nya förfrågningar omedelbart."
+          }
+        }
+      }
+    },
+    "Local previews need a direct connection to your Mac. Connect using Threading Direct, Wi-Fi, or Tailscale." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local previews need a direct connection to your Mac. Connect using Threading Direct, Wi-Fi, or Tailscale."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lokala förhandsvisningar kräver en direkt anslutning till din Mac. Anslut via Threading Direct, wifi eller Tailscale."
           }
         }
       }
@@ -8059,6 +8144,23 @@
         }
       }
     },
+    "Opening browser…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opening browser…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppnar webbläsaren…"
+          }
+        }
+      }
+    },
     "Opening chat…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9427,6 +9529,23 @@
         }
       }
     },
+    "Reload page" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reload page"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs in sidan igen"
+          }
+        }
+      }
+    },
     "Remote access options" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9854,6 +9973,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Återställs %@ · %@"
+          }
+        }
+      }
+    },
+    "Response" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Response"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Svar"
           }
         }
       }
@@ -10504,6 +10640,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skickad till din Mac"
+          }
+        }
+      }
+    },
+    "Separate browsing on your iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Separate browsing on your iPhone"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Separat surfning på din iPhone"
           }
         }
       }
@@ -11392,6 +11545,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stanna och vänta på mig"
+          }
+        }
+      }
+    },
+    "Stop loading" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop loading"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppa inläsning"
           }
         }
       }
@@ -12598,6 +12768,23 @@
         }
       }
     },
+    "The browser stopped. Try opening the page again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The browser stopped. Try opening the page again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Webbläsaren stoppades. Försök öppna sidan igen."
+          }
+        }
+      }
+    },
     "The code under a Mac is the identity this iPhone pins. It is the same code that Mac prints under This Mac’s Identity, so the two can be compared by eye." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13546,6 +13733,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här aktiva panelen är tillgänglig på din Mac."
+          }
+        }
+      }
+    },
+    "This local address is not part of the open preview. Open its tab from Follow Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This local address is not part of the open preview. Open its tab from Follow Mac."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här lokala adressen ingår inte i den öppna förhandsvisningen. Öppna dess flik från Följ Mac."
+          }
+        }
+      }
+    },
+    "This local preview expired. Open it again to reconnect to your Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This local preview expired. Open it again to reconnect to your Mac."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den lokala förhandsvisningen har gått ut. Öppna den igen för att återansluta till din Mac."
           }
         }
       }
@@ -14756,6 +14977,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vägar in"
+          }
+        }
+      }
+    },
+    "Website message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Website message"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meddelande från webbplatsen"
           }
         }
       }

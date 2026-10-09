@@ -4,6 +4,34 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## Independent iPhone browser — 2026-10-09
+
+The scaling unit is one explicitly opened browser, normally one preview capability and a small
+burst of asset connections. Stress admission is 16 capabilities process-wide, eight TCP streams
+per capability, and the remote server's existing 32-connection aggregate ceiling. Each relay
+direction reads a fixed 32 KiB chunk (the existing remote receive loop admits at most 64 KiB)
+and waits for the previous send before reading more. Initial pipelined bytes have a 128 KiB
+send ceiling. Site bodies are never accumulated, parsed or decoded on the UI actor; images,
+scripts and page layout belong to WebKit. The phone listener and both sockets are queue-owned.
+
+Follow Mac cancels its activity-driven capture task while the independent browser covers it.
+The local browser owns one WebKit view and a fixed set of navigation controls, with no native
+view per DOM element. One two-second task checks at most 16 in-memory authorization/session
+records; it ends when the last capability is removed. Closing the browser stops its listener,
+WebKit load, expiry task and connections. Unclaimed capabilities expire after 30 seconds;
+claimed capabilities have a one-hour ceiling. Proxy establishment has a 15-second deadline.
+
+`RemoteBrowserTunnelTests` exercises a 2 MiB response through the production Mac connection,
+form writes, WebSockets, credential containment and lease closure. The iOS
+`MobileSessionChromeTests/testWebKitLocalhostPageUsesScopedConnectThroughMobileProxy` fixture
+loads an otherwise unserved localhost address through the production local forwarder and
+WebKit configuration, so a bypass cannot pass as a working tunnel.
+The Mac fixture speaks raw CONNECT: macOS URLSession bypassed its configured proxy for
+loopback destinations, initially allowing page/form checks to pass through a direct socket.
+The raw fixture also asserts that another authority is refused and an existing WebSocket is
+closed on revocation. IPv4-only and IPv6-only listeners exercise localhost address selection.
+
+
 ## Mermaid attachment rendering — 2026-10-08
 
 Expected input is a 1–8 KiB architecture diagram. The regression fixture has 201 nodes / 200

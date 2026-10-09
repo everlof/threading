@@ -517,6 +517,8 @@
 				ThreadingMobile/MobileAccountImages.swift,
 				ThreadingMobile/MobileAgentIdentity.swift,
 				ThreadingMobile/MobileBrowserPermissionPrompt.swift,
+				ThreadingMobile/MobileBrowserProxy.swift,
+				ThreadingMobile/MobileBrowserView.swift,
 				ThreadingMobile/MobileButtonHaptics.swift,
 				ThreadingMobile/MobileClipboardWriter.swift,
 				ThreadingMobile/MobileProjectDisclosureStore.swift,

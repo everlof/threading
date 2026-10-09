@@ -753,15 +753,33 @@ capture_fixture() {
       --udid "${simulator_udid}" "${tap_x}" "${tap_y}" \
       >"${log_directory}/${identifier}.tap.log" 2>&1
 
-    local interaction_settled=0
+    local interaction_settled=0 missing_labels wait_label all_found
     for ((interaction_poll = 0; interaction_poll < 200; interaction_poll += 1)); do
       idb ui describe-all --json --udid "${simulator_udid}" >"${accessibility_json}"
-      if jq -e --argjson labels "${interaction_wait_labels}" '
+      missing_labels="$(jq -c --argjson labels "${interaction_wait_labels}" '
           [.[] | .AXLabel? // empty] as $actual
-          | all($labels[]; . as $label | any($actual[]; startswith($label)))
-        ' "${accessibility_json}" >/dev/null; then
+          | [$labels[] | . as $label | select(any($actual[]; startswith($label)) | not)]
+        ' "${accessibility_json}")"
+      if [[ "${missing_labels}" == "[]" ]]; then
         interaction_settled=1
         break
+      fi
+      # A postcondition can live in the same flattened UIKit bars as the tapped control.
+      # In particular, a browser's Reload action proves loading ended; its surrounding chrome
+      # exists earlier and must not release capture while WebKit is still painting a blank page.
+      if ((SECONDS - last_hit_test >= 1)); then
+        last_hit_test=${SECONDS}
+        all_found=1
+        while IFS= read -r wait_label; do
+          if ! hit_test_flattened_bars "${accessibility_json}" "${wait_label}" >/dev/null; then
+            all_found=0
+            break
+          fi
+        done < <(jq -r '.[]' <<<"${missing_labels}")
+        if ((all_found)); then
+          interaction_settled=1
+          break
+        fi
       fi
       sleep 0.05
     done

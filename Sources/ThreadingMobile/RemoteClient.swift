@@ -1644,6 +1644,20 @@ struct RemoteClient {
         return response.url
     }
 
+    func browserTunnel(sessionID: String, tabID: String, origin: RemoteBrowserLocalOrigin) async throws -> RemoteBrowserTunnelDTO {
+        try await postResponse(
+            RemoteBrowserTunnelRequest(tabID: tabID, expectedOrigin: origin.key),
+            to: link.browserTunnelURL(sessionID: sessionID), requestID: UUID().uuidString
+        )
+    }
+
+    func closeBrowserTunnel(sessionID: String, tabID: String, token: String) async throws {
+        let _: [String: Bool] = try await postResponse(
+            RemoteBrowserTunnelRequest(tabID: tabID, closingToken: token),
+            to: link.browserTunnelURL(sessionID: sessionID), requestID: UUID().uuidString
+        )
+    }
+
     func extensionPanel(
         sessionID: String,
         extensionIdentifier: String,

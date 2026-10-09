@@ -629,6 +629,7 @@ public enum RemoteSessionRouteAction: String, CaseIterable, Codable, Equatable, 
     case browserPermission = "browser-permission"
     case browserPreview = "browser-preview"
     case browserLink = "browser-link"
+    case browserTunnel = "browser-tunnel"
     case extensionPanel = "extension-panel"
     case extensionPanelResource = "extension-panel-resource"
 }

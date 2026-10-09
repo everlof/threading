@@ -8,6 +8,10 @@ import UniformTypeIdentifiers
 /// This intentionally renders a bounded Mac snapshot rather than loading the URL in an iPhone
 /// `WKWebView`: the latter would have different cookies, permissions, history, and page state.
 struct RemoteBrowserFollowView: View {
+    private struct RefreshIdentity: Equatable {
+        let sequence: Int
+        let browsingTabID: String?
+    }
     let session: RemoteSessionSummaryDTO
     let client: RemoteClient
     @ObservedObject var activity: MobileWorkspaceActivity
@@ -25,6 +29,7 @@ struct RemoteBrowserFollowView: View {
     @State private var isLoadingLink = false
     @State private var linkError: String?
     @State private var sharePayload: MobileSharePayload?
+    @State private var browsingTab: RemoteBrowserTabDTO?
     private let loadsRemotely: Bool
     private let showsCloseButton: Bool
 
@@ -102,13 +107,22 @@ struct RemoteBrowserFollowView: View {
                 .accessibilityLabel(MobileL10n.string("Refresh browser preview"))
             }
         }
-        .task(id: activity.changeSequence) {
+        .task(id: RefreshIdentity(sequence: activity.changeSequence, browsingTabID: browsingTab?.id)) {
             activity.markBrowserSeen()
-            guard loadsRemotely else { return }
+            guard loadsRemotely, browsingTab == nil else { return }
             await refresh()
         }
         .sheet(item: $sharePayload) { payload in
             MobileSystemShareSheet(items: payload.items)
+        }
+        .fullScreenCover(item: $browsingTab) { tab in
+            NavigationStack {
+                MobileBrowserView(
+                    client: client, sessionID: session.id, tabID: tab.id,
+                    loadsRemotely: loadsRemotely
+                )
+            }
+            .mobileTheme(theme)
         }
         .themedAlert(
             "Couldn’t use browser link",
@@ -168,6 +182,15 @@ struct RemoteBrowserFollowView: View {
                 Label("Following your Mac · Read only", systemImage: "eye")
                     .font(.caption)
                     .foregroundStyle(theme.tertiaryLabel)
+
+                if let tab = selectedTab, tab.canPreview, !tab.isPrivate,
+                   let address = tab.displayURL,
+                   address.hasPrefix("http://") || address.hasPrefix("https://") {
+                    Button("Browse on iPhone", systemImage: "safari") { browsingTab = tab }
+                        .buttonStyle(MobileThemedActionButtonStyle(
+                            kind: .secondary, theme: theme, width: .intrinsic
+                        ))
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 

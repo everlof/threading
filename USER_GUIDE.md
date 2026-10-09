@@ -3442,6 +3442,16 @@ navigation and interaction, and private
 tabs never send a preview. The picture is taken on the Mac, so a page only the Mac can reach, such
 as a dev server on its own localhost, shows on the phone like any other. Ask the agent to open
 its local URL using `browser_navigate`; no LAN address is needed for this preview. If the agent
+opens a shared web page, **Browse on iPhone** opens an interactive browser inside Threading.
+It has its own navigation and website login; the Mac tab stays unchanged. Public websites open
+in Safari's in-app browser. Localhost pages connect privately through your Mac, including page
+assets, forms and live reload, using the selected site's host and port. Keep the Mac awake and
+use Threading Direct, Wi-Fi/VPN, or Tailscale; the legacy Relay route cannot carry local previews.
+Local website data is discarded when you close the browser, and a local preview can remain open
+for up to an hour before it needs reopening. Another localhost port needs its own preview.
+Close returns to the screenshot follow view.
+
+If the agent
 opens a shared web page, tap the menu beside its address to **Open in Browser**, **Share Link**,
 or **Copy Link**. These actions use the exact URL at the moment you choose one; the address shown
 in the reader may omit credentials. Opening uses the iPhone's browser, with its own sign-in and

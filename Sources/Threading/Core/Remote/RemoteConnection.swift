@@ -73,8 +73,12 @@ final class RemoteConnection: @unchecked Sendable {
     private let queue: DispatchQueue
     private weak var delegate: Delegate?
 
-    private enum Mode { case http, webSocket }
+    private enum Mode { case http, webSocket, browserTunnel }
     private var mode: Mode = .http
+    private var browserUpstream: NWConnection?
+    private var browserGrant: RemoteBrowserTunnelGrant?
+    private var browserAdmissionID: UUID?
+    private var browserPendingBytes = 0
 
     private var buffer = Data()
     private var isHandling = false
@@ -176,6 +180,7 @@ final class RemoteConnection: @unchecked Sendable {
     func sendClose(code: UInt16, reason: String = "") {
         queue.async { [weak self] in
             guard let self, !self.isClosed else { return }
+            if self.mode == .browserTunnel { self.close(); return }
             self.write(RemoteWebSocket.closeFrame(code: code, reason: reason), thenClose: true)
         }
     }
@@ -202,6 +207,11 @@ final class RemoteConnection: @unchecked Sendable {
             else { receive() }
             return
         }
+        if mode == .browserTunnel {
+            guard error == nil else { close(); return }
+            sendBrowserBytes(data ?? Data(), isComplete: isComplete)
+            return
+        }
         if let data, !data.isEmpty {
             buffer.append(data)
             guard buffer.count <= RemoteAccessDefaults.maximumRequestBytes else {
@@ -215,6 +225,7 @@ final class RemoteConnection: @unchecked Sendable {
             switch mode {
             case .http: processHTTP()
             case .webSocket: processFrames()
+            case .browserTunnel: break
             }
         }
 
@@ -253,6 +264,8 @@ final class RemoteConnection: @unchecked Sendable {
             self.queue.async {
                 guard !self.isClosed else { return }
                 switch decision {
+                case .browserTunnel(let grant):
+                    self.startBrowserTunnel(grant)
                 case .respond(let response):
                     // The answer is leaving, so the connection is no longer waiting on this
                     // Mac: the fresh stretch bounds the body's transfer and, after a keep-alive
@@ -303,6 +316,103 @@ final class RemoteConnection: @unchecked Sendable {
     }
 
     // MARK: - WebSocket phase
+
+    /// The CONNECT head is consumed here; neither preview nor owner credentials reach the site.
+    /// Each direction waits for its previous write before reading another fixed-size chunk.
+    private func startBrowserTunnel(_ grant: RemoteBrowserTunnelGrant) {
+        guard let admission = grant.admit(onRevoke: { [weak self] in
+            guard let self else { return }
+            self.queue.async { self.close() }
+        }), let port = NWEndpoint.Port(rawValue: grant.origin.port) else {
+            write(HTTPResponse.status(503, "Preview busy").serialized, thenClose: true)
+            return
+        }
+        browserGrant = grant
+        browserAdmissionID = admission
+        authenticatedPeerState.withLock {
+            $0 = RemoteAuthenticatedPeer(
+                authorization: grant.authorization, deviceID: grant.authorization.boundDeviceID,
+                deviceName: nil, terminalReplayBudget: nil, authenticatedAt: Date()
+            )
+        }
+        mode = .browserTunnel
+        idleTimer?.cancel()
+        idleTimer = nil
+        let parameters = NWParameters.tcp
+        // Localhost may be served on IPv4 or IPv6. Let Network choose, while prohibiting any
+        // route off loopback even if the machine's hostname resolution has been customized.
+        parameters.requiredInterfaceType = .loopback
+        let upstream = NWConnection(host: .init(grant.origin.connectHost), port: port, using: parameters)
+        browserUpstream = upstream
+        upstream.stateUpdateHandler = { [weak self] state in
+            guard let self, !self.isClosed else { return }
+            switch state {
+            case .ready:
+                self.connection.send(
+                    content: Data("HTTP/1.1 200 Connection Established\r\n\r\n".utf8),
+                    completion: .contentProcessed { [weak self] error in
+                        guard let self else { return }
+                        if error != nil { self.close(); return }
+                        self.receiveBrowserBytes()
+                    }
+                )
+            case .failed, .cancelled:
+                self.close()
+            default: break
+            }
+        }
+        upstream.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + RemoteBrowserTunnelDefaults.connectTimeout) { [weak self] in
+            guard let self, self.browserUpstream?.state != .ready else { return }
+            self.close()
+        }
+        if !buffer.isEmpty {
+            let initial = buffer
+            buffer.removeAll()
+            sendBrowserBytes(initial, isComplete: false, resumesReading: false)
+        }
+    }
+
+    private func sendBrowserBytes(_ data: Data, isComplete: Bool, resumesReading: Bool = true) {
+        guard !isClosed, browserGrant?.isValid == true, let upstream = browserUpstream,
+              browserPendingBytes + data.count <= RemoteBrowserTunnelDefaults.chunkBytes * 4 else {
+            close(); return
+        }
+        browserPendingBytes += data.count
+        upstream.send(
+            content: data, contentContext: isComplete ? .finalMessage : .defaultMessage,
+            isComplete: true, completion: .contentProcessed { [weak self] error in
+                guard let self else { return }
+                self.browserPendingBytes -= data.count
+                if error != nil { self.close(); return }
+                if resumesReading && !isComplete { self.receive() }
+            }
+        )
+    }
+
+    private func receiveBrowserBytes() {
+        guard !isClosed, browserGrant?.isValid == true else { close(); return }
+        browserUpstream?.receive(
+            minimumIncompleteLength: 1, maximumLength: RemoteBrowserTunnelDefaults.chunkBytes
+        ) { [weak self] data, _, complete, error in
+            guard let self, !self.isClosed else { return }
+            guard error == nil, self.browserGrant?.isValid == true else { self.close(); return }
+            self.connection.send(
+                content: data, contentContext: complete ? .finalMessage : .defaultMessage,
+                isComplete: true, completion: .contentProcessed { [weak self] error in
+                    guard let self else { return }
+                    if error != nil { self.close(); return }
+                    if complete {
+                        // Let the downstream drain the final bytes before retiring the socket.
+                        self.isDrainingHTTP = true
+                        self.queue.asyncAfter(deadline: .now() + RemoteBrowserTunnelDefaults.connectTimeout) {
+                            self.close()
+                        }
+                    } else { self.receiveBrowserBytes() }
+                }
+            )
+        }
+    }
 
     private func processFrames() {
         let start = buffer.startIndex
@@ -475,6 +585,10 @@ final class RemoteConnection: @unchecked Sendable {
     private func close() {
         guard !isClosed else { return }
         isClosed = true
+        if let browserAdmissionID { browserGrant?.release(browserAdmissionID) }
+        browserUpstream?.cancel()
+        browserUpstream = nil
+        browserGrant = nil
         idleTimer?.cancel(); idleTimer = nil
         authTimer?.cancel(); authTimer = nil
         pingTimer?.cancel(); pingTimer = nil

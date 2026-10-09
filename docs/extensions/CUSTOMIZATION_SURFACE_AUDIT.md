@@ -686,6 +686,12 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+**Browse on iPhone** is host-only. Threading owns the selected tab and origin, owner-only preview
+capability, certificate verification, network destination, revocation, browser lifecycle and
+navigation policy. Themes supply the local browser's application chrome; Safari and WebKit own
+their system and page controls. Extensions receive no proxy credentials, network access or new
+presentation slot. Follow Mac remains a separate read-only projection of the Mac browser.
+
 Browser Network Capture extends the host-only Tools page with four fixed opt-in rows. Threading
 owns persistence, exact owner-approved agent proposals, capture generations, origin access,
 payload redaction and process-wide retention bounds. Themes style the existing Settings controls;

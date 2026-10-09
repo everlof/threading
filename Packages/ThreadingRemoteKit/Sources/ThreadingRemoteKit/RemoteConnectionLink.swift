@@ -433,6 +433,10 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         return components?.url
     }
 
+    public func browserTunnelURL(sessionID: String) -> URL {
+        sessionActionURL(sessionID: sessionID, action: .browserTunnel)
+    }
+
     public func extensionPanelURL(
         sessionID: String,
         extensionIdentifier: String,

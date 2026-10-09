@@ -1,13 +1,82 @@
 import SwiftTerm
+import Network
 import SwiftUI
 import ThreadingRemoteKit
 import UIKit
 import UniformTypeIdentifiers
 import XCTest
+import WebKit
 import os
 @testable import ThreadingMobile
 
 final class MobileSessionChromeTests: XCTestCase {
+    @MainActor
+    func testIndependentBrowserRunsInteractivePageAndReleasesWebViewOnClose() async throws {
+        let client = RemoteClient(link: try XCTUnwrap(RemoteConnectionLink(string: "https://demo.invalid/#preview")))
+        let model = MobileBrowserModel(client: client, sessionID: "fixture", tabID: "tab", loadsRemotely: false)
+        await model.open()
+        let browser = try XCTUnwrap(model.webView)
+        let controller = UIViewController()
+        controller.view = browser
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; model.close() }
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            if (try? await browser.evaluateJavaScript("typeof window.count")) as? String == "number" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let count = try await browser.evaluateJavaScript("document.getElementById('increment').click(); window.count")
+        XCTAssertEqual(count as? Int, 1)
+        XCTAssertNil(model.error)
+        model.close()
+        XCTAssertNil(model.webView)
+        XCTAssertNil(browser.navigationDelegate)
+        XCTAssertNil(browser.uiDelegate)
+    }
+
+    @MainActor
+    func testBrowserAddressDoesNotExposeCredentialsOrQuerySecrets() throws {
+        let url = try XCTUnwrap(URL(string: "https://user:secret@example.com/page?token=private#secret"))
+        XCTAssertEqual(MobileBrowserModel.displayAddress(url), "https://example.com/page")
+    }
+
+    @MainActor
+    func testWebKitLocalhostPageUsesScopedConnectThroughMobileProxy() async throws {
+        let server = try MobileBrowserTestProxy()
+        let serverPort = try await server.start()
+        defer { server.stop() }
+        let proxy = MobileBrowserProxy(upstreamURL: URL(string: "http://127.0.0.1:\(serverPort)")!)
+        let port = try await proxy.start()
+        defer { proxy.stop() }
+        // Nothing listens on this destination: a direct connection must fail. Only the proxy
+        // fixture can return the marker, proving WebKit did not silently bypass localhost.
+        let url = URL(string: "http://localhost:32123/page")!
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = try MobileBrowserModel.previewDataStore(
+            origin: XCTUnwrap(RemoteBrowserLocalOrigin(url: url)), proxyPort: port, token: "fixture-token"
+        )
+        let browser = WKWebView(frame: .zero, configuration: configuration)
+        let controller = UIViewController()
+        controller.view = browser
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; browser.stopLoading() }
+        browser.load(URLRequest(url: url))
+        let deadline = Date().addingTimeInterval(15)
+        var title: String?
+        while Date() < deadline {
+            title = (try? await browser.evaluateJavaScript("document.title")) as? String
+            if title == "Scoped local preview" { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(title, "Scoped local preview")
+        XCTAssertTrue(server.authorized)
+        XCTAssertEqual(browser.url, url, "the original origin survives without HTML rewriting")
+    }
+
     @MainActor
     func testBrowserFollowsActiveTabUnlessReaderExplicitlySelectsOne() {
         func workspace(active: String) -> RemoteWorkspaceDTO {
@@ -1030,5 +1099,70 @@ final class MobileSessionUsageMenuRowTests: XCTestCase {
             reading: MobileAccountUsageReading(rings: [], summary: nil)
         ))
         XCTAssertFalse(MobileSessionChrome.showsUsageMenuRow(reading: nil))
+    }
+}
+
+/// A bounded CONNECT peer for exercising the shipping iOS relay and WebKit configuration.
+private final class MobileBrowserTestProxy: @unchecked Sendable {
+    private let listener: NWListener
+    private let queue = DispatchQueue(label: "MobileBrowserTestProxy")
+    private let state = OSAllocatedUnfairLock(initialState: false)
+    private var sockets: [NWConnection] = []
+    var authorized: Bool { state.withLock { $0 } }
+
+    init() throws {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        listener = try NWListener(using: parameters)
+    }
+
+    func start() async throws -> UInt16 {
+        try await withCheckedThrowingContinuation { continuation in
+            listener.stateUpdateHandler = { [self] status in
+                if case .ready = status {
+                    listener.stateUpdateHandler = nil
+                    continuation.resume(returning: listener.port!.rawValue)
+                }
+            }
+            listener.newConnectionHandler = { [self] socket in
+                guard sockets.count < 16 else { socket.cancel(); return }
+                sockets.append(socket)
+                socket.start(queue: queue)
+                read(socket, buffer: Data(), connected: false)
+            }
+            listener.start(queue: queue)
+        }
+    }
+
+    func stop() {
+        queue.async { self.listener.cancel(); self.sockets.forEach { $0.cancel() } }
+    }
+
+    private func read(_ socket: NWConnection, buffer: Data, connected: Bool) {
+        socket.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { [self] data, _, eof, error in
+            var buffer = buffer
+            if let data { buffer.append(data) }
+            guard buffer.count <= 32_768 else { socket.cancel(); return }
+            guard let end = buffer.range(of: Data("\r\n\r\n".utf8)) else {
+                if !eof, error == nil { read(socket, buffer: buffer, connected: connected) }
+                return
+            }
+            let head = String(decoding: buffer[..<end.upperBound], as: UTF8.self)
+            if !connected {
+                let credential = Data("threading-preview:fixture-token".utf8).base64EncodedString()
+                guard head.hasPrefix("CONNECT localhost:32123 "), head.contains(credential) else {
+                    socket.send(content: Data("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"Threading preview\"\r\nContent-Length: 0\r\n\r\n".utf8), completion: .idempotent)
+                    read(socket, buffer: Data(), connected: false)
+                    return
+                }
+                state.withLock { $0 = true }
+                socket.send(content: Data("HTTP/1.1 200 Connection Established\r\n\r\n".utf8), completion: .idempotent)
+                read(socket, buffer: Data(buffer[end.upperBound...]), connected: true)
+            } else {
+                let body = Data("<!doctype html><title>Scoped local preview</title><h1>Real localhost content</h1>".utf8)
+                let response = Data("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8) + body
+                socket.send(content: response, contentContext: .finalMessage, completion: .idempotent)
+            }
+        }
     }
 }

@@ -299,6 +299,8 @@ protocol RemoteAuthorizing: AnyObject, Sendable {
 
 /// What the router decided an HTTP request should become.
 enum RemoteRouteDecision: Sendable {
+    /// An owner-authorized, origin-scoped byte tunnel for an independent phone browser.
+    case browserTunnel(RemoteBrowserTunnelGrant)
     /// A plain HTTP answer (static asset, REST result, or an error).
     case respond(HTTPResponse)
     /// Upgrade to a WebSocket bound to this session id. The token is validated on the first
