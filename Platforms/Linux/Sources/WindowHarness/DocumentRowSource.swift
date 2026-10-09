@@ -17,6 +17,7 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
         case diff([DiffLine])
         /// A reply still arriving. It can span several blocks, so it renders as a whole page.
         case streaming(String)
+        case user(String)
     }
     private var entries: [Entry]
     private var nextID: Int
@@ -27,6 +28,7 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
     private(set) var released = 0
     private(set) var live: Set<Int> = []
     private var activeDiffs: [Int: DiffView] = [:]
+    private var expandedUsers: Set<Int> = []
     private let identifier = NSUserInterfaceItemIdentifier("ConversationDiagnosticRow")
 
     var appDiffViewCount: Int { activeDiffs.count }
@@ -39,6 +41,10 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
     }
     init(diffLines: [DiffLine]) {
         entries = [Entry(id: 0, content: .diff(diffLines))]
+        nextID = 1
+    }
+    init(userMessage: String) {
+        entries = [Entry(id: 0, content: .user(userMessage))]
         nextID = 1
     }
     /// An empty transcript a live stream fills.
@@ -126,6 +132,17 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
             content = diff
         case .streaming(let text):
             content = MarkdownView(markdown: text)
+        case .user(let text):
+            let bubble = UserMessageBubbleView(text: text)
+            bubble.setExpanded(expandedUsers.contains(entry.id), notifying: false)
+            bubble.onExpansionChanged = { [weak self, weak tableView, weak host] expanded in
+                guard let self else { return }
+                if expanded { expandedUsers.insert(entry.id) } else { expandedUsers.remove(entry.id) }
+                guard let tableView, let host else { return }
+                let row = tableView.row(for: host)
+                if row >= 0 { tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row)) }
+            }
+            content = bubble
         }
         configured += 1
         live.insert(entry.id)

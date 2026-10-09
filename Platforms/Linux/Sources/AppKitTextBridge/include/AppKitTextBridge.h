@@ -95,4 +95,22 @@ int tat_label_render(TATLabelLayout *label, uint8_t *rgba, int capacity,
                      int width, int height, int clip_x, int clip_y, int antialias,
                      int selection_start, int selection_end, TATSelectionInk ink);
 
+// Complete plain-text paragraphs. Preparation validates/shapes the complete input and builds
+// an indexed line plan, so it belongs on a bounded worker, never in layout/draw/pointer callbacks.
+// Each plan owns a private font map. All operations on a plan must share one serial owner.
+// Rendering returns only an A8 viewport tile (at most 2048x128), independent of document height.
+typedef struct TATDocumentLayout TATDocumentLayout;
+TATDocumentLayout *tat_document_create(const uint8_t *utf8, int length,
+    int monospace, int weight, int italic, double pixel_size, int wrap_width,
+    int char_wrapping, int alignment, int antialias, TATMetrics *metrics, int *line_count);
+void tat_document_destroy(TATDocumentLayout *document);
+int tat_document_hit(TATDocumentLayout *document, double x, double y);
+int tat_document_render(TATDocumentLayout *document, uint8_t *coverage, int capacity,
+    int width, int height, int clip_x, int clip_y, int *visited_lines);
+int tat_document_selection(TATDocumentLayout *document, uint8_t *coverage, int capacity,
+    int width, int height, int clip_x, int clip_y, int start_byte, int end_byte);
+int tat_document_render_rgba(TATDocumentLayout *document, uint8_t *rgba, int capacity,
+    int width, int height, int clip_x, int clip_y, double red, double green, double blue,
+    double alpha);
+
 #endif

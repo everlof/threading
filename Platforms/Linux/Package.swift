@@ -110,6 +110,8 @@ let package = Package(
                       "StorageProposalOutlineView.swift", "ThemedBarSparklineView.swift",
                       "NativePluginPresentationBoundaryView.swift", "KeyEquivalentScopeView.swift",
                       "Fixture.swift"]),
+        .executableTarget(name: "CompleteLabelHarness", dependencies: ["AppKit"],
+            path: "tests/complete_label"),
         .executableTarget(name: "SearchMatchHarness", dependencies: ["AppKit"],
             path: "tests/search_match", exclude: ["run.sh"],
             sources: ["SearchMatchLabel.swift", "ShimDependencies.swift", "Fixture.swift"]),

@@ -153,6 +153,9 @@ TWWindow *tw_open(const char *title, int width, int height) {
     // The legacy 32-byte editing event silently truncates long compositions. SDL's extended
     // event keeps the whole preedit available for an explicit bounded projection below.
     SDL_SetHint(SDL_HINT_IME_SUPPORT_EXTENDED_TEXT, "1");
+    // The themed controls accept their activation click; SDL otherwise consumes it before
+    // the shim can route the press. Preserve the ordinary press/release pair on focus entry.
+    SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
     tw_startup_trace(trace, started, "sdl-init.begin");
     const int initialized = SDL_Init(SDL_INIT_VIDEO);
     tw_startup_trace(trace, started, "sdl-init.end");

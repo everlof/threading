@@ -169,7 +169,16 @@ exit 23''')
         self.env.update(RUNNER_FIXTURE_ROOT=str(self.root),
                         RUNNER_CONTRACT_BIN=str(contract_bin))
         self.command("apt-get", "exit 0")
-        self.command("clang", 'printf "%s\\n" "$*" >> "$RUNNER_FIXTURE_ROOT/compiler-calls"')
+        self.command("clang", '''printf '%s\\n' "$*" >> "$RUNNER_FIXTURE_ROOT/compiler-calls"
+while [[ $# -gt 0 ]]; do
+    if [[ "$1" == -o ]]; then
+        shift
+        printf '%s\\n' '#!/usr/bin/env bash' 'exit 0' > "$1"
+        chmod +x "$1"
+        break
+    fi
+    shift
+done''')
         self.command("swift", '''if [[ "$*" == "build -c release --show-bin-path" ]]; then
     printf '%s\\n' "$RUNNER_CONTRACT_BIN"
 fi''')
@@ -221,6 +230,7 @@ while True:
         self.write(contract_bin / "PriorityLayoutHarness", "exit 0")
         self.write(contract_bin / "ViewClippingHarness", "exit 0")
         self.write(contract_bin / "ParagraphWrappingHarness", "exit 0")
+        self.write(contract_bin / "CompleteLabelHarness", "exit 0")
         harness = contract_bin / "PortablePTYClientHarness"
         harness.write_text(f"#!{sys.executable}\n" + '''import json
 import os

@@ -68,8 +68,7 @@ public enum Design {
         /// card, and a surface that has measured its own tighter padding says so rather than
         /// being widened to a card's. The corner only ever pushes content further in.
         public static func inset(inside radius: CGFloat, from base: CGFloat = inset) -> CGFloat {
-            guard radius > base else { return base }
-            return (radius - (radius - base) / 2.0.squareRoot()).rounded()
+            SurfaceDrawing.contentInset(inside: radius, from: base)
         }
 
         /// The same, for a surface stated as a role rather than as a measurement.

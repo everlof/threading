@@ -222,8 +222,20 @@ pixels, Unicode copy, read-only text, live light/dark changes and width reflow. 
 verifies the renderer and license against their recorded revision; the package includes that license.
 The shared app `DiffView` adapter is mounted, including its source-reference and context-preview
 construction. Contextual action menus, `ToolCallView` and native session transports remain open.
-Labels retain the current 4096-byte/64-span/eight-line drawing limits; long individual paragraphs
-and code blocks still need complete viewport rendering before full transcript coverage is claimed.
+Attributed and bounded labels retain the 4096-byte/64-span/eight-line drawing limits; long rich
+paragraphs and code blocks still need complete viewport rendering before full transcript coverage.
+`tests/document_text/run.sh` checks the new complete plain-text paragraph backend against
+whole-document Pango pixels and hit positions at the head, middle and tail. Its indexed raster
+paints only viewport lines, and paragraph preparation runs in the fixture's dedicated worker.
+Unlimited selectable plain labels now use a serial worker for full source shaping, grapheme
+indexing, selection and viewport rasterization. Requests coalesce per label and discard stale
+deliveries; automatic table row heights and the native fixture repaint after worker completion.
+`CompleteLabelHarness` checks complete head/tail pixels, copy, grapheme navigation and selection
+through resize/collapse. `WindowHarness --user-bubble-ui-fixture OUTPUT_DIRECTORY` mounts the
+unchanged production `UserMessageBubbleView`; the installed runtime journey checks its fade,
+expansion, native wheel, full-message copy, colored emoji and light/dark tail. F9 moves this
+diagnostic fixture to the document footer. Long attributed runs and the full native conversation
+controller/transports remain open.
 `tests/search_match/run.sh` links unchanged production `SearchMatchLabel` through the same
 Pango-backed label path and checks highlighted attributed pixels, a one-line ellipsis, cell
 truncation behavior and the full accessibility value. `out/search-match.png` is its inspected

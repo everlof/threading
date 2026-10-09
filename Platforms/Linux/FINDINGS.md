@@ -5740,3 +5740,102 @@ the gallery has no recorded coverage for `ConversationVirtualRowHost`, `ThemedPr
 `ThemedMenuRowView`, `DiffView`, `PromptTextView`, `PromptTextScrollView`,
 `ThemedTerminalRowContentView` and `ThemedSessionRowContentView`. That existing branch coverage
 gap remains open. The complete iOS target passed 1,021 tests with one skip.
+
+## 180. Clean rebased package and complete paragraph geometry
+
+The clean `1959d2b2f4dd679453d9fca03825cdd284983234` Debian package and archive passed the
+complete Swift-free Ubuntu 24.04 arm64 runtime suite on 2026-10-09. The manifest records that
+exact revision and `source_dirty=false`; the Debian package SHA-256 is
+`bbb0d6e9a9d0f6e739ca378b943b417bd6eb2a12468b56e921ec2f8a28409290`.
+Evidence is in `out/bundle-smoke/clean-1959.llzvci_w`. The dark provider screenshot and saved
+terminal screenshot were inspected, including unselected title ink after live theme switching.
+The post-rebase Mac row/contrast/accessibility selection also passed all 20 tests.
+
+Long conversation content still stops at the label leaf's 4096-byte/eight-line prefix.
+`AppKitTextBridge/DocumentText.c` now provides a complete plain-text layout primitive, without
+changing those existing label limits or claiming that expansion is connected. Preparation
+validates the full UTF-8 value, shapes independent hard paragraphs with a private font map,
+preserves first-strong and inherited neutral paragraph direction, and builds one indexed line
+plan. Glyph overhangs participate in the paint index. A viewport raster uses binary search and
+only intersecting lines; its A8 output is at most 2048×128 pixels. Hit testing returns complete
+document byte offsets without scanning the document prefix. A plan has one serial owner; its
+creation belongs on a bounded worker.
+
+The scaling fixture uses 1,000/10,000 generated Unicode paragraphs (85,106/850,106 bytes), one
+850,106-byte paragraph, and a 100,000-character unbroken token. A dedicated pthread owns the
+plans while the caller remains available. Its independent reference uses whole-document Pango
+layout. Head, middle and tail masks match byte-for-byte; pointer offsets match, including
+combining text, Chinese, Arabic, emoji, RTL/neutral paragraph transitions, CRLF, empty lines,
+four alignments and character wrapping. At most eight lines were painted in the stress viewport.
+
+The first whole-document plan took 10.6 seconds to prepare 850 KB, and direct Pango did the same.
+Splitting at Pango's paragraph boundaries reduced preparation to 384 ms while preserving pixels.
+Seven warmed tail-raster samples measured 30.605 ms median / 31.062 ms max for whole-document
+Pango and 0.065 ms median / 0.068 ms max for the indexed plan. The one giant paragraph prepared
+in 337 ms and rasterized in 0.083 ms median / 0.086 ms max. These are Release C backend
+measurements, not UI latency or application footprint claims. The retained plan still scales
+with text and line count; integration must bound concurrent preparation, coalesce resize work,
+discard stale deliveries and maintain a bounded viewport cache.
+
+The Release WindowHarness build and existing TextLabelHarness contracts pass with the new bridge.
+`tests/document_text/run.sh` runs the full reference comparison and stress measurements in a
+fresh container; the package smoke's build lane runs it too. The primitive is not yet connected
+to NSTextField, attributed long text, selection painting or the full user-message bubble.
+The canonical fresh-container run passed in `out/document-text.VJJjWaB9`. AddressSanitizer and
+UndefinedBehaviorSanitizer also passed all cases; leak detection was disabled for the reference
+font stack's process caches. Those checks do not prove future aggregate cache ownership.
+
+## 181. Complete selectable plain labels and the production user bubble
+
+Unlimited selectable plain `NSTextField` now connects the complete paragraph backend through a
+serial worker. Full UTF conversion, grapheme indexing, Pango preparation, hit testing, copy and
+viewport rasterization stay on that owner. Main keeps recipe/sequence identity and pixels;
+obsolete deliveries cannot replace the current viewport. Row intrinsic invalidation reaches
+only the enclosing automatic table row, and the native document host observes window display
+revision after yielding to asynchronous deliveries. Selection survives width changes and
+collapse/re-expansion of the same source generation.
+
+The worker admits one active job and at most 64 pending latest-label jobs. Plan retention is
+8 MiB of source/64 owners, with one larger document alone; line geometry and grapheme indices
+also scale with that source. The viewport LRU is 16 MiB with one oversized viewport allowed,
+bounded to 8 Mi pixels/72 MiB for two RGBA planes and a selection mask. Pointer drags coalesce
+absolute endpoints; keyboard/copy order is preserved. A keyboard flood and preservation of the
+semantic reading position across reflow still need a complete ownership policy.
+
+`CompleteLabelHarness` passes full head/tail rendering, whole copy, a multi-code-point astronaut
+selection, rapid width changes and collapse/re-expansion. `TableHeightHarness` passes the
+1,000/10,000-row automatic and indexed mutation contracts. The unchanged production
+`UserMessageBubbleView` is linked into the document fixture through a narrow theme/font boundary;
+its content inset uses the same `SurfaceDrawing.contentInset` kernel as Mac Design. The focused
+Mac inset tests (15) and existing collapsed long-message render test (one) pass.
+
+The first expanded native tail exposed monochrome emoji: using an A8 glyph mask discarded the
+color font's intrinsic ink. Complete raster output now uses straight-alpha RGBA, with separate
+ordinary and selected ink plus an A8 selection mask. Independent full-Pango RGBA and selection
+comparisons pass at the head, middle and tail, including RTL/alignment cases.
+
+The native user-bubble journey also exposed SDL dropping the activation click before the shim
+received a press/release pair. The bridge now enables `SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH`, matching
+the shared controls' first-click behavior. The same journey passed with this hint enabled and
+its expanded light/dark tail screenshots were inspected: all text reaches the tail, emoji retain
+color, and copy/Show less stay in the footer. Evidence is in
+`out/user-bubble-clickthrough.OwlqUj`. The canonical build/runtime lanes include these contracts.
+
+This integration covers plain selectable wrapping labels and the explicit user-bubble fixture.
+Attributed long text, nonselectable unlimited labels, the ordinary host's asynchronous delivery
+loop, full conversation controller and native provider transports remain separate work. The
+clean package in §180 predates this integration and is not evidence for these new changes.
+
+The final source build, with the activation-click hint set in code, passed the native bubble
+journey in `out/user-bubble-commit.9iiXMS` and the complete-label contract. A rebuilt dirty-source
+Debian package/archive then passed the entire fresh Swift-free installed runtime suite in
+`out/bundle-smoke/complete-label.vxW2s9rf`; its installed dark expanded-tail screenshot was
+inspected. The manifest records `1959d2b2f4dd679453d9fca03825cdd284983234` plus
+`source_dirty=true`, and the Debian SHA-256 is
+`c8146678c5b1e942b9db260e9266339ff5d48547a5c5ae42de5cac3ee16a9b7f`.
+The 12 runner failure contracts and theme, architecture and main-actor latency gates pass.
+
+The pre-commit `scripts/test.sh all` attempt completed 10,522 Mac tests with 92 skips and one
+failure: the already documented Component Gallery catalogue gap from §179. No additional Mac
+failure appeared. The runner skips its iOS lane after a Mac failure, so iOS was not rerun for
+this checkpoint; the preceding clean-rebase iOS result remains the most recent evidence.

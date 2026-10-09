@@ -177,7 +177,9 @@ open class NSView: NSResponder, NSLayoutItem {
         }
         return false
     }
-    open var needsDisplay: Bool = true
+    open var needsDisplay: Bool = true {
+        didSet { if needsDisplay { window?.noteDisplayChange() } }
+    }
     open var needsLayout: Bool = true
     open var needsUpdateConstraints: Bool = true
     open var wantsLayer: Bool = false {
@@ -450,7 +452,18 @@ open class NSView: NSResponder, NSLayoutItem {
         NSBaselineMetric(heightFraction: 1, offset: -lastBaselineOffsetFromBottom)
     }
 
-    open func invalidateIntrinsicContentSize() { setNeedsLayout() }
+    open func invalidateIntrinsicContentSize() {
+        setNeedsLayout()
+        var ancestor = superview
+        while let view = ancestor {
+            if let table = view as? NSTableView, table.usesAutomaticRowHeights {
+                let row = table.row(for: self)
+                if row >= 0 { table.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row)) }
+                break
+            }
+            ancestor = view.superview
+        }
+    }
 
     open func setFrameSize(_ newSize: NSSize) {
         frame = NSRect(origin: frame.origin, size: newSize)

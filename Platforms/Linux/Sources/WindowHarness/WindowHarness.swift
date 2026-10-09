@@ -527,11 +527,12 @@ struct WindowHarness {
                                             keyEvent: composerKeyEvent)
             return
         }
-        if mode == "--document-ui-fixture" || mode == "--automatic-rows-ui-fixture" || mode == "--diff-ui-fixture" {
+        if mode == "--document-ui-fixture" || mode == "--automatic-rows-ui-fixture" || mode == "--diff-ui-fixture" || mode == "--user-bubble-ui-fixture" {
             let args = Array(CommandLine.arguments.dropFirst(2))
             guard args.count == 1 else { throw WindowFailure("usage: WindowHarness --document-ui-fixture OUTPUT") }
             try await DocumentUIFixture.run(output: args[0], automaticRows: mode == "--automatic-rows-ui-fixture",
                                             diffMode: mode == "--diff-ui-fixture",
+                                            userBubbleMode: mode == "--user-bubble-ui-fixture",
                                             keyEvent: composerKeyEvent)
             return
         }

@@ -9,6 +9,7 @@ extension Design.Surface {
 }
 extension Design {
     enum Chat {
+        static var bubbleFill: NSColor { LinuxTheme.color("accentMuted") }
         static let blockSpacing = Design.Spacing.small
         static let arrivalRise = Design.Spacing.medium
     }
@@ -40,9 +41,15 @@ extension NSView {
 extension NSTextField {
     enum DocumentFontRole {
         case detail
+        case body
         static func detail() -> Self { .detail }
     }
-    func applyFont(_ role: DocumentFontRole) { font = Design.Typography.detail() }
+    func applyFont(_ role: DocumentFontRole) {
+        font = role == .body ? Design.Typography.body() : Design.Typography.detail()
+    }
+    func applyFont(_ role: DocumentFontRole, in surface: Design.Typography.FontSurface) {
+        font = role == .body ? Design.Typography.body(surface: surface) : Design.Typography.detail()
+    }
 }
 extension L10n {
     static func format(_ value: String, _ arguments: CVarArg...) -> String {

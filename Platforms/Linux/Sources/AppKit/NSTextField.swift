@@ -40,6 +40,10 @@ open class NSTextField: NSView {
     private var labelLayout: SelectableLabelLayout?
     private var selectionAnchor: Int?
     private var draggingSelection = false
+    private var textGeneration: UInt64 = 0
+    private var completeLabel: CompletePlainLabelState?
+    private var completeDragStart: CGPoint?
+    private var completeDragAnchor: Int?
     public private(set) var selectedTextRange = NSRange(location: 0, length: 0)
 
     private var textStorage = ""
@@ -47,6 +51,7 @@ open class NSTextField: NSView {
         get { textStorage }
         set {
             textStorage = newValue
+            textGeneration &+= 1
             attributedStorage = nil
             selectedTextRange = NSRange(location: 0, length: 0)
             selectionAnchor = nil
@@ -175,6 +180,7 @@ open class NSTextField: NSView {
         naturalMetrics = nil
         scaledMetrics = nil
         labelLayout = nil
+        if !usesCompletePlainText { completeLabel?.suspend() }
         needsDisplay = true
         invalidateIntrinsicContentSize()
     }
@@ -190,6 +196,10 @@ open class NSTextField: NSView {
     }
 
     private func metrics(at scale: CGFloat) -> TATMetrics {
+        if let complete = completePlainText(at: scale), let metrics = complete.metrics {
+            return TATMetrics(width: Int32(metrics.width), height: Int32(metrics.height),
+                              baseline: Int32(metrics.baseline), glyphs: 0)
+        }
         if scale == 1, let naturalMetrics { return naturalMetrics }
         if let scaledMetrics, scaledMetrics.scale == scale { return scaledMetrics.metrics }
         let wraps = effectiveLineBreakMode == .byWordWrapping || effectiveLineBreakMode == .byCharWrapping
@@ -363,6 +373,15 @@ open class NSTextField: NSView {
     open override func mouseDown(with event: NSEvent) {
         guard isSelectable else { super.mouseDown(with: event); return }
         _ = window?.makeFirstResponder(self)
+        let point = convert(event.locationInWindow, from: nil)
+        if let complete = completePlainText(at: window?.backingScaleFactor ?? 1) {
+            let scale = window?.backingScaleFactor ?? 1
+            completeDragStart = CGPoint(x: point.x * scale, y: point.y * scale)
+            completeDragAnchor = event.modifierFlags.contains(.shift) ? selectionAnchor ?? selectedTextRange.location : nil
+            complete.action(.pointer(start: completeDragStart!, end: completeDragStart!, anchor: completeDragAnchor))
+            draggingSelection = true
+            return
+        }
         let offset = textOffset(at: convert(event.locationInWindow, from: nil))
         let anchor = event.modifierFlags.contains(.shift)
             ? selectionAnchor ?? selectedTextRange.location : offset
@@ -372,6 +391,13 @@ open class NSTextField: NSView {
     }
 
     open override func mouseDragged(with event: NSEvent) {
+        if isSelectable, draggingSelection, let start = completeDragStart,
+           let complete = completePlainText(at: window?.backingScaleFactor ?? 1) {
+            let point = convert(event.locationInWindow, from: nil)
+            let scale = window?.backingScaleFactor ?? 1
+            complete.action(.pointer(start: start, end: CGPoint(x: point.x * scale, y: point.y * scale), anchor: completeDragAnchor))
+            return
+        }
         guard isSelectable, draggingSelection, let anchor = selectionAnchor else { return }
         select(from: anchor, to: textOffset(at: convert(event.locationInWindow, from: nil)))
     }
@@ -386,6 +412,12 @@ open class NSTextField: NSView {
         if chord, key == "c" { copy(nil); return }
         guard [123, 124, 115, 119].contains(event.keyCode) else {
             super.keyDown(with: event)
+            return
+        }
+        if let complete = completePlainText(at: window?.backingScaleFactor ?? 1) {
+            complete.action(.arrow(left: event.keyCode == 123 || event.keyCode == 115,
+                                   edge: event.keyCode == 115 || event.keyCode == 119,
+                                   extends: event.modifierFlags.contains(.shift)))
             return
         }
         let source = stringValue as NSString
@@ -410,11 +442,19 @@ open class NSTextField: NSView {
 
     public func selectAll(_ sender: Any?) {
         guard isSelectable else { return }
+        if let complete = completePlainText(at: window?.backingScaleFactor ?? 1) {
+            complete.action(.selectAll)
+            return
+        }
         select(from: 0, to: (stringValue as NSString).length)
         selectionAnchor = 0
     }
 
     public func copy(_ sender: Any?) {
+        if isSelectable, let complete = completePlainText(at: window?.backingScaleFactor ?? 1) {
+            complete.action(.copy)
+            return
+        }
         guard isSelectable, selectedTextRange.length > 0,
               selectedTextRange.length <= 65_536 else { return }
         let value = (stringValue as NSString).substring(with: selectedTextRange)
@@ -457,11 +497,59 @@ open class NSTextField: NSView {
     }
 
     private func drawSelectableLabel() {
+        if let context = NSGraphicsContext.current,
+           let complete = completePlainText(at: context.scale), let color = textColor,
+           complete.draw(in: context, rect: visibleRect, color: color,
+                         selection: window?.firstResponder === self ? selectedTextRange : NSRange(location: 0, length: 0),
+                         attributes: selectedTextAttributes) { return }
         guard let context = NSGraphicsContext.current,
               let layout = selectableLayout(at: context.scale) else { return }
         layout.draw(in: context, bounds: bounds, top: textTop(at: context.scale),
             selection: window?.firstResponder === self ? selectedTextRange : NSRange(location: 0, length: 0),
             attributes: selectedTextAttributes)
+    }
+
+    private var usesCompletePlainText: Bool {
+        isSelectable && attributedStorage == nil && maximumNumberOfLines == 0 && !usesSingleLineMode &&
+            (effectiveLineBreakMode == .byWordWrapping || effectiveLineBreakMode == .byCharWrapping)
+    }
+
+    /// The raster host can observe settling without touching a Pango handle or scanning source.
+    public var isCompleteTextLayoutReady: Bool { completeLabel?.isReady ?? false }
+    public var isCompleteTextViewportReady: Bool { completeLabel?.isViewportReady ?? false }
+
+    private func completePlainText(at scale: CGFloat) -> CompletePlainLabelState? {
+        guard usesCompletePlainText, !preparedUTF8.isEmpty else { return nil }
+        let width = preferredMaxLayoutWidth > 0 ? preferredMaxLayoutWidth :
+            (automaticLayoutWidth > 0 ? automaticLayoutWidth : bounds.width)
+        guard width.isFinite, width > 0, scale.isFinite, scale > 0,
+              width * scale < Double(Int32.max / 1024) else { return nil }
+        if completeLabel == nil {
+            completeLabel = CompletePlainLabelState { [weak self] sizeChanged in
+                guard let self, let complete = completeLabel else { return }
+                selectedTextRange = complete.selectedRange
+                selectionAnchor = complete.anchor
+                if sizeChanged {
+                    naturalMetrics = nil
+                    scaledMetrics = nil
+                    invalidateIntrinsicContentSize()
+                }
+                needsDisplay = true
+            }
+        }
+        let horizontal: Int32
+        switch alignment {
+        case .left, .natural: horizontal = 0
+        case .center: horizontal = 1
+        case .right: horizontal = 2
+        case .justified: horizontal = 3
+        }
+        let recipe = CompleteTextRecipe(generation: textGeneration, width: Int(ceil(width * scale)),
+            scale: Double(scale), size: Double(max(1, min(128, (font?.pointSize ?? 13) * scale))),
+            monospace: isMonospace, weight: pangoWeight, italic: font?.isItalic == true ? 1 : 0,
+            characterWrapping: effectiveLineBreakMode == .byCharWrapping ? 1 : 0, alignment: horizontal)
+        completeLabel?.update(recipe, text: textStorage)
+        return completeLabel
     }
 }
 #endif

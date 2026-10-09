@@ -43,6 +43,7 @@ swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product 
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product PriorityLayoutHarness
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product ViewClippingHarness
 swift build -c release --product ParagraphWrappingHarness
+swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product CompleteLabelHarness
 contract_bin=$(swift build -c release --show-bin-path)
 timeout 120 "$contract_bin/CoreSliceHarness"
 timeout 120 "$contract_bin/TableHeightHarness"
@@ -50,6 +51,7 @@ timeout 120 "$contract_bin/OutlineViewHarness"
 timeout 120 "$contract_bin/PriorityLayoutHarness"
 timeout 120 "$contract_bin/ViewClippingHarness"
 timeout 120 "$contract_bin/ParagraphWrappingHarness"
+timeout 120 "$contract_bin/CompleteLabelHarness"
 contract_fixture=$(mktemp -d /tmp/threading-contracts.XXXXXXXX)
 out/threading-linux-preview-ubuntu24.04-arm64/bin/threading-ptyd \
   --socket "$contract_fixture/pty.sock" --state "$contract_fixture/daemon" >"$contract_fixture/daemon.log" 2>&1 &
@@ -61,6 +63,10 @@ for ((attempt=0; attempt<100; attempt++)); do
   sleep .1
 done
 timeout 30 "$contract_bin/PortablePTYClientHarness" "$contract_fixture/pty.sock"
+clang -O2 -Wall -Wextra -Werror tests/document_text_contract.c \
+  Sources/AppKitTextBridge/DocumentText.c -I Sources/AppKitTextBridge/include \
+  $(pkg-config --cflags --libs pangocairo) -pthread -lm -o "$contract_fixture/document-text-contract"
+timeout 120 "$contract_fixture/document-text-contract"
 # Run the cleanup trap without depending on the container CLI forwarding stdin EOF.
 exit 0
 BUILD
@@ -90,6 +96,7 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/project_create_menu_smoke.py:/project_create_menu_smoke.py:ro" \
   -v "$PWD/tests/composer_smoke.py:/composer_smoke.py:ro" \
   -v "$PWD/tests/document_ui_smoke.py:/document_ui_smoke.py:ro" \
+  -v "$PWD/tests/user_bubble_smoke.py:/user_bubble_smoke.py:ro" \
   -v "$PWD/tests/automatic_rows_smoke.py:/automatic_rows_smoke.py:ro" \
   -v "$PWD/tests/diff_ui_smoke.py:/diff_ui_smoke.py:ro" \
   -v "$PWD/tests/stream_conversation_smoke.py:/stream_conversation_smoke.py:ro" \

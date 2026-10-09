@@ -7,6 +7,12 @@ import AppKit
 @MainActor
 public enum SurfaceDrawing {
 
+    /// The content corner remains the requested distance inside the surface's diagonal arc.
+    nonisolated public static func contentInset(inside radius: CGFloat, from base: CGFloat) -> CGFloat {
+        guard radius > base else { return base }
+        return (radius - (radius - base) / 2.0.squareRoot()).rounded()
+    }
+
     /// The silhouette a surface was drawn as: a rect and the corner it was given.
     ///
     /// Returned instead of the `NSBezierPath` itself because the ring that follows a surface has

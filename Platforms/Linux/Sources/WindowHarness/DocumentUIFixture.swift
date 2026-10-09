@@ -91,6 +91,8 @@ enum DocumentUIFixture {
         let x: Int, y: Int, width: Int, height: Int
         let enabled: Bool
         let selectedStart: Int, selectedLength: Int
+        let completeTextReady: Bool
+        let completeViewportReady: Bool
     }
     private struct State: Codable, Sendable {
         let serial: Int
@@ -136,10 +138,21 @@ enum DocumentUIFixture {
     ]
 
     static func run(output: String, automaticRows: Bool = false, diffMode: Bool = false,
+                    userBubbleMode: Bool = false,
                     streamAgent: [String]? = nil,
                     keyEvent: (TWEvent) -> NSEvent) async throws {
-        let source = sample
-        let reply = try await Task.detached { try prepareDocumentFixtureReply(source) }.value
+        let source = userBubbleMode ? await Task.detached {
+            "FIRST user message é 👩🏽‍🚀\n" + (0..<300).map { "User line \($0): Unicode 日本語 العربية 👩🏽‍🚀\n" }.joined() + "TAIL USER MESSAGE é 👩🏽‍🚀"
+        }.value : sample
+        let reply = try await Task.detached {
+            if userBubbleMode {
+                var timeline = ConversationTimeline(sessionID: SessionID(), chartDecoder: { _, _ in nil })
+                _ = timeline.apply(.userMessage(source))
+                guard case .userMessage(let message) = timeline.rows.last else { throw WindowFailure("user fixture lost its message") }
+                return DocumentFixtureReply(markdown: message.text, timelineRows: timeline.rows.count, streamingCleared: true, blocks: [message.text])
+            }
+            return try prepareDocumentFixtureReply(source)
+        }.value
         let diffReply = diffMode ? try await Task.detached { try prepareDiffFixtureReply() }.value : nil
         let directory = URL(fileURLWithPath: output)
         try await Task.detached { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }.value
@@ -175,6 +188,7 @@ enum DocumentUIFixture {
         scroll.hasVerticalScroller = true
         scroll.verticalScrollElasticity = .none
         let rows = streamAgent != nil ? DocumentRowSource()
+            : userBubbleMode ? DocumentRowSource(userMessage: reply.markdown)
             : diffReply.map { DocumentRowSource(diffLines: $0.lines) }
             ?? (automaticRows ? DocumentRowSource(sources: reply.blocks) : nil)
         let table: NSTableView? = rows.map { source in
@@ -248,7 +262,9 @@ enum DocumentUIFixture {
             owner.initialFirstResponder = controls.first
             if owner.firstResponder === owner, let first = controls.first { _ = owner.makeFirstResponder(first) }
         }
+        var renderedDisplayRevision: UInt64 = 0
         while true {
+            if owner.displayRevision != renderedDisplayRevision { dirty = true }
             if dirty {
                 // Read before building the frame: deliveries can run during the awaited state
                 // write below, and must leave the next frame owed rather than marked drawn.
@@ -256,6 +272,7 @@ enum DocumentUIFixture {
                 layout()
                 let bitmap = Bitmap(width: pixelWidth, height: pixelHeight, background: LinuxTheme.components("surface"))
                 root.render(in: NSGraphicsContext(bitmap: bitmap, scale: 2))
+                let displayRevisionBeingRendered = owner.displayRevision
                 for (origin, paneWidth, sidebar) in [(0, 320, Int32(1)), (320, pixelWidth - 320, Int32(0))] {
                     var pane = [UInt8]()
                     pane.reserveCapacity(paneWidth * pixelHeight * 4)
@@ -279,7 +296,9 @@ enum DocumentUIFixture {
                     let rect = view.convert(view.bounds, to: root)
                     return Control(title: text, x: Int(rect.minX * 2), y: Int((root.bounds.height - rect.maxY) * 2),
                         width: Int(rect.width * 2), height: Int(rect.height * 2), enabled: enabled,
-                        selectedStart: selection.location, selectedLength: selection.length)
+                        selectedStart: selection.location, selectedLength: selection.length,
+                        completeTextReady: (view as? NSTextField)?.isCompleteTextLayoutReady ?? false,
+                        completeViewportReady: (view as? NSTextField)?.isCompleteTextViewportReady ?? false)
                 }
                 var addedWash: [Double] = [], removedWash: [Double] = []
                 if diffMode {
@@ -317,6 +336,7 @@ enum DocumentUIFixture {
                     try PNGWriter.write(bitmap, to: directory.appendingPathComponent("frame.png"))
                 }.value
                 dirty = false
+                renderedDisplayRevision = displayRevisionBeingRendered
                 if let stream, let revisionBeingRendered {
                     renderedRevision = revisionBeingRendered
                     if sentPrompts == 0 {
@@ -326,6 +346,7 @@ enum DocumentUIFixture {
                 }
             }
             var event = TWEvent()
+            await Task.yield()
             if let stream {
                 // Transport deliveries run on the main queue, so the loop polls and yields the
                 // main actor instead of blocking in the native wait.
@@ -340,7 +361,10 @@ enum DocumentUIFixture {
                 }
                 if received == 0 { continue }
             } else {
-                guard tw_next(native, &event) >= 0 else { throw WindowFailure(String(cString: tw_error())) }
+                let received = tw_next_timeout(native, &event, 16)
+                guard received >= 0 else { throw WindowFailure(String(cString: tw_error())) }
+                try? await Task.sleep(nanoseconds: 1_000_000)
+                if received == 0 { continue }
             }
             // F11 ends a stream session the way closing the window does, without relying on a
             // window manager to deliver the close request.
@@ -397,6 +421,12 @@ enum DocumentUIFixture {
             } else if event.kind == 48, event.action != 3 {
                 // Opt-in diagnostic mutations drive the same incremental table API used by
                 // the production transcript. These keys exist only in this fixture.
+                if userBubbleMode, Int(event.key) == TW_KEY_F9 {
+                    scroll.contentView.scroll(to: NSPoint(x: 0,
+                        y: max(0, document.frame.height - scroll.contentView.bounds.height)))
+                    dirty = true
+                    continue
+                }
                 if let stream, Int(event.key) == TW_KEY_F10 {
                     if sentPrompts == 1 {
                         stream.send(streamPrompts[1])

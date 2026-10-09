@@ -6,6 +6,9 @@ import Foundation
 @MainActor
 public final class NSWindow: NSResponder {
     public var backgroundColor: NSColor = .windowBackgroundColor
+    /// Native raster hosts observe this revision after yielding to asynchronous UI deliveries.
+    public private(set) var displayRevision: UInt64 = 0
+    func noteDisplayChange() { displayRevision &+= 1 }
     private struct CursorRect {
         let rect: NSRect
         let cursor: NSCursor

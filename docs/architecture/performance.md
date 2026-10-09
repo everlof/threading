@@ -1635,6 +1635,26 @@ composer rail shows one two-line preview and its detail sheet uses a List. Dicta
 one live Speech request, no audio-file archive, and ends within 90 seconds. Markup uses one
 2,048-pixel canvas and an 8 MiB ink export budget, with image reduction and flattening on workers.
 
+The Linux complete plain-text backend's initial gate uses 85 KB/850 KB multi-paragraph
+documents, an 850 KB single paragraph and a 100,000-character token. Full preparation runs on
+a dedicated worker; retained text/line geometry scales with content, while a viewport tile is
+at most 2048×128 and visits only intersecting lines. The matched 2026-10-09 850 KB run reduced
+paragraph preparation from 10.6 s to 384 ms, and warmed tail raster from 30.605 ms median to
+0.065 ms. Pixel and pointer comparisons against whole-document Pango hold fidelity. See
+[`Platforms/Linux/FINDINGS.md` §180](../../Platforms/Linux/FINDINGS.md) and
+`Platforms/Linux/tests/document_text/run.sh`. These are backend measurements. Unlimited
+selectable plain NSTextField labels now prepare complete source on one serial worker, with one
+active job and at most 64 latest pending label jobs. Plans retain at most 64 owners and 8 MiB of
+source, allowing one oversized document alone; Pango geometry and grapheme indices additionally
+scale with retained source. Viewport pixels use a 16 MiB aggregate LRU, allowing one oversized
+viewport alone (at most 8 Mi pixels, or 72 MiB for two RGBA planes and one selection mask).
+Resize/scroll requests coalesce, pointer drags retain only the latest absolute gesture and stale
+recipe/sequence deliveries cannot install pixels. Copy and keyboard commands preserve order;
+keyboard backlog and semantic reading-anchor preservation across width changes remain work.
+`CompleteLabelHarness` covers full head/tail, Unicode selection, rapid widths and re-expansion.
+The installed user-bubble journey covers worker-driven repaint and automatic row height.
+Attributed labels remain bounded; this does not establish full transcript scalability.
+
 Profiling should confirm an architecture, not be the first time its scaling boundary is named.
 Before building a UI or callback, classify both axes:
 
