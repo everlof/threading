@@ -1,0 +1,1106 @@
+import Foundation
+
+/// Runs one Agent Client Protocol CLI and adapts it to native Chat.
+///
+/// ACP owns the common conversation contract, so this type contains only process lifecycle and
+/// the translation from standard ACP updates into Threading's provider-neutral stream events.
+/// Everything one agent does differently — its name in prose, its `_meta` extensions, which of
+/// its commands the host refuses — arrives as an `ACPProviderProfile`, so nothing here asks which
+/// runtime it is running. An agent's own metadata is an optional source of model information,
+/// never a requirement for opening or resuming a conversation.
+@MainActor
+final class ACPStreamSession:
+    ConversationStreamSession,
+    ProviderExecutionReportingConversation,
+    ComposerCapabilityProviding,
+    InterruptibleConversation,
+    SessionTitleReportingConversation
+{
+
+    // MARK: - Properties
+
+    let sessionID: SessionID
+
+    var onEvent: ((StreamEvent) -> Void)?
+    var onProviderExecution: ((ProviderExecutionEvent) -> Void)?
+    var onLaunchFailure: ((Error) -> Void)?
+    var onExit: ((Int32) -> Void)?
+    var onInteractionAvailabilityChange: (() -> Void)?
+    var onComposerCapabilitiesChange: (() -> Void)?
+    var onSessionTitleChange: ((String) -> Void)?
+    private(set) var composerCapabilities: [ComposerCapability] = []
+    private(set) var isComposerCapabilityCatalogReady = false
+
+    private(set) var isRunning = false
+    var canSend: Bool {
+        isRunning && acceptsInput && !isTurnInFlight && pendingPrompt == nil
+    }
+
+    var rootProcessIdentifier: pid_t? {
+        guard let process, process.isRunning else { return nil }
+        return process.processIdentifier
+    }
+
+    private let workingDirectory: String
+    private let profile: ACPProviderProfile
+    private let handshakeTimeout: TimeInterval
+    private let commandCatalogTimeout: TimeInterval
+    private let mcpBinding: MCPServerBinding?
+    private let plan: () throws -> AgentLaunchPlan
+
+    /// Whether this conversation's CLI belongs in `threading-ptyd`, asked once per launch.
+    ///
+    /// A closure rather than a value for `plan`'s reason: it is resolved at launch time, so a
+    /// dormant conversation reopened an hour later asks the current setting and the current
+    /// daemon rather than the ones that were true when the controller was built. Nil is the
+    /// deliberate local route; an unavailable selected host throws before any child starts.
+    private let hostPlan: () throws -> PTYHostChildPlan?
+
+    private var process: AgentChildProcess?
+    private var transport: AgentStreamTransport<JSONRPCLineEnvelope>?
+    private var acceptsInput = false
+    private var parseDiagnostics = StreamParseDiagnostics()
+
+    private var requestSequence: Int64 = 0
+    private var pendingRequests: [JSONRPCRequestID: ACPRequestPurpose] = [:]
+    private var launchResumeState: ResumeState = .unavailable
+    private var activeSessionID: String?
+    private var pendingPrompt: String?
+    private var isTurnInFlight = false
+    private var isLoadingHistory = false
+    private var isTerminating = false
+    private var receivedTurnFinished = false
+
+    private var turnStartedAt: TimeInterval?
+    private var lastContextTokens: Int?
+    private var lastContextWindow: Int?
+
+    private var userMessageID: String?
+    private var pendingUserText = ""
+    private var assistantMessageID: String?
+    private var pendingAssistantBlocks: [ACPPendingBlock] = []
+    private var toolCalls: [String: ACPToolCallState] = [:]
+
+    /// Tool calls this client itself refused a permission for.
+    ///
+    /// Kept because the wire will not say so twice: an agent may complete a call it never ran,
+    /// and the only record that it was denied is the answer this client gave. See
+    /// `finishToolIfNeeded`.
+    private var deniedToolCallIDs: Set<String> = []
+
+    private var handshakeDeadline: Task<Void, Never>?
+    private var commandCatalogDeadline: Task<Void, Never>?
+
+    // MARK: - Initialization
+
+    /// - Parameter handshakeTimeout: how long `initialize` and `session/new`/`session/load` may
+    ///   go unanswered before the turn fails and the child is ended. A parameter rather than a
+    ///   constant read inline so a transport test can pin the behaviour in milliseconds instead
+    ///   of waiting out the real bound; production never passes it.
+    init(
+        sessionID: SessionID,
+        workingDirectory: String,
+        profile: ACPProviderProfile,
+        handshakeTimeout: TimeInterval = ACPDefaults.handshakeTimeout,
+        commandCatalogTimeout: TimeInterval = ACPDefaults.commandCatalogTimeout,
+        mcpBinding: MCPServerBinding? = nil,
+        hostPlan: @escaping () throws -> PTYHostChildPlan? = { nil },
+        plan: @escaping () throws -> AgentLaunchPlan
+    ) {
+        self.sessionID = sessionID
+        self.workingDirectory = workingDirectory
+        self.profile = profile
+        self.handshakeTimeout = handshakeTimeout
+        self.commandCatalogTimeout = commandCatalogTimeout
+        self.mcpBinding = mcpBinding
+        self.hostPlan = hostPlan
+        self.plan = plan
+    }
+
+    // MARK: - Public Methods
+
+    func start() {
+        guard !isRunning else { return }
+
+        let process: AgentChildProcess
+        do {
+            let launchPlan = try plan()
+            resetForLaunch(resumeState: launchPlan.resumeState)
+            process = try AgentChildProcess.launch(
+                executable: launchPlan.executable,
+                arguments: launchPlan.arguments,
+                environment: launchPlan.launchEnvironment(),
+                sessionID: sessionID,
+                host: try hostPlan()
+            ) { [weak self] status in
+                Task { @MainActor [weak self] in self?.handleTermination(status: status) }
+            }
+        } catch {
+            let label = profile.diagnosticsLabel
+            let reason = error.localizedDescription
+            ThreadingLogger.agent.error(
+                "\(label, privacy: .public) failed to start: \(reason, privacy: .private(mask: .hash))"
+            )
+            // Match every other native transport: start never calls an external lifecycle
+            // callback re-entrantly before its caller has finished installing the surface.
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let handler = self.onLaunchFailure { handler(error) }
+                else { self.onExit?(AgentChildProcessDefaults.spawnFailureStatus) }
+            }
+            return
+        }
+
+        let transport = AgentStreamTransport(
+            label: "codes.threading.agent.acp-stream",
+            input: process.standardInput,
+            output: process.standardOutput,
+            error: process.standardError,
+            maximumErrorBytes: ACPDefaults.maximumErrorBytes,
+            parser: { JSONRPCLineEnvelope.parse($0) },
+            onLine: { [weak self] envelope in self?.route(envelope) },
+            onMalformedLine: { [weak self] in
+                guard let self else { return }
+                self.parseDiagnostics.recordMalformedLine(provider: self.profile.diagnosticsLabel)
+            },
+            onFailure: { [weak self] failure in self?.transportFailed(failure) }
+        )
+        self.process = process
+        self.transport = transport
+        acceptsInput = true
+        isRunning = true
+        transport.start()
+        onInteractionAvailabilityChange?()
+        sendInitialize()
+    }
+
+    /// Prompts may arrive while ACP is still initializing. One is retained and sent as soon as
+    /// `session/new` or `session/load` supplies the provider session id.
+    @discardableResult
+    func send(_ text: String) -> Bool {
+        guard canSend else { return false }
+
+        pendingPrompt = text
+        isTurnInFlight = true
+        receivedTurnFinished = false
+        turnStartedAt = ProcessInfo.processInfo.systemUptime
+        onInteractionAvailabilityChange?()
+        sendPendingPromptIfReady()
+        return true
+    }
+
+    @discardableResult
+    func send(
+        _ invocation: ComposerInvocation,
+        identifiedBy id: ConversationMessageID
+    ) -> Bool {
+        guard composerCapabilities.contains(where: {
+            $0.id == invocation.capability.id && $0.isEnabled
+        }) else { return false }
+        // ACP has no client message-id field. The durable checkpoint still owns `id`; the wire
+        // transport cannot echo it back the way Claude and Codex do.
+        _ = id
+        return send(invocation.sourceText)
+    }
+
+    // MARK: - Turn Control
+
+    var canInterrupt: Bool {
+        isRunning && acceptsInput && isTurnInFlight && activeSessionID != nil
+    }
+
+    /// ACP has no steering primitive: the specification allows one prompt turn per session at a
+    /// time, and names nothing for adding to the one in flight. Saying so is the point — the
+    /// composer offers no steer for an ACP agent rather than one that quietly queues.
+    var steerAvailability: SteerAvailability { .unavailable(.unsupported) }
+
+    /// Stops the turn in flight, leaving the session open.
+    ///
+    /// `session/cancel` is a **notification**: there is nothing to await, and the protocol is
+    /// explicit that the agent answers the still-pending `session/prompt` with
+    /// `stopReason: "cancelled"` rather than with an error, precisely so a client can tell a
+    /// deliberate stop from a failure. That reply is what settles the turn as `.stopped` — see
+    /// `TurnOutcome(acpStopReason:)`.
+    ///
+    /// The distinction from `terminate()`, which sends the same notification, is that this one
+    /// keeps the process: Stop ends the work, not the conversation.
+    func interrupt(completion: @escaping @MainActor (InterruptReceipt) -> Void) {
+        guard canInterrupt, let activeSessionID else {
+            completion(.failed(reason: L10n.string("There is nothing running to stop.")))
+            return
+        }
+
+        sendNotification(
+            method: "session/cancel",
+            parameters: ["sessionId": activeSessionID]
+        )
+
+        // A notification is acknowledged by definition, and ACP holds nothing queued behind the
+        // turn for it to report on.
+        completion(.acknowledged)
+    }
+
+    func finish() {
+        guard acceptsInput, let transport else { return }
+        acceptsInput = false
+        transport.closeInput()
+        onInteractionAvailabilityChange?()
+    }
+
+    func terminate() {
+        guard isRunning else { return }
+
+        isTerminating = true
+        isRunning = false
+        transport?.detach()
+        transport = nil
+        acceptsInput = false
+        cancelHandshakeDeadline()
+        cancelCommandCatalogDeadline()
+        if isTurnInFlight, let activeSessionID {
+            sendNotification(
+                method: "session/cancel",
+                parameters: ["sessionId": activeSessionID]
+            )
+        }
+        finish()
+        process?.terminate()
+    }
+
+    var isHostBacked: Bool { process?.isHostBacked ?? false }
+
+    /// Hands the CLI to `threading-ptyd` rather than ending it.
+    ///
+    /// Neither `session/cancel` nor `finish()`, for the reason `ClaudeStreamSession` states: both
+    /// are how a conversation *ends*, and this is the one path where the turn goes on running
+    /// after the window it was started from has gone.
+    func detachFromBackgroundHost(by deadline: Date) -> Bool {
+        detachFromBackgroundHost(by: deadline, idleExpiresAt: nil)
+    }
+
+    func detachFromBackgroundHost(by deadline: Date, idleExpiresAt: Date?) -> Bool {
+        guard isRunning, let process,
+              process.detachFromBackgroundHost(
+                by: deadline,
+                idleExpiresAt: idleExpiresAt
+              ) else {
+            return false
+        }
+        isRunning = false
+        cancelHandshakeDeadline()
+        cancelCommandCatalogDeadline()
+        onInteractionAvailabilityChange?()
+        return true
+    }
+
+    // MARK: - Handshake
+
+    /// Arms the response deadline that covers the handshake.
+    ///
+    /// `initialize` and the session open are the two requests whose silence is otherwise
+    /// undetectable. An ACP agent is not obliged to answer a malformed line, and at least one
+    /// shipping CLI answers nothing at all — no response, no error, and nothing on standard
+    /// error — so a framing desync leaves a client waiting on a reply that is never coming. A
+    /// client-side deadline is the only detector.
+    ///
+    /// `session/prompt` deliberately gets none: a model turn is legitimately unbounded, and a
+    /// timeout there would end real work.
+    private func armHandshakeDeadline() {
+        handshakeDeadline?.cancel()
+        let seconds = handshakeTimeout
+        handshakeDeadline = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.handshakeDeadlineExpired()
+        }
+    }
+
+    private func cancelHandshakeDeadline() {
+        handshakeDeadline?.cancel()
+        handshakeDeadline = nil
+    }
+
+    /// Cursor publishes its command catalog in a notification after `session/new`. Do not let a
+    /// missing optional notification hold a slash-shaped opening message forever: once the
+    /// measured delivery window has passed, the empty/current catalog is authoritative and the
+    /// ordinary unknown-command path may proceed.
+    private func armCommandCatalogDeadline() {
+        guard !isComposerCapabilityCatalogReady else { return }
+        commandCatalogDeadline?.cancel()
+        let seconds = commandCatalogTimeout
+        commandCatalogDeadline = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.commandCatalogDeadlineExpired()
+        }
+    }
+
+    private func cancelCommandCatalogDeadline() {
+        commandCatalogDeadline?.cancel()
+        commandCatalogDeadline = nil
+    }
+
+    private func commandCatalogDeadlineExpired() {
+        guard isRunning, !isComposerCapabilityCatalogReady else { return }
+        commandCatalogDeadline = nil
+        isComposerCapabilityCatalogReady = true
+        onInteractionAvailabilityChange?()
+    }
+
+    private func handshakeDeadlineExpired() {
+        guard isRunning else { return }
+        handshakeDeadline = nil
+        let label = profile.diagnosticsLabel
+        ThreadingLogger.agent.error(
+            "\(label, privacy: .public) did not answer its handshake within the response deadline"
+        )
+        finishTurnWithTransportError(
+            ACPTransportMessage.handshakeTimedOut(profile.displayName)
+        )
+        terminate()
+    }
+
+    private func resetForLaunch(resumeState: ResumeState) {
+        cancelHandshakeDeadline()
+        cancelCommandCatalogDeadline()
+        launchResumeState = resumeState
+        transport = nil
+        acceptsInput = false
+        parseDiagnostics.reset()
+        requestSequence = 0
+        pendingRequests.removeAll()
+        activeSessionID = nil
+        pendingPrompt = nil
+        isTurnInFlight = false
+        isLoadingHistory = resumeState.isResumable
+        isTerminating = false
+        receivedTurnFinished = false
+        turnStartedAt = nil
+        lastContextTokens = nil
+        lastContextWindow = nil
+        resetMessageAccumulators()
+        toolCalls.removeAll()
+        deniedToolCallIDs.removeAll()
+        isComposerCapabilityCatalogReady = false
+        replaceComposerCapabilities([])
+    }
+
+    private func sendInitialize() {
+        let version = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "development"
+        var clientCapabilities: [String: Any] = [
+            "fs": ["readTextFile": false, "writeTextFile": false],
+            "terminal": false,
+            "session": ["configOptions": ["boolean": [:]]]
+        ]
+        if !profile.clientCapabilitiesMeta.isEmpty {
+            clientCapabilities["_meta"] = profile.clientCapabilitiesMeta
+        }
+        let parameters: [String: Any] = [
+            "protocolVersion": ACPDefaults.protocolVersion,
+            "clientCapabilities": clientCapabilities,
+            "clientInfo": [
+                "name": "threading",
+                "title": "Threading",
+                "version": version
+            ]
+        ]
+        _ = sendRequest(
+            method: "initialize",
+            parameters: parameters,
+            purpose: .initialize
+        )
+        armHandshakeDeadline()
+    }
+
+    private func openSession() {
+        var parameters: [String: Any] = [
+            "cwd": workingDirectory,
+            "mcpServers": mcpServers()
+        ]
+        let method: String
+        if let transcriptID = launchResumeState.transcriptID {
+            method = "session/load"
+            parameters["sessionId"] = transcriptID.rawValue
+        } else {
+            method = "session/new"
+        }
+        _ = sendRequest(method: method, parameters: parameters, purpose: .openSession)
+        armHandshakeDeadline()
+    }
+
+    /// Threading's own server, injected per session over the wire rather than written into any
+    /// provider's persistent configuration.
+    ///
+    /// Which of ACP's two `McpServer` shapes this is — the tagged `http` one or the untagged
+    /// stdio baseline — is `MCPSessionRegistry.binding`'s decision, the same one Claude's config
+    /// file and Codex's overrides are rendered from, so a session cannot have a bridge on one
+    /// transport and a URL on another.
+    private func mcpServers() -> [[String: Any]] {
+        guard ConversationMCPAdmission.allows(sessionID),
+              let mcpBinding else { return [] }
+        return [mcpBinding.acpServerObject(named: MCPToolNaming.serverName)]
+    }
+
+    private func sendPendingPromptIfReady() {
+        guard let prompt = pendingPrompt, let activeSessionID else { return }
+        guard sendRequest(
+            method: "session/prompt",
+            parameters: [
+                "sessionId": activeSessionID,
+                "prompt": [["type": "text", "text": prompt]]
+            ],
+            purpose: .prompt
+        ) != nil else {
+            finishTurnWithTransportError(
+                ACPTransportMessage.promptNotSent(profile.displayName)
+            )
+            return
+        }
+        pendingPrompt = nil
+    }
+
+    // MARK: - JSON-RPC
+
+    @discardableResult
+    private func sendRequest(
+        method: String,
+        parameters: [String: Any],
+        purpose: ACPRequestPurpose
+    ) -> JSONRPCRequestID? {
+        requestSequence += 1
+        let id = JSONRPCRequestID.integer(requestSequence)
+        guard writeLine([
+            "jsonrpc": "2.0",
+            "id": id.foundationValue,
+            "method": method,
+            "params": parameters
+        ]) else { return nil }
+        pendingRequests[id] = purpose
+        return id
+    }
+
+    private func sendNotification(method: String, parameters: [String: Any]) {
+        _ = writeLine([
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": parameters
+        ])
+    }
+
+    private func sendResponse(
+        id: JSONRPCRequestID,
+        result: [String: Any]? = nil,
+        error: [String: Any]? = nil
+    ) {
+        var object: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id": id.foundationValue
+        ]
+        if let error {
+            object["error"] = error
+        } else {
+            object["result"] = result ?? [:]
+        }
+        _ = writeLine(object)
+    }
+
+    private func writeLine(_ object: [String: Any]) -> Bool {
+        transport?.writeJSONObject(object) ?? false
+    }
+
+    // MARK: - Event Stream
+
+    private func route(_ envelope: JSONRPCLineEnvelope) {
+        switch envelope {
+        case .response(let id, let result, let error):
+            handleResponse(id: id, result: result, error: error)
+        case .request(let id, let method, let parameters):
+            handleServerRequest(id: id, method: method, parameters: parameters)
+        case .notification(let method, let parameters):
+            handleNotification(method: method, parameters: parameters)
+        }
+    }
+
+    private func handleResponse(
+        id: JSONRPCRequestID,
+        result: [String: Any]?,
+        error: String?
+    ) {
+        guard let purpose = pendingRequests.removeValue(forKey: id) else { return }
+
+        switch purpose {
+        case .initialize, .openSession: cancelHandshakeDeadline()
+        case .prompt: break
+        }
+
+        if let error {
+            switch purpose {
+            case .initialize, .openSession:
+                finishTurnWithTransportError(error)
+                terminate()
+            case .prompt:
+                flushPendingMessages()
+                finishTurnWithTransportError(error)
+            }
+            return
+        }
+
+        switch purpose {
+        case .initialize:
+            let capabilities = profile.initializeCommands(result).map(composerCapabilities(from:))
+            switch profile.initialCommandCatalog {
+            case .initializeResponse:
+                acceptInitialComposerCapabilities(capabilities ?? [])
+            case .sessionUpdate:
+                if let capabilities { replaceComposerCapabilities(capabilities) }
+            }
+            openSession()
+
+        case .openSession:
+            flushPendingMessages()
+            isLoadingHistory = false
+            let providerID = result?["sessionId"] as? String
+                ?? launchResumeState.transcriptID?.rawValue
+            guard let providerID, !providerID.isEmpty else {
+                finishTurnWithTransportError(
+                    ACPTransportMessage.noConversationSession(profile.displayName)
+                )
+                terminate()
+                return
+            }
+            activeSessionID = providerID
+            if profile.initialCommandCatalog == .sessionUpdate {
+                armCommandCatalogDeadline()
+            }
+            onEvent?(.initialised(
+                sessionID: TranscriptID(providerID),
+                model: ACPWireAdapter.currentModel(in: result)
+                    ?? profile.extendedModelID(result)
+            ))
+            sendPendingPromptIfReady()
+            onInteractionAvailabilityChange?()
+
+        case .prompt:
+            flushPendingMessages()
+            finishTurn(
+                text: nil,
+                outcome: TurnOutcome(acpStopReason: result?["stopReason"] as? String)
+            )
+        }
+    }
+
+    private func handleNotification(method: String, parameters: [String: Any]) {
+        guard method == "session/update",
+              let update = parameters["update"] as? [String: Any]
+        else { return }
+        if let providerID = activeSessionID,
+           let updateSessionID = parameters["sessionId"] as? String,
+           updateSessionID != providerID { return }
+
+        switch update["sessionUpdate"] as? String {
+        case "user_message_chunk":
+            handleUserChunk(update)
+        case "agent_message_chunk":
+            handleAssistantChunk(update, thinking: false)
+        case "agent_thought_chunk":
+            handleAssistantChunk(update, thinking: true)
+        case "tool_call":
+            flushPendingMessages()
+            handleToolCall(update)
+        case "tool_call_update":
+            handleToolCallUpdate(update)
+        case "plan":
+            onEvent?(.runPlanUpdated(ACPWireAdapter.planSteps(in: update)))
+        case "available_commands_update":
+            // Per element: a catalogue that lost one malformed entry is still the catalogue,
+            // and the strict cast withdrew every command over one of them.
+            let commands = WireList.objects(
+                update["availableCommands"],
+                site: WireListSite.acpAvailableCommands,
+                log: ThreadingLogger.agent
+            ) ?? []
+            let capabilities = composerCapabilities(from: commands)
+            if profile.initialCommandCatalog == .sessionUpdate,
+               !isComposerCapabilityCatalogReady {
+                acceptInitialComposerCapabilities(capabilities)
+            } else {
+                replaceComposerCapabilities(capabilities)
+            }
+        case "usage_update":
+            let usage = ACPWireAdapter.contextUsage(in: update)
+            lastContextTokens = usage.used
+            lastContextWindow = usage.size
+        case "session_info_update":
+            if let title = ACPWireAdapter.sessionTitle(in: update) {
+                onSessionTitleChange?(title)
+            }
+        case "current_mode_update", "config_option_update":
+            break
+        case .some(let value):
+            onEvent?(.unknown(type: "\(profile.unknownEventPrefix)\(value)"))
+        case .none:
+            onEvent?(.unknown(type: "\(profile.unknownEventPrefix)session_update"))
+        }
+    }
+
+    // MARK: - Messages
+
+    private func handleUserChunk(_ update: [String: Any]) {
+        guard isLoadingHistory,
+              let text = ACPWireAdapter.textContent(in: update) else { return }
+        flushAssistantMessage()
+        let messageID = update["messageId"] as? String
+        if userMessageID != nil, messageID != userMessageID { flushUserMessage() }
+        userMessageID = messageID ?? userMessageID
+        pendingUserText += text
+    }
+
+    private func handleAssistantChunk(_ update: [String: Any], thinking: Bool) {
+        guard let text = ACPWireAdapter.textContent(in: update), !text.isEmpty else { return }
+        flushUserMessage()
+        let messageID = update["messageId"] as? String
+        if assistantMessageID != nil, messageID != assistantMessageID {
+            flushAssistantMessage()
+        }
+        assistantMessageID = messageID ?? assistantMessageID
+        appendAssistant(text, thinking: thinking)
+
+        guard !isLoadingHistory else { return }
+        onEvent?(thinking ? .thinkingDelta(text) : .textDelta(text))
+    }
+
+    private func appendAssistant(_ text: String, thinking: Bool) {
+        if let last = pendingAssistantBlocks.indices.last {
+            switch (pendingAssistantBlocks[last], thinking) {
+            case (.text(let existing), false):
+                pendingAssistantBlocks[last] = .text(existing + text)
+                return
+            case (.thinking(let existing), true):
+                pendingAssistantBlocks[last] = .thinking(existing + text)
+                return
+            default:
+                break
+            }
+        }
+        pendingAssistantBlocks.append(thinking ? .thinking(text) : .text(text))
+    }
+
+    private func flushPendingMessages() {
+        flushUserMessage()
+        flushAssistantMessage()
+    }
+
+    private func flushUserMessage() {
+        guard !pendingUserText.isEmpty else {
+            userMessageID = nil
+            return
+        }
+        onEvent?(.userMessage(pendingUserText))
+        pendingUserText = ""
+        userMessageID = nil
+    }
+
+    private func flushAssistantMessage() {
+        guard !pendingAssistantBlocks.isEmpty else {
+            assistantMessageID = nil
+            return
+        }
+        onEvent?(.assistantMessage(blocks: pendingAssistantBlocks.map(\.streamBlock)))
+        pendingAssistantBlocks.removeAll(keepingCapacity: true)
+        assistantMessageID = nil
+    }
+
+    private func resetMessageAccumulators() {
+        userMessageID = nil
+        pendingUserText = ""
+        assistantMessageID = nil
+        pendingAssistantBlocks.removeAll(keepingCapacity: true)
+    }
+
+    // MARK: - Tool Calls
+
+    private func handleToolCall(_ update: [String: Any]) {
+        guard let id = update["toolCallId"] as? String, !id.isEmpty else { return }
+        var state = ACPToolCallState(update: update)
+        state.didEmitCall = true
+        toolCalls[id] = state
+        reportProviderExecution(update: update, state: state, phase: .requested, asInput: true)
+        if state.status?.isTerminal == true {
+            reportProviderExecution(
+                update: update,
+                state: state,
+                phase: state.status == .failed ? .failed : .completed,
+                asInput: false
+            )
+        }
+        onEvent?(.assistantMessage(blocks: [
+            .toolUse(
+                id: id,
+                tool: ACPWireAdapter.toolIdentity(kind: state.kind, title: state.title),
+                input: ACPWireAdapter.toolInput(from: update)
+            )
+        ]))
+        finishToolIfNeeded(id: id)
+    }
+
+    private func handleToolCallUpdate(_ update: [String: Any]) {
+        guard let id = update["toolCallId"] as? String, !id.isEmpty else { return }
+        var state = toolCalls[id] ?? ACPToolCallState(update: update)
+        state.merge(update)
+        if !state.didEmitCall {
+            state.didEmitCall = true
+            reportProviderExecution(update: update, state: state, phase: .requested, asInput: true)
+            onEvent?(.assistantMessage(blocks: [
+                .toolUse(
+                    id: id,
+                    tool: ACPWireAdapter.toolIdentity(kind: state.kind, title: state.title),
+                    input: ACPWireAdapter.toolInput(from: update)
+                )
+            ]))
+        }
+        let phase: ExecutionAuditRecord.Phase
+        switch state.status {
+        case .completed: phase = .completed
+        case .failed: phase = .failed
+        default: phase = .progressed
+        }
+        if phase == .progressed || !state.didEmitResult {
+            reportProviderExecution(update: update, state: state, phase: phase, asInput: false)
+        }
+        toolCalls[id] = state
+        finishToolIfNeeded(id: id)
+    }
+
+    private func reportProviderExecution(
+        update: [String: Any],
+        state: ACPToolCallState,
+        phase: ExecutionAuditRecord.Phase,
+        asInput: Bool
+    ) {
+        guard let event = ACPProviderExecutionAdapter.event(
+            update: update,
+            operation: state.title,
+            kind: state.kind,
+            phase: phase,
+            asInput: asInput
+        ) else { return }
+        onProviderExecution?(event)
+    }
+
+    /// Emits the result row once a call reaches a terminal status.
+    ///
+    /// **A call this client denied is presented as denied even when the agent says it
+    /// completed.** ACP has a `failed` status and not every agent uses it: one shipping CLI
+    /// answers a refused permission by completing the same tool call with no output at all, so
+    /// status alone cannot tell a refusal from a success. This client already knows — it gave the
+    /// answer — and that memory is the only honest source. An agent that does report `failed`
+    /// reaches the same conclusion through the wire, so the override never changes its rows.
+    private func finishToolIfNeeded(id: String) {
+        guard var state = toolCalls[id], !state.didEmitResult,
+              state.status?.isTerminal == true else { return }
+        state.didEmitResult = true
+        toolCalls[id] = state
+
+        let reportedFailure = state.status == .failed
+        let wasDenied = deniedToolCallIDs.contains(id)
+        var text = ACPWireAdapter.toolResultText(from: state.payload)
+        if wasDenied, !reportedFailure, text.isEmpty {
+            text = ACPTransportMessage.deniedToolCall
+        }
+
+        onEvent?(.toolResults([
+            ToolResult(
+                toolUseID: id,
+                text: text,
+                isError: reportedFailure || wasDenied
+            )
+        ]))
+    }
+
+    // MARK: - Permissions
+
+    private func handleServerRequest(
+        id: JSONRPCRequestID,
+        method: String,
+        parameters: [String: Any]
+    ) {
+        guard method == "session/request_permission",
+              let toolCall = parameters["toolCall"] as? [String: Any]
+        else {
+            sendResponse(
+                id: id,
+                error: ["code": -32601, "message": "Threading does not handle \(method)."]
+            )
+            return
+        }
+
+        let toolCallID = toolCall["toolCallId"] as? String
+        var state = toolCallID.flatMap { toolCalls[$0] } ?? ACPToolCallState(update: toolCall)
+        state.merge(toolCall)
+        if let toolCallID { toolCalls[toolCallID] = state }
+        let input = ACPWireAdapter.toolInput(from: state.payload)
+
+        let request = PermissionRequest(
+            sessionID: sessionID,
+            tool: ACPWireAdapter.toolIdentity(kind: state.kind, title: state.title),
+            input: input
+        )
+        // **Deliberately all-or-nothing**, and the one list on this side where that is the safe
+        // answer. `answerPermission` maps one human "Allow" onto the first option whose `kind`
+        // it recognises, in the order `ACPDefaults.allowOptionKinds` spells — so an unreadable
+        // `allow_once` would not be *missing* from a recovered list, it would be replaced by
+        // `allow_always`, and a person granting one command would have granted all of them.
+        // Refusing the list whole answers `cancelled`, which runs nothing. That follows
+        // `6bb2ebfb`, which kept the Codex approval arguments and the `PreToolUse` hook input
+        // strict for the same reason: a partial request is what gets approved for something it
+        // did not say.
+        let rawOptions = parameters["options"]
+        let options = rawOptions as? [[String: Any]] ?? []
+        if options.isEmpty, let listed = rawOptions as? [Any], !listed.isEmpty {
+            // Not silent: the refusal costs the agent its whole permission request, and without
+            // this the only symptom is a tool that never ran and never said why.
+            let label = profile.diagnosticsLabel
+            ThreadingLogger.agent.error(
+                """
+                \(label, privacy: .public) permission options refused whole: \
+                \(listed.count, privacy: .public) element(s), at least one not an object
+                """
+            )
+        }
+
+        ConversationPermissionDecision.decide(request) { [weak self] decision in
+            self?.answerPermission(
+                id: id,
+                toolCallID: toolCallID,
+                options: options,
+                decision: decision
+            )
+        }
+    }
+
+    private func answerPermission(
+        id: JSONRPCRequestID,
+        toolCallID: String?,
+        options: [[String: Any]],
+        decision: PermissionDecision
+    ) {
+        let allowed: Bool
+        switch decision {
+        case .allow: allowed = true
+        case .deny: allowed = false
+        }
+        if let toolCallID, !allowed { deniedToolCallIDs.insert(toolCallID) }
+        let preferredKinds = allowed
+            ? ACPDefaults.allowOptionKinds
+            : ACPDefaults.rejectOptionKinds
+        let selected = preferredKinds.lazy.compactMap { kind in
+            options.first { $0["kind"] as? String == kind }
+        }.first
+
+        if let optionID = selected?["optionId"] as? String {
+            sendResponse(id: id, result: [
+                "outcome": ["outcome": "selected", "optionId": optionID]
+            ])
+        } else {
+            sendResponse(id: id, result: ["outcome": ["outcome": "cancelled"]])
+        }
+    }
+
+    // MARK: - Completion
+
+    private func finishTurnWithTransportError(_ message: String) {
+        flushPendingMessages()
+        finishTurn(text: message, outcome: .failed)
+    }
+
+    private func finishTurn(text: String?, outcome: TurnOutcome) {
+        guard isTurnInFlight || text != nil else { return }
+        pendingPrompt = nil
+        isTurnInFlight = false
+        receivedTurnFinished = true
+        // The denied set annotates the tool state it is read beside, so it lives exactly as long:
+        // a turn's ids cannot recur, and keeping them would grow without bound across a long
+        // conversation.
+        toolCalls.removeAll(keepingCapacity: true)
+        deniedToolCallIDs.removeAll(keepingCapacity: true)
+        let duration = turnStartedAt.map {
+            max(0, ProcessInfo.processInfo.systemUptime - $0)
+        }
+        turnStartedAt = nil
+        onEvent?(.turnFinished(
+            text: text,
+            outcome: outcome,
+            metrics: TurnMetrics(
+                duration: duration,
+                outputTokens: nil,
+                effort: nil,
+                contextTokens: lastContextTokens,
+                contextWindow: lastContextWindow
+            )
+        ))
+        onInteractionAvailabilityChange?()
+    }
+
+    private func handleTermination(status: Int32) {
+        guard process != nil else { return }
+        cancelHandshakeDeadline()
+        cancelCommandCatalogDeadline()
+        let transport = self.transport
+        acceptsInput = false
+        onInteractionAvailabilityChange?()
+        guard let transport else {
+            finishTermination(status: status, diagnostics: "")
+            return
+        }
+        transport.finish { [weak self] diagnostics in
+            self?.finishTermination(status: status, diagnostics: diagnostics)
+        }
+    }
+
+    private func finishTermination(status: Int32, diagnostics: String) {
+        guard process != nil else { return }
+        self.process = nil
+        transport = nil
+
+        let wasTerminating = isTerminating
+        isTerminating = false
+        isRunning = false
+        if !wasTerminating, isTurnInFlight, !receivedTurnFinished {
+            finishTurnWithTransportError(
+                diagnostics.isEmpty
+                    ? ACPTransportMessage.exited(
+                        profile.diagnosticsLabel,
+                        status: status
+                    )
+                    : diagnostics
+            )
+        }
+        onInteractionAvailabilityChange?()
+        onExit?(status)
+    }
+
+    private func transportFailed(_ failure: AgentStreamTransportFailure) {
+        guard process != nil else { return }
+        let label = profile.diagnosticsLabel
+        let reason = failure.userFacingDescription
+        ThreadingLogger.agent.error(
+            "\(label, privacy: .public) transport failed: \(reason, privacy: .private(mask: .hash))"
+        )
+        if isTurnInFlight, !receivedTurnFinished {
+            finishTurnWithTransportError(reason)
+        }
+        terminate()
+    }
+
+    private func composerCapabilities(
+        from commands: [[String: Any]]
+    ) -> [ComposerCapability] {
+        ACPWireAdapter.composerCapabilities(
+            from: commands,
+            policy: profile.commandCatalog
+        )
+    }
+
+    private func replaceComposerCapabilities(_ capabilities: [ComposerCapability]) {
+        let normalization = ComposerCapabilityCatalogPolicy.normalize(capabilities)
+        if normalization.wasTruncated {
+            let label = profile.diagnosticsLabel
+            ThreadingLogger.agent.warning(
+                "\(label, privacy: .public) command catalog exceeded local presentation limits; truncated"
+            )
+        }
+        guard composerCapabilities != normalization.capabilities else { return }
+        composerCapabilities = normalization.capabilities
+        onComposerCapabilitiesChange?()
+    }
+
+    /// Installs the catalog before announcing readiness. A capability-change callback may retry
+    /// an opening command synchronously, so it must never observe `ready` with the old list.
+    private func acceptInitialComposerCapabilities(_ capabilities: [ComposerCapability]) {
+        let becameReady = !isComposerCapabilityCatalogReady
+        isComposerCapabilityCatalogReady = true
+        cancelCommandCatalogDeadline()
+        replaceComposerCapabilities(capabilities)
+        if becameReady { onInteractionAvailabilityChange?() }
+    }
+}
+
+// MARK: - Transport Messages
+
+/// What the user is told when the transport itself fails, rather than the model.
+///
+/// One place, because these strings are the only ones a provider's name reaches, and their
+/// wording is pinned by test.
+enum ACPTransportMessage {
+    static func noConversationSession(_ displayName: String) -> String {
+        "\(displayName) opened no conversation session."
+    }
+
+    static func promptNotSent(_ displayName: String) -> String {
+        "Threading could not send the \(displayName) turn."
+    }
+
+    static func exited(_ diagnosticsLabel: String, status: Int32) -> String {
+        "\(diagnosticsLabel) exited with status \(status)."
+    }
+
+    static func handshakeTimedOut(_ displayName: String) -> String {
+        "\(displayName) did not answer Threading's opening request."
+    }
+
+    /// Stands in for a denied call's result when the agent completes it with nothing at all, so
+    /// the row says what happened rather than reading as an empty success.
+    static let deniedToolCall = "Threading denied this tool call, so it did not run."
+}
+
+private enum ACPPendingBlock {
+    case text(String)
+    case thinking(String)
+
+    var streamBlock: ContentBlock {
+        switch self {
+        case .text(let text): return .text(text)
+        case .thinking(let text): return .thinking(text)
+        }
+    }
+}
+
+private enum ACPRequestPurpose {
+    case initialize
+    case openSession
+    case prompt
+}
+
+/// Internal rather than private so a focused test can pin the real bound it asserts against.
+enum ACPDefaults {
+    static let protocolVersion = 1
+    static let maximumErrorBytes = 64 * 1024
+
+    /// How long the handshake may go unanswered before the turn fails and the child is ended.
+    ///
+    /// Thirty seconds is generous against what the handshake actually costs and short enough
+    /// that a hang is reported rather than endured: the slowest measured `session/new` — a
+    /// Cursor session, which makes a network round trip inside it — answered in 2.5 seconds,
+    /// and `initialize` in 0.6. The bound exists because the failure it catches is otherwise
+    /// invisible: that same CLI swallows a malformed line with no response, no error and no
+    /// standard-error output, so a framing desync produces silence rather than a complaint.
+    /// Only the handshake is bounded; `session/prompt` is a model turn and is left unbounded.
+    static let handshakeTimeout: TimeInterval = 30
+
+    /// Maximum wait for an ACP agent that publishes commands after the session opens.
+    ///
+    /// Cursor's measured update arrives about 0.7 seconds after `session/new`; five seconds keeps
+    /// that real catalog authoritative without turning an optional notification into a hung
+    /// first message when an older or changed CLI omits it.
+    static let commandCatalogTimeout: TimeInterval = 5
+
+    /// The option kinds the protocol itself names, in the order a decision prefers them.
+    ///
+    /// Standard vocabulary rather than provider policy, so it stays out of `ACPProviderProfile`.
+    /// Another ACP client answers hyphenated kinds ("allow-once") as well; a CLI that deviates
+    /// that way earns a profile member then, not before.
+    static let allowOptionKinds = ["allow_once", "allow_always"]
+    static let rejectOptionKinds = ["reject_once", "reject_always"]
+}

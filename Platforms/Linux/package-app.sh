@@ -72,6 +72,11 @@ install -m 0755 "$daemon_dir/threading-ptyd" "$bundle/bin/threading-ptyd"
 install -m 0644 BUNDLE_README.md "$bundle/README.md"
 mkdir -p "$bundle/licenses/NativeDiffKit"
 install -m 0644 Sources/LinuxNativeDiffAppKit/LICENSE "$bundle/licenses/NativeDiffKit/LICENSE"
+grep -Fq "0226f30467f540a3f62ef48d453f93927da199b6" .build/checkouts/swift-crypto/Sources/CCryptoBoringSSL/hash.txt
+mkdir -p "$bundle/licenses/swift-crypto"
+install -m 0644 .build/checkouts/swift-crypto/LICENSE.txt "$bundle/licenses/swift-crypto/LICENSE.txt"
+install -m 0644 .build/checkouts/swift-crypto/NOTICE.txt "$bundle/licenses/swift-crypto/NOTICE.txt"
+install -m 0644 licenses/BoringSSL-LICENSE "$bundle/licenses/swift-crypto/BoringSSL-LICENSE"
 cat > "$bundle/BUNDLE-MANIFEST" <<EOF
 format=threading-linux-preview-1
 target=ubuntu-24.04-aarch64
@@ -109,7 +114,7 @@ Version: $version
 Section: devel
 Priority: optional
 Architecture: arm64
-Depends: libsqlite3-0, libsdl2-2.0-0, libpangocairo-1.0-0, libatk-bridge2.0-0t64, libglib2.0-0t64, libgdk-pixbuf-2.0-0, librsvg2-common, libdecor-0-plugin-1-cairo, zenity, fonts-dejavu-core, fonts-noto-color-emoji, util-linux, git
+Depends: libsqlite3-0, libcurl4t64, zlib1g, libstdc++6, libsdl2-2.0-0, libpangocairo-1.0-0, libatk-bridge2.0-0t64, libglib2.0-0t64, libgdk-pixbuf-2.0-0, librsvg2-common, libdecor-0-plugin-1-cairo, zenity, fonts-dejavu-core, fonts-noto-color-emoji, util-linux, git
 Maintainer: David Everlöf <support@mjukis.dev>
 Description: Experimental native Linux host for Threading
  Local projects, terminals and coding-agent sessions in a desktop window.

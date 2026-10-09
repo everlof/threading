@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 /// Locates the conversation transcripts Claude Code keeps on disk.
 ///
@@ -8,20 +7,6 @@ import os
 /// started elsewhere, and replaying one into the conversation view. The path is derived here
 /// so those three cannot drift apart.
 enum ClaudeTranscript {
-
-    /// The transcript for a session, whether or not it exists yet.
-    @MainActor
-    static func url(sessionID: TranscriptID, for session: AgentSession, in project: Project) -> URL? {
-        guard session.kind.supports(.checkoutScopedConversationStorage),
-              let account = AgentAccountDiscovery.account(
-            for: session.kind,
-            handle: session.accountHandle
-        ) else { return nil }
-
-        return SessionTranscript.url(
-            sessionID: sessionID, for: session, in: project, account: account
-        )
-    }
 
     /// A storage slot for a checkout, used for copy destinations. Readers select their source
     /// through `SessionTranscript`, which asks `StorageSlot` instead; this slot may be a stale copy.
@@ -93,16 +78,6 @@ enum ClaudeTranscript {
             .appendingPathExtension(AgentDefaults.transcriptExtension)
     }
 
-    /// Whether a conversation has been recorded, which is what makes a resume possible.
-    ///
-    /// An identifier alone is not enough: Claude's is minted before the conversation exists,
-    /// so a session that exited without exchanging anything has an id and no transcript.
-    @MainActor
-    static func exists(sessionID: TranscriptID, for session: AgentSession, in project: Project) -> Bool {
-        guard let url = url(sessionID: sessionID, for: session, in: project) else { return false }
-        return FileManager.default.fileExists(atPath: url.path)
-    }
-
     /// Claude's directory name for the folder a session runs in.
     ///
     /// `Project.folderPath` because callers hand this type an *execution* project — the copy
@@ -159,7 +134,7 @@ enum ClaudeTranscript {
         return physical
     }
 
-    private static let physicalPaths = OSAllocatedUnfairLock(initialState: [String: String]())
+    private static let physicalPaths = LockedState(initialState: [String: String]())
 
     /// A path encoded the way Claude names the directory it files that path's transcripts under.
     ///

@@ -1,4 +1,8 @@
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 import XCTest
 @testable import ThreadingRemoteKit
@@ -36,6 +40,15 @@ final class RemoteHostPinningTests: XCTestCase {
     private static let qrAlphanumeric = Set("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:")
 
     private static let certificate = Data("a certificate that is not really a certificate".utf8)
+
+    func testPortableCertificateDecisionFailsClosedWhenAPinIsHeld() {
+        let pin = RemoteHostPin(fingerprint: RemoteHostFingerprint(certificateDER: Self.certificate))
+        let pins = RemoteHostPinSet(current: pin)
+        XCTAssertEqual(RemoteCertificatePinning.evaluate(certificateDER: nil, against: nil), .notPinned)
+        XCTAssertEqual(RemoteCertificatePinning.evaluate(certificateDER: nil, against: pins), .rejectedFingerprintMismatch)
+        XCTAssertEqual(RemoteCertificatePinning.evaluate(certificateDER: Self.certificate, against: pins), .accepted)
+        XCTAssertEqual(RemoteCertificatePinning.evaluate(certificateDER: Data("other leaf".utf8), against: pins), .rejectedFingerprintMismatch)
+    }
 
     // MARK: - Base32
 

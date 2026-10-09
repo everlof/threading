@@ -1,0 +1,1450 @@
+import Foundation
+
+/// The per-turn choices app-server accepts without restarting its persistent process.
+struct CodexTurnConfiguration {
+    var model: String?
+    var effort: String?
+    var serviceTier: String?
+
+    init(
+        model: String? = nil,
+        effort: String? = nil,
+        serviceTier: String? = nil
+    ) {
+        self.model = model
+        self.effort = effort
+        self.serviceTier = serviceTier
+    }
+
+    static let inherited = CodexTurnConfiguration()
+}
+
+/// Runs Codex's persistent app-server and adapts its JSON-RPC notifications to a native chat.
+///
+/// The previous `codex exec --json` transport spawned one process per turn. That stream flattened
+/// delegated work into the parent and could not observe child threads. App-server keeps one
+/// process subscribed to the thread graph, which gives Threading both a reusable conversation
+/// channel and structured subagent lifecycle events.
+@MainActor
+final class CodexStreamSession:
+    ConversationStreamSession,
+    ProviderExecutionReportingConversation,
+    ComposerCapabilityProviding,
+    ReasoningEffortConfigurableConversation,
+    InterruptibleConversation,
+    SteerableConversation,
+    MessageLifecycleReportingConversation,
+    SubagentReportingConversation,
+    SessionTitleReportingConversation,
+    QuestionAskingConversation {
+
+    // MARK: - Properties
+
+    let sessionID: SessionID
+
+    var onEvent: ((StreamEvent) -> Void)?
+    var onLaunchFailure: ((Error) -> Void)?
+    var onProviderExecution: ((ProviderExecutionEvent) -> Void)?
+    var onSubagentEvent: ((SubagentEvent) -> Void)?
+    var onSessionTitleChange: ((String) -> Void)?
+    var onExit: ((Int32) -> Void)?
+    var onInteractionAvailabilityChange: (() -> Void)?
+    var onQuestion: ((ConversationQuestionRequest, @escaping ([String: String]?) -> Void) -> Void)? {
+        didSet { questionRequests.onPresent = onQuestion }
+    }
+    var onQuestionResolved: ((UUID) -> Void)?
+    private lazy var questionRequests: CodexQuestionRequests = {
+        let requests = CodexQuestionRequests()
+        requests.onPresent = onQuestion
+        requests.onResolved = { [weak self] in self?.onQuestionResolved?($0) }
+        requests.respond = { [weak self] id, result, error in
+            if let error {
+                self?.sendResponse(id: id, error: ["code": -32602, "message": error])
+            } else {
+                self?.sendResponse(id: id, result: result ?? [:])
+            }
+        }
+        return requests
+    }()
+    var onComposerCapabilitiesChange: (() -> Void)?
+    private(set) var composerCapabilities: [ComposerCapability] = []
+    var isComposerCapabilityCatalogReady: Bool {
+        didReportThread && !isSkillsRequestInFlight
+    }
+    var sessionTitleSource: AgentTitleSource { .provider }
+
+    private(set) var isRunning = false
+    var canSend: Bool {
+        isRunning && acceptsInput && !isTurnInFlight && pendingTurn == nil
+            && !isCompactionInFlight
+    }
+
+    /// Model, effort and service tier ride on the turn request, so a change takes effect on
+    /// the next one — which means the same readiness as sending it.
+    var acceptsConfigurationChange: Bool { canSend }
+
+    var rootProcessIdentifier: pid_t? {
+        guard let process, process.isRunning else { return nil }
+        return process.processIdentifier
+    }
+
+    private let plan: () throws -> AgentLaunchPlan
+    private let configurationProvider: () -> CodexTurnConfiguration
+    private let workingDirectory: String
+
+    /// Whether this conversation's CLI belongs in `threading-ptyd`, asked once per launch.
+    ///
+    /// A closure rather than a value for `plan`'s reason: it is resolved at launch time, so a
+    /// dormant conversation reopened an hour later asks the current setting and the current
+    /// daemon rather than the ones that were true when the controller was built. Nil is the
+    /// deliberate local route; an unavailable selected host throws before any child starts.
+    private let hostPlan: () throws -> PTYHostChildPlan?
+
+    private var process: AgentChildProcess?
+    private var transport: AgentStreamTransport<JSONRPCLineEnvelope>?
+    private var acceptsInput = false
+    private var launchResumeState: ResumeState = .unavailable
+
+    private var parseDiagnostics = StreamParseDiagnostics()
+    var malformedLineCount: Int { parseDiagnostics.malformedLineCount }
+
+    private var requestSequence: Int64 = 0
+    private var pendingRequests: [CodexAppServerRequestID: RequestPurpose] = [:]
+    private var didInitialize = false
+    private var didReportThread = false
+    private var rootThreadID: String?
+    private var pendingTurn: CodexPendingTurn?
+    private var isTurnInFlight = false
+    private var isCompactionInFlight = false
+    private var isSkillsRequestInFlight = false
+    private var shouldReloadSkills = false
+    private var isTerminating = false
+    private var receivedTurnFinished = false
+    private var skillsByCapabilityID: [String: CodexSkillMetadata] = [:]
+
+    private var turnStartedAt: TimeInterval?
+    private var turnEffort: String?
+    private var outputTokensByTurn: [String: Int] = [:]
+
+    var onMessageLifecycle: ((ConversationMessageID, MessageLifecycleState) -> Void)?
+
+    /// The turn `turn/steer` and `turn/interrupt` name.
+    ///
+    /// Read from `turn/started`, which the server sends for every turn including ones it opened
+    /// itself (a review, a compaction). Cleared when the turn settles, so `steerAvailability`
+    /// cannot offer to add to a turn that has ended.
+    private var activeTurnID: String?
+
+    /// The kind of the turn in flight, where it is not an ordinary one.
+    ///
+    /// App-server refuses a steer on `review` and `compact` turns by name
+    /// (`NonSteerableTurnKind`), so the composer is told before the user types rather than after
+    /// the RPC comes back.
+    private var activeTurnKind: CodexTurnKind = .ordinary
+
+    /// Identifiers we handed the server, by the `clientUserMessageId` it echoes on the user
+    /// message item. What lets a queued row state the provider's answer rather than an
+    /// assumption.
+    private var messageIDsInFlight: Set<ConversationMessageID> = []
+
+    /// Live turns on child threads, so Stop can end the fleet. Keyed by thread id because that
+    /// is what `turn/interrupt` takes alongside the turn.
+    ///
+    /// Tracked for *any* foreign conversation rather than only registered children: a child's
+    /// `turn/started` can arrive before the activity notification that registers it, and a Stop
+    /// that depends on registration timing leaves children running.
+    private var childTurnsByThread: [String: String] = [:]
+
+    /// The most recent request's size and the model's window, from `thread/tokenUsage/updated`
+    /// — what the context meter reads at each turn boundary. Session-scoped rather than
+    /// per-turn: the newest reading is the truth about the window whenever it arrives.
+    private var lastContextTokens: Int?
+    private var lastContextWindow: Int?
+
+    // MARK: - Initialization
+
+    init(
+        sessionID: SessionID,
+        workingDirectory: String = FileManager.default.currentDirectoryPath,
+        configurationProvider: @escaping () -> CodexTurnConfiguration = { .inherited },
+        hostPlan: @escaping () throws -> PTYHostChildPlan? = { nil },
+        plan: @escaping () throws -> AgentLaunchPlan
+    ) {
+        self.sessionID = sessionID
+        self.workingDirectory = workingDirectory
+        self.configurationProvider = configurationProvider
+        self.hostPlan = hostPlan
+        self.plan = plan
+    }
+
+    /// Kept as a source-compatible convenience for focused lifecycle tests and older callers.
+    convenience init(
+        sessionID: SessionID,
+        effortProvider: @escaping () -> String?,
+        plan: @escaping () throws -> AgentLaunchPlan
+    ) {
+        self.init(
+            sessionID: sessionID,
+            workingDirectory: FileManager.default.currentDirectoryPath,
+            configurationProvider: {
+                CodexTurnConfiguration(effort: effortProvider())
+            },
+            plan: plan
+        )
+    }
+
+    // MARK: - Public Methods
+
+    func start() {
+        guard !isRunning else { return }
+
+        let process: AgentChildProcess
+        do {
+            let launchPlan = try plan()
+            resetForLaunch(resumeState: launchPlan.resumeState)
+            process = try AgentChildProcess.launch(
+                executable: launchPlan.executable,
+                arguments: launchPlan.arguments,
+                environment: launchPlan.launchEnvironment(),
+                sessionID: sessionID,
+                host: try hostPlan()
+            ) { [weak self] status in
+                Task { @MainActor [weak self] in
+                    self?.handleTermination(status: status)
+                }
+            }
+        } catch {
+            ThreadingLogger.agent.error(
+                "Codex app-server failed to start: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let handler = self.onLaunchFailure { handler(error) }
+                else { self.onExit?(AgentChildProcessDefaults.spawnFailureStatus) }
+            }
+            return
+        }
+
+        let transport = AgentStreamTransport(
+            label: "codes.threading.agent.codex-stream",
+            input: process.standardInput,
+            output: process.standardOutput,
+            error: process.standardError,
+            maximumErrorBytes: CodexStreamDefaults.maximumErrorBytes,
+            parser: { JSONRPCLineEnvelope.parse($0) },
+            onLine: { [weak self] envelope in self?.route(envelope) },
+            onMalformedLine: { [weak self] in
+                self?.parseDiagnostics.recordMalformedLine(provider: "Codex app-server")
+            },
+            onFailure: { [weak self] failure in self?.transportFailed(failure) }
+        )
+        self.process = process
+        self.transport = transport
+        acceptsInput = true
+        isRunning = true
+        transport.start()
+        onInteractionAvailabilityChange?()
+        sendInitialize()
+    }
+
+    /// Accepts a turn as soon as the process has launched. If app-server is still completing
+    /// its initialize/thread handshake, the prompt waits in memory and is sent the moment the
+    /// root thread is ready. This preserves the native composer's first-message path.
+    @discardableResult
+    func send(_ text: String) -> Bool {
+        beginTurn(CodexPendingTurn(
+            input: [["type": "text", "text": text]]
+        ))
+    }
+
+    @discardableResult
+    func send(_ prompt: ConversationPrompt, identifiedBy id: ConversationMessageID) -> Bool {
+        beginTurn(CodexPendingTurn(
+            input: [["type": "text", "text": prompt.transportText]],
+            messageID: id
+        ))
+    }
+
+    @discardableResult
+    func send(
+        _ invocation: ComposerInvocation,
+        identifiedBy id: ConversationMessageID
+    ) -> Bool {
+        guard composerCapabilities.contains(where: {
+            $0.id == invocation.capability.id && $0.isEnabled
+        }) else {
+            return false
+        }
+
+        if let skill = skillsByCapabilityID[invocation.capability.id] {
+            return beginTurn(CodexPendingTurn(
+                input: [
+                    ["type": "text", "text": invocation.sourceText],
+                    ["type": "skill", "name": skill.name, "path": skill.path]
+                ],
+                messageID: id
+            ))
+        }
+
+        switch invocation.capability.id {
+        case CodexComposerCatalog.compactID:
+            return startCompact()
+        case CodexComposerCatalog.reviewID:
+            return startReview(arguments: invocation.arguments)
+        default:
+            return false
+        }
+    }
+
+    @discardableResult
+    private func beginTurn(_ turn: CodexPendingTurn) -> Bool {
+        guard canSend else { return false }
+
+        pendingTurn = turn
+        isTurnInFlight = true
+        receivedTurnFinished = false
+        turnStartedAt = ProcessInfo.processInfo.systemUptime
+        turnEffort = configurationProvider().effort
+        onInteractionAvailabilityChange?()
+        sendPendingTurnIfReady()
+        return true
+    }
+
+    private func startCompact() -> Bool {
+        guard canSend, let threadID = rootThreadID else { return false }
+        // The request only acknowledges that compaction started. App-server then treats the
+        // work as a turn and settles it through ordinary turn/item notifications.
+        isCompactionInFlight = true
+        isTurnInFlight = true
+        receivedTurnFinished = false
+        turnStartedAt = ProcessInfo.processInfo.systemUptime
+        turnEffort = nil
+        onInteractionAvailabilityChange?()
+        guard sendRequest(
+            method: "thread/compact/start",
+            parameters: ["threadId": threadID],
+            purpose: .compact
+        ) != nil else {
+            isCompactionInFlight = false
+            isTurnInFlight = false
+            turnStartedAt = nil
+            onInteractionAvailabilityChange?()
+            return false
+        }
+        return true
+    }
+
+    private func startReview(arguments: String) -> Bool {
+        guard canSend, let threadID = rootThreadID else { return false }
+        let target: [String: Any] = arguments.isEmpty
+            ? ["type": "uncommittedChanges"]
+            : ["type": "custom", "instructions": arguments]
+
+        isTurnInFlight = true
+        receivedTurnFinished = false
+        turnStartedAt = ProcessInfo.processInfo.systemUptime
+        turnEffort = configurationProvider().effort
+        onInteractionAvailabilityChange?()
+        guard sendRequest(
+            method: "review/start",
+            parameters: [
+                "threadId": threadID,
+                "delivery": "inline",
+                "target": target
+            ],
+            purpose: .startReview
+        ) != nil else {
+            isTurnInFlight = false
+            turnStartedAt = nil
+            turnEffort = nil
+            onInteractionAvailabilityChange?()
+            return false
+        }
+        return true
+    }
+
+    /// Closing stdin asks the persistent server to shut down after its current work.
+    func finish() {
+        guard acceptsInput, let transport else { return }
+        acceptsInput = false
+        transport.closeInput()
+        onInteractionAvailabilityChange?()
+    }
+
+    func terminate() {
+        questionRequests.invalidate()
+        guard isRunning else { return }
+
+        isTerminating = true
+        isRunning = false
+        finish()
+
+        if let process {
+            process.terminate()
+        } else {
+            onExit?(0)
+        }
+    }
+
+    var isHostBacked: Bool { process?.isHostBacked ?? false }
+
+    /// Hands the CLI to `threading-ptyd` rather than ending it.
+    ///
+    /// Deliberately **not** `finish()` first, for the reason `ClaudeStreamSession` states: closing
+    /// standard input is how an app-server conversation ends gracefully, and this is the one path
+    /// where it must go on running.
+    func detachFromBackgroundHost(by deadline: Date) -> Bool {
+        detachFromBackgroundHost(by: deadline, idleExpiresAt: nil)
+    }
+
+    func detachFromBackgroundHost(by deadline: Date, idleExpiresAt: Date?) -> Bool {
+        guard isRunning, let process,
+              process.detachFromBackgroundHost(
+                by: deadline,
+                idleExpiresAt: idleExpiresAt
+              ) else {
+            return false
+        }
+        isRunning = false
+        transport?.detach()
+        transport = nil
+        acceptsInput = false
+        onInteractionAvailabilityChange?()
+        return true
+    }
+
+    // MARK: - Launch Handshake
+
+    private func resetForLaunch(resumeState: ResumeState) {
+        questionRequests.invalidate()
+        launchResumeState = resumeState
+        transport = nil
+        acceptsInput = false
+        parseDiagnostics.reset()
+        requestSequence = 0
+        pendingRequests.removeAll()
+        didInitialize = false
+        didReportThread = false
+        rootThreadID = nil
+        pendingTurn = nil
+        isTurnInFlight = false
+        isCompactionInFlight = false
+        isSkillsRequestInFlight = false
+        shouldReloadSkills = false
+        isTerminating = false
+        receivedTurnFinished = false
+        skillsByCapabilityID.removeAll()
+        replaceComposerCapabilities([])
+        turnStartedAt = nil
+        turnEffort = nil
+        outputTokensByTurn.removeAll()
+    }
+
+    private func sendInitialize() {
+        let version = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "development"
+        let parameters: [String: Any] = [
+            "clientInfo": [
+                "name": "threading",
+                "title": "Threading",
+                "version": version
+            ],
+            "capabilities": ["experimentalApi": true]
+        ]
+        _ = sendRequest(
+            method: "initialize",
+            parameters: parameters,
+            purpose: .initialize
+        )
+    }
+
+    private func openThread() {
+        let method: String
+        let parameters: [String: Any]
+
+        if let transcriptID = launchResumeState.transcriptID {
+            method = "thread/resume"
+            parameters = ["threadId": transcriptID.rawValue]
+        } else {
+            method = "thread/start"
+            parameters = [:]
+        }
+
+        _ = sendRequest(
+            method: method,
+            parameters: parameters,
+            purpose: .openThread
+        )
+    }
+
+    private func sendPendingTurnIfReady() {
+        guard didInitialize,
+              let threadID = rootThreadID,
+              let pendingTurn else { return }
+
+        let configuration = configurationProvider()
+        var parameters: [String: Any] = [
+            "threadId": threadID,
+            "input": pendingTurn.input
+        ]
+        if let model = configuration.model { parameters["model"] = model }
+        if let effort = configuration.effort { parameters["effort"] = effort }
+        if let serviceTier = configuration.serviceTier {
+            parameters["serviceTier"] = serviceTier
+        }
+        if let messageID = pendingTurn.messageID {
+            parameters["clientUserMessageId"] = messageID.wireValue
+            messageIDsInFlight.insert(messageID)
+            onMessageLifecycle?(messageID, .started)
+        }
+
+        guard sendRequest(
+            method: "turn/start",
+            parameters: parameters,
+            purpose: .startTurn
+        ) != nil else {
+            if let messageID = pendingTurn.messageID {
+                messageIDsInFlight.remove(messageID)
+                onMessageLifecycle?(messageID, .cancelled)
+            }
+            finishTurnWithTransportError("Threading could not send the Codex turn.")
+            return
+        }
+        self.pendingTurn = nil
+    }
+
+    // MARK: - Turn Control
+
+    var canInterrupt: Bool {
+        isRunning && acceptsInput && isTurnInFlight && activeTurnID != nil
+    }
+
+    /// Whether app-server will accept an addition to the turn in flight.
+    ///
+    /// Three separate refusals rather than one boolean, because they mean different things to the
+    /// person holding a message: nothing running (wait), or a review/compaction running (this
+    /// particular work cannot be steered, but the next turn can).
+    var steerAvailability: SteerAvailability {
+        guard isRunning, acceptsInput, isTurnInFlight, activeTurnID != nil else {
+            return .unavailable(.noActiveTurn)
+        }
+        return activeTurnKind.acceptsSteering
+            ? .available
+            : .unavailable(.turnKindRefusesSteering)
+    }
+
+    /// Appends user input to the turn already running.
+    ///
+    /// `expectedTurnId` is the protocol's own optimistic-concurrency precondition, and it is the
+    /// good kind of API: the race Threading would otherwise lose — the turn ending between the
+    /// user pressing send and the request landing — becomes an explicit, catchable failure rather
+    /// than a message quietly delivered to the wrong turn. The handler for that failure is not to
+    /// retry; it is to let the caller queue the message as an ordinary next turn.
+    @discardableResult
+    func steer(_ prompt: ConversationPrompt, identifiedBy id: ConversationMessageID) -> Bool {
+        guard steerAvailability.isAvailable,
+              let threadID = rootThreadID,
+              let turnID = activeTurnID else { return false }
+
+        let parameters: [String: Any] = [
+            "threadId": threadID,
+            "expectedTurnId": turnID,
+            "clientUserMessageId": id.wireValue,
+            "input": [["type": "text", "text": prompt.transportText]]
+        ]
+
+        guard sendRequest(
+            method: "turn/steer",
+            parameters: parameters,
+            purpose: .steerTurn(id)
+        ) != nil else { return false }
+
+        messageIDsInFlight.insert(id)
+        onMessageLifecycle?(id, .handedOver)
+        return true
+    }
+
+    /// Stops the running turn and every child turn it started.
+    ///
+    /// Children first and best-effort, then the parent unconditionally: interrupting only the
+    /// root leaves a fleet running, and a child that never answers must not hold up the thing the
+    /// user pressed. Each child request is fire-and-forget for exactly that reason — the parent
+    /// interrupt below is what the receipt reports on.
+    func interrupt(completion: @escaping @MainActor (InterruptReceipt) -> Void) {
+        guard canInterrupt, let threadID = rootThreadID, let turnID = activeTurnID else {
+            completion(.failed(reason: L10n.string("There is nothing running to stop.")))
+            return
+        }
+
+        for (childThread, childTurn) in childTurnsByThread {
+            sendRequest(
+                method: "turn/interrupt",
+                parameters: ["threadId": childThread, "turnId": childTurn],
+                purpose: .interruptTurn
+            )
+        }
+        childTurnsByThread.removeAll()
+
+        guard sendRequest(
+            method: "turn/interrupt",
+            parameters: ["threadId": threadID, "turnId": turnID],
+            purpose: .interruptTurn
+        ) != nil else {
+            completion(.failed(reason: L10n.string("Threading could not reach Codex to stop it.")))
+            return
+        }
+
+        // App-server has no `still_queued`: it holds nothing between turns, so there is nothing
+        // for it to report on. The outbox keeps everything it is holding, which is the truth.
+        completion(.acknowledged)
+    }
+
+    /// Keeps the turn identity that `turn/steer` and `turn/interrupt` require.
+    ///
+    /// A turn belonging to another thread is a child's: recorded so Stop can end it, and
+    /// deliberately never allowed to become `activeTurnID`, which names the turn the composer is
+    /// adding to. Both facts come off the same notification, so they are read in one place.
+    private func noteTurnLifecycle(method: String, parameters: [String: Any]) {
+        guard method == "turn/started" || method == "turn/completed" else { return }
+
+        let notificationThreadID = parameters["threadId"] as? String
+        let turn = parameters["turn"] as? [String: Any]
+        guard let turnID = turn?["id"] as? String else { return }
+
+        let isRoot = notificationThreadID == nil || notificationThreadID == rootThreadID
+
+        if method == "turn/started" {
+            if isRoot {
+                let previousTurnID = activeTurnID
+                if previousTurnID != turnID { questionRequests.invalidate() }
+                activeTurnID = turnID
+                // `isCompactionInFlight` is set by the request that asked for it; a review turn
+                // is the one we started through `review/start`. Nothing on the wire names the
+                // kind, so it is remembered from what we asked for.
+                activeTurnKind = isCompactionInFlight ? .compact : activeTurnKind
+                if activeTurnID != previousTurnID {
+                    onInteractionAvailabilityChange?()
+                }
+            } else if let threadID = notificationThreadID {
+                childTurnsByThread[threadID] = turnID
+            }
+            return
+        }
+
+        if isRoot {
+            settleRootTurnIdentity()
+        } else if let threadID = notificationThreadID {
+            childTurnsByThread[threadID] = nil
+        }
+    }
+
+    /// Clears the provider identity and message receipts for a root turn that reached any
+    /// terminal wire boundary. Idempotence matters because app-server may emit a non-retrying
+    /// `error` and then the ordinary `turn/completed` for the same turn.
+    private func settleRootTurnIdentity() {
+        questionRequests.invalidate()
+        let hadActiveTurn = activeTurnID != nil
+        activeTurnID = nil
+        activeTurnKind = .ordinary
+        settleMessagesInFlight()
+        if hadActiveTurn {
+            onInteractionAvailabilityChange?()
+        }
+    }
+
+    /// Marks every message this turn carried as done.
+    ///
+    /// App-server reports no per-message completion of its own — `clientUserMessageId` comes back
+    /// on the user item, which says the message was accepted rather than finished — so the turn's
+    /// own completion is the honest end for everything that rode it, including a steer.
+    private func settleMessagesInFlight() {
+        let settled = messageIDsInFlight
+        messageIDsInFlight.removeAll()
+        for id in settled { onMessageLifecycle?(id, .completed) }
+    }
+
+    private func reportRootThread(_ thread: [String: Any]) {
+        guard let threadID = thread["id"] as? String else { return }
+
+        rootThreadID = threadID
+        reportSessionTitle(thread["name"])
+        replaceComposerCapabilities(CodexComposerCatalog.builtIns)
+        if !didReportThread {
+            didReportThread = true
+            onEvent?(.initialised(
+                sessionID: TranscriptID(threadID),
+                model: thread["model"] as? String
+            ))
+        }
+        sendPendingTurnIfReady()
+        requestSkillsIfNeeded()
+        onInteractionAvailabilityChange?()
+    }
+
+    private func requestSkillsIfNeeded(forceReload: Bool = false) {
+        if forceReload { shouldReloadSkills = true }
+        guard onComposerCapabilitiesChange != nil,
+              didInitialize,
+              rootThreadID != nil,
+              !isSkillsRequestInFlight else { return }
+
+        let reload = shouldReloadSkills
+        shouldReloadSkills = false
+        isSkillsRequestInFlight = true
+        var parameters: [String: Any] = ["cwds": [workingDirectory]]
+        if reload { parameters["forceReload"] = true }
+        if sendRequest(
+            method: "skills/list",
+            parameters: parameters,
+            purpose: .listSkills
+        ) == nil {
+            isSkillsRequestInFlight = false
+            shouldReloadSkills = reload
+        }
+    }
+
+    /// Reads a `skills/list` result into the composer catalog.
+    ///
+    /// The three containers below answer the same question three different ways, on purpose.
+    private func applySkills(_ result: [String: Any]?) {
+        // `data` holds one entry per requested cwd, and only the entry matching *this* checkout
+        // is ever read — so an unreadable entry belongs to some other scope and refusing the
+        // whole response let another checkout's malformed row delete this session's skills. If
+        // our own entry was the unreadable one, the search below finds no match and the response
+        // is still rejected, one line further down.
+        guard let entries = WireList.objects(
+            result?["data"], site: WireListSite.codexSkillScopes, log: ThreadingLogger.agent
+        ) else {
+            rejectSkillsResponse("missing data")
+            return
+        }
+        let expectedCWD = normalizedCheckoutPath(workingDirectory)
+        guard let entry = entries.first(where: { entry in
+            guard let cwd = entry["cwd"] as? String else { return false }
+            return normalizedCheckoutPath(cwd) == expectedCWD
+        }) else {
+            // Never borrow the first entry: one request may contain several cwd scopes, and a
+            // catalog from another checkout can invoke a same-named skill with a different path.
+            rejectSkillsResponse("no matching cwd")
+            return
+        }
+        // Read as `[Any]`, and recovering is *not* an option here: this guard trusts the
+        // catalog only when the scan reported no problems, so an error entry this client cannot
+        // open still has to count as a problem. Skipping it would turn "this scan reported
+        // errors" into "this scan was clean" and invert the check — the one direction that is
+        // never safe. `as? [Any]` asks the honest question ("did the scan list anything?")
+        // where `as? [[String: Any]]` only landed on the safe side by accident, refusing an
+        // unreadable list for being unreadable rather than for being non-empty.
+        guard let errors = entry["errors"] as? [Any], errors.isEmpty else {
+            // A partial scan is not authoritative. Keep the last complete snapshot so one broken
+            // SKILL.md cannot make unrelated, previously valid skills disappear.
+            rejectSkillsResponse("scan errors")
+            return
+        }
+        // All-or-nothing, matching the loop below: it already rejects the entire response for one
+        // skill whose metadata does not read, because a catalog missing a skill is indistinguishable
+        // from a catalog that never had it — the user reaches for `$name` and is told there is no
+        // such skill. An unreadable element says exactly as much as unreadable metadata does.
+        guard let rawSkills = entry["skills"] as? [[String: Any]] else {
+            rejectSkillsResponse("missing skills")
+            return
+        }
+
+        var metadataByID: [String: CodexSkillMetadata] = [:]
+        var capabilities: [ComposerCapability] = CodexComposerCatalog.builtIns
+        for object in rawSkills.prefix(
+            ComposerCapabilityCatalogPolicy.maximumInspectedCapabilities
+        ) {
+            guard let name = object["name"] as? String,
+                  let path = object["path"] as? String,
+                  let rawDescription = object["description"] as? String,
+                  let enabled = object["enabled"] as? Bool,
+                  object["scope"] as? String != nil,
+                  !name.isEmpty,
+                  (path as NSString).isAbsolutePath,
+                  ComposerCapabilityCatalogPolicy.acceptsPrivatePath(path)
+            else {
+                rejectSkillsResponse("invalid skill metadata")
+                return
+            }
+            let interface = object["interface"] as? [String: Any]
+            let displayName = interface?["displayName"] as? String
+            let shortDescription = interface?["shortDescription"] as? String
+                ?? object["shortDescription"] as? String
+            let description = shortDescription ?? rawDescription
+            let id = "codex.skill:\(name)"
+            guard metadataByID[id] == nil else {
+                rejectSkillsResponse("duplicate skill identity")
+                return
+            }
+            metadataByID[id] = CodexSkillMetadata(name: name, path: path)
+            capabilities.append(ComposerCapability(
+                id: id,
+                name: name,
+                displayName: displayName,
+                description: description,
+                kind: .skill,
+                trigger: .dollar,
+                presentation: .turn,
+                availability: enabled
+                    ? .available
+                    : .unavailable(reason: L10n.string("Disabled in Codex settings"))
+            ))
+        }
+        if rawSkills.count > ComposerCapabilityCatalogPolicy.maximumInspectedCapabilities {
+            ThreadingLogger.agent.warning(
+                "Codex skills response exceeded local inspection limits; truncated"
+            )
+        }
+        skillsByCapabilityID = metadataByID
+        replaceComposerCapabilities(capabilities)
+    }
+
+    private func replaceComposerCapabilities(_ capabilities: [ComposerCapability]) {
+        let normalization = ComposerCapabilityCatalogPolicy.normalize(capabilities)
+        if normalization.wasTruncated {
+            ThreadingLogger.agent.warning(
+                "Codex composer catalog exceeded local presentation limits; truncated"
+            )
+        }
+        let allowedIDs = Set(normalization.capabilities.map(\.id))
+        skillsByCapabilityID = skillsByCapabilityID.filter { allowedIDs.contains($0.key) }
+        guard composerCapabilities != normalization.capabilities else { return }
+        composerCapabilities = normalization.capabilities
+        onComposerCapabilitiesChange?()
+    }
+
+    private func rejectSkillsResponse(_ reason: String) {
+        ThreadingLogger.agent.warning(
+            "Ignored incomplete Codex skills snapshot: \(reason, privacy: .private(mask: .hash))"
+        )
+    }
+
+    private func normalizedCheckoutPath(_ path: String) -> String {
+        (path as NSString).standardizingPath
+    }
+
+    // MARK: - JSON-RPC
+
+    @discardableResult
+    private func sendRequest(
+        method: String,
+        parameters: [String: Any],
+        purpose: RequestPurpose
+    ) -> CodexAppServerRequestID? {
+        requestSequence += 1
+        let id = CodexAppServerRequestID.integer(requestSequence)
+        let object: [String: Any] = [
+            "id": id.foundationValue,
+            "method": method,
+            "params": parameters
+        ]
+        guard writeLine(object) else { return nil }
+        pendingRequests[id] = purpose
+        return id
+    }
+
+    private func sendNotification(method: String, parameters: [String: Any] = [:]) {
+        _ = writeLine(["method": method, "params": parameters])
+    }
+
+    private func sendResponse(
+        id: CodexAppServerRequestID,
+        result: [String: Any]? = nil,
+        error: [String: Any]? = nil
+    ) {
+        var object: [String: Any] = ["id": id.foundationValue]
+        if let error {
+            object["error"] = error
+        } else {
+            object["result"] = result ?? [:]
+        }
+        _ = writeLine(object)
+    }
+
+    private func writeLine(_ object: [String: Any]) -> Bool {
+        transport?.writeJSONObject(object) ?? false
+    }
+
+    // MARK: - Event Stream
+
+    private func route(_ envelope: CodexAppServerEnvelope) {
+        switch envelope {
+        case .response(let id, let result, let error):
+            handleResponse(id: id, result: result, error: error)
+        case .request(let id, let method, let parameters):
+            handleServerRequest(id: id, method: method, parameters: parameters)
+        case .notification(let method, let parameters):
+            handleNotification(method: method, parameters: parameters)
+        }
+    }
+
+    private func handleResponse(
+        id: CodexAppServerRequestID,
+        result: [String: Any]?,
+        error: String?
+    ) {
+        guard let purpose = pendingRequests.removeValue(forKey: id) else { return }
+
+        if let error {
+            switch purpose {
+            case .initialize, .openThread:
+                finishTurnWithTransportError(error)
+                terminate()
+            case .startTurn, .startReview:
+                finishTurnWithTransportError(error)
+            case .listSkills:
+                isSkillsRequestInFlight = false
+                if shouldReloadSkills { requestSkillsIfNeeded() }
+                onInteractionAvailabilityChange?()
+            case .compact:
+                isCompactionInFlight = false
+                finishTurnWithTransportError(L10n.format("Compact failed: %@", error))
+            case .steerTurn(let messageID):
+                // The turn ended, or turned out not to be steerable, between the press and the
+                // request landing — which is exactly what `expectedTurnId` exists to catch. The
+                // message goes back to the outbox as an ordinary next turn rather than being
+                // retried against a turn that is already gone.
+                messageIDsInFlight.remove(messageID)
+                onMessageLifecycle?(messageID, .cancelled)
+                ThreadingLogger.agent.info(
+                    "Codex refused a steer; the message returns to the queue: \(error, privacy: .private(mask: .hash))"
+                )
+            case .interruptTurn:
+                // Nothing to settle: the turn's own terminal event still decides how it ended,
+                // and a refused interrupt most often means it had already finished.
+                ThreadingLogger.agent.info(
+                    "Codex refused an interrupt: \(error, privacy: .private(mask: .hash))"
+                )
+            }
+            return
+        }
+
+        switch purpose {
+        case .initialize:
+            didInitialize = true
+            sendNotification(method: "initialized")
+            openThread()
+
+        case .openThread:
+            if let thread = result?["thread"] as? [String: Any] {
+                reportRootThread(thread)
+            } else {
+                finishTurnWithTransportError("Codex opened no conversation thread.")
+            }
+
+        case .startTurn:
+            break
+
+        case .startReview:
+            activeTurnKind = .review
+
+        case .steerTurn, .interruptTurn:
+            // Acceptance, not completion. The turn's own notifications settle both.
+            break
+
+        case .listSkills:
+            isSkillsRequestInFlight = false
+            applySkills(result)
+            if shouldReloadSkills { requestSkillsIfNeeded() }
+            onInteractionAvailabilityChange?()
+
+        case .compact:
+            // Acceptance is not completion. Standard `turn/completed` settles the operation.
+            break
+        }
+    }
+
+    private func handleNotification(method: String, parameters: [String: Any]) {
+        if method == "serverRequest/resolved",
+           parameters["threadId"] as? String == rootThreadID,
+           let id = JSONRPCRequestID(parameters["requestId"]) {
+            questionRequests.resolve(id: id)
+            return
+        }
+        if method == "skills/changed" {
+            requestSkillsIfNeeded(forceReload: true)
+        }
+
+        noteTurnLifecycle(method: method, parameters: parameters)
+
+        if method == "thread/started",
+           let thread = parameters["thread"] as? [String: Any],
+           (thread["parentThreadId"] == nil || thread["parentThreadId"] is NSNull),
+           rootThreadID == nil {
+            reportRootThread(thread)
+        }
+
+        if method == "thread/name/updated",
+           parameters["threadId"] as? String == rootThreadID {
+            reportSessionTitle(parameters["threadName"])
+        }
+
+        if method == "thread/tokenUsage/updated",
+           let turnID = parameters["turnId"] as? String,
+           let usage = parameters["tokenUsage"] as? [String: Any] {
+            if let last = usage["last"] as? [String: Any] {
+                if let output = (last["outputTokens"] as? NSNumber)?.intValue {
+                    outputTokensByTurn[turnID] = output
+                }
+                // `last` is the most recent request, which is what "how full is the window"
+                // means — the session's running total exceeds the window on any long
+                // conversation. Input already includes what was served from cache here,
+                // unlike Claude's accounting.
+                if let total = (last["totalTokens"] as? NSNumber)?.intValue {
+                    lastContextTokens = total
+                } else if let input = (last["inputTokens"] as? NSNumber)?.intValue,
+                          let output = (last["outputTokens"] as? NSNumber)?.intValue {
+                    lastContextTokens = input + output
+                }
+            }
+            if let window = ((usage["modelContextWindow"] ?? usage["contextWindow"])
+                as? NSNumber)?.intValue {
+                lastContextWindow = window
+            }
+        }
+
+        for event in CodexSubagentEvent.events(
+            method: method,
+            parameters: parameters,
+            rootThreadID: rootThreadID
+        ) {
+            onSubagentEvent?(event)
+        }
+
+        // App-server's item notification is the authoritative execution object. Capture it
+        // before the root-thread guard so delegated tools remain auditable too.
+        for event in CodexProviderExecutionAdapter.events(
+            method: method,
+            parameters: parameters
+        ) {
+            onProviderExecution?(event)
+        }
+
+        guard CodexAppServerEvent.threadID(
+            method: method,
+            parameters: parameters
+        ) == rootThreadID else { return }
+
+        // The parent message is echoed locally when it is accepted by `send`; app-server also
+        // reports it as an item, and rendering both would duplicate every prompt.
+        if (method == "item/started" || method == "item/completed"),
+           let item = parameters["item"] as? [String: Any],
+           item["type"] as? String == "userMessage" {
+            return
+        }
+
+        let turnID = parameters["turnId"] as? String
+            ?? (parameters["turn"] as? [String: Any])?["id"] as? String
+        let events = CodexAppServerEvent.streamEvents(
+            method: method,
+            parameters: parameters,
+            outputTokens: turnID.flatMap { outputTokensByTurn[$0] },
+            effort: turnEffort
+        )
+
+        for event in events {
+            let completed = completingTurnMetrics(in: event)
+            if case .turnFinished(_, let outcome, _) = completed {
+                // A terminal `error` is sufficient on its own, but current app-server versions
+                // may still send `turn/completed` afterwards. One provider turn has exactly one
+                // terminal event in Threading regardless of which notification arrived first.
+                guard !receivedTurnFinished else { continue }
+                let completedCompaction = isCompactionInFlight
+                settleRootTurnIdentity()
+                receivedTurnFinished = true
+                isTurnInFlight = false
+                isCompactionInFlight = false
+                pendingTurn = nil
+                if let turnID { outputTokensByTurn[turnID] = nil }
+                // A compaction the user stopped compacted nothing, so it says nothing.
+                if completedCompaction, outcome == .completed {
+                    onEvent?(.transcriptNotice(L10n.string("Context compacted.")))
+                }
+                onInteractionAvailabilityChange?()
+            }
+            onEvent?(completed)
+        }
+    }
+
+    private func reportSessionTitle(_ value: Any?) {
+        guard let title = (value as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else { return }
+        onSessionTitleChange?(title)
+    }
+
+    // MARK: - Approval Requests
+
+    private func handleServerRequest(
+        id: CodexAppServerRequestID,
+        method: String,
+        parameters: [String: Any]
+    ) {
+        if method == "item/tool/requestUserInput" {
+            questionRequests.receive(
+                id: id, parameters: parameters, threadID: rootThreadID, turnID: activeTurnID
+            )
+            return
+        }
+        let request: PermissionRequest
+
+        switch method {
+        case "item/commandExecution/requestApproval":
+            let input: [String: JSONValue] = [
+                "command": .string(parameters["command"] as? String ?? ""),
+                "cwd": .string(parameters["cwd"] as? String ?? ""),
+                "reason": .string(parameters["reason"] as? String ?? "")
+            ]
+            request = PermissionRequest(
+                sessionID: sessionID,
+                tool: .bash,
+                input: input
+            )
+
+        case "item/fileChange/requestApproval":
+            let input: [String: JSONValue] = [
+                "file_path": .string(parameters["grantRoot"] as? String ?? ""),
+                "reason": .string(parameters["reason"] as? String ?? "")
+            ]
+            request = PermissionRequest(
+                sessionID: sessionID,
+                tool: .edit,
+                input: input
+            )
+
+        case "item/permissions/requestApproval":
+            // Deliberately all-or-nothing, and the only reason it is safe to be: these arguments
+            // are what a person is shown before answering "allow this?". A partial request is
+            // exactly the shape that gets approved for something it did not say — so a container
+            // that will not convert is refused whole, and the refusal is explicit rather than
+            // silent: the agent gets `-32602` and nothing runs. Everywhere the answer is only
+            // *shown* rather than *approved*, `JSONValue.convertingObject(from:)` is the right
+            // conversion instead.
+            guard let input = JSONValue.object(from: parameters) else {
+                sendResponse(
+                    id: id,
+                    error: ["code": -32602, "message": "Permission arguments were not valid JSON."]
+                )
+                return
+            }
+            request = PermissionRequest(
+                sessionID: sessionID,
+                tool: .unknown("permissions"),
+                input: input
+            )
+
+        default:
+            sendResponse(
+                id: id,
+                error: ["code": -32601, "message": "Threading does not handle \(method)."]
+            )
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            ConversationPermissionDecision.decide(request) { decision in
+                guard let self else { return }
+                self.answerApproval(
+                    id: id,
+                    method: method,
+                    parameters: parameters,
+                    decision: decision
+                )
+            }
+        }
+    }
+
+    private func answerApproval(
+        id: CodexAppServerRequestID,
+        method: String,
+        parameters: [String: Any],
+        decision: PermissionDecision
+    ) {
+        let allowed: Bool
+        switch decision {
+        case .allow: allowed = true
+        case .deny: allowed = false
+        }
+
+        if method == "item/permissions/requestApproval" {
+            if allowed {
+                sendResponse(
+                    id: id,
+                    result: [
+                        "permissions": parameters["permissions"] as? [String: Any] ?? [:],
+                        "scope": "turn"
+                    ]
+                )
+            } else {
+                sendResponse(
+                    id: id,
+                    error: ["code": -32000, "message": "Permission declined by the user."]
+                )
+            }
+            return
+        }
+
+        sendResponse(id: id, result: ["decision": allowed ? "accept" : "decline"])
+    }
+
+    // MARK: - Completion
+
+    private func handleTermination(status: Int32) {
+        guard process != nil else { return }
+        let transport = self.transport
+        acceptsInput = false
+        guard let transport else {
+            finishTermination(status: status, diagnostics: "")
+            return
+        }
+        transport.finish { [weak self] diagnostics in
+            self?.finishTermination(status: status, diagnostics: diagnostics)
+        }
+    }
+
+    private func finishTermination(status: Int32, diagnostics: String) {
+        guard process != nil else { return }
+        questionRequests.invalidate()
+        process = nil
+        transport = nil
+
+        let wasTerminating = isTerminating
+        isTerminating = false
+        isRunning = false
+        isCompactionInFlight = false
+        isSkillsRequestInFlight = false
+        shouldReloadSkills = false
+
+        if !wasTerminating, isTurnInFlight, !receivedTurnFinished {
+            finishTurnWithTransportError(
+                diagnostics.isEmpty
+                    ? "Codex app-server exited with status \(status)."
+                    : diagnostics
+            )
+        }
+
+        onInteractionAvailabilityChange?()
+        onExit?(status)
+    }
+
+    private func transportFailed(_ failure: AgentStreamTransportFailure) {
+        guard process != nil else { return }
+        let reason = failure.userFacingDescription
+        ThreadingLogger.agent.error(
+            "Codex app-server transport failed: \(reason, privacy: .private(mask: .hash))"
+        )
+        if isTurnInFlight, !receivedTurnFinished { finishTurnWithTransportError(reason) }
+        terminate()
+    }
+
+    private func finishTurnWithTransportError(_ message: String) {
+        pendingTurn = nil
+        isTurnInFlight = false
+        receivedTurnFinished = true
+        onEvent?(completingTurnMetrics(in: .turnFinished(
+            text: message,
+            outcome: .failed,
+            metrics: .empty
+        )))
+        onInteractionAvailabilityChange?()
+    }
+
+    private func completingTurnMetrics(in event: StreamEvent) -> StreamEvent {
+        guard case .turnFinished(let text, let outcome, let metrics) = event else {
+            return event
+        }
+
+        let duration = turnStartedAt.map {
+            max(0, ProcessInfo.processInfo.systemUptime - $0)
+        }
+        turnStartedAt = nil
+        let effort = turnEffort
+        turnEffort = nil
+
+        return .turnFinished(
+            text: text,
+            outcome: outcome,
+            metrics: metrics.filling(
+                duration: duration,
+                effort: effort,
+                contextTokens: lastContextTokens,
+                contextWindow: lastContextWindow
+            )
+        )
+    }
+}
+
+private enum RequestPurpose {
+    case initialize
+    case openThread
+    case startTurn
+    case startReview
+    case listSkills
+    case compact
+
+    /// Carries the message identity so a refused steer can hand that exact message back to the
+    /// outbox rather than losing what somebody typed.
+    case steerTurn(ConversationMessageID)
+
+    case interruptTurn
+}
+
+private struct CodexPendingTurn {
+    let input: [[String: Any]]
+
+    /// The identifier the outbox knows this message by, travelling as `clientUserMessageId` so
+    /// the server can name it back. Absent for turns the composer did not originate — a review
+    /// or a compaction is work, not a message somebody queued.
+    var messageID: ConversationMessageID?
+}
+
+/// Whether the turn in flight is one app-server will let us add to.
+///
+/// `NonSteerableTurnKind` in the protocol schema is `review | compact`, and the server answers a
+/// steer on either with "cannot steer a review turn" / "cannot steer a compact turn". Knowing it
+/// locally means the composer can decline before the round trip rather than after.
+private enum CodexTurnKind {
+    case ordinary
+    case review
+    case compact
+
+    var acceptsSteering: Bool { self == .ordinary }
+}
+
+private struct CodexSkillMetadata {
+    let name: String
+    let path: String
+}
+
+enum CodexComposerCatalog {
+    static let compactID = "codex.command:compact"
+    static let reviewID = "codex.command:review"
+
+    /// Codex's TUI owns a much larger command language than app-server. Keep the current
+    /// documented names visible as disabled expectations so a known TUI command cannot fall
+    /// through as an ordinary model prompt in native Chat. This is deliberately not an
+    /// execution catalog: direct app-server mappings graduate into `builtIns` one at a time,
+    /// with their own response and lifecycle handling.
+    ///
+    /// Snapshot: Codex CLI 0.150.1's own command catalog, read on 2026-08-29. Each row keeps
+    /// the CLI's own summary in Threading's voice, because a row that says only "Command" is
+    /// the answer to no question a person opening `/` is asking. Aliases share one row so the
+    /// completion list stays below its bounded 64-row presentation limit.
+    static let terminalOnly: [ComposerCapability] = [
+        terminalCommand("permissions", description: "Choose what Codex is allowed to do"),
+        terminalCommand("ide", description: "Include the IDE's selection, open files and context"),
+        terminalCommand("keymap", description: "Remap the terminal shortcuts"),
+        terminalCommand("vim", description: "Turn Vim mode on or off for the composer"),
+        terminalCommand("setup-default-sandbox", description: "Set up the elevated agent sandbox"),
+        terminalCommand(
+            "sandbox-add-read-dir",
+            description: "Let the sandbox read one more directory"
+        ),
+        terminalCommand(
+            "agent", aliases: ["subagents"],
+            description: "Switch between this session's subagents"
+        ),
+        terminalCommand("apps", description: "Manage the connected apps"),
+        terminalCommand("plugins", description: "Browse the installed plugins"),
+        terminalCommand("hooks", description: "View and manage the lifecycle hooks"),
+        terminalCommand("clear", description: "Clear the terminal and start a new chat"),
+        terminalCommand("rename", description: "Rename the current thread"),
+        terminalCommand("archive", description: "Archive this session and exit"),
+        terminalCommand("delete", description: "Permanently delete this session and exit"),
+        terminalCommand("copy", description: "Copy the last response, code block or quote"),
+        terminalCommand("diff", description: "Show the git diff, including untracked files"),
+        terminalCommand("exit", aliases: ["quit"], description: "Leave Codex"),
+        terminalCommand("experimental", description: "Turn the experimental features on or off"),
+        terminalCommand("approve", description: "Approve one retry of a recent auto-review denial"),
+        terminalCommand("memories", description: "Configure what Codex remembers and when"),
+        terminalCommand(
+            "skills",
+            description: "Use skills to improve how Codex handles specific tasks"
+        ),
+        terminalCommand(
+            "import",
+            description: "Import setup, projects and recent chats from Claude Code"
+        ),
+        terminalCommand("feedback", description: "Send logs to the Codex maintainers"),
+        terminalCommand("init", description: "Write an AGENTS.md with instructions for Codex"),
+        terminalCommand("logout", description: "Log out of Codex"),
+        terminalCommand("mcp", description: "List the configured MCP tools"),
+        terminalCommand("mention", description: "Mention a file in the prompt"),
+        terminalCommand("model", description: "Choose the model and reasoning effort"),
+        terminalCommand("fast", description: "Turn fast mode on or off"),
+        terminalCommand("plan", description: "Switch to Plan mode"),
+        terminalCommand("goal", description: "Set or view the goal for a long-running task"),
+        terminalCommand("personality", description: "Choose a communication style for Codex"),
+        terminalCommand("ps", description: "List the background terminals"),
+        terminalCommand("stop", aliases: ["clean"], description: "Stop every background terminal"),
+        terminalCommand("fork", description: "Fork the current chat"),
+        terminalCommand("app", description: "Continue this session in the desktop app"),
+        terminalCommand(
+            "side", aliases: ["btw"],
+            description: "Start a side conversation in an ephemeral fork"
+        ),
+        terminalCommand("raw", description: "Toggle raw scrollback for copy-friendly selection"),
+        terminalCommand("resume", description: "Resume a saved chat"),
+        terminalCommand("new", description: "Start a new chat without leaving Codex"),
+        terminalCommand("status", description: "Show this session's configuration and token usage"),
+        terminalCommand("usage", description: "View account usage, or use a usage limit reset"),
+        terminalCommand("debug-config", description: "Show the config layers behind each setting"),
+        terminalCommand("statusline", description: "Choose what appears in the status line"),
+        terminalCommand("title", description: "Choose what appears in the terminal title"),
+        terminalCommand("theme", description: "Choose a syntax highlighting theme"),
+        terminalCommand("pets", aliases: ["pet"], description: "Choose or hide the terminal pet")
+    ]
+
+    static let builtIns: [ComposerCapability] = [
+        ComposerCapability(
+            id: compactID,
+            name: "compact",
+            description: L10n.string("Compact the conversation context"),
+            kind: .command,
+            trigger: .slash,
+            presentation: .command
+        ),
+        ComposerCapability(
+            id: reviewID,
+            name: "review",
+            description: L10n.string(
+                "Review uncommitted changes, or follow custom review instructions"
+            ),
+            argumentHint: "[instructions]",
+            kind: .command,
+            trigger: .slash,
+            presentation: .turn
+        )
+    ] + terminalOnly
+
+    /// `description` is localized here rather than at the call site so the 47 rows above stay
+    /// one readable line each; `scripts/localization_boundary_lint.py` still requires every
+    /// literal passed here to exist in the catalog.
+    private static func terminalCommand(
+        _ name: String,
+        aliases: [String] = [],
+        description: String
+    ) -> ComposerCapability {
+        ComposerCapability(
+            id: "codex.terminal-command:\(name)",
+            name: name,
+            description: L10n.string(description),
+            aliases: aliases,
+            kind: .command,
+            trigger: .slash,
+            presentation: .command,
+            availability: .unavailable(reason: L10n.string(
+                "Available in Codex Terminal; not available in native Chat yet"
+            ))
+        )
+    }
+
+}
+
+enum CodexStreamDefaults {
+    /// Stderr is diagnostic fallback only. Capping it prevents a failed server from becoming an
+    /// unbounded in-memory log while stdout remains the authoritative protocol stream.
+    static let maximumErrorBytes = 64 * 1024
+}

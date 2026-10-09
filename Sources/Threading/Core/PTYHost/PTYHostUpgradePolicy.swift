@@ -600,9 +600,7 @@ enum PTYHostUpgradeCheck {
 /// PTY links, native pipe links, and the background-session stop client all post this same edge.
 /// The registration coordinator ignores it unless its launch survey found a different generation
 /// with live work, so ordinary same-generation sessions add no socket traffic when they end.
-struct PTYHostMayHaveDrained: AppEvent {
-    static let name = Notification.Name("ptyHostMayHaveDrained")
-}
+
 
 /// The values a deferred upgrade check needs after the launch-time request has gone away.
 struct PTYHostUpgradeRequest: Equatable, Sendable {
@@ -889,37 +887,3 @@ final class PTYHostUpgradeMonitor: @unchecked Sendable {
 /// A semaphore plus a lock rather than a continuation, because the caller here is a blocking
 /// function on a background queue by design — the whole check is bounded, off-main work — and
 /// because `PTYHostClient` delivers on its own serial queue with no async surface at all.
-final class PTYHostLatch<Value>: @unchecked Sendable {
-
-    private let semaphore = DispatchSemaphore(value: 0)
-    private let lock = NSLock()
-    private var value: Value?
-    private var settled = false
-
-    /// Delivers the value, once. Later calls are ignored.
-    func complete(_ value: Value) {
-        lock.lock()
-        guard !settled else { return lock.unlock() }
-        settled = true
-        self.value = value
-        lock.unlock()
-        semaphore.signal()
-    }
-
-    /// Wakes the waiter with nothing — the link ended before an answer arrived.
-    func abandon() {
-        lock.lock()
-        guard !settled else { return lock.unlock() }
-        settled = true
-        lock.unlock()
-        semaphore.signal()
-    }
-
-    /// Blocks for at most `timeout` and answers what arrived, or nil.
-    func wait(_ timeout: TimeInterval) -> Value? {
-        _ = semaphore.wait(timeout: .now() + timeout)
-        lock.lock()
-        defer { lock.unlock() }
-        return value
-    }
-}

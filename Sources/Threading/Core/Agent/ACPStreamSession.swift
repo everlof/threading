@@ -438,9 +438,9 @@ final class ACPStreamSession:
     /// file and Codex's overrides are rendered from, so a session cannot have a bridge on one
     /// transport and a URL on another.
     private func mcpServers() -> [[String: Any]] {
-        guard !MCPToolCatalog.toolNames(for: sessionID).isEmpty,
+        guard ConversationMCPAdmission.allows(sessionID),
               let mcpBinding else { return [] }
-        return [mcpBinding.acpServerObject(named: MCPDefaults.serverName)]
+        return [mcpBinding.acpServerObject(named: MCPToolNaming.serverName)]
     }
 
     private func sendPendingPromptIfReady() {
@@ -870,7 +870,7 @@ final class ACPStreamSession:
             )
         }
 
-        PermissionBroker.decide(request) { [weak self] decision in
+        ConversationPermissionDecision.decide(request) { [weak self] decision in
             self?.answerPermission(
                 id: id,
                 toolCallID: toolCallID,

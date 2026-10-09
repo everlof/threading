@@ -1,4 +1,8 @@
+#if os(Linux)
+import Glibc
+#else
 import Darwin
+#endif
 import Dispatch
 import Foundation
 import ThreadingDomain
@@ -166,8 +170,13 @@ final class PTYHostPipeLink: @unchecked Sendable {
     /// The daemon-facing ends of the three local pipes, once adopted. Each is owned by its
     /// channel's cleanup handler from that moment, and by nothing else.
     private var inputChannel: DispatchIO?
+#if os(Linux)
+    private var outputChannel: SignalSafePipeWriter?
+    private var errorChannel: SignalSafePipeWriter?
+#else
     private var outputChannel: DispatchIO?
     private var errorChannel: DispatchIO?
+#endif
     private var pendingChildBytes = 0
 
     /// A native surface switch releases its controller immediately after asking the child to
@@ -191,7 +200,8 @@ final class PTYHostPipeLink: @unchecked Sendable {
         lock.lock()
         let transport = transportStorage
         transportStorage = nil
-        let channels = [inputChannel, outputChannel, errorChannel]
+        let input = inputChannel
+        let outputs = [outputChannel, errorChannel]
         inputChannel = nil
         outputChannel = nil
         errorChannel = nil
@@ -199,7 +209,12 @@ final class PTYHostPipeLink: @unchecked Sendable {
 
         // Letting go, never killing. The child is the daemon's and outlives this process, so a
         // link that stopped watching is a close — which the daemon keeps the child for.
-        for channel in channels { channel?.close(flags: .stop) }
+        input?.close(flags: .stop)
+#if os(Linux)
+        for channel in outputs { channel?.close(immediately: true) }
+#else
+        for channel in outputs { channel?.close(flags: .stop) }
+#endif
         transport?.close()
     }
 
@@ -251,11 +266,19 @@ final class PTYHostPipeLink: @unchecked Sendable {
     /// direction: the transport may close its read end at any moment — a `finish()`, a released
     /// controller — and a write into a pipe nobody is reading raises `SIGPIPE`, which would take
     /// Threading down rather than report an error.
-    func adoptDescriptors(input: Int32, output: Int32, error: Int32) {
-        _ = fcntl(output, F_SETNOSIGPIPE, 1)
-        _ = fcntl(error, F_SETNOSIGPIPE, 1)
-
+    func adoptDescriptors(input: Int32, output: Int32, error errorDescriptor: Int32) throws {
         let queue = DispatchQueue(label: PTYHostPipeDefaults.channelQueueLabel)
+#if os(Linux)
+        let outputChannel: SignalSafePipeWriter
+        do { outputChannel = try SignalSafePipeWriter(descriptor: output) }
+        catch { _ = Glibc.close(input); _ = Glibc.close(errorDescriptor); throw error }
+        let errorChannel: SignalSafePipeWriter
+        do { errorChannel = try SignalSafePipeWriter(descriptor: errorDescriptor) }
+        catch { outputChannel.close(immediately: true); _ = Glibc.close(input); throw error }
+#else
+        _ = fcntl(output, F_SETNOSIGPIPE, 1)
+        _ = fcntl(errorDescriptor, F_SETNOSIGPIPE, 1)
+
         let outputChannel = DispatchIO(
             type: .stream,
             fileDescriptor: output,
@@ -264,15 +287,22 @@ final class PTYHostPipeLink: @unchecked Sendable {
         )
         let errorChannel = DispatchIO(
             type: .stream,
-            fileDescriptor: error,
+            fileDescriptor: errorDescriptor,
             queue: queue,
-            cleanupHandler: { _ in Darwin.close(error) }
+            cleanupHandler: { _ in Darwin.close(errorDescriptor) }
         )
+#endif
         let inputChannel = DispatchIO(
             type: .stream,
             fileDescriptor: input,
             queue: queue,
-            cleanupHandler: { _ in Darwin.close(input) }
+            cleanupHandler: { _ in
+#if os(Linux)
+                Glibc.close(input)
+#else
+                Darwin.close(input)
+#endif
+            }
         )
         inputChannel.setLimit(lowWater: 1)
 
@@ -460,17 +490,20 @@ final class PTYHostPipeLink: @unchecked Sendable {
         pendingChildBytes += submitted
         lock.unlock()
 
-        let payload = bytes.withUnsafeBytes { DispatchData(bytes: $0) }
-        target.write(
-            offset: 0,
-            data: payload,
-            queue: PTYHostPipeDefaults.completionQueue
-        ) { [weak self] done, _, _ in
-            guard done, let self else { return }
+        let completed: @Sendable () -> Void = { [weak self] in
+            guard let self else { return }
             lock.lock()
             pendingChildBytes = max(0, pendingChildBytes - submitted)
             lock.unlock()
         }
+#if os(Linux)
+        target.write(bytes, completed: completed)
+#else
+        let payload = bytes.withUnsafeBytes { DispatchData(bytes: $0) }
+        target.write(offset: 0, data: payload, queue: PTYHostPipeDefaults.completionQueue) { done, _, _ in
+            if done { completed() }
+        }
+#endif
     }
 
     private func send(input bytes: Data) {
@@ -548,8 +581,13 @@ final class PTYHostPipeLink: @unchecked Sendable {
         // `[]` rather than `.stop`: queued writes reach the transport before the descriptor is
         // released, so the last of the child's output is read before the end of file that follows
         // it. The input channel is stopped instead — there is nobody left to send to.
+#if os(Linux)
+        output?.close(immediately: false)
+        errors?.close(immediately: false)
+#else
         output?.close(flags: [])
         errors?.close(flags: [])
+#endif
         input?.close(flags: .stop)
 
         // A spawn nobody answered, whose child then ended: release the launch rather than let it

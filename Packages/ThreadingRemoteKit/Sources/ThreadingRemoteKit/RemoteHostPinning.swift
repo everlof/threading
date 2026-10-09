@@ -1,6 +1,12 @@
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
+#if canImport(Security)
 import Security
+#endif
 
 /// The shape of the values a pinned host is identified by, in one place because two products and
 /// a QR encoder all have to agree on them.
@@ -254,6 +260,15 @@ public enum RemoteTrustVerdict: String, Codable, Equatable, Sendable {
 /// a tailnet, or a new DHCP lease with no re-pairing. Any SANs in the certificate are tidiness.
 public enum RemoteCertificatePinning {
 
+    /// The platform-neutral pin decision. A missing leaf under a held pin always fails closed.
+    public static func evaluate(certificateDER: Data?, against pins: RemoteHostPinSet?) -> RemoteTrustVerdict {
+        guard let pins else { return .notPinned }
+        guard let certificateDER else { return .rejectedFingerprintMismatch }
+        return pins.matches(certificateDER: certificateDER) ? .accepted : .rejectedFingerprintMismatch
+    }
+
+#if canImport(Security)
+
     /// The DER of the leaf certificate a server presented, or nil when the trust carries none.
     public static func leafCertificateData(in trust: SecTrust) -> Data? {
         guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
@@ -264,12 +279,12 @@ public enum RemoteCertificatePinning {
     /// Fail-closed: a host with a pin whose leaf cannot even be read is a mismatch, never an
     /// unpinned host, because "could not read it" must not become "trust it".
     public static func evaluate(_ trust: SecTrust, against pins: RemoteHostPinSet?) -> RemoteTrustVerdict {
-        guard let pins else { return .notPinned }
-        guard let leaf = leafCertificateData(in: trust) else { return .rejectedFingerprintMismatch }
-        return pins.matches(certificateDER: leaf) ? .accepted : .rejectedFingerprintMismatch
+        evaluate(certificateDER: leafCertificateData(in: trust), against: pins)
     }
+#endif
 }
 
+#if canImport(Security)
 /// A `URLSessionDelegate` that pins, and remembers what it decided.
 ///
 /// Attach it to the **session**, not to a task: a server-trust challenge goes to the session-level
@@ -394,3 +409,5 @@ public final class RemoteCertificatePinningDelegate: NSObject, URLSessionDelegat
         }
     }
 }
+
+#endif

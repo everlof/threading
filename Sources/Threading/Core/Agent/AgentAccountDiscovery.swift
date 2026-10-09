@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 /// Short-lived discovery results, separated from presentation preferences so editing an
 /// account name or emoji is reflected immediately without forcing another filesystem scan.
@@ -11,7 +10,7 @@ final class AgentAccountDiscoveryCache: @unchecked Sendable {
     }
 
     private let lifetime: TimeInterval
-    private let entries = OSAllocatedUnfairLock(initialState: [AgentKind: Entry]())
+    private let entries = LockedState(initialState: [AgentKind: Entry]())
 
     init(lifetime: TimeInterval) {
         self.lifetime = lifetime

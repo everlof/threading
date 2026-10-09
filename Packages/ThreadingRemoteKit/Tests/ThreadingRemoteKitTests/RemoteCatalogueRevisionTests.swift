@@ -1,4 +1,8 @@
+#if canImport(Compression)
 import Compression
+#else
+import ThreadingRemoteZlib
+#endif
 import Foundation
 import XCTest
 
@@ -94,7 +98,8 @@ final class GzipWriterTests: XCTestCase {
         var inflated = Data(count: count)
         let written = inflated.withUnsafeMutableBytes { destination -> Int in
             deflated.withUnsafeBytes { source -> Int in
-                compression_decode_buffer(
+                #if canImport(Compression)
+                return compression_decode_buffer(
                     destination.bindMemory(to: UInt8.self).baseAddress!,
                     count,
                     source.bindMemory(to: UInt8.self).baseAddress!,
@@ -102,6 +107,18 @@ final class GzipWriterTests: XCTestCase {
                     nil,
                     COMPRESSION_ZLIB
                 )
+                #else
+                var stream = z_stream()
+                guard inflateInit2_(&stream, -MAX_WBITS, ZLIB_VERSION,
+                                    Int32(MemoryLayout<z_stream>.size)) == Z_OK else { return 0 }
+                defer { inflateEnd(&stream) }
+                stream.next_in = UnsafeMutablePointer(mutating: source.bindMemory(to: UInt8.self).baseAddress!)
+                stream.avail_in = uInt(deflated.count)
+                stream.next_out = destination.bindMemory(to: UInt8.self).baseAddress!
+                stream.avail_out = uInt(count)
+                guard ThreadingRemoteZlib.inflate(&stream, Z_FINISH) == Z_STREAM_END else { return 0 }
+                return Int(stream.total_out)
+                #endif
             }
         }
         return inflated.prefix(written)

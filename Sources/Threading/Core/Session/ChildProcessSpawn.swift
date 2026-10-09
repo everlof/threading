@@ -1,4 +1,9 @@
+#if os(Linux)
+import Glibc
+import CNativeAgentProcess
+#else
 import Darwin
+#endif
 import Foundation
 
 // MARK: - Errors
@@ -82,14 +87,14 @@ enum ChildProcessSpawn {
 
         var openedNullDevice: Int32?
         if descriptors.values.contains(.nullDevice) {
-            let descriptor = Darwin.open("/dev/null", O_RDWR | O_CLOEXEC)
+            let descriptor = open("/dev/null", O_RDWR | O_CLOEXEC)
             guard descriptor >= 0 else {
                 throw ChildSpawnError.configurationFailed(code: errno)
             }
             openedNullDevice = descriptor
         }
         defer {
-            if let openedNullDevice { Darwin.close(openedNullDevice) }
+            if let openedNullDevice { close(openedNullDevice) }
         }
         var resolvedDescriptors: [Int32: Int32] = [:]
         resolvedDescriptors.reserveCapacity(descriptors.count)
@@ -108,7 +113,11 @@ enum ChildProcessSpawn {
             throw ChildSpawnError.invalidDescriptorMap
         }
 
+#if os(Linux)
+        var fileActions = posix_spawn_file_actions_t()
+#else
         var fileActions: posix_spawn_file_actions_t?
+#endif
         var result = posix_spawn_file_actions_init(&fileActions)
         guard result == 0 else { throw ChildSpawnError.configurationFailed(code: result) }
         defer { posix_spawn_file_actions_destroy(&fileActions) }
@@ -117,7 +126,11 @@ enum ChildProcessSpawn {
             // The `_np` spelling deliberately: the unsuffixed one arrived in macOS 26 and this
             // app deploys to 13, so the deprecation warning is the price of the only form that
             // exists on the deployment target.
+#if os(Linux)
+            result = threading_spawn_addchdir(&fileActions, workingDirectory.path)
+#else
             result = posix_spawn_file_actions_addchdir_np(&fileActions, workingDirectory.path)
+#endif
             guard result == 0 else { throw ChildSpawnError.configurationFailed(code: result) }
         }
         // A descriptor may legitimately be both a target and a source: test hosts can have a
@@ -129,7 +142,16 @@ enum ChildProcessSpawn {
             guard result == 0 else { throw ChildSpawnError.configurationFailed(code: result) }
         }
 
+#if os(Linux)
+        let targets = resolvedDescriptors.keys.sorted()
+        result = targets.withUnsafeBufferPointer {
+            threading_spawn_close_unmapped(&fileActions, $0.baseAddress, Int32($0.count))
+        }
+        guard result == 0 else { throw ChildSpawnError.configurationFailed(code: result) }
+        var attributes = posix_spawnattr_t()
+#else
         var attributes: posix_spawnattr_t?
+#endif
         result = posix_spawnattr_init(&attributes)
         guard result == 0 else { throw ChildSpawnError.configurationFailed(code: result) }
         defer { posix_spawnattr_destroy(&attributes) }
@@ -157,12 +179,13 @@ enum ChildProcessSpawn {
         sigemptyset(&unblocked)
         result = posix_spawnattr_setsigmask(&attributes, &unblocked)
         guard result == 0 else { throw ChildSpawnError.configurationFailed(code: result) }
+        var flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
+#if !os(Linux)
+        flags |= POSIX_SPAWN_CLOEXEC_DEFAULT
+#endif
         result = posix_spawnattr_setflags(
             &attributes,
-            Int16(
-                POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETPGROUP
-                    | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
-            )
+            Int16(flags)
         )
         guard result == 0 else { throw ChildSpawnError.configurationFailed(code: result) }
 
@@ -275,18 +298,30 @@ final class SpawnedChildProcess: @unchecked Sendable {
     )
     private let lock = NSLock()
     private let exited = DispatchSemaphore(value: 0)
-    private var source: DispatchSourceProcess?
+    private var source: (any DispatchSourceProtocol)?
     private var exitStatus: Int32?
     private var exitHandler: ((Int32) -> Void)?
 
     init(processIdentifier: pid_t) {
         self.processIdentifier = processIdentifier
 
+#if os(Linux)
+        let descriptor = threading_child_pidfd(processIdentifier)
+        guard descriptor >= 0 else {
+            // A kernel without pidfd support or an exhausted descriptor budget still needs
+            // exactly one reap. This child's own queue is the only blocking fallback owner.
+            exitQueue.async { self.reap() }
+            return
+        }
+        let source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: exitQueue)
+        source.setCancelHandler { _ = Glibc.close(descriptor) }
+#else
         let source = DispatchSource.makeProcessSource(
             identifier: processIdentifier,
             eventMask: .exit,
             queue: exitQueue
         )
+#endif
         self.source = source
         // Strongly, deliberately: a supervisor released before its child exits would otherwise
         // leave a zombie nobody can reap, because the pid is only waitable by this process. The
@@ -319,11 +354,19 @@ final class SpawnedChildProcess: @unchecked Sendable {
         // Negative pid means the whole process group. Do not guard on the leader still running:
         // a descendant can remain in the group after the leader exits, and that is exactly the
         // lifecycle leak this supervisor exists to prevent.
+#if os(Linux)
+        Glibc.kill(-processIdentifier, SIGTERM)
+#else
         Darwin.kill(-processIdentifier, SIGTERM)
+#endif
     }
 
     func kill() {
+#if os(Linux)
+        Glibc.kill(-processIdentifier, SIGKILL)
+#else
         Darwin.kill(-processIdentifier, SIGKILL)
+#endif
     }
 
     func observeExit(_ handler: ((Int32) -> Void)?) {
@@ -345,7 +388,9 @@ final class SpawnedChildProcess: @unchecked Sendable {
     private func reap() {
         var raw: Int32 = 0
         var status: Int32 = 0
-        if waitpid(processIdentifier, &raw, 0) == processIdentifier {
+        var reaped: pid_t
+        repeat { reaped = waitpid(processIdentifier, &raw, 0) } while reaped < 0 && errno == EINTR
+        if reaped == processIdentifier {
             // Report a signalled death the way a shell does, so callers comparing against a
             // `Process`-backed child see the same number for the same outcome.
             status = waitStatus(raw) == 0
@@ -563,9 +608,9 @@ enum BoundedChildProcess {
         outputPipe: ChildPipe
     ) -> [Int32: ChildDescriptorSource] {
         return [
-            AgentChildProcessDefaults.standardInputDescriptor: .nullDevice,
-            AgentChildProcessDefaults.standardOutputDescriptor: .inherited(outputPipe.writeEnd),
-            AgentChildProcessDefaults.standardErrorDescriptor:
+            STDIN_FILENO: .nullDevice,
+            STDOUT_FILENO: .inherited(outputPipe.writeEnd),
+            STDERR_FILENO:
                 output == .merged ? .inherited(outputPipe.writeEnd) : .nullDevice
         ]
     }

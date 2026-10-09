@@ -1149,7 +1149,7 @@ final class CodexStreamSession:
         }
 
         Task { @MainActor [weak self] in
-            PermissionBroker.decide(request) { decision in
+            ConversationPermissionDecision.decide(request) { decision in
                 guard let self else { return }
                 self.answerApproval(
                     id: id,

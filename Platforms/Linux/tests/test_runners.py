@@ -182,7 +182,7 @@ done''')
         self.command("swift", '''if [[ "$*" == "build -c release --show-bin-path" ]]; then
     printf '%s\\n' "$RUNNER_CONTRACT_BIN"
 fi''')
-        self.command("timeout", '[[ "$1" == 30 || "$1" == 120 ]] || exit 91; shift; exec "$@"')
+        self.command("timeout", '[[ "$1" == 30 || "$1" == 60 || "$1" == 120 ]] || exit 91; shift; exec "$@"')
         self.write(self.spike / "package-app.sh", 'touch "$RUNNER_FIXTURE_ROOT/packaged"')
         # The build gate now runs all three packaged row-layout fixtures before the daemon
         # contracts. Keep those invocations in this mock so it reaches the cleanup assertion.
@@ -225,6 +225,9 @@ while True:
 ''')
         daemon.chmod(0o755)
         self.write(contract_bin / "CoreSliceHarness", "exit 0")
+        self.write(contract_bin / "NativeAgentProcessHarness", "exit 0")
+        self.write(contract_bin / "NativeConversationHarness", "exit 0")
+        self.write(contract_bin / "NativeRemoteContractHarness", "exit 0")
         self.write(contract_bin / "TableHeightHarness", "exit 0")
         self.write(contract_bin / "OutlineViewHarness", "exit 0")
         self.write(contract_bin / "PriorityLayoutHarness", "exit 0")

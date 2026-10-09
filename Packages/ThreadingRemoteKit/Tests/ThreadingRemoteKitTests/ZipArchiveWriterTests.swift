@@ -30,8 +30,8 @@ final class ZipArchiveWriterTests: XCTestCase {
         )
     }
 
-    #if os(macOS)
-    func testArchiveCanBeExpandedByTheSystemUnzip() throws {
+    #if os(macOS) || os(Linux)
+    func testArchiveCanBeExpandedByTheSystemUnzip() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let archiveURL = root.appendingPathComponent("report.zip")
@@ -40,29 +40,35 @@ final class ZipArchiveWriterTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let diagnostics = Data("{\"status\":\"ready\"}".utf8)
-        let description = Data("The screen froze".utf8)
+        let description = Data(String(repeating: "日本語 🧵 diagnostics\n", count: 4096).utf8)
         let archive = try ZipArchiveWriter.archive(
             [
                 .init(path: "diagnostics.json", data: diagnostics),
-                .init(path: "description.txt", data: description),
+                .init(path: "日本語.txt", data: description),
             ],
             modified: Date(timeIntervalSince1970: 1_700_000_000)
         )
+        XCTAssertLessThan(archive.count, description.count)
         try archive.write(to: archiveURL)
 
         let unzip = Process()
         unzip.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
         unzip.arguments = ["-qq", archiveURL.path, "-d", expandedURL.path]
-        try unzip.run()
-        unzip.waitUntilExit()
-
-        XCTAssertEqual(unzip.terminationStatus, 0)
+        let status: Int32 = try await withCheckedThrowingContinuation { continuation in
+            unzip.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
+            do { try unzip.run() }
+            catch {
+                unzip.terminationHandler = nil
+                continuation.resume(throwing: error)
+            }
+        }
+        XCTAssertEqual(status, 0)
         XCTAssertEqual(
             try Data(contentsOf: expandedURL.appendingPathComponent("diagnostics.json")),
             diagnostics
         )
         XCTAssertEqual(
-            try Data(contentsOf: expandedURL.appendingPathComponent("description.txt")),
+            try Data(contentsOf: expandedURL.appendingPathComponent("日本語.txt")),
             description
         )
     }

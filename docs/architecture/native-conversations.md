@@ -99,6 +99,14 @@ The third leg is one runtime and two values: `ACPStreamSession` speaks the proto
 `ACPProviderProfile` carries whatever a particular CLI does differently. `.grok` and `.cursor`
 are the profiles that exist today, and the transport cannot tell them apart.
 
+The Linux CoreSlice compiles these production classes and their lifecycle, replay and execution
+adapters. Pure transcript readers and launch values are separate from host account lookup,
+permission presentation and MCP catalogue admission. The Mac keeps its existing host policy;
+Linux denies permissions and exposes no MCP tools until its host supplies those boundaries.
+Deterministic peers exercise two turns, Unicode, permission replies and exactly one exit both
+locally and through the real Linux daemon. This is transport evidence: the ordinary Linux
+workspace still needs the conversation controller, callback delivery, composer and launch plans.
+
 Codex native rendering uses the CLI's **app-server**, not the one-shot `codex exec --json`
 surface. `CodexStreamSession` launches one `codex app-server --listen stdio://` process,
 performs the `initialize` / `initialized` handshake, then calls `thread/start` or

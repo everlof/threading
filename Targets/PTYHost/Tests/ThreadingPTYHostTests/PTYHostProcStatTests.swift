@@ -1,4 +1,5 @@
 import XCTest
+import ThreadingPTYHostKit
 @testable import ThreadingPTYHost
 
 /// The Linux start time is two numbers read out of kernel text, and the text has one trap: the

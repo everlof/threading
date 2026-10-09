@@ -1,4 +1,8 @@
+#if os(Linux)
+import Glibc
+#else
 import Darwin
+#endif
 import Foundation
 
 // MARK: - Agent Child Owner
@@ -192,7 +196,7 @@ final class AgentChildLedger: @unchecked Sendable {
         sessionID: String?,
         executable: String
     ) -> LiveChildEnrollmentResult {
-        guard let startTime = ProcessUtility.startTime(forPid: child.processIdentifier) else {
+        guard let startTime = ProcessStartTime.read(forPid: child.processIdentifier) else {
             return .identityUnavailable
         }
         let record = AgentChildRecord(

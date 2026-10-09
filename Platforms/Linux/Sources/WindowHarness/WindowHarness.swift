@@ -517,6 +517,10 @@ struct WindowHarness {
             try await AppEventContract.run()
             return
         }
+        if mode == "--ui-worker-contract" {
+            try NativeUIWorkerContract.run()
+            return
+        }
         if mode == "--stream-ui-fixture" {
             let args = Array(CommandLine.arguments.dropFirst(2))
             guard args.count >= 2 else {
@@ -1493,6 +1497,8 @@ struct WindowHarness {
         }
         trace("open.end")
         defer { tw_close(window) }
+        let uiWork = NativeUIWorkLoop(window: window)
+        defer { uiWork.close() }
         NativeCursorBoundary.install(for: window)
         defer { NativeCursorBoundary.uninstall() }
         // The raster surface is two device pixels per AppKit point. Keep one content owner and
@@ -2471,6 +2477,7 @@ struct WindowHarness {
                     projectID: projects[selected].id, id: id, projectIndex: selected, childIndex: row))
         }
         while true {
+            if uiWork.drain() { dirty = true }
             if let gate = pendingOpenInCatalogue, let catalogue = gate.take() {
                 pendingOpenInCatalogue = nil
                 openInCatalogue = catalogue
@@ -3163,6 +3170,7 @@ struct WindowHarness {
                     throw WindowFailure(String(cString: tw_error()))
                 }
             }
+            if event.kind == 52 { continue }
             trace("event kind=\(event.kind) action=\(event.action)")
             let windowIsKey = tw_window_has_focus(window) != 0
             if contentWindow.isKeyWindow != windowIsKey {

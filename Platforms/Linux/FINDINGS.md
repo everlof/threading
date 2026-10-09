@@ -5839,3 +5839,113 @@ The pre-commit `scripts/test.sh all` attempt completed 10,522 Mac tests with 92 
 failure: the already documented Component Gallery catalogue gap from §179. No additional Mac
 failure appeared. The runner skips its iOS lane after a Mac failure, so iOS was not rerun for
 this checkpoint; the preceding clean-rebase iOS result remains the most recent evidence.
+
+## 182. Complete-text delivery in the ordinary native workspace
+
+The preceding complete-label integration could settle in the asynchronous document fixture,
+but ordinary `WindowHarness.show` occupies MainActor in SDL's blocking wait. Scheduling only
+a MainActor task there leaves complete-text metrics and pixels queued until some later event.
+The shipping workspace now installs `NativeUIWorkLoop`: a serial complete-text worker queues
+one receipt, pushes an SDL custom wake, and waits until the UI owner drains that receipt. The
+owner drains before deciding whether to paint another frame. A completed receipt owes a frame;
+ordinary idle waits and the existing runtime/deadline polling policy remain unchanged.
+
+`NSWindowWorkerDelivery` enforces one pending receipt. The worker cannot outrun the UI with
+MainActor tasks; its existing 64 latest-label pending jobs and source/viewport retention budgets
+still apply. A wake captures an event type and window generation, never a window pointer.
+Expired generations are ignored, and teardown drains a pending receipt before removing the
+native host. Standalone shim contracts keep their ordinary MainActor fallback.
+The native send is the thread-safe custom-event path documented by
+[SDL_PushEvent](https://wiki.libsdl.org/SDL2/SDL_PushEvent).
+
+`--ui-worker-contract` deliberately holds MainActor in the native wait while complete metrics
+and viewport pixels arrive, observes display invalidation and rejects a stale window wake.
+Its first assertion accidentally required a wake to be observed before the receipt became ready:
+a startup expose can drain that receipt first. The contract now waits for both facts. The stale
+wake check uses the real token from that closed window against a fresh window, accepting normal
+expose/focus events while rejecting any admitted worker wake. It belongs to the installed runtime
+lane, so it executes without a Swift toolchain.
+
+This delivery boundary currently serves complete selectable plain labels. It does not make
+other MainActor task sources run inside the synchronous workspace, nor connect full native
+conversation transports/controller, attributed long text or semantic reading anchors.
+
+The final static Release build passes the native worker and complete-label contracts. The
+entire rebuilt package/archive runtime suite passed in fresh Swift-free Ubuntu 24.04 arm64,
+including the installed worker contract, cached navigator during terminal output, blocked
+persistence/input, native project actions, long-message expansion/copy, stream rendering,
+provider rows, a 5,100-project outline, saved-terminal recovery, live reinstall and desktop launch.
+Evidence is in `out/bundle-smoke/ui-worker.ah8qvWjU`; the resized workspace and dark expanded
+user-message tail screenshots were inspected. The package manifest records
+`b536e6a013fdeea70a77bfd3c3ddbae09f9eff6a` plus `source_dirty=true`; its Debian SHA-256 is
+`34352c322f6f9580da069b8fd91e2dfe5e88fe18523a27b9bf5ab91f15b17505`.
+Runner failure contracts (12), theme boundaries and main-actor latency gates pass. This checkpoint
+changes only the Linux host/shim; the Mac/iOS suites were not repeated.
+
+## 183. Shared native conversation transports compile and run on Linux
+
+The CoreSlice manifest now includes the production Claude, Codex app-server and ACP sessions,
+provider adapters, lifecycle ownership, transcript replay and execution audit. All 123 files are
+copied from shipping sources without Linux-only replacement models. Foundation-only values and
+readers were separated from host account lookup, session presentation and MCP registry ownership;
+the Mac keeps those host conveniences and its existing permission broker.
+
+`ChildProcessSpawn` now uses Linux posix_spawn actions, an exact descriptor allowlist, process
+start identities shared with the daemon, and pidfd exit observation. The fallback still has one
+waitpid owner. Native pipe writes suppress only their own thread's SIGPIPE, preserve an already
+pending signal and restore the caller's mask. Hosted output uses a nonblocking writer with partial
+progress, the link's existing byte admission budget and a five-second close backstop. Empty writes
+settle without closing the pipe. The standalone child contracts check inherited descriptor refusal,
+Unicode environment/cwd, process-group termination, 100 immediate children without double reaping
+or pidfd leaks, bounded output/deadlines, queued partial writes through EOF, EPIPE and pipe cleanup.
+
+`NativeConversationHarness` runs the actual four provider profiles against deterministic protocol
+peers, both as local children and through the real packaged background daemon. Each completes two
+Unicode turns in one process, checks durable ownership and exactly one EOF exit, and verifies Codex
+permission denial followed by an explicit host approval. These tests need no provider credentials
+or network service. Permission presentation and MCP admission remain host-owned: an unwired Linux
+permission host denies, and an unwired MCP catalogue admits no tools. No new extension authority or
+public customization surface was added.
+
+The shared remote package uses Swift Crypto 5.0.0 on Linux, Foundation geometry and raw zlib
+DEFLATE for ZIP/gzip. Apple Security's URLSession trust adapter stays Apple-only; the portable pin
+decision fails closed but is not a Linux TLS client implementation. Independent Python readers
+validate compressed Unicode ZIP/gzip, and the native remote contract checks recipient-only secret
+opening and tamper rejection. The package includes the Swift Crypto license/notice and BoringSSL's
+license from its recorded source revision. The first Swift-free install caught missing libcurl;
+the Debian dependency list now declares libcurl, zlib and the C++ runtime explicitly.
+
+Focused Mac lifecycle/replay/permission/ACP regression tests passed (141), as did the complete
+remote-kit suite (276) and PTY-kit suite (81). Linux PTY-kit tests passed (81); Linux remote-kit tests
+passed (276) using the repository's existing XCTest watchdog, with seven diagnosed upstream
+setUp/tearDown deadlock retries. The watchdog also correctly refused a distinct real hang in the
+new Linux unzip integration test's blocking Process.waitUntilExit. Awaiting its termination callback
+fixed that test on both platforms; it is not handled as a watchdog retry. The native static
+transport, child and remote contracts all pass and are included in the canonical bundle build lane.
+
+The ordinary workspace still needs native conversation callback delivery, composer/permission
+presentation and provider launch-plan integration. The existing stream document fixture retains
+its narrower transport path. Long attributed text and the full conversation controller are also
+open; this checkpoint does not claim that the native transports are mounted in the workspace.
+
+The rebuilt Debian package/archive passed the entire fresh Swift-free Ubuntu runtime suite in
+`out/bundle-smoke/native-ports.mGoif907`. The resized workspace and expanded dark user-message
+screenshots were inspected. Its manifest records `b536e6a013fdeea70a77bfd3c3ddbae09f9eff6a` with
+`source_dirty=true`; Debian SHA-256 is
+`82bc11cb1b58e7acb5b82ac9a38454eb9eb4dffdcf9de7af6c4cead18fc170bc`.
+All 123 core copies and the 12 runner failure contracts pass. The verifier now parses its manifest
+once when checking unrecorded files instead of launching a full manifest pipeline per file.
+
+The required pre-commit `scripts/test.sh all` completed 10,522 Mac tests with 89 skips and one
+failure: the already documented Component Gallery catalogue gap, now listing nine components.
+No additional failure appeared. This failure prevented the runner's iOS stage; iOS was not rerun
+at this checkpoint. Native conversation UI integration remains open as stated above.
+
+The branch was then rebased onto master's session-name-history and invitation-fragment fixes.
+The two affected CoreSlice copies were refreshed. Post-rebase verification passed the full core
+contract harness, all four local native conversation profiles, the static WindowHarness build,
+the native worker wake contract and the three shared navigator row-layout contracts. Focused Mac
+session-history, sharing, lifecycle and ACP tests passed (69), and the updated remote package's
+Mac suite passed (277). The full installed UI evidence above predates this rebase; the rebuilt
+window and focused contracts are the post-rebase evidence. The full Mac/iOS lane was not repeated
+for these upstream changes.

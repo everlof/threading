@@ -12,8 +12,8 @@ extension ChartSpec {
     /// somewhere else. Anything malformed returns nil and stays an ordinary tool row: the panel
     /// is the surface that refuses a bad call, and the transcript must not refuse it twice.
     static func decoded(fromToolNamed name: String, input: [String: Any]) -> ChartSpec? {
-        guard name == MCPDefaults.allowedToolName(MCPBuiltInTool.displayChart.rawValue)
-            || name == MCPBuiltInTool.displayChart.rawValue
+        guard name == MCPToolNaming.allowedToolName(MCPToolNaming.displayChart)
+            || name == MCPToolNaming.displayChart
         else { return nil }
 
         // `series` stays all-or-nothing, and the `count` check further down already says so out

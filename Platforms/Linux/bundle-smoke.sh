@@ -28,7 +28,7 @@ docker run --rm -i --platform linux/arm64 \
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC
 apt-get update -qq >/dev/null
-apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev libglib2.0-dev libgdk-pixbuf-2.0-dev librsvg2-common >/dev/null
+apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev libglib2.0-dev libgdk-pixbuf-2.0-dev librsvg2-common zlib1g-dev python3 >/dev/null
 ./package-app.sh
 clang -shared -fPIC -Wall -Wextra -Werror tests/gtk_present_delay.c -ldl -o out/gtk-present-delay.so
 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --project-row-layout-fixture
@@ -36,6 +36,9 @@ out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --session-row-la
 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --terminal-row-layout-fixture
 timeout 120 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --app-event-contract
 # Exercise the same Release emulator/client modules before leaving the build container.
+swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product NativeAgentProcessHarness
+swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product NativeConversationHarness
+swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product NativeRemoteContractHarness
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product CoreSliceHarness
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product PortablePTYClientHarness
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product TableHeightHarness
@@ -45,6 +48,9 @@ swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product 
 swift build -c release --product ParagraphWrappingHarness
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product CompleteLabelHarness
 contract_bin=$(swift build -c release --show-bin-path)
+timeout 60 "$contract_bin/NativeAgentProcessHarness"
+timeout 60 "$contract_bin/NativeConversationHarness" tests/native_conversation/providers.py
+timeout 60 "$contract_bin/NativeRemoteContractHarness"
 timeout 120 "$contract_bin/CoreSliceHarness"
 timeout 120 "$contract_bin/TableHeightHarness"
 timeout 120 "$contract_bin/OutlineViewHarness"
@@ -63,10 +69,15 @@ for ((attempt=0; attempt<100; attempt++)); do
   sleep .1
 done
 timeout 30 "$contract_bin/PortablePTYClientHarness" "$contract_fixture/pty.sock"
+timeout 60 "$contract_bin/NativeConversationHarness" tests/native_conversation/providers.py "$contract_fixture/pty.sock"
 clang -O2 -Wall -Wextra -Werror tests/document_text_contract.c \
   Sources/AppKitTextBridge/DocumentText.c -I Sources/AppKitTextBridge/include \
   $(pkg-config --cflags --libs pangocairo) -pthread -lm -o "$contract_fixture/document-text-contract"
 timeout 120 "$contract_fixture/document-text-contract"
+clang -O2 -Wall -Wextra -Werror tests/native_agent_process/pipe_write_contract.c \
+  Sources/CNativeAgentProcess/NativeAgentProcess.c -I Sources/CNativeAgentProcess/include \
+  -pthread -o "$contract_fixture/native-pipe-contract"
+timeout 30 "$contract_fixture/native-pipe-contract"
 # Run the cleanup trap without depending on the container CLI forwarding stdin EOF.
 exit 0
 BUILD

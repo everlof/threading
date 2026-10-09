@@ -3693,7 +3693,7 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .displayChart,
-      name: "display_chart",
+      name: MCPToolNaming.displayChart,
       groupID: "display",
       family: .display,
       annotations: MCPToolAnnotations(

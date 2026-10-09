@@ -20,17 +20,6 @@ import ThreadingPTYHostKit
 /// a capability earns a member only when the difference is a *static fact about the runtime* —
 /// refuses it. Host-backing is a fact about the surface, and the surface clamp is the
 /// `TerminalInstanceIdentity` check below.
-struct PTYHostLaunchError: LocalizedError, Equatable, Sendable {
-    let cause: String
-
-    var errorDescription: String? {
-        L10n.string(
-            "The background session host is unavailable. Threading kept this session stopped "
-                + "so it would not be interrupted when the app closes."
-        )
-    }
-}
-
 enum PTYHostLaunchRoute: Sendable {
     /// Hosting was not selected for this surface.
     case local

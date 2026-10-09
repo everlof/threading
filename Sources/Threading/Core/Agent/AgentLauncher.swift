@@ -1554,16 +1554,3 @@ enum AgentLauncher {
     }
 
 }
-
-// Host environment resolution stays outside the portable command-plan value.
-extension AgentLaunchPlan {
-    /// The environment this plan's child is spawned with: the shared one, then this plan's own
-    /// entries on top, then its credentials.
-    func launchEnvironment() -> [String: String] {
-        var environment = baseEnvironment ?? AgentEnvironment.launchEnvironment()
-        for (key, value) in environmentOverrides {
-            environment[key] = value
-        }
-        return credentialEnvironment.applied(to: environment)
-    }
-}

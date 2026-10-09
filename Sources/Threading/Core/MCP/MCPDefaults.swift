@@ -8,7 +8,7 @@ import Foundation
 /// in the side panel rather than naming a file path the terminal cannot render.
 enum MCPDefaults {
     /// The server name agents see. Tool names derive from it: `mcp__threading__display_image`.
-    static let serverName = "threading"
+    static let serverName = MCPToolNaming.serverName
     static let serverVersion = "0.1.0"
 
     /// Spoken when a client offers no version of its own.
@@ -295,7 +295,7 @@ enum MCPDefaults {
 
     /// The full Claude-side name of one tool.
     static func allowedToolName(_ tool: String) -> String {
-        "mcp__\(serverName)__\(tool)"
+        MCPToolNaming.allowedToolName(tool)
     }
 
     /// Claude's exact preapproval argument for the tools this session will actually receive.

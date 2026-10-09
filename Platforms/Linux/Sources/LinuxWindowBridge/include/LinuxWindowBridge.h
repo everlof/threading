@@ -27,6 +27,11 @@ int tw_external_app_icon(const char *hint, uint8_t *rgba, int capacity,
                          int *width, int *height);
 
 typedef struct TWWindow TWWindow;
+// Immutable wake identity contains no window pointer. Capture it on the owning UI thread;
+// a bounded worker can push a wake safely. Kind52 asks the owner to drain UI work. Old window
+// generations cannot wake a replacement window, even if SDL reuses its event type.
+uint64_t tw_worker_wake_identity(TWWindow *window);
+int tw_worker_wake(uint64_t identity);
 // 1 repaint/resize, 2 project click (action=1 for AT-SPI select, key=validated visible slot),
 // 3/4 project navigation, 5 window quit. For 3/4, action=0 is an arrow key and action=1
 // is a sidebar wheel turn; keep those origins distinct when routing through responders.

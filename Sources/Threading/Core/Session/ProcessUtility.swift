@@ -16,18 +16,6 @@ struct ProcessResourceUsage {
     let memoryBytes: UInt64  // Physical memory footprint
 }
 
-/// When the kernel started a process, to the microsecond.
-///
-/// A pid on its own does not identify a process across a crash: macOS hands pids out again, so
-/// anything that acts on a recorded pid — the live-children ledger's startup sweep, above all —
-/// would otherwise signal whatever now holds that number. The start time is the other half of
-/// the identity, and it is the pair `ps` itself uses. Seconds alone are not enough: two
-/// processes started in the same second are common at launch.
-struct ProcessStartTime: Equatable, Codable, Sendable {
-    let seconds: UInt64
-    let microseconds: UInt64
-}
-
 /// How the kernel reports a process's run state, reduced to the two answers the info panel can
 /// stand behind. Everything that is not stopped — running, sleeping in a syscall, idle — reads
 /// as `.running`, because "asleep in `select`" and "burning a core" are the same answer to "is
@@ -262,17 +250,7 @@ enum ProcessUtility {
     /// handed out again before the child is reaped, so the worst case is a nil that fails
     /// closed, never a reading taken from a stranger's process.
     static func startTime(forPid pid: pid_t) -> ProcessStartTime? {
-        guard pid > 0 else { return nil }
-
-        var taskInfo = proc_bsdinfo()
-        let size = MemoryLayout<proc_bsdinfo>.size
-        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &taskInfo, Int32(size)) == size,
-              taskInfo.pbi_start_tvsec > 0 else { return nil }
-
-        return ProcessStartTime(
-            seconds: UInt64(taskInfo.pbi_start_tvsec),
-            microseconds: UInt64(taskInfo.pbi_start_tvusec)
-        )
+        ProcessStartTime.read(forPid: pid)
     }
 
     /// Checks if a process with the given PID exists.

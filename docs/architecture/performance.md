@@ -1653,6 +1653,13 @@ recipe/sequence deliveries cannot install pixels. Copy and keyboard commands pre
 keyboard backlog and semantic reading-anchor preservation across width changes remain work.
 `CompleteLabelHarness` covers full head/tail, Unicode selection, rapid widths and re-expansion.
 The installed user-bubble journey covers worker-driven repaint and automatic row height.
+The ordinary Linux workspace also installs a worker-delivery boundary: the serial complete-text
+worker owes at most one UI receipt and waits for it before preparing another job. SDL receives
+a thread-safe custom wake with an immutable window generation, and the owning loop drains the
+receipt before its next frame. No idle polling timer is added. The installed native worker
+contract holds MainActor inside SDL's wait while metrics/pixels arrive, then rejects a stale
+window wake. This boundary serves the complete-text lane; other MainActor task sources remain
+separate host integration work.
 Attributed labels remain bounded; this does not establish full transcript scalability.
 
 Profiling should confirm an architecture, not be the first time its scaling boundary is named.

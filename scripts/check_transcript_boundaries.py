@@ -16,7 +16,7 @@ STORAGE_OWNERS = {
 LOCATION_OWNERS = {
     "Core/Agent/ClaudeTranscriptLocations.swift",  # bounded location state
     "Core/Agent/AgentRuntime.swift",  # hooks, discard and observation ownership
-    "Core/Agent/SessionTranscript.swift",  # one source selection decision
+    "Core/Agent/SessionTranscript+Host.swift",  # host-owned source selection decision
 }
 
 

@@ -1,4 +1,6 @@
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 import Foundation
 
 /// The Codable wire types exchanged with a remote client. Shared between the macOS server and

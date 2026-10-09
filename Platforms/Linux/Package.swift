@@ -1,11 +1,12 @@
 // swift-tools-version:6.0
 import PackageDescription
 
-// Maintained Linux preview package. The AppKit-named module lets selected unchanged Threading
+// Maintained Linux preview package, including the shared native stream transports. The AppKit-named module lets selected unchanged Threading
 // sources compile on Linux; see README.md for the current host and compatibility boundaries.
 let package = Package(
     name: "LinuxAppKitSpike",
     dependencies: [
+        .package(url: "https://github.com/apple/swift-crypto.git", exact: "5.0.0"),
         // The exact NativeDiffCore revision resolved by the shipping Xcode project.
         .package(url: "https://github.com/everlof/NativeDiffKit.git",
                  revision: "363c6197d8e334fa0aaf30550fb0a0bcac540e71"),
@@ -13,6 +14,7 @@ let package = Package(
         // check keeps it Foundation-only, so building it here is the cheapest available test of
         // that claim on a platform it has never been compiled for.
         .package(path: "../../Packages/ThreadingDomain"),
+        .package(path: "../../Packages/ThreadingRemoteKit"),
         .package(path: "../../Packages/ThreadingUsage"),
         .package(path: "../../Packages/ThreadingPTYHostKit"),
         .package(path: "../../Packages/ThreadingPTYClient"),
@@ -22,6 +24,7 @@ let package = Package(
         .target(name: "AppKit", dependencies: [
             .target(name: "AppKitTextBridge", condition: .when(platforms: [.linux]))]),
         .target(name: "CoreText"),
+        .target(name: "CNativeAgentProcess"),
         // Exact shared Markdown package sources, compiled against this host AppKit module.
         .target(name: "ThreadingMarkdownKit", dependencies: ["AppKit"]),
         // Exact upstream renderer, with the AppKit shim made an explicit dependency. The
@@ -62,7 +65,12 @@ let package = Package(
         .target(name: "OSLog"),
         .target(
             name: "CoreSlice",
-            dependencies: ["SQLite3", "OSLog", .product(name: "ThreadingDomain", package: "ThreadingDomain"),
+            dependencies: ["SQLite3", "OSLog",
+                .target(name: "CNativeAgentProcess", condition: .when(platforms: [.linux])),
+                .product(name: "ThreadingDomain", package: "ThreadingDomain"),
+                .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+                .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient"),
+                .product(name: "ThreadingRemoteKit", package: "ThreadingRemoteKit"),
                 .product(name: "ThreadingUsage", package: "ThreadingUsage"),
                 .product(name: "NativeDiffCore", package: "NativeDiffKit"),
                 .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit")],
@@ -74,6 +82,16 @@ let package = Package(
         ),
         .executableTarget(name: "CoreSliceHarness", dependencies: ["CoreSlice",
             .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient")]),
+        .executableTarget(name: "NativeRemoteContractHarness", dependencies: ["CoreSlice",
+            .product(name: "Crypto", package: "swift-crypto"),
+            .product(name: "ThreadingRemoteKit", package: "ThreadingRemoteKit")],
+            path: "tests/native_remote_contract"),
+        .executableTarget(name: "NativeConversationHarness", dependencies: ["CoreSlice",
+            .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient"),
+            .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit")],
+            path: "tests/native_conversation", exclude: ["providers.py"]),
+        .executableTarget(name: "NativeAgentProcessHarness", dependencies: ["CoreSlice"],
+            path: "tests/native_agent_process", exclude: ["pipe_write_contract.c"]),
         .target(name: "TerminalRuntime", dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm")]),
         .executableTarget(name: "PortablePTYClientHarness", dependencies: ["CoreSlice", "TerminalRuntime",
             .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient"),

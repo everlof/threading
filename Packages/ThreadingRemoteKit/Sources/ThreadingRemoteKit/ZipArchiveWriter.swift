@@ -1,7 +1,6 @@
-import Compression
 import Foundation
 
-/// Writes a small, standards-compatible ZIP archive in memory on macOS and iOS.
+/// Writes a small, standards-compatible ZIP archive in memory.
 ///
 /// Deliberately not general-purpose: there is no Zip64, encryption, directory entry, or reader.
 /// Every field that the classic ZIP format stores as a 16- or 32-bit value is checked before it
@@ -141,33 +140,8 @@ public enum ZipArchiveWriter {
     // MARK: - Private Methods
 
     private static func compress(_ data: Data) -> (bytes: Data, method: UInt16) {
-        guard !data.isEmpty else { return (data, Format.stored) }
-
-        let capacity = data.count
-        var deflated = Data(count: capacity)
-        let written = deflated.withUnsafeMutableBytes { destination -> Int in
-            guard let destinationBase = destination.bindMemory(to: UInt8.self).baseAddress else {
-                return 0
-            }
-            return data.withUnsafeBytes { source -> Int in
-                guard let sourceBase = source.bindMemory(to: UInt8.self).baseAddress else {
-                    return 0
-                }
-                // `COMPRESSION_ZLIB` produces the raw DEFLATE stream required by ZIP method 8.
-                return compression_encode_buffer(
-                    destinationBase,
-                    capacity,
-                    sourceBase,
-                    data.count,
-                    nil,
-                    COMPRESSION_ZLIB
-                )
-            }
-        }
-
-        guard written > 0, written < data.count else { return (data, Format.stored) }
-        deflated.removeSubrange(written...)
-        return (deflated, Format.deflated)
+        guard let bytes = RawDeflate.compress(data) else { return (data, Format.stored) }
+        return (bytes, Format.deflated)
     }
 
     private static func sanitize(_ path: String) -> String {

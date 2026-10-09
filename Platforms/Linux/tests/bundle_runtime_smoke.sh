@@ -21,6 +21,11 @@ test -f /usr/share/icons/hicolor/1024x1024/apps/threading-linux-preview.png
 dpkg-query -W -f='${Status}\n' threading-linux-preview | grep -Fxq 'install ok installed'
 tar -xzf /archive.tar.gz -C /tmp
 bundle=/tmp/threading-linux-preview-ubuntu24.04-arm64
+for root in "$bundle" "$installed"; do
+  for license in LICENSE.txt NOTICE.txt BoringSSL-LICENSE; do
+    test -s "$root/licenses/swift-crypto/$license"
+  done
+done
 grep -Eq '^source_revision=[0-9a-f]{40,64}$' "$bundle/BUNDLE-MANIFEST"
 grep -Eq '^source_dirty=(true|false)$' "$bundle/BUNDLE-MANIFEST"
 for executable in "$bundle/bin/WindowHarness" "$bundle/bin/LinuxHost" "$bundle/bin/threading-ptyd"; do
@@ -144,6 +149,7 @@ dbus-run-session -- python3 /diff_ui_smoke.py "$bin/WindowHarness" /evidence/res
 dbus-run-session -- python3 /stream_conversation_smoke.py "$bin/WindowHarness" /stream_agent_fixture.py \
   /evidence/restart-out/stream
 timeout 15 "$bin/WindowHarness" --app-event-contract
+timeout 30 "$bin/WindowHarness" --ui-worker-contract
 dbus-run-session -- python3 /composer_account_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/composer-account.sock" "$fixture" \
   /evidence/restart-out/composer-account

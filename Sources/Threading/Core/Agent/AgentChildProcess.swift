@@ -1,4 +1,8 @@
+#if os(Linux)
+import Glibc
+#else
 import Darwin
+#endif
 import Foundation
 import ThreadingPTYClient
 import ThreadingPTYHostKit
@@ -124,11 +128,13 @@ final class AgentChildProcess {
         // write, or between any two later writes. This descriptor is the shared ownership
         // boundary for ACP, Codex and Claude, so make a closed reader an ordinary EPIPE error
         // here rather than letting any one transport terminate Threading with SIGPIPE.
+#if !os(Linux)
         guard fcntl(inputPipe.writeEnd, F_SETNOSIGPIPE, 1) != -1 else {
             let code = errno
             inputPipe.closeBothEnds()
             throw AgentChildInputError.noSignalProtectionFailed(code: code)
         }
+#endif
         let outputPipe = try ChildPipe(closingOnFailure: [inputPipe])
         let errorPipe = try ChildPipe(closingOnFailure: [inputPipe, outputPipe])
 
@@ -294,13 +300,13 @@ final class AgentChildProcess {
         link.adopt(transport)
 
         // Adopted before the spawn, so no output frame can arrive with nowhere to go.
-        link.adoptDescriptors(
-            input: pipes.input.takeReadDescriptor(),
-            output: pipes.output.takeWriteDescriptor(),
-            error: pipes.errors.takeWriteDescriptor()
-        )
-
         do {
+            try link.adoptDescriptors(
+                input: pipes.input.takeReadDescriptor(),
+                output: pipes.output.takeWriteDescriptor(),
+                error: pipes.errors.takeWriteDescriptor()
+            )
+
             try link.spawn(PTYHostSpawnRequest(
                 id: plan.identity,
                 channel: .pipes,
@@ -465,10 +471,12 @@ private final class HostPipes {
         // end: the child may exit between any two of a transport's writes, and once it has, the
         // link closes its read end so a write is an ordinary `EPIPE` error rather than a signal
         // that ends Threading.
+#if !os(Linux)
         guard fcntl(input.writeEnd, F_SETNOSIGPIPE, 1) != -1 else {
             input.closeBothEnds()
             return nil
         }
+#endif
         guard let output = try? ChildPipe(closingOnFailure: [input]),
               let errors = try? ChildPipe(closingOnFailure: [input, output]) else { return nil }
         self.input = input

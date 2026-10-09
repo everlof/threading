@@ -300,7 +300,7 @@ final class CompletePlainTextWorker: @unchecked Sendable {
                 cachedOwners = Set(plans.keys)
                 return !removals.contains(job.owner)
             }
-            if deliver { Task { @MainActor in job.completion(result) } }
+            if deliver { NSWindowWorkerDelivery.shared.deliver { job.completion(result) } }
         }
     }
 

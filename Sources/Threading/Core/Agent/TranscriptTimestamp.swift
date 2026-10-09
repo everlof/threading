@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 /// When a transcript record was written.
 ///
@@ -39,5 +38,5 @@ enum TranscriptTimestamp {
         }()
     }
 
-    private static let parsers = OSAllocatedUnfairLock(initialState: Parsers())
+    private static let parsers = LockedState(initialState: Parsers())
 }

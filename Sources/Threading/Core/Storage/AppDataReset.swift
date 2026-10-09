@@ -40,11 +40,21 @@ enum AppDataLocations {
 
     /// `~/Library/Application Support/Threading`.
     static var supportDirectory: URL {
+#if os(Linux)
+        let environment = ProcessInfo.processInfo.environment
+        if let configured = environment["THREADING_LINUX_DATA_DIR"], configured.hasPrefix("/") {
+            return URL(fileURLWithPath: configured, isDirectory: true)
+        }
+        let base = environment["XDG_DATA_HOME"].flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0) : nil }
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share")
+        return base.appendingPathComponent("threading-linux-spike", isDirectory: true)
+#else
         applicationSupport
             .appendingPathComponent(
                 ProjectIconDefaults.applicationDirectoryName,
                 isDirectory: true
             )
+#endif
     }
 
     /// Where a reset puts what it took, a **sibling** of the directory being moved rather than

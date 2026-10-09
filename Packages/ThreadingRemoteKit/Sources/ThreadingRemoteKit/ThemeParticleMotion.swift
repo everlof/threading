@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 public enum ThemeParticlePlacement: Equatable, Sendable {
     /// Moving under a ground for as long as it is on screen — the sidebar's column, a pane.

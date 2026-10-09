@@ -1,5 +1,11 @@
 import Foundation
 import OSLog
+#if os(Linux)
+import CNativeAgentProcess
+struct PerformanceSignpostState: Sendable {}
+#else
+typealias PerformanceSignpostState = OSSignpostIntervalState
+#endif
 
 /// A low-overhead, always-on record of coarse operations.
 ///
@@ -24,10 +30,12 @@ final class PerformanceRecorder: @unchecked Sendable {
     let directory: URL
 
     private let configuration: Configuration
+#if !os(Linux)
     private let signposter = OSSignposter(
         subsystem: "codes.threading",
         category: .pointsOfInterest
     )
+#endif
     private let exportQueue = DispatchQueue(
         label: "codes.threading.performance.export",
         qos: .utility
@@ -60,7 +68,11 @@ final class PerformanceRecorder: @unchecked Sendable {
         let start = DispatchTime.now().uptimeNanoseconds
         let threadID = Self.currentThreadID()
         let sanitizedMetadata = Self.sanitized(metadata)
+#if os(Linux)
+        let signpostState = PerformanceSignpostState()
+#else
         let signpostState = signposter.beginInterval(name)
+#endif
 
         let active = ActiveSpan(
             id: id,
@@ -176,10 +188,12 @@ final class PerformanceRecorder: @unchecked Sendable {
     fileprivate func end(
         id: UUID,
         name: StaticString,
-        signpostState: OSSignpostIntervalState,
+        signpostState: PerformanceSignpostState,
         metadata: [String: String]
     ) {
+#if !os(Linux)
         signposter.endInterval(name, signpostState)
+#endif
         let end = DispatchTime.now().uptimeNanoseconds
         let endedOnMainThread = Thread.isMainThread
 
@@ -219,9 +233,13 @@ final class PerformanceRecorder: @unchecked Sendable {
     }
 
     static func currentThreadID() -> UInt64 {
+#if os(Linux)
+        threading_native_thread_id()
+#else
         var identifier: UInt64 = 0
         pthread_threadid_np(nil, &identifier)
         return identifier
+#endif
     }
 
     /// The bounded semantic context a watchdog can persist without touching the blocked thread.
@@ -422,7 +440,7 @@ final class PerformanceSpan: @unchecked Sendable {
     private weak var recorder: PerformanceRecorder?
     private let id: UUID
     private let name: StaticString
-    private let signpostState: OSSignpostIntervalState
+    private let signpostState: PerformanceSignpostState
 
     /// Guards `hasEnded`; ending from an async completion and cancellation may race.
     private let lock = NSLock()
@@ -432,7 +450,7 @@ final class PerformanceSpan: @unchecked Sendable {
         recorder: PerformanceRecorder,
         id: UUID,
         name: StaticString,
-        signpostState: OSSignpostIntervalState
+        signpostState: PerformanceSignpostState
     ) {
         self.recorder = recorder
         self.id = id

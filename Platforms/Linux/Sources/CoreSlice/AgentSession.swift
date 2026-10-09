@@ -332,6 +332,83 @@ enum AgentTitleSource: String, Codable {
   }
 }
 
+/// Previous visible names, newest first. A name's date is when it stopped being visible,
+/// so reusing a name refreshes its recency without accumulating duplicate rename events.
+struct SessionNameHistory: Codable, Hashable, Sendable {
+  struct Entry: Codable, Hashable, Sendable {
+    let name: String
+    let lastSeenAt: Date
+  }
+
+  static let maximumEntries = 64
+  static let maximumNameUTF8Bytes = 512
+
+  private(set) var entries: [Entry] = []
+
+  init() {}
+
+  mutating func recordChange(from previousName: String, to name: String, at date: Date) {
+    guard previousName != name else { return }
+    let previous = Self.boundedName(previousName)
+    let previousKey = Self.comparisonKey(previous)
+    let currentKey = Self.comparisonKey(Self.boundedName(name))
+    guard !previous.isEmpty, previousKey != currentKey else { return }
+
+    entries.removeAll {
+      let key = Self.comparisonKey($0.name)
+      return key == previousKey || key == currentKey
+    }
+    entries.insert(Entry(name: previous, lastSeenAt: date), at: 0)
+    if entries.count > Self.maximumEntries { entries.removeLast() }
+  }
+
+  private static func comparisonKey(_ name: String) -> String {
+    name.folding(
+      options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+      locale: Locale(identifier: "en_US_POSIX")
+    ).lowercased()
+  }
+
+  private static func boundedName(_ name: String) -> String {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.utf8.count > maximumNameUTF8Bytes else { return trimmed }
+    var result = ""
+    var byteCount = 0
+    for character in trimmed {
+      let bytes = String(character).utf8.count
+      guard byteCount + bytes <= maximumNameUTF8Bytes else { break }
+      result.append(character)
+      byteCount += bytes
+    }
+    return result
+  }
+
+  private enum CodingKeys: String, CodingKey { case entries }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    var stored = try container.nestedUnkeyedContainer(forKey: .entries)
+    var seen: Set<String> = []
+    while !stored.isAtEnd {
+      guard entries.count < Self.maximumEntries else {
+        throw DecodingError.dataCorruptedError(in: stored, debugDescription: "Too many prior session names")
+      }
+      let entry = try stored.decode(Entry.self)
+      guard !entry.name.isEmpty,
+            entry.name.utf8.count <= Self.maximumNameUTF8Bytes,
+            seen.insert(Self.comparisonKey(entry.name)).inserted,
+            entry.lastSeenAt.timeIntervalSince1970.isFinite else {
+        throw DecodingError.dataCorruptedError(in: stored, debugDescription: "Invalid prior session name")
+      }
+      entries.append(entry)
+    }
+    entries.sort {
+      if $0.lastSeenAt != $1.lastSeenAt { return $0.lastSeenAt > $1.lastSeenAt }
+      return $0.name < $1.name
+    }
+  }
+}
+
 // MARK: - Session Snooze
 
 /// Why a snoozed session returned to attention before (or at) its deadline.
@@ -394,6 +471,9 @@ struct AgentSession: Codable, Identifiable {
   /// canonical provider metadata, or an explicitly chosen name, in increasing authority. Nil —
   /// every record from before the distinction — reads as reported.
   var agentTitleSource: AgentTitleSource?
+
+  /// Bounded prior sidebar names. Stored with the session and retained across archive/restore.
+  var nameHistory = SessionNameHistory()
 
   let createdAt: Date
   var lastActiveAt: Date
@@ -843,6 +923,7 @@ struct AgentSession: Codable, Identifiable {
     case id, kind, title, customTitle, createdAt, lastActiveAt, lastTurnAt, lastWorkAt
     case agentTitle = "terminalTitle"
     case agentTitleSource
+    case nameHistory
     case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
     case lastLaunchFailure
     case fastMode, remoteControl, fullscreenRenderer, permissionMode, archived, archivedAt
@@ -877,6 +958,8 @@ struct AgentSession: Codable, Identifiable {
       AgentTitleSource.self,
       forKey: .agentTitleSource
     )
+    nameHistory = try container.decodeIfPresent(SessionNameHistory.self, forKey: .nameHistory)
+      ?? SessionNameHistory()
     createdAt = decodedCreatedAt ?? Date()
     lastActiveAt =
       try container.decodeIfPresent(Date.self, forKey: .lastActiveAt)
@@ -1247,6 +1330,7 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(customTitle, forKey: .customTitle)
     try container.encodeIfPresent(agentTitle, forKey: .agentTitle)
     try container.encodeIfPresent(agentTitleSource, forKey: .agentTitleSource)
+    if !nameHistory.entries.isEmpty { try container.encode(nameHistory, forKey: .nameHistory) }
     try container.encode(createdAt, forKey: .createdAt)
     try container.encode(lastActiveAt, forKey: .lastActiveAt)
     try container.encodeIfPresent(lastTurnAt, forKey: .lastTurnAt)

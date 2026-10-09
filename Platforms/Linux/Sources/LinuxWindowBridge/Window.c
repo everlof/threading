@@ -9,6 +9,7 @@
 #include <string.h>
 #include <time.h>
 struct TWWindow {
+    uint32_t workerWakeType, workerWakeGeneration;
     SDL_Window *window;
     SDL_Cursor *cursors[6];
     SDL_Renderer *renderer;
@@ -32,6 +33,17 @@ struct TWWindow {
     uint8_t suppressedKeyups[SDL_NUM_SCANCODES];
     uint8_t composingKeyups[SDL_NUM_SCANCODES];
 };
+static uint32_t worker_wake_generation;
+
+uint64_t tw_worker_wake_identity(TWWindow *w) {
+    return ((uint64_t)w->workerWakeGeneration << 32) | w->workerWakeType;
+}
+int tw_worker_wake(uint64_t identity) {
+    SDL_Event event = {0};
+    event.type = (uint32_t)identity;
+    event.user.data1 = (void *)(uintptr_t)(identity >> 32);
+    return SDL_PushEvent(&event);
+}
 static int tw_modifiers(SDL_Keymod mods) {
     return ((mods & KMOD_SHIFT) ? 1 : 0) | ((mods & KMOD_ALT) ? 2 : 0)
         | ((mods & KMOD_CTRL) ? 4 : 0) | ((mods & KMOD_GUI) ? 8 : 0)
@@ -174,6 +186,9 @@ TWWindow *tw_open(const char *title, int width, int height) {
     w->renderer = SDL_CreateRenderer(w->window, -1, SDL_RENDERER_SOFTWARE);
     tw_startup_trace(trace, started, "create-renderer.end");
     if (!w->renderer) { tw_close(w); return NULL; }
+    w->workerWakeType = SDL_RegisterEvents(1);
+    if (w->workerWakeType == UINT32_MAX) { tw_close(w); return NULL; }
+    w->workerWakeGeneration = ++worker_wake_generation;
     tw_startup_trace(trace, started, "accessibility-open.begin");
     tw_accessibility_open(w);
     tw_accessibility_window_focus(w, (SDL_GetWindowFlags(w->window) & SDL_WINDOW_INPUT_FOCUS) != 0);
@@ -619,6 +634,11 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         }
         *out = (TWEvent){0};
         SDL_GetWindowSize(w->window, &out->width, &out->height);
+        if (e.type == w->workerWakeType) {
+            if ((uint32_t)(uintptr_t)e.user.data1 != w->workerWakeGeneration) continue;
+            out->kind = 52;
+            return 1;
+        }
         // The preview host owns its appearance switch. Consume both halves here so a live
         // terminal never receives the shortcut as PTY input or a stray printable t.
         if (w->sidebarWidth && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&

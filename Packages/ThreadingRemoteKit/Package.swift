@@ -14,16 +14,21 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../ThreadingExtensionKit"),
-        .package(path: "../ThreadingDomain")
+        .package(path: "../ThreadingDomain"),
+        .package(url: "https://github.com/apple/swift-crypto.git", exact: "5.0.0")
     ],
     targets: [
+        .systemLibrary(name: "ThreadingRemoteZlib", pkgConfig: "zlib", providers: [.apt(["zlib1g-dev"])]),
         .target(
             name: "ThreadingRemoteKit",
-            dependencies: ["ThreadingExtensionKit", "ThreadingDomain"]
+            dependencies: ["ThreadingExtensionKit", "ThreadingDomain",
+                .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+                .target(name: "ThreadingRemoteZlib", condition: .when(platforms: [.linux]))]
         ),
         .testTarget(
             name: "ThreadingRemoteKitTests",
-            dependencies: ["ThreadingRemoteKit", "ThreadingExtensionKit", "ThreadingDomain"]
+            dependencies: ["ThreadingRemoteKit", "ThreadingExtensionKit", "ThreadingDomain",
+                .target(name: "ThreadingRemoteZlib", condition: .when(platforms: [.linux]))]
         )
     ]
 )

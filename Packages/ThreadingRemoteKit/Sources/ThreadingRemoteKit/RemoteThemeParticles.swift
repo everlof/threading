@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 /// Shared particle vocabulary and limits; renderers own layers, artwork and lifecycle.
 public struct RemoteThemeParticles: Codable, Equatable, Sendable {

@@ -30,12 +30,17 @@ public enum BoundedFileReader {
         // all of them at once, which is how reading a 4.4 GB cache became 4.4 GB resident.
         while data.count <= maximumBytes {
             let remaining = maximumBytes + 1 - data.count
-            let readMore = try autoreleasepool { () -> Bool in
+            let readChunk = { () throws -> Bool in
                 guard let chunk = try handle.read(upToCount: min(64 * 1_024, remaining)),
                       !chunk.isEmpty else { return false }
                 data.append(chunk)
                 return true
             }
+#if os(Linux)
+            let readMore = try readChunk()
+#else
+            let readMore = try autoreleasepool(invoking: readChunk)
+#endif
             guard readMore else { break }
         }
         guard data.count <= maximumBytes else {

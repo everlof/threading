@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Copies the persistence slice listed in coreslice.list into Sources/CoreSlice, verbatim.
+# Copies the shared core listed in coreslice.list into Sources/CoreSlice, verbatim.
 #
 #   ./vendor-core.sh            # replace Sources/CoreSlice with fresh copies from the working tree
 #   ./vendor-core.sh --verify   # fail if any copy differs from its original
@@ -31,14 +31,17 @@ if [[ "${1:-}" == "--verify" ]]; then
       status=1
     fi
   done < <(entries)
+  # Parse the manifest once; rebuilding its full list for each file made this gate quadratic
+  # in subprocess work as the native transport graph grew.
+  recorded_names="$(entries | cut -f2)"
   # Anything in the directory the manifest does not name is an unrecorded file.
   while IFS= read -r present; do
-    if ! entries | cut -f2 | grep -qxF "${present}"; then
+    if ! grep -qxF "${present}" <<<"${recorded_names}"; then
       echo "UNRECORDED: Sources/CoreSlice/${present}" >&2
       status=1
     fi
   done < <(ls "${destination}")
-  [[ ${status} -eq 0 ]] && echo "all $(entries | wc -l | tr -d ' ') vendored files are byte-identical, and none is unrecorded"
+  [[ ${status} -eq 0 ]] && echo "all $(printf '%s\n' "${recorded_names}" | wc -l | tr -d ' ') vendored files are byte-identical, and none is unrecorded"
   exit ${status}
 fi
 

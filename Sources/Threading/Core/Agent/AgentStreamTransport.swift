@@ -1,4 +1,7 @@
 import Foundation
+#if os(Linux)
+import CNativeAgentProcess
+#endif
 
 enum AgentStreamTransportFailure: Error, Equatable, Sendable {
     case inputBackpressure
@@ -265,7 +268,15 @@ final class AgentStreamTransport<Line: Sendable>: @unchecked Sendable {
             return
         }
         do {
+#if os(Linux)
+            let code = data.withUnsafeBytes {
+                threading_pipe_write_no_signal(input.fileDescriptor,
+                    $0.baseAddress?.assumingMemoryBound(to: UInt8.self), Int32($0.count))
+            }
+            guard code == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(code)) }
+#else
             try input.write(contentsOf: data)
+#endif
         } catch {
             failFromWriteQueue(.writeFailed(error.localizedDescription))
         }

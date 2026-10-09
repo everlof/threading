@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 /// The small newline-delimited JSON-RPC surface shared by persistent agent transports.
 ///

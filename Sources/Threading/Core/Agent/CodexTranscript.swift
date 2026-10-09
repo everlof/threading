@@ -1,5 +1,4 @@
 import Foundation
-import os
 import ThreadingUsage
 
 enum CodexTranscriptDefaults {
@@ -70,17 +69,9 @@ enum CodexTranscript {
         var walkCount = 0
     }
 
-    private static let state = OSAllocatedUnfairLock(initialState: State())
+    private static let state = LockedState(initialState: State())
 
-    @MainActor
-    static func url(sessionID: TranscriptID, for session: AgentSession) -> URL? {
-        guard let account = AgentAccountDiscovery.account(
-            for: session.kind,
-            handle: session.accountHandle
-        ) else { return nil }
 
-        return url(sessionID: sessionID, account: account)
-    }
 
     /// Account-taking seam keeps lookup and memoization independently testable from machine
     /// account discovery. Rollout paths are immutable for the lifetime of a conversation.
