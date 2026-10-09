@@ -1414,6 +1414,29 @@ scannable without shrinking the tap target, and keeps long output out of both th
 the ordinary reading path. Reconfiguration replaces the row's theme outline rather than layering a
 new border and glow on every result, expansion or live palette update.
 
+The iPhone also groups **two or more consecutive tool rows** behind one quiet disclosure.
+`RemoteConversationToolGroups` projects the canonical rows into stable group/row identities;
+messages, thinking and notices end a run. The header shows the call count plus failed and running
+counts using the existing `isError`/missing-result contract. It never claims that missing output
+completed successfully. Permission and question cells remain independent, outside every group.
+There is no whole-turn folding or inferred duration: the remote row contract does not carry those
+authoritative facts. Grouping is host-owned presentation over the existing tool-call surface;
+themes supply ink and ground, while Threading retains chronology, outcomes, disclosure, approval
+authority and viewport continuity. It introduces no public extension component.
+
+Expansion inserts ordinary collection rows after the header; it does not build a stack of tool
+views inside one cell. A lone tool whose output is already open stays visible when a second call
+forms a group. Group and per-tool disclosure choices survive cell reuse, reconnect and older-page
+prepends during the screen's lifetime. Prepends retain an overlapping group's identity, and
+explicitly collapsing it wins over any previously opened member output. Toggling preserves the
+header's viewport position; structural updates while reading preserve the first visible row.
+Appends extend only the projection's tail, result updates use the row-to-group index, and metadata
+streaming does no group scan. Full projection rebuilds are reserved for ordering changes, history
+pages and row-kind corrections. Markdown warming on a row delta looks up only its changed IDs.
+`RemoteConversationStoreTests` covers the production collection, independent approvals and the
+5,000-tool expanded/closed workload; `conversation-tool-groups` and its attention variant capture
+the actual phone shell through the iOS evidence catalogue.
+
 Do not anchor the cold composer to `UIKeyboardLayoutGuide`. On the measured simulator that caused
 UIKit to load and initialize its text-input tracking coordinator while attaching the first window,
 adding about 108 ms before paint. Keyboard frame notifications update the safe-area bottom
@@ -1421,6 +1444,47 @@ constraint instead; the keyboard demo verifies the same layout behavior when inp
 requested.
 
 ## Queue, Steer, Stop
+
+### Phone chat reading and follow-ups
+
+The UIKit phone conversation uses the same transcript in native and mirrored conversations.
+Consecutive tool groups summarize known tool identities as reads, edits, searches, commands or
+browser actions; unfamiliar identities remain tool calls. Counts and pending categories update
+through the group's row index. Command prose never proves a successful test. Expanded output
+keeps its reading plate, while collapsed individual commands have no repeated outline.
+
+`RemoteConversationCatchUp` is a device-local reading aid keyed by host and session in
+`MobileSessionContinuityStore`. It counts rows after the last seen identity, marks the first new
+projected item, and offers jumps to new activity, the latest reply and pending decisions. A
+missing bookmark outside the loaded history is labelled recent activity, not a complete count.
+The collection retains its reading anchor; background updates are projected on return. This
+bookmark does not write or impersonate the host's durable completion/read receipts.
+
+At the latest settled reply, up to three inline navigation cards reuse Workspace's Review,
+Attachments and Browser destinations. Review explicitly opens the current working tree. A
+direct image card requires an answer reference matching an attachment admitted by the host;
+otherwise the card opens the chat's attachment inventory. Browser opens its current active,
+non-private tab. No screenshot bytes or diff hunks load merely to draw these cards.
+
+`RemoteConversationDeliveryDTO` is optional snapshot/delta metadata and the capability signal
+for owner-device follow-ups. It carries a maximum of 20 host outbox entries, with bounded
+summaries and queued, sending, delivered or working states taken from message lifecycle receipts.
+The `conversationFollowups` hello feature gates both initial requests and acknowledged retries:
+reconnecting to an older host cannot silently convert queue/steer intent to an ordinary turn.
+`submit.state` selects queue or steer and participates in the replay fingerprint. Queue uses
+the existing `ConversationOutbox` and turn admission without clearing the Mac's draft. Steering
+checks current provider availability and refuses a race; it never silently becomes queued.
+Guests and focused watchers receive disabled input capabilities. Older hosts omit the metadata
+and keep the ordinary send path. Session commands retain ordinary command admission, and
+workspace-file references cannot be steered through an unvalidated asynchronous path.
+
+The phone microphone starts one explicit recording, with live transcription into the editable
+draft. Speech/microphone consent is requested only on tap, audio engine work lives in an actor,
+and backgrounding, leaving the surface, Stop or the 90-second limit ends recording. The draft is
+never automatically submitted. Tapping an image in the attachment tray opens PencilKit markup;
+Cancel preserves the original, Apply flattens a copy on a worker, and the replacement must finish
+its ordinary staged upload before Send becomes available. The logical canvas remains fixed
+through rotation and output is capped at 2,048 pixels on its longest edge.
 
 Three separate dispositions for a message typed while the agent is busy, and conflating any two
 of them is the mistake every client makes first:

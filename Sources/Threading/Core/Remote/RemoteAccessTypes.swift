@@ -770,7 +770,8 @@ enum RemoteConversationWirePolicy {
             permission: snapshot.permission.map(safePermission),
             questions: safeQuestions(snapshot.questions),
             revision: snapshot.revision,
-            hasEarlier: snapshot.hasEarlier
+            hasEarlier: snapshot.hasEarlier,
+            delivery: snapshot.delivery
         )
     }
 
@@ -795,7 +796,8 @@ enum RemoteConversationWirePolicy {
             permission: snapshot.permission.map(safePermission),
             questions: safeQuestions(snapshot.questions),
             revision: revision,
-            hasEarlier: window.hasEarlier
+            hasEarlier: window.hasEarlier,
+            delivery: snapshot.delivery
         )
     }
 
@@ -864,7 +866,8 @@ enum RemoteConversationWirePolicy {
                 ? nil
                 : currentCapabilities,
             permission: current.permission.map(safePermission),
-            questions: safeQuestions(current.questions)
+            questions: safeQuestions(current.questions),
+            delivery: current.delivery
         )
     }
 
@@ -895,7 +898,8 @@ enum RemoteConversationWirePolicy {
                 ? nil
                 : currentCapabilities,
             permission: current.permission.map(safePermission),
-            questions: safeQuestions(current.questions)
+            questions: safeQuestions(current.questions),
+            delivery: current.delivery
         )
     }
 
@@ -930,7 +934,10 @@ enum RemoteConversationWirePolicy {
             permission: permission,
             questions: safeQuestions(snapshot.questions).map { $0.allowingAnswers(authorization.capability == .interact && canWrite) },
             revision: snapshot.revision,
-            hasEarlier: snapshot.hasEarlier
+            hasEarlier: snapshot.hasEarlier,
+            delivery: snapshot.delivery?.allowingInput(
+                authorization.principal == .ownerDevice && authorization.capability == .interact && canWrite
+            )
         )
     }
 
@@ -952,7 +959,10 @@ enum RemoteConversationWirePolicy {
                 : delta.composerCapabilities.map { _ in [] },
             permission: permission,
             questions: safeQuestions(delta.questions ?? []).map { $0.allowingAnswers(authorization.capability == .interact && canWrite) },
-            hasEarlier: delta.hasEarlier
+            hasEarlier: delta.hasEarlier,
+            delivery: delta.delivery?.allowingInput(
+                authorization.principal == .ownerDevice && authorization.capability == .interact && canWrite
+            )
         )
     }
 

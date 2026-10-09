@@ -3073,6 +3073,28 @@ fail over or adopt another advertised address without being paired again.
 
 ### Faster return to a chat on iPhone
 
+In the iPhone conversation view, consecutive tool calls share a descriptive disclosure such as
+**“4 file reads · 2 commands”**
+instead of filling the chat with separate command cards. Tap it to see each call, then tap an
+individual call to inspect its output. Messages stay visible between groups; failed and running
+counts remain visible while a group is closed. Approval requests and questions stay outside the
+fold. Your open groups stay open while reconnecting or loading earlier history in that screen.
+
+On return, **Since you left** summarizes new replies and tool activity. Tap it to jump to the
+first new item, latest reply or pending decision. Your reading position stays where you left it.
+Result cards beneath the latest completed reply open the current working-tree review, images
+and other attachments, or the active browser tab.
+
+While a capable Mac is working, choose **After this task** to queue a follow-up or **Send now**
+to join the current task when the provider supports it. The delivery row shows **Queued**,
+**Delivered to agent**, or **Working on this**, using the Mac's actual receipts. Tap the row to
+see the full list. Older Macs retain their ordinary send behavior.
+
+Tap the microphone in an empty composer to dictate a draft, or choose **Dictate message** from
+the attachment menu to add speech to existing text. Tap Stop, edit the words, then Send. Tapping
+an attached image opens markup: draw with a finger or Pencil, then Apply to upload the marked
+copy. Cancel keeps the original attachment.
+
 The iPhone keeps a blurred preview of each terminal chat you leave for up to three days, with no
 fixed limit on the number of chats. A new capture refreshes that chat's expiry. Previews are kept
 only in memory and may be discarded when memory is needed; after restarting the app, chats show

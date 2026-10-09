@@ -1013,7 +1013,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 text: parsed.text,
                 contextAttachments: parsed.contextAttachments,
                 attachmentUploadIDs: parsed.attachmentUploadIDs,
-                requestID: parsed.requestID
+                requestID: parsed.requestID,
+                deliveryMode: parsed.state
             )
         case "terminalSubmit":
             handleTerminalSubmit(
@@ -4749,8 +4750,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         text: String?,
         contextAttachments: [RemoteConversationContextAttachmentDTO]?,
         attachmentUploadIDs: [String]?,
-        requestID rawRequestID: String?
+        requestID rawRequestID: String?,
+        deliveryMode rawDeliveryMode: String?
     ) {
+        let deliveryMode = rawDeliveryMode.flatMap(RemoteConversationDeliveryMode.init(rawValue:))
+        guard rawDeliveryMode == nil || deliveryMode != nil else {
+            connection.sendText(encode(RemoteErrorDTO(code: "invalidDeliveryMode")))
+            return
+        }
         guard let authorization = connection.authorization, authorization.capability == .interact else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
             return
@@ -4768,7 +4775,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         let requestID = rawRequestID.flatMap(RemoteInboundPolicy.normalizedMutationRequestID)
-        if rawRequestID != nil, requestID == nil {
+        if (rawRequestID != nil || deliveryMode != nil), requestID == nil {
             connection.sendText(encode(RemoteErrorDTO(code: "invalidRequestID")))
             return
         }
@@ -4851,7 +4858,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 to: sessionID,
                 device: device,
                 authorization: authorization,
-                requestID: requestID
+                requestID: requestID,
+                deliveryMode: deliveryMode
             )
             // The outcome decides what happens to the loan. Accepted means custody was taken and
             // the staged duplicate can go; anything else gives the files back, so the draft the

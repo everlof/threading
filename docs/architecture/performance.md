@@ -956,6 +956,16 @@ THREADING_AUTOMATION_STRESS=1 scripts/test.sh fast \
 
 ## Implementation-time scaling gate
 
+The iPhone chat polish follows the existing 5,000-row timeline stress fixture. Activity category
+counts are O(changed rows), catch-up projects the loaded window once on entry/recovery and then
+counts only appended rows, and disclosure still mounts only visible collection cells. Inline
+result navigation has three cards maximum and fetches only the existing bounded metadata after
+a settled reply (64 attachment records maximum); matching runs off-main, and images/diffs are
+loaded only after activation. Delivery metadata has 20 entries with 512-character summaries; its
+composer rail shows one two-line preview and its detail sheet uses a List. Dictation retains
+one live Speech request, no audio-file archive, and ends within 90 seconds. Markup uses one
+2,048-pixel canvas and an 8 MiB ink export budget, with image reduction and flattening on workers.
+
 Profiling should confirm an architecture, not be the first time its scaling boundary is named.
 Before building a UI or callback, classify both axes:
 
@@ -2598,6 +2608,31 @@ foreground. `xcrun xctrace list devices` prints usable names and UDIDs. The defa
 These captures also require no Instruments window. Generic device traces still need the target
 interaction during the timed interval; the simulator conversation stress command supplies its own
 deterministic driver.
+
+### iPhone consecutive tool groups, 2026-10-09
+
+The remote transcript now projects consecutive runs of at least two tools into one collapsed
+collection item. Expected runs contain 2–20 calls; the explicit stress case contains 5,000.
+The projection retains DTO identities and counts, never hidden tool views. Appends update its
+tail, results update an indexed group, and a metadata-only delta does no full-history group or
+Markdown scan. Cold open, page prepends and structural corrections rebuild the projection once.
+Expansion inserts ordinary reusable cells; output text remains lazy behind each tool disclosure.
+
+The shipping-controller test on iPhone 17 Pro / iOS 26.5 Simulator measured the 5,000-call group
+at **12.89 ms** to mount and **62.27 ms** to expand. It mounted one cell while collapsed and 13
+visible cells after expansion, with no output text views constructed. The expansion still builds
+5,000 diffable identities: this is bounded view creation, not a claim of constant-time disclosure.
+The same tests exercise live results, independent approval, older-page anchoring and reconnect
+identity retention. These Debug simulator observations are not physical-device frame-rate claims.
+
+Three before/after launches of the existing mixed 5,000-row scroll fixture measured median work
+p95 at **14.18 / 12.91 ms**, with exact top navigation and zero geometry failures in every run.
+That mixed fixture contains no consecutive tool runs and checks the cost on ordinary history.
+Cold first-paint ranges were **388–451 / 386–508 ms** (medians 402 / 458 ms); this noisy capture
+does not establish a cold-open improvement. One unchanged reconnect per build retained all geometry
+and applied zero snapshot resets, at **21.79 / 29.98 ms** total. The added projection accounts for
+two samples in the updated cold view-load call tree; it does not recur in the scrolling path.
+Raw metrics and diagnostic samples are under `.build/ios-tool-groups/performance/`.
 
 ## Attachment scan stress target
 

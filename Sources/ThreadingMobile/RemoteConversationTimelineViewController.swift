@@ -552,7 +552,10 @@ final class RemoteConversationTimelineViewController: UIViewController {
     private let themeBackdrop = MobileThemeBackdropView()
     private enum Item: Hashable {
         case history
+        case unread
+        case results
         case row(String)
+        case toolGroup(String)
         case streaming
         case permission(String)
         case question(String)
@@ -572,6 +575,18 @@ final class RemoteConversationTimelineViewController: UIViewController {
     private var parsedDocuments: [String: RemoteMarkdownDocument] = [:]
     private var markdownSources: [String: String] = [:]
     private var expandedRows: Set<String> = []
+    private var toolGroups = RemoteConversationToolGroups()
+    private var lastSeenRowID: String?
+    private var catchUp: RemoteConversationCatchUp?
+    private var didPrepareCatchUp = false
+    var onCatchUpChange: ((RemoteConversationCatchUp?) -> Void)?
+    var onReadThrough: ((String) -> Void)?
+    var onSettledReply: ((RemoteConversationRowDTO) -> Void)?
+    var onOpenResult: ((SessionWorkspaceRoute) -> Void)?
+    private var latestReplyID: String?
+    private var reportedReplyID: String?
+    private var resultsAfterRowID: String?
+    private var resultLinks: [RemoteConversationResultLink] = []
     private var hasAppliedInitialSnapshot = false
     private var hasHistoryItem = false
     private var hasStreamingItem = false
@@ -582,6 +597,8 @@ final class RemoteConversationTimelineViewController: UIViewController {
     private var isInitialBottomPositionScheduled = false
     private var hasTimelineAppeared = false
     private var contentSizeObserver: NSObjectProtocol?
+    private var activityObservers: [NSObjectProtocol] = []
+    private var isInBackground = false
     private var contentHeightObservation: NSKeyValueObservation?
     private var viewportSaveWorkItem: DispatchWorkItem?
     private static let markdownPrefetchBatchSize = 64
@@ -605,6 +622,66 @@ final class RemoteConversationTimelineViewController: UIViewController {
         super.init(nibName: nil, bundle: nil)
     }
 
+    func restoreReadThrough(_ id: String?) {
+        lastSeenRowID = id
+    }
+
+    func jumpToFirstUnread() {
+        guard let id = catchUp?.firstUnreadID else { return }
+        jump(to: item(for: toolGroups.visibleItem(forRow: id)))
+    }
+
+    func jumpToLatestReply() {
+        guard let id = catchUp?.latestReplyID else { return }
+        jump(to: .row(id))
+    }
+
+    func jumpToDecision() {
+        let state = connection.conversationStore.state
+        if let permission = state.permission { jump(to: .permission(permission.id)) }
+        else if let question = state.questions.first { jump(to: .question(question.id)) }
+    }
+
+    func markCaughtUp() {
+        catchUp = nil
+        lastSeenRowID = connection.conversationStore.state.rows.last?.id
+        onCatchUpChange?(nil)
+        if let id = lastSeenRowID { onReadThrough?(id) }
+        applySnapshot(anchor: visibleTranscriptAnchor())
+    }
+
+    private func jump(to item: Item) {
+        guard let index = dataSource.indexPath(for: item) else { return }
+        needsInitialBottomPosition = false
+        MobileScrollMotion.cancel(in: collectionView)
+        collectionView.scrollToItem(at: index, at: .top, animated: !UIAccessibility.isReduceMotionEnabled)
+    }
+
+    private func prepareCatchUpIfNeeded() {
+        let state = connection.conversationStore.state
+        guard !isInBackground, !didPrepareCatchUp, !state.rows.isEmpty else { return }
+        didPrepareCatchUp = true
+        guard let lastSeenRowID else { return }
+        catchUp = RemoteConversationCatchUp(rows: state.rows, after: lastSeenRowID, hasEarlier: state.hasEarlier)
+        if catchUp?.firstUnreadID == nil { catchUp = nil }
+        onCatchUpChange?(catchUp?.firstUnreadID == nil ? nil : catchUp)
+    }
+
+    func showResults(_ links: [RemoteConversationResultLink], after rowID: String) {
+        guard connection.conversationStore.row(withID: rowID) != nil else { return }
+        let anchor = visibleTranscriptAnchor()
+        resultLinks = Array(links.prefix(3))
+        resultsAfterRowID = rowID
+        applySnapshot(reconfiguringSynthetic: true, anchor: anchor)
+    }
+
+    private func reportSettledReply() {
+        guard connection.conversationStore.state.canSend, let id = latestReplyID,
+              id != reportedReplyID, let row = connection.conversationStore.row(withID: id) else { return }
+        reportedReplyID = id
+        onSettledReply?(row)
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
@@ -617,6 +694,10 @@ final class RemoteConversationTimelineViewController: UIViewController {
 #endif
         configureCollectionView()
         configureDataSource()
+        prepareCatchUpIfNeeded()
+        latestReplyID = connection.conversationStore.state.rows.last(where: { $0.kind == .assistant })?.id
+        reportSettledReply()
+        toolGroups.rebuild(connection.conversationStore.state.rows, openedRows: expandedRows)
         observeContentHeight()
         observeStoreIfNeeded()
         contentSizeObserver = NotificationCenter.default.addObserver(
@@ -631,12 +712,34 @@ final class RemoteConversationTimelineViewController: UIViewController {
         }
         applySnapshot(scrollToBottom: initialViewport?.followsBottom != false)
         prefetchMarkdown()
+        activityObservers = [
+            NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    self?.isInBackground = true
+                    self?.didPrepareCatchUp = false
+                }
+            },
+            NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.isViewLoaded else { return }
+                    self.isInBackground = false
+                    let anchor = self.visibleTranscriptAnchor()
+                    self.prepareCatchUpIfNeeded()
+                    self.toolGroups.rebuild(self.connection.conversationStore.state.rows, openedRows: self.expandedRows)
+                    self.latestReplyID = self.connection.conversationStore.state.rows.last(where: { $0.kind == .assistant })?.id
+                    self.applySnapshot(anchor: anchor)
+                    self.prefetchMarkdown()
+                    self.reportSettledReply()
+                }
+            },
+        ]
 #if DEBUG
         MobileConversationPerformanceProbe.timelineViewLoadEnded()
 #endif
     }
 
     isolated deinit {
+        activityObservers.forEach(NotificationCenter.default.removeObserver)
         if let contentSizeObserver {
             NotificationCenter.default.removeObserver(contentSizeObserver)
         }
@@ -646,6 +749,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         saveViewport()
+        didPrepareCatchUp = false
         connection.conversationStore.removeObserver(storeObserver)
         storeObserver = nil
     }
@@ -655,8 +759,12 @@ final class RemoteConversationTimelineViewController: UIViewController {
         let wasDetached = storeObserver == nil
         observeStoreIfNeeded()
         if wasDetached, isViewLoaded {
+            prepareCatchUpIfNeeded()
+            latestReplyID = connection.conversationStore.state.rows.last(where: { $0.kind == .assistant })?.id
+            toolGroups.rebuild(connection.conversationStore.state.rows, openedRows: expandedRows)
             applySnapshot()
             prefetchMarkdown()
+            reportSettledReply()
         }
     }
 
@@ -665,6 +773,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
         themeBackdrop.isPresentationActive = true
         hasTimelineAppeared = true
         positionInitialBottomAfterLayout()
+        if !needsInitialBottomPosition { saveViewport() }
         reportPerformanceFirstPaintIfReady()
     }
 
@@ -801,6 +910,18 @@ final class RemoteConversationTimelineViewController: UIViewController {
             )
 #endif
             switch item {
+            case .results:
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: RemoteConversationRowCell.reuseIdentifier(for: .assistant), for: indexPath
+                ) as! RemoteConversationRowCell
+                cell.configureResults(resultLinks, theme: theme) { [weak self] route in self?.onOpenResult?(route) }
+                return cell
+            case .unread:
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: RemoteConversationRowCell.reuseIdentifier(for: .assistant), for: indexPath
+                ) as! RemoteConversationRowCell
+                cell.configureUnread(theme: theme)
+                return cell
             case .history:
                 let cell = collectionView.dequeueReusableCell(
                     withReuseIdentifier: RemoteConversationHistoryCell.reuseIdentifier,
@@ -831,6 +952,14 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 if row.kind == .assistant, parsedDocuments[id] == nil {
                     prepareMarkdown(for: row)
                 }
+                return cell
+
+            case .toolGroup(let id):
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: RemoteConversationRowCell.toolGroupReuseIdentifier,
+                    for: indexPath
+                ) as! RemoteConversationRowCell
+                configureToolGroup(cell, id: id)
                 return cell
 
             case .streaming:
@@ -875,12 +1004,16 @@ final class RemoteConversationTimelineViewController: UIViewController {
     }
 
     private func apply(_ change: RemoteConversationStore.Change) {
+        guard !isInBackground else { return }
         let nearBottom = isNearBottom
         switch change {
         case .unchanged:
             break
 
         case .reset(let updated):
+            latestReplyID = connection.conversationStore.state.rows.last(where: { $0.kind == .assistant })?.id
+            didPrepareCatchUp = false
+            prepareCatchUpIfNeeded()
             let state = connection.conversationStore.state
             let activeIDs = Set(state.rows.map(\.id))
             let assistantSources = Dictionary(uniqueKeysWithValues: state.rows.compactMap { row in
@@ -892,9 +1025,13 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 parsedDocuments[id] = nil
             }
             expandedRows.formIntersection(activeIDs)
+            let anchor = visibleTranscriptAnchor()
+            toolGroups.rebuild(state.rows, openedRows: expandedRows)
             applySnapshot(
                 reconfiguring: Set(updated),
-                scrollToBottom: !hasAppliedInitialSnapshot || nearBottom
+                reconfiguringGroups: Set(toolGroups.groups.keys),
+                scrollToBottom: !hasAppliedInitialSnapshot || nearBottom,
+                anchor: nearBottom ? nil : anchor
             )
             prefetchMarkdown()
 
@@ -912,10 +1049,33 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 markdownSources[id] = nil
             }
             let state = connection.conversationStore.state
+            let anchor = visibleTranscriptAnchor()
+            if let reply = inserted.reversed().lazy.compactMap(connection.conversationStore.row(withID:)).first(where: { $0.kind == .assistant }) {
+                latestReplyID = reply.id
+            }
+            let hadCatchUp = didPrepareCatchUp
+            prepareCatchUpIfNeeded()
+            if hadCatchUp, catchUp != nil, !inserted.isEmpty || permissionChanged || questionsChanged {
+                catchUp?.append(inserted.compactMap(connection.conversationStore.row(withID:)))
+                onCatchUpChange?(catchUp?.firstUnreadID == nil ? nil : catchUp)
+            }
+            let changedRows = updated.compactMap(connection.conversationStore.row(withID:))
+            let groupingChanged = toolGroups.needsRebuild(for: changedRows)
+            var changedGroups: Set<String>
+            if groupingChanged {
+                toolGroups.rebuild(state.rows, openedRows: expandedRows)
+                changedGroups = Set(toolGroups.groups.keys)
+            } else {
+                changedGroups = toolGroups.update(changedRows)
+                changedGroups.formUnion(toolGroups.append(
+                    inserted.compactMap(connection.conversationStore.row(withID:)),
+                    openedRows: expandedRows
+                ))
+            }
             let desiredPermissionID = state.permission?.id
             let desiredHistoryItem = state.hasEarlier
                 || connection.conversationStore.isLoadingEarlier
-            let structureChanged = !inserted.isEmpty
+            let structureChanged = groupingChanged || !inserted.isEmpty
                 || (historyChanged && hasHistoryItem != desiredHistoryItem)
                 || hasStreamingItem != !state.streamingText.isEmpty
                 || permissionItemID != desiredPermissionID
@@ -924,10 +1084,13 @@ final class RemoteConversationTimelineViewController: UIViewController {
             if structureChanged {
                 applySnapshot(
                     reconfiguring: Set(updated),
-                    scrollToBottom: nearBottom && (!inserted.isEmpty || questionsChanged || permissionChanged)
+                    reconfiguringGroups: changedGroups,
+                    scrollToBottom: nearBottom && (!inserted.isEmpty || questionsChanged || permissionChanged),
+                    anchor: nearBottom ? nil : anchor
                 )
             } else {
                 var items = updated.map(Item.row)
+                items.append(contentsOf: changedGroups.map(Item.toolGroup))
                 if streamingChanged, hasStreamingItem {
                     items.append(.streaming)
                 }
@@ -949,6 +1112,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
         case .loadingChanged:
             applySnapshot(reconfiguringSynthetic: true)
         }
+        reportSettledReply()
     }
 
     private func makeSnapshot() -> NSDiffableDataSourceSnapshot<Int, Item> {
@@ -958,7 +1122,18 @@ final class RemoteConversationTimelineViewController: UIViewController {
         if state.hasEarlier || connection.conversationStore.isLoadingEarlier {
             snapshot.appendItems([.history])
         }
-        snapshot.appendItems(state.rows.map { .row($0.id) })
+        let unreadItem = catchUp?.firstUnreadID.map { item(for: toolGroups.visibleItem(forRow: $0)) }
+        let projected = toolGroups.visibleItems().map(item(for:))
+        var items: [Item] = []
+        items.reserveCapacity(projected.count + 2)
+        for item in projected {
+            if item == unreadItem { items.append(.unread) }
+            items.append(item)
+            if item == resultsAfterRowID.map(Item.row), !resultLinks.isEmpty {
+                items.append(.results)
+            }
+        }
+        snapshot.appendItems(items)
         if !state.streamingText.isEmpty {
             snapshot.appendItems([.streaming])
         }
@@ -971,8 +1146,10 @@ final class RemoteConversationTimelineViewController: UIViewController {
 
     private func applySnapshot(
         reconfiguring ids: Set<String> = [],
+        reconfiguringGroups groupIDs: Set<String> = [],
         reconfiguringSynthetic: Bool = false,
-        scrollToBottom: Bool = false
+        scrollToBottom: Bool = false,
+        anchor: (Item, CGFloat)? = nil
     ) {
         var snapshot = makeSnapshot()
         adoptStreamingHeightIfHandingOff()
@@ -984,7 +1161,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
 #endif
         recordSyntheticState()
         let existing = Set(snapshot.itemIdentifiers)
-        let rowItems = ids.map(Item.row).filter(existing.contains)
+        let rowItems = (ids.map(Item.row) + groupIDs.map(Item.toolGroup)).filter(existing.contains)
         if !rowItems.isEmpty {
             snapshot.reconfigureItems(rowItems)
         }
@@ -995,7 +1172,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
             }
             snapshot.reconfigureItems(synthetic)
         }
-        dataSource.apply(snapshot, animatingDifferences: hasAppliedInitialSnapshot && !UIAccessibility.isReduceMotionEnabled) { [weak self] in
+        dataSource.apply(snapshot, animatingDifferences: hasAppliedInitialSnapshot && anchor == nil && !UIAccessibility.isReduceMotionEnabled) { [weak self] in
             guard let self else { return }
 #if DEBUG
             if profilesInitialSnapshot {
@@ -1014,6 +1191,8 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 } else {
                     self.scrollToBottom()
                 }
+            } else if let anchor {
+                self.restoreTranscriptAnchor(anchor)
             }
         }
     }
@@ -1036,33 +1215,81 @@ final class RemoteConversationTimelineViewController: UIViewController {
     }
 
     private func applyPrependingSnapshot() {
-        let visible = collectionView.indexPathsForVisibleItems
+        let anchor = visibleTranscriptAnchor()
+        toolGroups.rebuild(connection.conversationStore.state.rows, openedRows: expandedRows)
+        applySnapshot(
+            reconfiguringGroups: Set(toolGroups.groups.keys),
+            anchor: anchor
+        )
+    }
+
+    private func item(for projected: RemoteConversationToolGroups.Item) -> Item {
+        switch projected {
+        case .row(let id): return .row(id)
+        case .group(let id): return .toolGroup(id)
+        }
+    }
+
+    private func visibleTranscriptAnchor() -> (Item, CGFloat)? {
+        collectionView.indexPathsForVisibleItems
             .sorted()
             .compactMap { indexPath -> (Item, CGFloat)? in
                 guard let item = dataSource.itemIdentifier(for: indexPath),
-                      case .row = item,
                       let attributes = collectionView.layoutAttributesForItem(at: indexPath) else {
                     return nil
+                }
+                switch item {
+                case .row, .toolGroup: break
+                default: return nil
                 }
                 return (item, attributes.frame.minY - collectionView.contentOffset.y)
             }
             .first
+    }
 
-        let snapshot = makeSnapshot()
-        recordSyntheticState()
+    private func restoreTranscriptAnchor(_ anchor: (Item, CGFloat)) {
+        let target: Item
+        if case .row(let id) = anchor.0 {
+            target = item(for: toolGroups.visibleItem(forRow: id))
+        } else {
+            target = anchor.0
+        }
+        guard let indexPath = dataSource.indexPath(for: target) else { return }
+        collectionView.layoutIfNeeded()
+        guard let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
+        let minimum = -collectionView.adjustedContentInset.top
+        let maximum = max(minimum, collectionView.contentSize.height - collectionView.bounds.height
+            + collectionView.adjustedContentInset.bottom)
+        collectionView.setContentOffset(CGPoint(
+            x: collectionView.contentOffset.x,
+            y: min(maximum, max(minimum, frame.minY - anchor.1))
+        ), animated: false)
+    }
+
+    private func configureToolGroup(_ cell: RemoteConversationRowCell, id: String) {
+        guard let group = toolGroups.groups[id] else { return }
+        cell.configureToolGroup(group, isExpanded: toolGroups.expanded.contains(id), theme: theme) {
+            [weak self] in self?.toggleToolGroup(id)
+        }
+    }
+
+    private func toggleToolGroup(_ id: String) {
+        guard let group = toolGroups.groups[id],
+              let index = dataSource.indexPath(for: .toolGroup(id)),
+              let frame = collectionView.layoutAttributesForItem(at: index)?.frame else { return }
+        let anchor = (Item.toolGroup(id), frame.minY - collectionView.contentOffset.y)
+        toolGroups.toggle(id)
+        var snapshot = dataSource.snapshot()
+        let members = group.rowIDs.map(Item.row)
+        if toolGroups.expanded.contains(id) {
+            snapshot.insertItems(members, afterItem: .toolGroup(id))
+        } else {
+            snapshot.deleteItems(members)
+        }
+        snapshot.reconfigureItems([.toolGroup(id)])
+        // The tapped header remains under the finger; member rows are individually virtualized.
         dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-            guard let self, let visible,
-                  let indexPath = self.dataSource.indexPath(for: visible.0) else { return }
-            self.collectionView.layoutIfNeeded()
-            guard let attributes = self.collectionView.layoutAttributesForItem(at: indexPath)
-            else { return }
-            self.collectionView.setContentOffset(
-                CGPoint(
-                    x: self.collectionView.contentOffset.x,
-                    y: attributes.frame.minY - visible.1
-                ),
-                animated: false
-            )
+            self?.restoreTranscriptAnchor(anchor)
         }
     }
 
@@ -1084,9 +1311,11 @@ final class RemoteConversationTimelineViewController: UIViewController {
     }
 
     private func prefetchMarkdown(ids: Set<String>? = nil) {
-        let candidates = connection.conversationStore.state.rows.reversed().compactMap {
+        let rows = ids.map { $0.compactMap(connection.conversationStore.row(withID:)) }
+            ?? Array(connection.conversationStore.state.rows.reversed())
+        let candidates = rows.compactMap {
             row -> (id: String, source: String)? in
-            guard row.kind == .assistant, ids == nil || ids?.contains(row.id) == true else {
+            guard row.kind == .assistant else {
                 return nil
             }
             let source = row.text ?? ""
@@ -1171,6 +1400,14 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 continue
             }
             switch item {
+            case .results:
+                guard let cell = cell as? RemoteConversationRowCell else { continue }
+                cell.configureResults(resultLinks, theme: theme) { [weak self] route in self?.onOpenResult?(route) }
+                changedVisibleItems.append(indexPath)
+            case .unread:
+                guard let cell = cell as? RemoteConversationRowCell else { continue }
+                cell.configureUnread(theme: theme)
+                changedVisibleItems.append(indexPath)
             case .history:
                 guard let cell = cell as? RemoteConversationHistoryCell else { continue }
                 cell.configure(
@@ -1189,6 +1426,11 @@ final class RemoteConversationTimelineViewController: UIViewController {
                     theme: theme,
                     toggleExpansion: { [weak self] in self?.toggleRow(id) }
                 )
+                changedVisibleItems.append(indexPath)
+
+            case .toolGroup(let id):
+                guard let cell = cell as? RemoteConversationRowCell else { continue }
+                configureToolGroup(cell, id: id)
                 changedVisibleItems.append(indexPath)
 
             case .streaming:
@@ -1301,6 +1543,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
             self.positionFromContinuity()
             self.needsInitialBottomPosition = false
             self.isInitialBottomPositionScheduled = false
+            self.saveViewport()
             // A persisted non-following viewport is semantically away from the live edge even
             // when short final rows happen to fall inside the normal near-bottom tolerance.
             // Keep the affordance visible until the person explicitly returns to the end.
@@ -1366,6 +1609,11 @@ final class RemoteConversationTimelineViewController: UIViewController {
             ? Double(min(max((collectionView.contentOffset.y - minimumOffset) / available, 0), 1))
             : 1
         onViewportChange(progress, isNearBottom)
+        if isNearBottom, view.window != nil, UIApplication.shared.applicationState == .active,
+           let id = connection.conversationStore.state.rows.last?.id {
+            lastSeenRowID = id
+            onReadThrough?(id)
+        }
     }
 }
 
@@ -1834,6 +2082,7 @@ enum MobileConversationPerformanceProbe {
 private final class RemoteConversationRowCell: UICollectionViewCell {
     private static let reuseIdentifierBase = "RemoteConversationRowCell"
     static let streamingReuseIdentifier = "\(reuseIdentifierBase).streaming"
+    static let toolGroupReuseIdentifier = "\(reuseIdentifierBase).toolGroup"
     static let reuseIdentifiers = [
         "\(reuseIdentifierBase).user",
         "\(reuseIdentifierBase).assistant",
@@ -1841,6 +2090,7 @@ private final class RemoteConversationRowCell: UICollectionViewCell {
         "\(reuseIdentifierBase).tool",
         "\(reuseIdentifierBase).notice",
         streamingReuseIdentifier,
+        toolGroupReuseIdentifier,
     ]
 
     static func reuseIdentifier(for kind: RemoteConversationRowKind) -> String {
@@ -1944,6 +2194,56 @@ private final class RemoteConversationRowCell: UICollectionViewCell {
         }
     }
 
+    func configureUnread(theme: RemoteThemePalette) {
+        let label = UILabel()
+        label.text = MobileL10n.string("New since your last visit")
+        label.textColor = theme.uiAccent
+        label.font = .preferredFont(forTextStyle: .footnote)
+        label.adjustsFontForContentSizeCategory = true
+        label.numberOfLines = 0
+        label.accessibilityIdentifier = "conversation.first-unread"
+        install(label)
+    }
+
+    func configureResults(
+        _ links: [RemoteConversationResultLink], theme: RemoteThemePalette,
+        open: @escaping (SessionWorkspaceRoute) -> Void
+    ) {
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = MobileDesign.Spacing.small
+        for link in links.prefix(3) {
+            var configuration = UIButton.Configuration.plain()
+            configuration.title = link.title
+            configuration.subtitle = link.detail
+            configuration.image = UIImage(systemName: link.symbol)
+            configuration.imagePadding = MobileDesign.Spacing.medium
+            configuration.titleAlignment = .leading
+            configuration.baseForegroundColor = theme.uiLabel
+            configuration.contentInsets = .init(top: 10, leading: 12, bottom: 10, trailing: 12)
+            let button = UIButton(configuration: configuration, primaryAction: UIAction { _ in open(link.route) })
+            button.contentHorizontalAlignment = .leading
+            button.titleLabel?.adjustsFontForContentSizeCategory = true
+            button.applyRemoteSurface(fill: theme.uiConversationPanel, radius: theme.panelRadius)
+            button.heightAnchor.constraint(greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget).isActive = true
+            MobileButtonHaptics.install(on: button)
+            stack.addArrangedSubview(button)
+        }
+        stack.accessibilityIdentifier = "conversation.results"
+        install(stack)
+    }
+
+    func configureToolGroup(
+        _ group: RemoteConversationToolGroups.Group,
+        isExpanded: Bool,
+        theme: RemoteThemePalette,
+        toggle: @escaping () -> Void
+    ) {
+        let control = hostedView as? RemoteToolGroupControl ?? RemoteToolGroupControl()
+        control.configure(group: group, isExpanded: isExpanded, theme: theme, toggle: toggle)
+        install(control)
+    }
+
     private func install(_ view: UIView) {
         if hostedView === view { return }
         hostedView?.removeFromSuperview()
@@ -1960,6 +2260,102 @@ private final class RemoteConversationRowCell: UICollectionViewCell {
 }
 
 // MARK: - Row views
+
+/// One quiet disclosure for a consecutive run. Content and outcome both wrap at accessibility
+/// sizes; there are never hidden child tool views inside this header.
+final class RemoteToolGroupControl: UIControl {
+    private static let actionID = UIAction.Identifier("RemoteToolGroupControl.toggle")
+    private static let iconSize: CGFloat = 16
+    private static let chevronSize: CGFloat = 12
+    private let icon = UIImageView()
+    private let title = UILabel()
+    private let status = UILabel()
+    private let chevron = UIImageView()
+
+    override var isHighlighted: Bool {
+        didSet { alpha = isHighlighted ? 0.6 : 1 }
+    }
+
+    override func accessibilityActivate() -> Bool {
+        guard isEnabled else { return false }
+        sendActions(for: .touchUpInside)
+        return true
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        let labels = UIStackView(arrangedSubviews: [title, status])
+        labels.axis = .vertical
+        for label in [title, status] {
+            label.numberOfLines = 0
+            label.adjustsFontForContentSizeCategory = true
+        }
+        let stack = UIStackView(arrangedSubviews: [icon, labels, chevron])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = MobileDesign.Spacing.small
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.isUserInteractionEnabled = false
+        addSubview(stack)
+        for image in [icon, chevron] {
+            image.contentMode = .scaleAspectFit
+            image.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: MobileDesign.Spacing.small),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -MobileDesign.Spacing.small),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: MobileDesign.Spacing.tight),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -MobileDesign.Spacing.tight),
+            icon.widthAnchor.constraint(equalToConstant: Self.iconSize),
+            icon.heightAnchor.constraint(equalToConstant: Self.iconSize),
+            chevron.widthAnchor.constraint(equalToConstant: Self.chevronSize),
+            chevron.heightAnchor.constraint(equalToConstant: Self.chevronSize),
+        ])
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+        MobileButtonHaptics.install(on: self)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(
+        group: RemoteConversationToolGroups.Group,
+        isExpanded: Bool,
+        theme: RemoteThemePalette,
+        toggle: @escaping () -> Void
+    ) {
+        title.text = group.summary
+        title.font = .preferredFont(forTextStyle: .subheadline)
+        title.textColor = theme.uiSecondaryLabel
+        var outcomes: [String] = []
+        if group.failureCount > 0 {
+            outcomes.append(MobileL10n.string("%lld failed", group.failureCount))
+        }
+        if let running = group.runningSummary {
+            outcomes.append(running)
+        }
+        status.text = outcomes.joined(separator: " · ")
+        status.font = .preferredFont(forTextStyle: .footnote)
+        status.textColor = group.failureCount > 0 ? theme.uiNegative : theme.uiSecondaryLabel
+        status.isHidden = outcomes.isEmpty
+        icon.image = UIImage(systemName: group.failureCount > 0 ? "exclamationmark.circle" : "terminal")
+        icon.tintColor = status.textColor
+        chevron.image = UIImage(systemName: isExpanded ? "chevron.down" : "chevron.right")
+        chevron.tintColor = theme.uiSecondaryLabel
+        applyRemoteSurface(
+            fill: theme.uiConversationGround,
+            radius: theme.hasBackdropDecoration ? theme.panelRadius : 0
+        )
+        accessibilityIdentifier = "conversation.tool-group.\(group.id)"
+        accessibilityLabel = ([title.text ?? ""] + outcomes).joined(separator: ", ")
+        accessibilityValue = MobileL10n.string(isExpanded ? "Expanded" : "Collapsed")
+        accessibilityHint = MobileL10n.string(isExpanded ? "Hides tool calls" : "Shows tool calls")
+        removeAction(identifiedBy: Self.actionID, for: .touchUpInside)
+        addAction(UIAction(identifier: Self.actionID) { _ in toggle() }, for: .touchUpInside)
+    }
+}
 
 /// The stable one-line contract for a collapsed remote tool call.
 ///
@@ -2636,11 +3032,8 @@ final class RemoteToolMessageView: UIView {
         toggle: @escaping () -> Void
     ) {
         applyRemoteSurface(
-            fill: theme.uiConversationPanel,
-            radius: theme.panelRadius,
-            border: theme.uiBorder,
-            borderWidth: theme.borderWidth,
-            glow: theme.glow
+            fill: isExpanded ? theme.uiConversationPanel : theme.uiConversationGround,
+            radius: theme.panelRadius
         )
         disclosure.configure(
             row: row,

@@ -535,6 +535,32 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(watcher.composerCapabilities, snapshot.composerCapabilities)
     }
 
+    func testConversationDeliverySurvivesWireWindowsAndCannotGrantGuestOrWatcherInput() throws {
+        let delivery = RemoteConversationDeliveryDTO(canQueue: true, canSteer: true, messages: [
+            .init(id: "queued-message", summary: "Review the result", state: .queued)
+        ])
+        let snapshot = RemoteConversationSnapshotDTO(rows: [], canSend: false, revision: 8, delivery: delivery)
+        XCTAssertEqual(RemoteConversationWirePolicy.bounded(snapshot).delivery, delivery)
+        XCTAssertEqual(RemoteConversationWirePolicy.initial(snapshot, revision: 8).delivery, delivery)
+        let delta = try XCTUnwrap(RemoteConversationWirePolicy.deltaWithUnchangedRows(
+            from: .init(rows: [], canSend: false), to: snapshot, baseRevision: 7, revision: 8
+        ))
+        XCTAssertEqual(delta.delivery, delivery)
+        let owner = RemoteAuthorization(shareID: "owner", capability: .interact, scope: .allSessions, principal: .ownerDevice)
+        let guest = RemoteAuthorization(shareID: "guest", capability: .interact, scope: .session(SessionID()), principal: .guest)
+        let followups = RemoteWebSocketFeature.conversationFollowups.rawValue
+        XCTAssertTrue(RemoteSessionMirrorRegistry.advertisedFeatures(for: owner).contains(followups))
+        XCTAssertFalse(RemoteSessionMirrorRegistry.advertisedFeatures(for: guest).contains(followups))
+        XCTAssertFalse(RemoteSessionMirrorRegistry.advertisedFeatures(for: nil).contains(followups))
+        XCTAssertTrue(RemoteConversationWirePolicy.authorized(snapshot, for: owner).delivery?.canQueue == true)
+        XCTAssertFalse(RemoteConversationWirePolicy.authorized(snapshot, for: owner, canWrite: false).delivery?.canQueue == true)
+        XCTAssertFalse(RemoteConversationWirePolicy.authorized(delta, for: guest).delivery?.canSteer == true)
+        let data = try JSONEncoder().encode(snapshot)
+        XCTAssertEqual(try JSONDecoder().decode(RemoteConversationSnapshotDTO.self, from: data).delivery, delivery)
+        let legacy = try JSONDecoder().decode(RemoteConversationSnapshotDTO.self, from: Data("{\"rows\":[],\"canSend\":false}".utf8))
+        XCTAssertNil(legacy.delivery)
+    }
+
     override func tearDown() {
         server.stop()
         server = nil

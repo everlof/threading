@@ -3226,6 +3226,8 @@ public enum RemoteWebSocketFeature: String, Codable, CaseIterable, Sendable {
     case focusedInputControl
     /// Native conversation rows and prompt submissions carry structured references/comments.
     case conversationContextAttachments
+    /// Explicit queue/steer intent, preserved by acknowledged retries across reconnects.
+    case conversationFollowups
     /// The host closes initial terminal replay plus the first phone-owned resize with an
     /// ordered ready frame. A client that sees this feature can reveal on that boundary rather
     /// than guessing from network silence.
@@ -4424,6 +4426,7 @@ public struct RemoteConversationRowDTO: Codable, Equatable, Identifiable, Sendab
 /// make reconnect, replay, tool-result attachment, and streamed-placeholder replacement one
 /// idempotent operation for every client.
 public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
+    public let delivery: RemoteConversationDeliveryDTO?
     public let type: String
     public let rows: [RemoteConversationRowDTO]
     public let streamingText: String
@@ -4444,9 +4447,11 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
         permission: RemotePermissionRequestDTO? = nil,
         questions: [RemoteQuestionRequestDTO] = [],
         revision: Int = 0,
-        hasEarlier: Bool = false
+        hasEarlier: Bool = false,
+        delivery: RemoteConversationDeliveryDTO? = nil
     ) {
         type = "conversation"
+        self.delivery = delivery
         self.rows = rows
         self.streamingText = streamingText
         self.canSend = canSend
@@ -4459,12 +4464,13 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case type, rows, streamingText, canSend, composerCapabilities, permission, revision
-        case hasEarlier, questions
+        case hasEarlier, questions, delivery
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         type = try container.decodeIfPresent(String.self, forKey: .type) ?? "conversation"
+        delivery = try container.decodeIfPresent(RemoteConversationDeliveryDTO.self, forKey: .delivery)
         rows = try container.decodeIfPresent(
             [RemoteConversationRowDTO].self,
             forKey: .rows
@@ -4494,6 +4500,7 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
 /// those two operations directly. Full snapshots remain the recovery path when a client's base
 /// revision no longer matches.
 public struct RemoteConversationDeltaDTO: Codable, Equatable, Sendable {
+    public let delivery: RemoteConversationDeliveryDTO?
     public let type: String
     public let baseRevision: Int
     public let revision: Int
@@ -4518,9 +4525,11 @@ public struct RemoteConversationDeltaDTO: Codable, Equatable, Sendable {
         composerCapabilities: [RemoteComposerCapabilityDTO]? = nil,
         permission: RemotePermissionRequestDTO? = nil,
         questions: [RemoteQuestionRequestDTO]? = nil,
-        hasEarlier: Bool? = nil
+        hasEarlier: Bool? = nil,
+        delivery: RemoteConversationDeliveryDTO? = nil
     ) {
         type = "conversationDelta"
+        self.delivery = delivery
         self.baseRevision = baseRevision
         self.revision = revision
         self.appendedRows = appendedRows

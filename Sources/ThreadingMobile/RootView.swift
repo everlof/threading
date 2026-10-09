@@ -235,6 +235,9 @@ enum MobileDemoFixture: String, CaseIterable {
     case conversationScrollStress = "conversation-scroll-stress"
     case conversationStreaming = "conversation-streaming"
     case conversationToolExpanded = "conversation-tool-expanded"
+    case conversationToolGroups = "conversation-tool-groups"
+    case conversationToolGroupsAttention = "conversation-tool-groups-attention"
+    case conversationChatPolish = "conversation-chat-polish"
 
     case attentionRequest = "attention-request"
     case pairing = "pairing"

@@ -106,6 +106,7 @@ extension ConversationViewController {
             guard outbox.nextPending?.origin == .curfewWindDown else { return }
         }
         guard let item = outbox.handOverNext() else { return }
+        preparingOutboxMessageID = item.id
 
         refreshOutboxRail()
 
@@ -119,6 +120,7 @@ extension ConversationViewController {
             guard let self else { return }
             guard case .success = validation else {
                 self.outbox.reclaim(item.id)
+                self.preparingOutboxMessageID = nil
                 self.isPreparingTurn = false
                 if case .failure(let failure) = validation {
                     self.presentWorkspaceFileFailure(failure)
@@ -137,6 +139,7 @@ extension ConversationViewController {
             ) { [weak self] admitted, _ in
                 guard let self else { return }
                 self.isPreparingTurn = false
+                self.preparingOutboxMessageID = nil
 
                 guard admitted else {
                     // The transport refused after all — it exited between the settle and here. The
@@ -267,6 +270,7 @@ extension ConversationViewController {
         outboxRail.setRows(outbox.pending.map {
             ConversationOutboxRailView.Row(id: $0.id, summary: $0.summary, state: $0.state)
         })
+        RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
     }
 
     func wireOutboxRail() {

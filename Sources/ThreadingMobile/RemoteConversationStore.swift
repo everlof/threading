@@ -29,6 +29,7 @@ final class RemoteConversationStore {
 
     var onDecisionChange: (() -> Void)?
     var onCanSendChange: ((Bool) -> Void)?
+    var onDeliveryChange: ((RemoteConversationDeliveryDTO?) -> Void)?
 
     private var observers: [UUID: (Change) -> Void] = [:]
     private var rowsByID: [String: RemoteConversationRowDTO] = [:]
@@ -52,6 +53,7 @@ final class RemoteConversationStore {
         let oldCanSend = state.canSend
         let wasLoadingEarlier = isLoadingEarlier
         state.apply(snapshot)
+        if oldState.delivery != state.delivery { onDeliveryChange?(state.delivery) }
         rowsByID = Dictionary(uniqueKeysWithValues: state.rows.map { ($0.id, $0) })
         isLoadingEarlier = false
         if oldState.permission != state.permission || oldState.questions != state.questions { onDecisionChange?() }
@@ -76,9 +78,10 @@ final class RemoteConversationStore {
         let streamingChanged = oldState.streamingText != state.streamingText
         let permissionChanged = oldState.permission != state.permission
         let questionsChanged = oldState.questions != state.questions
-        let capabilitiesChanged = oldState.composerCapabilities != state.composerCapabilities
+        let capabilitiesChanged = oldState.composerCapabilities != state.composerCapabilities || oldState.delivery != state.delivery
         let historyChanged = oldState.hasEarlier != state.hasEarlier || wasLoadingEarlier
         guard !updated.isEmpty
+                || oldCanSend != state.canSend
                 || streamingChanged
                 || permissionChanged
                 || questionsChanged
@@ -109,10 +112,12 @@ final class RemoteConversationStore {
         let oldCapabilities = state.composerCapabilities
         let oldCanSend = state.canSend
         let oldHasEarlier = state.hasEarlier
+        let oldDelivery = state.delivery
         switch state.apply(delta) {
         case .requiresSnapshot:
             return false
         case .changed(let inserted, let updated):
+            if oldDelivery != state.delivery { onDeliveryChange?(state.delivery) }
             if oldPermission != state.permission || oldQuestions != state.questions { onDecisionChange?() }
             let changedIDs = Set(inserted + updated)
             for row in delta.updatedRows + delta.appendedRows where changedIDs.contains(row.id) {

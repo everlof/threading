@@ -23,6 +23,7 @@ final class MobileSessionContinuityStore: ObservableObject {
         var terminalDraft = ""
         var conversationViewportProgress: Double?
         var conversationFollowsBottom = true
+        var conversationLastSeenRowID: String?
         var terminalViewportProgress: Double?
         /// Whether the terminal's keyboard was wanted up when the chat was last left, so it
         /// comes back the same way. Position-like: disposable, and never a user choice in
@@ -38,6 +39,7 @@ final class MobileSessionContinuityStore: ObservableObject {
             !hasDraft
                 && conversationViewportProgress == nil
                 && conversationFollowsBottom
+                && conversationLastSeenRowID == nil
                 && terminalViewportProgress == nil
                 && terminalKeyboardWasUp == nil
                 && terminalKeyboardLeftAt == nil
@@ -152,6 +154,10 @@ final class MobileSessionContinuityStore: ObservableObject {
         update(hostID: hostID, sessionID: sessionID) { state in
             state.terminalViewportProgress = clamp(progress)
         }
+    }
+
+    func setConversationLastSeenRow(_ id: String, hostID: String, sessionID: String) {
+        update(hostID: hostID, sessionID: sessionID) { $0.conversationLastSeenRowID = id }
     }
 
     func setTerminalKeyboardUp(_ isUp: Bool, at now: Date, hostID: String, sessionID: String) {
@@ -279,6 +285,7 @@ final class MobileSessionContinuityStore: ObservableObject {
         }
         for (storageKey, state) in archive.states {
             try count(storageKey, maximum: Defaults.maximumStorageKeyBytes)
+            if let id = state.conversationLastSeenRowID { try count(id, maximum: Defaults.maximumIdentifierBytes) }
             if !state.conversationDraft.isEmpty {
                 try count(state.conversationDraft, maximum: Defaults.maximumDraftBytes)
             }

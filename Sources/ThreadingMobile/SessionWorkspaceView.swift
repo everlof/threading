@@ -35,7 +35,7 @@ private enum SessionWorkspaceItem: String, CaseIterable, Hashable, Identifiable 
     }
 }
 
-enum SessionWorkspaceRoute: Hashable {
+enum SessionWorkspaceRoute: Hashable, Sendable {
     case browser(tabID: String?)
     case review
     case files
@@ -94,6 +94,7 @@ struct SessionWorkspaceView: View {
         activity: MobileWorkspaceActivity,
         initialWorkspace: RemoteWorkspaceDTO? = nil,
         initialDestination: RemoteNotificationDestinationDTO? = nil,
+        initialRoute: SessionWorkspaceRoute? = nil,
         offersAttachmentThumbnails: Bool = false,
         offersAttachmentVideoStreaming: Bool = false,
         loadsRemotely: Bool = true,
@@ -107,7 +108,7 @@ struct SessionWorkspaceView: View {
         self.offersAttachmentVideoStreaming = offersAttachmentVideoStreaming
         _activity = ObservedObject(wrappedValue: activity)
         _workspace = State(initialValue: initialWorkspace)
-        let destination = SessionWorkspaceRoute.notificationDestination(initialDestination)
+        let destination = initialRoute ?? SessionWorkspaceRoute.notificationDestination(initialDestination)
         if case .browser(let tabID) = destination {
             _path = State(initialValue: [])
             _browserPresentation = State(initialValue: BrowserPresentation(tabID: tabID))

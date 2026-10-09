@@ -686,6 +686,14 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+The iPhone chat's activity summaries, catch-up marker, result navigation, delivery selector,
+dictation control and image-markup editor are deliberately host-only surfaces for one paired
+host/session. Themes supply the existing mobile palette and reading plates. Threading retains
+transcript chronology, result identities, input authority, provider receipts, recording consent,
+attachment custody and the explicit Send decision. PencilKit owns its drawing controls. No new
+extension slot or data authority is introduced; absent host capabilities fall back to ordinary
+sending and existing Workspace destinations.
+
 **Browse on iPhone** is host-only. Threading owns the selected tab and origin, owner-only preview
 capability, certificate verification, network destination, revocation, browser lifecycle and
 navigation policy. Themes supply the local browser's application chrome; Safari and WebKit own

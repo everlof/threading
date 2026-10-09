@@ -169,6 +169,34 @@ final class ComposerAttachmentTray {
         items.removeAll { $0.id == id }
     }
 
+    /// Commit markup only after a replacement is ready. A fresh identity prevents an old
+    /// upload's late progress callback from marking the edited image as uploaded.
+    func replaceImage(_ id: UUID, data: Data) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        uploads.removeValue(forKey: id)?.cancel()
+        let replacement = ComposerAttachmentItem(
+            name: "Marked-up.png", thumbnail: items[index].thumbnail, systemImage: "photo"
+        )
+        items[index] = replacement
+        // Enter uploading before yielding, so a simultaneous Send cannot submit the original
+        // while its replacement is being encoded. Eight tray slots bound concurrent workers.
+        uploads[replacement.id] = Task { [weak self] in
+            let payload = await Task.detached(priority: .userInitiated) {
+                ComposerAttachmentPayload.prepared(data: data, name: "Marked-up.png", type: .png)
+            }.value
+            guard !Task.isCancelled, let self,
+                  let index = items.firstIndex(where: { $0.id == replacement.id }) else { return }
+            guard let payload else {
+                items[index].state = .failed
+                notice = MobileL10n.string("Threading can’t send that file.")
+                uploads.removeValue(forKey: replacement.id)
+                return
+            }
+            items[index].thumbnail = payload.thumbnail
+            upload(payload, for: replacement.id)
+        }
+    }
+
     /// Drops every upload that failed, as one change rather than one per file.
     ///
     /// A surface that shows no chips has no other way to be rid of them, and a stranded failure
@@ -482,6 +510,7 @@ final class ComposerAttachmentStripView: UIView {
     private var theme: RemoteThemePalette?
     private var renderedItems: [ComposerAttachmentItem] = []
     private var renderedRemovalEnabled = true
+    private var renderedImageMarkupEnabled = false
 
     // MARK: - Initialization
 
@@ -505,14 +534,17 @@ final class ComposerAttachmentStripView: UIView {
     func update(
         items: [ComposerAttachmentItem],
         theme: RemoteThemePalette,
-        isRemovalEnabled: Bool = true
+        isRemovalEnabled: Bool = true,
+        isImageMarkupEnabled: Bool = false
     ) {
         guard self.theme != theme
                 || items != renderedItems
-                || isRemovalEnabled != renderedRemovalEnabled else { return }
+                || isRemovalEnabled != renderedRemovalEnabled
+                || isImageMarkupEnabled != renderedImageMarkupEnabled else { return }
         self.theme = theme
         renderedItems = items
         renderedRemovalEnabled = isRemovalEnabled
+        renderedImageMarkupEnabled = isImageMarkupEnabled
 
         stack.arrangedSubviews.forEach {
             stack.removeArrangedSubview($0)
@@ -522,7 +554,8 @@ final class ComposerAttachmentStripView: UIView {
             let chip = ComposerAttachmentChipView(
                 item: item,
                 theme: theme,
-                isRemovalEnabled: isRemovalEnabled
+                isRemovalEnabled: isRemovalEnabled,
+                isImageMarkupEnabled: isImageMarkupEnabled
             )
             chip.onRemove = { [weak self] in self?.onRemove?(item.id) }
             chip.onPreview = { [weak self] in self?.onPreview?(item) }
@@ -584,11 +617,12 @@ private final class ComposerAttachmentChipView: UIView {
     init(
         item: ComposerAttachmentItem,
         theme: RemoteThemePalette,
-        isRemovalEnabled: Bool
+        isRemovalEnabled: Bool,
+        isImageMarkupEnabled: Bool
     ) {
         super.init(frame: .zero)
         setup(theme: theme)
-        apply(item, theme: theme)
+        apply(item, theme: theme, isImageMarkupEnabled: isImageMarkupEnabled)
         removeButton.isEnabled = isRemovalEnabled
         removeButton.alpha = isRemovalEnabled ? 1 : MobileDesign.Opacity.disabledAction
     }
@@ -719,7 +753,7 @@ private final class ComposerAttachmentChipView: UIView {
         ])
     }
 
-    private func apply(_ item: ComposerAttachmentItem, theme: RemoteThemePalette) {
+    private func apply(_ item: ComposerAttachmentItem, theme: RemoteThemePalette, isImageMarkupEnabled: Bool) {
         imageView.image = item.thumbnail
         imageView.isHidden = item.thumbnail == nil
         glyphView.isHidden = item.thumbnail != nil
@@ -729,13 +763,15 @@ private final class ComposerAttachmentChipView: UIView {
                 pointSize: ComposerAttachmentMetrics.documentGlyph
             )
         )
-        playPlate.isHidden = !(item.isMovie && item.thumbnail != nil)
+        let marksImage = isImageMarkupEnabled && !item.isMovie && item.thumbnail != nil
+        playPlate.isHidden = !((item.isMovie || marksImage) && item.thumbnail != nil)
+        playGlyph.image = UIImage(systemName: marksImage ? "pencil.tip" : "play.fill")
 
         let isPreviewable = item.thumbnail != nil || item.previewURL != nil
         plate.isEnabled = isPreviewable
         plate.isAccessibilityElement = isPreviewable
         plate.accessibilityLabel = isPreviewable
-            ? MobileL10n.string("Preview %@", item.name)
+            ? (marksImage ? MobileL10n.string("Mark up %@", item.name) : MobileL10n.string("Preview %@", item.name))
             : nil
 
         let strokeColor: UIColor

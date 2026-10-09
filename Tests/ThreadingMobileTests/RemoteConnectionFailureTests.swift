@@ -447,6 +447,27 @@ final class RemoteConnectionFailureTests: XCTestCase {
         XCTAssertFalse(encoded.contains("\"z\""))
     }
 
+    func testFollowupRetryRefusesAHostThatNoLongerAdvertisesIntentSupport() throws {
+        let connection = makeConnection(port: 1, sessionID: UUID().uuidString)
+        connection.connect()
+        defer { connection.disconnect() }
+        connection.receiveServerTextForTesting(
+            #"{"type":"hello","surface":"conversation","capability":"interact","cols":80,"rows":24,"title":"Chat","features":["submitAcknowledgement","conversationFollowups"]}"#
+        )
+        _ = connection.conversationStore.replace(with: .init(rows: [], canSend: false,
+            delivery: .init(canQueue: true, canSteer: true)))
+        let requestID = try XCTUnwrap(connection.submit("Use the smaller layout", deliveryMode: .steer))
+        XCTAssertTrue(connection.isPromptSubmissionPending)
+        connection.receiveServerTextForTesting(
+            #"{"type":"hello","surface":"conversation","capability":"interact","cols":80,"rows":24,"title":"Chat","features":["submitAcknowledgement"]}"#
+        )
+        XCTAssertFalse(connection.isPromptSubmissionPending)
+        XCTAssertEqual(connection.promptSubmissionFeedback?.requestID, requestID)
+        XCTAssertEqual(connection.promptSubmissionFeedback?.status, .unavailable)
+        XCTAssertNil(connection.submit("Try the same follow-up", deliveryMode: .queue))
+        XCTAssertEqual(connection.phase, .connected, "Missing support must refuse before attempting a send")
+    }
+
     func testBackgroundLossShowsReconnectingUntilRecoveryFails() async throws {
         var routeReply: CheckedContinuation<RemoteClient?, Never>?
         let connection = makeConnection(port: 1, sessionID: UUID().uuidString) { _ in

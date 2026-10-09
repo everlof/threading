@@ -12,6 +12,17 @@
         }
       }
     },
+    " · +%lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " · +%lld"
+          }
+        }
+      }
+    },
     "%@   Loading usage…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -541,6 +552,17 @@
         }
       }
     },
+    "%lld browser actions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld webbläsaråtgärder"
+          }
+        }
+      }
+    },
     "%lld browser tabs · %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -585,6 +607,17 @@
         }
       }
     },
+    "%lld commands" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld kommandon"
+          }
+        }
+      }
+    },
     "%lld comments" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -607,6 +640,17 @@
         }
       }
     },
+    "%lld edits" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld ändringar"
+          }
+        }
+      }
+    },
     "%lld existing “continue on reset” messages for this account will be released only after Codex confirms new headroom. No message will be created or sent for any other chat." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -614,6 +658,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld befintliga ”fortsätt vid återställning”-meddelanden för det här kontot släpps först när Codex har bekräftat nytt utrymme. Inget meddelande skapas eller skickas för någon annan chatt."
+          }
+        }
+      }
+    },
+    "%lld failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld failed"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld misslyckade"
+          }
+        }
+      }
+    },
+    "%lld file reads" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld filläsningar"
           }
         }
       }
@@ -739,6 +811,17 @@
         }
       }
     },
+    "%lld replies" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld svar"
+          }
+        }
+      }
+    },
     "%lld requests" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -746,6 +829,62 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld förfrågningar"
+          }
+        }
+      }
+    },
+    "%lld running" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld running"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld pågår"
+          }
+        }
+      }
+    },
+    "%lld searches" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sökningar"
+          }
+        }
+      }
+    },
+    "%lld tool actions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld verktygsåtgärder"
+          }
+        }
+      }
+    },
+    "%lld tool calls" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld tool calls"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld verktygsanrop"
           }
         }
       }
@@ -838,6 +977,28 @@
         }
       }
     },
+    "1 browser action" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 webbläsaråtgärd"
+          }
+        }
+      }
+    },
+    "1 command" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 kommando"
+          }
+        }
+      }
+    },
     "1 comment" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -845,6 +1006,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 kommentar"
+          }
+        }
+      }
+    },
+    "1 edit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 ändring"
+          }
+        }
+      }
+    },
+    "1 file read" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 filläsning"
           }
         }
       }
@@ -893,6 +1076,28 @@
         }
       }
     },
+    "1 reply" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 svar"
+          }
+        }
+      }
+    },
+    "1 search" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 sökning"
+          }
+        }
+      }
+    },
     "1 second" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -900,6 +1105,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 sekund"
+          }
+        }
+      }
+    },
+    "1 tool action" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 verktygsåtgärd"
+          }
+        }
+      }
+    },
+    "1 tool call" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 verktygsanrop"
           }
         }
       }
@@ -1489,6 +1716,17 @@
         }
       }
     },
+    "Add to the current task…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till i den pågående uppgiften…"
+          }
+        }
+      }
+    },
     "Additional device details" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1529,6 +1767,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Avancerat"
+          }
+        }
+      }
+    },
+    "After this task" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Efter den här uppgiften"
+          }
+        }
+      }
+    },
+    "After this task ▾" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Efter den här uppgiften ▾"
           }
         }
       }
@@ -1850,6 +2110,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Utseende"
+          }
+        }
+      }
+    },
+    "Apply" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillämpa"
           }
         }
       }
@@ -2903,6 +3174,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj vad den här personen kan göra."
+          }
+        }
+      }
+    },
+    "Choose when the agent receives this message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj när agenten ska få det här meddelandet"
           }
         }
       }
@@ -4192,6 +4474,17 @@
         }
       }
     },
+    "Current working tree" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktuella arbetsfiler"
+          }
+        }
+      }
+    },
     "Custom extension surface" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4396,6 +4689,17 @@
         }
       }
     },
+    "Delivered to agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Levererat till agenten"
+          }
+        }
+      }
+    },
     "Delivery" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4556,6 +4860,28 @@
         }
       }
     },
+    "Dictate message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diktera meddelande"
+          }
+        }
+      }
+    },
+    "Dictation unavailable. Check microphone and speech permissions in Settings." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diktering är inte tillgänglig. Kontrollera mikrofon- och talbehörigheterna i Inställningar."
+          }
+        }
+      }
+    },
     "Direct" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4668,6 +4994,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dra för att ändra ordning via Redigera. Tangenterna gäller %@-sessioner på den här enheten."
+          }
+        }
+      }
+    },
+    "Draw on the image" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rita på bilden"
           }
         }
       }
@@ -5337,6 +5674,17 @@
         }
       }
     },
+    "Files shared in this chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filer som delats i chatten"
+          }
+        }
+      }
+    },
     "Find a file" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5436,6 +5784,17 @@
         }
       }
     },
+    "Finishing transcription…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avslutar transkribering…"
+          }
+        }
+      }
+    },
     "First message" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5443,6 +5802,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Första meddelandet"
+          }
+        }
+      }
+    },
+    "First new activity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Första nya aktiviteten"
           }
         }
       }
@@ -5827,6 +6197,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dölj tangentbordet"
+          }
+        }
+      }
+    },
+    "Hides tool calls" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hides tool calls"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Döljer verktygsanrop"
           }
         }
       }
@@ -6403,6 +6790,17 @@
         }
       }
     },
+    "Latest reply" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senaste svaret"
+          }
+        }
+      }
+    },
     "Left Arrow" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6498,6 +6896,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Länken är klar"
+          }
+        }
+      }
+    },
+    "Listening… Tap Stop when finished." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lyssnar… Tryck på Stopp när du är klar."
           }
         }
       }
@@ -6794,6 +7203,17 @@
         }
       }
     },
+    "Make the activity summary a little shorter" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gör aktivitetssammanfattningen lite kortare"
+          }
+        }
+      }
+    },
     "Make the error message useful…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6860,6 +7280,39 @@
         }
       }
     },
+    "Mark as read" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markera som läst"
+          }
+        }
+      }
+    },
+    "Mark up %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rita på %@"
+          }
+        }
+      }
+    },
+    "Mark up image" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rita på bilden"
+          }
+        }
+      }
+    },
     "Max" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6922,6 +7375,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Minnestryck"
+          }
+        }
+      }
+    },
+    "Message delivery" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meddelandeleverans"
+          }
+        }
+      }
+    },
+    "Message for the next task…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meddelande till nästa uppgift…"
           }
         }
       }
@@ -7208,6 +7683,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ny session i %@"
+          }
+        }
+      }
+    },
+    "New since your last visit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nytt sedan ditt senaste besök"
           }
         }
       }
@@ -8078,6 +8564,28 @@
         }
       }
     },
+    "Open browser" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna webbläsare"
+          }
+        }
+      }
+    },
+    "Open image" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna bild"
+          }
+        }
+      }
+    },
     "Open images and PDFs mentioned by the agent." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8581,6 +9089,17 @@
         }
       }
     },
+    "Pending decision" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på beslut"
+          }
+        }
+      }
+    },
     "People in open chats" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8847,6 +9366,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Förbereder bilaga"
+          }
+        }
+      }
+    },
+    "Preparing image…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förbereder bilden…"
           }
         }
       }
@@ -9233,6 +9763,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fråga %lld av %lld"
+          }
+        }
+      }
+    },
+    "Queue message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Köa meddelande"
+          }
+        }
+      }
+    },
+    "Queued" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Köad"
           }
         }
       }
@@ -10104,6 +10656,17 @@
         }
       }
     },
+    "Review changes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Granska ändringar"
+          }
+        }
+      }
+    },
     "Review comparison, %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10210,6 +10773,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kör ”%@”…"
+          }
+        }
+      }
+    },
+    "Running: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pågår: %@"
           }
         }
       }
@@ -10534,6 +11108,28 @@
         }
       }
     },
+    "Send now" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka nu"
+          }
+        }
+      }
+    },
+    "Send now ▾" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka nu ▾"
+          }
+        }
+      }
+    },
     "Send report" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10607,6 +11203,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skickar en gång…"
+          }
+        }
+      }
+    },
+    "Sending…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skickar…"
           }
         }
       }
@@ -11235,6 +11842,23 @@
         }
       }
     },
+    "Shows tool calls" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows tool calls"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar verktygsanrop"
+          }
+        }
+      }
+    },
     "Shows tool output" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11253,6 +11877,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sedan mätvärdena nollställdes"
+          }
+        }
+      }
+    },
+    "Since you left · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sedan du var här · %@"
+          }
+        }
+      }
+    },
+    "Since you left · New messages" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sedan du var här · Nya meddelanden"
+          }
+        }
+      }
+    },
+    "Since you left · Recent activity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sedan du var här · Senaste aktiviteten"
           }
         }
       }
@@ -11494,6 +12151,17 @@
         }
       }
     },
+    "Starting dictation…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startar diktering…"
+          }
+        }
+      }
+    },
     "Starting terminal on your Mac…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11545,6 +12213,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stanna och vänta på mig"
+          }
+        }
+      }
+    },
+    "Stop dictation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppa diktering"
           }
         }
       }
@@ -13480,6 +14159,17 @@
         }
       }
     },
+    "This drawing is too large. Remove some marks and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Teckningen är för stor. Ta bort några markeringar och försök igen."
+          }
+        }
+      }
+    },
     "This file has no text preview." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15205,6 +15895,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arbetar"
+          }
+        }
+      }
+    },
+    "Working on this" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbetar med detta"
           }
         }
       }

@@ -1515,6 +1515,8 @@ final class RemoteSessionMirrorRegistry {
     static func advertisedFeatures(for authorization: RemoteAuthorization?) -> [String] {
         RemoteWebSocketFeature.allCases.filter { feature in
             switch feature {
+            case .conversationFollowups:
+                return authorization?.principal == .ownerDevice && authorization?.capability == .interact
             case .composerAttachmentUploads, .terminalAttachmentInsertion:
                 return authorization?.principal == .ownerDevice
                     && authorization?.scope == .allSessions
@@ -2251,7 +2253,8 @@ final class RemoteSessionMirrorRegistry {
         to sessionID: SessionID,
         device: String?,
         authorization: RemoteAuthorization,
-        requestID: String?
+        requestID: String?,
+        deliveryMode: RemoteConversationDeliveryMode? = nil
     ) -> RemotePromptSubmissionStatus {
         let context = (remoteContext ?? []).compactMap(ConversationContextAttachment.init(remoteDTO:))
         let normalizedContext = ConversationContextPolicy.normalized(context)
@@ -2270,6 +2273,7 @@ final class RemoteSessionMirrorRegistry {
             )
         }
         var fingerprintSource = Data(("conversation\0" + text + "\0").utf8)
+        if let deliveryMode { fingerprintSource.append(Data((deliveryMode.rawValue + "\0").utf8)) }
         // Staged uploads are part of what makes this submission itself. Without them a retry
         // carrying different pictures would match the first attempt's fingerprint and replay
         // its status instead of being seen as the conflict it is.
@@ -2303,17 +2307,21 @@ final class RemoteSessionMirrorRegistry {
         } else if let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID),
                   conversation.isRunning
         {
-            if !conversation.remoteSnapshot.canSend {
+            let delivery = conversation.remoteSnapshot.delivery
+            let acceptsFollowup = deliveryMode.map {
+                authorization.principal == .ownerDevice && ($0 == .queue ? delivery?.canQueue == true : delivery?.canSteer == true)
+            } ?? false
+            if deliveryMode != nil && !acceptsFollowup {
+                status = .rejected
+            } else if deliveryMode == nil && !conversation.remoteSnapshot.canSend {
                 status = .busy
             } else if let prompt = promptText(
                 text,
                 stagedAttachmentPaths: attachmentPaths,
                 for: sessionID
-            ), conversation.sendRemotePrompt(
-                prompt,
-                context: normalizedContext,
-                authorization: authorization
-            ) {
+            ), deliveryMode.map({ mode in
+                conversation.sendRemoteFollowup(prompt, context: normalizedContext, mode: mode, authorization: authorization)
+            }) ?? conversation.sendRemotePrompt(prompt, context: normalizedContext, authorization: authorization) {
                 recordFirstInput(device: device, sessionID: sessionID)
                 status = .accepted
             } else {
@@ -3073,6 +3081,7 @@ final class RemoteSessionMirrorRegistry {
             && lhs.composerCapabilities == rhs.composerCapabilities
             && lhs.permission == rhs.permission
             && lhs.questions == rhs.questions
+            && lhs.delivery == rhs.delivery
             && lhs.hasEarlier == rhs.hasEarlier
     }
 

@@ -244,6 +244,36 @@ final class ComposerTextViewPasteTests: XCTestCase {
         )
     }
 
+    func testCatchUpHeaderStaysBelowNavigationAndOpensReadingActions() throws {
+        let model = RemoteAppModel()
+        model.startDemo()
+        let connection = RemoteSessionConnection.demoConversation()
+        _ = connection.conversationStore.replace(with: .init(rows: [
+            .init(id: "seen", kind: .user, text: "Check the change"),
+            .init(id: "new", kind: .assistant, text: "Ready to review"),
+        ], canSend: true))
+        let suite = UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let continuity = MobileSessionContinuityStore(defaults: defaults)
+        continuity.setConversationLastSeenRow("seen", hostID: try XCTUnwrap(model.activeHostID), sessionID: connection.session.id)
+        let controller = RemoteConversationViewController(
+            connection: connection, model: model, continuity: continuity,
+            notifications: RemoteNotificationManager(), inheritedTheme: RemoteThemePalette(nil)
+        )
+        let navigation = UINavigationController(rootViewController: controller)
+        let window = makeWindow(rootViewController: navigation, size: CGSize(width: 402, height: 874))
+        defer { window.isHidden = true }
+        let button = try XCTUnwrap(descendants(of: UIButton.self, in: window).first {
+            $0.accessibilityIdentifier == "conversation.catch-up"
+        })
+        XCTAssertFalse(button.isHidden)
+        XCTAssertGreaterThanOrEqual(button.convert(button.bounds, to: controller.view).minY,
+                                   controller.view.safeAreaInsets.top)
+        XCTAssertGreaterThanOrEqual(button.bounds.height, MobileDesign.Size.minimumTapTarget)
+        XCTAssertEqual(button.menu?.children.count, 3)
+    }
+
     /// The system keyboard implements a held Backspace as repeated `deleteBackward()` calls on
     /// one uninterrupted editing session. The composer's render after each deletion must not
     /// reapply the same editability value and terminate that sequence after its first callback.

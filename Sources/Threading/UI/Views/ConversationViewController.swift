@@ -859,6 +859,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// the controller rather than in the transport because the controller outlives a turn and is
     /// what `AgentRuntime` caches, so a queue survives switching panes.
     var outbox = ConversationOutbox()
+    var preparingOutboxMessageID: ConversationMessageID?
 
     /// Between asking the transport to stop and its receipt arriving. Keeps the Stop from being
     /// pressed twice into a transport that is already stopping.
@@ -2327,6 +2328,45 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         return accepted
     }
 
+    /// Follow-ups share the host outbox and its turn admission. The mirror has checked the
+    /// current input lease; these owner-device messages must not clear the Mac's local draft.
+    func sendRemoteFollowup(
+        _ text: String, context: [ConversationContextAttachment],
+        mode: RemoteConversationDeliveryMode, authorization: RemoteAuthorization
+    ) -> Bool {
+        guard authorization.principal == .ownerDevice, currentSession != nil, stream.isRunning else { return false }
+        if mode == .queue, stream.canSend, !isPreparingTurn, outbox.pending.isEmpty {
+            return sendRemotePrompt(text, context: context, authorization: authorization)
+        }
+        let prompt = ConversationPrompt(text: text.trimmingCharacters(in: .whitespacesAndNewlines), context: context)
+        guard !prompt.isEmpty, outbox.acceptsMore else { return false }
+        // Session commands have their own admission path; they are never steering text.
+        if context.isEmpty, let invocation = ComposerCapabilityResolver.invocation(in: text, capabilities: composerCapabilities),
+           invocation.capability.kind == .command { return false }
+        if mode == .steer {
+            guard stream.steerAvailability.isAvailable, workspaceReferences(in: context).isEmpty,
+                  let id = outbox.append(prompt) else { return false }
+            outbox.mark(id, as: .handedOver)
+            guard stream.steer(prompt, identifiedBy: id) else {
+                outbox.reclaim(id)
+                outbox.remove(id)
+                return false
+            }
+            apply(timeline.appendUserMessage(prompt.userMessage))
+            recordSentTurn(prompt)
+            if !stream.reportsMessageLifecycle { outbox.mark(id, as: .completed) }
+        } else {
+            guard outbox.append(prompt) != nil else { return false }
+            flushOutboxIfReady()
+        }
+        MailHumanTurn.started(sessionID)
+        ProjectStore.shared.noteUserWriting(in: sessionID)
+        RemoteNotificationService.shared.recordOwnerInteraction(sessionID: sessionID)
+        refreshOutboxRail()
+        RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+        return true
+    }
+
     /// A prompt the app composed on the user's behalf — the sidebar's "Rename with Agent".
     ///
     /// Deliberately the ordinary `submit`, so the request is echoed into the transcript as a
@@ -2372,7 +2412,21 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                     )
                 },
                 permission: activePermissionCard?.remoteRequest,
-                questions: questionOrder.compactMap { questionCards[$0]?.request.remoteRequest }
+                questions: questionOrder.compactMap { questionCards[$0]?.request.remoteRequest },
+                delivery: RemoteConversationDeliveryDTO(
+                    canQueue: stream.isRunning && outbox.acceptsMore,
+                    canSteer: stream.steerAvailability.isAvailable && outbox.acceptsMore,
+                    messages: outbox.items.compactMap { item in
+                        let state: RemoteConversationDeliveryDTO.Message.State
+                        switch item.state {
+                        case .queued: state = .queued
+                        case .handedOver: state = item.id == preparingOutboxMessageID ? .sending : .delivered
+                        case .started: state = .working
+                        case .completed, .cancelled: return nil
+                        }
+                        return .init(id: item.id.wireValue, summary: item.summary, state: state)
+                    }
+                )
             ),
             rowsRevision: remoteRowProjection.rowsRevision
         )

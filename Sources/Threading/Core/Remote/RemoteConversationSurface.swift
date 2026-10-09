@@ -28,6 +28,11 @@ protocol RemoteConversationSurface: AnyObject {
 
     func answerRemoteQuestion(id: String, answers: [String: String]?) -> Bool
 
+    func sendRemoteFollowup(
+        _ text: String, context: [ConversationContextAttachment],
+        mode: RemoteConversationDeliveryMode, authorization: RemoteAuthorization
+    ) -> Bool
+
     @discardableResult
     func sendRemotePrompt(
         _ text: String,
@@ -37,6 +42,10 @@ protocol RemoteConversationSurface: AnyObject {
 }
 
 extension RemoteConversationSurface {
+    func sendRemoteFollowup(
+        _ text: String, context: [ConversationContextAttachment],
+        mode: RemoteConversationDeliveryMode, authorization: RemoteAuthorization
+    ) -> Bool { false }
     func answerRemoteQuestion(id: String, answers: [String: String]?) -> Bool { false }
 
     var remoteSnapshot: RemoteConversationSnapshotDTO {

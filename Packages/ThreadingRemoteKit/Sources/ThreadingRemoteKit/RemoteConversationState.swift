@@ -21,6 +21,7 @@ public struct RemoteConversationState: Equatable, Sendable {
     public private(set) var permission: RemotePermissionRequestDTO?
     public private(set) var revision: Int
     public private(set) var hasEarlier: Bool
+    public private(set) var delivery: RemoteConversationDeliveryDTO?
 
     public init(
         rows: [RemoteConversationRowDTO] = [],
@@ -52,6 +53,7 @@ public struct RemoteConversationState: Equatable, Sendable {
         questions = Self.safeQuestions(snapshot.questions)
         revision = snapshot.revision
         hasEarlier = snapshot.hasEarlier
+        delivery = snapshot.delivery
         return .replaced
     }
 
@@ -82,12 +84,14 @@ public struct RemoteConversationState: Equatable, Sendable {
         }
 
         let metadataChanged = streamingText != delta.streamingText
+            || delivery != delta.delivery
             || canSend != delta.canSend
             || delta.composerCapabilities.map { composerCapabilities != $0 } == true
             || permission != delta.permission
             || questions != Self.safeQuestions(delta.questions ?? [])
             || delta.hasEarlier.map { hasEarlier != $0 } == true
         streamingText = delta.streamingText
+        delivery = delta.delivery
         canSend = delta.canSend
         if let capabilities = delta.composerCapabilities {
             composerCapabilities = capabilities

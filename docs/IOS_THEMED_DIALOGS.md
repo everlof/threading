@@ -3,6 +3,10 @@
 The phone's half of [`THEME_BOUNDARY.md`](THEME_BOUNDARY.md). The filename is historical: the
 rules began with dialogs and now cover every application-owned surface in `ThreadingMobile`.
 
+`MobileScreenshotMarkupController` contains PencilKit's native canvas and tool picker. Its initial
+red pen is editable document ink that is exported into the image; the exact `systemRed` use has a
+source-checker exception. The containing controls and surfaces still use `RemoteThemePalette`.
+
 The system-owned WidgetKit surface has its named containment in
 `Targets/ThreadingGlance/GlanceDesign.swift`. It uses adaptive semantic typography and foregrounds;
 WidgetKit retains background removal, margins, tinted Home Screen and vibrant Lock Screen ink.

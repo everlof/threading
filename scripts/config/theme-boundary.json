@@ -447,6 +447,12 @@
       "kind": "frozenLayerColor",
       "symbol": "backgroundColor",
       "reason": "The still particle field is a tiled pattern image, which Core Animation takes as a CGColor. The shared mobile backdrop restates it on every theme, viewport, scale and workload change, and gates it with its presentation lifecycle."
+    },
+    {
+      "path": "Sources/ThreadingMobile/MobileScreenshotMarkupController.swift",
+      "kind": "systemColor",
+      "symbol": "systemRed",
+      "reason": "PencilKit's initial pen colour is user-editable ink exported into the image, not application chrome. The containing controller uses RemoteThemePalette for its controls and surfaces."
     }
   ]
 }

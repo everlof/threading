@@ -5,6 +5,42 @@ import ThreadingRemoteKit
 import UIKit
 import UniformTypeIdentifiers
 
+private struct MobileConversationDeliverySheet: View {
+    @ObservedObject var connection: RemoteSessionConnection
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        NavigationStack {
+            List(connection.conversationStore.state.delivery?.messages ?? []) { message in
+                VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+                    Text(label(message.state)).font(theme.chromeSwiftUIFont(.caption)).foregroundStyle(theme.secondaryLabel)
+                    Text(message.summary).font(theme.chromeSwiftUIFont(.body)).foregroundStyle(theme.label)
+                }
+                .themedSettingsRow(theme)
+            }
+            .listStyle(.plain)
+            .themedSettingsPage(theme)
+            .navigationTitle("Message delivery")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func label(_ state: RemoteConversationDeliveryDTO.Message.State) -> String {
+        switch state {
+        case .queued: MobileL10n.string("Queued")
+        case .sending: MobileL10n.string("Sending…")
+        case .delivered: MobileL10n.string("Delivered to agent")
+        case .working: MobileL10n.string("Working on this")
+        }
+    }
+}
+
 /// Owns the edge treatment for every native conversation host.
 ///
 /// SwiftUI otherwise decides inconsistently whether a hosted UIKit controller stops above the
@@ -70,6 +106,8 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     private var composerStackPanelBottomConstraint: NSLayoutConstraint!
 
     private let bottomStack = UIStackView()
+    private let catchUpStack = UIStackView()
+    private let catchUpButton = UIButton(type: .system)
     private let capabilityContainer = UIView()
     private let capabilityScrollView = UIScrollView()
     private let capabilityStack = UIStackView()
@@ -83,6 +121,9 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     private let controlMenuButton = UIButton(type: .system)
     private let attentionLabel = InsetsLabel()
     private let submissionLabel = InsetsLabel()
+    private let deliveryButton = UIButton(type: .system)
+    private let queuedMessagesButton = UIButton(type: .system)
+    private var deliveryMode: RemoteConversationDeliveryMode = .queue
     private let composerShell = UIView()
     private let composerPanel = UIView()
     private let composerOutline = MobileThemeOutlineView()
@@ -105,6 +146,14 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     private let textView = IntrinsicTextView()
     private let placeholderLabel = UILabel()
     private let sendButton = UIButton(type: .system)
+    private let microphoneButton = UIButton(type: .system)
+    private let dictation = MobileConversationDictation()
+    private var dictationID: UUID?
+    private var dictationIsListening = false
+    private var isFinishingDictation = false
+    private var dictationTask: Task<Void, Never>?
+    private var resultTask: Task<Void, Never>?
+    private var pendingResultRow: RemoteConversationRowDTO?
     private let navigationTitleView = RemoteConversationNavigationTitleView()
 
     private lazy var timelineController: RemoteConversationTimelineViewController = {
@@ -113,15 +162,20 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             continuity.state(hostID: $0, sessionID: connection.session.id)
         }
 #if DEBUG
-        let fixtureViewport: (progress: Double?, followsBottom: Bool)? =
-            ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
-                == "conversation-away-from-latest"
-                ? (0.32, false)
-                : nil
+        let environment = ProcessInfo.processInfo.environment
+        let fixtureViewport: (progress: Double?, followsBottom: Bool)?
+        if environment[MobileDemoScene.environmentKey] == "conversation-away-from-latest" {
+            fixtureViewport = (0.32, false)
+        } else if environment["THREADING_MOBILE_UI_EVIDENCE_ID"] == "conversation-tool-groups-accessibility" {
+            // At AX5 the independent approval fills a screen. Keep the group above it in view.
+            fixtureViewport = (0.45, false)
+        } else {
+            fixtureViewport = nil
+        }
 #else
         let fixtureViewport: (progress: Double?, followsBottom: Bool)? = nil
 #endif
-        return RemoteConversationTimelineViewController(
+        let timeline = RemoteConversationTimelineViewController(
             connection: connection,
             theme: theme,
             initialViewport: fixtureViewport ?? saved.map {
@@ -138,6 +192,20 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
                 )
             }
         )
+        timeline.restoreReadThrough(saved?.conversationLastSeenRowID)
+#if DEBUG
+        if environment["THREADING_MOBILE_UI_EVIDENCE_ID"]?.contains("chat-catch-up") == true {
+            timeline.restoreReadThrough("group-progress")
+        }
+#endif
+        timeline.onCatchUpChange = { [weak self] recap in self?.updateCatchUp(recap) }
+        timeline.onReadThrough = { [weak model, weak continuity, weak connection] id in
+            guard let hostID = model?.activeHostID, let sessionID = connection?.session.id else { return }
+            continuity?.setConversationLastSeenRow(id, hostID: hostID, sessionID: sessionID)
+        }
+        timeline.onSettledReply = { [weak self] row in self?.loadResults(for: row) }
+        timeline.onOpenResult = { [weak self] route in self?.openResult(route) }
+        return timeline
     }()
 
     private var showsCapabilityCatalog = false
@@ -183,6 +251,25 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         installNavigationTitle()
+#if DEBUG
+        let evidence = ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"] ?? ""
+        if evidence.contains("chat-dictation"), dictationID == nil {
+            dictationID = UUID()
+            dictationIsListening = true
+            textView.text = MobileL10n.string("Make the activity summary a little shorter")
+            textDidChange()
+            updateSubmission()
+        }
+        if evidence.contains("chat-markup"), presentedViewController == nil {
+            let screenshot = UIGraphicsImageRenderer(bounds: view.bounds).image { _ in
+                view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
+            }
+            let editor = MobileScreenshotMarkupController(image: screenshot, theme: theme) { _ in }
+            let navigation = UINavigationController(rootViewController: editor)
+            navigation.modalPresentationStyle = .fullScreen
+            present(navigation, animated: false)
+        }
+#endif
         guard initiallyFocusesComposer, !initiallyFocused else { return }
         initiallyFocused = true
         if textView.text.isEmpty {
@@ -205,8 +292,32 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         renderState()
     }
 
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        stopDictation()
+    }
+
     private func configureHierarchy() {
         view.backgroundColor = theme.uiGround
+        catchUpStack.axis = .vertical
+        catchUpStack.translatesAutoresizingMaskIntoConstraints = false
+        catchUpStack.addArrangedSubview(catchUpButton)
+        catchUpButton.isHidden = true
+        var catchUpConfiguration = compactControlConfiguration()
+        catchUpConfiguration.image = UIImage(systemName: "chevron.down")
+        catchUpConfiguration.imagePlacement = .trailing
+        catchUpConfiguration.imagePadding = MobileDesign.Spacing.small
+        catchUpButton.configuration = catchUpConfiguration
+        catchUpButton.showsMenuAsPrimaryAction = true
+        catchUpButton.titleLabel?.numberOfLines = 0
+        catchUpButton.titleLabel?.font = .preferredFont(forTextStyle: .footnote)
+        catchUpButton.titleLabel?.adjustsFontForContentSizeCategory = true
+        catchUpButton.accessibilityIdentifier = "conversation.catch-up"
+        let catchUpHeight = catchUpButton.heightAnchor.constraint(greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget)
+        catchUpHeight.priority = .defaultHigh
+        catchUpHeight.isActive = true
+        MobileButtonHaptics.install(on: catchUpButton, activationEvent: .menuActionTriggered)
+        view.addSubview(catchUpStack)
 
         addChild(timelineController)
         view.addSubview(timelineController.view)
@@ -223,6 +334,21 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         configureControlBar()
         configureBanner(attentionLabel)
         configureBanner(submissionLabel)
+        for button in [deliveryButton, queuedMessagesButton] {
+            button.configuration = compactControlConfiguration()
+            button.contentHorizontalAlignment = .leading
+            button.titleLabel?.font = .preferredFont(forTextStyle: .footnote)
+            button.titleLabel?.adjustsFontForContentSizeCategory = true
+            button.titleLabel?.numberOfLines = 2
+            let height = button.heightAnchor.constraint(greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget)
+            height.priority = .defaultHigh
+            height.isActive = true
+            MobileButtonHaptics.install(on: button)
+        }
+        deliveryButton.showsMenuAsPrimaryAction = true
+        deliveryButton.accessibilityIdentifier = "conversation.delivery-mode"
+        queuedMessagesButton.accessibilityIdentifier = "conversation.queued-messages"
+        queuedMessagesButton.addAction(UIAction { [weak self] _ in self?.showQueuedMessages() }, for: .touchUpInside)
         configureComposer()
 
         [
@@ -231,6 +357,8 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             controlBar,
             attentionLabel,
             submissionLabel,
+            queuedMessagesButton,
+            deliveryButton,
             composerShell,
         ].forEach(bottomStack.addArrangedSubview)
 
@@ -238,7 +366,10 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             equalTo: view.bottomAnchor
         )
         NSLayoutConstraint.activate([
-            timelineController.view.topAnchor.constraint(equalTo: view.topAnchor),
+            catchUpStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            catchUpStack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            catchUpStack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            timelineController.view.topAnchor.constraint(equalTo: catchUpStack.bottomAnchor),
             timelineController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             timelineController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             timelineController.view.bottomAnchor.constraint(equalTo: bottomStack.topAnchor),
@@ -246,6 +377,20 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             bottomStack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             bottomConstraint,
         ])
+    }
+
+    private func compactControlConfiguration() -> UIButton.Configuration {
+        var configuration = UIButton.Configuration.plain()
+        configuration.contentInsets = NSDirectionalEdgeInsets(
+            top: MobileDesign.Spacing.small, leading: MobileDesign.Spacing.large,
+            bottom: MobileDesign.Spacing.small, trailing: MobileDesign.Spacing.large
+        )
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.preferredFont(forTextStyle: .footnote)
+            return attributes
+        }
+        return configuration
     }
 
     private func configureCapabilityList() {
@@ -378,6 +523,8 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             accessibilityLabel: MobileL10n.string("Send feedback")
         )
 
+        configureCircleButton(microphoneButton, symbol: "mic", accessibilityLabel: MobileL10n.string("Dictate message"))
+        microphoneButton.accessibilityIdentifier = "conversation.dictation"
         textView.translatesAutoresizingMaskIntoConstraints = false
         textView.delegate = self
         textView.backgroundColor = .clear
@@ -399,7 +546,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             placeholderLabel.widthAnchor.constraint(lessThanOrEqualTo: textView.widthAnchor, constant: -18),
         ])
 
-        [capabilityButton, attachButton, attentionButton, textView, sendButton]
+        [capabilityButton, attachButton, attentionButton, textView, microphoneButton, sendButton]
             .forEach(composerStack.addArrangedSubview)
 
         // The panel now holds a column: staged files above, controls below. The strip hides
@@ -505,6 +652,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             attachButton,
             attentionButton,
             sendButton,
+            microphoneButton,
             requestControlButton,
         ].forEach { MobileButtonHaptics.install(on: $0) }
         MobileButtonHaptics.install(
@@ -536,6 +684,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         sendButton.addAction(UIAction { [weak self] _ in
             self?.submitDraft()
         }, for: .touchUpInside)
+        microphoneButton.addAction(UIAction { [weak self] _ in self?.toggleDictation() }, for: .touchUpInside)
         requestControlButton.addAction(UIAction { [weak self] _ in
             guard let self else { return }
             _ = connection.changeInputControl(action: .request)
@@ -543,6 +692,9 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     }
 
     private func observeState() {
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .sink { [weak self] _ in self?.stopDictation() }
+            .store(in: &observations)
         connection.objectWillChange.sink { [weak self] _ in
             self?.scheduleRender()
         }.store(in: &observations)
@@ -609,9 +761,12 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         updateSubmission()
         updateComposer()
         updateCapabilities()
+        if let pendingResultRow, model.client != nil { loadResults(for: pendingResultRow) }
     }
 
     private func applyTheme() {
+        catchUpButton.backgroundColor = theme.uiSurface
+        catchUpButton.tintColor = theme.uiAccent
         overrideUserInterfaceStyle = theme.colorScheme == .light ? .light : .dark
         presenceLabel.font = theme.chromeFont(forTextStyle: .caption1)
         controlLabel.font = theme.chromeFont(forTextStyle: .caption1)
@@ -768,6 +923,73 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         presenceLabel.isHidden = text == nil
     }
 
+    private func updateCatchUp(_ recap: RemoteConversationCatchUp?) {
+        catchUpButton.isHidden = recap == nil
+        catchUpButton.setTitle(recap?.summary, for: .normal)
+        var actions = [UIAction(title: MobileL10n.string("First new activity"), image: UIImage(systemName: "text.alignleft")) { [weak self] _ in
+            self?.timelineController.jumpToFirstUnread()
+        }]
+        if recap?.latestReplyID != nil {
+            actions.append(UIAction(title: MobileL10n.string("Latest reply"), image: UIImage(systemName: "text.bubble")) { [weak self] _ in
+                self?.timelineController.jumpToLatestReply()
+            })
+        }
+        if connection.isAwaitingUserDecision {
+            actions.append(UIAction(title: MobileL10n.string("Pending decision"), image: UIImage(systemName: "hand.raised")) { [weak self] _ in
+                self?.timelineController.jumpToDecision()
+            })
+        }
+        actions.append(UIAction(title: MobileL10n.string("Mark as read"), image: UIImage(systemName: "checkmark")) { [weak self] _ in
+            self?.timelineController.markCaughtUp()
+        })
+        catchUpButton.menu = UIMenu(children: actions)
+    }
+
+    private func loadResults(for row: RemoteConversationRowDTO) {
+#if DEBUG
+        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "conversation-chat-polish" {
+            let links = RemoteConversationResultLink.links(answer: row.text ?? "", attachments: [
+                .init(path: "screenshots/chat.png", name: "chat.png", kind: .image, byteCount: 1_024, id: "chat-screenshot")
+            ], workspace: .init(browserTabs: [
+                .init(id: "preview", title: "Chat preview", displayURL: "http://localhost:3000", isActive: true, isPrivate: false, canPreview: true)
+            ]))
+            Task { [weak self] in
+                await Task.yield()
+                self?.timelineController.showResults(links, after: row.id)
+            }
+            return
+        }
+#endif
+        guard let client = model.client else { pendingResultRow = row; return }
+        pendingResultRow = nil
+        resultTask?.cancel()
+        let sessionID = connection.session.id
+        resultTask = Task { [weak self] in
+            async let attachments = try? client.attachments(sessionID: sessionID)
+            async let workspace = try? client.workspace(sessionID: sessionID)
+            let values = await (attachments, workspace)
+            guard !Task.isCancelled else { return }
+            let links = await Task.detached(priority: .userInitiated) {
+                RemoteConversationResultLink.links(answer: row.text ?? "", attachments: values.0?.attachments ?? [], workspace: values.1)
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.timelineController.showResults(links, after: row.id)
+        }
+    }
+
+    private func openResult(_ route: SessionWorkspaceRoute) {
+        guard let client = model.client, presentedViewController == nil else { return }
+        stopDictation()
+        let root = SessionWorkspaceView(
+            session: connection.session, client: client,
+            activity: MobileWorkspaceActivity(sessionID: connection.session.id),
+            initialRoute: route,
+            offersAttachmentThumbnails: model.me?.features?.contains(RemoteRESTFeature.attachmentThumbnails.rawValue) == true,
+            offersAttachmentVideoStreaming: model.me?.features?.contains(RemoteRESTFeature.attachmentVideoStreaming.rawValue) == true
+        ).mobileTheme(theme)
+        present(UIHostingController(rootView: root), animated: true)
+    }
+
     private func updateInputControl() {
         guard connection.shouldPresentInputControl, let state = connection.inputControl else {
             controlBar.isHidden = true
@@ -845,7 +1067,13 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             lastSubmissionFeedback = connection.promptSubmissionFeedback
             handleSubmissionFeedback(connection.promptSubmissionFeedback)
         }
-        if connection.isPromptSubmissionPending, pendingSubmissionID != nil {
+        if dictationID != nil {
+            submissionLabel.text = isFinishingDictation ? MobileL10n.string("Finishing transcription…")
+                : dictationIsListening ? MobileL10n.string("Listening… Tap Stop when finished.")
+                : MobileL10n.string("Starting dictation…")
+            submissionLabel.textColor = theme.uiSecondaryLabel
+            submissionLabel.isHidden = false
+        } else if connection.isPromptSubmissionPending, pendingSubmissionID != nil {
             submissionLabel.text = MobileL10n.string("Sending once…")
             submissionLabel.textColor = theme.uiSecondaryLabel
             submissionLabel.isHidden = false
@@ -865,13 +1093,18 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     }
 
     private func updateComposer() {
+        let delivery = connection.conversationStore.state.delivery
+        // A withdrawn steering capability does not silently change a selected Send now into
+        // Queue. Disable that choice until the user chooses queue or the turn becomes ready.
+        let canDeliver = connection.conversationCanSend || (deliveryMode == .queue
+            ? delivery?.canQueue == true : delivery?.canSteer == true)
         let enabled = connection.phase == .connected
             && connection.capability == .interact
             && connection.inputControl?.canWrite != false
-            && connection.conversationCanSend
+            && canDeliver
             && !connection.isPromptSubmissionPending
         let hasText = !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        textView.setEditableIfNeeded(enabled)
+        textView.setEditableIfNeeded(enabled && dictationID == nil)
         capabilityButton.isEnabled = connection.capability == .interact
             && !connection.composerCapabilities.isEmpty
         // Hidden rather than disabled when the host does not offer uploads: a guest or view-only
@@ -891,7 +1124,14 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         // better to wait a moment than to reject something the person already pressed send on.
         let tray = attachmentTray
         let hasAttachments = tray?.readyUploadIDs.isEmpty == false
+        microphoneButton.isHidden = dictationID == nil && (hasText || hasAttachments)
+        microphoneButton.isEnabled = (enabled || dictationID != nil) && !isFinishingDictation
+        microphoneButton.setImage(UIImage(systemName: dictationID == nil ? "mic" : "stop.fill"), for: .normal)
+        microphoneButton.accessibilityLabel = MobileL10n.string(dictationID == nil ? "Dictate message" : "Stop dictation")
+        microphoneButton.tintColor = dictationID == nil ? theme.uiSecondaryLabel : theme.uiNegative
+        sendButton.isHidden = !microphoneButton.isHidden
         sendButton.isEnabled = enabled
+            && dictationID == nil
             && attachmentPicksInFlight == 0
             && (hasText || hasAttachments)
             && tray?.isSettling != true
@@ -901,8 +1141,61 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         attachmentStrip.update(
             items: tray?.items ?? [],
             theme: theme,
-            isRemovalEnabled: enabled
+            isRemovalEnabled: enabled,
+            isImageMarkupEnabled: enabled
         )
+        updateDeliveryControls(delivery)
+    }
+
+    private func updateDeliveryControls(_ delivery: RemoteConversationDeliveryDTO?) {
+        deliveryButton.isHidden = connection.conversationCanSend || delivery == nil
+            || connection.capability != .interact
+        deliveryButton.tintColor = theme.uiAccent
+        deliveryButton.setTitle(MobileL10n.string(deliveryMode == .queue ? "After this task ▾" : "Send now ▾"), for: .normal)
+        let queue = UIAction(title: MobileL10n.string("After this task"), state: deliveryMode == .queue ? .on : .off) { [weak self] _ in
+            self?.deliveryMode = .queue
+            self?.updateComposer()
+        }
+        let steer = UIAction(title: MobileL10n.string("Send now"), attributes: delivery?.canSteer == true ? [] : .disabled,
+                             state: deliveryMode == .steer ? .on : .off) { [weak self] _ in
+            self?.deliveryMode = .steer
+            self?.updateComposer()
+        }
+        deliveryButton.menu = UIMenu(children: [queue, steer])
+        deliveryButton.accessibilityHint = MobileL10n.string("Choose when the agent receives this message")
+        let messages = delivery?.messages ?? []
+        queuedMessagesButton.isHidden = messages.isEmpty
+        queuedMessagesButton.tintColor = theme.uiSecondaryLabel
+        if let first = messages.first {
+            queuedMessagesButton.setTitle(
+                MobileL10n.string("%@ · %@", deliveryLabel(first.state), first.summary)
+                    + (messages.count > 1 ? MobileL10n.string(" · +%lld", messages.count - 1) : ""), for: .normal
+            )
+        }
+        if !connection.conversationCanSend, delivery != nil {
+            placeholderLabel.text = MobileL10n.string(deliveryMode == .queue ? "Message for the next task…" : "Add to the current task…")
+            sendButton.accessibilityLabel = MobileL10n.string(deliveryMode == .queue ? "Queue message" : "Send now")
+        } else {
+            placeholderLabel.text = MobileL10n.string("Add feedback…")
+            sendButton.accessibilityLabel = MobileL10n.string("Send feedback")
+        }
+    }
+
+    private func deliveryLabel(_ state: RemoteConversationDeliveryDTO.Message.State) -> String {
+        switch state {
+        case .queued: MobileL10n.string("Queued")
+        case .sending: MobileL10n.string("Sending…")
+        case .delivered: MobileL10n.string("Delivered to agent")
+        case .working: MobileL10n.string("Working on this")
+        }
+    }
+
+    private func showQueuedMessages() {
+        guard presentedViewController == nil else { return }
+        let messages = connection.conversationStore.state.delivery?.messages ?? []
+        let controller = UIHostingController(rootView: MobileConversationDeliverySheet(connection: connection).mobileTheme(theme))
+        guard !messages.isEmpty else { return }
+        present(controller, animated: true)
     }
 
     private func updateCapabilities() {
@@ -989,6 +1282,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     }
 
     private func submitDraft() {
+        guard dictationID == nil, sendButton.isEnabled else { return }
         let trimmed = textView.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.caseInsensitiveCompare("/skills") == .orderedSame,
            connection.composerCapabilities.contains(where: {
@@ -999,7 +1293,8 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         }
         if let requestID = connection.submit(
             textView.text,
-            attachmentUploadIDs: attachmentTray?.readyUploadIDs ?? []
+            attachmentUploadIDs: attachmentTray?.readyUploadIDs ?? [],
+            deliveryMode: connection.conversationCanSend ? nil : deliveryModeForSubmission
         ) {
             pendingSubmissionID = requestID
             showsCapabilityCatalog = false
@@ -1008,6 +1303,10 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             updateCapabilities()
             updateSubmission()
         }
+    }
+
+    private var deliveryModeForSubmission: RemoteConversationDeliveryMode? {
+        connection.conversationStore.state.delivery == nil ? nil : deliveryMode
     }
 
     // MARK: - Attachments
@@ -1037,6 +1336,16 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 
     private func presentAttachmentPreview(_ item: ComposerAttachmentItem) {
         guard presentedViewController == nil else { return }
+        stopDictation()
+        if !connection.isPromptSubmissionPending, !item.isMovie, let image = item.thumbnail {
+            let editor = MobileScreenshotMarkupController(image: image, theme: theme) { [weak self] data in
+                self?.attachmentTray?.replaceImage(item.id, data: data)
+            }
+            let navigation = UINavigationController(rootViewController: editor)
+            navigation.modalPresentationStyle = .fullScreen
+            present(navigation, animated: true)
+            return
+        }
         let controller = UIHostingController(rootView:
             ComposerAttachmentQuickView(item: item).mobileTheme(theme)
         )
@@ -1054,6 +1363,9 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         guard let tray = attachmentTray, tray.canAcceptMore else { return }
 
         let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: MobileL10n.string("Dictate message"), style: .default) { [weak self] _ in
+            self?.toggleDictation()
+        })
         // Read once, here, where somebody has just asked to attach something: the answer decides
         // whether the entry is drawn at all, and asking on every layout pass would be an XPC
         // round trip to the pasteboard server for a menu nobody opened.
@@ -1198,6 +1510,55 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         applyRestoredDraft(draft)
     }
 
+    private func toggleDictation() {
+        if dictationID != nil {
+            guard dictationIsListening else { stopDictation(); return }
+            isFinishingDictation = true
+            updateComposer()
+            updateSubmission()
+            Task { [dictation] in await dictation.finish() }
+            return
+        }
+        let id = UUID()
+        dictationID = id
+        let prefix = textView.text ?? ""
+        textView.resignFirstResponder()
+        updateComposer()
+        updateSubmission()
+        dictationTask = Task { [weak self, dictation] in
+            guard !Task.isCancelled else { return }
+            await dictation.start { [weak self] event in
+                guard let self, self.dictationID == id else { return }
+                switch event {
+                case .listening:
+                    self.dictationIsListening = true
+                    self.updateSubmission()
+                case .text(let words):
+                    self.textView.text = prefix + (prefix.isEmpty ? "" : " ") + words
+                    self.textDidChange()
+                case .finished:
+                    self.stopDictation()
+                case .unavailable:
+                    self.stopDictation()
+                    self.submissionNotice = MobileL10n.string("Dictation unavailable. Check microphone and speech permissions in Settings.")
+                    self.updateSubmission()
+                }
+            }
+        }
+    }
+
+    private func stopDictation() {
+        guard dictationID != nil else { return }
+        dictationID = nil
+        dictationIsListening = false
+        isFinishingDictation = false
+        dictationTask?.cancel()
+        dictationTask = nil
+        Task { [dictation] in await dictation.stop() }
+        updateComposer()
+        updateSubmission()
+    }
+
     private func applyRestoredDraft(_ draft: String) {
         // Assigning even the same empty string makes UITextView coordinate a selection change
         // and cold-load dictation services. Most conversations have no saved draft, so keep that
@@ -1225,6 +1586,8 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         }
         guard environment["THREADING_MOBILE_UI_EVIDENCE_ID"] != nil else { return nil }
         switch mode {
+        case "conversation-chat-polish", "conversation-tool-groups", "conversation-tool-groups-attention":
+            return ""
         case "conversation", "conversation-collaboration":
             return MobileL10n.string("Check the final layout.")
         case "permission", "conversation-keyboard":

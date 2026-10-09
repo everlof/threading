@@ -90,6 +90,40 @@
           }
         }
       }
+    },
+    "NSMicrophoneUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use the microphone to dictate an editable chat message."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd mikrofonen för att diktera ett chattmeddelande som du kan redigera."
+          }
+        }
+      }
+    },
+    "NSSpeechRecognitionUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transcribe your voice into a draft. Messages are sent only when you tap Send."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Omvandla ditt tal till ett utkast. Meddelanden skickas bara när du trycker på Skicka."
+          }
+        }
+      }
     }
   },
   "version" : "1.2"

@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Use the microphone to dictate an editable chat message.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Transcribe your voice into a draft. Messages are sent only when you tap Send.</string>
 	<!--
 		This file exists for array keys and values that expand target build settings. Other
 		Info.plist values still come from GENERATE_INFOPLIST_FILE and the INFOPLIST_KEY_ build

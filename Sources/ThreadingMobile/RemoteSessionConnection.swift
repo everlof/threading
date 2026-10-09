@@ -289,6 +289,7 @@ private struct PendingRemoteSubmission {
     let attachmentUploadIDs: [String]
     let createdAt: Date
     let startedAtNanoseconds: UInt64
+    var deliveryMode: RemoteConversationDeliveryMode? = nil
 }
 
 private struct PendingTerminalInputProbe {
@@ -428,6 +429,7 @@ final class RemoteSessionConnection: ObservableObject {
     private var backgroundedAt: Date?
     private var recoveryFailure: RemoteConnectionFailure?
     @Published private(set) var conversationCanSend = false
+    @Published private(set) var conversationDelivery: RemoteConversationDeliveryDTO?
     @Published private(set) var composerCapabilities: [RemoteComposerCapabilityDTO] = []
     @Published private(set) var presence = MobileCollaborationPresence()
     @Published private(set) var isPromptSubmissionPending = false
@@ -697,6 +699,9 @@ final class RemoteSessionConnection: ObservableObject {
         conversationStore.onDecisionChange = { [weak self] in self?.objectWillChange.send() }
         conversationStore.onCanSendChange = { [weak self] canSend in
             self?.conversationCanSend = canSend
+        }
+        conversationStore.onDeliveryChange = { [weak self] delivery in
+            self?.conversationDelivery = delivery
         }
 #if canImport(UIKit)
         lifecycleObservers = [
@@ -1452,22 +1457,29 @@ final class RemoteSessionConnection: ObservableObject {
     func submit(
         _ text: String,
         contextAttachments: [RemoteConversationContextAttachmentDTO] = [],
-        attachmentUploadIDs: [String] = []
+        attachmentUploadIDs: [String] = [],
+        deliveryMode: RemoteConversationDeliveryMode? = nil
     ) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let delivery = conversationStore.state.delivery
+        let allowed = deliveryMode.map {
+            $0 == .queue ? delivery?.canQueue == true : delivery?.canSteer == true
+        } ?? conversationStore.state.canSend
         guard phase == .connected, capability == .interact,
               inputControl?.canWrite != false,
+              deliveryMode == nil || serverFeatures.contains(RemoteWebSocketFeature.conversationFollowups.rawValue),
               contextAttachments.isEmpty || serverFeatures.contains(
                   RemoteWebSocketFeature.conversationContextAttachments.rawValue
               ),
               attachmentUploadIDs.isEmpty || supportsComposerAttachmentUploads,
-              conversationStore.state.canSend else { return nil }
+              allowed else { return nil }
         return sendSubmission(
             type: "submit",
             text: trimmed,
             contextAttachments: contextAttachments,
             attachmentUploadIDs: attachmentUploadIDs,
-            permitsLegacyHost: true
+            permitsLegacyHost: deliveryMode == nil,
+            deliveryMode: deliveryMode
         )
     }
 
@@ -1532,7 +1544,8 @@ final class RemoteSessionConnection: ObservableObject {
         text: String,
         contextAttachments: [RemoteConversationContextAttachmentDTO] = [],
         attachmentUploadIDs: [String] = [],
-        permitsLegacyHost: Bool
+        permitsLegacyHost: Bool,
+        deliveryMode: RemoteConversationDeliveryMode? = nil
     ) -> String? {
         guard phase == .connected, capability == .interact,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1553,13 +1566,15 @@ final class RemoteSessionConnection: ObservableObject {
                 contextAttachments: contextAttachments,
                 attachmentUploadIDs: attachmentUploadIDs,
                 createdAt: Date(),
-                startedAtNanoseconds: MobileDiagnostics.monotonicNow()
+                startedAtNanoseconds: MobileDiagnostics.monotonicNow(),
+                deliveryMode: deliveryMode
             )
             recordPromptSubmissionStarted(requestID: requestID, messageType: type)
             isPromptSubmissionPending = supportsAcknowledgement
             try send(RemoteClientMessage(
                 type: type,
                 text: text,
+                state: deliveryMode?.rawValue,
                 requestID: supportsAcknowledgement ? requestID : nil,
                 contextAttachments: contextAttachments.isEmpty ? nil : contextAttachments,
                 attachmentUploadIDs: attachmentUploadIDs.isEmpty ? nil : attachmentUploadIDs
@@ -2824,6 +2839,13 @@ final class RemoteSessionConnection: ObservableObject {
 
     private func resendPendingPromptIfSupported() {
         guard let pending = pendingPromptSubmission else { return }
+        // A downgraded host may still acknowledge ordinary submits but ignore their state.
+        // Retrying steering there would silently turn it into a new ordinary turn.
+        if pending.deliveryMode != nil,
+           !serverFeatures.contains(RemoteWebSocketFeature.conversationFollowups.rawValue) {
+            finishPendingPrompt(with: .unavailable)
+            return
+        }
         guard serverFeatures.contains(
             RemoteWebSocketFeature.submitAcknowledgement.rawValue
         ) else {
@@ -2848,6 +2870,7 @@ final class RemoteSessionConnection: ObservableObject {
         try? send(RemoteClientMessage(
             type: pending.messageType,
             text: pending.text,
+            state: pending.deliveryMode?.rawValue,
             requestID: pending.requestID,
             contextAttachments: pending.contextAttachments.isEmpty
                 ? nil
@@ -3507,6 +3530,31 @@ final class RemoteSessionConnection: ObservableObject {
                     text: "Fixture contains 400 rows; only visible collection cells are mounted."
                 ),
             ]
+        } else if demoMode.hasPrefix("conversation-tool-groups") || demoMode == "conversation-chat-polish" {
+            let isChatPolish = demoMode == "conversation-chat-polish"
+            let commands = [
+                "git status --short", "cat build/release.json", "python3 tools/check_release.py",
+                "rg request_id logs/", "cat build/issues/ANDROID-2.json", "git show --stat HEAD",
+            ]
+            let needsAttention = demoMode == "conversation-tool-groups-attention"
+            var groupedRows: [RemoteConversationRowDTO] = [
+                .init(id: "group-user", kind: .user, text: "Check which build the issue came from."),
+                .init(id: "group-progress", kind: .assistant,
+                      text: "I’ll compare the saved release record with the nearby errors."),
+            ]
+            for (index, command) in commands.enumerated() {
+                let failed = needsAttention && index == 3
+                let result = failed ? "Exit 1 · No matching request IDs found." : "Completed the release check."
+                groupedRows.append(.init(
+                    id: "group-tool-\(index)", kind: .tool, toolName: isChatPolish && index < 4 ? "Read" : "Bash", summary: command,
+                    result: needsAttention && index == 5 ? nil : result, isError: failed
+                ))
+            }
+            if !needsAttention {
+                groupedRows.append(.init(id: "group-answer", kind: .assistant,
+                    text: isChatPolish ? "Updated the chat layout and saved screenshots/chat.png. You can review the changes below." : "Build 7 matches the release record. The nearby errors came from builds 5 and 6 on another device, with no matching request IDs or traces."))
+            }
+            rows = groupedRows
         } else if ["conversation-content-types", "conversation-tool-expanded"].contains(demoMode) {
             rows = contentRows
         } else if demoMode == "conversation-attachments" {
@@ -3575,15 +3623,23 @@ final class RemoteSessionConnection: ObservableObject {
         ]
         connection.composerCapabilities = capabilities
         let storeStarted = ProcessInfo.processInfo.systemUptime
+        let deliveryFixture = ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]?.contains("chat-delivery") == true
         let conversationSnapshot = RemoteConversationSnapshotDTO(
             rows: rows,
             streamingText: demoMode == "conversation-streaming"
                 ? "I’m checking the keyboard-safe-area transaction and comparing the composer’s baseline frame…"
                 : "",
-            canSend: demoMode != "conversation-streaming",
+            canSend: demoMode != "conversation-streaming" && demoMode != "conversation-tool-groups-attention" && !deliveryFixture,
             composerCapabilities: capabilities,
+            permission: demoMode == "conversation-tool-groups-attention"
+                ? .init(id: "group-permission", toolName: "Bash", summary: "Run the release verification script")
+                : nil,
             hasEarlier: demoMode == "conversation-cold-stress"
-                && sourceRowCount > rows.count
+                && sourceRowCount > rows.count,
+            delivery: deliveryFixture ? .init(canQueue: true, canSteer: true, messages: [
+                .init(id: "delivery-working", summary: "Check the larger text sizes too.", state: .working),
+                .init(id: "delivery-next", summary: "Then polish the image preview.", state: .queued)
+            ]) : nil
         )
         connection.conversationStore.replace(with: conversationSnapshot)
         if demoMode.hasPrefix("conversation-question") {
