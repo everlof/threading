@@ -218,6 +218,37 @@ final class MobileInvitationRouteTests: XCTestCase {
         XCTAssertEqual(RemoteInvitation(payload: exported.absoluteString), .hostedPairing(hosted))
     }
 
+    func testSharedHostedInvitationRemainsOneDetectedLinkInsideAMessage() throws {
+        let hosted = try XCTUnwrap(HostedPairingLink(
+            serviceURL: RemoteInvitationWebLink.productionOrigin,
+            hostID: "11111111-2222-3333-4444-555555555555",
+            deviceID: "invite-11111111-2222-3333-4444-555555555555",
+            rendezvousCredential: String(repeating: "r", count: 43),
+            bootstrapToken: String(repeating: "b", count: 43),
+            expiresAt: Date(timeIntervalSince1970:
+                Date().addingTimeInterval(600).timeIntervalSince1970.rounded(.down))))
+        let minted = try XCTUnwrap(RemoteInvitationWebLink.url(appPayload: hosted.scannablePayload))
+        var legacy = try XCTUnwrap(URLComponents(url: minted, resolvingAgainstBaseURL: false))
+        let unescapedFragment = legacy.fragment
+        legacy.fragment = unescapedFragment
+        let introduction = "Your invitation:\n"
+        let detector = try NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
+        for invitation in [minted, try XCTUnwrap(legacy.url)] {
+            let shared = SharedSessionLinkCopy.sharedURL(for: invitation)
+            let message = introduction + shared.absoluteString
+            let match = try XCTUnwrap(detector.firstMatch(
+                in: message, range: NSRange(location: 0, length: message.utf16.count)))
+            XCTAssertEqual(match.range, NSRange(
+                location: introduction.utf16.count, length: shared.absoluteString.utf16.count))
+            let detected = try XCTUnwrap(match.url)
+            guard case .hostedPairing(let parsed)? = MobileInvitationRoute(url: detected) else {
+                return XCTFail("the detected URL must carry the complete hosted invitation")
+            }
+            XCTAssertEqual(parsed, hosted)
+        }
+    }
+
     func testSharedHTTPSLinkOpensThePairingScreenAndPreservesThePin() throws {
         let link = try makeLink()
         let text = SharedSessionLinkCopy.sharedText(for: link.shareURL)

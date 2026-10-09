@@ -30,8 +30,9 @@ small{display:block;line-height:1.5;color:light-dark(#666,#aaa)}[hidden]{display
 </main><script nonce="${nonce}">
 const button=document.getElementById('open');
 try {
- const encoded=location.hash.slice(1);
- if(!encoded || location.href.length>8192 || !/^[A-Za-z0-9_-]+$/.test(encoded)) throw Error();
+ if(location.href.length>8192) throw Error();
+ const encoded=decodeURIComponent(location.hash.slice(1));
+ if(!encoded || !/^[A-Za-z0-9_-]+$/.test(encoded)) throw Error();
  const payload=atob(encoded.replaceAll('-','+').replaceAll('_','/'));
  const link=new URL(payload);
  if(link.protocol!=='threading:' || !['pair','join'].includes(link.hostname.toLowerCase()) || !link.hash || link.username || link.password || link.port || link.pathname || link.search) throw Error();

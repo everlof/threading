@@ -161,6 +161,39 @@ final class ShareChatSheetTests: XCTestCase {
         XCTAssertEqual(RemoteInvitation(payload: copied), .hostedPairing(link))
     }
 
+    func testCopiedHostedInvitationRemainsOneDetectedLinkInsideAMessage() throws {
+        let link = try XCTUnwrap(HostedPairingLink(
+            serviceURL: RemoteInvitationWebLink.productionOrigin,
+            hostID: "11111111-2222-3333-4444-555555555555",
+            deviceID: "invite-11111111-2222-3333-4444-555555555555",
+            rendezvousCredential: String(repeating: "r", count: 43),
+            bootstrapToken: String(repeating: "b", count: 43),
+            expiresAt: Date(timeIntervalSince1970:
+                Date().addingTimeInterval(600).timeIntervalSince1970.rounded(.down))))
+        let minted = try XCTUnwrap(RemoteInvitationWebLink.url(appPayload: link.scannablePayload))
+        var legacy = try XCTUnwrap(URLComponents(url: minted, resolvingAgainstBaseURL: false))
+        let unescapedFragment = legacy.fragment
+        legacy.fragment = unescapedFragment
+        let legacyURL = try XCTUnwrap(legacy.url)
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        let detector = try NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        let introduction = "Nu har jag fixa länken också:\n"
+
+        for invitation in [minted, legacyURL] {
+            ShareInvitationText.copy(invitation, to: pasteboard)
+            let copied = try XCTUnwrap(pasteboard.string(forType: .string))
+            let message = introduction + copied
+            let match = try XCTUnwrap(detector.firstMatch(
+                in: message, range: NSRange(location: 0, length: message.utf16.count)))
+            XCTAssertEqual(match.range, NSRange(
+                location: introduction.utf16.count, length: copied.utf16.count),
+                "a link preview must consume the invitation fragment too")
+            let detectedURL = try XCTUnwrap(match.url)
+            XCTAssertEqual(RemoteInvitation(payload: detectedURL.absoluteString), .hostedPairing(link))
+        }
+    }
+
     /// Render the shipping alert content, including its chrome and button row, not an isolated
     /// accessory. The same request and presenter construct the modal used by the sidebar.
     func testRendersTheGrantsLightAndDark() throws {

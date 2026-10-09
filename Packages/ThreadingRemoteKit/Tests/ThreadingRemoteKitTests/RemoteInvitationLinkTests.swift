@@ -133,6 +133,38 @@ final class RemoteInvitationLinkTests: XCTestCase {
         }
     }
 
+    #if canImport(Darwin)
+    func testHostedInvitationRemainsOneDetectedURLInsideAMessage() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let introduction = "Your invitation:\n"
+        let detector = try NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        for credentialLength in [43, 4096] {
+            let hosted = try XCTUnwrap(HostedPairingLink(
+                serviceURL: RemoteInvitationWebLink.productionOrigin,
+                hostID: "11111111-2222-3333-4444-555555555555",
+                deviceID: "invite-11111111-2222-3333-4444-555555555555",
+                rendezvousCredential: String(repeating: "r", count: credentialLength),
+                bootstrapToken: String(repeating: "b", count: 43),
+                expiresAt: now.addingTimeInterval(3600), now: now))
+            let minted = try XCTUnwrap(RemoteInvitationWebLink.url(appPayload: hosted.scannablePayload))
+            var legacy = try XCTUnwrap(URLComponents(url: minted, resolvingAgainstBaseURL: false))
+            let unescapedFragment = legacy.fragment
+            legacy.fragment = unescapedFragment
+
+            for url in [minted, try XCTUnwrap(legacy.url)] {
+                let copied = RemoteInvitationShare.text(shareURL: url, guidance: "ignored")
+                let message = introduction + copied
+                let match = try XCTUnwrap(detector.firstMatch(
+                    in: message, range: NSRange(location: 0, length: message.utf16.count)))
+                XCTAssertEqual(match.range, NSRange(
+                    location: introduction.utf16.count, length: copied.utf16.count))
+                let detected = try XCTUnwrap(match.url)
+                XCTAssertEqual(RemoteInvitation(payload: detected.absoluteString, now: now), .hostedPairing(hosted))
+            }
+        }
+    }
+    #endif
+
     func testPublicWrapperRejectsUnknownDomainsCredentialsQueriesAndOversizedInput() throws {
         let url = try XCTUnwrap(RemoteInvitationWebLink.url(appPayload: makeLink().appOpenPayload))
         for bad in [

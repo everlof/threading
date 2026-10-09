@@ -1544,7 +1544,18 @@ Pairing and sharing are deliberately different actions:
   On Mac, fresh chat/terminal invitations and the Sharing pane's Copy action use the same
   `ShareInvitationText` writer: one pasteboard item exposes both `public.url` and plain text,
   each containing the identical complete invitation. Copying a stored private-route invitation
-  applies the public wrapper too; copying an already-hosted invitation preserves it unchanged.
+  applies the public wrapper too; copying an already-hosted invitation preserves its authority
+  and service environment.
+  Public wrappers percent-encode one fragment byte every 128 bytes. Apple's text link detector
+  otherwise recognizes only the base URL when the double-base64 envelope is one long
+  alphanumeric word, leaving the capability as separate message text. Standard URL decoding
+  preserves the exact invitation and works with the existing native parser. The landing page
+  checks its 8-KiB URL bound before `decodeURIComponent`, then validates the decoded base64url
+  fragment. Stored unescaped wrappers are normalized on copy without reissuing their authority.
+  Formatting is one bounded, linear operation per invitation, not per session or update. An
+  optimized macOS 26.5 probe over 200 identical calls measured median/max 0.037/0.089 ms for a
+  497-byte app payload and 0.369/0.465 ms for a 5,817-byte payload near the final URL ceiling;
+  the former unescaped formatter measured 0.017/0.147 and 0.149/0.188 ms respectively.
 
 - **Hosted Direct admits guest memberships.** When the hosted listener is ready, the asynchronous
   chat-share preparation issues a transport credential under `invite-<share ID>` for at most

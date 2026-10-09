@@ -510,7 +510,7 @@ enum ShareInvitationText {
 
     static func pasteboard(for shareURL: URL) -> String {
         if RemoteInvitationWebLink.appPayload(from: shareURL.absoluteString) != nil {
-            return shareURL.absoluteString
+            return RemoteInvitationShare.text(shareURL: shareURL, guidance: guidance)
         }
         guard let link = RemoteConnectionLink(url: shareURL) else { return shareURL.absoluteString }
         let origin = AppSettings.shared.remoteHostedServiceEnvironment == .development

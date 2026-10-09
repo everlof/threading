@@ -114,7 +114,12 @@ public enum RemoteInvitationShare {
     /// A share URL that cannot be read back as a link is written through unchanged rather than
     /// dropped: an invitation the recipient cannot use is worse than one without its sentence.
     public static func text(shareURL: URL, guidance: String) -> String {
-        if RemoteInvitationWebLink.appPayload(from: shareURL.absoluteString) != nil { return shareURL.absoluteString }
+        if let payload = RemoteInvitationWebLink.appPayload(from: shareURL.absoluteString) {
+            let origin = shareURL.host == RemoteInvitationWebLink.developmentOrigin.host
+                ? RemoteInvitationWebLink.developmentOrigin : RemoteInvitationWebLink.productionOrigin
+            return RemoteInvitationWebLink.url(appPayload: payload, origin: origin)?.absoluteString
+                ?? shareURL.absoluteString
+        }
         guard let link = RemoteConnectionLink(url: shareURL) else {
             return shareURL.absoluteString
         }
@@ -148,6 +153,8 @@ extension Data {
 public enum RemoteInvitationWebLink {
     public static let productionOrigin = URL(string: "https://remote.threading.codes")!
     public static let developmentOrigin = URL(string: "https://dev.remote.threading.codes")!
+    private static let fragmentEscapeInterval = 128
+    private static let fragmentByteEscapeFormat = "%%%02X"
 
     public static func url(appPayload: String, origin: URL = productionOrigin) -> URL? {
         guard appPayload.utf8.count <= RemoteInvitation.maximumEncodedBytes,
@@ -155,10 +162,26 @@ public enum RemoteInvitationWebLink {
               origin == productionOrigin || origin == developmentOrigin else { return nil }
         var components = URLComponents(url: origin, resolvingAgainstBaseURL: false)!
         components.path = "/join"
-        components.fragment = Data(appPayload.utf8).base64URLEncodedString()
+        let fragment = Data(appPayload.utf8).base64URLEncodedString()
+        components.percentEncodedFragment = shareableFragment(fragment)
         guard let url = components.url,
               url.absoluteString.utf8.count <= RemoteInvitation.maximumEncodedBytes else { return nil }
         return url
+    }
+
+    /// Apple's link detector drops long alphanumeric fragment words. Standard URL escapes
+    /// bound those words while URLComponents.fragment still returns the identical payload.
+    private static func shareableFragment(_ fragment: String) -> String {
+        var result = String()
+        result.reserveCapacity(fragment.utf8.count)
+        for (offset, byte) in fragment.utf8.enumerated() {
+            if offset.isMultiple(of: fragmentEscapeInterval) {
+                result += String(format: fragmentByteEscapeFormat, byte)
+            } else {
+                result.unicodeScalars.append(UnicodeScalar(byte))
+            }
+        }
+        return result
     }
 
     public static func appPayload(from value: String) -> String? {
