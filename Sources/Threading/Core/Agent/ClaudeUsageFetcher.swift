@@ -20,9 +20,9 @@ private struct ClaudeCredentialsFile: Decodable {
 /// cache when no credentials file exists — which is the normal macOS layout, where Claude
 /// Code keeps its token in the Keychain instead.
 ///
-/// Four sources, ordered by freshness: the API against a token on disk, the API against the
-/// Keychain token, the status-line cache Claude Code pushes on every turn, then the CLI's own
-/// `cachedUsageUtilization`. A live read carries its model-scoped windows itself — the
+/// The API against a token on disk, then the API against the Keychain token, then whichever
+/// credential-free reading is newest: Threading's own status-line feed, Claudex's status-line
+/// cache, or the CLI's own `cachedUsageUtilization`. A live read carries its model-scoped windows itself — the
 /// endpoint's document names them in `limits[]` (`ClaudeUtilization`) — and the last source is
 /// *merged into* a winner that arrived without any, which is the status-line feed's case; see
 /// `ClaudeUsageProfileCache`.
@@ -87,14 +87,17 @@ enum ClaudeUsageFetcher {
             }
         }
 
-        // 3. The status-line feed, which needs no credential at all — so a login whose tokens
+        // 3. The status-line feeds, which need no credential at all — so a login whose tokens
         //    are all unreadable from here still reports the number Claude Code last pushed.
-        if let cached = ClaudeUsageCache.read(account: account) {
-            return withModelWindows(from: profile, on: cached)
+        //    Threading's own and Claudex's carry the same block; the newer one wins.
+        // 4. The CLI's own last API reading, usually staler — but only usually: a `/usage` in
+        //    the CLI rewrites it, so it competes on age rather than losing on position.
+        if let local = newestLocalReading(
+            feeds: [ClaudeUsageCache.readFeed(account: account), ClaudeUsageCache.read(account: account)],
+            profile: profile
+        ) {
+            return local
         }
-
-        // 4. The CLI's own last API reading, staler still.
-        if let profile { return profile }
 
         throw refusal ?? .noCredential("No readable usage source for this Claude account.")
     }
@@ -125,6 +128,21 @@ enum ClaudeUsageFetcher {
             .capitalized
 
         return .usable(token: token, plan: plan)
+    }
+
+    /// The newest of the credential-free readings, with the profile's scoped windows carried
+    /// onto a status-line winner. A tie goes to a status-line feed, which is per turn.
+    static func newestLocalReading(
+        feeds: [AccountUsage?],
+        profile: AccountUsage?,
+        at now: Date = Date()
+    ) -> AccountUsage? {
+        let feed = feeds.compactMap { $0 }.max { $0.observedAt < $1.observedAt }
+
+        if let profile, feed.map({ profile.observedAt > $0.observedAt }) ?? true {
+            return profile
+        }
+        return feed.map { withModelWindows(from: profile, on: $0, at: now) }
     }
 
     // MARK: - Private Methods

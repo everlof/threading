@@ -612,16 +612,35 @@ Sources, per provider:
      within the day.
   1b. The **Keychain token** (`ClaudeKeychainCredentials`, opt-in as above) against the same
      endpoint — the live source a macOS login actually has.
-  2. **Claudex's status-line cache**:
+  2. **Threading's own status-line feed** (`ClaudeUsageCache.readFeed`):
+     `<support root>/ClaudeStatus/<profileID>.json`. Every local Claude *terminal* launch writes
+     a `statusLine` (`ClaudeStatusLineSettings.feedCommand`) that saves the CLI's status-line
+     input whenever it carries `rate_limits` — present from a session's first API response on
+     (verified on 2.1.296), absent before it, which is why only a payload naming the key is
+     saved — then pipes the same input to the account's own command, silenced or not as the
+     user chose. This is on by default, not only when the Keychain refuses: a Debug build
+     loses its Keychain grant with every rebuild, and the launch flags are fixed before any
+     read could learn that, so a conditional feed would flicker with every rebuild. With no
+     command of the account's own the line prints nothing, and the CLI draws an empty status
+     line as no line at all (verified against the same launch with no `statusLine`). Shell
+     builtins only on the common path; the write is a `0600` temp file renamed into place.
+     The file has no timestamp of its own, so its modification date is `observedAt`.
+     Remote launches leave it out — the path names this Mac.
+  2b. **Claudex's status-line cache**:
      `~/Library/Application Support/Claudex/ClaudeStatus/<profileID>.json`, where `profileID`
      is the lowercase-hex SHA-256 of the standardized, symlink-resolved config-dir path
      (Claudex's own recipe, verified against the real cache files). Claude Code pushes
      `rate_limits` into that feed on every turn, so it is fresher than any polling — and reads
      as `source: .localCache`, which shortens the re-read interval from 300s to 30s.
   3. `<config>/.claude.json` → `cachedUsageUtilization` (`ClaudeUsageProfileCache`, source
-     `.profileSnapshot`), the CLI's own copy of its last API reading. Staler — the CLI refreshes it on its own schedule, not
-     per turn — but it needs neither a credential nor Claudex, so it is what an account with
-     neither of the first two still reports.
+     `.profileSnapshot`), the CLI's own copy of its last API reading. Usually staler — the CLI
+     refreshes it on its own schedule, not per turn — but it needs neither a credential nor a
+     status line, so it is what an account with neither still reports.
+
+  The credential-free sources (2, 2b, 3) **compete on age, not position**
+  (`ClaudeUsageFetcher.newestLocalReading`). A `/usage` in the CLI rewrites `.claude.json`, and
+  a feed file left by a login nobody has run since must not outrank that; a tie goes to the
+  status line.
 
   **A source that cannot serve hands the question down; it never answers for the chain.** The
   order above only means anything if every step falls through, and one did not: the credentials

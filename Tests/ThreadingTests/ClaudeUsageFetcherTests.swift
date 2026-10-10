@@ -197,6 +197,53 @@ final class ClaudeUsageFetcherTests: XCTestCase {
         XCTAssertEqual(merged.modelWindows, [current])
     }
 
+    // MARK: - The Local Readings
+
+    /// The credential-free readings compete on age, not on position. The CLI's `.claude.json`
+    /// is usually days behind the status line, but a `/usage` in the CLI rewrites it — and a
+    /// status-line file left behind by a login nobody has run since must not outrank that.
+    func testNewestLocalReadingWinsWhicheverSourceItCameFrom() {
+        let older = usage(windows: [window(id: "5h", fraction: 0.5, resetsAt: now)], observedAt: now - 600)
+        let newer = usage(windows: [window(id: "5h", fraction: 0.1, resetsAt: now)], observedAt: now - 60)
+        let profile = usage(
+            windows: [window(id: "5h", fraction: 0.3, resetsAt: now)],
+            observedAt: now - 300,
+            source: .profileSnapshot
+        )
+
+        XCTAssertEqual(
+            ClaudeUsageFetcher.newestLocalReading(feeds: [older, newer], profile: profile, at: now),
+            newer
+        )
+        XCTAssertEqual(
+            ClaudeUsageFetcher.newestLocalReading(feeds: [nil, older], profile: profile, at: now),
+            profile
+        )
+        XCTAssertEqual(
+            ClaudeUsageFetcher.newestLocalReading(feeds: [nil, nil], profile: profile, at: now),
+            profile
+        )
+        XCTAssertNil(ClaudeUsageFetcher.newestLocalReading(feeds: [nil, nil], profile: nil, at: now))
+    }
+
+    /// A status-line winner still borrows the profile's current scoped windows, which the
+    /// status line does not carry; a tie goes to the status line, which is per turn.
+    func testStatusLineWinnerCarriesTheProfilesScopedWindows() {
+        let status = usage(windows: [window(id: "7d", fraction: 0.2, resetsAt: now + 3600)])
+        var profile = usage(
+            windows: [window(id: "7d", fraction: 0.9, resetsAt: now + 3600)],
+            source: .profileSnapshot
+        )
+        let scoped = window(id: "Fable", fraction: 0.4, resetsAt: now + 3600, scopeName: "Fable")
+        profile.modelWindows = [scoped]
+
+        let winner = ClaudeUsageFetcher.newestLocalReading(feeds: [status], profile: profile, at: now)
+
+        XCTAssertEqual(winner?.source, .localCache)
+        XCTAssertEqual(winner?.windows, status.windows)
+        XCTAssertEqual(winner?.modelWindows, [scoped])
+    }
+
     // MARK: - The Endpoint Document
 
     /// The usage endpoint serves the same utilization document the CLI caches, scoped limits
@@ -273,12 +320,16 @@ final class ClaudeUsageFetcherTests: XCTestCase {
         )
     }
 
-    private func usage(windows: [AccountUsage.Window]) -> AccountUsage {
+    private func usage(
+        windows: [AccountUsage.Window],
+        observedAt: Date? = nil,
+        source: AccountUsage.Source = .localCache
+    ) -> AccountUsage {
         AccountUsage(
             windows: windows,
             planLabel: "Max",
-            observedAt: now,
-            source: .localCache
+            observedAt: observedAt ?? now,
+            source: source
         )
     }
 

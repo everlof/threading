@@ -2337,8 +2337,10 @@ button or scroll its windows. It closes shortly after you leave both the pill an
 Click the pill to pin it; Escape closes it. Option-click shows all accounts.
 
 For Claude accounts the freshest numbers come from **Settings ▸ Privacy ▸ Live usage from
-your Claude login**; without it the pill reads the CLI's local caches, which can lag by
-hours. The freshness line says which one you are looking at: "via Claude's status-line feed"
+your Claude login**. Without it, any Claude terminal session Threading runs still reports the
+account's usage after every turn through Claude's status line — invisibly, and alongside your
+own status line if you have one — so the pill only falls back to the CLI's slower local cache
+for a login with no session running. The freshness line says which one you are looking at: "via Claude's status-line feed"
 is current to the last turn, while "from the Claude CLI's last saved reading" is a copy the CLI
 updates on its own schedule and can be days old. If live usage is on but a login has not yet
 let Threading read its keychain sign-in — typically one added after you turned the switch on —
@@ -2401,10 +2403,11 @@ Where the numbers come from, per agent:
   minutes and after the session finishes working.
 - **Claude** — fetched with the account's `.credentials.json` when one exists. On most Macs
   Claude Code keeps its token in the Keychain instead; with **Live usage from your Claude
-  login** on and the login allowed, Threading reads it there. Otherwise it reads the usage feed
-  Claude Code itself publishes through its status line when [Claudex](~/repo/claudex) manages
-  it, and failing that the CLI's own last saved reading in `.claude.json`. No usage source
-  means no pill.
+  login** on and the login allowed, Threading reads it there. Otherwise it uses the newest of
+  the usage Claude Code publishes through its status line — caught by Threading in every
+  Claude terminal it launches, and by [Claudex](~/repo/claudex) where Claudex manages the
+  line — and the CLI's own last saved reading in `.claude.json`. No usage source means no
+  pill.
 
 Threading never stores or refreshes a login itself — it reads what the official CLI keeps, and
 if a token has expired the tooltip says so and the CLI is the place to sign in again.

@@ -35,6 +35,36 @@ enum ClaudeStatusLineSettings {
         "{ \(command) ; } >/dev/null 2>&1"
     }
 
+    /// The status-line command every local Claude terminal runs: it saves the CLI's input for
+    /// `ClaudeUsageCache.readFeed` whenever that input carries `rate_limits`, then hands the same
+    /// input to the account's own command, if it has one, exactly as the CLI would have.
+    ///
+    /// Claude Code pushes the account's rate limits into the status line from the first API
+    /// response of a session onward (verified on 2.1.296; the payload before that has no
+    /// `rate_limits` key, which is why only a payload naming one is saved — an earlier one would
+    /// overwrite a good reading with nothing). That makes it the one usage source that is fresh
+    /// after every turn and needs no credential, so a login whose Keychain item this build cannot
+    /// read still reports.
+    ///
+    /// With no command of the account's own, the line prints nothing — and a status line that
+    /// prints nothing draws nothing: no row is reserved (verified on 2.1.296 against the same
+    /// launch with no `statusLine` at all). Shell builtins only on the common path; `mkdir` runs
+    /// once, and the write is a temporary file renamed into place so a reader never sees half a
+    /// payload. Failures are silenced: a feed that cannot write must not print into the line.
+    static func feedCommand(writingTo file: URL, then command: String?) -> String {
+        let directory = MCPBridgeLocation.shellQuoted(file.deletingLastPathComponent().path)
+        let target = MCPBridgeLocation.shellQuoted(file.path)
+        let input = ClaudeSettingsDefaults.feedInputVariable
+
+        let save = "\(input)=$(cat); case \"$\(input)\" in *'\"rate_limits\"'*) "
+            + "( umask 077; [ -d \(directory) ] || mkdir -p \(directory); "
+            + "printf '%s' \"$\(input)\" > \(target).$$ && mv -f \(target).$$ \(target) ) "
+            + ">/dev/null 2>&1 ;; esac"
+
+        guard let command else { return save }
+        return "\(save); printf '%s' \"$\(input)\" | { \(command) ; }"
+    }
+
     /// The `statusLine` command that would run for this account in this project.
     ///
     /// The CLI's own order, which is *not* a merge for this key: a managed policy replaces the
@@ -61,6 +91,8 @@ enum ClaudeSettingsDefaults {
     static let statusLineKey = "statusLine"
     static let typeKey = "type"
     static let commandKey = "command"
+    /// The shell variable `ClaudeStatusLineSettings.feedCommand` holds the CLI's input in.
+    static let feedInputVariable = "threading_status"
 
     /// How much a session may do before it has to ask, in the CLI's own spelling.
     /// `manual` is accepted as an alias for `default`; both read as `AgentPermissionMode.manual`.

@@ -211,30 +211,40 @@ enum AgentLauncher {
         return fast
     }
 
-    /// The silenced status line this terminal launch writes, or nil to leave the account's
-    /// line exactly as the user configured it.
+    /// The status line this terminal launch writes: Threading's usage feed, followed by the
+    /// account's own command — silenced when the user suppresses the line.
     ///
-    /// Only with the suppression setting on, and only when the account actually resolves a
-    /// command: an account with no status line has nothing to silence, and writing an override
-    /// for it would add a key where the user has none. The account's own command is kept
-    /// running inside the wrapper because these commands are commonly bridges with side
-    /// effects the app itself relies on — see `ClaudeStatusLineSettings.silencedCommand`.
+    /// Written for every Claude terminal whose account resolves, whether or not the user has a
+    /// line of their own, because the feed is the usage source that stays fresh after every turn
+    /// without a credential (`ClaudeStatusLineSettings.feedCommand`). With no command of the
+    /// account's own it prints nothing, which the CLI draws as no line at all. The account's
+    /// command keeps running inside the wrapper because these commands are commonly bridges
+    /// with side effects the app itself relies on — see `ClaudeStatusLineSettings.silencedCommand`.
     ///
     /// Terminal launches only. A native conversation runs `--print`, where the CLI never
-    /// draws a status line, so its settings file has nothing to say about one.
+    /// draws a status line, so its settings file has nothing to say about one. A remote launch
+    /// never asks: the feed's file is a path on this Mac.
     static func statusLineOverride(for session: AgentSession, in project: Project) -> String? {
-        guard session.kind.supports(.statusLine), AppSettings.shared.suppressesClaudeStatusLine,
+        guard session.kind.supports(.statusLine),
               let account = AgentAccountDiscovery.account(
                   for: session.kind,
                   handle: session.accountHandle
-              ),
-              let command = ClaudeStatusLineSettings.resolvedCommand(
-                  account: account,
-                  projectDirectory: project.folderPath
               )
         else { return nil }
 
-        return ClaudeStatusLineSettings.silencedCommand(wrapping: command)
+        let ownCommand = ClaudeStatusLineSettings.resolvedCommand(
+            account: account,
+            projectDirectory: project.folderPath
+        ).map { command in
+            AppSettings.shared.suppressesClaudeStatusLine
+                ? ClaudeStatusLineSettings.silencedCommand(wrapping: command)
+                : command
+        }
+
+        return ClaudeStatusLineSettings.feedCommand(
+            writingTo: ClaudeUsageCache.feedFileURL(forConfigPath: account.configPath),
+            then: ownCommand
+        )
     }
 
     /// The permission posture this launch states, or nil to state none.

@@ -27,6 +27,74 @@ final class ClaudeStatusLineSettingsTests: XCTestCase {
         )
     }
 
+    // MARK: - Usage Feed
+
+    /// The input Claude Code 2.1.296 hands the line once a session has had its first API
+    /// response, trimmed. The one before that has no `rate_limits` key at all.
+    private let inputWithLimits = #"{"session_id":"s","version":"2.1.296","rate_limits":{"five_hour":{"used_percentage":3,"resets_at":1791628800},"seven_day":{"used_percentage":16,"resets_at":1791968400}}}"#
+    private let inputWithoutLimits = #"{"session_id":"s","version":"2.1.296","cost":{"total_cost_usd":0}}"#
+
+    /// The feed is run, not inspected: what matters is what a shell does with it. A payload
+    /// naming no limits must not replace a good reading, and with no command of the account's
+    /// own the line prints nothing — which the CLI draws as no line at all.
+    func testFeedSavesOnlyInputThatCarriesRateLimitsAndPrintsNothingOnItsOwn() throws {
+        let directory = try makeDirectory(named: "status-feed")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("not-yet-created/profile.json")
+        let command = ClaudeStatusLineSettings.feedCommand(writingTo: file, then: nil)
+
+        XCTAssertEqual(try run(command, input: inputWithoutLimits), "")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+
+        XCTAssertEqual(try run(command, input: inputWithLimits), "")
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), inputWithLimits)
+        let mode = try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int
+        XCTAssertEqual(mode, 0o600, "the input names the session's paths; it stays the user's")
+
+        XCTAssertEqual(try run(command, input: inputWithoutLimits), "")
+        XCTAssertEqual(
+            try String(contentsOf: file, encoding: .utf8),
+            inputWithLimits,
+            "an input before the first API response keeps the last good reading"
+        )
+    }
+
+    /// The account's own line still gets the CLI's exact input on stdin and still draws.
+    func testFeedHandsTheInputOnToTheAccountsOwnCommand() throws {
+        let directory = try makeDirectory(named: "status-feed-chain")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("profile.json")
+
+        let command = ClaudeStatusLineSettings.feedCommand(writingTo: file, then: "cat; printf ' drawn'")
+
+        XCTAssertEqual(try run(command, input: inputWithLimits), inputWithLimits + " drawn")
+        XCTAssertEqual(try run(command, input: inputWithoutLimits), inputWithoutLimits + " drawn")
+    }
+
+    /// What the feed saved reads back as this account's usage, timed by the file.
+    func testSavedFeedReadsBackAsTheAccountsUsage() throws {
+        let account = AgentAccount(
+            provider: .claude,
+            handle: .named("status-feed"),
+            configPath: try makeDirectory(named: "status-feed-account").path
+        )
+        let file = ClaudeUsageCache.feedFileURL(forConfigPath: account.configPath)
+        defer {
+            try? FileManager.default.removeItem(at: file)
+            try? FileManager.default.removeItem(atPath: account.configPath)
+        }
+        let command = ClaudeStatusLineSettings.feedCommand(writingTo: file, then: nil)
+        _ = try run(command, input: inputWithLimits)
+
+        let usage = try XCTUnwrap(ClaudeUsageCache.readFeed(account: account))
+
+        XCTAssertEqual(usage.source, .localCache)
+        XCTAssertEqual(usage.windows.map(\.id), [UsageDefaults.fiveHourWindowID, UsageDefaults.weeklyWindowID])
+        XCTAssertEqual(usage.windows.map(\.fraction), [0.03, 0.16])
+        XCTAssertEqual(usage.windows.first?.resetsAt, Date(timeIntervalSince1970: 1_791_628_800))
+        XCTAssertLessThan(abs(usage.observedAt.timeIntervalSinceNow), 60)
+    }
+
     // MARK: - Resolution
 
     /// Resolution follows the CLI's own layer order, most-specific-first: a project's
@@ -144,6 +212,23 @@ final class ClaudeStatusLineSettingsTests: XCTestCase {
                 projectDirectory: project.path
             )
         )
+    }
+
+    /// Runs a status-line command the way the CLI does: through a shell, with the input on stdin.
+    private func run(_ command: String, input: String) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", command]
+        let stdin = Pipe()
+        let stdout = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = stdout
+        try process.run()
+        stdin.fileHandleForWriting.write(Data(input.utf8))
+        try stdin.fileHandleForWriting.close()
+        let output = stdout.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: output, as: UTF8.self)
     }
 
     private func makeDirectory(named name: String) throws -> URL {
