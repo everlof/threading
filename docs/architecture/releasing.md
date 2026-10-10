@@ -245,7 +245,7 @@ switch from an old profile-less local build to a manually launched profiled expo
 require one new QR scan. The auto-installer now preserves the installed build's credential realm;
 verify which bundle owns the listener before interpreting a phone's 401 as a network failure.
 
-`scripts/check_bundle_entitlements.py` then reads the signed product and requires all seven
+`scripts/check_bundle_entitlements.py` then reads the signed product and requires all eight
 first-party helpers to match those files exactly after resolving the embedded profile's standard
 `$(AppIdentifierPrefix)` expansion. The auto-installer runs it before accepting a
 build, the release script runs it over the exported bundle, and an executable newly added under
@@ -255,6 +255,13 @@ separate gate. `scripts/tests/test_bundle_entitlements.py` checks the manifest a
 in both directions, because the "declared file exists" direction alone passed happily while
 `threading-triggerd` had a declaration the verifier had never heard of — a gap that otherwise
 surfaces only after a Release build.
+
+The CMake-built `threading-proxyd` also declares its empty entitlement dictionary under
+`Targets/ProxyHost`; `scripts/embed_proxy_helper.sh` passes that file to codesign and the verifier
+requires an exact match. It is a first-party helper even though it has no Xcode target. Missing
+it from the manifest blocked both auto-installs on 2026-10-10 after successful archive/export.
+The manifest test checks its build script as well as the Xcode target declarations; do not put
+it in the unmanaged-executable exception just to let installation proceed.
 
 The result is a bundle whose designated requirement is byte-identical to the shipping one —
 `identifier "codes.threading"` and a Developer ID leaf for the team — which is what makes the

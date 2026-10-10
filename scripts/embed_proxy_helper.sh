@@ -26,10 +26,11 @@ cp "$proxy_build/threading-proxyd" "$proxy_helpers/threading-proxyd"
 chmod 755 "$proxy_helpers/threading-proxyd"
 if [[ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ]]; then
   proxy_identity="${EXPANDED_CODE_SIGN_IDENTITY:--}"
+  proxy_entitlements="${SRCROOT}/Targets/ProxyHost/threading-proxyd.entitlements"
   if [[ "$proxy_identity" == "-" ]]; then
-    /usr/bin/codesign --force --sign - --options runtime "$proxy_helpers/threading-proxyd"
+    /usr/bin/codesign --force --sign - --options runtime --entitlements "$proxy_entitlements" "$proxy_helpers/threading-proxyd"
   else
-    /usr/bin/codesign --force --sign "$proxy_identity" --options runtime --timestamp "$proxy_helpers/threading-proxyd"
+    /usr/bin/codesign --force --sign "$proxy_identity" --options runtime --timestamp --entitlements "$proxy_entitlements" "$proxy_helpers/threading-proxyd"
   fi
 fi
 # Full corresponding source, archives, original notices and rebuild instructions travel with it.

@@ -29,6 +29,7 @@ HELPER_ENTITLEMENTS = {
         "Targets/MCPBridge/threading-mcp-bridge.entitlements"
     ),
     "threading-ptyd": Path("Targets/PTYHost/threading-ptyd.entitlements"),
+    "threading-proxyd": Path("Targets/ProxyHost/threading-proxyd.entitlements"),
     "threading-simulator-helper": Path(
         "Targets/SimulatorHelper/threading-simulator-helper.entitlements"
     ),

@@ -149,9 +149,23 @@ class BundleEntitlementTests(unittest.TestCase):
 
     def test_manifest_matches_project_entitlement_declarations(self) -> None:
         project = (REPOSITORY / "Threading.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
-        for declaration in checker.HELPER_ENTITLEMENTS.values():
+        proxy_embed = (REPOSITORY / "scripts/embed_proxy_helper.sh").read_text(encoding="utf-8")
+        for name, declaration in checker.HELPER_ENTITLEMENTS.items():
             self.assertTrue((REPOSITORY / declaration).is_file())
-            self.assertIn(f'CODE_SIGN_ENTITLEMENTS = "{declaration}";', project)
+            if name == "threading-proxyd":
+                self.assertIn(f'${{SRCROOT}}/{declaration}', proxy_embed)
+                self.assertIn('--entitlements "$proxy_entitlements"', proxy_embed)
+            else:
+                self.assertIn(f'CODE_SIGN_ENTITLEMENTS = "{declaration}";', project)
+
+    def test_proxy_helper_rejects_unexpected_entitlements(self) -> None:
+        declaration = REPOSITORY / checker.HELPER_ENTITLEMENTS["threading-proxyd"]
+        self.assertEqual(plistlib.loads(declaration.read_bytes()), {})
+        self.observed["threading-proxyd"] = {"com.apple.security.get-task-allow": True}
+
+        problems = checker.verify_bundle(self.bundle, self.root, self.signed_reader)
+
+        self.assertEqual(problems, ["threading-proxyd: unexpected com.apple.security.get-task-allow"])
 
     def test_every_helper_declaration_in_the_project_is_registered(self) -> None:
         """A helper target added under Targets/ has to join the verifier.
