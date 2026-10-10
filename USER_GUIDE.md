@@ -4217,6 +4217,9 @@ archives that went in either direction, newest first. Two things land there:
   the picture you just sent is findable next to whatever the agent made of it, rather than
   disappearing into the conversation.
 
+Automatic terminal detection checks a bounded window of recent output. If a file is mentioned
+only in older scrollback, printing its path again brings it back into that window.
+
 An animation plays in the preview with play/pause, a scrubber and its elapsed time, and it keeps
 playing in the lightbox when you press Space or double-click. It stops when you look away —
 another tab, a collapsed pane, a window behind another one, or the Dock. Under **Reduce Motion**

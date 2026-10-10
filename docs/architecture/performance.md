@@ -4,6 +4,68 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## Attachment read lock ownership — 2026-10-10
+
+The running Debug app retained a 15,596.97 ms main-thread stall overlapping a 15,630.15 ms
+`attachments.read` on a worker. That read returned 56,172 bytes and zero new rows. A subsequent
+ten-second sample attributed 898 worker samples to the synchronized recent-text reader; 831
+were in one worker's lock-held translation call tree. Render workers were waiting for
+`TerminalLock`. The later capture did not reproduce the original 15-second main-thread stack,
+so the span overlap alone is not proof of that incident's complete cause.
+
+The September move to a worker left translation inside the terminal's shared lock. The view
+reader now captures an immutable, Sendable text snapshot under that lock and converts it after
+release. Snapshot capture bulk-copies packed cells and copies the bounded grapheme lookup prefix
+once: at most 65,535 immutable scalar-array references, with no attribute table or reverse
+interning dictionary. It never retains the mutable arena or constructs Unicode strings while
+holding the terminal lock. Known blank tails are excluded using `BufferLine`'s existing storage
+invariant. An intermediate version captured only referenced graphemes in per-row dictionaries;
+2,000 rows of combining characters made that hold the lock for 166–267 ms, so it was rejected.
+
+The common repeated read covers a 50–200-row screen; the stress cases use 3,500 sparse rows,
+2,000 dense/Unicode rows and a 10,000-row cold history. Mutation frequency remains the observer's existing
+coalesced cadence and fleet-wide single worker. Capture has separate ceilings of 4,096 newest
+physical rows and 262,144 packed cells (2 MiB), so sparse/blank history cannot turn a small output
+into an arbitrarily long critical section. This is deliberately a bounded recent suffix:
+older rows beyond either storage ceiling are omitted even when the output byte budget has room.
+The existing 256 KiB text ceiling, omission of a partial oldest logical line, mutable-screen
+reread and commit-on-admission cursor remain intact. No terminal state changes during a read.
+
+`RecentBufferTextTests` checks snapshot independence after mutation/reset, byte-for-byte parity
+with the original reader across Unicode and every small byte budget, erase/insert/delete/resize,
+storage ceilings, wrapped-line truncation, grapheme-table block boundaries and retirement, and
+the shipping view's incremental/repaint path. The opt-in sweep also fills the entire grapheme table.
+`SWIFTTERM_READ_STRESS=1 swift test --package-path Packages/Vendor/SwiftTerm --filter
+RecentBufferTextTests` enables the matched lock-cost fixture and the cold-history sweep.
+The matched fixture compares the former lock-held reader with snapshot capture on the same
+terminal, asserting identical text and cursor before reporting lock and unlocked conversion
+separately. Fixture feed and view creation are outside the timers. These are Debug critical-section
+measurements, not a claim that the original live stall has been reproduced or eliminated in an
+installed Release build.
+
+Three matched Debug repetitions on this Mac, with other builds running:
+
+| Identical read | Previous lock hold, median / max | Snapshot lock hold, median / max | Unlocked conversion |
+|---|---:|---:|---:|
+| 3,500 sparse rows | 119.70 / 147.20 ms | 1.94 / 2.08 ms | 14.09–19.70 ms |
+| 2,000 dense rows | 125.96 / 282.63 ms | 2.18 / 5.90 ms | 27.34–48.41 ms |
+| 2,000 combining-character rows | 166.21 / 178.00 ms | 2.35 / 2.72 ms | 39.75–62.17 ms |
+
+The 10,000-row cold sweep captured the new 4,096-row suffix in 3.04–5.06 ms and returned
+91,845 bytes; this is not a matched-output speedup over the old full-history read. Subsequent
+50-row reads returned the same 1,099 bytes in 1.15–2.05 ms. Copying all 65,535 grapheme entries
+took 47.59 ms cold and 0.54 / 0.57 ms on two subsequent copies. Earlier runs during compilation
+had capture tails up to 65 ms, so these numbers do not establish a hard real-time ceiling. The
+remaining synchronized work is bounded raw storage capture; attachment text conversion no longer
+holds the lock that input and rendering need.
+
+The final package run passed 120 XCTest cases (three opt-in stress cases skipped) and 1,174
+Swift Testing cases; all 16 recent-text cases passed with stress enabled. An earlier full run
+had three timer/scroller failures under concurrent load, which passed both separately and in
+the final full run. Architecture and main-actor latency gates passed without raising policy
+ceilings. The final ordinary Xcode build passed all 59 selected app attachment/observer cases
+(two opt-in stress cases skipped). The running app has not been restarted with this change.
+
 ## Browser canvas scroll containment — 2026-10-09
 
 One native clip owns each browser canvas. Ordinary scroll callbacks run at gesture frequency;

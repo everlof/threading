@@ -8152,6 +8152,37 @@ open class Terminal {
             nextAbsoluteRow: endAbsoluteRow
         )
     }
+
+    /// The synchronized view reader captures values here and translates them after unlocking.
+    /// Limits apply to storage examined, independently of how little text sparse rows return.
+    func recentBufferTextSnapshot(
+        maximumUTF8Bytes: Int,
+        sinceAbsoluteRow: Int,
+        kind: BufferKind
+    ) -> RecentBufferTextSnapshot {
+        let inspectedBuffer = bufferFromKind(kind: kind)
+        let end = inspectedBuffer.linesTop + inspectedBuffer.lines.count
+        guard maximumUTF8Bytes > 0, !inspectedBuffer.lines.isEmpty else {
+            return RecentBufferTextSnapshot(rowsNewestFirst: [], graphemes: [], nextAbsoluteRow: end)
+        }
+        let requested = sinceAbsoluteRow > end ? inspectedBuffer.linesTop : sinceAbsoluteRow
+        let floor = min(max(requested, inspectedBuffer.linesTop) - inspectedBuffer.linesTop,
+                        inspectedBuffer.yBase, inspectedBuffer.lines.count - 1)
+        let boundedFloor = max(floor, inspectedBuffer.lines.count - RecentBufferTextSnapshot.maximumRows)
+        var rows: [RecentBufferTextSnapshot.Row] = []
+        rows.reserveCapacity(inspectedBuffer.lines.count - boundedFloor)
+        var cellsRemaining = RecentBufferTextSnapshot.maximumCells
+        for index in stride(from: inspectedBuffer.lines.count - 1, through: boundedFloor, by: -1) {
+            let line = inspectedBuffer.lines[index]
+            guard let row = line.textSnapshot(maximumCells: cellsRemaining) else { break }
+            rows.append(row)
+            cellsRemaining -= row.cells.count
+        }
+        return RecentBufferTextSnapshot(
+            rowsNewestFirst: rows,
+            graphemes: inspectedBuffer.cellArena.textGraphemeSnapshot(),
+            nextAbsoluteRow: end)
+    }
     
     /// Returns the text between the specified range
     ///

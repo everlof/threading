@@ -856,6 +856,20 @@ public final class BufferLine: CustomDebugStringConvertible {
         return 0
     }
 
+    /// The known blank tail needs neither copying nor scanning. Keep one trailing cell so
+    /// a wide character's spacer is preserved exactly as in translateToString(trimRight:).
+    private var textSnapshotCellCount: Int {
+        storage.arena.logicalCode(for: tailBlankCell) == 0
+            ? min(storage.count, usedLength + 1)
+            : storage.count
+    }
+
+    func textSnapshot(maximumCells: Int) -> RecentBufferTextSnapshot.Row? {
+        let count = textSnapshotCellCount
+        guard count <= maximumCells else { return nil }
+        return storage.textSnapshot(count: count, isWrapped: isWrapped)
+    }
+
     /// Copies a range of CharData elements from another bufferline into this one
     /// - Parameters:
     ///  - src: the buffer line to copy from

@@ -87,6 +87,15 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     `main` at `58224a7`. The vendored source tree matches that revision; Git metadata, build
     output and ignored generated cache artifacts are not copied into the application repository.
   - **This is our fork** - feel free to modify SwiftTerm source code directly to implement features or fix bugs. The iOS folder is excluded on macOS builds.
+  - **Recent-text readers release the terminal lock before decoding.** The view's attachment
+    reader copies an owned `RecentBufferTextSnapshot`, then trims cells, converts Unicode and
+    joins logical lines on its caller's worker. A worker holding `TerminalLock` throughout those
+    operations still blocks input and rendering. Capture considers at most 4,096 newest rows
+    and 262,144 packed cells, excluding known blank tails; the text byte budget applies separately.
+    One copy of the bounded grapheme lookup prefix retains immutable scalar arrays, with no live
+    arena or buffer reference; per-row dictionaries recreated a long lock hold on Unicode-heavy
+    screens. A logical line cut by either budget is omitted. Keep the current-screen reread and absolute-row
+    cursor rules when re-syncing, and keep conversion outside the synchronized owner boundary.
   - **Shared-memory calls cross a fixed C seam.** Darwin declares `shm_open` variadically, so
     a Swift `@_silgen_name` declaration with a fixed mode argument does not follow its C varargs
     ABI. That created Kitty test images with incorrect permissions and refused the subsequent

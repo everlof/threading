@@ -589,6 +589,23 @@ final class CellArena {
         return graphemeBlocks[blockIndex]![slot]
     }
 
+    /// Owns the published, immutable scalar arrays without retaining this mutable arena.
+    /// The terminal's arena admits at most 65,535 entries. Copy blocks once per text read,
+    /// rather than resolving and inserting the same identifiers for every cell or row.
+    func textGraphemeSnapshot() -> [[UInt32]?] {
+        var result: [[UInt32]?] = [nil] // Identifiers start at one.
+        let count = Int(graphemeCountValue)
+        result.reserveCapacity(count + 1)
+        var copied = 0
+        while copied < count {
+            let blockCount = min(Self.graphemeBlockSize, count - copied)
+            let block = graphemeBlocks[copied / Self.graphemeBlockSize]!
+            result.append(contentsOf: UnsafeBufferPointer(start: block, count: blockCount))
+            copied += blockCount
+        }
+        return result
+    }
+
     @inline(__always)
     func logicalCode(for cell: PackedCell) -> Int32 {
         switch cell.contentTag {
@@ -882,6 +899,12 @@ final class CellStoragePage {
     @inline(__always)
     func rawCell(at index: Int) -> PackedCell {
         cells[index]
+    }
+
+    /// Bulk-copy only packed cells; the read owns one shared grapheme lookup snapshot.
+    func textSnapshot(count: Int, isWrapped: Bool) -> RecentBufferTextSnapshot.Row {
+        let copied = Array(UnsafeBufferPointer(start: cells.baseAddress, count: count))
+        return RecentBufferTextSnapshot.Row(cells: copied, isWrapped: isWrapped)
     }
 
     @inline(__always)

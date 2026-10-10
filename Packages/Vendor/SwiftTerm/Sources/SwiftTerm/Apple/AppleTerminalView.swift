@@ -1771,6 +1771,8 @@ extension TerminalView {
     }
 
     /// Returns recent complete logical lines without exposing mutable terminal storage.
+    /// In addition to the text byte budget, capture is limited to the newest 4,096 physical
+    /// rows and 262,144 cells with potentially nonblank content. Partial logical lines are omitted.
     public nonisolated func recentLogicalBufferText(
         maximumUTF8Bytes: Int,
         sinceAbsoluteRow: Int = 0,
@@ -1783,7 +1785,8 @@ extension TerminalView {
     }
 
     /// Captures the synchronized terminal reader without retaining the AppKit/UIKit view.
-    /// Callers may translate the buffer on a worker; the render owner locks terminal state.
+    /// Callers translate on a worker. Only bounded raw-cell copying holds the terminal lock;
+    /// Unicode conversion and logical-line assembly use the owned snapshot after release.
     public nonisolated func recentLogicalBufferReader(
         maximumUTF8Bytes: Int
     ) -> @Sendable (Int) -> Terminal.RecentBufferText {
