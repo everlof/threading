@@ -150,7 +150,8 @@ The launched child receives the controller executable, the broker socket
 variables — never the store path (see [Agent tool broker](#agent-tool-broker)).
 `threading-controller agent REQUEST_JSON_FILE` exposes a
 single typed operation; `agent-mcp` exposes the same operations over newline-delimited stdio MCP:
-`work_context`, `work_questions`, `work_messages`, `work_history`, `work_message_consumed`,
+`work_context`, `workroom_context`, `workroom_links`, `workroom_questions`, `work_questions`,
+`work_messages`, `work_history`, `work_message_consumed`,
 `work_checkpoint`, `work_ask`, `work_finish`, `memory_list`, `memory_get`, `memory_put`, `memory_delete`,
 `knowledge_get`, `knowledge_put`. These adapters have no claim, answer, retry, stop, delivery acknowledgement, arbitrary
 SQL or destination-selection tool. Question recipients and output destination come from the
@@ -1041,7 +1042,7 @@ fenced owner-RPC repair; each fails against the 0708ee200 binaries). It uses the
 XCTest harness watchdog on Linux; Swift Testing failures are not retried. The standard Mac CI
 and a separate Ubuntu lane both invoke it. `threading-controller --version` reports protocol,
 schema and capabilities without opening or migrating a database. Before an upgrade, take a
-`host-state.py capture` (store and secrets); older binaries refuse schema 10. Restore into an isolated private directory
+`host-state.py capture` (store and secrets); older binaries refuse newer schemas. Restore into an isolated private directory
 with workers/sources disarmed before testing, never alongside active copies of the same work.
 
 A reusable Linux distribution path is `scripts/build-controller-host.sh OUTPUT` inside a
@@ -1091,3 +1092,32 @@ read from an agent's process can reach another worker's notes; mutual isolation 
 OS account or container per worker. This is the hosted memory core;
 attaching persistent identities to native chats, promotion/profile UI and authenticated remote
 chat attachment remain separate consumer work.
+
+## Linked Workrooms (schema v11, local trial)
+
+`LinkedWorkrooms.swift` adds a room with an owner scope, title and purpose. It can exist without
+an external reference. Typed links hold opaque provider IDs and optional HTTPS display URLs;
+they do not grant provider access. A work item may bind to one room when enqueued. That binding
+is committed with the work, so an idempotent retry cannot attach existing work to another room.
+The existing question and answer lifecycle remains the single scheduler: questions asked by
+bound work are projected into the room, and an eligible answer requeues the work as before.
+An optional question presentation keeps background, up to six possible paths and up to eight
+source notes on the same immutable question record. `work_ask` accepts these as typed optional
+fields; identical-ID retries must supply identical presentation. The human portal escapes every
+field and labels sources as notes to verify. It generates a PDF snapshot of that record on
+request, after checking the same room and recipient access as the HTML view. PDFs are not a
+separate decision record or a publication channel.
+
+`workroom_work`, `workroom_question` and `workroom_question_recipient` index room membership,
+open questions and recipient pages. The owner CLI offers `room-*` commands. Execution-scoped
+MCP exposes `workroom_context`, `workroom_links` and `workroom_questions`; it derives the room
+from the current work and accepts no room selector. The ordinary `work_ask` permission policy
+still controls recipients. The room tools cannot create links, grant access, or answer.
+
+`Service/LinkedWorkrooms` is a separate loopback-only browser trial over the owner CLI. It
+uses ephemeral 24-hour bearer invitations for named recipients, checks the room and question
+on each request, and exposes only addressed questions to a guest. This is a local prototype,
+not a hosted identity or client access service. It cannot read Jira content, publish updates,
+or render agent-authored HTML. Those need separate adapters and authenticated publication
+rules before use with external participants. Run it against a new private database;
+schema v11 migration is one-way for older controller binaries.

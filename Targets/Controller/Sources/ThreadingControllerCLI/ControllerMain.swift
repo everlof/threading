@@ -18,6 +18,17 @@ struct ControllerMain {
 
     workers [CURSOR]
     worker-add WORKER_UUID NAME
+    room-create ROOM_UUID SCOPE TITLE PURPOSE_FILE
+    rooms SCOPE [CURSOR]
+    room ROOM_UUID
+    room-link ROOM_UUID LINK_UUID KIND PROVIDER TARGET LABEL RELATIONSHIP URL_OR_DASH
+    room-links ROOM_UUID [CURSOR]
+    room-enqueue ROOM_UUID WORKER_UUID SOURCE_KEY INSTRUCTION_FILE [AFTER_WORK_UUIDS_CSV]
+    room-works ROOM_UUID [CURSOR]
+    room-questions ROOM_UUID [CURSOR]
+    room-question ROOM_UUID QUESTION_UUID
+    room-questions-for ROOM_UUID RECIPIENT [CURSOR]
+    room-open-questions ROOM_UUID [CURSOR]
     enqueue WORKER_UUID SOURCE_KEY INSTRUCTION_FILE [AFTER_WORK_UUIDS_CSV]
     enqueue-request WORKER_UUID SOURCE_KEY INSTRUCTION_FILE REQUEST_FILE [AFTER_WORK_UUIDS_CSV]
       (AFTER: up to 16 tasks that must complete first; cancelling one cancels this task)
@@ -513,6 +524,41 @@ struct ControllerMain {
             let after = try cursor(0); try output(await store.workers(after: after))
         case "worker-add":
             try count(2); try output(await store.addWorker(id: WorkerID(args[0]), name: args[1]))
+        case "room-create":
+            try count(4)
+            try output(await store.createWorkroom(id: WorkroomID(args[0]), scope: args[1], title: args[2], purpose: file(args[3])))
+        case "rooms":
+            let after = try cursor(1); try output(await store.workrooms(scope: args[0], after: after))
+        case "room":
+            try count(1); try output(await store.workroom(WorkroomID(args[0])))
+        case "room-link":
+            try count(8)
+            guard let kind = WorkroomLinkKind(rawValue: args[2]),
+                  let relationship = WorkroomLinkRelationship(rawValue: args[6]) else {
+                throw ControllerError.invalidInput("link_type")
+            }
+            try output(await store.addWorkroomLink(id: WorkroomLinkID(args[1]), roomID: WorkroomID(args[0]),
+                                                   kind: kind, provider: args[3], target: args[4], label: args[5],
+                                                   relationship: relationship, url: args[7] == "-" ? nil : args[7]))
+        case "room-links":
+            let after = try cursor(1); try output(await store.workroomLinks(roomID: WorkroomID(args[0]), after: after))
+        case "room-enqueue":
+            guard args.count == 4 || args.count == 5 else { throw ControllerError.invalidInput("arguments") }
+            try output(await store.enqueueInWorkroom(roomID: WorkroomID(args[0]), workerID: WorkerID(args[1]),
+                                                    key: args[2], instruction: file(args[3]),
+                                                    after: workIDs(args.count == 5 ? args[4] : nil)))
+        case "room-works":
+            let after = try cursor(1); try output(await store.workroomWorks(roomID: WorkroomID(args[0]), after: after))
+        case "room-questions", "room-open-questions":
+            let after = try cursor(1)
+            try output(await store.workroomQuestions(roomID: WorkroomID(args[0]), after: after,
+                                                     openOnly: command == "room-open-questions"))
+        case "room-question":
+            try count(2)
+            try output(await store.workroomQuestion(roomID: WorkroomID(args[0]), questionID: QuestionID(args[1])))
+        case "room-questions-for":
+            let after = try cursor(2)
+            try output(await store.workroomQuestionsFor(roomID: WorkroomID(args[0]), recipient: args[1], after: after))
         case "enqueue":
             guard args.count == 3 || args.count == 4 else { throw ControllerError.invalidInput("arguments") }
             try output(await store.enqueue(workerID: WorkerID(args[0]), key: args[1], instruction: file(args[2]),
@@ -556,8 +602,12 @@ struct ControllerMain {
         case "checkpoint":
             try count(2); try output(await store.checkpoint(executionID: ExecutionID(args[0]), text: file(args[1])))
         case "ask":
-            try count(5); try output(await store.ask(executionID: ExecutionID(args[0]), id: QuestionID(args[1]),
-                recipients: csv(args[2]), text: file(args[3]), checkpoint: file(args[4])))
+            guard args.count == 5 || args.count == 6 else { throw ControllerError.invalidInput("arguments") }
+            let presentation = try args.count == 6
+                ? JSONDecoder().decode(WorkQuestionPresentation.self, from: Data(file(args[5]).utf8)) : nil
+            try output(await store.ask(executionID: ExecutionID(args[0]), id: QuestionID(args[1]),
+                recipients: csv(args[2]), text: file(args[3]), checkpoint: file(args[4]),
+                presentation: presentation))
         case "questions":
             let after = try cursor(1); try output(await store.questions(workID: WorkID(args[0]), after: after))
         case "question":

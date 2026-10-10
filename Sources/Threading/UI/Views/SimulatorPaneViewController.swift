@@ -79,6 +79,9 @@ final class SimulatorPaneViewController: NSViewController {
         static let liveFrameWait: Duration = .seconds(1)
     }
 
+    private static let maximumDiagnosticCharacters = 1_000
+    private static let maximumRecoveryMessageCharacters = 512
+
     private enum ControlActivity: Equatable {
         case idle
         case connecting
@@ -110,6 +113,10 @@ final class SimulatorPaneViewController: NSViewController {
     private var preparationTask: Task<Void, Never>?
     private var preparationGeneration = 0
     private var preparationFailureDetail: String?
+    private var recoveryView: SimulatorRecoveryView?
+    private var recoveryDiscoveryTask: Task<Void, Never>?
+    private var recoveryMenuSession: AnyObject?
+    var onRecoveryDeviceSelection: ((SimulatorDeviceID) -> Void)?
     private var preparationCompletions: [
         @MainActor @Sendable (SimulatorPaneAgentResult<SimulatorDeviceLease>) -> Void
     ] = []
@@ -450,6 +457,7 @@ final class SimulatorPaneViewController: NSViewController {
         case .preparing(let id): return devices.first(where: { $0.id == id })?.name ?? L10n.string("iPhone")
         case .idle, .discovering, .failed:
             if let id = selectedDeviceID, let device = devices.first(where: { $0.id == id }) { return device.name }
+            if let device = lease?.device { return device.name }
             return L10n.string("Choose Simulator")
         }
     }
@@ -923,7 +931,11 @@ final class SimulatorPaneViewController: NSViewController {
             }
             hiddenTransportReleaseTask?.cancel()
             hiddenTransportReleaseTask = nil
-            if let lease {
+            if requiresLeaseRefresh {
+                // A tab switch is not proof that an unavailable device came back.
+                renderState()
+                return
+            } else if let lease {
                 presentationState = .ready(lease.device)
                 // The stream can drop while the pane is hidden (a helper loss, or a background
                 // install/launch), which parks it on the screenshot fallback. Reconnecting the
@@ -955,6 +967,10 @@ final class SimulatorPaneViewController: NSViewController {
     /// Explicit tab/session teardown. A user-owned boot stays running; a Threading-owned boot is
     /// handed back through the lease capability without retaining this controller.
     func terminate() {
+        ThemedMenuPresenter.dismiss(recoveryMenuSession)
+        recoveryMenuSession = nil
+        recoveryDiscoveryTask?.cancel()
+        recoveryDiscoveryTask = nil
         captureModifierMonitor.remove()
         if let touchPreferencesObserver {
             NotificationCenter.default.removeObserver(touchPreferencesObserver)
@@ -1003,7 +1019,7 @@ final class SimulatorPaneViewController: NSViewController {
             SimulatorPaneAgentResult<SimulatorDeviceLease>
         ) -> Void
     ) {
-        if let lease, deviceID == nil || lease.device.id == deviceID {
+        if !requiresLeaseRefresh, let lease, deviceID == nil || lease.device.id == deviceID {
             completion(.success(lease))
             return
         }
@@ -1013,8 +1029,10 @@ final class SimulatorPaneViewController: NSViewController {
             return
         }
 
-        preferredDeviceID = deviceID
-        prepare(deviceID, releasingCurrentLease: lease != nil)
+        let targetID = deviceID ?? selectedDeviceID
+        let refresh = requiresLeaseRefresh && lease?.device.id == targetID
+        preferredDeviceID = targetID
+        prepare(targetID, releasingCurrentLease: lease != nil, refreshingCurrentLease: refresh)
     }
 
     func installAndLaunchForAgent(
@@ -1242,7 +1260,13 @@ final class SimulatorPaneViewController: NSViewController {
         refreshingCurrentLease: Bool = false
     ) {
         preparationTask?.cancel()
+        ThemedMenuPresenter.dismiss(recoveryMenuSession)
+        recoveryMenuSession = nil
+        recoveryDiscoveryTask?.cancel()
+        recoveryDiscoveryTask = nil
         stopTransport()
+        screenView.image = nil
+        presenter?.screenView.image = nil
         presentationState = .discovering
         preparationFailureDetail = nil
         let leaseManager = leaseManager
@@ -1309,9 +1333,7 @@ final class SimulatorPaneViewController: NSViewController {
                     self.lease = currentLease
                     self.requiresLeaseRefresh = true
                 }
-                self.preparationFailureDetail = (error as? SimulatorControlError)?
-                    .diagnosticDetail
-                self.presentationState = .failed(error.localizedDescription)
+                self.showFailure(error)
                 self.finishPreparation(.failure(error.localizedDescription))
             }
         }
@@ -1360,7 +1382,7 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private func startFrameLoop() {
-        guard wantsFrames, lease != nil else { return }
+        guard wantsFrames, lease != nil, !requiresLeaseRefresh else { return }
         if let streamSession {
             streamSession.setVisible(true)
             if let capabilities = liveCapabilities {
@@ -1380,6 +1402,7 @@ final class SimulatorPaneViewController: NSViewController {
     @discardableResult
     private func openTransport() -> Bool {
         guard let deviceID = lease?.device.id,
+              !requiresLeaseRefresh,
               streamSession == nil, streamTask == nil, fallbackTask == nil,
               publicTransactionCount == 0 else { return false }
 
@@ -1529,8 +1552,7 @@ final class SimulatorPaneViewController: NSViewController {
                 } catch {
                     guard let self, !Task.isCancelled else { return }
                     self.requiresLeaseRefresh = true
-                    self.setScreenInteraction(.unavailable)
-                    self.presentationState = .failed(error.localizedDescription)
+                    self.showFailure(error)
                     return
                 }
             }
@@ -1938,6 +1960,9 @@ final class SimulatorPaneViewController: NSViewController {
             guard lease?.device.id == deviceID else {
                 throw SimulatorLiveStreamError.disconnected
             }
+            if requiresLeaseRefresh, case .failed(let message) = presentationState {
+                throw SimulatorLiveStreamError.helperUnavailable(message)
+            }
             if let streamSession, liveCapabilities != nil { return streamSession }
             if case .screenshotFallback = liveBackend {
                 throw SimulatorLiveStreamError.helperUnavailable(
@@ -2098,7 +2123,7 @@ final class SimulatorPaneViewController: NSViewController {
     /// Appearance is a `simctl` device setting, not HID input, so it is live whenever a device is
     /// adopted — even on the screenshot fallback — and needs no input consent.
     private func configureAppearanceButton() {
-        appearanceButton.isEnabled = isPresented && lease != nil
+        appearanceButton.isEnabled = isPresented && lease != nil && !requiresLeaseRefresh
     }
 
     private func toggleAppearance() {
@@ -3032,7 +3057,7 @@ final class SimulatorPaneViewController: NSViewController {
         presenterButton.toolTip = open ? title
             : L10n.string("Open the device alone in its own window, to share in Meet or Zoom")
         presenterButton.isSelected = open
-        presenterButton.isEnabled = open || lease != nil
+        presenterButton.isEnabled = open || (lease != nil && !requiresLeaseRefresh)
     }
 
     /// The window a consent sheet belongs to: the presenter's when that is where the person is
@@ -3238,8 +3263,93 @@ final class SimulatorPaneViewController: NSViewController {
             + entries.joined(separator: "\n\n")
     }
 
+    private func showFailure(_ error: Error) {
+        requiresLeaseRefresh = lease != nil
+        stopTransport()
+        if isRecording { stopRecording() }
+        screenView.image = nil
+        presenter?.screenView.image = nil
+        let detail = (error as? SimulatorControlError)?.diagnosticDetail
+            ?? error.localizedDescription
+        preparationFailureDetail = String(detail.prefix(Self.maximumDiagnosticCharacters))
+        let message: String
+        if case .commandFailed = error as? SimulatorControlError {
+            message = L10n.string("Threading can’t reach this Simulator. Retry or choose another device.")
+        } else {
+            message = error.localizedDescription
+        }
+        presentationState = .failed(String(message.prefix(Self.maximumRecoveryMessageCharacters)))
+    }
+
+    private func showRecovery(message: String) {
+        let recovery: SimulatorRecoveryView
+        if let recoveryView {
+            recovery = recoveryView
+        } else {
+            recovery = SimulatorRecoveryView()
+            recovery.onRetry = { [weak self] in self?.retry() }
+            recovery.onChoose = { [weak self] in self?.chooseRecoveryDevice() }
+            view.addSubview(recovery)
+            NSLayoutConstraint.activate([
+                recovery.leadingAnchor.constraint(equalTo: screenView.leadingAnchor),
+                recovery.trailingAnchor.constraint(equalTo: screenView.trailingAnchor),
+                recovery.topAnchor.constraint(equalTo: screenView.topAnchor),
+                recovery.bottomAnchor.constraint(equalTo: screenView.bottomAnchor),
+            ])
+            recoveryView = recovery
+        }
+        recovery.detail = message
+        recovery.toolTip = preparationFailureDetail
+        recovery.chooseButton.isEnabled = recoveryDiscoveryTask == nil
+        recovery.isHidden = false
+    }
+
+    /// Discovery is one bounded asynchronous operation per explicit click, never a failure poll.
+    private func chooseRecoveryDevice() {
+        guard recoveryDiscoveryTask == nil, let recoveryView else { return }
+        recoveryView.chooseButton.isEnabled = false
+        let generation = preparationGeneration
+        recoveryDiscoveryTask = Task { [weak self, leaseManager] in
+            defer {
+                if self?.preparationGeneration == generation {
+                    self?.recoveryDiscoveryTask = nil
+                    self?.recoveryView?.chooseButton.isEnabled = true
+                }
+            }
+            do {
+                let devices = try await leaseManager.availableDevices()
+                try Task.checkCancellation()
+                guard let self, let recovery = self.recoveryView, !recovery.isHidden else { return }
+                self.devices = devices
+                let entries: [ThemedMenuEntry] = devices.map { device in
+                    .item(ThemedMenuItem(title: device.name, subtitle: device.runtimeName,
+                        onChoose: { [weak self] in self?.selectRecoveryDevice(device.id) }))
+                }
+                guard !entries.isEmpty else {
+                    recovery.detail = L10n.string("No available iOS Simulator device is installed in Xcode.")
+                    return
+                }
+                self.recoveryMenuSession = ThemedMenuPresenter.present(
+                    ThemedMenuPresentation(entries: entries, minimumWidth: Self.menuWidth), from: recovery.chooseButton,
+                    selectedEntryIndex: nil, onChoose: { _, item in item.onChoose?() },
+                    onDismiss: { [weak self] in self?.recoveryMenuSession = nil }
+                )
+            } catch {
+                guard !Task.isCancelled else { return }
+                self?.showFailure(error)
+            }
+        }
+    }
+
+    func selectRecoveryDevice(_ id: SimulatorDeviceID) {
+        if id == selectedDeviceID { retry() }
+        else if let onRecoveryDeviceSelection { onRecoveryDeviceSelection(id) }
+        else { selectDevice(id) }
+    }
+
     private func renderState() {
         guard isViewLoaded else { return }
+        recoveryView?.isHidden = true
         switch presentationState {
         case .idle:
             deviceChip.configure(symbolName: "iphone", title: L10n.string("Choose Simulator"))
@@ -3277,16 +3387,17 @@ final class SimulatorPaneViewController: NSViewController {
             statusLabel.textColor = isDisconnected ? Design.Status.negative : Design.Text.tertiary
             retryButton.isEnabled = true
         case .failed(let message):
-            statusLabel.stringValue = message
-            statusLabel.textColor = Design.Status.negative
+            statusLabel.stringValue = L10n.string("Unavailable")
+            statusLabel.textColor = Design.Text.secondary
             retryButton.isEnabled = true
+            showRecovery(message: message)
         }
         if isRecording { showRecordingStatus() }
-        if case .ready = presentationState {
-            logsButton.isEnabled = selectedDeviceID != nil
-        } else {
-            logsButton.isEnabled = false
-        }
+        let deviceIsReady: Bool
+        if case .ready = presentationState { deviceIsReady = true }
+        else { deviceIsReady = false }
+        logsButton.isEnabled = deviceIsReady && selectedDeviceID != nil
+        for button in [captureButton, inspectButton, annotateButton] { button.isEnabled = deviceIsReady }
         recordButton.isEnabled = isRecording ? !isFinishingRecording : canRecord
         refreshPresenterButton()
         // The selected device is useful identity even when it is the only available target.
@@ -3297,6 +3408,7 @@ final class SimulatorPaneViewController: NSViewController {
         configureHardwareButtons()
         configureAppearanceButton()
         var tooltipLines = [statusLabel.stringValue]
+        if case .failed(let message) = presentationState { tooltipLines.append(message) }
         if case .ready = presentationState, let backend = liveBackendDescription {
             tooltipLines.append(backend)
         }
@@ -3306,7 +3418,7 @@ final class SimulatorPaneViewController: NSViewController {
             tooltipLines.append(lastStreamFailure)
         }
         if case .failed = presentationState, let preparationFailureDetail {
-            tooltipLines.append(String(preparationFailureDetail.prefix(1_000)))
+            tooltipLines.append(preparationFailureDetail)
         }
         statusLabel.toolTip = tooltipLines.joined(separator: "\n")
         if isWorkspaceMember {
@@ -3357,6 +3469,7 @@ final class SimulatorPaneViewController: NSViewController {
     }
     var screenViewForTesting: SimulatorScreenView { screenView }
     var statusForTesting: String { statusLabel.stringValue }
+    var recoveryViewForTesting: SimulatorRecoveryView? { recoveryView }
     var statusViewForTesting: NSView { statusLabel }
     var statusTooltipForTesting: String { statusLabel.toolTip ?? "" }
     var controlButtonForTesting: ThemedIconButton { controlButton }

@@ -6,8 +6,17 @@
   let height = 1;
   let inset = 0;
   let renderNumber = 0;
+  let ticket = null;
+  const faces = new Map();
   const canvas = document.getElementById('canvas');
   const diagram = document.getElementById('diagram');
+  // Native keeps the latest viewport, so releasing this page while the pane is hidden loses nothing.
+  // Sent as it happens: the engine already coalesces scroll events to one a frame, and a page in
+  // an occluded window gets no animation frames to defer to.
+  function reportViewport() {
+    if (ticket === null) return;
+    window.webkit?.messageHandlers?.threadingViewport?.postMessage({ ticket, fitting, scale, x: scrollX, y: scrollY });
+  }
   function layout() {
     if (fitting) scale = Math.min(1, Math.max(0.1, (innerWidth - inset * 2) / width));
     const scaledWidth = width * scale;
@@ -20,6 +29,20 @@
     }
     canvas.style.width = `${scaledWidth + inset * 2}px`;
     canvas.style.height = `${scaledHeight + inset * 2}px`;
+    reportViewport();
+  }
+  // A process-registered theme face arrives as bytes; WebKit's content process cannot see it.
+  async function adoptFace(face) {
+    if (!face || faces.get(face.family)?.key === face.key) return;
+    const binary = atob(face.data);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    const font = new FontFace(face.family, bytes);
+    await font.load();
+    const previous = faces.get(face.family);
+    if (previous) document.fonts.delete(previous.font);
+    document.fonts.add(font);
+    faces.set(face.family, { key: face.key, font });
   }
   window.threadingZoom = (operation) => {
     fitting = operation === 'fit';
@@ -27,10 +50,15 @@
     layout();
   };
   window.addEventListener('resize', layout);
+  window.addEventListener('scroll', reportViewport, { passive: true });
   document.addEventListener('contextmenu', (event) => event.preventDefault());
-  window.threadingRender = async (source, palette, limits, preserveViewport) => {
+  // `viewport` is 'fit' for a new document, 'preserve' for a repaint of the same reader, or the
+  // { fitting, scale, x, y } native saved before it released the previous page.
+  window.threadingRender = async (source, palette, limits, viewport, renderTicket) => {
     const started = performance.now();
     const scroll = [scrollX, scrollY];
+    // An unreadable face falls back to the system family that follows it in `palette.font`.
+    try { await adoptFace(palette.fontFace); } catch {}
     inset = palette.inset;
     canvas.style.padding = `${inset}px`;
     document.body.style.background = palette.ground;
@@ -39,8 +67,13 @@
       startOnLoad: false, securityLevel: 'strict', suppressErrorRendering: true,
       maxTextSize: limits.bytes, maxEdges: limits.edges,
       // Neither front matter nor init directives may relax safety/work limits or replace host ink.
+      // Mermaid applies this list at every depth, so the per-diagram font keys are locked too.
       secure: ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'maxEdges',
-        'suppressErrorRendering', 'theme', 'themeVariables', 'themeCSS', 'fontFamily', 'fontSize', 'htmlLabels', 'flowchart'],
+        'suppressErrorRendering', 'dompurifyConfig', 'theme', 'themeVariables', 'themeCSS',
+        'fontFamily', 'fontSize', 'htmlLabels', 'flowchart',
+        'actorFontFamily', 'boundaryFontFamily', 'componentFontFamily', 'containerFontFamily',
+        'dbFontFamily', 'messageFontFamily', 'noteFontFamily', 'personFontFamily', 'queueFontFamily',
+        'systemFontFamily', 'taskFontFamily', 'titleFontFamily', 'usecaseFontFamily'],
       theme: 'base', fontFamily: palette.font, fontSize: palette.fontSize, htmlLabels: true,
       themeVariables: {
         darkMode: palette.dark, fontSize: `${palette.fontSize}px`, background: palette.ground, primaryColor: palette.face,
@@ -71,9 +104,17 @@
     width = Math.max(1, box.width); height = Math.max(1, box.height);
     svg.setAttribute('width', width); svg.setAttribute('height', height);
     svg.style.maxWidth = 'none';
-    if (!preserveViewport) fitting = true;
+    if (viewport === 'fit') {
+      fitting = true;
+    } else if (viewport && typeof viewport === 'object') {
+      fitting = viewport.fitting;
+      scale = Math.max(0.1, Math.min(4, viewport.scale));
+    }
+    ticket = renderTicket;
     layout();
-    if (preserveViewport) scrollTo(...scroll);
+    if (viewport === 'preserve') scrollTo(...scroll);
+    else if (viewport && typeof viewport === 'object') scrollTo(viewport.x, viewport.y);
+    reportViewport();
     return { width, height, nodes: diagram.querySelectorAll('.node').length, renderMilliseconds: performance.now() - started };
   };
 })();

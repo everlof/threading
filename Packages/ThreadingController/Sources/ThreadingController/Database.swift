@@ -8,7 +8,7 @@ final class ControllerDatabase {
     /// under its write lock and refuses unless it is exactly this, so an older process that
     /// stays open while a newer one migrates the file stops writing instead of writing rows the
     /// new schema's invariants do not expect. The integrator sets this to the final step.
-    static let schemaVersion: Int64 = 10
+    static let schemaVersion: Int64 = 11
     /// How long a write waits for another process's write lock before SQLITE_BUSY.
     private static let busyTimeoutMilliseconds: Int32 = 3_000
     private var handle: OpaquePointer?
@@ -135,6 +135,32 @@ final class ControllerDatabase {
                     UPDATE usage_unsettled SET stopped_day=(SELECT substr(json_extract(payload,'$.stoppedAt'),1,10)
                     FROM record WHERE kind='launch' AND id=usage_unsettled.execution)
                     """)
+            }
+            // Collaboration rooms keep their identity independently of provider work and links.
+            // Membership rows let a room page only its own work and questions.
+            try migrate(to: 11) { _ in
+                try run("""
+                    CREATE TABLE IF NOT EXISTS workroom_work (
+                        room TEXT NOT NULL, work TEXT PRIMARY KEY, sequence INTEGER NOT NULL
+                    )
+                    """)
+                try run("CREATE INDEX IF NOT EXISTS workroom_work_page ON workroom_work(room,sequence)")
+                try run("""
+                    CREATE TABLE IF NOT EXISTS workroom_question (
+                        room TEXT NOT NULL, question TEXT PRIMARY KEY,
+                        sequence INTEGER NOT NULL, state TEXT NOT NULL
+                    )
+                    """)
+                try run("CREATE INDEX IF NOT EXISTS workroom_question_page ON workroom_question(room,sequence)")
+                try run("CREATE INDEX IF NOT EXISTS workroom_question_open ON workroom_question(room,state,sequence)")
+                try run("""
+                    CREATE TABLE IF NOT EXISTS workroom_question_recipient (
+                        room TEXT NOT NULL, question TEXT NOT NULL,
+                        recipient TEXT NOT NULL, sequence INTEGER NOT NULL,
+                        PRIMARY KEY(question,recipient)
+                    )
+                    """)
+                try run("CREATE INDEX IF NOT EXISTS workroom_question_recipient_page ON workroom_question_recipient(room,recipient,sequence)")
             }
             guard try currentVersion() == Self.schemaVersion else { throw ControllerError.unsupportedSchema }
             try run("PRAGMA journal_mode=WAL")

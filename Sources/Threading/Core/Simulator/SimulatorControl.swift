@@ -64,6 +64,7 @@ enum SimulatorControlError: LocalizedError, Equatable, Sendable {
     case tooManyDevices(maximum: Int)
     case noAvailableIOSDevices
     case deviceNotFound(SimulatorDeviceID)
+    case deviceUnavailable(SimulatorDeviceID, detail: String)
     case invalidApplication(String)
     case invalidBundleIdentifier
     case tooManyLaunchArguments(maximum: Int)
@@ -88,7 +89,7 @@ enum SimulatorControlError: LocalizedError, Equatable, Sendable {
             return "More than \(maximum) iOS Simulator devices are installed."
         case .noAvailableIOSDevices:
             return "No available iOS Simulator device is installed in Xcode."
-        case .deviceNotFound:
+        case .deviceNotFound, .deviceUnavailable:
             return L10n.string(
                 "The selected Simulator is no longer available. Choose another device."
             )
@@ -104,8 +105,11 @@ enum SimulatorControlError: LocalizedError, Equatable, Sendable {
     }
 
     var diagnosticDetail: String? {
-        if case .bootFailed(_, let detail) = self { return detail }
-        return nil
+        switch self {
+        case .bootFailed(_, let detail), .deviceUnavailable(_, let detail),
+             .commandFailed(_, let detail): return detail
+        default: return nil
+        }
     }
 }
 
@@ -164,6 +168,7 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
                 _ = try Self.run(
                     ["bootstatus", device.id.rawValue, "-b"],
                     operation: "boot",
+                    deviceID: device.id,
                     timeout: SimulatorControlDefaults.bootTimeout,
                     maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
                     capture: .combined,
@@ -200,6 +205,7 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
             _ = try Self.run(
                 ["install", deviceID.rawValue, applicationURL.path],
                 operation: "install",
+                deviceID: deviceID,
                 timeout: SimulatorControlDefaults.installTimeout,
                 maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
                 capture: .combined,
@@ -214,6 +220,7 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
                     bundleIdentifier
                 ] + arguments,
                 operation: "launch",
+                deviceID: deviceID,
                 timeout: SimulatorControlDefaults.launchTimeout,
                 maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
                 capture: .combined,
@@ -243,6 +250,7 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
                     capture.outputURL.path
                 ],
                 operation: "screenshot",
+                deviceID: deviceID,
                 timeout: SimulatorControlDefaults.screenshotTimeout,
                 maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
                 capture: .combined,
@@ -279,6 +287,7 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
             _ = try Self.run(
                 ["ui", deviceID.rawValue, "appearance", dark ? "dark" : "light"],
                 operation: "appearance",
+                deviceID: deviceID,
                 timeout: SimulatorControlDefaults.shutdownTimeout,
                 maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
                 capture: .combined,
@@ -294,6 +303,7 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
             _ = try Self.run(
                 ["shutdown", lease.device.id.rawValue],
                 operation: "shutdown",
+                deviceID: lease.device.id,
                 timeout: SimulatorControlDefaults.shutdownTimeout,
                 maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
                 capture: .combined,
@@ -369,6 +379,7 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
     private static func run(
         _ arguments: [String],
         operation: String,
+        deviceID: SimulatorDeviceID? = nil,
         timeout: TimeInterval,
         maximumOutputBytes: Int,
         capture: SimulatorCommandCapture,
@@ -405,6 +416,12 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
                 failureDescription = detail
             } else {
                 failureDescription = "Simulator \(operation) failed with status \(status)."
+            }
+            // Only the exact device refusal proves unavailability. A boot error or a generic
+            // "Invalid argument" must remain its original failure, not imply device deletion.
+            if let deviceID,
+               failureDescription.caseInsensitiveCompare("Invalid device: \(deviceID.rawValue)") == .orderedSame {
+                throw SimulatorControlError.deviceUnavailable(deviceID, detail: failureDescription)
             }
             throw SimulatorControlError.commandFailed(
                 operation: operation,

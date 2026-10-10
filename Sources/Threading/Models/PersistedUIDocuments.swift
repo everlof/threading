@@ -272,6 +272,7 @@ struct PersistedSessionAttachment: Codable {
   /// that still held every older one.
   let kind: SessionAttachment.Kind?
   let origin: SessionAttachment.Origin?
+  let agentSources: [AttachmentAgentSource]?
 
   /// Written only when true, and read as false when absent: every payload predating the
   /// configurable scope holds files that passed the narrow rule, so the absent case is a fact
@@ -292,6 +293,7 @@ struct PersistedSessionAttachment: Codable {
     case sourcePath
     case kind
     case origin
+    case agentSources
     case isOutsideProject
     case isImmutableSnapshot
     case turnID
@@ -306,6 +308,7 @@ struct PersistedSessionAttachment: Codable {
     sourcePath: String?,
     kind: SessionAttachment.Kind?,
     origin: SessionAttachment.Origin?,
+    agentSources: [AttachmentAgentSource]? = nil,
     isOutsideProject: Bool?,
     isImmutableSnapshot: Bool?,
     turnID: String?,
@@ -318,6 +321,7 @@ struct PersistedSessionAttachment: Codable {
     self.sourcePath = sourcePath
     self.kind = kind
     self.origin = origin
+    self.agentSources = agentSources
     self.isOutsideProject = isOutsideProject
     self.isImmutableSnapshot = isImmutableSnapshot
     self.turnID = turnID
@@ -337,6 +341,7 @@ struct PersistedSessionAttachment: Codable {
       .flatMap(SessionAttachment.Kind.init(rawValue:))
     origin = (try container.decodeIfPresent(String.self, forKey: .origin))
       .flatMap(SessionAttachment.Origin.init(rawValue:))
+    agentSources = try container.decodeIfPresent([AttachmentAgentSource].self, forKey: .agentSources)
     isOutsideProject = try container.decodeIfPresent(Bool.self, forKey: .isOutsideProject)
     isImmutableSnapshot = try container.decodeIfPresent(Bool.self, forKey: .isImmutableSnapshot)
     turnID = try container.decodeIfPresent(String.self, forKey: .turnID)

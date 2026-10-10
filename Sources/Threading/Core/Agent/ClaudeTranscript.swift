@@ -83,6 +83,16 @@ enum ClaudeTranscript {
             .appendingPathComponent(AgentDefaults.claudeSubagentsSubdirectory, isDirectory: true)
     }
 
+    /// Start hooks can name a child before they include its transcript path. Derive only that
+    /// child's slot from the exact root path the hook supplied; no account-tree discovery.
+    static func subagentURL(childID: String, root: URL) -> URL? {
+        guard !childID.isEmpty, childID != ".", childID != "..",
+              !childID.contains("/"), !childID.contains("\0") else { return nil }
+        return subagentsDirectory(forRoot: root)
+            .appendingPathComponent(ClaudeSubagentHistoryDefaults.agentPrefix + childID)
+            .appendingPathExtension(AgentDefaults.transcriptExtension)
+    }
+
     /// Whether a conversation has been recorded, which is what makes a resume possible.
     ///
     /// An identifier alone is not enough: Claude's is minted before the conversation exists,

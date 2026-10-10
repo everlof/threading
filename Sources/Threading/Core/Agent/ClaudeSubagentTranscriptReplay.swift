@@ -239,35 +239,7 @@ enum ClaudeSubagentTranscriptReplay {
     }
 
     private static func conversationEvent(from record: [String: Any]) -> StreamEvent? {
-        guard record["isMeta"] as? Bool != true,
-              let type = record["type"] as? String,
-              type == "user" || type == "assistant",
-              let message = record["message"] as? [String: Any] else {
-            return nil
-        }
-
-        if type == "assistant" {
-            // Per element, exactly as the parent replay is: a child's turn that vanishes reads
-            // as a subagent that never answered.
-            let content = WireList.objects(
-                message["content"],
-                site: WireListSite.claudeSubagentContent,
-                log: ThreadingLogger.agent
-            ) ?? []
-            let blocks = content.compactMap(StreamEvent.contentBlock).filter(hasVisibleContent)
-            return blocks.isEmpty ? nil : .assistantMessage(blocks: blocks)
-        }
-
-        return ClaudeTranscriptUserRecord.event(from: message, scope: .child)
-    }
-
-    private static func hasVisibleContent(_ block: ContentBlock) -> Bool {
-        switch block {
-        case .text(let text), .thinking(let text):
-            return !text.isEmpty
-        case .toolUse:
-            return true
-        }
+        TranscriptReplay.claudeEvent(from: record, scope: .child)
     }
 
     private static func normalisedAgentID(_ value: String) -> String {

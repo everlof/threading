@@ -255,6 +255,15 @@ final class SimulatorWorkspaceViewController: NSViewController {
         controllers[member.id] = controller
         addChild(controller)
         controller.onFocusRequest = { [weak self] in self?.select(member.id) }
+        controller.onRecoveryDeviceSelection = { [weak self, weak controller] deviceID in
+            guard let self else { return }
+            if let existing = self.state.members.first(where: { $0.deviceID == deviceID }) {
+                self.select(existing.id)
+            } else {
+                self.select(member.id)
+                controller?.selectDevice(deviceID)
+            }
+        }
         controller.onGestureEnd = { [weak self] in self?.canvas.needsLayout = true }
         controller.onFrameAspectChange = { [weak self] aspect in self?.canvas.updateAspect(aspect, for: member.id) }
         controller.onWorkspaceIdentityChange = { [weak self] in

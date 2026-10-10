@@ -173,7 +173,7 @@ final class SimulatorPaneTests: HostedStoreTestCase {
         }
 
         XCTAssertEqual(
-            controller.statusForTesting,
+            controller.recoveryViewForTesting?.detail,
             L10n.format(
                 "Couldn’t start %@. Try Refresh or choose another Simulator.",
                 simulatorPaneTestDevice.name
@@ -200,7 +200,7 @@ final class SimulatorPaneTests: HostedStoreTestCase {
         }
 
         XCTAssertEqual(
-            controller.statusForTesting,
+            controller.recoveryViewForTesting?.detail,
             L10n.string("The selected Simulator is no longer available. Choose another device.")
         )
         let counts = await control.counts()

@@ -65,6 +65,7 @@ copy_notice "$font_root/Topaz/Topaz-UPSTREAM-README.txt" "Topaz-UPSTREAM-README.
 copy_notice "$font_root/Topaz/Topaz-SOURCE.md" "Topaz-SOURCE.md"
 
 if [[ "$profile" == "macos" ]]; then
+    copy_notice "$repository_root/Targets/ProxyHost/THIRD_PARTY_NOTICES.md" "ProxyHost-THIRD_PARTY_NOTICES.md"
     copy_notice "$repository_root/ThirdParty/scc/LICENSE" "scc-MIT.txt"
     copy_notice "$repository_root/Packages/Vendor/BorderBeamKit/LICENSE" "BorderBeamKit-MIT.txt"
     copy_notice "$repository_root/Packages/Vendor/LabelMorph/LICENSE" "LabelMorph-MIT.txt"

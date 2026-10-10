@@ -12,6 +12,34 @@ import XCTest
 @MainActor
 final class DisplayPaneLayoutTests: HostedStoreTestCase {
 
+    func testBrowserViewportCannotDriftAfterReturningToDisplayTab() throws {
+        let pane = DisplayPaneController()
+        let sessionID = SessionID()
+        pane.showSession(sessionID)
+        let window = NSWindow(
+            contentRect: CGRect(x: 0, y: 0, width: 1_440, height: 600),
+            styleMask: [.borderless], backing: .buffered, defer: false
+        )
+        window.contentViewController = pane
+        defer { window.contentViewController = nil }
+        let browser = try XCTUnwrap(pane.addBrowserTab(for: sessionID, contextKind: .private))
+        pane.view.layoutSubtreeIfNeeded()
+        let tabID = try XCTUnwrap(pane.loadedTabs(for: sessionID).first { $0.browser === browser }?.id)
+        _ = try XCTUnwrap(pane.addBrowserTab(for: sessionID, contextKind: .private))
+        window.setContentSize(CGSize(width: 430, height: 600))
+        pane.view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(pane.activateTab(id: tabID, for: sessionID))
+        pane.view.layoutSubtreeIfNeeded()
+        let scroll = try XCTUnwrap(browser.view.subviews.compactMap { $0 as? NSScrollView }.first)
+
+        // No explicit layout after the native scroll request: the old test repaired the
+        // defect before looking at it, while the shipping pane could stay shifted indefinitely.
+        scroll.contentView.scroll(to: CGPoint(x: 180, y: 80))
+        XCTAssertEqual(scroll.contentView.bounds.origin, .zero)
+        XCTAssertEqual(browser.webView.frame.size, scroll.contentView.bounds.size)
+        XCTAssertEqual(browser.webView.convert(.zero, to: browser.view).x, 0, accuracy: 0.5)
+    }
+
     /// Moving a chat keeps its tab strip, but the filesystem-backed controllers inside that
     /// strip must be rebuilt against the destination checkout. The shipped failure left the
     /// row under the new branch while Review still showed the source branch and its pull request.

@@ -42,6 +42,7 @@ common_notices=(
 )
 
 macos_notices=(
+    "ProxyHost-THIRD_PARTY_NOTICES.md"
     "scc-MIT.txt"
     "BorderBeamKit-MIT.txt"
     "LabelMorph-MIT.txt"

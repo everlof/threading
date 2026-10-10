@@ -3,7 +3,9 @@
 > Status: **decision record** (2026-08-22). **Done**: ship `arm64` only — the durable rule now
 > lives in [`releasing.md`](../architecture/releasing.md#apple-silicon-only). **Reject**
 > on-demand resources and any further stripping. **Wait for evidence** on `-Osize`. **Wait for
-> demand** on a slimmer or on-demand WebRTC, and on Sparkle delta updates.
+> demand** on a slimmer or on-demand WebRTC, and on Sparkle delta updates. **Added 2026-10-08**:
+> the Mermaid attachment reader ships the official tiny build, not the full one, and is not
+> downloaded on demand (§2, §3).
 
 Part of the [decisions index](README.md). Read alongside
 [`releasing.md`](../architecture/releasing.md) (the archive, export and the gates),
@@ -42,6 +44,17 @@ measured with `CODE_SIGNING_ALLOWED=NO` (signing adds well under 1 MB), the down
 
 The dSYMs the archive keeps outside the bundle are another 275 MB for the app alone.
 
+**Added since: the Mermaid renderer (2026-10-08).** The attachment reader's bundled JavaScript
+was the first new embedded payload over the ~5 MB line in §4, and was not recorded when it
+landed. It is architecture-independent, so its two columns are the same; compressed is
+`ditto -c -k` of the file alone. Percentages are of the 54.5 MB / 24.5 MB `arm64` bundle above,
+which has not been re-measured since.
+
+| `Resources/Mermaid` | on disk | compressed |
+|---|---|---|
+| `mermaid` 12.1.0, `mermaid.min.js` (shipped first) | 5.49 MB (≈10%) | 1.57 MB (≈6.4%) |
+| `@mermaid-js/tiny` 12.1.0, `mermaid.tiny.js` (shipped) | 2.81 MB (≈5.2%) | 0.75 MB (≈3.0%) |
+
 **Stripping is already complete.** `STRIP_INSTALLED_PRODUCT=YES`, `STRIP_STYLE=all`,
 `STRIP_SWIFT_SYMBOLS=YES`, dead-stripping and whole-module `-O` are all in effect for the
 archive; the shipped main binary has 3.4k symbols left (the exports dyld needs) and a 1.1 MB
@@ -75,6 +88,8 @@ is under 30 KB. There is no fat spot; the binary shrinks by writing less code, n
 | **Resources on demand** (a CDN, "our Cloudflare setup") | Resources are 7.4 MB on disk, 3.7 MB compressed; deleting every one saves 8% of the download | **Reject**. macOS has no on-demand resources; a signed bundle cannot change after signing, so files would live outside it with their own integrity check, offline story and first-launch wait. The Cloudflare service is a signalling/TURN control plane, not a CDN |
 | **Slimmer WebRTC** | 27 MB universal, 11.8 MB `arm64`, 5.5 MB compressed, for nine imported classes — the data channel, ICE and SDP types; no media | **Wait for demand**. A data-channel-only libwebrtc is a depot_tools checkout and a build we maintain; downloading it on demand is code, so a signed and notarized payload, EdDSA verification, quarantine handling and a fail-safe loader — a second Sparkle. Reopen when remote-access adoption is known or a maintained slim community build exists |
 | **Sparkle delta updates** | Affects updates only; `scripts/generate_appcast.sh` runs `--maximum-deltas 0` with only the current zip in its work dir, so deltas cannot be produced today | **Wait for demand**: reopen when update downloads are what people notice. The change is to download the previous release's zip into `$WORK` and raise `--maximum-versions`/`--maximum-deltas` |
+| **Mermaid: tiny build** | 5.49 → 2.81 MB on disk, 1.57 → 0.75 MB of every update download; loses mindmap and architecture diagrams (cytoscape) and KaTeX math, which then show their source | **Done** — `Resources/Mermaid/SOURCE.md`; the reader's tests pin which diagram types render |
+| **Mermaid on demand** | Would save the remaining 0.75 MB of download | **Reject**: the resources-on-demand row's costs, plus it is executable code — a hash-verified download into a location the page's `script-src` must be widened to, a cache pinned to the exact version `viewer.js` was written against, and a reader that no longer renders offline the first time |
 | **`scc` on demand** | Official build is already `-s -w`; 4.4 MB `arm64` | **Reject**: the on-demand cost is WebRTC's for a smaller prize |
 | **`SWIFT_REFLECTION_METADATA_LEVEL=none`** | `__swift5_fieldmd` + `__swift5_reflstr` ≈ 0.5 MB per slice; three `Mirror(` call sites to audit | **Reject**: not worth the audit |
 

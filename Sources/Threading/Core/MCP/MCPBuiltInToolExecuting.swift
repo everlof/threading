@@ -8,6 +8,9 @@ import Foundation
 /// a string or erases an argument through `Any`.
 @MainActor
 protocol MCPBuiltInToolExecuting: AnyObject {
+  func traffic(_ request: TrafficRequest, for sessionID: SessionID,
+               completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void)
+
   func reportProblem(
     _ arguments: ReportProblemArguments, for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void

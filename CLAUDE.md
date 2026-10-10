@@ -21,9 +21,11 @@ conversation can be resumed later by its agent-assigned identifier.
 
 ## Build & Run Commands
 
-The project is **Xcode-only** — a single `Threading.xcodeproj`, no SwiftPM manifest. (SwiftTerm
+The application is **Xcode-only** — a single `Threading.xcodeproj`, no root SwiftPM manifest. (SwiftTerm
 stays a local Swift package that the Xcode project references; the app's own `Package.swift` was
-removed so there is one build system, not two.)
+removed so there is one application build system.) Standalone portable helpers have their own
+build entry points; the C proxy's CMake path is documented in
+[`proxy-engine.md`](docs/architecture/proxy-engine.md).
 
 ```bash
 # Build the app
@@ -35,6 +37,7 @@ scripts/test.sh all      # the whole ThreadingTests target
 scripts/test.sh ui       # app-level XCUITest scenarios in an isolated Cocoa home
 scripts/test-connectivity.sh software  # focused Mac + iOS Simulator connectivity contracts
 scripts/test-ptyd-linux.sh             # static Linux threading-ptyd (with its suite) and threading-mcp-bridge, in Docker (pty-host.md#linux)
+python3 scripts/test-proxy.py          # standalone C proxy: native macOS/Linux/Windows build, socket tests and dependency provenance
 scripts/test-connectivity.sh hardware --device <name-or-UDID> --scenario automatic --non-interactive  # unattended device lifecycle lane
 
 # Run the built app (never the bare binary — build with xcodebuild, then open the bundle)
@@ -190,6 +193,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | The live browser an agent drives: origin grants, the accessibility snapshot, refs and semantic locators, the browser tools | [`agent-browser.md`](docs/architecture/agent-browser.md) |
 | Natively rendered conversations: the Claude/Codex stream transports, permission brokering, transcript replay, the timeline model, tool rows, diffs, the turn rail | [`native-conversations.md`](docs/architecture/native-conversations.md) |
 | The exact agent-execution ledger: provider-native adapters, redaction, hash-linked storage, filters and the live browser split | [`execution-audit.md`](docs/architecture/execution-audit.md) |
+| The portable HTTP/TLS proxy, bounded payload capture, session MCP tools, CA custody and dependency licensing | [`proxy-engine.md`](docs/architecture/proxy-engine.md) |
 | Session state (`dormant`/`idle`/`working`/`needsAttention`/`limitReached`), Claude/Codex lifecycle hooks, provider-neutral output inference, `hooks.json`, the shell-command policy | [`session-activity.md`](docs/architecture/session-activity.md) |
 | Badge/read-receipt proof, catalogue snapshot/event continuity, direct visit settlement and bounded loader states | [`status-integrity.md`](docs/architecture/status-integrity.md) |
 | Routine turn-completion activity suppression, per-device preview consent, generations, retraction, and privacy-safe delivery diagnostics | [`notification-delivery.md`](docs/architecture/notification-delivery.md) |

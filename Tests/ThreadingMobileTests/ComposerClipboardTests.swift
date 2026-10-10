@@ -670,6 +670,69 @@ final class ComposerTextViewPasteTests: XCTestCase {
 @MainActor
 final class TerminalLineTextLayoutTests: XCTestCase {
 
+    func testTerminalComposerRoutesImagePasteToItsAttachmentTray() throws {
+        let pasteboard = UIPasteboard.withUniqueName()
+        defer { UIPasteboard.remove(withName: pasteboard.name) }
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        pasteboard.setData(try XCTUnwrap(image.pngData()), forPasteboardType: UTType.png.identifier)
+
+        let suite = "TerminalComposerPasteTests.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let continuity = MobileSessionContinuityStore(defaults: defaults)
+        let model = RemoteAppModel(continuity: continuity)
+        model.startDemo()
+        let connection = RemoteSessionConnection.demoTerminal()
+        let hostID = try XCTUnwrap(model.activeHostID)
+        let draft = "Review this screenshot"
+        continuity.setDraft(draft, surface: .terminal, hostID: hostID, sessionID: connection.session.id)
+        let host = UIHostingController(rootView: TerminalLineComposer(
+            connection: connection,
+            bridge: TerminalKeyBridge(),
+            quotes: .constant([]),
+            clipboard: ComposerClipboard(pasteboard: pasteboard)
+        )
+        .environmentObject(model)
+        .environmentObject(continuity)
+        .mobileTheme(RemoteThemePalette(nil)))
+        let window = makeWindow(hosting: host, size: CGSize(width: 390, height: 844))
+        defer { window.isHidden = true }
+        let textView = try XCTUnwrap(descendants(of: TerminalLineTextView.self, in: window).first)
+        XCTAssertTrue(textView.becomeFirstResponder())
+        textView.selectedRange = NSRange(location: 7, length: 4)
+
+        // Check the shipping composer's wiring before invoking paste, so a regression never
+        // falls through to UIKit reading the person's real clipboard in this hosted test.
+        XCTAssertTrue(textView.offersFiles(), "the terminal composer must offer image paste")
+        guard textView.offersFiles() else { return }
+        XCTAssertTrue(textView.canPerformAction(
+            #selector(UIResponderStandardEditActions.paste(_:)), withSender: nil
+        ))
+        XCTAssertTrue(UIApplication.shared.sendAction(
+            #selector(UIResponderStandardEditActions.paste(_:)), to: nil, from: nil, for: nil
+        ))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        window.layoutIfNeeded()
+
+        XCTAssertEqual(textView.text, draft)
+        XCTAssertEqual(textView.selectedRange, NSRange(location: 7, length: 4))
+        XCTAssertTrue(textView.isFirstResponder)
+        XCTAssertEqual(
+            descendants(of: UIButton.self, in: window).filter {
+                $0.accessibilityIdentifier == "composer.attachment.remove"
+            }.count,
+            1,
+            "the paste command must stage exactly one attachment in the real composer"
+        )
+
+        pasteboard.string = "plain text"
+        XCTAssertFalse(textView.offersFiles(), "text must remain on UIKit's native insertion path")
+        XCTAssertFalse(textView.pasteFiles())
+    }
+
     func testWrappedLinesRunUnderTheFirstLineAccessories() {
         let textView = TerminalLineTextView(frame: CGRect(x: 0, y: 0, width: 240, height: 160))
         textView.font = UIFont.preferredFont(forTextStyle: .body)
@@ -721,6 +784,28 @@ final class TerminalLineTextLayoutTests: XCTestCase {
             MobileDesign.Size.minimumTapTarget,
             "the full-width line begins below both 44-point hit targets"
         )
+    }
+
+    func testTerminalEditorPastesTextAtTheSelectionAndKeepsTheDraft() throws {
+        let draft = "before selected after"
+        let host = UIHostingController(rootView: TerminalEditorHarness(initialDraft: draft))
+        let window = makeWindow(hosting: host)
+        defer { window.isHidden = true }
+        let textView = try XCTUnwrap(descendants(of: TerminalLineTextView.self, in: window).first)
+        XCTAssertTrue(textView.becomeFirstResponder())
+        textView.selectedRange = (draft as NSString).range(of: "selected")
+
+        // Explicit item providers exercise UIKit insertion without touching the real clipboard.
+        textView.paste(itemProviders: [NSItemProvider(object: "pasted text" as NSString)])
+        let inserted = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in textView.text == "before pasted text after" },
+            object: nil
+        )
+        wait(for: [inserted], timeout: 2)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        XCTAssertEqual(textView.text, "before pasted text after", "the binding must retain the paste")
+        XCTAssertTrue(textView.isFirstResponder)
     }
 
     func testTerminalEditorKeepsFocusAcrossATypedCharacter() throws {
@@ -902,6 +987,8 @@ final class TerminalLineTextLayoutTests: XCTestCase {
                 text: $draft,
                 isFocused: $isFocused,
                 theme: RemoteThemePalette(nil),
+                offersFiles: { false },
+                pasteFiles: { false },
                 onSubmit: onSubmit
             )
             .frame(width: editorWidth)

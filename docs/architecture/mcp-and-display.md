@@ -1418,10 +1418,17 @@ and the real one was never recorded. Previews route by kind: images through
 latter two inside `MediaInspectorDocumentView`, the one named system-chrome boundary, so an
 archive previews as the same icon-and-metadata card the space bar shows in Finder. Diagram
 source has two native fallbacks: DOT/GV stays in a read-only `ThemedTextView`, while MMD/Mermaid
-uses `MermaidPreviewView` with the bundled Mermaid 12.1.0 standalone renderer. The latter opens
+uses `MermaidPreviewView` with the bundled `@mermaid-js/tiny` 12.1.0 renderer. The latter opens
 as a diagram fitted to width, with scrolling, native zoom controls and a Diagram/Source choice.
-Source stays available when parsing fails or the rendering budget is exceeded; `.mmd` containing
-MultiMarkdown consequently remains readable. Neither route edits a file. Only images and PDFs join the media
+The tiny build is Mermaid without mindmap and architecture diagrams (the only users of
+cytoscape), KaTeX math and lazy loading, at half the full build's size — 2.81 MB rather than
+5.49 MB on disk, about 0.75 MB rather than 1.57 MB of every update download; see
+[`bundle-size-levers.md`](../decisions/bundle-size-levers.md). A mindmap or architecture file
+fails to parse and keeps its source, like any invalid diagram.
+Source stays available when parsing fails, the rendering budget is exceeded or the bytes are not
+UTF-8 (or BOM-marked UTF-16) text; `.mmd` containing MultiMarkdown, in any encoding, consequently
+remains readable — non-text bytes are shown decoded leniently, the way the DOT path shows them,
+and are never handed to the renderer. Neither route edits a file. Only images and PDFs join the media
 inspector's rail; only images can be a side of a comparison. A
 persisted row whose `kind` this build does not know re-derives it from the file's own
 extension, and drops alone when both are unknown — decoding used to be all-or-nothing per
@@ -1429,19 +1436,50 @@ session, and the next admission then persisted the fresh rows over a payload tha
 every older one.
 
 **Mermaid is an offline host-owned reader.** `Resources/Mermaid/SOURCE.md` records the upstream
-pin, reproduction and hashes. A serial actor reads at most 512 KiB and validates UTF-8; rendering
-admits a 64 KiB / 1,000-line budget and locks Mermaid's 500-edge ceiling. Only one
-selected diagram owns a WebKit canvas, initialized after the asynchronous read. Parsing/layout
-runs in WebKit's content process. A ten-second timeout releases a failed canvas and shows source.
-Selection cancellation invalidates worker/render results before another file may mount.
+pin, reproduction and hashes. Each read runs on its own worker from a concurrent queue — not one
+shared serial actor, where a single file on a stalled mount held every pane's preview behind it —
+and reads at most the pane's shared 512 KiB source cap. Rendering admits a 64 KiB / 1,000-line
+budget and locks Mermaid's 500-edge ceiling. Lines are counted in bytes, as LF, CRLF or lone CR:
+`"\r\n"` is one Swift `Character` that is not equal to `"\n"`, so a CRLF file counted by
+`Character` had no lines and skipped the budget entirely. Parsing/layout runs in WebKit's content
+process. One ten-second budget covers each stage — the read, the page load and every render — so
+a stuck read reaches a fallback too.
+
+**One canvas per pane, released when hidden.** Moving between two Mermaid rows, or the selected
+file changing on disk, renders into the page already loaded; launching a content process and
+parsing the renderer again cost ~400 ms per selection with the full build. An in-place change keeps the reader's
+zoom and scroll, which is what an agent rewriting the diagram under the reader needs. Hiding or
+detaching the reader still releases the canvas — a retained content process per session would
+grow with sessions — but keeps the file, the Diagram/Source choice and the viewport, which the
+page reports to a weakly held script-message relay as it changes. The first render after the
+reader returns restores that viewport when the file's fingerprint is unchanged. Selection
+cancellation invalidates worker/render results before another file may mount, and each
+viewport report carries a ticket so a report about the previous document in a reused page is
+not taken for the new one's. A page that answered "not a diagram" stays loaded for the next
+selection; a page that did not answer (timeout, content-process exit, failed navigation) is
+discarded, and an attachment-list refresh of the unchanged file may retry it at most
+`maximumRendererRetries` times. Showing the reader again is a fresh attempt. A theme change that
+lands while a render is in flight is applied when that render completes.
 
 The nonpersistent web view can navigate only to its bundled entry. CSP blocks remote resources,
 local document content, connections and authored scripts; source crosses as JavaScript arguments.
 Strict Mermaid mode and the secure configuration list cannot be relaxed by front matter or init
-directives. Source-authored link callbacks are never bound and rendered anchors lose their targets.
-Themes supply ink, ground and fonts; live refresh retains zoom and scroll. The native attachment
-surface retains file admission, selection, actions and source fallback. This introduces no new
-extension capability or component slot and does not change the iPhone's source preview.
+directives. Mermaid applies that list at every depth of a directive, so it also names every
+per-diagram `*FontFamily` key, and `dompurifyConfig`, which Mermaid's `sanitizeText` consults in
+place of its default `FORBID_TAGS: ["style"]`. The last is hardening rather than a fix for an
+observed escape: probing 12.1.0's flowchart, sequence, state, ER, journey, pie and gantt renderers
+with a directive that adds `style` to the sanitizer found no authored `<style>` element in any
+output, locked or not. Mermaid resets directive configuration after each render, so a test of a
+locked key reads the drawing, not `getConfig()` — a top-level `fontFamily` directive is the one
+whose effect on the SVG is observable. Source-authored link callbacks are never bound and rendered anchors
+lose their targets. Themes supply ink, ground and fonts. The family is a quoted CSS string (an
+unquoted "3270 Nerd Font" invalidated the whole declaration) over a system-face floor. A face this
+process registered — a bundled theme font such as Amiga's Topaz, or one a theme carries — is
+invisible to WebKit's content process, so its bytes cross once per page as a `FontFace`, bounded
+by the theme-font cap; CSP still denies every font URL. Live refresh retains zoom and scroll. The
+native attachment surface retains file admission, selection, actions and source fallback. This
+introduces no new extension capability or component slot and does not change the iPhone's source
+preview.
 
 **Space on a row is Finder's preview key, answered by the app's own inspector.** The list itself
 carries no policy: `ThemedTableView.onQuickLook` reports the bare key and the trackpad's preview
@@ -1475,6 +1513,34 @@ merge and its no-project fallback. The list had to become two things it was not 
   for today, the day otherwise — and inside the row's single spoken sentence. A chronology whose
   rows carry no time is a list whose order has to be taken on trust, and the order is the whole
   reason the images stopped being tabs.
+
+**Child references share the attachment pipeline.** `AttachmentDetection.assistantTexts` owns
+eligible structured content for both live sources and `TranscriptReplay.latestAssistantTexts`.
+The latter uses the same Claude parent/child record normalizer as the child transcript renderer;
+only the conversation scope differs. `AttachmentDetectionWorker` serializes bounded transcript
+preparation and path resolution, and every result enters `SessionAttachmentStore.recordScanned`.
+There is no child-specific extension list, regex, containment rule or custody implementation.
+
+`SubagentAttachmentObserver` belongs to the retained session state, not the selected child pane.
+Native child events feed that pipeline immediately. Terminal children use the ordinary terminal
+transcript observer, including its final-write retries, plus bounded live checks while working.
+Claude start hooks derive the child slot from the exact reported root path when the child path
+has not arrived yet. Restored descriptors supply known files without scanning account trees.
+Deletion invalidates outstanding scans; turning detection off gates preparation and admission.
+
+A mutable attachment remains one row per source path. `agentSources` retains the main-agent mark
+and bounded child identities/names; a repeat reference keeps its opaque attachment ID and merges
+attribution. Explicit user handoff identity and turn placement survive later scans. Immutable
+shown snapshots remain distinct versions. Optional provenance fields migrate old rows to their
+previous agent/user meaning. Withheld outside-project paths retain provenance until the existing
+scope gate admits them. Child descriptors retain the delegating parent turn identity when known.
+
+The filter offers **All / Main agent / Subagents / You** only after this thread has had a child
+(or a retained attachment records one). Before then Subagents is absent. Child completion does
+not remove it, and an empty child bucket remains selectable. A first-child membership event
+refreshes this chrome without subscribing it to every child token. Attribution, filtering,
+chronology, selection and file admission stay host-owned; `attachments.preview@1` still replaces
+only the preview body.
 
 **Turn disclosures make that chronology navigable without making transcript rows its authority.**
 `SessionAttachmentTurnSectioning` projects the bounded attachment values against the bounded,

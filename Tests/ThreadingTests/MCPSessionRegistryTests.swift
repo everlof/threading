@@ -918,8 +918,14 @@ final class MCPWireTests: XCTestCase {
 
     let handler = RecordingCommandHandler()
     for descriptor in MCPBuiltInToolRegistry.descriptors {
-      let arguments: [String: Any] = descriptor.tool == .manageAutomation
-        ? ["operation": "list"] : [:]
+      let arguments: [String: Any]
+      switch descriptor.tool {
+      case .manageAutomation: arguments = ["operation": "list"]
+      case .trafficGet: arguments = ["id": "1"]
+      case .trafficBody: arguments = ["id": "1", "side": "response"]
+      case .trafficHeaders: arguments = ["id": "1", "side": "response", "index": 0]
+      default: arguments = [:]
+      }
       let payload = try JSONSerialization.data(
         withJSONObject: ["name": descriptor.tool.rawValue, "arguments": arguments]
       )

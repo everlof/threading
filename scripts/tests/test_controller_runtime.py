@@ -31,7 +31,7 @@ def tool(request):
                                 check=True, capture_output=True, text=True, timeout=10)
         return json.loads(result.stdout)
 work = tool({"context": {}})["work"]
-if sys.argv[1] == "mcp":
+if sys.argv[1] in ("mcp", "mcp-question"):
     server = subprocess.Popen([os.environ["THREADING_CONTROLLER_BIN"], "agent-mcp"],
                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     def rpc(method, params=None, identifier=9007199254740993):
@@ -50,7 +50,13 @@ if sys.argv[1] == "mcp":
     assert rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
                               "clientInfo": {"name": "fixture", "version": "1"}})["result"]["protocolVersion"] == "2025-11-25"
     rpc("notifications/initialized", identifier=None)
-    assert {tool["name"] for tool in rpc("tools/list")["result"]["tools"]} == {"work_context", "work_questions", "work_messages", "work_message_consumed", "work_history", "work_checkpoint", "work_ask", "work_finish", "memory_list", "memory_get", "memory_put", "memory_delete", "knowledge_get", "knowledge_put", "mail_send", "mail_ask", "mail_inbox", "mail_ack", "mail_directory"}
+    assert {tool["name"] for tool in rpc("tools/list")["result"]["tools"]} == {
+        "work_context", "workroom_context", "workroom_links", "workroom_questions",
+        "work_questions", "work_messages", "work_message_consumed", "work_history",
+        "work_checkpoint", "work_ask", "work_finish", "memory_list", "memory_get",
+        "memory_put", "memory_delete", "knowledge_get", "knowledge_put", "mail_send",
+        "mail_ask", "mail_inbox", "mail_ack", "mail_directory",
+    }
     assert rpc("tools/call", {"name": "knowledge_get", "arguments": {"spaceID": str(uuid.uuid4()), "key": "private"}})["result"]["isError"]
     assert rpc("tools/call", {"name": "work_context", "arguments": {"workerID": str(uuid.uuid4())}})["result"]["isError"]
     assert not rpc("tools/call", {"name": "work_context", "arguments": {}})["result"]["isError"]
@@ -60,7 +66,15 @@ if sys.argv[1] == "mcp":
     assert not rpc("tools/call", {"name": "memory_put", "arguments": {"key": "scratch-" + work["id"], "expectedRevision": 0, "content": "Temporary"}})["result"]["isError"]
     assert rpc("tools/call", {"name": "memory_delete", "arguments": {"key": "scratch-" + work["id"], "expectedRevision": 0}})["result"]["isError"]
     assert not rpc("tools/call", {"name": "memory_delete", "arguments": {"key": "scratch-" + work["id"], "expectedRevision": 1}})["result"]["isError"]
-    assert not rpc("tools/call", {"name": "work_finish", "arguments": {"payload": "MCP draft"}})["result"]["isError"]
+    if sys.argv[1] == "mcp-question":
+        assert not rpc("tools/call", {"name": "work_ask", "arguments": {
+            "id": str(uuid.uuid4()), "text": "Which path?", "checkpoint": "Comparison saved",
+            "context": "Two outcomes need a domain choice.",
+            "choices": ["Review one case", "Review a batch"],
+            "sources": ["SONDA-X reference; verify the current issue"],
+        }})["result"]["isError"]
+    else:
+        assert not rpc("tools/call", {"name": "work_finish", "arguments": {"payload": "MCP draft"}})["result"]["isError"]
     assert rpc("tools/call", {"name": "memory_put", "arguments": {"key": "stale", "expectedRevision": 0, "content": "Forbidden"}})["result"]["isError"]
     server.stdin.close()
     assert server.wait(timeout=5) == 0
@@ -191,6 +205,16 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual([item["provenance"]["actor"] for item in history], ["agent", "agent"])
         self.assertEqual({item["provenance"]["executionID"] for item in history}, {launch["executionID"]})
         self.assertEqual(self.call("memory-list", self.worker)["items"], [])
+
+    def test_mcp_question_carries_structured_context(self):
+        launch = self.call("launch", self.worker, self.recipe("mcp-question"))
+        questions = self.wait(lambda: self.call("questions", self.work["id"])["items"])
+        self.assertEqual(questions[0]["presentation"], {
+            "context": "Two outcomes need a domain choice.",
+            "choices": ["Review one case", "Review a batch"],
+            "sources": ["SONDA-X reference; verify the current issue"],
+        })
+        self.wait(lambda: self.call("launch-status", launch["executionID"])["presence"] == "stopped")
 
     def test_launch_secret_is_resolved_at_dispatch_and_never_stored(self):
         recipe = json.loads(Path(self.recipe("secret")).read_text())

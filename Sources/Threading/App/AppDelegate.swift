@@ -1154,6 +1154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         )
         AgentRuntime.shared.terminateAll()
         ExtensionManager.shared.terminateAll()
+        ProxyCaptureService.shared.stopAll()
         AudioSpectrumService.shared.stop()
         macNotificationActivityMonitor.stop()
         // Stops the tunnel child and closes remote sockets before the listeners go, so nothing

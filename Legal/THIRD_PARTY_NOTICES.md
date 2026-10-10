@@ -37,3 +37,11 @@ distribution's BSD terms and the upstream Google WebRTC terms supplied by the pi
 The build copies these texts from the pinned source checkout rather than maintaining rewritten
 license summaries. `scripts/check_bundled_licenses.sh` verifies that every required file is
 present and non-empty in the finished application resources.
+
+## Threading proxy helper (macOS)
+
+`Contents/Helpers/threading-proxyd` is GPL-3.0-only. Its complete corresponding source,
+hash-pinned upstream source archives, original license notices and CMake rebuild instructions
+are bundled in `Contents/Resources/ProxySource`. See `Legal/ProxyHost-THIRD_PARTY_NOTICES.md`.
+It statically links libuv (MIT/BSD-2-Clause/ISC), llhttp (MIT), cJSON (MIT), Mbed TLS and
+TF-PSA-Crypto (Apache-2.0 selected from the dual license), and zlib (Zlib).

@@ -9527,6 +9527,7 @@ enum MCPTools {
       )
     ])
     declarations.append(contentsOf: mailDeclarations)
+    declarations.append(contentsOf: trafficDeclarations)
     return declarations
   }()
 

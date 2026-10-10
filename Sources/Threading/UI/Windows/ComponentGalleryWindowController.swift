@@ -55,6 +55,19 @@ final class ComponentGalleryWindowController: ThemedWindowController {
     }
 }
 
+/// The gallery's Mermaid story reads a real file, as the Attachments pane does.
+private enum MermaidGallerySample {
+    static let fileName = "threading-component-gallery.mmd"
+    static let source = """
+    graph LR
+      Agent["Agent"] -->|writes| File["architecture.mmd"]
+      File --> Pane["Attachments"]
+      Pane --> Reader["Mermaid reader"]
+      Reader -->|Diagram| Canvas["Offline canvas"]
+      Reader -->|Source| Text["Read-only source"]
+    """
+}
+
 extension ComponentGalleryWindowController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         (contentViewController as? ComponentGalleryViewController)?
@@ -139,6 +152,7 @@ final class ComponentGalleryViewController: NSViewController {
         "MediaDocumentPlayerView",
         "MediaInspectorView",
         "MediaPlaybackOverlayView",
+        "MermaidPreviewView",
         "MediaTransportView",
         "ModelEffortMatrixControl",
         "ModelEffortPickerViewController",
@@ -3799,6 +3813,15 @@ final class ComponentGalleryViewController: NSViewController {
                     makeImageCompareSample()
                 ),
                 story(
+                    "MermaidPreviewView",
+                    "The Attachments reader for a Mermaid file, offline: the diagram fitted to "
+                        + "the width, with Diagram/Source and zoom around a canvas that reads a "
+                        + "real file. Zoom in, scroll, and switch to Source and back; in the pane, "
+                        + "a hidden reader releases its canvas but keeps all three for when it "
+                        + "returns.",
+                    makeMermaidPreviewSample()
+                ),
+                story(
                     "ThemedImagePreview",
                     "A picture that takes the size it is given rather than lending its own: "
                         + "scaled down to fit, never up, hung from the top. Tab to it for the "
@@ -4547,6 +4570,27 @@ final class ComponentGalleryViewController: NSViewController {
             )
         ])
         return compare
+    }
+
+    /// A real file, because the reader's authority is a file: it reads, fingerprints and
+    /// renders it exactly as the Attachments pane does. Written off the main actor.
+    private func makeMermaidPreviewSample() -> NSView {
+        let preview = MermaidPreviewView()
+        NSLayoutConstraint.activate([
+            preview.widthAnchor.constraint(equalToConstant: 420),
+            preview.heightAnchor.constraint(equalToConstant: 300)
+        ])
+        let source = MermaidGallerySample.source
+        Task { [weak preview] in
+            let file = await Task.detached { () -> URL? in
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(MermaidGallerySample.fileName)
+                return (try? Data(source.utf8).write(to: url)) == nil ? nil : url
+            }.value
+            guard let preview, let file else { return }
+            preview.display(file)
+        }
+        return preview
     }
 
     /// Two of them side by side at one height: a picture wider than its box and one far

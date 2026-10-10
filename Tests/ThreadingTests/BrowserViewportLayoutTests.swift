@@ -6,15 +6,38 @@ import XCTest
 final class BrowserViewportLayoutTests: XCTestCase {
 
     @MainActor
+    func testAutomaticViewportRejectsNativeScrollBursts() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["THREADING_BROWSER_VIEWPORT_STRESS"] == "1")
+        let (browser, window, scroll) = try browserWindow()
+        defer { window.contentViewController = nil }
+        // One clip per tab, normally called at gesture frequency. Stress 2,000 native
+        // requests per batch; fixture/WebKit creation is deliberately outside the timer.
+        for batch in 1...3 {
+            let start = ProcessInfo.processInfo.systemUptime
+            for index in 0..<1_000 {
+                let origin = CGPoint(x: index % 800, y: index % 600)
+                scroll.contentView.scroll(to: origin)
+                scroll.contentView.setBoundsOrigin(origin)
+            }
+            let milliseconds = (ProcessInfo.processInfo.systemUptime - start) * 1_000
+            XCTAssertEqual(scroll.contentView.bounds.origin, .zero)
+            XCTAssertEqual(browser.webView.convert(.zero, to: browser.view).x, 0, accuracy: 0.5)
+            print("Browser canvas batch \(batch): 2,000 native requests in \(milliseconds) ms")
+        }
+    }
+
+    @MainActor
     func testAutomaticViewportCannotRemainPannedOutsideItsHost() throws {
         let (browser, window, scroll) = try browserWindow()
         defer { window.contentViewController = nil }
         // AppKit can retain a bounds origin independently of the document's frame. In fill
         // mode the page itself owns scrolling; its outer canvas has no valid panning range.
         scroll.contentView.scroll(to: CGPoint(x: 180, y: 80))
-        browser.view.needsLayout = true
-        browser.view.layoutSubtreeIfNeeded()
         XCTAssertNil(browser.responsiveViewport)
+        XCTAssertEqual(scroll.contentView.bounds.origin, .zero)
+        XCTAssertEqual(browser.webView.convert(.zero, to: browser.view).x, 0, accuracy: 0.5)
+
+        scroll.contentView.setBoundsOrigin(CGPoint(x: 240, y: 120))
         XCTAssertEqual(scroll.contentView.bounds.origin, .zero)
         XCTAssertEqual(browser.webView.convert(.zero, to: browser.view).x, 0, accuracy: 0.5)
     }
@@ -31,6 +54,21 @@ final class BrowserViewportLayoutTests: XCTestCase {
         browser.view.layoutSubtreeIfNeeded()
         XCTAssertEqual(browser.responsiveViewport, CGSize(width: 1_440, height: 900))
         XCTAssertEqual(scroll.contentView.bounds.origin, CGPoint(x: 180, y: 80))
+    }
+
+    @MainActor
+    func testResponsiveViewportConstrainsScrollingWithoutAnotherLayout() throws {
+        let (browser, window, scroll) = try browserWindow()
+        defer { window.contentViewController = nil }
+        browser.setResponsiveViewport(width: 1_440, height: 900)
+        browser.view.layoutSubtreeIfNeeded()
+        let clip = scroll.contentView
+        let canvas = try XCTUnwrap(scroll.documentView)
+        clip.scroll(to: CGPoint(x: 2_000, y: 2_000))
+        XCTAssertEqual(clip.bounds.maxX, canvas.frame.maxX, accuracy: 0.5)
+        XCTAssertEqual(clip.bounds.maxY, canvas.frame.maxY, accuracy: 0.5)
+        clip.scroll(to: CGPoint(x: -180, y: -80))
+        XCTAssertEqual(clip.bounds.origin, .zero)
     }
 
     @MainActor

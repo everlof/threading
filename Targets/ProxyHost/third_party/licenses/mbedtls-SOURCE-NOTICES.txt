@@ -1,0 +1,1501 @@
+Sources: configs/ext/config_tfm.h, configs/ext/mbedtls_entropy_nv_seed_config.h
+
+/*
+ *  Empty placeholder
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: framework/psasim/src/aut_psa_aead_encrypt.c, framework/psasim/src/aut_psa_aead_encrypt_decrypt.c, framework/psasim/src/aut_psa_asymmetric_encrypt_decrypt.c, framework/psasim/src/aut_psa_cipher_encrypt_decrypt.c, framework/psasim/src/aut_psa_hash.c, framework/psasim/src/aut_psa_hash_compute.c, framework/psasim/src/aut_psa_hkdf.c, framework/psasim/src/aut_psa_key_agreement.c, framework/psasim/src/aut_psa_mac.c, framework/psasim/src/aut_psa_random.c, framework/psasim/src/aut_psa_sign_verify.c, framework/tests/include/baremetal-override/time.h, framework/tests/src/helpers.c, library/mps_common.h, library/mps_error.h, library/mps_reader.h, library/mps_trace.h, library/pkcs7.c, library/ssl_tls13_invasive.h, tests/src/ssl_context_reset_verifier.c, tf-psa-crypto/core/psa_util.c, tf-psa-crypto/drivers/builtin/src/psa_util_internal.c, tf-psa-crypto/framework/psasim/src/aut_psa_aead_encrypt.c, tf-psa-crypto/framework/psasim/src/aut_psa_aead_encrypt_decrypt.c, tf-psa-crypto/framework/psasim/src/aut_psa_asymmetric_encrypt_decrypt.c, tf-psa-crypto/framework/psasim/src/aut_psa_cipher_encrypt_decrypt.c, tf-psa-crypto/framework/psasim/src/aut_psa_hash.c, tf-psa-crypto/framework/psasim/src/aut_psa_hash_compute.c, tf-psa-crypto/framework/psasim/src/aut_psa_hkdf.c, tf-psa-crypto/framework/psasim/src/aut_psa_key_agreement.c, tf-psa-crypto/framework/psasim/src/aut_psa_mac.c, tf-psa-crypto/framework/psasim/src/aut_psa_random.c, tf-psa-crypto/framework/psasim/src/aut_psa_sign_verify.c, tf-psa-crypto/framework/tests/include/baremetal-override/time.h, tf-psa-crypto/framework/tests/src/helpers.c, tf-psa-crypto/programs/psa/crypto_examples.c, tf-psa-crypto/programs/psa/psa_constant_names.c
+
+/*
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: framework/tests/include/spe/crypto_spe.h, tf-psa-crypto/framework/tests/include/spe/crypto_spe.h
+
+/*
+ * Copyright The Mbed TLS Contributors
+ * SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ *
+ */
+
+Sources: framework/tests/programs/query_compile_time_config.c, tf-psa-crypto/framework/tests/programs/query_compile_time_config.c
+
+/*
+ *  Query the Mbed TLS compile time configuration
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: framework/tests/programs/query_config.h, tf-psa-crypto/framework/tests/programs/query_config.h
+
+/*
+ *  Query Mbed TLS compile time configurations from mbedtls_config.h
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: framework/tests/programs/zeroize.c, tf-psa-crypto/framework/tests/programs/zeroize.c
+
+/*
+ * Zeroize application for debugger-driven testing
+ *
+ * This is a simple test application used for debugger-driven testing to check
+ * whether calls to mbedtls_platform_zeroize() are being eliminated by compiler
+ * optimizations. This application is used by the GDB script at
+ * tests/programs/test_zeroize.gdb: the script sets a breakpoint at the last
+ * return statement in the main() function of this program. The debugger
+ * facilities are then used to manually inspect the memory and verify that the
+ * call to mbedtls_platform_zeroize() was not eliminated.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/debug.c
+
+/*
+ *  Debugging routines
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/error.c
+
+/* -*-c-*-
+ *  Error message information
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/mps_reader.c
+
+/*
+ *  Message Processing Stack, Reader implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/mps_trace.c
+
+/*
+ *  Message Processing Stack, Trace module
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/net_sockets.c
+
+/*
+ *  TCP/IP or UDP/IP networking functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/ssl_cache.c
+
+/*
+ *  SSL session cache implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/ssl_ciphersuites.c
+
+/**
+ * \file ssl_ciphersuites.c
+ *
+ * \brief SSL ciphersuites for Mbed TLS
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/ssl_client.c
+
+/*
+ *  TLS 1.2 and 1.3 client-side functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/ssl_client.h
+
+/**
+ *  TLS 1.2 and 1.3 client-side functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/ssl_cookie.c
+
+/*
+ *  DTLS cookie callbacks implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/ssl_msg.c
+
+/*
+ *  Generic SSL/TLS messaging layer functions
+ *  (record layer + retransmission state machine)
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/ssl_ticket.c
+
+/*
+ *  TLS server tickets callbacks implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/ssl_tls.c
+
+/*
+ *  TLS shared functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/ssl_tls12_client.c
+
+/*
+ *  TLS client-side functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/ssl_tls12_server.c
+
+/*
+ *  TLS server-side functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/ssl_tls13_client.c
+
+/*
+ *  TLS 1.3 client-side functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/ssl_tls13_generic.c
+
+/*
+ *  TLS 1.3 functionality shared between client and server
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/ssl_tls13_keys.c, library/ssl_tls13_keys.h
+
+/*
+ *  TLS 1.3 key schedule
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/ssl_tls13_server.c
+
+/*
+ *  TLS 1.3 server-side functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/timing.c
+
+/*
+ *  Portable interface to the CPU cycle counter
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/version.c, tf-psa-crypto/core/tf_psa_crypto_version.c
+
+/*
+ *  Version information
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/version_features.c
+
+/* -*-c-*-
+ *  Version feature information
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/x509.c
+
+/*
+ *  X.509 common functions for parsing and verification
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/x509_create.c
+
+/*
+ *  X.509 base functions for creating certificates / CSRs
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/x509_crl.c
+
+/*
+ *  X.509 Certificate Revocation List (CRL) parsing
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/x509_crt.c
+
+/*
+ *  X.509 certificate parsing and verification
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/x509_csr.c
+
+/*
+ *  X.509 Certificate Signing Request (CSR) parsing
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/x509_oid.c
+
+/**
+ * \file x509_oid.c
+ *
+ * \brief Object Identifier (OID) database
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/x509write.c
+
+/*
+ *  X.509 internal, common functions for writing
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/x509write_crt.c
+
+/*
+ *  X.509 certificate writing
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: library/x509write_csr.c
+
+/*
+ *  X.509 Certificate Signing Request writing
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/ssl/dtls_client.c
+
+/*
+ *  Simple DTLS client demonstration program
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/ssl/dtls_server.c
+
+/*
+ *  Simple DTLS server demonstration program
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/ssl/mini_client.c
+
+/*
+ *  Minimal SSL client, used for memory measurements.
+ *  (meant to be used with config-suite-b.h or config-ccm-psk-tls1_2.h)
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/ssl/ssl_client1.c
+
+/*
+ *  SSL client demonstration program
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/ssl/ssl_client2.c
+
+/*
+ *  SSL client with certificate authentication
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/ssl/ssl_context_info.c
+
+/*
+ *  Mbed TLS SSL context deserializer from base64 code
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/ssl/ssl_fork_server.c
+
+/*
+ *  SSL server demonstration program using fork() for handling multiple clients
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/ssl/ssl_mail_client.c
+
+/*
+ *  SSL client for SMTP servers
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/ssl/ssl_pthread_server.c
+
+/*
+ *  SSL server demonstration program using pthread for handling multiple
+ *  clients.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/ssl/ssl_server.c
+
+/*
+ *  SSL server demonstration program
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/ssl/ssl_server2.c
+
+/*
+ *  SSL client with options
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/ssl/ssl_test_common_source.c
+
+/*
+ *  Common source code for SSL test programs. This file is included by
+ *  both ssl_client2.c and ssl_server2.c and is intended for source
+ *  code that is textually identical in both programs, but that cannot be
+ *  compiled separately because it refers to types or macros that are
+ *  different in the two programs, or because it would have an incomplete
+ *  type.
+ *
+ *  This file is meant to be #include'd and cannot be compiled separately.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/ssl/ssl_test_lib.c
+
+/*
+ *  Common code library for SSL test programs.
+ *
+ *  In addition to the functions in this file, there is shared source code
+ *  that cannot be compiled separately in "ssl_test_common_source.c".
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/ssl/ssl_test_lib.h
+
+/*
+ *  Common code for SSL test programs
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/test/cmake_package/cmake_package.c
+
+/*
+ *  Simple program to test that Mbed TLS builds correctly as a CMake package.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/test/cmake_package_install/cmake_package_install.c
+
+/*
+ * Simple program to test that Mbed TLS builds correctly as an installable CMake
+ * package.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/test/cmake_subproject/cmake_subproject.c
+
+/*
+ *  Simple program to test that CMake builds with Mbed TLS as a subdirectory
+ *  work correctly.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/test/dlopen.c
+
+/*
+ *  Test dynamic loading of libmbed*
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/test/query_config.c
+
+/* -*-c-*-
+ *  Query Mbed TLS compile time configurations from mbedtls_config.h
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/test/selftest.c
+
+/*
+ *  Self-test demonstration program
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/test/udp_proxy.c
+
+/*
+ *  UDP proxy: emulate an unreliable UDP connection for DTLS testing
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/util/pem2der.c
+
+/*
+ *  Convert PEM to DER
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/util/strerror.c
+
+/*
+ *  Translate error code to error string
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/x509/cert_app.c
+
+/*
+ *  Certificate reading application
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/x509/cert_req.c
+
+/*
+ *  Certificate request generation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/x509/cert_write.c
+
+/*
+ *  Certificate generation and signing
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/x509/crl_app.c
+
+/*
+ *  CRL reading application
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/x509/load_roots.c
+
+/*
+ *  Root CA reading application
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: programs/x509/req_app.c
+
+/*
+ *  Certificate request reading application
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tests/include/test/test_certs.h, tests/src/certs.c
+
+/*
+ *  X.509 test certificates
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/configs/ext/crypto_config_profile_medium.h
+
+/*
+ * Copyright (c) 2018-2023, Arm Limited. All rights reserved.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/aes.c
+
+/*
+ *  FIPS-197 compliant AES implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/aesce.c
+
+/*
+ *  Armv8-A Cryptographic Extension support functions for Aarch64
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/aesni.c
+
+/*
+ *  AES-NI support functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/aria.c
+
+/*
+ *  ARIA implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/bignum.c
+
+/*
+ *  Multi-precision integer library
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/bignum_core.c
+
+/*
+ *  Core bignum functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/bignum_mod.c
+
+/**
+ *  Modular bignum functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/bignum_mod_raw.c
+
+/*
+ *  Low-level modular bignum functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/camellia.c
+
+/*
+ *  Camellia implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/ccm.c
+
+/*
+ *  NIST SP800-38C compliant CCM implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/chacha20.c
+
+/**
+ * \file chacha20.c
+ *
+ * \brief ChaCha20 cipher.
+ *
+ * \author Daniel King <damaki.gh@gmail.com>
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/chacha20_neon.c
+
+/**
+ * \file chacha20_neon.c
+ *
+ * \brief Neon implementation of ChaCha20
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/chacha20_neon.h
+
+/**
+ * \file chacha20_neon.h
+ *
+ * \brief Neon implementation of ChaCha20
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/chachapoly.c
+
+/**
+ * \file chachapoly.c
+ *
+ * \brief ChaCha20-Poly1305 AEAD construction based on RFC 7539.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/cipher.c
+
+/**
+ * \file cipher.c
+ *
+ * \brief Generic cipher wrapper for Mbed TLS
+ *
+ * \author Adriaan de Jong <dejong@fox-it.com>
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/cipher_wrap.c
+
+/**
+ * \file cipher_wrap.c
+ *
+ * \brief Generic cipher wrapper for Mbed TLS
+ *
+ * \author Adriaan de Jong <dejong@fox-it.com>
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/cmac.c
+
+/**
+ * \file cmac.c
+ *
+ * \brief NIST SP800-38B compliant CMAC implementation for AES and 3DES
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/ctr.h
+
+/**
+ * \file ctr.h
+ *
+ * \brief    This file contains common functionality for counter algorithms.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/ctr_drbg.c
+
+/*
+ *  CTR_DRBG implementation based on AES-256 (NIST SP 800-90)
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/ecdsa.c
+
+/*
+ *  Elliptic curve DSA
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/ecjpake.c
+
+/*
+ *  Elliptic curve J-PAKE
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/ecp.c
+
+/*
+ *  Elliptic curves over GF(p): generic functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/ecp_curves.c
+
+/*
+ *  Elliptic curves over GF(p): curve-specific data and functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/ecp_curves_new.c
+
+/*
+ *  This file used to be non-empty. It's kept only for compatibility
+ *  with custom build systems in LTS branches.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/entropy.c
+
+/*
+ *  Entropy accumulator implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/entropy_poll.c
+
+/*
+ *  Platform-specific and custom entropy polling functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/gcm.c
+
+/*
+ *  NIST SP800-38D compliant GCM implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/hmac_drbg.c
+
+/*
+ *  HMAC_DRBG implementation (NIST SP 800-90)
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/md5.c
+
+/*
+ *  RFC 1321 compliant MD5 implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/md_psa.h
+
+/**
+ * Translation between MD and PSA identifiers (algorithms, errors).
+ *
+ *  Note: this internal module will go away when everything becomes based on
+ *  PSA Crypto; it is a helper for the transition period.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/poly1305.c
+
+/**
+ * \file poly1305.c
+ *
+ * \brief Poly1305 authentication algorithm.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/ripemd160.c
+
+/*
+ *  RIPE MD-160 implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/rsa.c
+
+/*
+ *  The RSA public-key cryptosystem
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/rsa_alt_helpers.c
+
+/*
+ *  Helper functions for the RSA module
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ *
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/sha1.c
+
+/*
+ *  FIPS-180-1 compliant SHA-1 implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/sha256.c
+
+/*
+ *  FIPS-180-2 compliant SHA-256 implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/sha3.c
+
+/*
+ *  FIPS-202 compliant SHA3 implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/builtin/src/sha512.c
+
+/*
+ *  FIPS-180-2 compliant SHA-384/512 implementation
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/Hacl_Curve25519.h, tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/kremlib/FStar_UInt128.h, tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/kremlib/FStar_UInt64_FStar_UInt32_FStar_UInt16_FStar_UInt8.h, tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/kremlin/c_endianness.h, tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/kremlin/internal/builtin.h, tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/kremlin/internal/callconv.h, tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/kremlin/internal/compat.h, tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/kremlin/internal/debug.h, tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/kremlin/internal/target.h, tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/kremlin/internal/types.h, tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/kremlin/internal/wasmsupport.h, tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/vs2013/Hacl_Curve25519.h, tf-psa-crypto/drivers/everest/library/Hacl_Curve25519.c, tf-psa-crypto/drivers/everest/library/kremlib/FStar_UInt128_extracted.c, tf-psa-crypto/drivers/everest/library/kremlib/FStar_UInt64_FStar_UInt32_FStar_UInt16_FStar_UInt8.c, tf-psa-crypto/drivers/everest/library/legacy/Hacl_Curve25519.c
+
+/* Copyright (c) INRIA and Microsoft Corporation. All rights reserved.
+   Licensed under the Apache 2.0 License. */
+
+Sources: tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/kremlib.h
+
+/*
+ *  Copyright 2016-2018 INRIA and Microsoft Corporation
+ *
+ *  SPDX-License-Identifier: Apache-2.0
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License"); you may
+ *  not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ *  WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ *  This file is part of Mbed TLS (https://tls.mbed.org) and
+ *  originated from Project Everest (https://project-everest.github.io/)
+ */
+
+Sources: tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/x25519.h, tf-psa-crypto/drivers/everest/library/x25519.c
+
+/*
+ *  ECDH with curve-optimized implementation multiplexing
+ *
+ *  Copyright 2016-2018 INRIA and Microsoft Corporation
+ *  SPDX-License-Identifier: Apache-2.0
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License"); you may
+ *  not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ *  WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ *  This file is part of Mbed TLS (https://tls.mbed.org)
+ */
+
+Sources: tf-psa-crypto/drivers/everest/library/Hacl_Curve25519_joined.c
+
+/*
+ *  Interface to code from Project Everest
+ *
+ *  Copyright 2016-2018 INRIA and Microsoft Corporation
+ *  SPDX-License-Identifier: Apache-2.0
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License"); you may
+ *  not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ *  WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ *  This file is part of Mbed TLS (https://tls.mbed.org)
+ */
+
+Sources: tf-psa-crypto/drivers/p256-m/p256-m/p256-m.c
+
+/*
+ * Implementation of curve P-256 (ECDH and ECDSA)
+ *
+ * Copyright The Mbed TLS Contributors
+ * Author: Manuel Pégourié-Gonnard.
+ * SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/p256-m/p256-m/p256-m.h
+
+/*
+ * Interface of curve P-256 (ECDH and ECDSA)
+ *
+ * Copyright The Mbed TLS Contributors
+ * Author: Manuel Pégourié-Gonnard.
+ * SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/meta.h, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/arith_native_aarch64.h, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/meta.h, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/arith_native_aarch64.h, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/fips202/aarch64/auto.h, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/fips202/aarch64/src/fips202_native_aarch64.h, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/fips202/aarch64/src/keccakf1600_round_constants.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/fips202/aarch64/x1_scalar.h, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/fips202/aarch64/x1_v84a.h, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/fips202/aarch64/x2_v84a.h, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/fips202/aarch64/x4_v8a_scalar.h, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/fips202/aarch64/x4_v8a_v84a_scalar.h, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/meta.h, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/arith_native_x86_64.h, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/intt.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/ntt.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/nttunpack.S, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/bring_your_own_fips202/custom_fips202/fips202.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/bring_your_own_fips202/custom_fips202/fips202x4.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/bring_your_own_fips202_static/custom_fips202/fips202.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/monolithic_build/main.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/monolithic_build_multilevel/main.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/monolithic_build_multilevel/mldsa_native_all.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/monolithic_build_multilevel/mldsa_native_all.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/monolithic_build_multilevel_native/main.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/monolithic_build_multilevel_native/mldsa_native_all.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/monolithic_build_native/main.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/multilevel_build/main.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/multilevel_build/mldsa_native_all.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/multilevel_build_native/main.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/ct.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/ct.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/debug.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/debug.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/fips202x4.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/fips202x4.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/keccakf1600.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/keccakf1600.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/aarch64/auto.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/aarch64/src/fips202_native_aarch64.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/aarch64/src/keccakf1600_round_constants.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/aarch64/x1_scalar.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/aarch64/x1_v84a.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/aarch64/x2_v84a.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/aarch64/x4_v8a_scalar.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/aarch64/x4_v8a_v84a_scalar.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/api.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/auto.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/x86_64/src/KeccakP_1600_times4_SIMD256.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/x86_64/src/KeccakP_1600_times4_SIMD256.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/x86_64/xkcp.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/meta.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/arith_native_aarch64.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/api.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/meta.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/meta.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/arith_native_x86_64.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/intt.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/ntt.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/nttunpack.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/sys.h, tf-psa-crypto/drivers/pqcp/mldsa-native/proofs/hol_light/x86_64/mldsa/mldsa_ntt.S
+
+/*
+ * Copyright (c) The mlkem-native project authors
+ * Copyright (c) The mldsa-native project authors
+ * SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT
+ */
+
+Sources: tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/aarch64_zetas.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/poly_caddq_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/poly_chknorm_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/poly_decompose_32_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/poly_decompose_88_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/poly_use_hint_32_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/poly_use_hint_88_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/polyz_unpack_table.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/rej_uniform_eta_table.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/rej_uniform_table.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/aarch64_zetas.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/poly_caddq_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/poly_chknorm_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/poly_decompose_32_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/poly_decompose_88_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/poly_use_hint_32_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/poly_use_hint_88_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/polyz_unpack_table.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/rej_uniform_eta_table.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/rej_uniform_table.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/consts.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/consts.h, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/pointwise.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/pointwise_acc_l4.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/pointwise_acc_l5.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/pointwise_acc_l7.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/poly_caddq_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/poly_chknorm_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/poly_decompose_32_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/poly_decompose_88_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/poly_use_hint_32_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/poly_use_hint_88_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/polyz_unpack_17_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/polyz_unpack_19_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/rej_uniform_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/rej_uniform_eta2_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/rej_uniform_eta4_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/x86_64/src/rej_uniform_table.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/basic/expected_signatures.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/basic/main.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/basic_deterministic/main.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/basic_deterministic/mldsa_native/mldsa_native_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/basic_lowram/main.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/basic_lowram/mldsa_native/mldsa_native_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/bring_your_own_fips202/main.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/bring_your_own_fips202/mldsa_native/mldsa_native_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/bring_your_own_fips202_static/main.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/bring_your_own_fips202_static/mldsa_native/mldsa_native_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/custom_backend/main.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/custom_backend/mldsa_native/mldsa_native_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/custom_backend/mldsa_native/src/fips202/native/custom/custom.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/monolithic_build/mldsa_native/mldsa_native_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/monolithic_build_multilevel/expected_signatures.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/monolithic_build_multilevel/mldsa_native/mldsa_native_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/monolithic_build_multilevel_native/mldsa_native/mldsa_native_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/monolithic_build_native/mldsa_native/mldsa_native_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/multilevel_build/mldsa_native/mldsa_native_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/multilevel_build_native/mldsa_native/mldsa_native_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/multilevel_build_native/mldsa_native_all.h, tf-psa-crypto/drivers/pqcp/mldsa-native/integration/liboqs/config_aarch64.h, tf-psa-crypto/drivers/pqcp/mldsa-native/integration/liboqs/config_c.h, tf-psa-crypto/drivers/pqcp/mldsa-native/integration/liboqs/config_x86_64.h, tf-psa-crypto/drivers/pqcp/mldsa-native/integration/liboqs/fips202_glue.h, tf-psa-crypto/drivers/pqcp/mldsa-native/integration/liboqs/fips202x4_glue.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/mldsa_native.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/mldsa_native.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/mldsa_native.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/mldsa_native_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/cbmc.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/fips202.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/fips202.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/aarch64_zetas.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/poly_caddq_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/poly_chknorm_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/poly_decompose_32_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/poly_decompose_88_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/poly_use_hint_32_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/poly_use_hint_88_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/polyz_unpack_table.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/rej_uniform_eta_table.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/rej_uniform_table.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/consts.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/consts.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/pointwise.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/pointwise_acc_l4.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/pointwise_acc_l5.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/pointwise_acc_l7.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/poly_caddq_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/poly_chknorm_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/poly_decompose_32_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/poly_decompose_88_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/poly_use_hint_32_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/poly_use_hint_88_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/polyz_unpack_17_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/polyz_unpack_19_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/rej_uniform_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/rej_uniform_eta2_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/rej_uniform_eta4_avx2.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/x86_64/src/rej_uniform_table.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/packing.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/packing.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/params.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/poly.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/poly_kl.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/polyvec.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/polyvec.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/randombytes.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/reduce.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/rounding.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/sign.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/sign.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/symmetric.h, tf-psa-crypto/drivers/pqcp/mldsa-native/proofs/cbmc/dummy_backend.h, tf-psa-crypto/drivers/pqcp/mldsa-native/proofs/cbmc/dummy_backend_fips202_x1.h, tf-psa-crypto/drivers/pqcp/mldsa-native/proofs/cbmc/dummy_backend_fips202_x4.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/acvp/acvp_mldsa.c, tf-psa-crypto/drivers/pqcp/mldsa-native/test/configs/break_pct_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/configs/custom_heap_alloc_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/configs/custom_memcpy_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/configs/custom_memset_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/configs/custom_native_capability_config_0.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/configs/custom_native_capability_config_1.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/configs/custom_native_capability_config_CPUID_AVX2.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/configs/custom_native_capability_config_ID_AA64PFR1_EL1.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/configs/custom_randombytes_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/configs/custom_stdlib_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/configs/custom_zeroize_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/configs/no_asm_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/configs/serial_fips202_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/configs/test_alloc_config.h, tf-psa-crypto/drivers/pqcp/mldsa-native/test/src/gen_KAT.c, tf-psa-crypto/drivers/pqcp/mldsa-native/test/src/test_alloc.c, tf-psa-crypto/drivers/pqcp/mldsa-native/test/src/test_mldsa.c, tf-psa-crypto/drivers/pqcp/mldsa-native/test/src/test_rng_fail.c, tf-psa-crypto/drivers/pqcp/mldsa-native/test/src/test_stack.c, tf-psa-crypto/drivers/pqcp/mldsa-native/test/src/test_unit.c
+
+/*
+ * Copyright (c) The mldsa-native project authors
+ * SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT
+ */
+
+Sources: tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/intt.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/ntt.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/intt.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/ntt.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/intt.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/ntt.S
+
+/* Copyright (c) 2022 Arm Limited
+ * Copyright (c) 2022 Hanno Becker
+ * Copyright (c) 2023 Amin Abdulrahman, Matthias Kannwischer
+ * Copyright (c) The mlkem-native project authors
+ * Copyright (c) The mldsa-native project authors
+ * SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT
+ */
+
+Sources: tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/mld_polyvecl_pointwise_acc_montgomery_l4.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/mld_polyvecl_pointwise_acc_montgomery_l5.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/mld_polyvecl_pointwise_acc_montgomery_l7.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/pointwise_montgomery.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/mld_polyvecl_pointwise_acc_montgomery_l4.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/mld_polyvecl_pointwise_acc_montgomery_l5.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/mld_polyvecl_pointwise_acc_montgomery_l7.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/pointwise_montgomery.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/mld_polyvecl_pointwise_acc_montgomery_l4.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/mld_polyvecl_pointwise_acc_montgomery_l5.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/mld_polyvecl_pointwise_acc_montgomery_l7.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/pointwise_montgomery.S
+
+/* Copyright (c) The mldsa-native project authors
+ * SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT
+ */
+
+Sources: tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/polyz_unpack_17_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/polyz_unpack_19_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/rej_uniform_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/rej_uniform_eta2_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_clean/src/rej_uniform_eta4_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/polyz_unpack_17_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/polyz_unpack_19_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/rej_uniform_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/rej_uniform_eta2_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/aarch64_opt/src/rej_uniform_eta4_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/common.h, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/polyz_unpack_17_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/polyz_unpack_19_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/rej_uniform_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/rej_uniform_eta2_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/native/aarch64/src/rej_uniform_eta4_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/poly.c, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/poly_kl.c, tf-psa-crypto/drivers/pqcp/mldsa-native/test/bench/bench_components_mldsa.c, tf-psa-crypto/drivers/pqcp/mldsa-native/test/bench/bench_mldsa.c
+
+/*
+ * Copyright (c) The mldsa-native project authors
+ * Copyright (c) The mlkem-native project authors
+ * SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT
+ */
+
+Sources: tf-psa-crypto/drivers/pqcp/mldsa-native/dev/fips202/aarch64/src/keccak_f1600_x1_scalar_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/fips202/aarch64/src/keccak_f1600_x1_v84a_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/fips202/aarch64/src/keccak_f1600_x2_v84a_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/fips202/aarch64/src/keccak_f1600_x4_v8a_scalar_hybrid_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/dev/fips202/aarch64/src/keccak_f1600_x4_v8a_v84a_scalar_hybrid_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/aarch64/src/keccak_f1600_x1_scalar_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/aarch64/src/keccak_f1600_x1_v84a_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/aarch64/src/keccak_f1600_x2_v84a_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/aarch64/src/keccak_f1600_x4_v8a_scalar_hybrid_asm.S, tf-psa-crypto/drivers/pqcp/mldsa-native/mldsa/src/fips202/native/aarch64/src/keccak_f1600_x4_v8a_v84a_scalar_hybrid_asm.S
+
+/*
+ * Copyright (c) The mlkem-native project authors
+ * Copyright (c) The mldsa-native project authors
+ * Copyright (c) 2021-2022 Arm Limited
+ * Copyright (c) 2022 Matthias Kannwischer
+ * SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT
+ */
+
+Sources: tf-psa-crypto/drivers/pqcp/mldsa-native/examples/bring_your_own_fips202/custom_fips202/tiny_sha3/sha3.c, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/custom_backend/mldsa_native/src/fips202/native/custom/src/sha3.c
+
+/* SPDX-License-Identifier: MIT
+ *
+ * sha3.c
+ * 19-Nov-11  Markku-Juhani O. Saarinen <mjos@iki.fi> */
+
+Sources: tf-psa-crypto/drivers/pqcp/mldsa-native/examples/bring_your_own_fips202/custom_fips202/tiny_sha3/sha3.h, tf-psa-crypto/drivers/pqcp/mldsa-native/examples/custom_backend/mldsa_native/src/fips202/native/custom/src/sha3.h
+
+/* SPDX-License-Identifier: MIT
+ *
+ * sha3.h
+ * 19-Nov-11  Markku-Juhani O. Saarinen <mjos@iki.fi> */
+
+Sources: tf-psa-crypto/drivers/pqcp/mldsa-native/test/hal/hal.c
+
+/*
+ * Copyright (c) The mldsa-native project authors
+ * Copyright (c) The mlkem-native project authors
+ * Copyright (c) 2022 Arm Limited
+ * Copyright (c) 2020 Dougall Johnson
+ * SPDX-License-Identifier: MIT
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ */
+
+Sources: tf-psa-crypto/drivers/pqcp/mldsa-native/test/hal/hal.h
+
+/*
+ * Copyright (c) The mldsa-native project authors
+ * Copyright (c) The mlkem-native project authors
+ * Copyright (c) 2022 Arm Limited
+ * SPDX-License-Identifier: MIT
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ */
+
+Sources: tf-psa-crypto/drivers/pqcp/mldsa-native/test/notrandombytes/notrandombytes.c, tf-psa-crypto/drivers/pqcp/mldsa-native/test/notrandombytes/notrandombytes.h
+
+/*
+ * Copyright (c) The mldsa-native project authors
+ * SPDX-License-Identifier: LicenseRef-PD-hp OR CC0-1.0 OR 0BSD OR MIT-0 OR MIT
+ */
+
+Sources: tf-psa-crypto/extras/lmots.c
+
+/*
+ * The LM-OTS one-time public-key signature scheme
+ *
+ * Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/extras/lms.c
+
+/*
+ *  The LMS stateful-hash public-key signature scheme
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/extras/md.c
+
+/**
+ * \file md.c
+ *
+ * \brief Generic message digest wrapper for Mbed TLS
+ *
+ * \author Adriaan de Jong <dejong@fox-it.com>
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/extras/nist_kw.c
+
+/*
+ *  Implementation of NIST SP 800-38F key wrapping, supporting KW and KWP modes
+ *  only
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/extras/pk.c
+
+/*
+ *  Public Key abstraction layer
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/extras/pk_ecc.c
+
+/*
+ *  ECC setters for PK.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/extras/pk_rsa.c
+
+/*
+ *  RSA setters for PK.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/extras/pk_wrap.c
+
+/*
+ *  Public Key abstraction layer: wrapper functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/extras/pkparse.c
+
+/*
+ *  Public Key layer for parsing key files and structures
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/extras/pkwrite.c
+
+/*
+ *  Public Key layer for writing key files and structures
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/platform/memory_buffer_alloc.c
+
+/*
+ *  Buffer-based memory allocator
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/platform/platform.c
+
+/*
+ *  Platform abstraction layer
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/platform/platform_util.c
+
+/*
+ * Common and shared functions used by multiple modules in the Mbed TLS
+ * library.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/platform/threading.c
+
+/*
+ *  Threading abstraction layer
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/programs/psa/generate_random_uuid.c
+
+/*
+ *  Generate a random UUID.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/programs/psa/psa_hash.c
+
+/*
+ *  Example computing a SHA-256 hash using the PSA Crypto API
+ *
+ *  The example computes the SHA-256 hash of a test string using the
+ *  one-shot API call psa_hash_compute() and the using multi-part
+ *  operation, which requires psa_hash_setup(), psa_hash_update() and
+ *  psa_hash_finish(). The multi-part operation is popular on embedded
+ *  devices where a rolling hash needs to be computed.
+ *
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/programs/test/benchmark.c
+
+/*
+ *  Benchmark demonstration program
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/programs/test/cmake_package/cmake_package.c
+
+/*
+ *  Simple program to test that TF-PSA-Crypto builds correctly as a CMake
+ *  package.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/programs/test/cmake_package_install/cmake_package_install.c
+
+/*
+ * Simple program to test that TF-PSA-Crypto builds correctly as an installable
+ * CMake package.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/programs/test/cmake_subproject/cmake_subproject.c
+
+/*
+ *  Simple program to test that CMake builds with TF-PSA-Crypto as a
+ *  subdirectory work correctly.
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/programs/test/tfpsacrypto_dlopen.c
+
+/*
+ * Test dynamic loading of libtfpsacrypto
+ *
+ * Copyright The Mbed TLS Contributors
+ * SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/utilities/asn1parse.c
+
+/*
+ *  Generic ASN.1 parsing
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/utilities/asn1write.c
+
+/*
+ * ASN.1 buffer writing functionality
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/utilities/base64.c
+
+/*
+ *  RFC 1521 base64 encoding/decoding
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/utilities/constant_time.c, tf-psa-crypto/utilities/constant_time_impl.h, tf-psa-crypto/utilities/constant_time_internal.h
+
+/**
+ *  Constant-time functions
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/utilities/oid.c
+
+/**
+ * \file oid.c
+ *
+ * \brief Object Identifier (OID) database
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/utilities/pem.c
+
+/*
+ *  Privacy Enhanced Mail (PEM) decoding
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
+Sources: tf-psa-crypto/utilities/pkcs5.c
+
+/**
+ * \file pkcs5.c
+ *
+ * \brief PKCS#5 functions
+ *
+ * \author Mathias Olsson <mathias@kompetensum.com>
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */

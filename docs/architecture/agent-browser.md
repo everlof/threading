@@ -316,12 +316,23 @@ black render bands.
 
 WebKit owns document scrolling, including elastic overscroll. The outer canvas enables its
 scrollers only for an explicit responsive viewport and has no elasticity of its own. Layout
-constrains its retained pan offset to the current canvas range: filling the host has no outer
-panning range, while an oversized responsive viewport keeps every still-valid offset. Resizing
-or rehosting therefore cannot leave the whole page shifted outside its pane, and correcting the
+constrains its retained pan offset to the current canvas range. `BrowserViewportClipView` also
+enforces the range at the scroll boundary: automatic sizing accepts only the zero origin, while
+an explicit responsive viewport permits the document's actual pan range. `NSClipView.scroll(to:)`
+does not constrain its argument or call `setBoundsOrigin`, and changing that origin need not
+schedule controller layout. A layout-only repair therefore left the page clipped indefinitely;
+tests that forced layout immediately after scrolling concealed it. Both native entry points are
+covered without requesting a repair pass, including the live page and its own scroll position.
+Filling the host has no outer panning range, while an oversized responsive viewport keeps every
+still-valid offset. Resizing or rehosting therefore cannot leave the whole page shifted outside
+its pane, and correcting the
 canvas never resets the website's own scroll position or the selected CSS dimensions. This is
 host-owned geometry, independent of theme or extension presentation. Each layout adds only
 constant-time range arithmetic; it neither inspects the DOM nor scales with page content.
+The scroll boundary owns one clip per browser and does O(1) geometry work at gesture frequency.
+`BrowserViewportLayoutTests.testAutomaticViewportRejectsNativeScrollBursts`, enabled with
+`THREADING_BROWSER_VIEWPORT_STRESS=1`, exercises three batches of 2,000 native origin requests
+through the production browser, excluding fixture creation from the measured phase.
 
 The native address field is content before it is an input. At rest the URL draws directly on the
 browser strip with no permanent field silhouette; pointer hover raises a `controlHover` plate over

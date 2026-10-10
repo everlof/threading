@@ -543,25 +543,20 @@ enum TranscriptReplay {
     static func latestAssistantTexts(
         at url: URL,
         kind: AgentKind,
-        scanLimit: Int
+        scanLimit: Int,
+        isChild: Bool = false
     ) -> [String] {
         guard scanLimit > 0, let format = TranscriptReplayFormat(kind: kind) else { return [] }
 
         var newestFirst: [String] = []
         JSONLReader.forEachRecordFromEnd(at: url, limit: scanLimit) { record in
-            guard let event = event(from: record, format: format) else { return true }
-
-            switch event {
-            case .userMessage:
+            if isChild, record["type"] as? String == "inter_agent_communication_metadata" {
                 return false
-            case .assistantMessage(let blocks):
-                newestFirst += blocks.reversed().compactMap { block in
-                    guard case .text(let text) = block, !text.isEmpty else { return nil }
-                    return text
-                }
-            default:
-                break
             }
+            guard let event = event(from: record, format: format, isChild: isChild) else { return true }
+
+            if case .userMessage = event { return false }
+            newestFirst += AttachmentDetection.assistantTexts(in: event).reversed()
             return true
         }
 
@@ -711,18 +706,21 @@ enum TranscriptReplay {
     /// Maps one transcript record to something worth drawing, or nil to skip it.
     private static func event(
         from record: [String: Any],
-        format: TranscriptReplayFormat
+        format: TranscriptReplayFormat,
+        isChild: Bool = false
     ) -> StreamEvent? {
         switch format {
         case .claude:
-            return claudeEvent(from: record)
+            return claudeEvent(from: record, scope: isChild ? .child : .parent)
         case .codex:
             return codexEvent(from: record)
         }
     }
 
     /// Maps one Claude transcript record to something worth drawing, or nil to skip it.
-    private static func claudeEvent(from record: [String: Any]) -> StreamEvent? {
+    static func claudeEvent(
+        from record: [String: Any], scope: ClaudeTranscriptUserRecord.Scope = .parent
+    ) -> StreamEvent? {
         // Records Claude writes about itself rather than about the conversation: mode
         // changes, titles, file snapshots, deferred-tool deltas. None of it is dialogue.
         guard let type = record["type"] as? String,
@@ -734,7 +732,7 @@ enum TranscriptReplay {
 
         // Sidechains are subagent conversations. They belong to a run of the Task tool, not
         // to this thread, and interleaving them would make the transcript read as nonsense.
-        guard record["isSidechain"] as? Bool != true else { return nil }
+        guard scope == .child || record["isSidechain"] as? Bool != true else { return nil }
 
         guard let message = record["message"] as? [String: Any] else { return nil }
 
@@ -747,11 +745,16 @@ enum TranscriptReplay {
                 site: WireListSite.claudeAssistantContent,
                 log: ThreadingLogger.agent
             ) ?? []
-            let blocks = content.compactMap(StreamEvent.contentBlock)
+            let blocks = content.compactMap(StreamEvent.contentBlock).filter { block in
+                switch block {
+                case .text(let text), .thinking(let text): return !text.isEmpty
+                case .toolUse: return true
+                }
+            }
             return blocks.isEmpty ? nil : .assistantMessage(blocks: blocks)
         }
 
-        return ClaudeTranscriptUserRecord.event(from: message, scope: .parent)
+        return ClaudeTranscriptUserRecord.event(from: message, scope: scope)
     }
 
     /// Codex records dialogue as `event_msg` and tool activity as `response_item`. Response

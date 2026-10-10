@@ -619,6 +619,77 @@
     debounceMS: 80,
   };
 
+  // A full-screen TUI repaint often arrives as a clear in one WebSocket frame and the
+  // replacement cells in the next. Keep the old screen visible until that short burst
+  // settles, rather than presenting the empty intermediate frame on every phone refresh.
+  var repaintChunks = [];
+  var repaintBytes = 0;
+  var repaintQuietTimer = null;
+  var repaintLimitTimer = null;
+  var clearSequenceState = 0;
+  var hasTerminalOutput = false;
+
+  function containsFullScreenClear(bytes) {
+    var found = false;
+    for (var index = 0; index < bytes.length; index += 1) {
+      var byte = bytes[index];
+      if (clearSequenceState === 0) {
+        clearSequenceState = byte === 27 ? 1 : 0;
+      } else if (clearSequenceState === 1) {
+        clearSequenceState = byte === 91 ? 2 : (byte === 27 ? 1 : 0);
+      } else if (clearSequenceState === 2) {
+        clearSequenceState = byte === 50 || byte === 51 ? 3 : (byte === 27 ? 1 : 0);
+      } else {
+        if (byte === 74) { found = true; }
+        clearSequenceState = byte === 27 ? 1 : 0;
+      }
+    }
+    return found;
+  }
+
+  function flushTerminalRepaint() {
+    clearTimeout(repaintQuietTimer);
+    clearTimeout(repaintLimitTimer);
+    repaintQuietTimer = null;
+    repaintLimitTimer = null;
+    if (!term || !repaintBytes) {
+      repaintChunks = [];
+      repaintBytes = 0;
+      return;
+    }
+    var output = new Uint8Array(repaintBytes);
+    var offset = 0;
+    repaintChunks.forEach(function (chunk) {
+      output.set(chunk, offset);
+      offset += chunk.length;
+    });
+    repaintChunks = [];
+    repaintBytes = 0;
+    term.write(output, restoreTerminalViewport);
+  }
+
+  function receiveTerminalOutput(bytes) {
+    if (!term) { return; }
+    // Carry the escape parser state because the sequence can cross socket frames.
+    var clearsScreen = containsFullScreenClear(bytes);
+    if (!hasTerminalOutput || (!repaintBytes && !clearsScreen)) {
+      hasTerminalOutput = true;
+      term.write(bytes, restoreTerminalViewport);
+      return;
+    }
+    repaintChunks.push(bytes);
+    repaintBytes += bytes.length;
+    if (repaintBytes >= 512 * 1024) {
+      flushTerminalRepaint();
+      return;
+    }
+    clearTimeout(repaintQuietTimer);
+    repaintQuietTimer = setTimeout(flushTerminalRepaint, 180);
+    if (repaintLimitTimer === null) {
+      repaintLimitTimer = setTimeout(flushTerminalRepaint, 450);
+    }
+  }
+
   function validHex(value) {
     return typeof value === "string" && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value);
   }
@@ -1911,7 +1982,7 @@
       if (socket !== openedSocket) { return; }
       if (event.data instanceof ArrayBuffer) {
         if (term) {
-          term.write(new Uint8Array(event.data), restoreTerminalViewport);
+          receiveTerminalOutput(new Uint8Array(event.data));
         }
         return;
       }
@@ -1951,6 +2022,7 @@
       socketDiagnosticConnected = false;
       setBadge(t("badge.disconnected"), "disconnected");
       if (term) {
+        flushTerminalRepaint();
         term.write("\r\n\x1b[2m" + t("terminal.disconnected") + "\x1b[0m\r\n");
       } else {
         appendNotice(t("session.socketDisconnected"));
@@ -2211,6 +2283,7 @@
         } else {
           setBadge(t("badge.ended"), "disconnected");
           if (term) {
+            flushTerminalRepaint();
             term.write("\r\n\x1b[2m" + t("terminal.ended") + "\x1b[0m\r\n");
           } else {
             appendNotice(t("session.endedOnMac"));
@@ -2714,6 +2787,14 @@
   }
 
   function disposeTerminal() {
+    clearTimeout(repaintQuietTimer);
+    clearTimeout(repaintLimitTimer);
+    repaintQuietTimer = null;
+    repaintLimitTimer = null;
+    repaintChunks = [];
+    repaintBytes = 0;
+    clearSequenceState = 0;
+    hasTerminalOutput = false;
     if (fitTimer !== null) {
       clearTimeout(fitTimer);
       fitTimer = null;

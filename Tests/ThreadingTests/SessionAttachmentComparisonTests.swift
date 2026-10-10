@@ -996,7 +996,7 @@ final class SessionAttachmentComparisonTests: XCTestCase {
         )
         let titles = descendants(of: filter)
             .compactMap { $0 as? NSTextField }
-            .filter { ["All", "Agent", "You"].contains($0.stringValue) }
+            .filter { ["All", "Main agent", "You"].contains($0.stringValue) }
 
         XCTAssertEqual(titles.count, 3)
         for title in titles {

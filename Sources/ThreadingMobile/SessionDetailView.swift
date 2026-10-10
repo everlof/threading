@@ -2231,6 +2231,7 @@ struct TerminalLineComposer: View {
     @ObservedObject var connection: RemoteSessionConnection
     @ObservedObject var bridge: TerminalKeyBridge
     @Binding var quotes: [RemoteTerminalSelectionQuote]
+    var clipboard: ComposerClipboard = .general
     /// Writing here was writing in this chat: a chat left mid-draft opens with the composer
     /// focused again, within the keyboard memory's recall.
     var focusesOnAppear = false
@@ -2286,6 +2287,8 @@ struct TerminalLineComposer: View {
                     text: Binding(get: { draft }, set: { value in updateDraft(value) }),
                     isFocused: $draftIsFocused,
                     theme: theme,
+                    offersFiles: { canAddAttachments && clipboard.hasFiles },
+                    pasteFiles: stageClipboardFiles,
                     onSubmit: submit
                 )
                 .mobileUIEvidenceKeyboardFocus($draftIsFocused)
@@ -2378,7 +2381,13 @@ struct TerminalLineComposer: View {
             // always done it. This entry is for what that cannot carry: a picture has no text to
             // insert, and a copied one is in neither picker.
             if clipboardOffersFiles {
-                Button(action: stageClipboardFiles) {
+                Button {
+                    guard canAddAttachments else { return }
+                    if !stageClipboardFiles() {
+                        refreshClipboardOffer()
+                        submissionNotice = MobileL10n.string("There’s nothing on the clipboard to attach.")
+                    }
+                } label: {
                     Label(
                         MobileL10n.string("From Clipboard"),
                         systemImage: "doc.on.clipboard"
@@ -2405,12 +2414,14 @@ struct TerminalLineComposer: View {
                     height: MobileDesign.Size.minimumTapTarget
                 )
         }
-        .disabled(
-            connection.isPromptSubmissionPending
-                || attachmentPicksInFlight > 0
-                || attachmentTray?.canAcceptMore != true
-        )
+        .disabled(!canAddAttachments)
         .accessibilityLabel(MobileL10n.string("Attachments"))
+    }
+
+    private var canAddAttachments: Bool {
+        !connection.isPromptSubmissionPending
+            && attachmentPicksInFlight == 0
+            && attachmentTray?.canAcceptMore == true
     }
 
     private var sendButton: some View {
@@ -2486,21 +2497,19 @@ struct TerminalLineComposer: View {
     }
 
     private func refreshClipboardOffer() {
-        clipboardOffersFiles = ComposerClipboard.general.hasFiles
+        clipboardOffersFiles = clipboard.hasFiles
     }
 
-    private func stageClipboardFiles() {
-        guard let tray = attachmentTray else { return }
-        let files = ComposerClipboard.general.files()
-        guard !files.isEmpty else {
-            // Between drawing the entry and choosing it, the clipboard changed under it.
-            refreshClipboardOffer()
-            submissionNotice = MobileL10n.string("There’s nothing on the clipboard to attach.")
-            return
-        }
+    /// The edit menu, keyboard Paste command and paperclip all stage through the same tray.
+    /// A text-only clipboard returns false so UIKit keeps insertion, selection and undo.
+    private func stageClipboardFiles() -> Bool {
+        guard canAddAttachments, let tray = attachmentTray, clipboard.hasFiles else { return false }
+        let files = clipboard.files()
+        guard !files.isEmpty else { return false }
         for file in files {
             tray.add(data: file.data, name: file.name, type: file.type)
         }
+        return true
     }
 
     private func loadPhotos(_ items: [PhotosPickerItem]) async {
@@ -2625,6 +2634,8 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
     let theme: RemoteThemePalette
+    let offersFiles: () -> Bool
+    let pasteFiles: () -> Bool
     let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -2663,6 +2674,8 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
     func updateUIView(_ view: IntrinsicTextView, context: Context) {
         context.coordinator.updateBindings(text: $text, isFocused: $isFocused)
         context.coordinator.onSubmit = onSubmit
+        view.offersFiles = offersFiles
+        view.pasteFiles = pasteFiles
         if view.text != text {
             view.text = text
             view.invalidateIntrinsicContentSize()

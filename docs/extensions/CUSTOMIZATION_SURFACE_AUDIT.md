@@ -686,6 +686,12 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+**Proxy debugging commands** are deliberately host-only. The existing Tools settings group and
+session MCP transport expose bounded HTTP(S) capture. Threading owns exact TLS scope, CA key
+custody, process lifetime, payload/raw-read authority, certificate exports and trust setup.
+A future extension may present flow data through a separate admitted capability; this increment
+introduces no presentation slot or extension data authority.
+
 The iPhone chat's activity summaries, catch-up marker, result navigation, delivery selector,
 dictation control and image-markup editor are deliberately host-only surfaces for one paired
 host/session. Themes supply the existing mobile palette and reading plates. Threading retains
@@ -693,6 +699,13 @@ transcript chronology, result identities, input authority, provider receipts, re
 attachment custody and the explicit Send decision. PencilKit owns its drawing controls. No new
 extension slot or data authority is introduced; absent host capabilities fall back to ordinary
 sending and existing Workspace destinations.
+
+**Attachment subagent provenance and filtering** extend the existing host-owned attachment shell.
+Threading owns child identity, first-child visibility, source attribution, parent-turn association,
+shared detection/admission, file custody and deduplication. Existing themes style the segmented
+control and row typography; `attachments.preview@1` remains the only presentation replacement.
+No extension can relabel a reference owner or widen file access through these controls.
+
 
 **Browse on iPhone** is host-only. Threading owns the selected tab and origin, owner-only preview
 capability, certificate verification, network destination, revocation, browser lifecycle and

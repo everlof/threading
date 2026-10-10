@@ -65,6 +65,8 @@ public struct WorkItem: Codable, Equatable, Sendable {
     public internal(set) var dependsOn: [WorkID]? = nil
     /// Why the host cancelled this item itself (a cancelled dependency); nil for owner cancels.
     public internal(set) var cancelReason: String? = nil
+    /// An optional collaboration room. Its identity does not depend on an external ticket.
+    public internal(set) var workroomID: WorkroomID? = nil
 }
 public enum ExecutionState: String, Codable, Sendable { case running, yielded, completed, interrupted }
 public struct ControllerExecution: Codable, Equatable, Sendable {
@@ -85,8 +87,32 @@ public struct WorkQuestion: Codable, Equatable, Sendable {
     public let recipients: [String]
     public let text: String
     public let checkpoint: String
+    public let presentation: WorkQuestionPresentation?
     public internal(set) var answer: String?
     public internal(set) var answeredBy: String?
+}
+
+/// Context supplied with the exact question. It is information for a person, not a grant or
+/// an accepted decision. The host renders these fields as text, never agent-authored HTML.
+public struct WorkQuestionPresentation: Codable, Equatable, Sendable {
+    public let context: String
+    public let choices: [String]
+    public let sources: [String]
+
+    public init(context: String, choices: [String] = [], sources: [String] = []) {
+        self.context = context
+        self.choices = choices
+        self.sources = sources
+    }
+
+    func validate() throws {
+        try Limits.text(context, field: "presentation_context", maximum: 4_096)
+        guard choices.count <= 6, sources.count <= 8 else {
+            throw ControllerError.invalidInput("presentation_items")
+        }
+        for choice in choices { try Limits.text(choice, field: "presentation_choice", maximum: 512) }
+        for source in sources { try Limits.text(source, field: "presentation_source", maximum: 512) }
+    }
 }
 
 /// Constructed by a trusted authentication adapter, never decoded from an agent request.

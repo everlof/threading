@@ -1,0 +1,39 @@
+name: Portable proxy
+
+on:
+  pull_request:
+    paths:
+      - 'Targets/ProxyHost/**'
+      - 'scripts/test-proxy.py'
+      - '.github/workflows/proxy.yml'
+  push:
+    paths:
+      - 'Targets/ProxyHost/**'
+      - 'scripts/test-proxy.py'
+      - '.github/workflows/proxy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proxy:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Native build and socket integration tests
+        run: python scripts/test-proxy.py
+      - name: Check install contains notices and corresponding source
+        run: |
+          cmake --install .build/proxy --config RelWithDebInfo --prefix .build/proxy-install
+          python .build/proxy-install/share/threading-proxyd/source/tests/provenance.py
+      - name: Address and undefined behavior sanitizers
+        if: runner.os != 'Windows'
+        run: python scripts/test-proxy.py --sanitize

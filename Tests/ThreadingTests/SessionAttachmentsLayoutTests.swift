@@ -1584,6 +1584,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
             pane.flushPendingHTMLNavigationForTesting()
             pane.view.layoutSubtreeIfNeeded()
+            if format == .mermaid { try settleMermaidPreview(in: pane) }
         }
         let coldSwitchEnded = DispatchTime.now().uptimeNanoseconds
 
@@ -1592,6 +1593,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
             pane.flushPendingHTMLNavigationForTesting()
             pane.view.layoutSubtreeIfNeeded()
+            if format == .mermaid { try settleMermaidPreview(in: pane) }
         }
         let warmSwitchEnded = DispatchTime.now().uptimeNanoseconds
         let warmDrawStarted = DispatchTime.now().uptimeNanoseconds
@@ -1937,8 +1939,23 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         case html
         case archive
         case document
+        /// DOT source: the read-only text preview at its byte cap.
         case diagram
+        /// Ordinary Mermaid diagrams. The reader renders after selection returns, so each switch
+        /// waits for the diagram to settle and the switch times are selection-to-diagram.
+        case mermaid
         case mixed
+    }
+
+    /// Spins the main run loop until the Mermaid reader has a diagram or its fallback on screen.
+    private func settleMermaidPreview(in pane: SessionAttachmentsViewController) throws {
+        let preview = try XCTUnwrap(pane.mermaidPreviewForTesting)
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline,
+              !(preview.state == .ready && !preview.isRendering) && preview.state != .sourceOnly {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.005))
+        }
+        XCTAssertEqual(preview.state, .ready, preview.rendererFailureForTesting ?? "Mermaid did not settle")
     }
 
     private func makeAttachmentStressFiles(
@@ -1987,7 +2004,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
                 try Data("{\\rtf1\\ansi \(paragraphs)}".utf8).write(to: url)
                 return url
             case .diagram:
-                let url = root.appendingPathComponent("stress-\(index).mmd")
+                let url = root.appendingPathComponent("stress-\(index).dot")
                 let line = "node\(index) --> node\(index + 1)\n"
                 let repetitions = max(
                     1,
@@ -1998,6 +2015,11 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
                     source = source.prefix(SessionAttachmentsDefaults.maximumSourcePreviewBytes - 1)
                 }
                 try source.write(to: url)
+                return url
+            case .mermaid:
+                let url = root.appendingPathComponent("stress-\(index).mmd")
+                let edges = (0..<40).map { "  N\($0)[\"Service \($0)\"] --> N\(($0 * 7 + index) % 40)" }
+                try Data((["graph LR"] + edges).joined(separator: "\n").utf8).write(to: url)
                 return url
             case .mixed:
                 preconditionFailure("mixed resolves to a concrete format before file creation")

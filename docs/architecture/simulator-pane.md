@@ -363,6 +363,22 @@ device chooser as recovery paths; its bounded stderr stays in the status tooltip
 selected UDID missing from current discovery is called unavailable before the lease manager can
 reuse a cached lease. Neither path guesses that a boot error means the device was deleted.
 
+**An unavailable device replaces its framebuffer with recovery.** An exact `simctl` refusal
+`Invalid device: <requested UDID>` becomes a typed unavailable-device error; generic boot and
+capture errors do not imply deletion. The pane stops transport, clears both pane and presenter
+pixels, and shows a `SimulatorRecoveryView` with Retry and Choose Simulator. Bounded technical
+output remains in the tooltip. Retry and agent preparation revalidate the same lease through
+discovery; a tab visibility change cannot revive a failed capability. The old lease retains its
+identity and release ownership until recovery or explicit replacement. Choosing a device refreshes
+the catalogue, replaces only that member, or selects the existing member if the device is already
+in the workspace. No replacement is automatic.
+
+Recovery extends the existing host-only lifecycle surface: themes style the Design component,
+while Threading owns availability, exact-device choice, lease refresh and input authority. It
+adds one lazy, fixed-size view per failed member (normally one, at most four in a workspace),
+updated only on state changes. Chooser discovery uses the existing off-main, 512-device-bounded
+catalogue once per explicit click; resize, frame callbacks and failed devices do not poll it.
+
 **Annotations have an explicit mode and a one-note gesture.** Option-click (or the screen menu's
 **Add Note Here**) pins a note through exactly the same bounded editor without enabling the
 persistent annotation mode or emitting device HID. The persistent mode selects its toolbar button

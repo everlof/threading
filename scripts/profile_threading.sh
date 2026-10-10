@@ -1850,7 +1850,7 @@ run_attachment_format_stress() {
     cd "${repository_directory}"
     build_macos_stress_test_bundle "${output_directory}"
 
-    local workloads=(image pdf html archive document diagram mixed)
+    local workloads=(image pdf html archive document diagram mermaid mixed)
     if [[ -n "${THREADING_ATTACHMENT_FORMAT_STRESS_KIND:-}" ]]; then
       workloads=("${THREADING_ATTACHMENT_FORMAT_STRESS_KIND}")
     fi

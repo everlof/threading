@@ -3330,6 +3330,9 @@ keys — when you prefer to write in the iOS text area and send the finished lin
 all TUIs on this device, including after restarting the app. **Settings → On this iPhone → Terminal keys**
 changes the same shared preference.
 
+In **Compose**, Paste inserts text at the cursor. Pasting a copied picture or file adds it to
+the attachment strip for your next message, just like **paperclip → From Clipboard**.
+
 When another reply-capable participant joins, the terminal temporarily uses **Compose**. The
 entire line and Return reach Claude Code or Codex as one PTY write, so another person cannot mix
 their keystrokes into yours. The key bar's controls remain immediate, and the terminal returns to
@@ -3844,9 +3847,12 @@ treated the same way: a visible tab that goes a few seconds without a new pictur
 to the screenshot preview and offers retry, rather than keeping a stale frame under a live label.
 The public screenshot fallback is view-only, so actual device input waits until the direct
 connection has recovered.
-If a device cannot start, the tab names it and offers Refresh or the device chip to choose another;
-hover the error for CoreSimulator's detail. If a saved device is gone, choose one that is still
-listed in the chip.
+If a device cannot start or becomes unavailable, its picture is replaced by a recovery panel.
+**Retry** checks the same device again; **Choose Simulator** refreshes Xcode's available devices
+and lets you choose a replacement, including in a workspace with several devices. Choosing a
+device already in that workspace selects its existing tile. Hover the recovery message or status
+for CoreSimulator's technical detail. Threading keeps the unavailable device's place until you
+choose a replacement or remove it from the workspace.
 
 **More tabs than fit scroll rather than shrink**, and the strip only answers what is meant for
 it. Swipe sideways over the tabs to move along them; a mouse wheel does the same, since sideways
@@ -4215,9 +4221,13 @@ it opens paused; press Play and it plays.
 
 **Mermaid diagrams render on the Mac** — select an `.mmd` or `.mermaid` attachment to see its
 diagram. Use **Diagram / Source** to inspect the original text, the magnifying glasses to zoom,
-and **Fit diagram to width** to reset the scale. Scroll to explore a large diagram. Rendering
-works offline with the renderer bundled in Threading. Invalid or oversized diagrams show their
-source with a notice. DOT/GV files continue to show source, and the iPhone shows diagram source.
+and **Fit diagram to width** to reset the scale. Scroll to explore a large diagram. Switching to
+another tab or session and back keeps your zoom, scroll position and Diagram/Source choice, and a
+diagram an agent rewrites while you are looking at it keeps your place too. Rendering works
+offline with the renderer bundled in Threading. Invalid or oversized diagrams, and files that are
+not UTF-8 text, show their source with a notice. Mindmap and architecture diagrams are not part of
+the bundled renderer, so they show their source too. DOT/GV files continue to show source, and
+the iPhone shows diagram source.
 
 **Movies play here too** — a screen recording, a simulator capture, a clip an agent produced.
 Selecting the row shows the first frame with a timeline under it, plus a speaker button when the
@@ -4239,10 +4249,17 @@ extension and the built-in preview comes back.
 
 Every row shows the picture itself and when it arrived, as a localized full date and time so files
 from different days or years never look contemporaneous. The iPhone's attachment list shows the
-same arrival date and time before the path. Rows are also marked **Agent** or **You**; when a session has both, a small
-**All / Agent / You** filter appears beside the count. It stays hidden while everything came from
-one side. A picture the agent shows opens this tab and selects its row, and resets that filter if it
-would have hidden it: being asked to show something outranks a filter you left set.
+same arrival date and time before the path. The **All / Main agent / You** filter separates agent
+output from your handoffs. After a thread has had a child agent, **Subagents** appears between
+Main agent and You and remains available after the children finish, even before they share a file.
+Otherwise the filter stays hidden while every attachment came from one side.
+
+Child references appear automatically in **All** and **Subagents**, using the same supported-file,
+finished-assistant-text and outside-project rules as the main agent. Rows name the child task in
+the detail line. When several agents reference the same file it remains one row, available under
+each relevant filter. Child output keeps the parent turn that delegated the work when that turn
+identity is available. A picture the agent shows opens this tab and selects its row, resetting a
+filter that would have hidden it.
 
 Files are separated into **Latest turn**, **Previous turn**, and older turn groups. Click a turn's
 chevron to collapse or expand it; the latest turn stays named even when it has no files, so the top

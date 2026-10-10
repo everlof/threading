@@ -1,0 +1,85 @@
+{
+  "dependencies": [
+    {
+      "name": "libuv",
+      "version": "1.53.0",
+      "license": "MIT AND BSD-2-Clause AND ISC",
+      "archive": "libuv-v1.53.0.tar.gz",
+      "root": "libuv-v1.53.0",
+      "url": "https://dist.libuv.org/dist/v1.53.0/libuv-v1.53.0.tar.gz",
+      "sha256": "cb0d6dd2128d5a95bd242c6cc982a24fe608fa93da57b6b4ec763b0018c53e64",
+      "notices": {
+        "LICENSE": "libuv-MIT.txt",
+        "LICENSE-extra": "libuv-LICENSE-extra.txt",
+        "LICENSE-docs": "libuv-LICENSE-docs.txt"
+      }
+    },
+    {
+      "name": "llhttp",
+      "version": "9.4.3",
+      "license": "MIT",
+      "archive": "llhttp-release-v9.4.3.tar.gz",
+      "root": "llhttp-release-v9.4.3",
+      "url": "https://codeload.github.com/nodejs/llhttp/tar.gz/refs/tags/release/v9.4.3",
+      "sha256": "1eb813c7437b31a87496a1cd3ed79f00746720f5e7e29c79b42c02cb69f36c39",
+      "notices": {
+        "LICENSE": "llhttp-MIT.txt",
+        "LICENSE-MIT": "llhttp-LICENSE-MIT.txt"
+      }
+    },
+    {
+      "name": "llhttp generator and tests (source only)",
+      "version": "9.4.3",
+      "license": "MIT",
+      "archive": "llhttp-source-v9.4.3.tar.gz",
+      "root": "llhttp-9.4.3",
+      "url": "https://codeload.github.com/nodejs/llhttp/tar.gz/refs/tags/v9.4.3",
+      "sha256": "d3897ec6263ba1eed13ecc37d54e9c42d6bb6f04c7852490bc8a7ef5326c53e1",
+      "notices": {
+        "LICENSE": "llhttp-MIT.txt"
+      }
+    },
+    {
+      "name": "Mbed TLS and TF-PSA-Crypto",
+      "version": "4.1.1",
+      "license": "Apache-2.0 (chosen from Apache-2.0 OR GPL-2.0-or-later)",
+      "archive": "mbedtls-4.1.1.tar.bz2",
+      "root": "mbedtls-4.1.1",
+      "url": "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-4.1.1/mbedtls-4.1.1.tar.bz2",
+      "sha256": "3359a349e23db3d5536fcee032ae7b2ecbfc08972fab643089b5cbf2a375c98c",
+      "notices": {
+        "LICENSE": "mbedtls-LICENSE.txt",
+        "tf-psa-crypto/LICENSE": "tf-psa-crypto-LICENSE.txt",
+        "framework/LICENSE": "mbedtls-framework-LICENSE.txt",
+        "tf-psa-crypto/framework/LICENSE": "tf-psa-framework-LICENSE.txt",
+        "tf-psa-crypto/drivers/pqcp/mldsa-native/LICENSE": "mldsa-native-LICENSE.txt",
+        "tf-psa-crypto/drivers/pqcp/mldsa-native/RELICENSE.md": "mldsa-native-RELICENSE.md",
+        "tf-psa-crypto/drivers/pqcp/mldsa-native/examples/custom_backend/mldsa_native/src/fips202/native/custom/src/LICENSE": "mldsa-example-LICENSE.txt"
+      }
+    },
+    {
+      "name": "cJSON",
+      "version": "1.7.19",
+      "license": "MIT",
+      "archive": "cjson-v1.7.19.tar.gz",
+      "root": "cJSON-1.7.19",
+      "url": "https://codeload.github.com/DaveGamble/cJSON/tar.gz/refs/tags/v1.7.19",
+      "sha256": "7fa616e3046edfa7a28a32d5f9eacfd23f92900fe1f8ccd988c1662f30454562",
+      "notices": {
+        "LICENSE": "cJSON-MIT.txt"
+      }
+    },
+    {
+      "name": "zlib",
+      "version": "1.3.2",
+      "license": "Zlib",
+      "archive": "zlib-1.3.2.tar.gz",
+      "root": "zlib-1.3.2",
+      "url": "https://zlib.net/fossils/zlib-1.3.2.tar.gz",
+      "sha256": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16",
+      "notices": {
+        "LICENSE": "zlib-LICENSE.txt"
+      }
+    }
+  ]
+}

@@ -48,6 +48,11 @@ enum MCPRemoteSessionToolScope {
              .simulatorTypeText, .simulatorPressButton, .listIOSDiagnosticDevices, .inspectIOSDiagnostics:
             return false
 
+        // The listener, trust bundle and exported certificate paths belong to this Mac.
+        case .trafficStart, .trafficStatus, .trafficStop, .trafficList, .trafficGet,
+             .trafficBody, .trafficHeaders, .trafficClear, .trafficCertificate:
+            return false
+
         case .panelListTabs, .panelActivateTab:
             return true
 

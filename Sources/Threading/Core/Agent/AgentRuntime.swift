@@ -945,7 +945,13 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             // An empty type is the parent reporting itself, never a child's role. Storing it
             // would put `""` on the descriptor and leave `displayName` guessing.
             role: report.subagentType.flatMap { $0.isEmpty ? nil : $0 },
-            path: report.subagentTranscriptPath
+            path: report.subagentTranscriptPath ?? (
+                stored.kind.supports(.checkoutScopedConversationStorage)
+                    ? report.transcriptPath.flatMap {
+                        ClaudeTranscript.subagentURL(childID: childID, root: URL(fileURLWithPath: $0))?.path
+                    }
+                    : nil
+            )
         )))
 
         switch report.event {
@@ -956,9 +962,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
                 message: nil
             ))
         case .subagentStopped:
-            let finalMessage = report.lastAssistantMessage.map(
-                SubagentDefaults.compactActivity
-            )
+            let finalMessage = report.lastAssistantMessage
             state.apply(.state(
                 threadID: childID,
                 status: .completed,
@@ -1196,6 +1200,29 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             store: SubagentStateStore.shared
         )
         subagentStates[sessionID] = state
+        let observation = SubagentAttachmentObserver(
+            sessionID: sessionID,
+            configuration: {
+                guard let session = ProjectStore.shared.session(withID: sessionID),
+                      let project = ProjectStore.shared.project(forSessionID: sessionID),
+                      !ProjectStore.shared.sessionRunsOnRemoteHost(sessionID) else { return nil }
+                return .init(kind: session.kind, projectRoot: URL(
+                    fileURLWithPath: session.workingDirectory(in: project), isDirectory: true
+                ))
+            },
+            currentTurnID: {
+                GitTurnBaselineStore.shared.activeCheckpoint(forSessionID: sessionID)?.userTurnID
+            },
+            isEnabled: {
+                guard let session = ProjectStore.shared.session(withID: sessionID) else { return false }
+                return AppSettings.shared.detectsAttachmentReferences(for: session.kind)
+            }
+        )
+        state.attachmentTurnID = {
+            GitTurnBaselineStore.shared.activeCheckpoint(forSessionID: sessionID)?.userTurnID
+        }
+        state.attachmentObserver = observation
+        observation.restore(state.timeline)
         return state
     }
 

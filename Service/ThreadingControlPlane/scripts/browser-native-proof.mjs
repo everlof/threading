@@ -27,6 +27,7 @@ const signals=new WebSocketServer({noServer:true,handleProtocols:protocols=>prot
 server.on('upgrade',(req,socket,head)=>signals.handleUpgrade(req,socket,head,ws=>{
   const path=new URL(req.url,origin).pathname;
   ws.on('message',data=>{
+    if(data.toString()==='threading-ping')return;
     const m=JSON.parse(data.toString());
     if(path==='/v1/rendezvous/host' && m.kind==='hostHello') {host=ws;send(ws,{kind:'hostReady',hostID:m.hostID});return;}
     if(path==='/join/rendezvous' && m.kind==='deviceConnect') {

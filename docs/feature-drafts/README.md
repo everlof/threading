@@ -38,6 +38,10 @@ reshuffling it is a line move.
 
 ### Now — in active design
 
+- [Linked Workrooms](linked-workrooms.md) — shared questions and decisions around an objective,
+  with optional links to tickets, documents, PRs and other context. Agents use scoped MCP tools;
+  people answer in an authenticated portal. The first Sonda pilot includes a room without a
+  ticket and keeps external publication reviewable.
 - [Host and agent diagnostics](host-agent-diagnostics.md) — agreed implementation plan for
   portable controller/ptyd health, Rindabox task explanations and incidents, Mac remote-host
   inspection, and independent Cloudflare outage emails for the VPS and an opted-in Mac.

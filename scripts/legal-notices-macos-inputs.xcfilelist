@@ -16,3 +16,4 @@ $(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-SOURCE.md
 $(SRCROOT)/Threading.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 $(SRCROOT)/scripts/check_bundled_licenses.sh
 $(SRCROOT)/scripts/embed_legal_notices.sh
+$(SRCROOT)/Targets/ProxyHost/THIRD_PARTY_NOTICES.md

@@ -3,12 +3,16 @@ import Foundation
 /// Agent requests contain content, never worker identity, recipients or destination authority.
 public enum ControllerAgentRequest: Codable, Sendable {
     case context
+    case workroomContext
+    case workroomLinks(after: Int64)
+    case workroomQuestions(after: Int64)
     case questions(after: Int64)
     case messages(after: Int64)
     case messageConsumed(id: UUID)
     case history(after: Int64)
     case checkpoint(text: String)
     case ask(id: QuestionID, text: String, checkpoint: String)
+    case askPresented(id: QuestionID, text: String, checkpoint: String, presentation: WorkQuestionPresentation)
     case finish(payload: String)
     case memoryList(after: Int64)
     case memoryGet(key: String)
@@ -26,6 +30,9 @@ public enum ControllerAgentRequest: Codable, Sendable {
 
 public struct ControllerAgentResponse: Codable, Sendable {
     public var work: WorkItem?
+    public var workroom: LinkedWorkroom?
+    public var workroomLinks: ControllerPage<WorkroomLink>?
+    public var workroomQuestions: ControllerPage<WorkQuestion>?
     public var messages: ControllerPage<WorkMessage>?
     public var message: WorkMessage?
     public var history: ControllerPage<WorkActivity>?
@@ -62,6 +69,9 @@ extension ControllerStore {
             case .ask(let id, let text, let checkpoint):
                 response.question = try ask(executionID: executionID, id: id, recipients: launch.spec.recipients,
                                             text: text, checkpoint: checkpoint)
+            case .askPresented(let id, let text, let checkpoint, let presentation):
+                response.question = try ask(executionID: executionID, id: id, recipients: launch.spec.recipients,
+                                            text: text, checkpoint: checkpoint, presentation: presentation)
             case .finish(let payload):
                 response.delivery = try finish(executionID: executionID, destination: launch.spec.destination, payload: payload)
             case .mailAsk(let recipient, let id, let text, let checkpoint):
@@ -73,6 +83,16 @@ extension ControllerStore {
                     response.work = work
                     response.agent = try agentIdentity(work.workerID)
                     response.memoryKeys = try memoryKeys(workerID: work.workerID)
+                case .workroomContext:
+                    guard let roomID = work.workroomID else { throw ControllerError.notFound }
+                    response.workroom = try workroom(roomID)
+                    response.workroomLinks = try workroomLinks(roomID: roomID)
+                case .workroomLinks(let after):
+                    guard let roomID = work.workroomID else { throw ControllerError.notFound }
+                    response.workroomLinks = try workroomLinks(roomID: roomID, after: after)
+                case .workroomQuestions(let after):
+                    guard let roomID = work.workroomID else { throw ControllerError.notFound }
+                    response.workroomQuestions = try workroomQuestions(roomID: roomID, after: after)
                 case .memoryList(let after): response.memoryKeys = try memoryKeys(workerID: work.workerID, after: after)
                 case .messages(let after): response.messages = try messages(workID: work.id, after: after)
                 case .messageConsumed(let id): response.message = try consumeMessage(executionID: executionID, id: id)
@@ -102,7 +122,7 @@ extension ControllerStore {
                     response.address = try executionAddress(executionID)
                     response.directory = try mailDirectory(executionID: executionID)
                 case .mailNotice(let event): response.notice = try mailNotice(executionID: executionID, event: event)
-                case .ask, .finish, .mailAsk: throw ControllerError.conflict
+                case .ask, .askPresented, .finish, .mailAsk: throw ControllerError.conflict
                 }
             }
             return response

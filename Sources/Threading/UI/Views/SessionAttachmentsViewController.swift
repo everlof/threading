@@ -142,6 +142,8 @@ final class SessionAttachmentsViewController: NSViewController {
     private var listItems: [SessionAttachmentTurnListItem] = []
     private var collapsedTurnSections: Set<SessionAttachmentTurnSection.ID> = []
     private var filter: AttachmentFilter = .all
+    private var availableFilters: [AttachmentFilter] = [.all, .agent, .user]
+    private let hasSubagents: () -> Bool
     private var selectedRelativePath: String?
     /// `selectRowIndexes` invokes the delegate synchronously. A refresh owns the one presentation
     /// after it has restored selection, so its delegate notification must not present the same
@@ -180,6 +182,7 @@ final class SessionAttachmentsViewController: NSViewController {
     private(set) var firstPreviewTimingForTesting: SessionAttachmentPreviewTiming?
     private(set) var latestPreviewTimingForTesting = SessionAttachmentPreviewTiming()
     private(set) var previewPresentationCountForTesting = 0
+    var mermaidPreviewForTesting: MermaidPreviewView? { mermaidPreview }
 
     /// The one row a caller has explicitly asked to be looking at, resolved on the next refresh.
     ///
@@ -216,12 +219,12 @@ final class SessionAttachmentsViewController: NSViewController {
     }()
     private lazy var filterControl: ThemedSegmentedControl = {
         let control = ThemedSegmentedControl()
-        control.configure(titles: AttachmentFilter.allCases.map(\.title))
+        control.configure(titles: availableFilters.map(\.title))
         control.setAccessibilityLabel(L10n.string("Show attachments from"))
         control.onSelect = { [weak self] index in
-            guard AttachmentFilter.allCases.indices.contains(index) else { return }
-            self?.filter = AttachmentFilter.allCases[index]
-            self?.refresh()
+            guard let self, self.availableFilters.indices.contains(index) else { return }
+            self.filter = self.availableFilters[index]
+            self.refresh()
         }
         control.translatesAutoresizingMaskIntoConstraints = false
         return control
@@ -469,10 +472,17 @@ final class SessionAttachmentsViewController: NSViewController {
 
     // MARK: - Initialization
 
-    init(sessionID: SessionID) {
+    init(sessionID: SessionID, hasSubagents: (() -> Bool)? = nil) {
         self.sessionID = sessionID
+        self.hasSubagents = hasSubagents ?? {
+            AgentRuntime.shared.subagentState(for: sessionID).timeline.hasAgents
+        }
         super.init(nibName: nil, bundle: nil)
 
+        appEvents.observe(SessionSubagentsDidAppear.self) { [weak self] event in
+            guard event.sessionID == self?.sessionID else { return }
+            self?.refresh()
+        }
         appEvents.observe(SessionAttachmentsDidChange.self) { [weak self] event in
             guard event.sessionID == self?.sessionID else { return }
             self?.refresh()
@@ -858,7 +868,7 @@ final class SessionAttachmentsViewController: NSViewController {
         updateScopeBand(count: listSnapshot.countOfFilesOutsideProject)
 
         let hasAttachments = !attachments.isEmpty
-        headerRow.isHidden = allAttachments.isEmpty
+        headerRow.isHidden = allAttachments.isEmpty && !availableFilters.contains(.subagents)
         scrollView.isHidden = !hasAttachments
         listFold.isHidden = !hasAttachments
         previewHost.isHidden = !hasAttachments
@@ -937,15 +947,25 @@ final class SessionAttachmentsViewController: NSViewController {
     /// offering no choice — and here it is also the common case, since most sessions exchange
     /// files in one direction only.
     private func updateFilterControl() {
-        let origins = Set(allAttachments.map(\.origin))
-        headerRow.setFilterHidden(origins.count < 2)
-        if filterControl.isHidden, filter != .all {
-            filter = .all
+        let includesChildren = hasSubagents() || allAttachments.contains {
+            $0.agentSources.contains { $0.threadID != nil }
         }
-        if let index = AttachmentFilter.allCases.firstIndex(of: filter) {
+        availableFilters = AttachmentFilter.visibleCases(hasSubagents: includesChildren)
+        let titles = availableFilters.map(\.title)
+        if filterControl.titles != titles { filterControl.configure(titles: titles) }
+        let populated = availableFilters.filter { choice in
+            choice != .all && allAttachments.contains(where: choice.admits)
+        }
+        // Once a child has existed, its empty bucket is useful too: the agent may still be
+        // working, and finishing must not make its filter vanish.
+        headerRow.setFilterHidden(!includesChildren && populated.count < 2)
+        if filterControl.isHidden || !availableFilters.contains(filter) { filter = .all }
+        if let index = availableFilters.firstIndex(of: filter) {
             filterControl.selectedIndex = index
         }
     }
+
+    var attachmentFilterControl: ThemedSegmentedControl { filterControl }
 
     /// The band appears only when the scope setting would change *this* session's list.
     ///
@@ -1042,7 +1062,7 @@ final class SessionAttachmentsViewController: NSViewController {
     /// pane while detection is off reads as "nothing was found", and an empty pane under a filter
     /// reads as "this session has no attachments" when the row you want is one click away.
     private func emptyStateMessage() -> String {
-        if !allAttachments.isEmpty, attachments.isEmpty {
+        if filter != .all, attachments.isEmpty {
             return L10n.format("Nothing here from %@.", filter.title)
         }
 
@@ -1284,16 +1304,10 @@ final class SessionAttachmentsViewController: NSViewController {
             timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
 
         case .diagram:
-            let suffix = attachment.url.pathExtension.lowercased()
-            if suffix == "mmd" || suffix == "mermaid" {
-                if let preview = mermaidPreview, !preview.isHidden, preview.currentURL == attachment.url {
-                    preview.refreshFile()
-                    return
-                }
-                hideInstalledPreviews()
-                let preview = installedMermaidPreview()
-                preview.isHidden = false
-                preview.display(attachment.url)
+            if MediaContentProbe.structuralHint(
+                forExtension: attachment.url.pathExtension.lowercased()
+            ) == .mermaid {
+                showMermaid(attachment, timing: &timing)
                 return
             }
             // A tighter cap than the general one: this lands in a text view, and a text view
@@ -1321,6 +1335,34 @@ final class SessionAttachmentsViewController: NSViewController {
             sourcePreview.isHidden = false
             timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
         }
+    }
+
+    /// The Mermaid reader's synchronous half. Reading, parsing and layout happen after this
+    /// returns — on a worker and in WebKit's content process — and the reader's own
+    /// "Mermaid Preview" span times them.
+    ///
+    /// Moving between two Mermaid rows keeps the reader, and with it the loaded canvas: hiding it
+    /// for one frame would release the page it is about to render into.
+    private func showMermaid(_ attachment: SessionAttachment, timing: inout SessionAttachmentPreviewTiming) {
+        timing.format = "mermaid"
+        let clearStarted = DispatchTime.now().uptimeNanoseconds
+        let installed = mermaidPreview.flatMap { $0.isHidden ? nil : $0 }
+        if let installed, installed.currentURL == attachment.url {
+            timing.clearNanoseconds = DispatchTime.now().uptimeNanoseconds - clearStarted
+            let presentStarted = DispatchTime.now().uptimeNanoseconds
+            installed.refreshFile()
+            timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
+            return
+        }
+        hideInstalledPreviews(keepingMermaid: installed != nil)
+        timing.clearNanoseconds = DispatchTime.now().uptimeNanoseconds - clearStarted
+        let installStarted = DispatchTime.now().uptimeNanoseconds
+        let preview = installedMermaidPreview()
+        timing.installNanoseconds = DispatchTime.now().uptimeNanoseconds - installStarted
+        let presentStarted = DispatchTime.now().uptimeNanoseconds
+        preview.isHidden = false
+        preview.display(attachment.url)
+        timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
     }
 
     // MARK: - Media
@@ -1700,17 +1742,17 @@ final class SessionAttachmentsViewController: NSViewController {
 
     /// Takes down everything the previous row put on screen, **and** abandons any offer still in
     /// flight for it.
-    private func hideInstalledPreviews() {
+    private func hideInstalledPreviews(keepingMermaid: Bool = false) {
         previewOffer.cancel()
         previewableAttachment = nil
         clearExtensionPreview()
-        hideNativePreviews()
+        hideNativePreviews(keepingMermaid: keepingMermaid)
     }
 
     /// The view work alone. Split out because an accepted extension body replaces the native
     /// fallback *while the offer that won is still the current one* — clearing the offer there
     /// would revoke the attachment handle the winner is about to resolve.
-    private func hideNativePreviews() {
+    private func hideNativePreviews(keepingMermaid: Bool = false) {
         imageView?.image = nil
         imageView?.isHidden = true
         imagePreviewStack?.isHidden = true
@@ -1719,8 +1761,10 @@ final class SessionAttachmentsViewController: NSViewController {
         documentView?.isHidden = true
         clearHTMLPreview()
         clearSourcePreview()
-        mermaidPreview?.clear()
-        mermaidPreview?.isHidden = true
+        if !keepingMermaid {
+            mermaidPreview?.clear()
+            mermaidPreview?.isHidden = true
+        }
         clearVideoPreview()
     }
 
@@ -2785,7 +2829,8 @@ final class SessionAttachmentRowView: NSTableCellView, ThemeDerivedContent {
         name.lineBreakMode = .byTruncatingMiddle
         name.translatesAutoresizingMaskIntoConstraints = false
 
-        let path = NSTextField(labelWithString: attachment.relativePath)
+        let path = NSTextField(labelWithString: attachment.referenceDetail)
+        path.toolTip = attachment.referenceDetail
         path.applyFont(.caption)
         path.textColor = Design.Text.tertiary
         path.lineBreakMode = .byTruncatingMiddle
@@ -2793,7 +2838,7 @@ final class SessionAttachmentRowView: NSTableCellView, ThemeDerivedContent {
 
         // Marked on every row rather than only on the user's, because a mark that appears on one
         // kind makes its absence carry meaning, and absence is exactly what nobody reads.
-        let origin = NSTextField(labelWithString: attachment.origin.title)
+        let origin = NSTextField(labelWithString: attachment.sourceTitle)
         origin.applyFont(.caption)
         origin.textColor = Design.Text.quaternary
         origin.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -2860,8 +2905,8 @@ final class SessionAttachmentRowView: NSTableCellView, ThemeDerivedContent {
             L10n.format(
                 "%@, from %@, %@, %@",
                 attachment.name,
-                attachment.origin.title,
-                attachment.relativePath,
+                attachment.sourceTitle,
+                attachment.referenceDetail,
                 moment.stringValue
             )
         )
@@ -3138,12 +3183,18 @@ enum AttachmentAction: String, CaseIterable {
 enum AttachmentFilter: CaseIterable {
     case all
     case agent
+    case subagents
     case user
+
+    static func visibleCases(hasSubagents: Bool) -> [Self] {
+        allCases.filter { hasSubagents || $0 != .subagents }
+    }
 
     var title: String {
         switch self {
         case .all: return L10n.string("All")
-        case .agent: return SessionAttachment.Origin.agent.title
+        case .agent: return L10n.string("Main agent")
+        case .subagents: return L10n.string("Subagents")
         case .user: return SessionAttachment.Origin.user.title
         }
     }
@@ -3151,7 +3202,8 @@ enum AttachmentFilter: CaseIterable {
     func admits(_ attachment: SessionAttachment) -> Bool {
         switch self {
         case .all: return true
-        case .agent: return attachment.origin == .agent
+        case .agent: return attachment.agentSources.contains { $0.threadID == nil }
+        case .subagents: return attachment.agentSources.contains { $0.threadID != nil }
         case .user: return attachment.origin == .user
         }
     }
@@ -3166,6 +3218,27 @@ extension SessionAttachment.Origin {
         case .agent: return L10n.string("Agent")
         case .user: return L10n.string("You")
         }
+    }
+}
+
+extension SessionAttachment {
+    var sourceTitle: String {
+        let children = agentSources.contains { $0.threadID != nil }
+        guard children else { return origin.title }
+        if origin == .user { return L10n.string("You + subagents") }
+        return agentSources.contains { $0.threadID == nil }
+            ? L10n.string("Main + subagents") : L10n.string("Subagents")
+    }
+
+    /// Keep the compact provenance mark aligned with other rows; task names use the flexible
+    /// detail line, with the full path and ownership retained in its tooltip and accessibility.
+    var referenceDetail: String {
+        let children = agentSources.compactMap { source -> String? in
+            guard let id = source.threadID else { return nil }
+            return "\(source.name ?? String(id.prefix(8))) [\(id.prefix(8))]"
+        }
+        guard !children.isEmpty else { return relativePath }
+        return children.joined(separator: ", ") + " · " + relativePath
     }
 }
 
@@ -3189,10 +3262,8 @@ enum SessionAttachmentsDefaults {
     static let playMarkIdentifier = "attachment.row.play"
     static let maximumPreviewFileBytes = 64 * 1024 * 1024
 
-    /// The diagram-source cap, far under the general one: source lands in a text view, and a
-    /// text view is bounded by what it must lay out, not by what the disk can hold. Any real
-    /// dot or Mermaid file is kilobytes.
-    static let maximumSourcePreviewBytes = 512 * 1024
+    /// The diagram-source cap — see `SessionAttachmentDefaults.maximumSourcePreviewBytes`.
+    static let maximumSourcePreviewBytes = SessionAttachmentDefaults.maximumSourcePreviewBytes
 
     /// How many pixels a row's thumbnail is decoded to, as a multiple of the well it sits in:
     /// enough for a Retina row, and nowhere near a full decode of the file behind it.

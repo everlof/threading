@@ -1352,6 +1352,7 @@
 				F6000001000000000000002 /* Sources */,
 				F3000001000000000000001 /* Frameworks */,
 				F6000001000000000000003 /* Resources */,
+				9F0900010000000000000001 /* Build and Embed Proxy */,
 				E77200010000000000000001 /* Embed Legal Notices */,
 				E77100010000000000000001 /* Embed Extension SDK */,
 				877EDD4F2A5B003140CB8A81 /* Embed Extension Helpers */,
@@ -1573,6 +1574,19 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		9F0900010000000000000001 /* Build and Embed Proxy */ = {
+            isa = PBXShellScriptBuildPhase;
+            alwaysOutOfDate = 1;
+            buildActionMask = 2147483647;
+            files = ();
+            inputPaths = ("$(SRCROOT)/Targets/ProxyHost", "$(SRCROOT)/scripts/embed_proxy_helper.sh");
+            name = "Build and Embed Proxy";
+            outputPaths = ("$(DERIVED_FILE_DIR)/ProxyHost", "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/threading-proxyd", "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ProxySource");
+            runOnlyForDeploymentPostprocessing = 0;
+            shellPath = /bin/bash;
+            shellScript = "\"${SRCROOT}/scripts/embed_proxy_helper.sh\"";
+        };
+
 		C0D3A1100000000000000001 /* Enforce Repository Boundaries */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;

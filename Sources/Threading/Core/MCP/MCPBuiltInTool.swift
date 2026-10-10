@@ -121,12 +121,16 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case listIOSDiagnosticDevices
   case inspectIOSDiagnostics
 
+  case trafficStart, trafficStatus, trafficStop, trafficList, trafficGet
+  case trafficBody, trafficHeaders, trafficClear, trafficCertificate
+
   enum Family: String, CaseIterable, Sendable {
     case continuation
     case display
     case browser
     case simulator
     case deviceLog
+    case networkTraffic
     case panel
     case project
     case session

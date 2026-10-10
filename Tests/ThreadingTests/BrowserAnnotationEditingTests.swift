@@ -13,8 +13,6 @@ final class BrowserAnnotationEditingTests: XCTestCase {
         try waitUntil { try self.script(browser, "window.scrollX === 240 && window.scrollY === 400") as? Bool == true }
 
         scroll.contentView.scroll(to: CGPoint(x: 180, y: 80))
-        browser.view.needsLayout = true
-        host.view.layoutSubtreeIfNeeded()
         XCTAssertEqual(scroll.contentView.bounds.origin, .zero)
         XCTAssertNil(browser.responsiveViewport)
         XCTAssertEqual(try script(browser, "window.scrollX") as? Double, 240)
@@ -430,8 +428,6 @@ final class BrowserAnnotationEditingTests: XCTestCase {
                 // every canonical render. The page and editor must stay inside this pane.
                 let scroll = try XCTUnwrap(browser.view.subviews.compactMap { $0 as? NSScrollView }.first)
                 scroll.contentView.scroll(to: CGPoint(x: 180, y: 80))
-                browser.view.needsLayout = true
-                host.view.layoutSubtreeIfNeeded()
                 XCTAssertEqual(scroll.contentView.bounds.origin, .zero)
                 XCTAssertTrue(overlay.bounds.contains(editor.frame), "Editor must stay inside compact viewports")
                 XCTAssertGreaterThan(editor.noteField.bounds.width, 200)

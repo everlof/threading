@@ -561,6 +561,13 @@ are projections of the descriptor, timeline and usage snapshot already in memory
 does not start another provider read or poll. Selection still changes only the transcript beneath
 the navigator, and a page still constructs at most 40 child rows.
 
+The same retained state owns `SubagentAttachmentObserver`. It routes eligible child output to the
+main agent's `AttachmentDetection`/`recordScanned` pipeline independently of whether a child pane
+is selected, and persists the delegating parent turn on the descriptor when known. A one-time
+`SessionSubagentsDidAppear` edge reveals the Attachments pane's child filter without refreshing
+that pane for every progress event. Provenance and scan bounds live in
+[mcp-and-display.md](mcp-and-display.md).
+
 Codex app-server reports child `thread/started`, `thread/status/changed`,
 `collabAgentToolCall`, and `subAgentActivity` events with real thread ids.
 `CodexSubagentEvent` translates those into `SubagentEvent`, including the child's complete

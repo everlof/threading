@@ -555,6 +555,7 @@ final class BrowserViewController: NSViewController {
     // MARK: - Web View
 
     private(set) lazy var webView = makePrimaryWebView()
+    private let viewportClipView = BrowserViewportClipView()
     private lazy var webViewHost: NSView = {
         let host = BrowserViewportCanvasView()
         host.translatesAutoresizingMaskIntoConstraints = false
@@ -562,6 +563,7 @@ final class BrowserViewController: NSViewController {
     }()
     private lazy var viewportScrollView: NSScrollView = {
         let scroll = ThemedScrollView()
+        scroll.contentView = viewportClipView
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.borderType = .noBorder
         scroll.drawsBackground = false
@@ -1107,6 +1109,7 @@ final class BrowserViewController: NSViewController {
     /// inside a narrow panel without the app window being resized under them.
     private func layoutWebViews(resetScrollPosition: Bool = false) {
         let pansViewport = agentViewportSize != nil
+        viewportClipView.allowsPanning = pansViewport
         if viewportScrollView.hasHorizontalScroller != pansViewport {
             viewportScrollView.hasHorizontalScroller = pansViewport
         }

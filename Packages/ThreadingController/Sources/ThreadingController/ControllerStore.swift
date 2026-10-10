@@ -120,15 +120,19 @@ public actor ControllerStore {
     /// Commits the question and checkpoint and yields this execution in ONE transaction.
     /// No synchronous wait and no process required to keep the question alive.
     public func ask(executionID: ExecutionID, id: QuestionID, recipients: [String],
-                    text: String, checkpoint: String) throws -> WorkQuestion {
-        try ask(executionID: executionID, id: id, recipients: recipients, text: text, checkpoint: checkpoint, allowAgentRecipient: false)
+                    text: String, checkpoint: String,
+                    presentation: WorkQuestionPresentation? = nil) throws -> WorkQuestion {
+        try ask(executionID: executionID, id: id, recipients: recipients, text: text,
+                checkpoint: checkpoint, presentation: presentation, allowAgentRecipient: false)
     }
     /// `agent:` recipients exist only through `askMail`, which sends the question as mail in the
     /// same transaction; the reply to that mail is the only way to answer one.
     func ask(executionID: ExecutionID, id: QuestionID, recipients: [String],
-             text: String, checkpoint: String, allowAgentRecipient: Bool) throws -> WorkQuestion {
+             text: String, checkpoint: String, presentation: WorkQuestionPresentation? = nil,
+             allowAgentRecipient: Bool) throws -> WorkQuestion {
         try Limits.text(text, field: "question")
         try Limits.text(checkpoint, field: "checkpoint")
+        try presentation?.validate()
         guard (1...32).contains(recipients.count), Set(recipients).count == recipients.count else {
             throw ControllerError.invalidInput("recipients")
         }
@@ -142,17 +146,20 @@ public actor ControllerStore {
             // A retry after losing the response returns the original committed question.
             if let prior: WorkQuestion = try optional("question", id.description) {
                 guard prior.executionID == executionID, prior.text == text,
-                      prior.recipients == recipients, prior.checkpoint == checkpoint else { throw ControllerError.conflict }
+                      prior.recipients == recipients, prior.checkpoint == checkpoint,
+                      prior.presentation == presentation else { throw ControllerError.conflict }
                 return prior
             }
             var (work, execution) = try running(executionID)
             let question = WorkQuestion(id: id, workID: work.id, executionID: executionID,
-                                        recipients: recipients, text: text, checkpoint: checkpoint, answer: nil, answeredBy: nil)
+                                        recipients: recipients, text: text, checkpoint: checkpoint,
+                                        presentation: presentation, answer: nil, answeredBy: nil)
             work.checkpoint = checkpoint
             work.state = .waiting
             work.executionID = nil
             execution.state = .yielded
             try insert("question", id.description, parent: work.id.description, state: "open", scope: work.workerID.description, value: question)
+            if let roomID = work.workroomID { try recordWorkroomQuestion(question, roomID: roomID) }
             try saveWork(work)
             try saveExecution(execution)
             try event("question.opened", id.description)
@@ -188,6 +195,8 @@ public actor ControllerStore {
             question.answeredBy = answeredBy
             work.state = .queued
             try update("question", questionID.description, state: "answered", value: question)
+            try db.run("UPDATE workroom_question SET state='answered' WHERE question=?",
+                       [.text(questionID.description)])
             try saveWork(work)
             try event("question.answered", questionID.description)
             try event("work.queued", work.id.description)

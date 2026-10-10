@@ -67,7 +67,7 @@ struct SessionAttachment: Equatable, Identifiable {
 
     /// Opaque identity used by notifications and remote fetches. A path remains presentation
     /// metadata; it is neither authority nor identity once two captures can come from one file.
-    let id: String
+    var id: String
 
     let sessionID: SessionID
 
@@ -82,7 +82,8 @@ struct SessionAttachment: Equatable, Identifiable {
     /// regenerated chart as a new row instead of refreshing the one already there.
     let sourcePath: String
     let kind: Kind
-    let origin: Origin
+    var origin: Origin
+    var agentSources: [AttachmentAgentSource]
 
     /// Whether this row only exists because the checkout rule was widened.
     ///
@@ -94,8 +95,8 @@ struct SessionAttachment: Equatable, Identifiable {
     let isOutsideProject: Bool
     /// Generated display output is copied once and never refreshed underneath its row.
     let isImmutableSnapshot: Bool
-    let turnID: String?
-    let turnPlacement: TurnPlacement
+    var turnID: String?
+    var turnPlacement: TurnPlacement
     let referencedAt: Date
 
     init(
@@ -107,6 +108,7 @@ struct SessionAttachment: Equatable, Identifiable {
         sourcePath: String,
         kind: Kind,
         origin: Origin,
+        agentSources: [AttachmentAgentSource]? = nil,
         isOutsideProject: Bool = false,
         isImmutableSnapshot: Bool = false,
         turnID: String? = nil,
@@ -121,6 +123,7 @@ struct SessionAttachment: Equatable, Identifiable {
         self.sourcePath = sourcePath
         self.kind = kind
         self.origin = origin
+        self.agentSources = agentSources ?? (origin == .agent ? [.main] : [])
         self.isOutsideProject = isOutsideProject
         self.isImmutableSnapshot = isImmutableSnapshot
         self.turnID = turnID
@@ -141,6 +144,7 @@ struct SessionAttachment: Equatable, Identifiable {
 struct WithheldAttachmentReference: Equatable {
     let path: String
     let kind: SessionAttachment.Kind
+    var context: AttachmentReferenceContext = .main
 }
 
 /// Raised after one session's attachment list changes.
@@ -233,7 +237,8 @@ final class SessionAttachmentStore {
     }
 
     /// Hosted tests exercise the shared store; the user's real database is not theirs to write.
-    static let shared: SessionAttachmentStore = {
+    // Replaceable for hosted shell fixtures that supply a deterministic clock and scratch custody.
+    static var shared: SessionAttachmentStore = {
         guard NSClassFromString("XCTestCase") == nil else {
             // The user's own database and attachment directory are not a test's to write, but
             // *refusing custody* is not the same as not writing: a store with nowhere to copy to
@@ -382,6 +387,7 @@ final class SessionAttachmentStore {
         resolved resolution: AttachmentReferenceDetector.Resolution,
         sessionID: SessionID,
         projectRoot: URL,
+        context: AttachmentReferenceContext = .main,
         shouldAdmit: @escaping @MainActor () -> Bool = { true }
     ) async -> ScannedRecordResult {
         let insideMainStarted = DispatchTime.now().uptimeNanoseconds
@@ -396,12 +402,14 @@ final class SessionAttachmentStore {
             resolution.insideProject,
             sessionID: sessionID,
             projectRoot: resolution.resolvedProjectRoot
-                ?? projectRoot.standardizedFileURL.resolvingSymlinksInPath()
+                ?? projectRoot.standardizedFileURL.resolvingSymlinksInPath(),
+            context: context
         )
         let insideMainNanoseconds = DispatchTime.now().uptimeNanoseconds - insideMainStarted
         let outside = await stageAndAdmitOutsideProject(
             resolution.outsideProject,
             sessionID: sessionID,
+            context: context,
             shouldAdmit: shouldAdmit
         )
         return ScannedRecordResult(
@@ -426,6 +434,7 @@ final class SessionAttachmentStore {
         return await stageAndAdmitOutsideProject(
             withheld.map { URL(fileURLWithPath: $0.path) },
             sessionID: sessionID,
+            context: nil,
             shouldAdmit: shouldAdmit
         )
     }
@@ -434,6 +443,7 @@ final class SessionAttachmentStore {
     private func stageAndAdmitOutsideProject(
         _ outsideProject: [URL],
         sessionID: SessionID,
+        context: AttachmentReferenceContext?,
         shouldAdmit: @escaping @MainActor () -> Bool
     ) async -> ScannedRecordResult {
         let firstMainStarted = DispatchTime.now().uptimeNanoseconds
@@ -445,8 +455,9 @@ final class SessionAttachmentStore {
                 mainActorNanoseconds: DispatchTime.now().uptimeNanoseconds - firstMainStarted
             )
         }
+        if let context { attributeExistingReferences(outsideProject, for: sessionID, context: context) }
         guard allowsFilesOutsideProject() else {
-            noteWithheld(outsideProject, for: sessionID)
+            if let context { noteWithheld(outsideProject, for: sessionID, context: context) }
             return ScannedRecordResult(
                 attachments: [],
                 custodyWorkerNanoseconds: 0,
@@ -491,7 +502,7 @@ final class SessionAttachmentStore {
         }
         guard allowsFilesOutsideProject() else {
             discard(staged)
-            noteWithheld(outsideProject, for: sessionID)
+            if let context { noteWithheld(outsideProject, for: sessionID, context: context) }
             return ScannedRecordResult(
                 attachments: [],
                 custodyWorkerNanoseconds: staged.workerNanoseconds,
@@ -505,6 +516,7 @@ final class SessionAttachmentStore {
             attempted: admissible,
             sessionID: sessionID,
             root: root,
+            context: context,
             referencedAt: timestamp
         )
         return ScannedRecordResult(
@@ -531,17 +543,23 @@ final class SessionAttachmentStore {
         // the tail is exactly the set that would have been left. Measured: this is most of the
         // difference between the two scopes (`attachment-stress`).
         let admissible = urls.suffix(SessionAttachmentDefaults.maximumPerSession)
-        let made = admissible.compactMap {
+        let contexts = Dictionary(uniqueKeysWithValues:
+            (withheldBySession[sessionID] ?? []).map { ($0.path, $0.context) })
+        let made = admissible.compactMap { url -> SessionAttachment? in
             // Straight to custody, not through `declaredAttachment`: these are outside the
             // checkout by construction, and copying is the whole reason they may be listed.
-            copiedAttachment(
-                at: $0,
+            guard var attachment = copiedAttachment(
+                at: url,
                 sessionID: sessionID,
                 origin: .agent,
                 preferredName: nil,
                 isOutsideProject: true,
                 referencedAt: timestamp
-            )
+            ) else { return nil }
+            let context = contexts[url.path] ?? .main
+            attachment.agentSources = context.sources
+            attachment.turnID = context.turnID
+            return attachment
         }
         // Cleared *before* admitting, not after, and that ordering is load-bearing: `admit`
         // announces the change synchronously, an open pane answers by refreshing, and a refresh
@@ -610,6 +628,7 @@ final class SessionAttachmentStore {
         attempted: [URL],
         sessionID: SessionID,
         root: URL,
+        context: AttachmentReferenceContext?,
         referencedAt: Date
     ) -> [SessionAttachment] {
         var made: [SessionAttachment] = []
@@ -621,7 +640,10 @@ final class SessionAttachmentStore {
             }
             existingBySource[existing.sourcePath] = existing
         }
+        let withheldContexts = Dictionary(uniqueKeysWithValues:
+            (withheldBySession[sessionID] ?? []).map { ($0.path, $0.context) })
         for copy in staged {
+            let attribution = context ?? withheldContexts[copy.source.path] ?? .main
             let existing = existingBySource[copy.source.path]
 
             let destination: URL
@@ -657,7 +679,9 @@ final class SessionAttachmentStore {
                 sourcePath: copy.source.path,
                 kind: copy.kind,
                 origin: origin,
+                agentSources: attribution.sources,
                 isOutsideProject: isOutsideProject,
+                turnID: attribution.turnID,
                 referencedAt: referencedAt
             ))
         }
@@ -680,7 +704,8 @@ final class SessionAttachmentStore {
     private func recordResolvedInsideProject(
         _ urls: [URL],
         sessionID: SessionID,
-        projectRoot: URL
+        projectRoot: URL,
+        context: AttachmentReferenceContext
     ) -> [SessionAttachment] {
         let timestamp = now()
         let rootPrefix = projectRoot.path.hasSuffix("/")
@@ -704,6 +729,8 @@ final class SessionAttachmentStore {
                     sourcePath: url.path,
                     kind: kind,
                     origin: .agent,
+                    agentSources: context.sources,
+                    turnID: context.turnID,
                     referencedAt: timestamp
                 )
             }
@@ -955,7 +982,10 @@ final class SessionAttachmentStore {
     /// Bounded like the list itself, newest first, and deduplicated against what is already
     /// listed: a file the user declared from `$TMPDIR` is in the pane already, and counting it
     /// again as withheld would offer to reveal something that is not hidden.
-    private func noteWithheld(_ urls: [URL], for sessionID: SessionID) {
+    private func noteWithheld(
+        _ urls: [URL], for sessionID: SessionID,
+        context: AttachmentReferenceContext = .main
+    ) {
         loadIfNeeded(sessionID)
         let listed = Set((attachmentsBySession[sessionID] ?? []).map(\.sourcePath))
         var current = withheldBySession[sessionID] ?? []
@@ -969,12 +999,18 @@ final class SessionAttachmentStore {
         // is quadratic in what an agent happened to print, and it showed: it made refusing a
         // buffer twice as expensive as admitting one (`attachment-stress`).
         for url in urls.suffix(SessionAttachmentDefaults.maximumWithheldPerSession) {
+            if let index = current.firstIndex(where: { $0.path == url.path }) {
+                let merged = current[index].context.merging(context)
+                changed = changed || merged != current[index].context
+                current[index].context = merged
+                continue
+            }
             guard !listed.contains(url.path),
                   held.insert(url.path).inserted,
                   let kind = AttachmentReferenceDetector.kind(for: url) else {
                 continue
             }
-            current.insert(WithheldAttachmentReference(path: url.path, kind: kind), at: 0)
+            current.insert(WithheldAttachmentReference(path: url.path, kind: kind, context: context), at: 0)
             changed = true
         }
         guard changed else { return }
@@ -987,6 +1023,27 @@ final class SessionAttachmentStore {
         withheldBySession[sessionID] = current
         // The pane's footer is drawn from this count, so a refusal is a change to what the
         // session has to show even though nothing entered the list.
+        NotificationCenter.default.post(SessionAttachmentsDidChange(sessionID: sessionID))
+    }
+
+    /// Referencing an already admitted file adds provenance without widening file authority or
+    /// recopying a deliberate handoff while outside-project discovery is disabled.
+    private func attributeExistingReferences(
+        _ urls: [URL], for sessionID: SessionID, context: AttachmentReferenceContext
+    ) {
+        loadIfNeeded(sessionID)
+        guard var rows = attachmentsBySession[sessionID] else { return }
+        let paths = Set(urls.map(\.path))
+        var changed = false
+        for index in rows.indices where !rows[index].isImmutableSnapshot && paths.contains(rows[index].sourcePath) {
+            let merged = AttachmentAgentSource.merged(rows[index].agentSources, context.sources)
+            guard merged != rows[index].agentSources else { continue }
+            rows[index].agentSources = merged
+            changed = true
+        }
+        guard changed else { return }
+        attachmentsBySession[sessionID] = rows
+        persist(rows, for: sessionID)
         NotificationCenter.default.post(SessionAttachmentsDidChange(sessionID: sessionID))
     }
 
@@ -1048,7 +1105,25 @@ final class SessionAttachmentStore {
         for (index, attachment) in made.enumerated() where !attachment.isImmutableSnapshot {
             winningMutableIndex[attachment.sourcePath] = index
         }
-        let survivingMade = made.enumerated().compactMap { index, attachment in
+        let currentBySource = Dictionary(
+            current.filter { !$0.isImmutableSnapshot }.map { ($0.sourcePath, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let attributed = made.map { incoming -> SessionAttachment in
+            guard !incoming.isImmutableSnapshot,
+                  let previous = currentBySource[incoming.sourcePath] else { return incoming }
+            var merged = incoming
+            merged.id = previous.id
+            merged.turnID = incoming.turnID ?? previous.turnID
+            merged.agentSources = AttachmentAgentSource.merged(previous.agentSources, incoming.agentSources)
+            if previous.origin == .user {
+                merged.origin = .user
+                merged.turnID = previous.turnID
+                merged.turnPlacement = previous.turnPlacement
+            }
+            return merged
+        }
+        let survivingMade = attributed.enumerated().compactMap { index, attachment in
             attachment.isImmutableSnapshot || winningMutableIndex[attachment.sourcePath] == index
                 ? attachment
                 : nil
@@ -1097,7 +1172,7 @@ final class SessionAttachmentStore {
         }
         persist(admitted, for: sessionID)
         NotificationCenter.default.post(SessionAttachmentsDidChange(sessionID: sessionID))
-        return made
+        return attributed
     }
 
     // MARK: Reading
@@ -1158,6 +1233,7 @@ final class SessionAttachmentStore {
                 sessionID: sessionID,
                 root: $0.root,
                 origin: $0.origin,
+                agentSources: $0.agentSources,
                 sourcePath: $0.sourcePath,
                 isOutsideProject: $0.isOutsideProject,
                 id: $0.id,
@@ -1211,6 +1287,7 @@ final class SessionAttachmentStore {
                 sourcePath: attachment.sourcePath,
                 kind: attachment.kind,
                 origin: attachment.origin,
+                agentSources: attachment.agentSources,
                 isOutsideProject: attachment.isOutsideProject,
                 isImmutableSnapshot: attachment.isImmutableSnapshot,
                 turnID: turnID,
@@ -1275,6 +1352,32 @@ final class SessionAttachmentStore {
     private static let encoder = JSONEncoder()
     private static let decoder = JSONDecoder()
 
+    /// A later provider descriptor can name a child that was initially known only by id. Repair
+    /// that metadata without rereading files, changing chronology or recopying attachments.
+    func updateAgentSource(_ source: AttachmentAgentSource, for sessionID: SessionID) {
+        guard let threadID = source.threadID else { return }
+        loadIfNeeded(sessionID)
+        var rows = attachmentsBySession[sessionID] ?? []
+        var changed = false
+        for index in rows.indices {
+            guard let sourceIndex = rows[index].agentSources.firstIndex(where: { $0.threadID == threadID }),
+                  rows[index].agentSources[sourceIndex] != source else { continue }
+            rows[index].agentSources[sourceIndex] = source
+            changed = true
+        }
+        if var withheld = withheldBySession[sessionID] {
+            for index in withheld.indices {
+                guard let sourceIndex = withheld[index].context.sources.firstIndex(where: { $0.threadID == threadID }) else { continue }
+                withheld[index].context.sources[sourceIndex] = source
+            }
+            withheldBySession[sessionID] = withheld
+        }
+        guard changed else { return }
+        attachmentsBySession[sessionID] = rows
+        persist(rows, for: sessionID)
+        NotificationCenter.default.post(SessionAttachmentsDidChange(sessionID: sessionID))
+    }
+
     /// Fills a session's list from the store once. Entries are not validated here — reading
     /// already validates on every access, and a file deleted while the app was closed should
     /// fall out the same way as one deleted while it ran.
@@ -1316,6 +1419,7 @@ final class SessionAttachmentStore {
                 sourcePath: entry.sourcePath ?? url.path,
                 kind: kind,
                 origin: entry.origin ?? .agent,
+                agentSources: entry.agentSources,
                 // A payload written before the scope was configurable holds only files that
                 // passed the narrow rule, so absent reads as "inside" rather than as unknown.
                 isOutsideProject: entry.isOutsideProject ?? false,
@@ -1340,6 +1444,7 @@ final class SessionAttachmentStore {
                 sourcePath: $0.sourcePath,
                 kind: $0.kind,
                 origin: $0.origin,
+                agentSources: $0.agentSources,
                 isOutsideProject: $0.isOutsideProject ? true : nil,
                 isImmutableSnapshot: $0.isImmutableSnapshot ? true : nil,
                 turnID: $0.turnID,
@@ -1373,6 +1478,7 @@ final class SessionAttachmentStore {
         sessionID: SessionID,
         root: URL,
         origin: SessionAttachment.Origin,
+        agentSources: [AttachmentAgentSource]? = nil,
         sourcePath: String? = nil,
         isOutsideProject: Bool = false,
         id: String? = nil,
@@ -1403,6 +1509,7 @@ final class SessionAttachmentStore {
             sourcePath: sourcePath ?? file.path,
             kind: kind,
             origin: origin,
+            agentSources: agentSources,
             isOutsideProject: isOutsideProject,
             isImmutableSnapshot: isImmutableSnapshot,
             turnID: turnID,
@@ -2420,6 +2527,15 @@ final class TerminalTranscriptAttachmentObserver {
     private let transcriptURL: () -> URL?
     private let transcriptLookup: () -> TranscriptURLLookup?
     private let isEnabled: () -> Bool
+    private let context: () -> AttachmentReferenceContext
+    private let isChild: Bool
+    private let store: SessionAttachmentStore
+    private var activeScan: Task<Void, Never>?
+    private var pendingInput: (
+        generation: Int, transcript: URL?, lookup: TranscriptURLLookup?, message: String?, force: Bool
+    )?
+    private var isInvalidated = false
+    private var transcriptSignature: AttachmentDetectionWorker.TranscriptSignature?
 
     private var generation = 0
     private var pendingScans: [Task<Void, Never>] = []
@@ -2432,7 +2548,10 @@ final class TerminalTranscriptAttachmentObserver {
         currentDirectory: @escaping () -> URL?,
         transcriptURL: @escaping () -> URL?,
         transcriptLookup: @escaping () -> TranscriptURLLookup? = { nil },
-        isEnabled: @escaping () -> Bool = { true }
+        isEnabled: @escaping () -> Bool = { true },
+        context: @escaping () -> AttachmentReferenceContext = { .main },
+        isChild: Bool = false,
+        store: SessionAttachmentStore = .shared
     ) {
         self.sessionID = sessionID
         self.kind = kind
@@ -2441,10 +2560,14 @@ final class TerminalTranscriptAttachmentObserver {
         self.transcriptURL = transcriptURL
         self.transcriptLookup = transcriptLookup
         self.isEnabled = isEnabled
+        self.context = context
+        self.isChild = isChild
+        self.store = store
     }
 
     deinit {
         pendingScans.forEach { $0.cancel() }
+        activeScan?.cancel()
     }
 
     /// Starts a new bounded scan generation for the turn that just settled.
@@ -2456,9 +2579,11 @@ final class TerminalTranscriptAttachmentObserver {
         pendingScans.forEach { $0.cancel() }
         pendingScans.removeAll(keepingCapacity: true)
         generation += 1
+        pendingInput = nil
+        transcriptSignature = nil
         pathsRecordedThisTurn.removeAll(keepingCapacity: true)
 
-        guard isEnabled() else { return }
+        guard !isInvalidated, isEnabled() else { return }
         let thisGeneration = generation
         // Capture the provider identity before a terminating process clears its per-launch
         // caches. The file itself remains live for the delayed stability reads.
@@ -2480,79 +2605,102 @@ final class TerminalTranscriptAttachmentObserver {
                     generation: thisGeneration,
                     transcript: transcript,
                     transcriptLookup: lookup,
-                    lastAssistantMessage: lastAssistantMessage
+                    lastAssistantMessage: lastAssistantMessage,
+                    force: true
                 )
             }
             pendingScans.append(work)
         }
     }
 
+    func invalidate() {
+        isInvalidated = true
+        generation += 1
+        pendingInput = nil
+        pendingScans.forEach { $0.cancel() }
+        activeScan?.cancel()
+    }
+
+    /// Reuses the current generation for live child output. One scan can be active, with one
+    /// latest rescan request; repeated polling neither accumulates work nor reorders old files.
+    func noteTranscriptChanged() {
+        scan(generation: generation, transcript: transcriptURL(),
+             transcriptLookup: transcriptLookup(), lastAssistantMessage: nil)
+    }
+
     private func scan(
         generation expectedGeneration: Int,
         transcript: URL?,
         transcriptLookup: TranscriptURLLookup?,
-        lastAssistantMessage: String?
+        lastAssistantMessage: String?,
+        force: Bool = false
     ) {
-        guard generation == expectedGeneration,
-              isEnabled(),
+        guard !isInvalidated, generation == expectedGeneration, isEnabled(),
               let root = projectRoot() else { return }
-
+        guard activeScan == nil else {
+            pendingInput = (expectedGeneration, transcript, transcriptLookup,
+                            lastAssistantMessage ?? pendingInput?.message, force || pendingInput?.force == true)
+            return
+        }
         let current = currentDirectory()
+        let attribution = context()
         let kind = kind
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let resolvedTranscript = transcript ?? transcriptLookup?()
-            var texts = resolvedTranscript.map {
-                TranscriptReplay.latestAssistantTexts(
-                    at: $0,
-                    kind: kind,
-                    scanLimit: TranscriptAttachmentDefaults.transcriptScanBytes
-                )
-            } ?? []
-            if let lastAssistantMessage, !lastAssistantMessage.isEmpty {
-                texts.append(lastAssistantMessage)
-            }
-            guard !texts.isEmpty else { return }
-
-            let resolution = AttachmentReferenceDetector.resolve(
-                text: texts.joined(separator: "\n"),
-                projectRoot: root,
-                currentDirectory: current
+        let isChild = isChild
+        let previousSignature = force ? nil : transcriptSignature
+        activeScan = Task { [weak self] in
+            let prepared = await AttachmentDetectionWorker.shared.transcriptReferences(
+                at: transcript, lookup: transcriptLookup, kind: kind, isChild: isChild,
+                lastAssistantMessage: lastAssistantMessage, projectRoot: root,
+                currentDirectory: current, previousSignature: previousSignature
             )
-            guard !resolution.isEmpty else { return }
-
-            Task { @MainActor [weak self] in
-                guard let self,
-                      self.generation == expectedGeneration,
-                      self.isEnabled() else { return }
-
-                let fresh = AttachmentReferenceDetector.Resolution(
-                    insideProject: resolution.insideProject.filter {
-                        self.pathsRecordedThisTurn.insert($0.path).inserted
-                    },
-                    outsideProject: resolution.outsideProject.filter {
-                        self.pathsRecordedThisTurn.insert($0.path).inserted
-                    },
-                    resolvedProjectRoot: resolution.resolvedProjectRoot
-                )
-                guard !fresh.isEmpty else { return }
-                _ = await SessionAttachmentStore.shared.recordScanned(
-                    resolved: fresh,
-                    sessionID: self.sessionID,
-                    projectRoot: root,
-                    shouldAdmit: { [weak self] in
-                        guard let self else { return false }
-                        return self.generation == expectedGeneration && self.isEnabled()
-                    }
-                )
+            guard let self else { return }
+            defer {
+                self.activeScan = nil
+                if let pending = self.pendingInput {
+                    self.pendingInput = nil
+                    self.scan(generation: pending.generation, transcript: pending.transcript,
+                              transcriptLookup: pending.lookup, lastAssistantMessage: pending.message,
+                              force: pending.force)
+                }
             }
+            guard !Task.isCancelled, self.generation == expectedGeneration, self.isEnabled() else { return }
+            self.transcriptSignature = prepared.signature
+            let resolution = prepared.resolution
+            let fresh = AttachmentReferenceDetector.Resolution(
+                insideProject: resolution.insideProject.filter {
+                    self.pathsRecordedThisTurn.insert($0.path).inserted
+                },
+                outsideProject: resolution.outsideProject.filter {
+                    self.pathsRecordedThisTurn.insert($0.path).inserted
+                },
+                resolvedProjectRoot: resolution.resolvedProjectRoot
+            )
+            if self.pathsRecordedThisTurn.count > SessionAttachmentDefaults.rememberedScannedPaths {
+                self.pathsRecordedThisTurn = Set((resolution.insideProject + resolution.outsideProject).map(\.path))
+            }
+            guard !fresh.isEmpty else { return }
+            _ = await self.store.recordScanned(
+                resolved: fresh, sessionID: self.sessionID, projectRoot: root,
+                context: attribution,
+                shouldAdmit: { [weak self] in
+                    guard let self else { return false }
+                    return self.generation == expectedGeneration && self.isEnabled()
+                }
+            )
         }
     }
+
 }
 
 // MARK: - Defaults
 
 enum SessionAttachmentDefaults {
     static let maximumPerSession = 64
+
+    /// The diagram-source cap, far under the general preview ceiling: source lands in a text view,
+    /// and a text view is bounded by what it must lay out, not by what the disk can hold. Any real
+    /// dot or Mermaid file is kilobytes. The DOT/GV text preview and the Mermaid reader share it.
+    static let maximumSourcePreviewBytes = 512 * 1024
 
     /// How many refused paths one session remembers. Smaller than the list itself on purpose:
     /// this is a *hint* about a setting, not a queue, and "12 files outside this project" and

@@ -77,6 +77,20 @@ final class SimulatorWorkspaceTests: HostedStoreTestCase {
         XCTAssertTrue(try workspace.adopt(device(1)) === original)
     }
 
+    func testRecoveryChoiceOfAnExistingMemberSelectsItWithoutDuplicatingTheDevice() throws {
+        let workspace = SimulatorWorkspaceViewController(state: SimulatorWorkspaceState(deviceID: device(1))) { id in
+            SimulatorPaneViewController(preferredDeviceID: id, isWorkspaceMember: true, control: WorkspaceControlFake())
+        }
+        defer { workspace.terminate() }
+        let original = workspace.selectedSimulator
+        let second = try workspace.adopt(device(2))
+        workspace.select(workspace.state.members[0].id)
+        original.selectRecoveryDevice(device(2))
+        XCTAssertTrue(workspace.selectedSimulator === second)
+        XCTAssertEqual(workspace.state.members.compactMap(\.deviceID), [device(1), device(2)])
+        XCTAssertEqual(original.selectedDeviceID, device(1))
+    }
+
     func testSharedHardwareControlsKeepFullTargetsAtNarrowWidths() {
         let buttons = (0..<6).map { index in
             ThemedIconButton(symbolName: "house", accessibility: "Button \(index)", target: .device, inkSource: .chrome)

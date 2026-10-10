@@ -436,7 +436,7 @@
       "priority": "critical",
       "title": "Adopted iOS Simulator pane",
       "description": "The production conversation/window/display shell with one to four exact Simulator devices, adaptive portrait rows and landscape columns, mixed orientations, Grid and Focus.",
-      "states": ["Booted device", "In-panel framebuffer", "Device identity", "Preview fallback", "Device Logs shortcut", "Control-held Copy Snapshot", "Annotation mode", "Option-click note editor", "Portrait pair", "Landscape pair", "Mixed orientations", "Three devices", "Four-device grid", "Focused device"],
+      "states": ["Booted device", "In-panel framebuffer", "Device identity", "Preview fallback", "Device Logs shortcut", "Control-held Copy Snapshot", "Annotation mode", "Option-click note editor", "Portrait pair", "Landscape pair", "Mixed orientations", "Three devices", "Four-device grid", "Focused device", "Unavailable device recovery"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark"],
@@ -1364,7 +1364,8 @@
         "themes": [
           "System",
           "Cyberpunk",
-          "Windows 98"
+          "Windows 98",
+          "Amiga"
         ],
         "appearances": [
           "Light",
@@ -1381,6 +1382,27 @@
       },
       "capture": {
         "glob": "attachment-mermaid-*.png"
+      }
+    },
+    {
+      "id": "attachment-subagents",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Subagent attachment provenance",
+      "description": "The shipping Attachments tab with conditional child filtering, shared-file provenance and child task names.",
+      "states": ["No child yet", "Completed child without files", "All origins", "Subagents selected", "Shared main/child reference"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Windows 98"],
+        "appearances": ["Light", "Dark", "Theme-authored"],
+        "sizes": ["Shipping main-window display pane"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SubagentAttachmentTests.swift",
+        "test": "ThreadingTests/SubagentAttachmentTests/testRendersSubagentAttachmentsInShippingShell"
+      },
+      "capture": {
+        "glob": "attachment-subagents-*.png"
       }
     },
     {

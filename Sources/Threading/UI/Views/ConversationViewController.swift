@@ -3389,41 +3389,15 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             return
         }
 
-        let texts: [String]
-        switch event {
-        case .assistantMessage(let blocks):
-            texts = blocks.compactMap {
-                if case .text(let text) = $0 { return text }
-                return nil
-            }
-        case .turnFinished(let text, _, _):
-            texts = text.map { [$0] } ?? []
-        default:
-            return
-        }
-
-        let root = URL(
-            fileURLWithPath: session.workingDirectory(in: project),
-            isDirectory: true
-        )
-        let scanned = texts.joined(separator: "\n")
+        let texts = AttachmentDetection.assistantTexts(in: event)
+        guard !texts.isEmpty else { return }
+        let root = URL(fileURLWithPath: session.workingDirectory(in: project), isDirectory: true)
         let sessionID = sessionID
-        let agentKindRawValue = session.kind.rawValue
-        Task.detached(priority: .userInitiated) {
-            let resolution = AttachmentReferenceDetector.resolve(
-                text: scanned,
-                projectRoot: root,
-                currentDirectory: nil
-            )
-            guard !resolution.isEmpty, !Task.isCancelled else { return }
-            _ = await SessionAttachmentStore.shared.recordScanned(
-                resolved: resolution,
-                sessionID: sessionID,
-                projectRoot: root,
-                shouldAdmit: {
-                    guard let kind = AgentKind(rawValue: agentKindRawValue) else { return false }
-                    return AppSettings.shared.detectsAttachmentReferences(for: kind)
-                }
+        let kind = session.kind
+        Task {
+            await AttachmentDetection.record(
+                texts: texts, sessionID: sessionID, projectRoot: root,
+                shouldAdmit: { AppSettings.shared.detectsAttachmentReferences(for: kind) }
             )
         }
     }

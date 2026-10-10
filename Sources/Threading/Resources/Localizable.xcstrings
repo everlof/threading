@@ -14271,6 +14271,17 @@
         }
       }
     },
+    "Clear captured traffic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rensa insamlad trafik"
+          }
+        }
+      }
+    },
     "Clear site data" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19393,6 +19404,17 @@
         }
       }
     },
+    "Debug HTTP and selected HTTPS requests with a session-owned proxy." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Felsök HTTP och valda HTTPS-anrop med en proxy för sessionen."
+          }
+        }
+      }
+    },
     "Debug experiment using only a disposable Keychain credential. Requires a paired iPhone on a pinned HTTPS connection." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -22869,6 +22891,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Exportera jämförelsen"
+          }
+        }
+      }
+    },
+    "Export inspection certificate" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exportera inspektionscertifikat"
           }
         }
       }
@@ -27723,6 +27756,17 @@
         }
       }
     },
+    "Inspect captured exchange" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Granska insamlat anrop"
+          }
+        }
+      }
+    },
     "Inspect elements" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30317,6 +30361,17 @@
         }
       }
     },
+    "List captured traffic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lista insamlad trafik"
+          }
+        }
+      }
+    },
     "List components" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31181,6 +31236,23 @@
         }
       }
     },
+    "Main + subagents" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Main + subagents"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Huvudagent + underagenter"
+          }
+        }
+      }
+    },
     "Main agent" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32013,6 +32085,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sammanslagen med %@"
+          }
+        }
+      }
+    },
+    "MermaidPreviewView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MermaidPreviewView"
           }
         }
       }
@@ -33225,6 +33308,17 @@
         }
       }
     },
+    "Network traffic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nätverkstrafik"
+          }
+        }
+      }
+    },
     "Never" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34131,6 +34225,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inga automatiseringar"
+          }
+        }
+      }
+    },
+    "No available iOS Simulator device is installed in Xcode." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No available iOS Simulator device is installed in Xcode."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen tillgänglig iOS-simulator är installerad i Xcode."
           }
         }
       }
@@ -41700,6 +41811,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Läs en semantisk sideträd med stabila referenser för interaktion."
+          }
+        }
+      }
+    },
+    "Read captured body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs insamlat innehåll"
+          }
+        }
+      }
+    },
+    "Read captured header" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs insamlat huvud"
           }
         }
       }
@@ -51035,6 +51168,23 @@
         }
       }
     },
+    "Simulator unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulator unavailable"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorn är inte tillgänglig"
+          }
+        }
+      }
+    },
     "SimulatorHardwareControlsView" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -52214,6 +52364,17 @@
         }
       }
     },
+    "Start traffic capture" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starta trafikinsamling"
+          }
+        }
+      }
+    },
     "Start using Threading" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -52800,6 +52961,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stoppa den här bakgrundssessionen och behåll dess transkript"
+          }
+        }
+      }
+    },
+    "Stop traffic capture" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppa trafikinsamling"
           }
         }
       }
@@ -54551,6 +54723,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1Password-objektet länkades inte"
+          }
+        }
+      }
+    },
+    "The Attachments reader for a Mermaid file, offline: the diagram fitted to the width, with Diagram/Source and zoom around a canvas that reads a real file. Zoom in, scroll, and switch to Source and back; in the pane, a hidden reader releases its canvas but keeps all three for when it returns." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bilagornas läsare för en Mermaid-fil, offline: diagrammet anpassat till bredden, med Diagram/Källa och zoom kring en yta som läser en riktig fil. Zooma in, skrolla och växla till Källa och tillbaka; i panelen släpper en dold läsare sin yta men behåller alla tre till den visas igen."
           }
         }
       }
@@ -60915,6 +61098,23 @@
         }
       }
     },
+    "This diagram is not UTF-8 text. Showing source." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This diagram is not UTF-8 text. Showing source."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagrammet är inte UTF-8-text. Visar källan."
+          }
+        }
+      }
+    },
     "This diagram is too large to render. Showing source." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -61859,6 +62059,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading kan inte avgöra om sessionen arbetar, så den slutar bara leverera meddelanden."
+          }
+        }
+      }
+    },
+    "Threading can’t reach this Simulator. Retry or choose another device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading can’t reach this Simulator. Retry or choose another device."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kan inte nå den här simulatorn. Försök igen eller välj en annan enhet."
           }
         }
       }
@@ -63636,6 +63853,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spåra konversationens livscykel"
+          }
+        }
+      }
+    },
+    "Traffic capture status" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Status för trafikinsamling"
           }
         }
       }
@@ -68358,6 +68586,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Du"
+          }
+        }
+      }
+    },
+    "You + subagents" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You + subagents"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du + underagenter"
           }
         }
       }

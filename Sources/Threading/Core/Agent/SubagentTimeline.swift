@@ -137,6 +137,7 @@ struct SubagentDescriptor: Codable, Equatable, Sendable {
     /// surface reconcile the other without guessing from a title or launch order.
     var alternateThreadIDs: [String]?
     var parentThreadID: String?
+    var parentTurnID: String?
     var nickname: String?
     var role: String?
     var path: String?
@@ -148,6 +149,7 @@ struct SubagentDescriptor: Codable, Equatable, Sendable {
         threadID: String,
         alternateThreadIDs: [String]? = nil,
         parentThreadID: String? = nil,
+        parentTurnID: String? = nil,
         nickname: String? = nil,
         role: String? = nil,
         path: String? = nil,
@@ -158,6 +160,7 @@ struct SubagentDescriptor: Codable, Equatable, Sendable {
         self.threadID = threadID
         self.alternateThreadIDs = alternateThreadIDs
         self.parentThreadID = parentThreadID
+        self.parentTurnID = parentTurnID
         self.nickname = nickname
         self.role = role
         self.path = path
@@ -218,6 +221,7 @@ struct SubagentDescriptor: Codable, Equatable, Sendable {
             .subtracting([threadID])
         alternateThreadIDs = mergedAliases.isEmpty ? nil : mergedAliases.sorted()
         parentThreadID = newer.parentThreadID ?? parentThreadID
+        parentTurnID = parentTurnID ?? newer.parentTurnID
         nickname = newer.nickname ?? nickname
         role = newer.role ?? role
         path = newer.path ?? path
@@ -393,6 +397,16 @@ struct SubagentTimeline {
             )
             registerAliases(for: stored.descriptor, canonicalID: threadID)
         }
+    }
+
+    var hasAgents: Bool { !orderedIDs.isEmpty }
+
+    func recentAgents(limit: Int) -> [Agent] {
+        orderedIDs.suffix(max(0, limit)).compactMap { agentsByID[$0] }
+    }
+
+    func agent(threadID: String) -> Agent? {
+        canonicalID(for: threadID).flatMap { agentsByID[$0] }
     }
 
     var agents: [Agent] {
@@ -678,6 +692,8 @@ final class SubagentSessionState {
 
     /// At most one renderer is live for a session, so one change observer is sufficient.
     var onChange: (() -> Void)?
+    var attachmentObserver: SubagentAttachmentObserver?
+    var attachmentTurnID: (() -> String?)?
 
     private let store: SubagentStateStore?
     private var persistenceTimer: Timer?
@@ -700,7 +716,17 @@ final class SubagentSessionState {
 
     func apply(_ event: SubagentEvent) {
         guard !isInvalidated else { return }
+        var event = event
+        if case .discovered(var descriptor) = event, !timeline.contains(threadID: descriptor.threadID) {
+            descriptor.parentTurnID = descriptor.parentTurnID ?? attachmentTurnID?()
+            event = .discovered(descriptor)
+        }
+        let hadAgents = timeline.hasAgents
         timeline.apply(event)
+        attachmentObserver?.apply(event, timeline: timeline)
+        if !hadAgents, timeline.hasAgents {
+            NotificationCenter.default.post(SessionSubagentsDidAppear(sessionID: sessionID))
+        }
 
         // Conversation rows are recoverable from the descriptor's provider transcript and
         // intentionally absent from the compact snapshot. Avoid rewriting the same snapshot
@@ -731,6 +757,7 @@ final class SubagentSessionState {
     /// hierarchy, but it must not imply that work from the terminated process is still live.
     func stopWorking(message: String? = nil) {
         guard !isInvalidated else { return }
+        attachmentObserver?.stop()
         let working = timeline.agents.filter(\.status.isWorking)
         guard !working.isEmpty else { return }
 
@@ -819,6 +846,8 @@ final class SubagentSessionState {
     /// Makes late provider callbacks harmless after the owning session has been deleted.
     func invalidate() {
         isInvalidated = true
+        attachmentObserver?.invalidate()
+        attachmentObserver = nil
         onChange = nil
         transcriptReductionGeneration.removeAll()
         persistenceTimer?.invalidate()
@@ -1273,4 +1302,10 @@ enum SubagentUsageReader {
         }
         return total > 0 && total <= Int64(Int.max) ? Int(total) : nil
     }
+}
+
+/// A one-time membership edge, separate from high-frequency child progress and transcript rows.
+struct SessionSubagentsDidAppear: AppEvent {
+    static let name = Notification.Name("sessionSubagentsDidAppear")
+    let sessionID: SessionID
 }

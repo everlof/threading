@@ -29,6 +29,7 @@ final class SimulatorPaneRenderTests: XCTestCase {
     }
 
     func testRendersAdoptedSimulatorInRightPanel() throws {
+        try renderUnavailableSimulator()
         try FileManager.default.createDirectory(
             at: Render.directory,
             withIntermediateDirectories: true
@@ -478,7 +479,7 @@ final class SimulatorPaneRenderTests: XCTestCase {
             let content = try XCTUnwrap(fixture.window.contentView)
             XCTAssertEqual(fixture.panel.view.bounds.width, Render.panelWidth, accuracy: 2)
             XCTAssertEqual(
-                fixture.simulator.statusForTesting,
+                fixture.simulator.recoveryViewForTesting?.detail,
                 L10n.format(
                     "Couldn’t start %@. Try Refresh or choose another Simulator.",
                     "iPhone 17 Pro"
@@ -670,6 +671,65 @@ final class SimulatorPaneRenderTests: XCTestCase {
         return view.subviews.lazy.compactMap { self.findCaptureButton(in: $0) }.first
     }
 
+    private func renderUnavailableSimulator() throws {
+        try FileManager.default.createDirectory(at: Render.directory, withIntermediateDirectories: true)
+        let previous = AppThemePalette.current
+        defer { AppThemePalette.set(previous) }
+        let variants: [(String, AppTheme, NSAppearance.Name)] = [
+            ("system-light", .system, .aqua),
+            ("system-dark", .system, .darkAqua),
+            ("cyberpunk", try XCTUnwrap(AppThemeLibrary.stock.first { $0.name == "Cyberpunk" }), .darkAqua),
+            ("swiss", try XCTUnwrap(AppThemeLibrary.stock.first { $0.name == "Swiss Minimalist" }), .aqua),
+        ]
+        for (name, theme, appearance) in variants {
+            AppThemePalette.set(theme)
+            let fixture = try makeFixture(appearance: appearance, deviceFrame: makeDeviceFramePNG(), additionalDeviceCount: 1)
+            defer { fixture.tearDown() }
+            eventually { fixture.simulator.frameImageForTesting != nil }
+            let id = try XCTUnwrap(fixture.simulator.selectedDeviceID)
+            Task {
+                await fixture.control.makeUnavailable(id)
+                fixture.streams.disconnect(id)
+            }
+            eventually { if case .failed = fixture.simulator.presentationState { return true }; return false }
+            XCTAssertNil(fixture.simulator.frameImageForTesting)
+            let recovery = try XCTUnwrap(fixture.simulator.recoveryViewForTesting)
+            XCTAssertFalse(recovery.isHidden)
+            XCTAssertTrue(ThemeBoundaryAudit.violations(in: recovery).isEmpty)
+            XCTAssertTrue(fixture.simulator.statusTooltipForTesting.contains("Invalid device:"))
+            XCTAssertFalse(recovery.detail.contains(id.rawValue))
+            settle(fixture.window)
+            let content = try XCTUnwrap(fixture.window.contentView)
+            XCTAssertEqual(fixture.panel.view.bounds.width, Render.panelWidth, accuracy: 2)
+            for action in [recovery.retryButton, recovery.chooseButton] {
+                XCTAssertTrue(recovery.bounds.contains(action.convert(action.bounds, to: recovery)), "\(name): recovery action clipped")
+                XCTAssertEqual(action.accessibilityRole(), .button)
+            }
+            let bitmap = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent("simulator-pane-unavailable-\(name).png")
+            )
+            // Switching the theme while unavailable uses the existing component, with the same actions.
+            AppThemePalette.set(.system)
+            AppThemeRefresh.repaint(content)
+            XCTAssertTrue(fixture.simulator.recoveryViewForTesting === recovery)
+            XCTAssertTrue(recovery.chooseButton.performPrimaryAction())
+            eventually { ThemedMenuPresenter.isMenuOpen(in: fixture.window) }
+            XCTAssertFalse(fixture.simulator.availableWorkspaceDevices.contains { $0.id == id },
+                           "The recovery chooser must refresh its stale catalogue.")
+            func replacementRow(in view: NSView) -> NSView? {
+                if view.accessibilityRole() == .menuItem,
+                   view.accessibilityTitle()?.contains("iPhone SE") == true { return view }
+                return view.subviews.lazy.compactMap { replacementRow(in: $0) }.first
+            }
+            let replacement = try XCTUnwrap(replacementRow(in: content))
+            XCTAssertTrue(replacement.accessibilityPerformPress())
+            XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: fixture.window))
+            XCTAssertEqual(fixture.panel.currentSimulatorWorkspace?.state.members.count, 2)
+        }
+    }
+
     private func makeFixture(
         appearance appearanceName: NSAppearance.Name,
         deviceFrame: Data,
@@ -728,9 +788,10 @@ final class SimulatorPaneRenderTests: XCTestCase {
         if let alternateFrame, let second = additionalDevices.first,
            let image = NSImage(data: alternateFrame),
            let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) { framesByDevice[second.id] = cg }
+        let streams = SimulatorPaneRenderStreamCoordinator(frame: liveFrame, framesByDevice: framesByDevice)
         let panel = DisplayPaneController(
             simulatorControl: control,
-            simulatorStreamCoordinator: SimulatorPaneRenderStreamCoordinator(frame: liveFrame, framesByDevice: framesByDevice)
+            simulatorStreamCoordinator: streams
         )
         let split = SidebarSplitViewController()
         let conversationItem = NSSplitViewItem(viewController: conversation)
@@ -783,7 +844,9 @@ final class SimulatorPaneRenderTests: XCTestCase {
         return SimulatorPaneRenderFixture(
             window: window,
             panel: panel,
-            simulator: simulator
+            simulator: simulator,
+            control: control,
+            streams: streams
         )
     }
 
@@ -1100,6 +1163,8 @@ private struct SimulatorPaneRenderFixture {
     let window: NSWindow
     let panel: DisplayPaneController
     let simulator: SimulatorPaneViewController
+    let control: SimulatorPaneRenderControl
+    let streams: SimulatorPaneRenderStreamCoordinator
 
     func tearDown() {
         if let session = panel.currentSessionID {
@@ -1156,6 +1221,8 @@ private actor PhysicalDevicePaneRenderControl: PhysicalDeviceControlling {
 }
 
 private actor SimulatorPaneRenderControl: SimulatorControlling {
+    private var unavailable: Set<SimulatorDeviceID> = []
+    func makeUnavailable(_ id: SimulatorDeviceID) { unavailable.insert(id) }
     private let device: SimulatorDevice
     private let additionalDevices: [SimulatorDevice]
     private let frame: Data
@@ -1168,7 +1235,7 @@ private actor SimulatorPaneRenderControl: SimulatorControlling {
         self.bootFailure = bootFailure
     }
 
-    func availableDevices() async throws -> [SimulatorDevice] { [device] + additionalDevices }
+    func availableDevices() async throws -> [SimulatorDevice] { ([device] + additionalDevices).filter { !unavailable.contains($0.id) } }
 
     func prepare(deviceID: SimulatorDeviceID?) async throws -> SimulatorDeviceLease {
         if let bootFailure {
@@ -1193,7 +1260,12 @@ private actor SimulatorPaneRenderControl: SimulatorControlling {
         )
     }
 
-    func screenshot(of deviceID: SimulatorDeviceID) async throws -> Data { frame }
+    func screenshot(of deviceID: SimulatorDeviceID) async throws -> Data {
+        if unavailable.contains(deviceID) {
+            throw SimulatorControlError.deviceUnavailable(deviceID, detail: "Invalid device: \(deviceID.rawValue)")
+        }
+        return frame
+    }
 
     func release(_ lease: SimulatorDeviceLease) async throws {}
 }
@@ -1208,6 +1280,10 @@ private final class SimulatorPaneRenderStreamCoordinator:
 {
     private let frame: CGImage
     private let framesByDevice: [SimulatorDeviceID: CGImage]
+    private let lock = NSLock()
+    private var sessions: [SimulatorDeviceID: SimulatorPaneRenderStreamSession] = [:]
+
+    func disconnect(_ id: SimulatorDeviceID) { lock.withLock { sessions[id] }?.disconnect() }
 
     init(frame: CGImage, framesByDevice: [SimulatorDeviceID: CGImage] = [:]) {
         self.frame = frame
@@ -1217,7 +1293,9 @@ private final class SimulatorPaneRenderStreamCoordinator:
     func openStream(
         for deviceID: SimulatorDeviceID
     ) async throws -> any SimulatorLiveStreamSession {
-        SimulatorPaneRenderStreamSession(frame: framesByDevice[deviceID] ?? frame)
+        let session = SimulatorPaneRenderStreamSession(frame: framesByDevice[deviceID] ?? frame)
+        lock.withLock { sessions[deviceID] = session }
+        return session
     }
 }
 
@@ -1255,6 +1333,7 @@ private final class SimulatorPaneRenderStreamSession:
     }
 
     func setVisible(_ visible: Bool) {}
+    func disconnect() { continuation.yield(.failed("The Simulator device became unavailable.")) }
     func sendInput(_ input: SimulatorBridgeInput) async throws {}
     func stop() { continuation.finish() }
 }

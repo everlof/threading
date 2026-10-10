@@ -4,6 +4,51 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## Browser canvas scroll containment — 2026-10-09
+
+One native clip owns each browser canvas. Ordinary scroll callbacks run at gesture frequency;
+the stress case sends three batches of 2,000 origin requests through both native scroll entry
+points. The new constraint does O(1) rectangle work, with no DOM inspection, I/O, view creation,
+or dependence on page size. Responsive viewports retain their valid pan range; automatic
+viewports remain at zero without scheduling a corrective layout.
+
+`BrowserViewportLayoutTests.testAutomaticViewportRejectsNativeScrollBursts` is opt-in with
+`THREADING_BROWSER_VIEWPORT_STRESS=1`, run through the built test bundle using the direct
+`xcrun xctest` pattern below. Fixture and WebKit creation are outside the timer. Debug batches
+measured 1.61 / 1.69 / 7.67 ms (median 1.69, max 7.67) and retained exact zero origins. This is
+a bounded callback measurement, not a Release or end-to-end browser latency claim. The matched
+correctness regression failed before the change with an outer origin of (180, 80) and the page
+at x = -180; it passes afterwards without forcing controller layout.
+
+## Subagent attachment discovery — 2026-10-09
+
+Expected sessions have 1–8 children; the stress fixture uses 64 children referring to one shared
+file. Discovery retains at most 64 recent child observers per session. Native children feed
+completed assistant messages into the same detector as the main agent. Terminal children use
+their known transcript paths, with one two-second timer per session, one active read and one
+coalesced rescan per child. Unchanged file signatures skip parsing. No provider directory tree
+is walked, and a child pane need not exist for discovery to run.
+
+One serial worker prepares structured references across sessions. Transcript reads and message
+scans have the existing 2 MiB ceiling and candidate budget; only bounded values cross back to
+the main actor for admission. A child retains at most 32 pending message batches. The existing
+64-row attachment history remains shared, with up to 64 child sources per row and 160 Unicode
+scalars per display name. Repeated references retain one stable attachment identity. The filter
+adds one fixed segment after the first child and uses the existing virtualized attachment table;
+progress events do not rebuild the attachment pane.
+
+`SubagentAttachmentTests.testStressSixtyFourChildrenShareOneBoundedFileHistoryWhenEnabled`
+is enabled with `THREADING_SUBAGENT_ATTACHMENT_STRESS=1`. It separates synchronous event enqueue
+from detector/admission settlement and asserts one row with all 64 child sources. These are
+Debug regression measurements, not launch or Release claims.
+
+Three runs through the built test bundle measured enqueue at 19.35 / 4.17 / 3.97 ms (median
+4.17 ms, max 19.35 ms) and complete settlement at 59.44 / 60.25 / 33.02 ms (median 59.44 ms,
+max 60.25 ms). Each admitted exactly one row with 64 sources. This is the first baseline for
+the new child path; it does not claim a speedup over parent-only detection. Invoke it with
+`xcrun xctest` and the built app's `DYLD_LIBRARY_PATH` / `DYLD_FRAMEWORK_PATH`, as the existing
+stress runner does: arbitrary new environment variables are not forwarded by the Xcode test plan.
+
 ## Independent iPhone browser — 2026-10-09
 
 The scaling unit is one explicitly opened browser, normally one preview capability and a small
@@ -31,16 +76,16 @@ loopback destinations, initially allowing page/form checks to pass through a dir
 The raw fixture also asserts that another authority is refused and an existing WebSocket is
 closed on revocation. IPv4-only and IPv6-only listeners exercise localhost address selection.
 
-
 ## Mermaid attachment rendering — 2026-10-08
 
 Expected input is a 1–8 KiB architecture diagram. The regression fixture has 201 nodes / 200
 edges, rendered through the production attachment controller at 420×700 points. Source reading,
-UTF-8 validation, line/byte admission and a SHA-256 fingerprint run on one serial actor. An
+text decoding, line/byte admission and a SHA-256 fingerprint run on a worker per read (a shared
+serial actor, the first version, let one stalled read hold every pane's preview). An
 unchanged-file refresh compares only the 32-byte fingerprint on main, keeps the same canvas and
 preserves zoom. Parsing and graph layout run in WebKit's content process, never the app's main
-actor. Hiding or detaching a reader cancels pending results and releases its renderer; a hidden
-file update does not start a reader. Only one selected document is mounted, with 91 native views
+actor. Hiding or detaching a reader cancels pending results and releases its renderer (and, since
+the follow-up below, keeps its viewport); a hidden file update does not start a reader. Only one selected document is mounted, with 91 native views
 in this fixture regardless of graph-node count.
 
 The source-only DOT control uses the same graph text and the unchanged pre-Mermaid source path.
@@ -58,7 +103,45 @@ refusal precedes WebKit construction, and stale file/theme results cannot replac
 selection. `MermaidAttachmentPreviewTests` covers source/canvas reuse, visibility teardown,
 theme/zoom preservation, failure and oversized-input fallback, navigation/resource denial and
 the repeated stress case. `attachment-mermaid-preview` captures the real main-window tab in
-System light/dark, Cyberpunk and Windows 98, plus source and failure states.
+System light/dark, Cyberpunk, Windows 98 and Amiga, plus source and failure states.
+
+**Follow-up the same day: one canvas per pane.** Every selection and every changed-file refresh
+had discarded the loaded page and launched a new nonpersistent `WKWebView`, so moving between
+diagrams paid content-process launch plus a parse of the 5.5 MB bundle each time. The reader now
+renders a new document into the page it already has and releases it only when hidden or detached.
+Matched Debug runs of `testStressKeepsOneCanvasAndReportsRenderCost` (201-node fixture, same
+machine and fixture, baseline built from the commit before this change; the machine was shared,
+so ranges are wide):
+
+| Operation | Before | After |
+|---|---:|---:|
+| Re-display, same pane (four/six samples) | median 975 ms (858–1,124), engine 549–727 ms | median 308 ms (283–417), engine 270–387 ms, install 0 ms |
+| Hide and show again (canvas released, viewport restored) | — | 762–1,734 ms, engine 461–741 ms |
+| Initial mount | 1,360–1,533 ms | 757–2,115 ms |
+
+The hide/show row is the old re-display cost by design: a hidden reader still gives its content
+process back. What it no longer gives back is the reader's zoom, scroll and Diagram/Source
+choice. The opt-in format sweep's new `mermaid` workload — 64 forty-edge flowcharts, each
+selection waiting for its diagram — measured 6,496 ms for the first pass (about 101 ms a
+diagram, the first canvas launch included) and 4,717 ms for the reverse pass (about 74 ms). The
+`diagram` workload, now DOT at the source cap, stayed at 145/172 ms for its two passes. The
+selection's synchronous phase is now recorded too (`format=mermaid`, 0.05 ms present on a reused
+canvas), and the asynchronous read/launch/engine phases end the reader's own `Mermaid Preview`
+span with `read_ms`, `renderer_install_ms`, `engine_ms` and an outcome.
+
+**Then the tiny build (also 2026-10-08).** The renderer moved from `mermaid.min.js` (5.49 MB) to
+`@mermaid-js/tiny` (2.81 MB) for bundle size — see
+[`bundle-size-levers.md`](../decisions/bundle-size-levers.md). Same stress test, Debug, the two
+builds alternated tiny/full/tiny/full on one machine so drift lands on both:
+
+| Operation | Full | Tiny |
+|---|---:|---:|
+| Fresh canvas (hide and show: content-process launch, script parse, render), four samples | median 750 ms (715–797), engine 447–505 ms | median 591 ms (583–614), engine 359–379 ms |
+| Reused canvas (re-display), four samples | median 294 ms (273–311) | median 312 ms (306–330) |
+
+Half the script is ~160 ms off every fresh canvas; a render into a loaded page is unchanged within
+noise, as it should be, since parsing is the only work the size removes. Initial mounts were too
+noisy to compare (the first canvas in each process paid 150–476 ms of WebKit launch).
 
 ## Toast text bounds — 2026-10-06
 
@@ -2871,8 +2954,12 @@ the switching figures are main-thread interaction cost, not time until Quick Loo
 finished painting remote-process content.
 
 The default fixtures are 1,600 × 1,000 PNGs, twelve-page PDFs, 300-row HTML files, archive metadata
-cards, 800-paragraph RTF documents, and Mermaid source immediately below the 512 KB source-preview
-cap. `mixed` rotates through all six families. Set
+cards, 800-paragraph RTF documents, and DOT source immediately below the 512 KB source-preview
+cap. `mixed` rotates through those six families. The `diagram` fixtures were `.mmd` until the
+Mermaid reader shipped; from then on a `.mmd` row returns before the text path runs, so the sweep
+reported near-zero diagram cost until they moved to `.dot`. `mermaid`, outside `mixed`, writes 64
+forty-edge flowcharts and spins the run loop until each selected diagram settles, so its switching
+figures are selection-to-diagram, not main-thread dispatch alone. Set
 `THREADING_ATTACHMENT_FORMAT_STRESS_KIND` or `..._FILES` for a focused point. Quick Look activates
 its display bundle asynchronously, so each fresh-process workload retains its offscreen test window
 until process exit; immediately destroying or closing an activation-pending `QLPreviewView` tests
@@ -6383,3 +6470,100 @@ Release benchmarks. RSS includes shared framework pages and is not private footp
 totals exclude SpringBoard and other simulated OS services. The four-member/helper cap remains
 load-bearing. For landscape shared-memory delivery, vImage rotates into the existing three
 mapped buffers; codecs reuse one additional oriented surface rather than allocating per frame.
+
+## Portable proxy engine baseline (2026-10-09)
+
+The first C HTTP/CONNECT engine has no prior implementation to optimize against. Its matched
+baseline is the same loopback origin reached directly and through the real helper. The scaling
+contract and exact bounds live in [proxy-engine.md](proxy-engine.md); the helper runs outside
+the application and has no main-actor work or views.
+
+`python3 Targets/ProxyHost/tests/benchmark.py .build/proxy-release/threading-proxyd` measured a
+macOS arm64 RelWithDebInfo build, without sanitizers. Each of three rounds alternated 300 direct
+and 300 proxied requests for a 1 KiB response, using a fresh connection for each request. Process
+and fixture startup were excluded; the Python origin's per-connection handling remained in both
+routes. These are local development-machine observations, not an isolated throughput claim:
+
+| Round | Direct median / p95 / max (ms) | Proxied median / p95 / max (ms) |
+|---|---|---|
+| 1 | 0.296 / 1.187 / 4.374 | 0.445 / 1.560 / 6.752 |
+| 2 | 0.714 / 6.837 / 55.270 | 1.062 / 9.451 / 49.188 |
+| 3 | 0.323 / 1.258 / 11.026 | 0.505 / 1.759 / 5.008 |
+
+The median added cost was 0.149–0.348 ms; the noisy second round affected both routes. The largest
+owned pending socket payload in this small-response workload was 1,084 bytes. A separate fresh
+helper measured 1,488 KiB RSS idle and 13,968 KiB with the hard ceiling of 128 established idle
+CONNECT tunnels. RSS includes shared pages and excludes kernel socket buffers; idle tunnels do
+not measure the maximum queued-payload case.
+
+The actual-executable suite separately transferred an 8 MiB response to a delayed reader and
+asserted exact content plus the two-direction queue bound of 591,872 bytes. Its opt-in
+`THREADING_PROXY_STRESS_FLOWS=10000` case completed 10,000 requests with 16 concurrent clients
+while the observation pipe was deliberately unread, then verified an explicit dropped-event
+count after the reader resumed. Both macOS and Linux suites passed with ASan/UBSan; Windows
+cross-compilation passed, with native Windows execution left to the new CI lane. The initial
+development artifacts are under `.build/proxy-benchmark-final.json`, `.build/proxy-stress.log`,
+`.build/proxy-tests.log` and `.build/proxy-linux-tests.log`.
+
+Future capture stores, HTTP/2 or persistent connections must retain this matched
+fixture and add their own stress shapes. A cap on exported metadata is not a substitute for
+bounding the relay's body buffers, resolver work, connection lifetimes and output queues.
+
+### TLS inspection and MCP (2026-10-09)
+
+The TLS increment keeps crypto, parsing, relay and MCP work in the helper process. Its additional
+budgets are two 64 KiB encrypted-input buffers per inspected connection, bounded plaintext and
+ciphertext queues, 16 exact-host identities, 128 fixed-size completed metadata records, pages of
+20, 64 KiB MCP messages and 512 KiB/128 queued replies. No body capture or UI rows are allocated.
+The origin/client sockets in the bulk TLS fixture use a 30-second deadline: the Linux GCC
+ASan/UBSan build took substantially longer than the original five-second fixture budget to
+encrypt/decrypt the 8 MiB response. The helper's streaming/queue assertions remain unchanged.
+
+`python3 Targets/ProxyHost/tests/tls_benchmark.py .build/proxy-release/threading-proxyd --requests 1000`
+used macOS 26.5 arm64 RelWithDebInfo without sanitizers, one client, fresh TLS connections,
+independent origin/interception CAs and a 1 KiB response. The three rounds alternate direct and
+inspected routes. Both include the Python origin and fresh socket/TLS setup; process and CA
+fixture setup are excluded. This is 3,000 inspected exchanges plus 3,000 direct controls:
+
+| Round | Direct median / p95 / p99 (ms) | Inspected median / p95 / p99 (ms) |
+|---|---|---|
+| 1 | 1.356 / 4.033 / 7.594 | 4.624 / 6.993 / 18.251 |
+| 2 | 1.173 / 2.045 / 5.889 | 4.564 / 5.108 / 7.172 |
+| 3 | 1.132 / 1.462 / 2.680 | 4.628 / 7.677 / 16.811 |
+
+The observed median addition is 3.27–3.50 ms for two separately verified TLS legs and HTTP parsing.
+Concurrent builds were present during part of the run; this is development-machine evidence,
+not isolated tail-latency or throughput measurement. Artifact: `.build/proxy-tls-benchmark-final.json`.
+A separate native release process measured 2,240 KiB RSS idle with its leaf policy loaded and
+36,304 KiB with 128 established inspected TLS connections awaiting request headers. This excludes
+kernel buffers and does not measure maximum queued payload. The delayed-reader test verifies exact
+8 MiB content and at most 640 KiB combined owned queued payload per inspected connection.
+
+MCP tests exercise history eviction, monotonic pagination across clear/restart, closed and stalled
+output consumers, oversized/deep/malformed input and process-lifetime teardown. Public certificate
+export is bounded and contains no signing key. Apple trust operations are not part of performance
+tests; their command plans and fingerprints are checked without changing the developer's trust.
+
+
+### Proxy payload capture (2026-10-10)
+
+Capture observes llhttp body spans rather than reparsing or buffering whole wire messages. Each
+request/response prefix defaults to 64 KiB (up to 1 MiB), with separate 16 MiB active and retained
+byte budgets and 128 retained records. History copies only used bytes. Header previews and byte
+pages are bounded before JSON formatting; inflation caps output at 1 MiB. JSON credential
+redaction walks a validated tree and its source once; only sensitive value spans are replaced.
+This preserves large numeric IDs and whitespace and avoids cJSON sibling-lookup costs. The
+redacted view buffer is bounded to three times the 1 MiB decoded input ceiling.
+The Mac host admits four helper workers including draining processes, four pending operations per
+owner, 64 KiB RPC replies and 15-second pipe deadlines. No socket, file, certificate or process
+operation runs on the main actor.
+
+`tls_benchmark.py --capture --requests 1000` completed 3,000 inspected and 3,000 direct 1 KiB
+exchanges over fresh TLS connections at concurrency 1. Release helper RSS after the run was
+5,792 KiB with 128 exchanges retaining 141,568 payload/header bytes. Direct/inspected median ms
+were 2.799/10.660, 1.880/8.576, and 1.709/5.324; inspected p95 was 37.903, 20.728 and 10.445 ms.
+Concurrent Xcode and Linux/Windows builds produced a visibly changing noise floor, so these are
+bounded-workload observations, not evidence of a capture regression or a stable latency claim.
+The fixture reports capture bounds/RSS and checks completed responses. Separate integration tests
+fill history beyond 16 MiB, stream larger-than-capture bodies unchanged, and inspect truncated
+origins, binary bytes, chunked gzip and over-expanding compressed bodies.

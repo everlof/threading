@@ -2,6 +2,32 @@ import XCTest
 @testable import Threading
 
 final class SimulatorControlTests: XCTestCase {
+    func testInvalidDeviceScreenshotHasReadableFailureAndRetainsDiagnostic() async throws {
+        let detail = "Invalid device: \(Self.workPhoneID.rawValue)"
+        let runner = RecordingSimulatorCommandRunner(outputs: [Data(detail.utf8)], exitStatuses: [1])
+        let control = SimctlSimulatorControl(runner: runner)
+        do {
+            _ = try await control.screenshot(of: Self.workPhoneID)
+            XCTFail("An invalid device returned a screenshot.")
+        } catch let error as SimulatorControlError {
+            XCTAssertEqual(error, .deviceUnavailable(Self.workPhoneID, detail: detail))
+            XCTAssertEqual(error.diagnosticDetail, detail)
+            XCTAssertFalse(error.localizedDescription.contains(Self.workPhoneID.rawValue))
+        }
+    }
+
+    func testGenericScreenshotFailureDoesNotClaimTheDeviceIsGone() async throws {
+        let detail = "Invalid argument"
+        let runner = RecordingSimulatorCommandRunner(outputs: [Data(detail.utf8)], exitStatuses: [1])
+        let control = SimctlSimulatorControl(runner: runner)
+        do {
+            _ = try await control.screenshot(of: Self.workPhoneID)
+            XCTFail("A failed capture returned a screenshot.")
+        } catch let error as SimulatorControlError {
+            XCTAssertEqual(error, .commandFailed(operation: "screenshot", detail: detail))
+        }
+    }
+
     func testCatalogKeepsOnlyAvailableIOSDevicesAndOrdersActivePhonesFirst() throws {
         let devices = try SimulatorDeviceCatalog.decodeAvailableIOSDevices(
             from: Data(Self.deviceFixture.utf8)

@@ -1383,6 +1383,14 @@ frame. Height counts as much as width there, because the rows that fall off the 
 live ones. A grid that already fits is restored to full size, which is also what returns an
 interactive page to 13px once its lease is honoured.
 
+The browser keeps the rendered terminal visible across a full-screen clear/repaint burst.
+PTY bytes can put a clear and its replacement cells in separate WebSocket frames; rendering
+each frame immediately made Safari briefly show an empty screen with the cursor at the top.
+Only a full-screen clear starts a short bounded hold. The queued bytes are written to xterm
+together after 180 ms of quiet, with a 450 ms deadline and a 512 KiB size ceiling; ordinary
+output remains immediate. Leaving the terminal cancels the hold and discards its bytes so a
+late timer cannot paint them into another session.
+
 The first-run iPhone screen exposes **Settings** before any connection exists. App icon,
 notification preferences, in-app presence/typing, the default terminal input style and local
 diagnostics are useful without a Mac and stay available from the dashboard's `…` menu after
@@ -1858,6 +1866,14 @@ instead of to the sentence, and the paperclip carries **From Clipboard** beside 
 for the same act reached the other way. Text is untouched by both: it keeps the text view's own
 paste, insertion point and undo and all. `ComposerClipboard` is the one reader —
 `ComposerClipboardTests` pins what it takes, what it skips and the cap.
+
+The terminal's **Compose** editor uses the same contract: `TerminalLinePromptEditor` forwards
+both `offersFiles` and `pasteFiles` to `IntrinsicTextView`, refreshing the callbacks on SwiftUI
+updates. Sharing the text-view subclass alone does not connect its default, empty callbacks to
+the terminal's attachment tray. The paperclip and editor share staging and its capacity/pending
+submission guard; ordinary text falls through to UIKit without an attachment notice. The hosted
+terminal-composer paste test dispatches the responder-chain action against an isolated image
+clipboard and verifies one staged chip with the draft, selection and focus preserved.
 
 Two properties are load-bearing there. **Asking what the pasteboard holds is not reading it:**
 since iOS 16 reading a *value* raises the system's paste notification, while the `has…` flags and

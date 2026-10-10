@@ -404,10 +404,7 @@ final class ExtensionProjectFileBroker {
     /// hint it produced crosses the boundary.
     private nonisolated static func contentHint(for url: URL) -> ExtensionFileContentHint? {
         let suffix = url.pathExtension.lowercased()
-        if suffix == "lottie" { return .dotLottie }
-        if suffix == "svg" { return .svg }
-        if suffix == "mmd" || suffix == "mermaid" { return .mermaid }
-        if suffix == "dot" || suffix == "gv" { return .graphviz }
+        if let structural = MediaContentProbe.structuralHint(forExtension: suffix) { return structural }
         guard suffix == "json" || suffix == "yaml" || suffix == "yml" else { return nil }
         guard let prefix = MediaContentProbe.prefix(
             of: url,

@@ -630,13 +630,25 @@ final class SimulatorPaneRecoveryTests: XCTestCase {
 
         controller.setPresented(true)
         try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        let frames = failedSession.emitFramesContinuously(width: 8, height: 16)
+        try await eventually { controller.frameImageForTesting != nil }
+        frames.cancel()
         failedSession.emit(.failed("The helper lost the device framebuffer."))
         try await eventually {
             if case .failed = controller.presentationState { return true }
             return false
         }
 
-        controller.retryForTesting()
+        XCTAssertNil(controller.frameImageForTesting, "An unavailable device must not keep a live-looking frozen frame.")
+        let recovery = try XCTUnwrap(controller.recoveryViewForTesting)
+        XCTAssertFalse(recovery.isHidden)
+        XCTAssertEqual(controller.screenInteractionStateForTesting, .unavailable)
+        controller.setPresented(false)
+        controller.setPresented(true)
+        XCTAssertFalse(recovery.isHidden, "Returning to the tab must not revive a stale lease.")
+        let opensBeforeRetry = await coordinator.openCount
+        XCTAssertEqual(opensBeforeRetry, 1)
+        XCTAssertTrue(recovery.retryButton.performPrimaryAction())
 
         try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
         XCTAssertEqual(controller.selectedDeviceID, simulatorRecoveryFirstDevice.id)
@@ -644,6 +656,58 @@ final class SimulatorPaneRecoveryTests: XCTestCase {
         let openCount = await coordinator.openCount
         XCTAssertEqual(prepareCount, 2)
         XCTAssertEqual(openCount, 2)
+        XCTAssertTrue(recovery.isHidden)
+    }
+
+    func testAgentPreparationRevalidatesAnUnavailableLease() async throws {
+        let session = SimulatorRecoveryStreamSessionFake()
+        let control = SimulatorRecoveryControlFake(screenshotFailures: 1)
+        let controller = makeController(control: control, coordinator: SimulatorRecoveryStreamCoordinatorFake([
+            .success(session), .success(SimulatorRecoveryStreamSessionFake()),
+        ]))
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        session.emit(.failed("Device lost"))
+        try await eventually { if case .failed = controller.presentationState { return true }; return false }
+        let result: SimulatorPaneAgentResult<SimulatorDeviceLease> = await withCheckedContinuation { continuation in
+            controller.prepareForAgent(deviceID: nil) { continuation.resume(returning: $0) }
+        }
+        guard case .success(let lease) = result else { return XCTFail("The exact device did not recover.") }
+        XCTAssertEqual(lease.device.id, simulatorRecoveryFirstDevice.id)
+        let prepares = await control.prepareCount
+        XCTAssertEqual(prepares, 2, "Agent prepare must not return the stale cached capability.")
+    }
+
+    func testDeletedDeviceKeepsItsIdentityUntilAnExplicitReplacement() async throws {
+        let first = SimulatorRecoveryStreamSessionFake()
+        let second = SimulatorRecoveryStreamSessionFake()
+        let control = SimulatorRecoveryControlFake()
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([.success(first), .success(second)])
+        let controller = makeController(control: control, coordinator: coordinator)
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        await control.removeDevice(simulatorRecoveryFirstDevice.id)
+        first.emit(.failed("Device removed"))
+        try await eventually { if case .failed = controller.presentationState { return true }; return false }
+        XCTAssertTrue(controller.statusTooltipForTesting.contains("Invalid device:"))
+
+        let result: SimulatorPaneAgentResult<SimulatorDeviceLease> = await withCheckedContinuation { continuation in
+            controller.prepareForAgent(deviceID: nil) { continuation.resume(returning: $0) }
+        }
+        guard case .failure = result else { return XCTFail("A deleted device was returned as a valid lease.") }
+        XCTAssertEqual(controller.selectedDeviceID, simulatorRecoveryFirstDevice.id)
+        XCTAssertEqual(controller.workspaceDeviceName, simulatorRecoveryFirstDevice.name)
+        let opensBeforeChoice = await coordinator.openCount
+        XCTAssertEqual(opensBeforeChoice, 1, "No transport should be opened for a known unavailable device.")
+
+        controller.selectRecoveryDevice(simulatorRecoverySecondDevice.id)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        XCTAssertEqual(controller.selectedDeviceID, simulatorRecoverySecondDevice.id)
+        XCTAssertTrue(try XCTUnwrap(controller.recoveryViewForTesting).isHidden)
     }
 
     private func makeController(
@@ -828,6 +892,8 @@ final class SimulatorRecoveryInputAuthorizerFake: SimulatorInputAuthorizing {
 }
 
 actor SimulatorRecoveryControlFake: SimulatorControlling {
+    private var devices = [simulatorRecoveryFirstDevice, simulatorRecoverySecondDevice]
+    func removeDevice(_ id: SimulatorDeviceID) { devices.removeAll { $0.id == id } }
     private(set) var prepareCount = 0
     private(set) var screenshotCount = 0
     private(set) var installObservedTransportStopped: Bool?
@@ -844,7 +910,7 @@ actor SimulatorRecoveryControlFake: SimulatorControlling {
     }
 
     func availableDevices() async throws -> [SimulatorDevice] {
-        [simulatorRecoveryFirstDevice, simulatorRecoverySecondDevice]
+        devices
     }
 
     func prepare(deviceID: SimulatorDeviceID?) async throws -> SimulatorDeviceLease {
@@ -873,6 +939,9 @@ actor SimulatorRecoveryControlFake: SimulatorControlling {
 
     func screenshot(of deviceID: SimulatorDeviceID) async throws -> Data {
         screenshotCount += 1
+        guard devices.contains(where: { $0.id == deviceID }) else {
+            throw SimulatorControlError.deviceUnavailable(deviceID, detail: "Invalid device: \(deviceID.rawValue)")
+        }
         screenshotObservedTransportStopped = transportStoppedProbe()
         if screenshotFailures > 0 {
             screenshotFailures -= 1
