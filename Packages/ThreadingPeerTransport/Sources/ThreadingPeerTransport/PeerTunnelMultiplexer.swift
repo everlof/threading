@@ -2,10 +2,12 @@ import Foundation
 
 public struct PeerTunnelStream: Sendable {
     public let id: UInt32
+    public let service: PeerTunnelService
     private let multiplexer: PeerTunnelMultiplexer
 
-    fileprivate init(id: UInt32, multiplexer: PeerTunnelMultiplexer) {
+    fileprivate init(id: UInt32, service: PeerTunnelService, multiplexer: PeerTunnelMultiplexer) {
         self.id = id
+        self.service = service
         self.multiplexer = multiplexer
     }
 
@@ -54,6 +56,7 @@ public actor PeerTunnelMultiplexer {
 
     private struct StreamState {
         var phase: Phase
+        var service: PeerTunnelService
         var sendCredit = PeerTunnelBounds.streamWindowBytes
         var inboundChunks: [Data] = []
         var inboundHead = 0
@@ -101,19 +104,19 @@ public actor PeerTunnelMultiplexer {
         }
     }
 
-    public func openStream() async throws -> PeerTunnelStream {
+    public func openStream(service: PeerTunnelService = .http) async throws -> PeerTunnelStream {
         try ensureStarted()
         guard role == .client else { throw PeerTunnelError.protocolViolation }
         guard streams.count < PeerTunnelBounds.maximumStreams else {
             throw PeerTunnelError.tooManyStreams(limit: PeerTunnelBounds.maximumStreams)
         }
         let streamID = try allocateClientStreamID()
-        streams[streamID] = StreamState(phase: .opening)
+        streams[streamID] = StreamState(phase: .opening, service: service)
 
         do {
-            try await writer.send(.control(.open, streamID: streamID))
+            try await writer.send(.control(service == .https ? .openTLS : .open, streamID: streamID))
             try await waitUntilAccepted(streamID: streamID)
-            return PeerTunnelStream(id: streamID, multiplexer: self)
+            return PeerTunnelStream(id: streamID, service: service, multiplexer: self)
         } catch {
             failStream(streamID, error: error)
             throw error
@@ -127,8 +130,8 @@ public actor PeerTunnelMultiplexer {
             let streamID = acceptedStreamIDs[acceptedHead]
             acceptedHead += 1
             compactAcceptedStreamsIfNeeded()
-            if streams[streamID] != nil {
-                return PeerTunnelStream(id: streamID, multiplexer: self)
+            if let state = streams[streamID] {
+                return PeerTunnelStream(id: streamID, service: state.service, multiplexer: self)
             }
         }
         guard pendingAccept == nil else { throw PeerTransportError.operationAlreadyPending }
@@ -293,12 +296,15 @@ public actor PeerTunnelMultiplexer {
     }
 
     private func handle(_ frame: PeerTunnelFrame) async throws {
-        if frame.operation != .open, retiredStreamIDs.contains(frame.streamID) {
+        if frame.operation != .open, frame.operation != .openTLS,
+           retiredStreamIDs.contains(frame.streamID) {
             return
         }
         switch frame.operation {
         case .open:
-            try handleOpen(frame.streamID)
+            try handleOpen(frame.streamID, service: .http)
+        case .openTLS:
+            try handleOpen(frame.streamID, service: .https)
         case .opened:
             try handleOpened(frame.streamID)
         case .data:
@@ -318,7 +324,7 @@ public actor PeerTunnelMultiplexer {
         }
     }
 
-    private func handleOpen(_ streamID: UInt32) throws {
+    private func handleOpen(_ streamID: UInt32, service: PeerTunnelService) throws {
         guard role == .server, streamID.isMultiple(of: 2) == false,
               streams[streamID] == nil, !retiredStreamIDs.contains(streamID) else {
             throw PeerTunnelError.protocolViolation
@@ -327,8 +333,8 @@ public actor PeerTunnelMultiplexer {
             Task { try? await writer.send(.control(.reset, streamID: streamID)) }
             return
         }
-        streams[streamID] = StreamState(phase: .opening)
-        let stream = PeerTunnelStream(id: streamID, multiplexer: self)
+        streams[streamID] = StreamState(phase: .opening, service: service)
+        let stream = PeerTunnelStream(id: streamID, service: service, multiplexer: self)
         if let continuation = pendingAccept {
             pendingAccept = nil
             continuation.resume(returning: stream)

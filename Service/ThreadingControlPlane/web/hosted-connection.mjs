@@ -13,7 +13,8 @@ export function parseInvitation(fragment, origin, { allowExpired = false } = {})
   const p = JSON.parse(decode64(link.hash.slice(1)));
   const service = new URL(p.s);
   if (service.origin !== origin || service.pathname !== '/' || service.search || service.hash || service.username || service.password) throw Error('Open this invitation on its original Threading service.');
-  if (p.v !== 1 || ![p.h,p.d].every(v => typeof v === 'string' && /^[A-Za-z0-9._:-]{1,256}$/.test(v)) ||
+  const versionValid = (p.v === 1 && p.p == null) || (p.v === 2 && typeof p.p === 'string' && /^[A-Z2-7]{25}[AEIMQUY4]$/.test(p.p));
+  if (!versionValid || ![p.h,p.d].every(v => typeof v === 'string' && /^[A-Za-z0-9._:-]{1,256}$/.test(v)) ||
       ![p.c,p.b].every(v => typeof v === 'string' && /^[\x21-\x7e]{1,4096}$/.test(v)) ||
       !Number.isFinite(p.e) || (!allowExpired && p.e * 1000 <= Date.now()) || p.e * 1000 > Date.now() + 370 * 86400000) throw Error('This invitation has expired or is invalid. Ask for a new link.');
   return p;

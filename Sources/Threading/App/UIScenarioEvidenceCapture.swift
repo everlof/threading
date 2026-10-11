@@ -143,12 +143,14 @@ final class UIScenarioEvidenceCapture {
     }
 
     private func captureVisibleWindow() throws -> Data {
-        guard var window = NSApp.mainWindow ?? NSApp.windows.first(where: \.isVisible) else {
+        guard var window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first(where: \.isVisible) else {
             throw CaptureError.windowUnavailable
         }
-        // A sheet is a separate AppKit window. Capturing its parent only records the dimmed
-        // background, so follow the attached sheet to the surface receiving the interaction.
-        while let sheet = window.attachedSheet { window = sheet }
+        // Both native sheets and themed attached dialogs live in separate windows. The latter
+        // are child panels so their authored corners survive; attachedSheet alone misses them.
+        while let presentation = window.attachedSheet ?? window.childWindows?.last(where: {
+            $0.isVisible && ThemedAlert.isPresentationWindow($0)
+        }) { window = presentation }
         guard let contentView = window.contentView else {
             throw CaptureError.windowUnavailable
         }

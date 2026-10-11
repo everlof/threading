@@ -104,8 +104,12 @@ Captures are rendered by Threading from its own AppKit window rather than read b
 display, so a successful result neither retains pixels from unrelated applications nor needs the
 macOS Screen Recording grant. A small JSON attachment beside each PNG carries its journey name,
 checkpoint order, title and description; the report never has to infer meaning from a filename.
-When a sheet is attached, capture follows it to the active sheet window: AppKit's parent-window
-bitmap contains only the dimmed background, not the separate sheet receiving the interaction.
+Capture prefers the key window, so Settings receives its own evidence. When a sheet or themed
+confirmation is attached, capture follows that presentation window: AppKit's parent bitmap does
+not include separate child windows. Themed confirmations deliberately use child panels to retain
+theme-authored corners, so following only `attachedSheet` silently captured the empty parent
+instead of the proxy approval. `ThemedAlert.isPresentationWindow` keeps that private panel type
+owned by the design layer while allowing the Debug evidence harness to find it even without focus.
 
 Every UI run gets a unique result bundle and a static HTML gallery under
 `.build/ui-test-reports/`. The runner prints the exact `index.html` path and an `open` command.

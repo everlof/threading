@@ -1656,6 +1656,8 @@ enum AppSettingDefinitions {
     ]
 
     private static let surfaceDefinitions: [AppSettingDefinition] = [
+        surfaced("tools.proxyClientAccess", pageID: "tools", order: 0, section: nil,
+                  title: "Proxy Client Access", "proxy", "IP", "approve", "revoke", "forget", "device"),
         surfaced("tools.network.requestHeaders", pageID: "tools", order: 1,
                   section: "Browser Network Capture", title: "Capture request headers",
                   "browser", "network", "headers", "bodies", "capture", "development"),

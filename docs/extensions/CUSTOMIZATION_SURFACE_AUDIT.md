@@ -31,7 +31,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Theme and extension-enablement commands | deliberately host-only; shared themed controls | host appearance service | the theme choice, enablement ownership, persistence, runtime admission, focus and failure truth; appearance packs were retired on 2026-10-05 ([decision](../decisions/appearance-packs.md)) | Implemented |
 | Public browser guest client | deliberately host-only | existing RemoteClient UI with transport adapter | invitation decoding, service origin, membership/device binding, scope, approval, expiry and revocation | Implemented |
 | Chat invitation sheet | deliberately host-only | host form | capability scope, permission approval, route reachability, expiry, credential issuance and revocation | Implemented |
-| Hosted Direct enrollment controls | — | host-only | explicit Internet opt-in, installation-secret custody, service identity removal, device revocation and reachable status | Host-only |
+| Hosted Direct enrollment controls and pilot invitation prompt | — | host-only | explicit Internet opt-in, single-use invitation admission, installation-secret custody, service identity removal, device revocation and reachable status; themes style the shared text prompt without seeing credentials | Host-only |
 | Main window content | `application.main-window@1` | around-hook | window chrome, input routing | Implemented |
 | Sidebar workload analyzer | existing theme `material.chart_style: spectrum` | theme-selected host presentation | workload/intensity truth, exact count, effort judgement, accessibility, bounded motion | Implemented |
 | Music spectrum presentation | `audio.*` host signals on existing Metal surface contracts; theme `sidebar.brand.analyzer` | theme-selected host presentation | consent, source identity/selection, system permission, private tap lifetime, local analysis, signal truth/freshness, visibility/motion/power gates and bounded cadence | Implemented |
@@ -690,7 +690,9 @@ value; notification chrome remains owned by the operating system.
 session MCP transport expose bounded HTTP(S) capture. Threading owns exact TLS scope, CA key
 custody, process lifetime, payload/raw-read authority, certificate exports and trust setup.
 A future extension may present flow data through a separate admitted capability; this increment
-introduces no presentation slot or extension data authority.
+introduces no presentation slot or extension data authority. Proxy client approval and the Tools
+settings revocation row are also host-only: Threading owns pending connections, one-time/capture
+grants, persisted exact-IP scope, expiry, dismissal and revocation. Extensions cannot approve clients.
 
 The iPhone chat's activity summaries, catch-up marker, result navigation, delivery selector,
 dictation control and image-markup editor are deliberately host-only surfaces for one paired

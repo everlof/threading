@@ -341,7 +341,7 @@ export class HostRendezvous {
       kind: "ready",
       sessionID: attachment.sessionID,
       expiresAt: deviceState.expiresAt,
-      iceServers: await generateIceServers(this.env),
+      iceServers: await generateIceServers(this.env, attachment.accountID),
     });
     device.send(ready);
     socket.send(ready);

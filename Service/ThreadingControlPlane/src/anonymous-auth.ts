@@ -8,10 +8,11 @@ import { assertExactKeys, readJSON } from "./http";
 // per-installation quota. The matching D1 trigger checks capacity atomically on every insert.
 const hostIDPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const secretPattern = /^th_install_[A-Za-z0-9_-]{43}$/u;
+const invitationPattern = /^th_pilot_[A-Za-z0-9_-]{43}$/u;
 
 export async function signInAnonymousHost(request: Request, env: Env): Promise<Response> {
   const body = await readJSON(request, 1024);
-  assertExactKeys(body, ["hostID", "installationSecret"]);
+  assertExactKeys(body, ["hostID", "installationSecret", "invitation"]);
   if (typeof body.hostID !== "string" || !hostIDPattern.test(body.hostID)
     || typeof body.installationSecret !== "string"
     || !secretPattern.test(body.installationSecret)) {
@@ -36,6 +37,10 @@ export async function signInAnonymousHost(request: Request, env: Env): Promise<R
   }
 
   const now = Math.floor(Date.now() / 1000);
+  if (typeof body.invitation !== "string" || !invitationPattern.test(body.invitation)) {
+    throw new HttpError(403, "invitationRequired", "A pilot invitation is required for a new Mac");
+  }
+  const invitationDigest = await sha256Hex(body.invitation);
   // The account row and identity row are one transaction. The D1 trigger fails the batch closed
   // if another request claimed the last pilot slot in the meantime.
   try {
@@ -43,9 +48,9 @@ export async function signInAnonymousHost(request: Request, env: Env): Promise<R
       env.DB.prepare("INSERT INTO accounts (id, created_at, updated_at) VALUES (?, ?, ?)")
         .bind(accountID, now, now),
       env.DB.prepare(
-        "INSERT INTO anonymous_host_identities (account_id, host_id, secret_digest, created_at) "
-          + "VALUES (?, ?, ?, ?)",
-      ).bind(accountID, body.hostID, digest, now),
+        "INSERT INTO anonymous_host_identities (account_id, host_id, secret_digest, created_at, invitation_digest) "
+          + "VALUES (?, ?, ?, ?, ?)",
+      ).bind(accountID, body.hostID, digest, now, invitationDigest),
     ]);
   } catch (error) {
     if (String(error).includes("threading_anon_capacity")) {
@@ -58,6 +63,9 @@ export async function signInAnonymousHost(request: Request, env: Env): Promise<R
     ).bind(accountID, body.hostID).first<{ secret_digest: string }>();
     if (raced?.secret_digest === digest) return issueSession(accountID, env, now);
     if (raced) throw new HttpError(401, "unauthorized", "Installation credential is invalid");
+    if (String(error).includes("threading_pilot_invitation")) {
+      throw new HttpError(403, "invitationInvalid", "The pilot invitation has expired or has already been used");
+    }
     throw error;
   }
   return issueSession(accountID, env, now);

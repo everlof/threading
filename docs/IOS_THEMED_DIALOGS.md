@@ -563,6 +563,14 @@ exposes `inputView` as a settable seam and already ships a symbol/function-key p
 replacement alphanumeric keyboard would cost the user's own layout, autocorrect, dictation and
 emoji, so any such pad belongs beside the system keyboard, not in place of it.
 
+The terminal's **Compose** editor keeps Return as ordinary multiline editing and requests the
+system's default Return key, rather than Send. `TerminalLinePromptEditor` has no submission
+callback: UIKit owns insertion, selection, marked text and undo, and every edit follows the
+existing immediate draft-persistence path. The composer's arrow owns the explicit send decision.
+This is host-owned input behavior under the existing mobile theme; it introduces no extension
+surface or authority. Direct input continues to send keys to the terminal. The regression in
+`TerminalLineTextLayoutTests` edits and persists multiple lines through the shipping composer.
+
 ## Inline conversation decisions
 
 `MobileConversationQuestionCard` owns the native question form inside the virtual transcript.

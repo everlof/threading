@@ -4,6 +4,14 @@ This package provides Threading's bounded native WebRTC data channel, hosted ren
 and loopback stream bridge for macOS and iOS. It prefers direct ICE and uses TURN only when direct
 connectivity fails.
 
+The native app selects `PeerTunnelService.https`: TLS travels unchanged through WebRTC to the
+Mac's dedicated TLS loopback listener. The phone pins the Mac certificate from its pairing code
+before transmitting a capability. `openTLS` (opcode 7) is separate from HTTP `open` (opcode 1);
+missing TLS support refuses the stream without HTTP fallback. The default `.http` remains for
+browser guests and existing package clients; callers must select `.https` for the independent
+Mac-identity guarantee. Browser JavaScript still trusts its page/signaling service. Neither TLS
+nor WebRTC replaces the Mac's bearer authorization or membership checks.
+
 It is linked into both shipping targets and runs in the default CI package loop. The community
 Google WebRTC M151 XCFramework is exact-version and checksum pinned; its upstream source commit,
 license inventory and update gate are recorded in

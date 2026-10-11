@@ -172,6 +172,7 @@ const expectedMigrations = [
   "0008_development_auth_and_push_registrations.sql",
   "0009_service_failure_alerts.sql",
   "0010_anonymous_host_identities.sql",
+  "0011_pilot_admission_and_turn_budget.sql",
 ];
 if (JSON.stringify(migrations) !== JSON.stringify(expectedMigrations)) {
   failures.push("the production migration set differs from the reviewed ordered list");

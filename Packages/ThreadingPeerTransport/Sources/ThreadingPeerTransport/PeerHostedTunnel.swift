@@ -172,6 +172,7 @@ public enum PeerHostedDeviceConnector {
         hostID: String,
         deviceID: String,
         credential: PeerRendezvousCredential,
+        service: PeerTunnelService = .http,
         progress: (@Sendable (PeerHostedDeviceConnectionPhase) -> Void)? = nil
     ) async throws -> PeerHostedDeviceTunnel {
         progress?(.rendezvous)
@@ -244,7 +245,7 @@ public enum PeerHostedDeviceConnector {
                     progress?(.ice)
                     try await transport.waitUntilOpen()
                     let multiplexer = PeerTunnelMultiplexer(role: .client, transport: transport)
-                    let proxy = PeerTunnelLocalProxy(multiplexer: multiplexer)
+                    let proxy = PeerTunnelLocalProxy(multiplexer: multiplexer, service: service)
                     progress?(.proxy)
                     let origin = try await proxy.start()
                     try Task.checkCancellation()
@@ -357,6 +358,7 @@ public actor PeerHostedHostListener {
     private let hostID: String
     private let credential: PeerRendezvousCredential
     private let targetPort: UInt16
+    private let tlsTargetPort: UInt16?
     private let keepalive: PeerRendezvousKeepalive
     private var controlSocket: PeerRendezvousWebSocket?
     private var controlTask: Task<Void, Never>?
@@ -372,12 +374,14 @@ public actor PeerHostedHostListener {
         hostID: String,
         credential: PeerRendezvousCredential,
         targetPort: UInt16,
+        tlsTargetPort: UInt16? = nil,
         keepalive: PeerRendezvousKeepalive = .standard
     ) {
         self.endpoint = endpoint
         self.hostID = hostID
         self.credential = credential
         self.targetPort = targetPort
+        self.tlsTargetPort = tlsTargetPort
         self.keepalive = keepalive
         let stream = AsyncStream<PeerHostedHostEvent>.makeStream(
             bufferingPolicy: .bufferingNewest(64)
@@ -575,7 +579,8 @@ public actor PeerHostedHostListener {
                     sessionID: sessionID,
                     deviceID: deviceID,
                     credential: sessionCredential,
-                    targetPort: targetPort
+                    targetPort: targetPort,
+                    tlsTargetPort: tlsTargetPort
                 )
                 await didConnect(tunnel)
             } catch {
@@ -650,7 +655,8 @@ private func negotiateHostSession(
     sessionID: String,
     deviceID: String,
     credential: PeerRendezvousCredential,
-    targetPort: UInt16
+    targetPort: UInt16,
+    tlsTargetPort: UInt16?
 ) async throws -> PeerHostedHostTunnel {
     let socket = try PeerRendezvousWebSocket(url: endpoint.sessionURL, credential: credential)
     try await socket.connect()
@@ -711,7 +717,8 @@ private func negotiateHostSession(
             let multiplexer = PeerTunnelMultiplexer(role: .server, transport: transport)
             let bridge = try PeerTunnelLoopbackBridge(
                 multiplexer: multiplexer,
-                targetPort: targetPort
+                targetPort: targetPort,
+                tlsTargetPort: tlsTargetPort
             )
             try await bridge.start()
             return PeerHostedHostTunnel(

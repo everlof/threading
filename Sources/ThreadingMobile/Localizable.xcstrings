@@ -8889,6 +8889,23 @@
         }
       }
     },
+    "Pair this Mac again by scanning its current code before using Threading Direct." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pair this Mac again by scanning its current code before using Threading Direct."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Para den här Macen igen genom att skanna dess aktuella kod innan du använder Threading Direct."
+          }
+        }
+      }
+    },
     "Pair this iPhone with Threading FaceID first. Use Pair a Mac and scan the QR code in Mac Settings → Remote Access." : {
       "extractionState" : "manual",
       "localizations" : {

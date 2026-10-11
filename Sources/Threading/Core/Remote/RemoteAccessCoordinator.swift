@@ -542,12 +542,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 || hostedService.anonymousEnrollmentIsDisabled)
     }
 
-    func enableHostedAnonymousEnrollment() throws {
+    func enableHostedAnonymousEnrollment(invitation: String? = nil) throws {
         guard appSettings.hostedDirectIsOffered else { throw PeerControlPlaneError.invalidEndpoint }
-        try hostedService.enableAnonymousEnrollment()
+        try hostedService.enableAnonymousEnrollment(invitation: invitation)
         appSettings.remoteHostedEnrollmentEnabled = true
         if case .listening(let port) = status {
-            hostedService.start(targetPort: port)
+            startHostedTransport(port: port)
         }
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
     }
@@ -1053,10 +1053,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                   case .listening = status,
                   RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
                   let origin = service.serviceURL,
+                  let fingerprint = identityStore.snapshot.fingerprint,
                   let link = issued.credential.withValue({ credential in
                       HostedPairingLink(serviceURL: origin, hostID: issued.hostID,
                                         deviceID: issued.deviceID, rendezvousCredential: credential,
-                                        bootstrapToken: token, expiresAt: issued.expiresAt)
+                                        bootstrapToken: token, expiresAt: issued.expiresAt,
+                                        pinnedFingerprintCode: fingerprint.pairingCode)
                   }),
                   let url = RemoteInvitationWebLink.url(
                       appPayload: link.scannablePayload,
@@ -1968,7 +1970,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         hostedService = replacement
         bindHostedService(replacement)
         if case let .listening(port) = status {
-            replacement.start(targetPort: port)
+            startHostedTransport(port: port)
         }
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
 #endif
@@ -2181,7 +2183,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         return RemoteListenerConfiguration(
             preferredPort: appSettings.remoteAccessListenerPort,
             doors: doors,
-            isDiscoveryEnabled: appSettings.remoteAccessDiscoveryEnabled
+            isDiscoveryEnabled: appSettings.remoteAccessDiscoveryEnabled,
+            isHostedTLSEnabled: appSettings.hostedDirectIsOffered
         )
     }
 
@@ -2234,8 +2237,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     private func applyListenerStatus(_ status: RemoteListenerStatus) {
-        guard case .listening = self.status else { return }
+        guard case .listening(let port) = self.status else { return }
+        let changedTLS = listenerStatus.hostedTLSPort != status.hostedTLSPort
         listenerStatus = status
+        if changedTLS { startHostedTransport(port: port) }
     }
 
     // MARK: - Transports
@@ -2251,11 +2256,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         transportGeneration += 1
         let generation = transportGeneration
         tailscale.stop()
-        if !hostedService.usesAnonymousEnrollment || appSettings.remoteHostedEnrollmentEnabled {
-            hostedService.start(targetPort: port)
-        } else {
-            hostedService.stop()
-        }
+        startHostedTransport(port: port)
         tailscaleServeStatus = .stopped
 
         if shouldRunTailscaleServe {
@@ -2263,6 +2264,19 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         } else if appSettings.remoteAccessTailscaleEnabled {
             tailscale.refreshHostFacts()
         }
+    }
+
+    private func startHostedTransport(port: UInt16) {
+        guard let tlsPort = listenerStatus.hostedTLSPort,
+              !hostedService.usesAnonymousEnrollment || appSettings.remoteHostedEnrollmentEnabled else {
+            hostedService.stop()
+            hostedService.tlsTargetPort = nil
+            return
+        }
+        if hostedService.tlsTargetPort == tlsPort,
+           hostedService.state == .ready || hostedService.state == .connecting { return }
+        hostedService.tlsTargetPort = tlsPort
+        hostedService.start(targetPort: port)
     }
 
     private func bindHostedService(_ service: RemoteHostedServiceController) {
@@ -2343,12 +2357,14 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         guard hostedPairingTask == nil,
               hostedService.canIssueDeviceCredentials,
               case .listening = status,
-              let bootstrap = pairingBootstrapToken
+              let bootstrap = pairingBootstrapToken,
+              let fingerprint = identityStore.snapshot.fingerprint
         else {
             return
         }
         if let current = hostedPairingLink,
            current.bootstrapToken == bootstrap,
+           current.pinnedFingerprintCode == fingerprint.pairingCode,
            !current.isExpired
         {
             return
@@ -2376,7 +2392,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                         deviceID: issued.deviceID,
                         rendezvousCredential: credential,
                         bootstrapToken: bootstrap,
-                        expiresAt: issued.expiresAt
+                        expiresAt: issued.expiresAt,
+                        pinnedFingerprintCode: fingerprint.pairingCode
                     )
                 }
                 guard let link else { return }

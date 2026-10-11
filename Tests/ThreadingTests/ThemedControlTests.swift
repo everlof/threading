@@ -4491,6 +4491,32 @@ final class ThemedControlTests: HostedStoreTestCase {
                     try rendered.write(to: output.appendingPathComponent(fileName))
                 }
             }
+
+            // The invitation is the shipping text prompt attached to the real Settings shell.
+            // Capture its separate presentation panel; AppKit excludes child panels from the
+            // parent's bitmap. No live enrollment or real invitation is involved.
+            let controller = makeMainWindowController()
+            controller.showSettingsPage(id: SettingsPages.remoteAccessID)
+            let window = try XCTUnwrap(controller.window)
+            window.appearance = appearance
+            window.contentView?.layoutSubtreeIfNeeded()
+            let request = RemotePilotInvitationPrompt.request
+            let field = ThemedTextField(frame: NSRect(origin: .zero, size: request.fieldSize))
+            field.placeholderString = request.placeholder
+            let alert = TextPromptAlert.makeAlert(request, field: field)
+            alert.beginSheetModal(for: window)
+            defer { alert.dismiss(); window.orderOut(nil) }
+            let panel = try XCTUnwrap(alert.presentedWindow)
+            panel.appearance = appearance
+            panel.makeFirstResponder(nil) // Stable evidence without a blinking caret.
+            let content = try XCTUnwrap(panel.contentView)
+            AppThemeRefresh.repaint(content)
+            content.layoutSubtreeIfNeeded()
+            let promptPNG = try renderedPNG(of: content)
+            attach(promptPNG, named: "remote-access-pilot-invitation-\(name)")
+            if let output {
+                try promptPNG.write(to: output.appendingPathComponent("remote-access-pilot-invitation-\(name).png"))
+            }
         }
     }
 

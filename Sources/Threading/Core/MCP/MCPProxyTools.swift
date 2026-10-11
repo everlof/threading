@@ -4,7 +4,19 @@ struct TrafficStartArguments: Codable, Sendable {
     let hosts: [String]?
     let bodyLimit: Int?
     let upstreamCA: String?
-    enum CodingKeys: String, CodingKey { case hosts; case bodyLimit = "body_limit"; case upstreamCA = "upstream_ca" }
+    let listenAddress: String?
+    let clientAddress: String?
+    init(hosts: [String]?, bodyLimit: Int?, upstreamCA: String?, listenAddress: String? = nil, clientAddress: String? = nil) {
+        self.hosts = hosts
+        self.bodyLimit = bodyLimit
+        self.upstreamCA = upstreamCA
+        self.listenAddress = listenAddress
+        self.clientAddress = clientAddress
+    }
+    enum CodingKeys: String, CodingKey {
+        case hosts; case bodyLimit = "body_limit"; case upstreamCA = "upstream_ca"
+        case listenAddress = "listen_address"; case clientAddress = "client_address"
+    }
 }
 struct TrafficStopArguments: Codable, Sendable { let release: Bool? }
 struct TrafficListArguments: Codable, Sendable { let after: String?; let limit: Int? }
@@ -54,11 +66,13 @@ enum TrafficRequest: Sendable {
 extension MCPTools {
     static let trafficDeclarations: [MCPToolDefinition] = [
         trafficDeclaration(.trafficStart, name: "traffic_start", title: "Start traffic capture", read: false,
-            description: "Start a session-owned loopback HTTP/HTTPS debugging proxy. Supply up to 16 exact TLS hosts (no wildcards). The host keeps the CA signing key in Keychain and issues 24-hour leaf certificates. Does not install trust or change OS proxy settings. Returns the port, public certificate paths and setup commands. Each body retains 64 KiB by default (up to 1 MiB); history is bounded to 128 flows / 16 MiB. Repeating the same scope reuses the capture. End the session to release it.",
+            description: "Start a session-owned HTTP/HTTPS debugging proxy. Defaults to loopback. To capture an iPhone on trusted Wi-Fi, supply listen_address (Mac IPv4); Threading asks the user when a new client IP connects. No phone IP is needed in advance. The user can allow waiting connections once, for this capture, or remember the IP. Decisions are not agent tools. Supply up to 16 exact TLS hosts (no wildcards). The host keeps the CA signing key in Keychain and issues 24-hour leaf certificates. Does not install trust or change OS proxy settings. Returns the endpoint, public certificate profile and setup steps. Each body retains 64 KiB by default (up to 1 MiB); history is bounded to 128 flows / 16 MiB. Repeating the same scope reuses the capture. End the session to release it.",
             properties: [
                 "hosts": MCPPropertySchema(type: .array, description: "Exact DNS/IP hosts to inspect over TLS; [] captures plain HTTP and tunnels HTTPS.", items: MCPArrayItemSchema(type: .string, description: "Lowercase exact host, without port, wildcard or URL.")),
                 "body_limit": MCPPropertySchema(type: .integer, description: "Maximum retained bytes per request/response body, 1–1048576. Default 65536."),
                 "upstream_ca": MCPPropertySchema(type: .string, description: "Optional absolute PEM bundle for a private development origin. Default: macOS trusted anchors."),
+                "listen_address": MCPPropertySchema(type: .string, description: "Exact Mac IPv4 interface to bind. Omit client_address to ask the user when a device connects. Private/link-local/loopback only; no wildcard or hostname. Omit both addresses for local-only 127.0.0.1."),
+                "client_address": MCPPropertySchema(type: .string, description: "Legacy explicit source-IP filter. Omit for the interactive client approval flow. Requires listen_address. Private/link-local/loopback only. This source-IP filter is not device authentication; use a trusted network."),
             ], required: ["hosts"], request: { .start($0) }),
         trafficDeclaration(.trafficStatus, name: "traffic_status", title: "Traffic capture status", read: true,
             description: "Read this session's proxy status, TLS scope and capture bounds.", request: { (_: TrafficEmptyArguments) in .status }),
@@ -84,7 +98,7 @@ extension MCPTools {
         trafficDeclaration(.trafficClear, name: "traffic_clear", title: "Clear captured traffic", read: false, destructive: true,
             description: "Erase completed exchanges and payloads retained by this session. Active requests can publish when they finish.", request: { (_: TrafficEmptyArguments) in .clear }),
         trafficDeclaration(.trafficCertificate, name: "traffic_certificate", title: "Export inspection certificate", read: true,
-            description: "Read the public inspection CA, fingerprint, Apple installation profile and setup paths. Never returns the CA private key. iOS profile installation and full trust require separate Settings actions. A physical device also needs a reachable proxy route.", request: { (_: TrafficEmptyArguments) in .certificate }),
+            description: "Read the public inspection CA, fingerprint, Apple installation profile and setup paths. Never returns the CA private key. AirDrop profile_path to the iPhone; profile installation and full trust require separate Settings actions. Device capture needs listen_address at start; omit client_address to ask the user when a device connects.", request: { (_: TrafficEmptyArguments) in .certificate }),
     ]
 
     private static var flowID: MCPPropertySchema { MCPPropertySchema(type: .string, description: "Opaque flow ID from traffic_list; valid only for its owning capture.") }

@@ -558,6 +558,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             })
         )
         self.mainWindowController = mainWindowController
+        ProxyCaptureService.shared.presentClientApproval = { [weak mainWindowController] client, scope, owner, completion in
+            ProxyClientApprovalPresenter.present(client, scope: scope, sessionID: owner,
+                in: mainWindowController?.window, completion: completion)
+        }
         let navigationSearchIndexStore = NavigationSearchIndexStore(
             projectStore: environment.projectStore
         )
@@ -636,6 +640,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         } else {
             mainWindowController.showWindow(nil)
         }
+        #if DEBUG
+        UIScenarioBootstrap.startProxyIfRequested()
+        #endif
         // Appearance restoration now yields before constructing the first window. Fulfil the
         // foreground launch request once that window exists, rather than relying on AppKit's
         // did-finish-launching activation while there was still nothing to make key.
@@ -4339,6 +4346,21 @@ private enum UIScenarioBootstrap {
     private static let automationFixtureEvents = AppEventObservations()
 
     private static let markerName = ".threading-ui-scenario-home"
+    private static var proxyScenarioRoot: URL?
+
+    static func startProxyIfRequested() {
+        guard let root = proxyScenarioRoot else { return }
+        proxyScenarioRoot = nil
+        Task {
+            let result = await ProxyCaptureService.shared.call(.start(TrafficStartArguments(
+                hosts: [], bodyLimit: nil, upstreamCA: nil, listenAddress: "127.0.0.1"
+            )), for: SessionID())
+            let bytes = Data(result.text.utf8)
+            await Task.detached(priority: .utility) {
+                try? bytes.write(to: root.appendingPathComponent("proxy-endpoint.json"), options: .atomic)
+            }.value
+        }
+    }
     private static let sessionID = SessionID(
         UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
     )
@@ -4368,6 +4390,7 @@ private enum UIScenarioBootstrap {
         case .installed: break
         case .refused(let reason): return .refused(reason)
         }
+        if environment["THREADING_UI_SCENARIO_PROXY"] == "1" { proxyScenarioRoot = root }
         if let stallHUD = environment[Key.stallHUD] {
             guard stallHUD == "0" || stallHUD == "1" else {
                 return .refused("scenario stall HUD preference is invalid")

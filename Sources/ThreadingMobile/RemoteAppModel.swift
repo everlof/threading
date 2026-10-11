@@ -1428,6 +1428,10 @@ final class RemoteAppModel: ObservableObject {
     }
 
     func pair(_ hostedLink: HostedPairingLink, displayName: String) async throws {
+        guard let code = hostedLink.pinnedFingerprintCode,
+              let pin = RemoteHostPin(pairingCode: code) else {
+            throw HostedRemoteConnectionManager.Failure.pairingRequired
+        }
         guard await restorePairedHostsIfNeeded() else { throw RemoteHostStore.StoreError.unreadable }
         guard !hostedLink.isExpired else { throw PeerControlPlaneError.invalidCredential }
         phase = .connecting
@@ -1456,6 +1460,7 @@ final class RemoteAppModel: ObservableObject {
                 hostID: hostedLink.hostID,
                 deviceID: hostedLink.deviceID,
                 credential: credential,
+                service: .https,
                 progress: { phase in
                     MobileDiagnostics.recordConnectivity(.hostRouteProgress, fields: [
                         .trace: trace,
@@ -1497,9 +1502,15 @@ final class RemoteAppModel: ObservableObject {
             ]) { _, new in new }
         )
         defer { tunnel.stop() }
+        guard tunnel.origin.scheme == "https",
+              let trust = RemoteClient.pinningDelegate.register(
+                RemoteHostPinSet(current: pin), forOrigin: tunnel.origin
+              ) else { throw HostedRemoteConnectionManager.Failure.pairingRequired }
+        defer { withExtendedLifetime(trust) {} }
         guard let loopbackLink = RemoteConnectionLink(
             baseURL: tunnel.origin,
-            token: hostedLink.bootstrapToken
+            token: hostedLink.bootstrapToken,
+            pinnedFingerprintCode: code
         ) else {
             MobileDiagnostics.recordConnectivity(
                 .hostPairingFailed,

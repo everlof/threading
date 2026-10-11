@@ -11,6 +11,13 @@ test('public invitation preserves separate secrets and rejects expired or foreig
   }
   assert.throws(()=>parseInvitation('x'.repeat(8193),origin));
 });
+test('browser accepts the pinned native invitation without discarding its identity',()=>{
+  const pinned={...route,v:2,p:'A'.repeat(26)};
+  assert.deepEqual(parseInvitation(link(pinned),origin),pinned);
+  for(const p of [{...pinned,p:'INVALID'},{...pinned,p:'A'.repeat(25)+'B'},{...pinned,v:1}]) {
+    assert.throws(()=>parseInvitation(link(p),origin));
+  }
+});
 test('service failures close the signaling connection without sending Mac authority',async()=>{
   let socket;
   class Socket {

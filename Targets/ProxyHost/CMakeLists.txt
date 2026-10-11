@@ -91,7 +91,7 @@ if(BUILD_TESTING)
   set_tests_properties(proxy-tls PROPERTIES TIMEOUT 120)
   add_test(NAME proxy-mcp COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_integration.py" "$<TARGET_FILE:threading-proxyd>")
-  set_tests_properties(proxy-mcp PROPERTIES TIMEOUT 120)
+  set_tests_properties(proxy-mcp PROPERTIES TIMEOUT 150) # Includes real 90-second approval expiry.
   add_test(NAME proxy-provenance COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/provenance.py")
 endif()

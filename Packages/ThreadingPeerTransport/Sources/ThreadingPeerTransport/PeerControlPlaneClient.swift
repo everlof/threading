@@ -258,7 +258,8 @@ public struct PeerControlPlaneClient: Sendable {
     /// first enrollment. The service binds that secret to exactly one host identifier.
     public func signInAnonymousHost(
         hostID: String,
-        installationSecret: PeerControlPlaneBearer
+        installationSecret: PeerControlPlaneBearer,
+        invitation: PeerControlPlaneBearer? = nil
     ) async throws -> PeerControlPlaneSession {
         try validateIdentifier(hostID)
         let response: SessionResponse = try await request(
@@ -266,7 +267,8 @@ public struct PeerControlPlaneClient: Sendable {
             url: endpoint.route("v1", "auth", "anonymous-host"),
             body: AnonymousHostSignInRequest(
                 hostID: hostID,
-                installationSecret: installationSecret.rawValue
+                installationSecret: installationSecret.rawValue,
+                invitation: invitation?.rawValue
             )
         )
         return try response.validated()
@@ -631,6 +633,7 @@ private struct AppleSignInRequest: Encodable {
 private struct AnonymousHostSignInRequest: Encodable {
     let hostID: String
     let installationSecret: String
+    let invitation: String?
 }
 
 private struct DevelopmentSignInStartRequest: Encodable {

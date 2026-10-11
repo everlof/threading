@@ -8,6 +8,14 @@
 
 typedef struct px_connection px_connection;
 
+enum { CLIENT_UNUSED, CLIENT_PENDING, CLIENT_ALLOWED, CLIENT_DENIED };
+enum { CLIENT_APPROVAL_TIMEOUT_MS = 90000 };
+typedef struct {
+    int state;
+    uint32_t address;
+    uint64_t id, deadline;
+} px_client_access;
+
 typedef struct {
     uv_tcp_t tcp;
     uv_shutdown_t shutdown;
@@ -35,6 +43,11 @@ struct px_proxy {
     uint64_t next_id;
     px_connection *first;
     px_capture_budget capture_budget;
+    struct sockaddr_in listen_address;
+    struct sockaddr_in client_address;
+    uint64_t rejected_clients;
+    uint64_t next_client_id;
+    px_client_access clients[PX_CLIENT_LIMIT];
 };
 
 struct px_connection {
@@ -54,6 +67,8 @@ struct px_connection {
     bool finishing;
     bool response_started;
     bool inspecting;
+    bool admitted;
+    uint64_t pending_client_id;
     struct sockaddr_storage addresses[PX_ADDRESS_LIMIT];
     unsigned address_count;
     unsigned address_index;
@@ -139,7 +154,7 @@ static void close_connection(px_connection *connection, const char *result) {
     connection->capture.request.complete = connection->request.complete;
     connection->capture.response.complete = connection->response.complete;
     connection->flow.capture = &connection->capture;
-    if (proxy->callback) proxy->callback(&connection->flow, proxy->context);
+    if (connection->admitted && proxy->callback) proxy->callback(&connection->flow, proxy->context);
     if (connection->previous) connection->previous->next = connection->next;
     else proxy->first = connection->next;
     if (connection->next) connection->next->previous = connection->previous;
@@ -152,6 +167,10 @@ static void close_connection(px_connection *connection, const char *result) {
 
 static void timed_out(uv_timer_t *timer) {
     px_connection *connection = timer->data;
+    if (!connection->admitted) {
+        px_proxy_decide_client(connection->proxy, connection->pending_client_id, PX_CLIENT_DENY);
+        return;
+    }
     if (connection->finishing) close_connection(connection, "timeout");
     else fail_connection(connection, 504, "timeout");
 }
@@ -527,13 +546,14 @@ static void connect_next(px_connection *connection) {
 
 static bool self_address(px_connection *connection, const struct sockaddr *address) {
     if (connection->target.port != connection->proxy->port) return false;
-    char text[64];
     if (address->sa_family == AF_INET) {
-        if (uv_ip4_name((const struct sockaddr_in *)address, text, sizeof(text)) < 0) return true;
-        return strcmp(text, "127.0.0.1") == 0;
+        return ((const struct sockaddr_in *)address)->sin_addr.s_addr == connection->proxy->listen_address.sin_addr.s_addr;
     }
-    if (uv_ip6_name((const struct sockaddr_in6 *)address, text, sizeof(text)) < 0) return true;
-    return strcmp(text, "::ffff:127.0.0.1") == 0;
+    if (address->sa_family != AF_INET6) return false;
+    const unsigned char *bytes = ((const struct sockaddr_in6 *)address)->sin6_addr.s6_addr;
+    static const unsigned char mapped_prefix[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+    return memcmp(bytes, mapped_prefix, sizeof(mapped_prefix)) == 0 &&
+        memcmp(bytes + 12, &connection->proxy->listen_address.sin_addr, 4) == 0;
 }
 
 static void resolved(uv_getaddrinfo_t *request, int status, struct addrinfo *addresses) {
@@ -640,6 +660,92 @@ static void process_client(px_connection *connection, const char *data, size_t l
     if (connection->request.complete) stop_reading(&connection->client);
 }
 
+static void admit_client(px_connection *connection) {
+    connection->pending_client_id = 0;
+    connection->admitted = true;
+    connection->started = uv_now(connection->proxy->loop);
+    uv_tcp_nodelay(&connection->client.tcp, 1);
+    touch(connection);
+    start_reading(&connection->client);
+}
+
+bool px_proxy_decide_client(px_proxy *proxy, uint64_t id, px_client_decision decision) {
+    if (!proxy || proxy->stopping || !id) return false;
+    px_client_access *access = NULL;
+    for (size_t i = 0; i < PX_CLIENT_LIMIT; ++i) {
+        if (proxy->clients[i].state == CLIENT_PENDING && proxy->clients[i].id == id) access = &proxy->clients[i];
+    }
+    if (!access) return false;
+    bool timely = uv_now(proxy->loop) < access->deadline;
+    if (!timely) decision = PX_CLIENT_DENY;
+    access->state = decision == PX_CLIENT_DENY ? CLIENT_DENIED :
+        decision == PX_CLIENT_SESSION ? CLIENT_ALLOWED : CLIENT_UNUSED;
+    px_connection *connection = proxy->first;
+    while (connection) {
+        px_connection *next = connection->next;
+        if (connection->pending_client_id == id) {
+            if (decision == PX_CLIENT_DENY) {
+                ++proxy->rejected_clients;
+                close_connection(connection, "client_not_allowed");
+            } else admit_client(connection);
+        }
+        connection = next;
+    }
+    return timely;
+}
+
+size_t px_proxy_pending_clients(px_proxy *proxy, px_client_request requests[PX_PENDING_CLIENT_LIMIT]) {
+    if (!proxy || proxy->stopping) return 0;
+    size_t count = 0;
+    for (size_t i = 0; i < PX_CLIENT_LIMIT; ++i) {
+        px_client_access *access = &proxy->clients[i];
+        if (access->state != CLIENT_PENDING) continue;
+        if (uv_now(proxy->loop) >= access->deadline) {
+            px_proxy_decide_client(proxy, access->id, PX_CLIENT_DENY);
+            continue;
+        }
+        px_client_request *request = &requests[count++];
+        request->id = access->id;
+        request->connections = 0;
+        struct sockaddr_in address;
+        memset(&address, 0, sizeof(address));
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = access->address;
+        uv_ip4_name(&address, request->address, sizeof(request->address));
+        for (px_connection *connection = proxy->first; connection; connection = connection->next) {
+            if (connection->pending_client_id == access->id) ++request->connections;
+        }
+    }
+    return count;
+}
+
+static bool await_client_approval(px_connection *connection, uint32_t address) {
+    px_proxy *proxy = connection->proxy;
+    px_client_access *access = NULL, *empty = NULL;
+    unsigned pending = 0;
+    for (size_t i = 0; i < PX_CLIENT_LIMIT; ++i) {
+        px_client_access *item = &proxy->clients[i];
+        if (item->state == CLIENT_PENDING) ++pending;
+        if (item->state == CLIENT_UNUSED) empty = item;
+        else if (item->address == address) access = item;
+    }
+    if (access && access->state == CLIENT_ALLOWED) { admit_client(connection); return true; }
+    if (access && access->state == CLIENT_DENIED) return false;
+    if (!access) {
+        if (!empty || pending == PX_PENDING_CLIENT_LIMIT) return false;
+        access = empty;
+        *access = (px_client_access){CLIENT_PENDING, address, ++proxy->next_client_id, uv_now(proxy->loop) + CLIENT_APPROVAL_TIMEOUT_MS};
+    }
+    unsigned connections = 0;
+    for (px_connection *item = proxy->first; item; item = item->next) {
+        if (item->pending_client_id == access->id) ++connections;
+    }
+    if (connections == PX_CLIENT_CONNECTION_LIMIT || uv_now(proxy->loop) >= access->deadline) return false;
+    connection->pending_client_id = access->id;
+    uv_timer_start(&connection->timer, timed_out, access->deadline - uv_now(proxy->loop), 0);
+    return true; /* No read, TLS, DNS or upstream connection before approval. */
+}
+
 static void free_rejected(uv_handle_t *handle) { free(handle); }
 
 static void accept_client(uv_stream_t *server, int status) {
@@ -675,31 +781,52 @@ static void accept_client(uv_stream_t *server, int status) {
     connection->timer.data = connection;
     retain(connection);
     if (uv_accept(server, (uv_stream_t *)&connection->client.tcp) < 0) { close_connection(connection, "accept_error"); return; }
-    uv_tcp_nodelay(&connection->client.tcp, 1);
-    touch(connection);
-    start_reading(&connection->client);
+    struct sockaddr_storage address;
+    int length = sizeof(address);
+    char client_address[16];
+    bool valid = uv_tcp_getpeername(&connection->client.tcp, (struct sockaddr *)&address, &length) == 0 &&
+        address.ss_family == AF_INET && uv_ip4_name((struct sockaddr_in *)&address, client_address, sizeof(client_address)) == 0 &&
+        px_proxy_valid_address(client_address);
+    if (valid) {
+        uint32_t source = ((const struct sockaddr_in *)&address)->sin_addr.s_addr;
+        if (proxy->config.ask_clients && await_client_approval(connection, source)) return;
+        if (!proxy->config.ask_clients && source == proxy->client_address.sin_addr.s_addr) { admit_client(connection); return; }
+    }
+    ++proxy->rejected_clients;
+    close_connection(connection, "client_not_allowed");
+}
+
+bool px_proxy_valid_address(const char *text) {
+    struct sockaddr_in address;
+    char canonical[16];
+    if (!text || uv_ip4_addr(text, 0, &address) < 0 ||
+        uv_ip4_name(&address, canonical, sizeof(canonical)) < 0 || strcmp(text, canonical) != 0) return false;
+    uint32_t value = ntohl(address.sin_addr.s_addr);
+    return (value >> 24) == 10 || (value >> 24) == 127 ||
+        (value >> 20) == 0xac1 || (value >> 16) == 0xc0a8 || (value >> 16) == 0xa9fe;
 }
 
 px_proxy *px_proxy_create(uv_loop_t *loop, px_config config, px_flow_callback callback, void *context) {
     if (!config.max_connections || config.max_connections > PX_MAX_CONNECTIONS || config.port > 65535 || !config.idle_timeout_ms) return NULL;
+    if (!px_proxy_valid_address(config.listen_address) || !px_proxy_valid_address(config.client_address)) return NULL;
     px_proxy *proxy = calloc(1, sizeof(*proxy));
     if (!proxy) return NULL;
     proxy->loop = loop;
     proxy->config = config;
     proxy->callback = callback;
     proxy->context = context;
+    uv_ip4_addr(config.listen_address, (int)config.port, &proxy->listen_address);
+    uv_ip4_addr(config.client_address, 0, &proxy->client_address);
     return proxy;
 }
 
 int px_proxy_start(px_proxy *proxy) {
     struct sockaddr_in address;
-    int status = uv_ip4_addr("127.0.0.1", (int)proxy->config.port, &address);
-    if (status < 0) return status;
-    status = uv_tcp_init(proxy->loop, &proxy->listener);
+    int status = uv_tcp_init(proxy->loop, &proxy->listener);
     if (status < 0) return status;
     proxy->initialized = true;
     proxy->listener.data = proxy;
-    status = uv_tcp_bind(&proxy->listener, (const struct sockaddr *)&address, 0);
+    status = uv_tcp_bind(&proxy->listener, (const struct sockaddr *)&proxy->listen_address, 0);
     if (status < 0) return status;
     status = uv_listen((uv_stream_t *)&proxy->listener, PX_MAX_CONNECTIONS, accept_client);
     if (status < 0) return status;
@@ -710,6 +837,7 @@ int px_proxy_start(px_proxy *proxy) {
 }
 
 unsigned px_proxy_port(const px_proxy *proxy) { return proxy->port; }
+uint64_t px_proxy_rejected_clients(const px_proxy *proxy) { return proxy ? proxy->rejected_clients : 0; }
 
 static void listener_closed(uv_handle_t *handle) {
     px_proxy *proxy = handle->data;

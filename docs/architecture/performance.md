@@ -4,6 +4,39 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## Finite remote HTTP responses — 2026-10-11
+
+Physical iPhone pairing reached and pinned the Mac, which persisted the new device, but every
+acceptance response was discarded by the live socket's 2 MiB send-backlog guard. The phone
+reported `NSURLErrorDomain -1005` in 648–865 ms. The host had 1,641 stored sessions; pairing sends
+the complete owner catalogue without the compression used by ordinary catalogue refreshes.
+The pinned-TLS regression reproduced the same error with 1,200 sessions and bounded long titles.
+
+HTTP now retains one finite response per connection and submits one 64 KiB chunk at a time,
+waiting for Network.framework's completion before submitting the next. Pipelined requests stay
+queued until the preceding response finishes. The aggregate response cap is 24 MiB plus 64 KiB
+for the HTTP head, matching the previous attachment ceiling; oversized responses receive an
+explicit refusal. The server's 32-connection admission bound, the HTTP silence deadline and the
+2 MiB live WebSocket backlog remain in force. Work runs on the existing server queue, with no
+new main-actor callback or UI cardinality. The usual 1,000 / stress 5,000-session catalogue
+contract is unchanged; this fixes transfer, not projection or eager rendering.
+
+`RemoteListenerTLSTests.testPairingDeliversALargeCatalogueOverTLSAndReplaysTheSameAcceptance`
+measures acceptance plus exact replay, excluding fixture creation and listener startup.
+`RemoteConnectionIdleTests` checks two pipelined multi-megabyte responses and explicit refusal
+above the HTTP ceiling. Existing pinned-TLS image tests cover closing responses on slow links.
+The focused ordinary Xcode run passed 69 tests. The 1,200-session fixture delivered 2,636,813
+bytes and replayed the identical acceptance in 0.743 s combined (Debug, one measured run;
+not a physical-device latency claim). Before the change its TLS request failed with `-1005`;
+the pipelining and oversized-response regressions also lost their connections. Physical-device
+verification still requires installing the corrected Release build.
+
+The acceptance route still includes and synchronously encodes a whole catalogue. A further
+protocol improvement should separate the durable pairing acknowledgement from catalogue loading,
+then use the existing conditional, compressed catalogue path. Other catalogue-bearing mutations
+should share a bounded encoding worker and a byte-budgeted replay cache. Chunked socket writes
+do not remove those allocation and main-actor costs.
+
 ## Attachment read lock ownership — 2026-10-10
 
 The running Debug app retained a 15,596.97 ms main-thread stall overlapping a 15,630.15 ms

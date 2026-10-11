@@ -169,6 +169,9 @@ final class RemoteListenerSet: @unchecked Sendable {
     /// window lets the old start's timer fail the new one.
     private var startGeneration = 0
     private var isRunning = false
+    private var hostedTLSListener: NWListener?
+    private var hostedTLSPort: UInt16?
+    private var hostedTLSFingerprint: RemoteHostFingerprint?
 
     // MARK: - Initialization
 
@@ -276,6 +279,7 @@ final class RemoteListenerSet: @unchecked Sendable {
                 }
                 entry.listener.cancel()
             }
+            stopHostedTLS()
             listeners.removeAll()
             resolvedPort = nil
             configuration = RemoteListenerConfiguration()
@@ -426,11 +430,12 @@ final class RemoteListenerSet: @unchecked Sendable {
         let enabled = configuration.bindableDoors
         let classified = RemoteDoorClassification.doors(for: addressSource())
 
-        // One resolution per rebuild, and only when a door that needs one is enabled: the
-        // shipped default binds loopback alone and must not mint a certificate for it.
+        // One resolution per rebuild, only for TLS doors or the native hosted TLS listener.
+        // The plain HTTP loopback listener alone never needs an identity.
         var identity: RemoteAccessIdentity?
         identityFailure = nil
-        if enabled.contains(where: { $0.requiresTLS && !(classified[$0] ?? []).isEmpty }) {
+        if configuration.isHostedTLSEnabled
+            || enabled.contains(where: { $0.requiresTLS && !(classified[$0] ?? []).isEmpty }) {
             switch identityProvider.currentIdentity() {
             case .success(let resolved):
                 identity = resolved
@@ -472,8 +477,59 @@ final class RemoteListenerSet: @unchecked Sendable {
             listeners[door] = existing.isEmpty ? nil : existing
         }
 
+        updateHostedTLS(identity: identity)
         updatePathMonitor()
         publish()
+    }
+
+    /// One extra bounded listener shares the Mac identity and the server's connection handler.
+    /// Only TLS records cross the native peer bridge; Serve and web guests keep their HTTP port.
+    private func updateHostedTLS(identity: RemoteAccessIdentity?) {
+        guard configuration.isHostedTLSEnabled, let identity,
+              let options = Self.tlsOptions(for: identity) else {
+            stopHostedTLS()
+            return
+        }
+        if hostedTLSListener != nil, hostedTLSFingerprint == identity.fingerprint { return }
+        stopHostedTLS()
+        let parameters = NWParameters(tls: options, tcp: NWProtocolTCP.Options())
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        guard let listener = try? NWListener(using: parameters) else { return }
+        hostedTLSListener = listener
+        hostedTLSFingerprint = identity.fingerprint
+        listener.newConnectionHandler = { [weak self] connection in
+            guard let handler = self?.onConnection else { connection.cancel(); return }
+            handler(connection)
+        }
+        listener.stateUpdateHandler = { [weak self, weak listener] state in
+            guard let self, let listener, self.hostedTLSListener === listener else { return }
+            switch state {
+            case .ready:
+                self.hostedTLSPort = listener.port?.rawValue
+            case .failed, .cancelled:
+                self.stopHostedTLS()
+            case .waiting:
+                self.hostedTLSPort = nil
+            default:
+                return
+            }
+            self.publish()
+        }
+        listener.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + RemoteAccessDefaults.listenerStartTimeout) { [weak self, weak listener] in
+            guard let self, let listener, self.hostedTLSListener === listener,
+                  self.hostedTLSPort == nil else { return }
+            self.stopHostedTLS()
+            self.publish()
+        }
+    }
+
+    private func stopHostedTLS() {
+        hostedTLSListener?.stateUpdateHandler = nil
+        hostedTLSListener?.cancel()
+        hostedTLSListener = nil
+        hostedTLSPort = nil
+        hostedTLSFingerprint = nil
     }
 
     /// One listener, pinned to one address, presenting this Mac's identity when the door is a
@@ -619,7 +675,8 @@ final class RemoteListenerSet: @unchecked Sendable {
         let status = RemoteListenerStatus(
             port: resolvedPort?.rawValue,
             doors: doors,
-            firewall: firewall
+            firewall: firewall,
+            hostedTLSPort: hostedTLSPort
         )
         statusStorage.withLock { $0 = status }
         requestedStorage.withLock { current in
@@ -777,6 +834,7 @@ final class RemoteListenerSet: @unchecked Sendable {
     /// Ends a start that cannot produce a listener: nothing stays bound, and the set is idle
     /// again so the user's retry is a real retry rather than a replay of this answer.
     private func failStart(_ failure: RemoteListenerFailure) {
+        stopHostedTLS()
         for entry in listeners.values.flatMap({ $0.values }) { cancel(entry) }
         listeners.removeAll()
         resolvedPort = nil

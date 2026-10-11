@@ -1607,11 +1607,19 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         hostedSignOutButton.isEnabled = hostedAccountTask == nil
         hostedDeleteAccountButton.isEnabled = hostedAccountTask == nil
         hostedEnableButton.isEnabled = hostedAccountTask == nil
+        hostedEnableButton.title = L10n.string("Enable Hosted Access")
 
         if hostedAnonymous {
             if coordinator.hostedAnonymousEnrollmentIsDisabled
                 || !AppSettings.shared.remoteHostedEnrollmentEnabled {
                 hostedStatusLabel.stringValue = L10n.string("Hosted access is off")
+                hostedEnableButton.isHidden = false
+                return
+            }
+            if coordinator.hostedServiceState == .unavailable("pilot-invitation") {
+                hostedStatusLabel.stringValue = hostedAccountError
+                    ?? L10n.string("Enter a valid pilot invitation to connect this Mac.")
+                hostedEnableButton.title = L10n.string("Enter Pilot Invitation…")
                 hostedEnableButton.isHidden = false
                 return
             }
@@ -1760,9 +1768,15 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
     @objc private func enableHostedAccess() {
         guard hostedAnonymous else { return }
+        let coordinator = RemoteAccessCoordinator.shared
+        var invitation: String?
+        if coordinator.hostedServiceState == .unavailable("pilot-invitation") {
+            guard case .text(let value) = TextPromptAlert.ask(RemotePilotInvitationPrompt.request) else { return }
+            invitation = value
+        }
         hostedAccountError = nil
         do {
-            try RemoteAccessCoordinator.shared.enableHostedAnonymousEnrollment()
+            try coordinator.enableHostedAnonymousEnrollment(invitation: invitation)
         } catch {
             hostedAccountError = L10n.string("Could not enable hosted access. Try again.")
         }

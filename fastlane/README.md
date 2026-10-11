@@ -23,7 +23,7 @@ For _fastlane_ installation instructions, see [Installing _fastlane_](https://do
 
 Archive ThreadingMobile in Release and upload it to TestFlight.
 
-Refuses an uncommitted tree unless allow_dirty:true. changelog:"…" sets What to Test;
+Requires a clean, tested checkout and compatible production service. changelog:"…" sets What to Test;
 
 wait:false returns before App Store Connect finishes processing.
 
@@ -34,6 +34,14 @@ wait:false returns before App Store Connect finishes processing.
 ```
 
 Build the IPA beta would upload and have App Store Connect validate it, uploading nothing.
+
+### ios beta_metadata
+
+```sh
+[bundle exec] fastlane ios beta_metadata
+```
+
+Update TestFlight description, privacy link and review instructions. Does not submit a build.
 
 ### ios internal_testers
 

@@ -2962,11 +2962,15 @@ error becomes visible again.
     public certificate logs, so it is off unless you want the browser. Its own status line says
     where it is serving, or which admin-console setting is missing, with the button that opens it.
 - **Threading Direct** (every build). Choose **Enable Hosted Access** under **Connection →
-  Hosted Direct** and wait for **Ready**. No Apple sign-in is required, including in local and
+  Hosted Direct** and wait for **Ready**. New Macs in the pilot need a one-use invitation; if
+  prompted, choose **Enter Pilot Invitation…** and paste your code. Existing installations can
+  reconnect without another code. No Apple sign-in is required, including in local and
   internal builds using Production. Paired iPhones and invited chat guests can connect across
   networks without a VPN while this Mac is online and awake. An existing phone pairing receives
   its hosted credentials when it next refreshes over a working connection to the Mac; enable
-  hosted access before leaving home, or pair with the hosted code once it is ready.
+  hosted access before leaving home, or pair with the hosted code once it is ready. Direct verifies
+  the Mac’s paired certificate before sending data. If an old Direct pairing asks you to scan
+  again, scan the current code on your Mac; there is no unverified fallback.
 
 In a Debug build or Threading's internal `/Applications` build, **Advanced > Developer Settings >
 Hosted service** selects **Production** or the isolated **Development** service. Switching it
@@ -3347,7 +3351,8 @@ keys — when you prefer to write in the iOS text area and send the finished lin
 all TUIs on this device, including after restarting the app. **Settings → On this iPhone → Terminal keys**
 changes the same shared preference.
 
-In **Compose**, Paste inserts text at the cursor. Pasting a copied picture or file adds it to
+In **Compose**, Return inserts a new line; tap the send arrow to send the finished draft.
+Paste inserts text at the cursor. Pasting a copied picture or file adds it to
 the attachment strip for your next message, just like **paperclip → From Clipboard**.
 
 When another reply-capable participant joins, the terminal temporarily uses **Compose**. The
@@ -4726,6 +4731,44 @@ HTML runs with network access, so CDN libraries work. That is a deliberate choic
 an oversight — the agent already has a shell, so a locked-down web view would stop nothing it
 could not do more easily with `curl`. What is blocked is navigation, which is a usability
 problem rather than a security one.
+
+### Capturing HTTP and HTTPS traffic
+
+**Settings → Tools → Network traffic** lets the agent start a debugging proxy owned by this
+chat. Ask it to capture traffic for the exact HTTPS domains you need. It can inspect request and
+response headers and actual bodies, including error responses. Capture defaults to 64 KiB per
+body and retains at most 128 exchanges / 16 MiB of history; larger responses still reach the
+client, with truncation reported in the captured copy. Common credentials are redacted in normal
+reads, and exact raw reads are available when requested. There is no separate Traffic pane yet.
+
+For **Safari on your iPhone**, connect the phone and Mac to the same trusted Wi-Fi and ask the
+agent to start a device capture. You do not need the phone's IP in advance. Threading binds
+the selected Mac IPv4 address and asks when a new client IP connects. Local-only capture remains
+the default.
+
+Choose **Allow Once** for connections already waiting, **This Capture** until capture stops,
+**Always Allow This IP** to remember that IP with this Mac's proxy address and the selected HTTPS
+hosts, or **Deny** to block retries until capture stops. Unanswered requests expire after 90 seconds.
+An IP address is not a verified device identity and can later belong to another device. Use
+**Settings → Tools → Proxy Client Access → Forget Saved IPs** to revoke saved grants; this also
+stops captures using connection approval.
+
+The agent returns the Mac server address, port and a public certificate profile. On the phone,
+set **Configure Proxy → Manual** for that Wi-Fi network, enter the server/port and leave
+Authentication off. AirDrop the profile to the phone, install it from **Settings → Profile
+Downloaded**, then enable it in **General → About → Certificate Trust Settings**. Installation
+and full trust are separate steps. Open `https://example.com/` for a first test with that domain
+selected; the agent should see its decrypted GET, response status and HTML body.
+
+Only selected HTTPS domains are decrypted; other HTTPS connections pass through as opaque
+tunnels. Plain HTTP is captured too. This setup covers traffic using that Wi-Fi proxy, not
+cellular traffic. If the phone address changes, Threading asks about its new IP. Check the Mac firewall,
+Wi-Fi client isolation and VPN routing if the phone cannot connect.
+
+Restore the phone's previous Wi-Fi proxy setting before stopping capture, and remove the
+certificate profile when finished. Ordinary stop keeps captured exchanges readable; releasing
+the capture also erases them. Ending or archiving the chat closes its proxy. Threading never
+installs certificate trust or changes network proxy settings just because capture was started.
 
 ### Letting an agent change the theme
 

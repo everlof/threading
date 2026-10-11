@@ -1,5 +1,6 @@
 import type { Env } from "./environment";
 import { BOUNDS, type IceServer } from "./protocol";
+import { reserveTURN, TURN_BUDGET } from "./turn-budget";
 
 const fallbackSTUN: IceServer = {
   urls: ["stun:stun.cloudflare.com:3478", "stun:stun.cloudflare.com:53"],
@@ -15,9 +16,11 @@ const reviewedTURNURLs = [
 
 /// TURN is an availability fallback: a credential-provisioning outage must not suppress the
 /// direct STUN path. The returned native configuration remains within the Swift-side 8 × 4 cap.
-export async function generateIceServers(env: Env): Promise<IceServer[]> {
+export async function generateIceServers(env: Env, accountID: string): Promise<IceServer[]> {
   if (env.LOCAL_DEVELOPMENT_MODE === "1" && env.LOCAL_ICE_MODE === "host-only") return [];
   if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) return [fallbackSTUN];
+  const customIdentifier = await reserveTURN(env, accountID);
+  if (!customIdentifier) return [fallbackSTUN];
   try {
     const response = await fetch(
       `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(env.TURN_KEY_ID)}`
@@ -28,7 +31,7 @@ export async function generateIceServers(env: Env): Promise<IceServer[]> {
           Authorization: `Bearer ${env.TURN_KEY_API_TOKEN}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ ttl: 24 * 60 * 60 }),
+        body: JSON.stringify({ ttl: TURN_BUDGET.credentialLifetimeSeconds, customIdentifier }),
         signal: AbortSignal.timeout(5000),
       },
     );

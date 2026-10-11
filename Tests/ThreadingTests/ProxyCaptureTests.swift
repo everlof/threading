@@ -5,7 +5,7 @@ import Darwin
 @testable import Threading
 
 final class ProxyCaptureTests: XCTestCase {
-    private static func authority() throws -> ProxyCertificateAuthority {
+    static func authority() throws -> ProxyCertificateAuthority {
         let key = try RemoteIdentityCertificateBuilder.makeKey()
         return ProxyCertificateAuthority(key: key, certificate: try ProxyCertificateAuthority.makeCertificate(subjectKey: key, signingKey: key, host: nil))
     }
@@ -38,6 +38,42 @@ final class ProxyCaptureTests: XCTestCase {
         XCTAssertThrowsError(try ProxyLaunchScope(TrafficStartArguments(hosts: [], bodyLimit: 0, upstreamCA: nil)))
     }
 
+    func testDeviceScopeAllowsApprovalWithoutPredefinedClientAndDecodesFromMCP() throws {
+        let decoded = try JSONDecoder().decode(TrafficStartArguments.self, from: Data(#"{"hosts":["example.com"],"listen_address":"192.168.1.10","client_address":"192.168.1.20"}"#.utf8))
+        let scope = try ProxyLaunchScope(decoded)
+        XCTAssertEqual(scope.listenAddress, "192.168.1.10")
+        XCTAssertEqual(scope.clientAddress, "192.168.1.20")
+        let local = try ProxyLaunchScope(TrafficStartArguments(hosts: [], bodyLimit: nil, upstreamCA: nil))
+        XCTAssertEqual(local.listenAddress, "127.0.0.1")
+        XCTAssertEqual(local.clientAddress, "127.0.0.1")
+        let asking = try ProxyLaunchScope(TrafficStartArguments(hosts: [], bodyLimit: nil, upstreamCA: nil, listenAddress: "192.168.1.10"))
+        XCTAssertTrue(asking.asksClients)
+        XCTAssertFalse(local.asksClients)
+        XCTAssertThrowsError(try ProxyLaunchScope(TrafficStartArguments(hosts: [], bodyLimit: nil, upstreamCA: nil, clientAddress: "192.168.1.20")))
+        for address in ["0.0.0.0", "::", "::1", "localhost", "8.8.8.8", "224.0.0.1", "255.255.255.255", "192.168.01.1", "127.1", "127.0.0.1:8080", "172.32.0.1", "169.253.1.2"] {
+            XCTAssertThrowsError(try ProxyLaunchScope(TrafficStartArguments(hosts: [], bodyLimit: nil, upstreamCA: nil, listenAddress: address, clientAddress: "127.0.0.1")), address)
+            XCTAssertThrowsError(try ProxyLaunchScope(TrafficStartArguments(hosts: [], bodyLimit: nil, upstreamCA: nil, listenAddress: "127.0.0.1", clientAddress: address)), address)
+        }
+    }
+
+    @MainActor
+    func testBundledHelperEnforcesClientScopeWithoutRetainingRejectedTraffic() async throws {
+        let service = ProxyCaptureService(configuration: .bundled, center: NotificationCenter())
+        defer { service.stopAll() }
+        let owner = SessionID()
+        let arguments = TrafficStartArguments(hosts: [], bodyLimit: nil, upstreamCA: nil, listenAddress: "127.0.0.1", clientAddress: "127.0.0.2")
+        let started = try Self.object(await service.call(.start(arguments), for: owner))
+        XCTAssertEqual(started["listen_address"] as? String, "127.0.0.1")
+        XCTAssertEqual(started["client_address"] as? String, "127.0.0.2")
+        let port = try XCTUnwrap(started["port"] as? Int)
+        try await Task.detached { try Self.expectRejectedClient(proxyPort: port) }.value
+        let status = try Self.object(await service.call(.status, for: owner))
+        XCTAssertEqual(status["rejected_clients"] as? String, "1")
+        XCTAssertEqual(status["retained_flows"] as? Int, 0)
+        let changed = await service.call(.start(TrafficStartArguments(hosts: [], bodyLimit: nil, upstreamCA: nil)), for: owner)
+        XCTAssertTrue(changed.isError, "Changing the admitted device requires explicit release")
+    }
+
     @MainActor
     func testBundledHelperCapturesRealHTTPAndKeepsSessionsSeparate() async throws {
         let configuration = ProxyProcess.Configuration.bundled
@@ -45,7 +81,7 @@ final class ProxyCaptureTests: XCTestCase {
             temporaryRoot: FileManager.default.temporaryDirectory, authority: { throw ProxyProcess.Failure.message("HTTP capture must not access Keychain") }), center: NotificationCenter())
         defer { service.stopAll() }
         let owner = SessionID(), other = SessionID()
-        let started = await service.call(.start(TrafficStartArguments(hosts: [], bodyLimit: 65536, upstreamCA: nil)), for: owner)
+        let started = await service.call(.start(TrafficStartArguments(hosts: [], bodyLimit: 65536, upstreamCA: nil, listenAddress: "127.0.0.1", clientAddress: "127.0.0.1")), for: owner)
         let status = try Self.object(started)
         let proxyPort = try XCTUnwrap(status["port"] as? Int)
         let bytes = try await Task.detached { try Self.performExchange(proxyPort: proxyPort) }.value
@@ -109,8 +145,27 @@ final class ProxyCaptureTests: XCTestCase {
         return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(result.text.utf8)) as? [String: Any])
     }
 
+    static func expectRejectedClient(proxyPort: Int) throws {
+        let client = socket(AF_INET, SOCK_STREAM, 0)
+        guard client >= 0 else { throw ProxyProcess.Failure.message("fixture client") }
+        defer { close(client) }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        address.sin_port = UInt16(proxyPort).bigEndian
+        let connected = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(client, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        guard connected == 0 else { throw ProxyProcess.Failure.message("fixture connect") }
+        var timeout = timeval(tv_sec: 5, tv_usec: 0)
+        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        var byte: UInt8 = 0
+        XCTAssertEqual(read(client, &byte, 1), 0, "Unapproved client must close before any protocol data")
+    }
+
     /// A real origin and client; no URLSession connection-pool/proxy bypass behavior in the fixture.
-    private static func performExchange(proxyPort: Int) throws -> Data {
+    static func performExchange(proxyPort: Int) throws -> Data {
         let listener = socket(AF_INET, SOCK_STREAM, 0)
         guard listener >= 0 else { throw ProxyProcess.Failure.message("fixture socket") }
         defer { close(listener) }

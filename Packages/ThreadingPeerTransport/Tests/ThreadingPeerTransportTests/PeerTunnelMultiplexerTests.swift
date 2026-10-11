@@ -4,6 +4,40 @@ import XCTest
 @testable import ThreadingPeerTransport
 
 final class PeerTunnelMultiplexerTests: XCTestCase {
+    func testTLSOpenKeepsItsServiceAndCannotFallBackToTheHTTPBridge() async throws {
+        let pair = await InMemoryMessageTransport.makePair()
+        let client = PeerTunnelMultiplexer(role: .client, transport: pair.left)
+        let server = PeerTunnelMultiplexer(role: .server, transport: pair.right)
+        try await client.start()
+        try await server.start()
+        async let opened = client.openStream(service: .https)
+        let incoming = try await server.acceptStream()
+        XCTAssertEqual(incoming.service, .https)
+        try await incoming.accept()
+        let outgoing = try await opened
+        XCTAssertEqual(outgoing.service, .https)
+        await outgoing.reset()
+        await client.close()
+        await server.close()
+
+        let plainPair = await InMemoryMessageTransport.makePair()
+        let plainClient = PeerTunnelMultiplexer(role: .client, transport: plainPair.left)
+        try await plainClient.start()
+        let bridge = try PeerTunnelLoopbackBridge(
+            multiplexer: PeerTunnelMultiplexer(role: .server, transport: plainPair.right),
+            targetPort: 54321 // No TLS destination configured: never even try the HTTP port.
+        )
+        try await bridge.start()
+        do {
+            _ = try await plainClient.openStream(service: .https)
+            XCTFail("A bridge without a TLS listener must refuse TLS streams")
+        } catch let error as PeerTunnelError {
+            guard case .streamClosed = error else { throw error }
+        }
+        bridge.stop()
+        await plainClient.close()
+    }
+
     func testFrameCodecRejectsVersionAndLengthViolations() throws {
         let payload = Data(repeating: 0x42, count: PeerTunnelBounds.maximumDataBytes)
         let frame = PeerTunnelFrame.data(streamID: 1, payload: payload)

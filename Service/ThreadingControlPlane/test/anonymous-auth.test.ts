@@ -1,9 +1,21 @@
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { Env } from "../src/environment";
 import worker from "../src/index";
+import { sha256Hex } from "../src/crypto";
 
 const testEnv = env as unknown as Env;
+beforeEach(async () => {
+  await testEnv.DB.prepare("DELETE FROM accounts WHERE id LIKE 'anon_%'").run();
+  await testEnv.DB.prepare("DELETE FROM pilot_invitations").run();
+});
+
+async function invitation(expiresAt = Math.floor(Date.now() / 1000) + 3600): Promise<string> {
+  const token = installationSecret().replace("th_install_", "th_pilot_");
+  await testEnv.DB.prepare("INSERT INTO pilot_invitations (digest, created_at, expires_at) VALUES (?, ?, ?)")
+    .bind(await sha256Hex(token), Math.floor(Date.now() / 1000), expiresAt).run();
+  return token;
+}
 
 function installationSecret(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
@@ -27,6 +39,7 @@ describe("accountless Mac enrollment", () => {
     const hostID = crypto.randomUUID();
     const secret = installationSecret();
     const first = await post("/v1/auth/anonymous-host", {
+      invitation: await invitation(),
       hostID,
       installationSecret: secret,
     });
@@ -88,6 +101,7 @@ describe("accountless Mac enrollment", () => {
     const existingSecret = installationSecret();
     expect((await post("/v1/auth/anonymous-host", {
       hostID: existingHostID,
+      invitation: await invitation(),
       installationSecret: existingSecret,
     })).status).toBe(200);
 
@@ -109,6 +123,7 @@ describe("accountless Mac enrollment", () => {
     }
 
     const full = await post("/v1/auth/anonymous-host", {
+      invitation: await invitation(),
       hostID: crypto.randomUUID(),
       installationSecret: installationSecret(),
     });
@@ -120,5 +135,35 @@ describe("accountless Mac enrollment", () => {
       hostID: existingHostID,
       installationSecret: existingSecret,
     })).status).toBe(200);
+  });
+
+  it("requires an invitation and never leaves an account for a refused grant", async () => {
+    for (const grant of [undefined, await invitation(1), installationSecret().replace("th_install_", "th_pilot_")]) {
+      const hostID = crypto.randomUUID();
+      const response = await post("/v1/auth/anonymous-host", {
+        hostID, installationSecret: installationSecret(), invitation: grant,
+      });
+      expect(response.status).toBe(403);
+      expect(await testEnv.DB.prepare("SELECT id FROM accounts WHERE id = ?")
+        .bind(`anon_${hostID}`).first()).toBeNull();
+    }
+  });
+
+  it("admits only one installation when the same invitation is redeemed concurrently", async () => {
+    const grant = await invitation();
+    const attempts = Array.from({ length: 6 }, () => ({
+      hostID: crypto.randomUUID(), installationSecret: installationSecret(), invitation: grant,
+    }));
+    const responses = await Promise.all(attempts.map(body => post("/v1/auth/anonymous-host", body)));
+    expect(responses.map(r => r.status).sort()).toEqual([200, 403, 403, 403, 403, 403]);
+    const winner = attempts[responses.findIndex(r => r.status === 200)]!;
+    expect((await post("/v1/auth/anonymous-host", winner)).status).toBe(200);
+    // Deleting the installation cannot make its consumed grant usable a second time, even
+    // with the original host ID and secret. Only renewal of an existing installation retries.
+    await testEnv.DB.prepare("DELETE FROM accounts WHERE id = ?").bind(`anon_${winner.hostID}`).run();
+    expect((await post("/v1/auth/anonymous-host", winner)).status).toBe(403);
+    const used = await testEnv.DB.prepare("SELECT claimed_host_id FROM pilot_invitations WHERE digest = ?")
+      .bind(await sha256Hex(grant)).first<{ claimed_host_id: string }>();
+    expect(used?.claimed_host_id).toBe(winner.hostID);
   });
 });

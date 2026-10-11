@@ -19,6 +19,7 @@ final class ToolsPreferencesViewController: NSViewController {
     /// The groups whose tool documentation the user has unfolded, by group id. A view state,
     /// not a preference — the same session-only fold Storage keeps for its checkouts.
     private var expandedGroups: Set<String> = []
+    private var proxyAccessForgotten = false
     private let appEvents = AppEventObservations()
     private var pageView: SettingsPageView?
     private let groupOverride: [MCPToolGroup]?
@@ -44,6 +45,7 @@ final class ToolsPreferencesViewController: NSViewController {
         case tool(group: Int, tool: Int)
         case groupFooter(Int)
         case browserSignInCaption
+        case proxyClientAccess
         case browserNetworkCaption
         case browserNetworkField(BrowserNetworkCaptureField)
         case browserSignInProvider
@@ -89,6 +91,7 @@ final class ToolsPreferencesViewController: NSViewController {
     private lazy var scrollView: ThemedScrollView = {
         let scroll = ThemedScrollView()
         scroll.hasVerticalScroller = true
+        scroll.setAccessibilityIdentifier("settings.tools.content")
         scroll.drawsBackground = false
         scroll.automaticallyAdjustsContentInsets = false
         scroll.documentView = tableView
@@ -223,6 +226,7 @@ final class ToolsPreferencesViewController: NSViewController {
                 }
             }
         }
+        rows.append(.proxyClientAccess)
         rows.append(.browserNetworkCaption)
         rows.append(contentsOf: BrowserNetworkCaptureField.allCases.map(PresentationRow.browserNetworkField))
         rows.append(contentsOf: [.browserSignInCaption, .browserSignInProvider])
@@ -327,7 +331,7 @@ final class ToolsPreferencesViewController: NSViewController {
                 } else {
                     extensionBounds[sectionIndex] = (rowIndex, rowIndex)
                 }
-            case .note, .group, .tool, .groupFooter, .browserSignInCaption, .browserNetworkCaption, .chromeAutomation,
+            case .note, .group, .tool, .groupFooter, .proxyClientAccess, .browserSignInCaption, .browserNetworkCaption, .chromeAutomation,
                  .websiteAccessCaption, .extensionCaption:
                 break
             }
@@ -519,6 +523,15 @@ final class ToolsPreferencesViewController: NSViewController {
     /// virtual row does not exist. Match against the footer's actual built anchor, then unfold
     /// only that group and ask the table to vend the destination before reveal searches again.
     private func prepareToRevealSettingsRow(_ title: String) -> Bool {
+        if title == L10n.string("Proxy Client Access"), let row = presentationRows.firstIndex(where: {
+            if case .proxyClientAccess = $0 { return true }
+            return false
+        }) {
+            tableView.scrollRowToVisible(row)
+            _ = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
+            tableView.layoutSubtreeIfNeeded()
+            return true
+        }
         if let field = BrowserNetworkCaptureField.allCases.first(where: {
             L10n.string($0.title) == title
         }), let row = presentationRows.firstIndex(where: {
@@ -853,6 +866,15 @@ final class ToolsPreferencesViewController: NSViewController {
     }
 
     // MARK: - Actions
+
+    @objc private func forgetProxyClientIPs(_ sender: ThemedButton) {
+        sender.isEnabled = false
+        Task { [weak self] in
+            await ProxyCaptureService.shared.revokeSavedClientAccess()
+            self?.proxyAccessForgotten = true
+            self?.render()
+        }
+    }
 
     @objc private func groupToggled(_ sender: ThemedToggle) {
         guard displayedGroups.indices.contains(sender.tag) else { return }
@@ -1249,7 +1271,7 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
         case .websiteAccessEmpty, .websiteAccessOrigin, .websiteAccessSession,
              .websiteAccessRevokeAll:
             return 0
-        case .note, .group, .browserSignInCaption, .browserNetworkCaption, .chromeAutomation,
+        case .note, .group, .proxyClientAccess, .browserSignInCaption, .browserNetworkCaption, .chromeAutomation,
              .websiteAccessCaption, .extensionCaption:
             return Design.Spacing.large
         case .extensionField(let sectionIndex, let fieldIndex):
@@ -1289,6 +1311,14 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
                 : supervisionFooter()
         case .browserSignInCaption:
             return SettingsUI.caption("Browser Sign-In")
+        case .proxyClientAccess:
+            return SettingsUI.row(
+                title: "Proxy Client Access",
+                subtitle: proxyAccessForgotten
+                    ? "Saved IPs forgotten. Device captures stopped."
+                    : "Forget saved IP addresses and stop captures that use connection approval. New device connections will ask again.",
+                control: SettingsUI.button("Forget Saved IPs", target: self, action: #selector(forgetProxyClientIPs(_:)))
+            )
         case .browserNetworkCaption:
             return SettingsUI.caption("Browser Network Capture", help: SettingsUI.help(
                 "Browser Network Capture",

@@ -903,25 +903,46 @@ final class TerminalLineTextLayoutTests: XCTestCase {
         )
     }
 
-    func testTerminalEditorReturnSubmitsWithoutAddingANewline() throws {
-        var submissionCount = 0
-        let host = UIHostingController(rootView: TerminalEditorHarness {
-            submissionCount += 1
-        })
-        let window = makeWindow(hosting: host)
+    func testTerminalComposerReturnInsertsNewlinesAndPersistsTheDraft() throws {
+        let suite = "TerminalComposerReturnTests.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let continuity = MobileSessionContinuityStore(defaults: defaults)
+        let model = RemoteAppModel(continuity: continuity)
+        model.startDemo()
+        let connection = RemoteSessionConnection.demoTerminal()
+        let hostID = try XCTUnwrap(model.activeHostID)
+        continuity.setDraft(
+            "firstsecond", surface: .terminal, hostID: hostID, sessionID: connection.session.id
+        )
+        let host = UIHostingController(rootView: TerminalLineComposer(
+            connection: connection,
+            bridge: TerminalKeyBridge(),
+            quotes: .constant([])
+        )
+        .environmentObject(model)
+        .environmentObject(continuity)
+        .mobileTheme(RemoteThemePalette(nil)))
+        let window = makeWindow(hosting: host, size: CGSize(width: 390, height: 844))
         defer { window.isHidden = true }
 
-        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
-        textView.text = "ship it"
-        let acceptsReturn = textView.delegate?.textView?(
-            textView,
-            shouldChangeTextIn: NSRange(location: textView.text.utf16.count, length: 0),
-            replacementText: "\n"
-        )
+        let textView = try XCTUnwrap(descendants(of: TerminalLineTextView.self, in: window).first)
+        XCTAssertEqual(textView.returnKeyType, .default)
+        XCTAssertTrue(textView.becomeFirstResponder())
+        textView.selectedRange = NSRange(location: 5, length: 0)
+        textView.insertText("\n")
+        textView.insertText("\n")
+        textView.insertText("next ")
 
-        XCTAssertEqual(acceptsReturn, false)
-        XCTAssertEqual(submissionCount, 1)
-        XCTAssertEqual(textView.text, "ship it")
+        let expectedDraft = "first\n\nnext second"
+        XCTAssertEqual(textView.text, expectedDraft)
+        XCTAssertEqual(
+            continuity.draft(surface: .terminal, hostID: hostID, sessionID: connection.session.id),
+            expectedDraft,
+            "Return must follow the same immediate draft-persistence path as ordinary typing"
+        )
+        XCTAssertFalse(connection.isPromptSubmissionPending)
+        XCTAssertTrue(textView.isFirstResponder)
     }
 
     /// The suggestion row is where the system keyboard offers to paste what was just copied, and
@@ -968,18 +989,15 @@ final class TerminalLineTextLayoutTests: XCTestCase {
         @State private var isFocused = false
         let editorWidth: CGFloat
         let editorHeight: CGFloat?
-        let onSubmit: () -> Void
 
         init(
             initialDraft: String = "",
             editorWidth: CGFloat = 288,
-            editorHeight: CGFloat? = 100,
-            onSubmit: @escaping () -> Void = {}
+            editorHeight: CGFloat? = 100
         ) {
             _draft = State(initialValue: initialDraft)
             self.editorWidth = editorWidth
             self.editorHeight = editorHeight
-            self.onSubmit = onSubmit
         }
 
         var body: some View {
@@ -988,8 +1006,7 @@ final class TerminalLineTextLayoutTests: XCTestCase {
                 isFocused: $isFocused,
                 theme: RemoteThemePalette(nil),
                 offersFiles: { false },
-                pasteFiles: { false },
-                onSubmit: onSubmit
+                pasteFiles: { false }
             )
             .frame(width: editorWidth)
             .frame(height: editorHeight)

@@ -311,6 +311,9 @@ final class RemoteHostedServiceController {
     }
     private var brokerNotificationProtocols: [URL: BrokerNotificationProtocol] = [:]
     private var listener: PeerHostedHostListener?
+    /// The coordinator supplies the separately bound TLS upstream before starting Direct.
+    var tlsTargetPort: UInt16?
+    private var pilotInvitation: PeerControlPlaneBearer?
     private var listenerEventsTask: Task<Void, Never>?
     private var connectionTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
@@ -484,8 +487,16 @@ final class RemoteHostedServiceController {
 
     var usesAnonymousEnrollment: Bool { anonymousAuthentication }
 
-    func enableAnonymousEnrollment() throws {
+    func enableAnonymousEnrollment(invitation: String? = nil) throws {
         guard anonymousAuthentication else { return }
+        if let invitation {
+            let value = invitation.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard value.utf8.count == 52,
+                  value.range(of: "^th_pilot_[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil else {
+                throw PeerControlPlaneError.invalidCredential
+            }
+            pilotInvitation = try PeerControlPlaneBearer(value)
+        }
         if try installationSecretStore.isDisabled() {
             try installationSecretStore.delete()
         }
@@ -615,13 +626,17 @@ final class RemoteHostedServiceController {
             }
             let session = try await client.signInAnonymousHost(
                 hostID: hostID,
-                installationSecret: secret
+                installationSecret: secret,
+                invitation: pilotInvitation
             )
+            guard generation == lifecycleGeneration, !Task.isCancelled else { return }
+            pilotInvitation = nil
             let hostCredential = try await client.enrollHost(
                 accessToken: session.accessToken,
                 hostID: hostID,
                 displayName: hostName
             )
+            guard generation == lifecycleGeneration, !Task.isCancelled else { return }
             try persist(RemoteHostedServiceRecord(
                 version: RemoteHostedServiceDefaults.recordVersion,
                 endpoint: endpoint.baseURL,
@@ -635,6 +650,10 @@ final class RemoteHostedServiceController {
             guard generation == lifecycleGeneration else { return }
             if case PeerControlPlaneError.rejected(429, "installationLimit") = error {
                 state = .unavailable("pilot-full")
+            } else if case PeerControlPlaneError.rejected(403, let code) = error,
+                      code == "invitationRequired" || code == "invitationInvalid" {
+                pilotInvitation = nil
+                state = .unavailable("pilot-invitation")
             } else if case PeerControlPlaneError.rejected(401, _) = error {
                 state = .unavailable("credentials")
             } else {
@@ -940,7 +959,8 @@ final class RemoteHostedServiceController {
                 endpoint: endpoint.rendezvousEndpoint,
                 hostID: hostID,
                 credential: credential,
-                targetPort: targetPort
+                targetPort: targetPort,
+                tlsTargetPort: tlsTargetPort
             )
             try await listener.start()
             guard generation == lifecycleGeneration, desiredPort == targetPort else {

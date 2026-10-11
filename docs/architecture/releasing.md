@@ -41,9 +41,8 @@ service `codes.threading.release.sentry` and account `threading`, so a new check
 without copying secrets between folders. Local releases use the trusted Mac; their credential
 setup does not upload tokens to GitHub. Never track `.sentryclirc`, `sentry.properties` or an env file.
 `scripts/sentry-release.sh check` verifies access without publishing; the local driver runs it
-before the quality gate and again before any public ref moves. The iOS companion has no shipping
-archive lane here, so its App Store pipeline must perform the same upload from the archive Apple
-receives rather than reusing the Mac dSYMs.
+before the quality gate and again before any public ref moves. The iOS Fastlane lane performs the
+same upload from the exact archive Apple receives, using the separate `threading-ios` project.
 
 ## Distribution signing is not a build setting
 
@@ -1198,8 +1197,9 @@ to. The Marketeer CLI reads the same three `ASC_*` names, which is why they are 
 
 | Lane | Does | Touches App Store Connect |
 |---|---|---|
-| `validate` | Archives and exports exactly what `beta` would, then `altool --validate-app` | Reads; creates profiles if missing |
-| `beta` | The same build, uploaded to TestFlight. Refuses a dirty tree unless `allow_dirty:true` | Uploads a build |
+| `validate` | Runs CI and production readiness checks, archives, exports and runs `altool --validate-app` | Reads; creates profiles if missing |
+| `beta` | Requires an unchanged clean checkout, runs the same checks/build/validation, uploads its dSYMs to Sentry, then the IPA to TestFlight | Uploads a build |
+| `beta_metadata` | Updates the beta description, feedback/privacy links and Beta App Review contact/instructions; submits no build | Writes beta metadata |
 | `internal_testers` | Creates the internal group `MJUKIS` (access to all builds) and adds the testers | Writes testers |
 | `download_metadata` | Replaces `fastlane/metadata` with the live listing | Reads |
 | `metadata` | Uploads `fastlane/metadata` to the editable version; never submits | Writes the listing |
@@ -1220,9 +1220,30 @@ reason. The marketing version is still the project's `MARKETING_VERSION`, which 
 the Mac app's (see the previous section).
 
 Because the internal group has access to all builds, a processed upload reaches its testers with
-no distribution step, and internal testing needs no Beta App Review. External testing does, and
-it needs what the record does not have yet: a beta description, a feedback email and a privacy
-policy URL.
+no distribution step, and internal testing needs no Beta App Review. External testing does.
+`beta_metadata` populated the English beta description, feedback email, privacy policy URL and
+review instructions on 2026-10-11; its source is `fastlane/beta_description.txt` and the existing
+review/listing metadata. It does not submit a build for review or enable external distribution.
+
+### TestFlight checks cannot be bypassed
+
+The 2026-10-11 review found that `beta` could upload without running tests or checking the live
+service, and without preparing Sentry's matching symbols. It now checks Sentry project access,
+runs `scripts/ci.sh` (including iOS), and verifies the production service and report intake before
+building. The exact exported IPA must pass Apple's validation. `sentry-release.sh prepare` then
+uses that archive's app and dSYMs with `SENTRY_PROJECT=threading-ios`; only a successful TestFlight
+upload records a deploy, in `production` to match the Release SDK configuration.
+
+`allow_dirty:true` no longer bypasses validation. The checkout, including untracked files, must
+be clean before checks and remain at the same commit before the archive, Sentry preparation and
+upload. The lane cannot substitute a tested checkout with later local edits. Unit tests execute
+the real lane with external actions stubbed and prove that a failed gate, changed checkout or
+failed upload stops the dependent publication steps.
+
+These automated checks do not replace a distributed-build device test: pair with a signed Mac,
+exercise cellular and forced TURN (UDP/TCP/TLS), foreground/background recovery, production APNs,
+credential revocation and a consented, symbolicated Sentry crash. The October review did not
+perform that device matrix or publish a new iOS archive.
 
 ### The legal-notice phase cannot be script-sandboxed
 
@@ -1282,19 +1303,26 @@ changes `MobileAppStoreSubmissionTests`, deliberately.
 
 ### What the privacy manifest declares, and the caveat on "linked"
 
-A code audit on 2026-09-13 found no analytics, crash-reporting or tracking SDK. Two flows store
-data on a server MJUKIS AB operates (`remote.threading.codes`):
+A 2026-10-11 follow-up includes the optional Sentry SDK introduced after the September audit.
+There is no advertising or tracking. The device-local diagnostics switch is off by default;
+when enabled, Sentry receives sanitized crash, error and sampled performance data. The native
+manifest declares crash data unlinked; see [the diagnostics contract](sentry-diagnostics.md)
+for the allowlist and verification requirements. Both Sentry projects had server-side IP
+storage disabled when checked on 2026-10-11.
+
+Two other flows store data on a server MJUKIS AB operates (`remote.threading.codes`):
 
 - **Report a Problem** (user-sent, 30-day R2 retention): the description and optional
   screenshot (Customer Support), the typed connection journal and versions (Other Diagnostic
   Data, Product Interaction), and with additional details on, timings, memory and storage
   (Performance Data).
 - **Hosted push and rendezvous**: the APNs token and the install's random device id, stored
-  against the account (Device ID).
+  against the installation identity (or a legacy Apple-linked account), plus associated host
+  and device records (Device ID). Current public Direct enrollment does not require Apple sign-in.
 
 The manifest declares the report types **linked**, conservatively. A report's `peer-` field is an
-unsalted 12-hex-character SHA-256 prefix of the host id, which the service also stores beside an
-account, so the operator could join the two. Salting or dropping that field would make "not
+unsalted 12-hex-character SHA-256 prefix of the host id, which the service also stores beside a
+service identity, so the operator could join the two. Salting or dropping that field would make "not
 linked" true; until then, the App Store Connect App Privacy answers must say linked too. The
 manifest and those answers are two declarations of one fact and have to change together.
 

@@ -65,6 +65,23 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertNil(HostedPairingLink(string: "THREADING://PAIR#not-base64", now: now))
     }
 
+    func testHostedPairingCarriesAnIndependentMacPin() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let code = RemoteHostFingerprint(certificateDER: Data("Mac certificate".utf8)).pairingCode
+        let link = try XCTUnwrap(HostedPairingLink(
+            serviceURL: URL(string: "https://remote.threading.codes")!, hostID: "host",
+            deviceID: "phone", rendezvousCredential: "credential", bootstrapToken: "bootstrap",
+            expiresAt: now.addingTimeInterval(300), pinnedFingerprintCode: code, now: now
+        ))
+        XCTAssertEqual(HostedPairingLink(string: link.scannablePayload, now: now), link)
+        XCTAssertEqual(HostedPairingLink(string: link.scannablePayload, now: now)?.pinnedFingerprintCode, code)
+        XCTAssertNil(HostedPairingLink(
+            serviceURL: link.serviceURL, hostID: "host", deviceID: "phone",
+            rendezvousCredential: "credential", bootstrapToken: "bootstrap",
+            expiresAt: link.expiresAt, pinnedFingerprintCode: "INVALID", now: now
+        ))
+    }
+
     func testNotificationPayloadAndRegistrationRoundTrip() throws {
         let event = RemoteNotificationEventDTO(
             id: "event-1",

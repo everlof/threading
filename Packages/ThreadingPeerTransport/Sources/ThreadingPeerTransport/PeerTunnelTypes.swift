@@ -17,6 +17,15 @@ public enum PeerTunnelRole: Sendable {
     case server
 }
 
+/// Selects one of two fixed Mac listeners, never an address supplied by a peer. HTTPS carries
+/// the client's TLS handshake unchanged through the bridge; the bridge does not terminate it.
+public enum PeerTunnelService: Sendable {
+    case http
+    case https
+
+    var scheme: String { self == .https ? "https" : "http" }
+}
+
 public enum PeerTunnelError: Error, Equatable, Sendable {
     case notStarted
     case alreadyStarted
@@ -91,6 +100,7 @@ struct PeerTunnelFrame: Equatable, Sendable {
         case window = 4
         case end = 5
         case reset = 6
+        case openTLS = 7
     }
 
     static let magic: UInt16 = 0x5452
@@ -131,7 +141,7 @@ struct PeerTunnelFrame: Equatable, Sendable {
                   value <= UInt32(PeerTunnelBounds.streamWindowBytes) else {
                 throw PeerTunnelError.protocolViolation
             }
-        case .open, .opened, .end, .reset:
+        case .open, .openTLS, .opened, .end, .reset:
             guard payload.isEmpty, value == 0 else {
                 throw PeerTunnelError.protocolViolation
             }

@@ -170,6 +170,14 @@ export default {
         .slice(0, 10);
       cleanupStatements.push(
         env.DB.prepare(
+          "DELETE FROM turn_issuance_budget WHERE rowid IN "
+            + `(SELECT rowid FROM turn_issuance_budget WHERE starts_at < ? LIMIT ${cleanupPageSize})`,
+        ).bind(now - 7 * 24 * 60 * 60),
+        env.DB.prepare(
+          "DELETE FROM pilot_invitations WHERE digest IN "
+            + `(SELECT digest FROM pilot_invitations WHERE expires_at < ? LIMIT ${cleanupPageSize})`,
+        ).bind(now - 7 * 24 * 60 * 60),
+        env.DB.prepare(
           "DELETE FROM apple_assertions WHERE digest IN "
             + `(SELECT digest FROM apple_assertions WHERE expires_at < ? LIMIT ${cleanupPageSize})`,
         ).bind(now),
@@ -327,6 +335,9 @@ async function probeStorage(env: Env, includeIssueReports = true): Promise<void>
     env.DB.prepare("SELECT consumed_at FROM development_auth_transactions LIMIT 1"),
     env.DB.prepare("SELECT revoked_at FROM push_registrations LIMIT 1"),
     env.DB.prepare("SELECT secret_digest FROM anonymous_host_identities LIMIT 1"),
+    env.DB.prepare("SELECT invitation_digest FROM anonymous_host_identities LIMIT 1"),
+    env.DB.prepare("SELECT claimed_secret_digest FROM pilot_invitations LIMIT 1"),
+    env.DB.prepare("SELECT count, maximum FROM turn_issuance_budget LIMIT 1"),
   ]);
   if (includeIssueReports) {
     await env.ISSUE_REPORTS.head("health/readiness-probe");

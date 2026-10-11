@@ -2,6 +2,15 @@ import Foundation
 import ThreadingPeerTransport
 import ThreadingRemoteKit
 
+/// The manager owns a tunnel's lifetime independently of its network implementation.
+protocol HostedRemoteTunnel: AnyObject, Sendable {
+    var origin: URL { get }
+    var isActive: Bool { get }
+    func stop()
+}
+
+extension PeerHostedDeviceTunnel: HostedRemoteTunnel {}
+
 /// The hosted way in as the app holds it: the loopback origin `URLSession` dials, and the tunnel
 /// standing behind it.
 ///
@@ -12,11 +21,17 @@ import ThreadingRemoteKit
 /// its journal reached back, because the app held the origin and nothing held the tunnel.
 struct HostedRemoteRoute: Sendable {
     let link: RemoteConnectionLink
-    private let tunnel: PeerHostedDeviceTunnel
+    private let tunnel: any HostedRemoteTunnel
+    private let trust: RemoteCertificatePinningDelegate.Registration
 
-    fileprivate init(link: RemoteConnectionLink, tunnel: PeerHostedDeviceTunnel) {
+    fileprivate init(
+        link: RemoteConnectionLink,
+        tunnel: any HostedRemoteTunnel,
+        trust: RemoteCertificatePinningDelegate.Registration
+    ) {
         self.link = link
         self.tunnel = tunnel
+        self.trust = trust
     }
 
     /// Whether the tunnel behind the origin is still standing. False once it has stopped, on
@@ -63,25 +78,47 @@ struct HostedRouteMirror {
 /// A tunnel that has ended is never handed out. It stops itself when its transport closes or
 /// fails, and the next caller finds it inactive here, drops it, and negotiates again.
 actor HostedRemoteConnectionManager {
+    enum Failure: LocalizedError {
+        case pairingRequired
+        var errorDescription: String? {
+            MobileL10n.string("Pair this Mac again by scanning its current code before using Threading Direct.")
+        }
+    }
+    typealias Connector = @Sendable (
+        PeerControlPlaneServiceEndpoint,
+        PeerDeviceServiceCredential,
+        @escaping @Sendable (PeerHostedDeviceConnectionPhase) -> Void
+    ) async throws -> any HostedRemoteTunnel
+
     private struct RouteKey: Equatable, Sendable {
         let serviceURL: URL
         let credential: PeerDeviceServiceCredential
+        let pins: RemoteHostPinSet
     }
 
     private struct Active {
         let key: RouteKey
-        let tunnel: PeerHostedDeviceTunnel
+        let tunnel: any HostedRemoteTunnel
         let route: HostedRemoteRoute
     }
 
     private struct Pending {
         let id: UUID
         let key: RouteKey
-        let task: Task<PeerHostedDeviceTunnel, Error>
+        let task: Task<HostedRemoteRoute, Error>
     }
 
     private var active: Active?
     private var pending: Pending?
+    private let connect: Connector
+
+    init(connect: @escaping Connector = { endpoint, credential, progress in
+        try await HostedRemoteConnectionManager.connectTunnel(
+            endpoint: endpoint, credential: credential, progress: progress
+        )
+    }) {
+        self.connect = connect
+    }
 
     func route(
         for host: PairedRemoteHost,
@@ -95,8 +132,9 @@ actor HostedRemoteConnectionManager {
         else {
             return nil
         }
+        guard host.hasPairedIdentity, let pins = host.pinSet else { throw Failure.pairingRequired }
         let endpoint = try PeerControlPlaneServiceEndpoint(serviceURL)
-        let key = RouteKey(serviceURL: endpoint.baseURL, credential: credential)
+        let key = RouteKey(serviceURL: endpoint.baseURL, credential: credential, pins: pins)
         if let active, active.key == key {
             if active.tunnel.isActive { return active.route }
             // The tunnel ended by itself: its transport closed or failed and it stopped its
@@ -106,43 +144,36 @@ actor HostedRemoteConnectionManager {
         }
 
         if let pending, pending.key == key {
-            let tunnel = try await pending.task.value
-            return try install(tunnel: tunnel, key: key, host: host, pendingID: pending.id)
+            return try await pending.task.value
         }
 
         pending?.task.cancel()
         let startedAt = MobileDiagnostics.monotonicNow()
         let peer = MobileDiagnostics.pseudonym(host.id, prefix: "peer")
+        let pendingID = UUID()
         let task = Task {
-            let rendezvousCredential = try credential.credential.withValue {
-                try PeerRendezvousCredential($0)
+            let tunnel = try await connect(endpoint, credential) { phase in
+                guard let trace else { return }
+                MobileDiagnostics.recordConnectivity(.hostRouteProgress, fields: [
+                    .trace: trace,
+                    .peer: peer,
+                    .transport: RemoteHostEndpointKind.hosted.rawValue,
+                    .phase: "hosted.\(phase.rawValue)",
+                    .result: "stage",
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                    .timeoutMS: MobileDiagnostics.milliseconds(
+                        PeerTransportBounds.negotiationTimeout
+                    ),
+                ])
             }
-            return try await PeerHostedDeviceConnector.connect(
-                endpoint: endpoint.rendezvousEndpoint,
-                hostID: credential.hostID,
-                deviceID: credential.deviceID,
-                credential: rendezvousCredential,
-                progress: { phase in
-                    guard let trace else { return }
-                    MobileDiagnostics.recordConnectivity(.hostRouteProgress, fields: [
-                        .trace: trace,
-                        .peer: peer,
-                        .transport: RemoteHostEndpointKind.hosted.rawValue,
-                        .phase: "hosted.\(phase.rawValue)",
-                        .result: "stage",
-                        .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
-                        .timeoutMS: MobileDiagnostics.milliseconds(
-                            PeerTransportBounds.negotiationTimeout
-                        ),
-                    ])
-                }
-            )
+            // The shared task installs once. Its waiters borrow the resulting route; none of
+            // them may dispose of the same tunnel as if it were a duplicate connection.
+            return try install(tunnel: tunnel, key: key, host: host, pendingID: pendingID)
         }
-        let pending = Pending(id: UUID(), key: key, task: task)
+        let pending = Pending(id: pendingID, key: key, task: task)
         self.pending = pending
         do {
-            let tunnel = try await task.value
-            return try install(tunnel: tunnel, key: key, host: host, pendingID: pending.id)
+            return try await task.value
         } catch {
             if self.pending?.id == pending.id { self.pending = nil }
             throw error
@@ -161,26 +192,43 @@ actor HostedRemoteConnectionManager {
     }
 
     private func install(
-        tunnel: PeerHostedDeviceTunnel,
+        tunnel: any HostedRemoteTunnel,
         key: RouteKey,
         host: PairedRemoteHost,
         pendingID: UUID
     ) throws -> HostedRemoteRoute {
-        if let active, active.key == key, active.tunnel.isActive {
-            tunnel.stop()
-            if pending?.id == pendingID { pending = nil }
-            return active.route
-        }
         guard pending?.id == pendingID,
-              let link = RemoteConnectionLink(baseURL: tunnel.origin, token: host.link.token)
+              tunnel.isActive,
+              tunnel.origin.scheme == "https",
+              let pins = host.pinSet,
+              let link = RemoteConnectionLink(baseURL: tunnel.origin, token: host.link.token),
+              let trust = RemoteClient.pinningDelegate.register(pins, forOrigin: tunnel.origin)
         else {
             tunnel.stop()
             throw CancellationError()
         }
         active?.tunnel.stop()
-        let route = HostedRemoteRoute(link: link, tunnel: tunnel)
+        let route = HostedRemoteRoute(link: link, tunnel: tunnel, trust: trust)
         active = Active(key: key, tunnel: tunnel, route: route)
         pending = nil
         return route
+    }
+
+    private static func connectTunnel(
+        endpoint: PeerControlPlaneServiceEndpoint,
+        credential: PeerDeviceServiceCredential,
+        progress: @escaping @Sendable (PeerHostedDeviceConnectionPhase) -> Void
+    ) async throws -> any HostedRemoteTunnel {
+        let rendezvousCredential = try credential.credential.withValue {
+            try PeerRendezvousCredential($0)
+        }
+        return try await PeerHostedDeviceConnector.connect(
+            endpoint: endpoint.rendezvousEndpoint,
+            hostID: credential.hostID,
+            deviceID: credential.deviceID,
+            credential: rendezvousCredential,
+            service: .https,
+            progress: progress
+        )
     }
 }

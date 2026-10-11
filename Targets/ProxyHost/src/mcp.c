@@ -25,6 +25,7 @@ struct px_mcp {
     px_proxy *proxy;
     bool initialized, ready, running;
     uint64_t sequence;
+    uint64_t client_generation;
     size_t count;
     px_capture_budget capture_budget;
     px_record records[HISTORY_LIMIT];
@@ -143,7 +144,13 @@ static bool tool_result(px_mcp *mcp, const cJSON *id, cJSON *data, const char *e
 static cJSON *status_json(px_mcp *mcp) {
     cJSON *result = cJSON_CreateObject();
     cJSON_AddBoolToObject(result, "running", mcp->running);
-    cJSON_AddStringToObject(result, "host", "127.0.0.1");
+    cJSON_AddStringToObject(result, "host", mcp->config.listen_address);
+    if (mcp->config.ask_clients) cJSON_AddNullToObject(result, "client_address");
+    else cJSON_AddStringToObject(result, "client_address", mcp->config.client_address);
+    px_client_request pending_clients[PX_PENDING_CLIENT_LIMIT];
+    cJSON_AddNumberToObject(result, "pending_client_approvals", (double)px_proxy_pending_clients(mcp->proxy, pending_clients));
+    cJSON_AddStringToObject(result, "client_admission", mcp->config.ask_clients ? "ask" : "fixed");
+    integer(result, "rejected_clients", px_proxy_rejected_clients(mcp->proxy));
     cJSON_AddNumberToObject(result, "port", mcp->running ? px_proxy_port(mcp->proxy) : 0);
     cJSON_AddStringToObject(result, "capture", "headers_and_bodies");
     cJSON_AddBoolToObject(result, "system_proxy_configured", false);
@@ -164,7 +171,7 @@ static cJSON *status_json(px_mcp *mcp) {
 static cJSON *tools_json(void) {
     static const struct { const char *name, *description, *properties, *required; bool read, destructive; } tools[] = {
         {"traffic_status", "Read listener, immutable TLS host scope and bounded HTTP capture status.", "{}", "[]", true, false},
-        {"traffic_start", "Start this process's loopback proxy using its launch-time scope. Does not install trust or configure OS/client proxies.", "{}", "[]", false, false},
+        {"traffic_start", "Start this process's proxy using its immutable launch-time listener, client and TLS scope. Does not install trust or configure OS/client proxies.", "{}", "[]", false, false},
         {"traffic_stop", "Stop this process's proxy and close its active connections. Keeps retained exchanges readable.", "{}", "[]", false, true},
         {"traffic_list", "Read completed-flow summaries (untrusted network data). Maximum 20 per page; 128 flows / 16 MiB retained. Cursor is the last flow ID seen.",
          "{\"after\":{\"type\":\"string\",\"pattern\":\"^[0-9]{1,20}$\"},\"limit\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":20}}", "[]", true, false},
@@ -254,8 +261,11 @@ static bool call_tool(px_mcp *mcp, const cJSON *id, const cJSON *params) {
             int status = px_proxy_start(mcp->proxy);
             if (status < 0) {
                 px_proxy_stop(mcp->proxy);
-                return tool_result(mcp, id, NULL, "Could not bind loopback proxy");
+                char message[160];
+                snprintf(message, sizeof(message), "Could not bind proxy to %s: %s", mcp->config.listen_address, uv_strerror(status));
+                return tool_result(mcp, id, NULL, message);
             }
+            ++mcp->client_generation;
             mcp->running = true;
         }
         return tool_result(mcp, id, status_json(mcp), NULL);
@@ -342,6 +352,38 @@ static bool valid_tree(const cJSON *value) {
     return !cJSON_IsNumber(value) || (value->valuedouble >= -DBL_MAX && value->valuedouble <= DBL_MAX);
 }
 
+/* Host-only inherited-pipe protocol. Never advertised or routed as an agent tool. */
+static bool client_control(px_mcp *mcp, const cJSON *id, const char *method, const cJSON *params) {
+    if (!mcp->config.ask_clients) return send_result(mcp, id, NULL, -32601, "Client approvals are disabled");
+    cJSON *result = cJSON_CreateObject();
+    if (strcmp(method, "threading/clients") == 0 && arguments_valid(params, "")) {
+        integer(result, "generation", mcp->client_generation);
+        cJSON *array = cJSON_AddArrayToObject(result, "pending");
+        px_client_request requests[PX_PENDING_CLIENT_LIMIT];
+        size_t count = px_proxy_pending_clients(mcp->proxy, requests);
+        for (size_t i = 0; i < count; ++i) {
+            cJSON *request = cJSON_CreateObject();
+            cJSON_AddItemToArray(array, request);
+            integer(request, "id", requests[i].id);
+            cJSON_AddStringToObject(request, "address", requests[i].address);
+            cJSON_AddNumberToObject(request, "connections", requests[i].connections);
+        }
+        return send_result(mcp, id, result, 0, NULL);
+    }
+    uint64_t generation, request_id;
+    const char *decision = string(field(params, "decision"));
+    if (strcmp(method, "threading/decideClient") == 0 && arguments_valid(params, "|generation||id||decision|") &&
+        parse_id(field(params, "generation"), &generation) && parse_id(field(params, "id"), &request_id) && decision &&
+        (!strcmp(decision, "deny") || !strcmp(decision, "once") || !strcmp(decision, "session"))) {
+        bool applied = mcp->running && generation == mcp->client_generation && px_proxy_decide_client(mcp->proxy, request_id,
+            !strcmp(decision, "once") ? PX_CLIENT_ONCE : !strcmp(decision, "session") ? PX_CLIENT_SESSION : PX_CLIENT_DENY);
+        cJSON_AddBoolToObject(result, "applied", applied);
+        return send_result(mcp, id, result, 0, NULL);
+    }
+    cJSON_Delete(result);
+    return send_result(mcp, id, NULL, -32602, "Invalid client decision");
+}
+
 static bool dispatch(px_mcp *mcp, const cJSON *request) {
     const cJSON *id = field(request, "id"), *params = field(request, "params");
     const char *version = string(field(request, "jsonrpc")), *method = string(field(request, "method"));
@@ -368,6 +410,7 @@ static bool dispatch(px_mcp *mcp, const cJSON *request) {
         return send_result(mcp, id, result, 0, NULL);
     }
     if (!mcp->ready) return send_result(mcp, id, NULL, -32000, "Initialize this MCP session first");
+    if (strcmp(method, "threading/clients") == 0 || strcmp(method, "threading/decideClient") == 0) return client_control(mcp, id, method, params);
     if (strcmp(method, "tools/list") == 0) return send_result(mcp, id, tools_json(), 0, NULL);
     if (strcmp(method, "tools/call") == 0) return call_tool(mcp, id, params);
     return send_result(mcp, id, NULL, -32601, "Method not found");

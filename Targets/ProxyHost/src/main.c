@@ -100,14 +100,17 @@ static void usage(void) {
          "       [--idle-timeout-ms 100..300000] [--stdio | --mcp] [--body-limit 1..1048576]\n"
          "       [--upstream-ca PEM --tls-identity HOST LEAF_CERT LEAF_KEY] (up to 16 hosts)\n"
          "       [--inspection-ca PUBLIC_ROOT_CERT] (public certificate/profile export over MCP)\n"
-         "Explicit HTTP/1 proxy on 127.0.0.1. Selected CONNECT hosts use verified TLS inspection.\n"
+         "       [--listen-address LOCAL_IPV4 (--client-address DEVICE_IPV4 | --mcp --ask-clients)]\n"
+         "Explicit HTTP/1 proxy; defaults to 127.0.0.1. Device mode requires an explicit source or host approval,\n"
+         "private/link-local/loopback IPv4 only, no wildcard binds. Clients require the source filter or host approval.\n"
          "stdout: bounded versioned JSONL metadata. --stdio: stop on stdin EOF or stop\\n.\n"
          "--mcp: native MCP stdio server; capture starts with traffic_start and ends on stdin EOF.\n"
          "Licenses and corresponding source: share/threading-proxyd beside the installed bin directory.");
 }
 
 int main(int argc, char **argv) {
-    px_config config = {0, PX_MAX_CONNECTIONS, PX_IDLE_TIMEOUT_MS, NULL, 0};
+    px_config config = {0, PX_MAX_CONNECTIONS, PX_IDLE_TIMEOUT_MS, NULL, 0, "127.0.0.1", "127.0.0.1", false};
+    bool explicit_listener = false, explicit_client = false;
     px_tls_identity identities[PX_TLS_IDENTITIES];
     size_t identity_count = 0;
     const char *ca_bundle = NULL;
@@ -118,7 +121,18 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "--version") == 0) { usage(); return 0; }
         if (strcmp(argv[i], "--stdio") == 0) { stdio_control = true; continue; }
+        if (strcmp(argv[i], "--ask-clients") == 0 && !config.ask_clients) { config.ask_clients = true; continue; }
         if (strcmp(argv[i], "--mcp") == 0) { mcp_control = true; continue; }
+        if (strcmp(argv[i], "--listen-address") == 0 && i + 1 < argc && !explicit_listener) {
+            config.listen_address = argv[++i];
+            explicit_listener = true;
+            continue;
+        }
+        if (strcmp(argv[i], "--client-address") == 0 && i + 1 < argc && !explicit_client) {
+            config.client_address = argv[++i];
+            explicit_client = true;
+            continue;
+        }
         if (strcmp(argv[i], "--upstream-ca") == 0 && i + 1 < argc && !ca_bundle) {
             ca_bundle = argv[++i];
             continue;
@@ -142,6 +156,11 @@ int main(int argc, char **argv) {
         else { usage(); return 2; }
     }
     config.body_limit = mcp_control ? body_limit : 0;
+    if ((config.ask_clients ? (!mcp_control || explicit_client || !explicit_listener) : explicit_listener != explicit_client) || !px_proxy_valid_address(config.listen_address) ||
+        !px_proxy_valid_address(config.client_address)) {
+        fputs("threading-proxyd: supply --listen-address with either --client-address or --mcp --ask-clients; exact private/link-local/loopback IPv4 only\n", stderr);
+        return 2;
+    }
     if (stdio_control && mcp_control) { usage(); return 2; }
     if (identity_count || ca_bundle) {
         config.tls = px_tls_policy_load(ca_bundle, identities, identity_count);
@@ -189,9 +208,9 @@ int main(int argc, char **argv) {
     } else if (!mcp_control) {
         char ready[256];
         snprintf(ready, sizeof(ready),
-            "{\"version\":%d,\"event\":\"ready\",\"host\":\"127.0.0.1\",\"port\":%u,"
+            "{\"version\":%d,\"event\":\"ready\",\"host\":\"%s\",\"port\":%u,"
             "\"http\":\"1.1\",\"tls_inspection\":%s,\"capture\":\"metadata\"}\n",
-            PX_PROTOCOL_VERSION, px_proxy_port(application.proxy), config.tls ? "true" : "false");
+            PX_PROTOCOL_VERSION, config.listen_address, px_proxy_port(application.proxy), config.tls ? "true" : "false");
         px_output_send(&application.output, ready);
     }
     uv_run(&application.loop, UV_RUN_DEFAULT);

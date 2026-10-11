@@ -359,6 +359,8 @@ struct RemoteListenerStatus: Equatable, Sendable {
     let port: UInt16?
     let doors: [RemoteAccessDoor: RemoteAccessDoorState]
     let firewall: RemoteFirewallHint
+    /// Ephemeral, loopback-only TLS upstream for native Direct. Never advertised as a LAN door.
+    var hostedTLSPort: UInt16? = nil
 
     static let idle = RemoteListenerStatus(port: nil, doors: [:], firewall: .unknown)
 
@@ -432,17 +434,20 @@ struct RemoteListenerConfiguration: Equatable, Sendable {
     /// announcement. Turning it off costs nothing but the convenience — the advertised endpoint
     /// list still carries every address, which is the same path a VPN or tailnet already uses.
     var isDiscoveryEnabled: Bool
+    var isHostedTLSEnabled: Bool
 
     init(
         preferredPort: UInt16 = RemoteAccessDefaults.defaultListenerPort,
         doors: Set<RemoteAccessDoor> = [],
         fallbackRange: ClosedRange<UInt16> = RemoteAccessDefaults.listenerPortFallbackRange,
-        isDiscoveryEnabled: Bool = true
+        isDiscoveryEnabled: Bool = true,
+        isHostedTLSEnabled: Bool = false
     ) {
         self.preferredPort = preferredPort
         self.doors = doors
         self.fallbackRange = fallbackRange
         self.isDiscoveryEnabled = isDiscoveryEnabled
+        self.isHostedTLSEnabled = isHostedTLSEnabled
     }
 
     /// The ports the listener tries, in order.

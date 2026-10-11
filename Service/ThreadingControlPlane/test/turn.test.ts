@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/environment";
 import { BOUNDS } from "../src/protocol";
@@ -15,17 +16,17 @@ describe("TURN credential provisioning", () => {
   it("uses host-only ICE without contacting a cloud service in local development", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 
-    await expect(generateIceServers({
+    await expect(generateIceServers({ DB: (env as unknown as Env).DB,
       LOCAL_DEVELOPMENT_MODE: "1",
       LOCAL_ICE_MODE: "host-only",
       TURN_KEY_ID: "must-not-be-used",
       TURN_KEY_API_TOKEN: "must-not-be-used",
-    } as Env)).resolves.toEqual([]);
+    } as Env, "turn-test-account")).resolves.toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("keeps direct STUN available when TURN is not configured", async () => {
-    await expect(generateIceServers({} as Env)).resolves.toEqual([fallbackSTUN]);
+    await expect(generateIceServers({ DB: (env as unknown as Env).DB,} as Env, "turn-test-account")).resolves.toEqual([fallbackSTUN]);
   });
 
   it("requests bounded credentials and returns only reviewed Cloudflare routes", async () => {
@@ -48,10 +49,10 @@ describe("TURN credential provisioning", () => {
       ],
     }, { status: 201 }));
 
-    const result = await generateIceServers({
+    const result = await generateIceServers({ DB: (env as unknown as Env).DB,
       TURN_KEY_ID: "turn-key-id",
       TURN_KEY_API_TOKEN: "turn-api-token",
-    } as Env);
+    } as Env, "turn-test-account");
 
     expect(result).toEqual([
       fallbackSTUN,
@@ -74,7 +75,7 @@ describe("TURN credential provisioning", () => {
     );
     expect(options?.method).toBe("POST");
     expect(new Headers(options?.headers).get("Authorization")).toBe("Bearer turn-api-token");
-    expect(JSON.parse(String(options?.body))).toEqual({ ttl: 24 * 60 * 60 });
+    expect(JSON.parse(String(options?.body))).toMatchObject({ ttl: 24 * 60 * 60, customIdentifier: expect.stringMatching(/^[a-f0-9]{64}$/) });
   });
 
   it("falls back without returning malformed credentials or logging secrets", async () => {
@@ -87,10 +88,10 @@ describe("TURN credential provisioning", () => {
     }, { status: 201 }));
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const result = await generateIceServers({
+    const result = await generateIceServers({ DB: (env as unknown as Env).DB,
       TURN_KEY_ID: "turn-key-id",
       TURN_KEY_API_TOKEN: "turn-api-token",
-    } as Env);
+    } as Env, "turn-test-account");
 
     expect(result).toEqual([fallbackSTUN]);
     expect(warning).toHaveBeenCalledWith("turn_credential_failed", {
@@ -117,10 +118,10 @@ describe("TURN credential provisioning", () => {
     }, { status: 201 }));
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const result = await generateIceServers({
+    const result = await generateIceServers({ DB: (env as unknown as Env).DB,
       TURN_KEY_ID: "turn-key-id",
       TURN_KEY_API_TOKEN: "turn-api-token",
-    } as Env);
+    } as Env, "turn-test-account");
 
     expect(result).toEqual([fallbackSTUN]);
     expect(warning).toHaveBeenCalledWith("turn_credential_failed", {
@@ -134,10 +135,10 @@ describe("TURN credential provisioning", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("unavailable", { status: 503 }));
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    await expect(generateIceServers({
+    await expect(generateIceServers({ DB: (env as unknown as Env).DB,
       TURN_KEY_ID: "turn-key-id",
       TURN_KEY_API_TOKEN: "turn-api-token",
-    } as Env)).resolves.toEqual([fallbackSTUN]);
+    } as Env, "turn-test-account")).resolves.toEqual([fallbackSTUN]);
     expect(warning).toHaveBeenCalledWith("turn_credential_failed", { status: 503 });
   });
 });

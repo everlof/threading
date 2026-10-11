@@ -25,7 +25,7 @@ nonblocking borrowed flow/capture callback. It has no AppKit, Swift, filesystem,
 The callback receives borrowed values and must copy only bounded data before returning.
 
 The customization-surface gate classifies this increment as a deliberately **host-owned developer
-helper**, with no new public extension component or UI. The eventual Traffic presentation remains
+helper**, with no new public extension component. Client approval and revocation use host-owned UI. The eventual Traffic presentation remains
 an advanced extension as described by the draft. Capture authority, system mutation, root signing
 keys and trust installation remain host-owned even when that presentation is customizable.
 The standalone MCP server is not a substitute for manifest-declared companion operations or
@@ -33,8 +33,32 @@ Threading's existing session-scoped MCP permission routing. Its launch-time host
 
 ## Current contract
 
-The listener binds only `127.0.0.1`; port zero selects an ephemeral endpoint. Clients explicitly
-opt into the proxy. Absolute-form HTTP is converted to origin form, Host is regenerated from the
+The listener defaults to `127.0.0.1`; port zero selects an ephemeral endpoint. Device capture
+uses an exact `listen_address` (Mac IPv4). Omitting `client_address` enables human approval;
+unknown source IPs wait before any protocol read, DNS, TLS or upstream connection. The portable
+CLI exposes this as `--mcp --listen-address ... --ask-clients`. The older explicit listener/client
+pair remains a fixed source filter. Canonical RFC1918, IPv4 link-local and loopback addresses are
+admitted; public, wildcard and hostname inputs are refused. Numeric and IPv4-mapped IPv6 targets
+cannot recurse into the listener. The bound address and admission mode are immutable per helper.
+
+`ProxyCaptureService` serializes one host-owned confirmation at a time across all capture owners.
+Remembered clients are admitted independently, so an unanswered prompt cannot block their traffic.
+Allow Once admits the connection group already waiting for that IP, This Capture remembers it
+until listener stop, and Always Allow This IP additionally persists a grant for the exact client
+IP, listener IP and TLS host list. Deny and expiry suppress retries until listener stop. IPs are
+not authenticated device identities or Wi-Fi network identities; this is explicit in the UI.
+`ProxyClientGrantStore` reads/writes at most 32 grants through an actor and the isolated
+`PreferenceStore` domain. Tools settings can forget all grants and stop active ask-mode listeners while retaining debugging history. A store revision prevents an older
+save from restoring a grant after revocation.
+
+The inherited-pipe `threading/clients` / `threading/decideClient` methods are host IPC, never agent
+tools. The process adapter polls at 500 ms on its existing serial worker only while capture runs.
+Snapshots carry revisions to reject out-of-order main-actor delivery. Listener generations and
+request IDs reject stale answers after stop/restart; process lease IDs reject callbacks after
+replacement. Approval expiry is enforced by the helper even if the UI/parent stalls. Teardown
+retires the sheet, closes pending sockets and cannot turn sheet dismissal into a second answer.
+
+Clients explicitly opt into the proxy. Absolute-form HTTP is converted to origin form, Host is regenerated from the
 target, and proxy credentials/hop-by-hop fields are stripped. Ambiguous framing and unsupported
 protocol forms fail closed. The parser is pinned llhttp with no leniency flags enabled.
 
@@ -79,6 +103,18 @@ promise. The implementation's aggregate limits are:
 
 - At most 128 live connection allocations, including closing connections with outstanding
   callbacks. Excess accepted sockets close immediately. The kernel listen backlog is also bounded.
+  Fixed device admission is one O(1) socket-peer comparison per accept on the existing worker loop,
+  with no main-actor or filesystem work. Expected load remains one phone / 1–16 connections;
+  the regression sends 32 rejected connections and asserts zero history growth. Rejected
+  connections share the same allocation/drain ceiling and create no per-client retained state.
+- Approval mode adds fixed arrays for at most 32 per-listener decisions, including at most eight
+  pending IPs and eight waiting sockets per IP, sharing the 128-connection cap. Pending groups
+  expire after 90 seconds. Searches scan only these fixed tables / bounded live connections.
+  Expected use is one phone with 1–8 parallel connections; stress covers grouped requests,
+  over-limit connections, retries, late answers and listener replacement. Four helper leases
+  bound host pending value state to 32 requests with one live dialog. Host lists are capped at
+  16 names and long lists use a 120-point scroll viewport; session labels are bounded to 128
+  characters. Pipe, preference, file and codec work never runs on the main actor.
 - Each direction reads chunks of at most 16 KiB. Pending writes pause the opposite reader at
   256 KiB and resume at 128 KiB. One in-progress callback/header expansion can exceed the high
   watermark; the integration assertion permits at most two times `(256 KiB + 33 KiB)` of owned
@@ -153,12 +189,47 @@ ThreadingMobile can receive the public DER/profile and fingerprint through the a
 host channel, then hand installation to the system and explain the trust step. It must never carry
 the reusable root key or leaf private keys. [Apple requires explicit full trust for manually
 installed profiles](https://support.apple.com/en-us/102390); ordinary app delivery cannot silently
-perform that step. This increment does not add the iOS delivery UI or a reachable device listener:
-the proxy binds only loopback. A later authorized LAN listener or authenticated route is necessary
-for physical-device capture, alongside client proxy configuration. Certificate-pinned clients,
+perform that step. The first physical-device path instead uses AirDrop of the existing public
+profile and the explicit listener with client approval above. Start/status return the iPhone proxy
+server/port and setup instructions. No HTTP MCP endpoint is exposed, trust is not installed on
+either device automatically, and stopping the session closes the device listener. The phone's
+Wi-Fi proxy must be restored separately before capture stops. Paired certificate-delivery UI and
+an authenticated paired route remain future work. Certificate-pinned clients,
 clients that ignore proxy settings, HTTP/3 and upstream mutual TLS need truthful unsupported states.
 
 ## Verification
+
+The client-approval follow-up passed 58 process tests plus provenance on macOS, including the
+actual Wi-Fi-interface test, and a separately added regression that waits 16 seconds for human
+approval before sending headers. The 90-second unanswered-approval expiry is tested in real time.
+The corresponding Linux ASan/UBSan suite passed with the optional physical-interface case
+skipped, and the Windows MinGW cross-build passed; the later header-deadline regression ran only
+on macOS. Nineteen focused hosted app tests and one shipping-app UI journey passed against the
+signed bundled helper. They cover all four choices, saved grants across normal app relaunch,
+scope matching, revocation without losing history, late answers after release, and remembered
+clients proceeding while another capture waits for approval. The actual approval dialog and
+Settings revocation row were captured and visually inspected. The tested source files matched
+the isolated validation checkout; unrelated concurrent work was excluded from that app build.
+Artifacts are `.build/proxy-approval-verified.xcresult`,
+`.build/proxy-approval-evidence/report/index.html` and
+`.build/proxy-approval-validation.json`. No baseline was accepted. The new approval prompt has
+not yet been exercised on the physical iPhone, and native Windows execution remains unverified.
+
+The device-listener follow-up passed 54 process tests on macOS, including actual Wi-Fi-interface
+HTTP/TLS capture, public-profile export, rejection before protocol reads/history, and IPv4/mapped
+IPv6 self-proxy refusal. The signed app's bundled helper separately passed the 17 MCP tests on
+that interface. Seven focused app tests passed through Xcode, including typed device-scope
+decoding, helper admission, immutable session scope, payload reads and the opt-in real Keychain
+test. This used an isolated checkout to avoid concurrent unrelated changes; tested proxy sources
+were compared byte-for-byte with the working changes. The Linux ASan/UBSan lane passed with its
+optional physical-interface test skipped, and the Windows MinGW cross-build passed. The subsequent
+physical-iPhone test used the running app's session MCP tools, manual Wi-Fi proxy configuration
+and the public profile installed/trusted by the user. iPhone Safari's GET to `example.com`
+completed with HTTP 200, inspected HTTPS and TLS 1.3 upstream; request/response headers and the
+complete response body were captured without truncation. The origin chose Brotli: its 334 captured
+bytes decoded to 577 bytes of HTML using the Mac's existing Brotli library. Built-in body preview
+still supports only gzip/deflate, so Brotli currently requires an explicit raw read and external
+decoding. Native Windows execution remains unverified.
 
 `python3 scripts/test-proxy.py` configures, builds and runs the actual-process integration and
 provenance tests. `--sanitize` instruments both our code and the linked dependencies. The dedicated
@@ -184,7 +255,7 @@ payload capture and session lifecycle described below are implemented.
 The user explicitly requested useful debugging payloads rather than metadata-only capture. The
 current command surface is deliberately host-only: `MCPProxyTools` declares typed built-ins in
 one group, `AgentToolCoordinator` routes them, and `ProxyCaptureService` owns session authority.
-There is no extension provider bypass or new UI component. Remote execution hosts do not receive
+There is no extension provider bypass; admission UI uses the existing confirmation and settings components. Remote execution hosts do not receive
 these Mac-local tools. Public certificate exports are not CA private-key exports.
 
 `ProxyProcess` has one serial worker per admitted session. Pipe I/O is nonblocking with 15-second
@@ -203,7 +274,8 @@ private staging directory on normal teardown. A crash can leave short-lived leaf
 owner-only OS temporary directory; the reusable signing key never enters that directory. Existing
 missing/invalid Keychain pairs are errors, never silently replaced. Trust setup uses the bundled
 fingerprint-checking Python shortcut for the current Mac user or one explicit booted simulator;
-no trust store is changed by starting capture. Physical iOS routing/delivery remains future work.
+no trust store is changed by starting capture. Physical iOS capture uses an explicit IPv4 route
+and AirDrop of the public profile; paired delivery remains future work.
 
 `capture.c` observes llhttp's body callbacks, so chunk framing is removed without guessing at
 socket boundaries. Retained headers describe the original client request and origin response,
@@ -226,5 +298,33 @@ or installed trust. The signed, bundled helper passed the four app capture tests
 session-registry and 32 MCP wire tests (53 total), with a successful Xcode build/test exit.
 Certificate evaluation runs off-main in both the production worker and its independent test;
 running that verifier synchronously on the test host's main thread caused Security.framework
-warnings and stalled test-host shutdown. Real user-Keychain persistence, trust installation and
-physical iPhone setup are intentionally not exercised by automated tests.
+warnings and stalled test-host shutdown. Ordinary automated tests do not create Keychain items,
+install trust or configure a physical iPhone.
+
+An opt-in test exercises real Keychain creation/reload, non-exportability, signing and refusal
+to replace an incomplete identity:
+
+```sh
+TEST_RUNNER_THREADING_PROXY_KEYCHAIN_TEST=1 scripts/test.sh fast \
+  -only-testing:ThreadingTests/ProxyKeychainIntegrationTests
+```
+
+It uses a unique `codes.threading.proxy.tests.<UUID>` namespace, suppresses Keychain prompts,
+and removes its two items on exit, asserting their absence. It never reads or replaces the app's
+normal inspection identity and never installs certificate trust.
+
+This test exposed a first-start failure that the in-memory CA fixtures missed: macOS ignored
+`kSecAttrIsExtractable: false` inside `kSecPrivateKeyAttrs`, producing an exportable key that the
+CA guard correctly refused. The setting now lives at the top level of the generation parameters.
+Verification checks both the stored attribute and actual export refusal after reloading the key,
+alongside a successful signing challenge. Do not weaken the CA guard to accept the ignored setting.
+
+Revalidation on macOS 26.5 (2026-10-10) passed all 50 process tests against the signed bundled
+helper. An independent curl client also verified a public `https://example.com/` request using
+macOS root anchors, exact MCP body recovery, and a local HTTPS POST with a chunked/gzip 422
+response, redacted previews and lossless raw reads. Wrong-name, expired and untrusted origin
+certificates were rejected. The four app capture tests plus the real-Keychain test passed after
+the fix, including cleanup assertions. These five tests ran in an isolated checkout with a
+focused test bundle against the complete app; a cold build of the entire test bundle stalled in
+unrelated browser-test compilation. Real trust installation, physical-device setup and native
+Windows execution remain outside this local verification.

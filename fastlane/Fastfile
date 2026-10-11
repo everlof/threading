@@ -33,32 +33,65 @@ SCREENSHOT_CAPTURES = %w[01-sessions 02-claude-tui 03-claude-usage-menu 04-codex
 
 platform :ios do
   desc "Archive ThreadingMobile in Release and upload it to TestFlight."
-  desc "Refuses an uncommitted tree unless allow_dirty:true. changelog:\"…\" sets What to Test;"
+  desc "Requires a clean, tested checkout and compatible production service. changelog:\"…\" sets What to Test;"
   desc "wait:false returns before App Store Connect finishes processing."
   lane :beta do |options|
-    ensure_git_status_clean unless options[:allow_dirty]
-    ipa = build_for_app_store
+    revision = testflight_checkout
+    testflight_quality_gate
+    verify_testflight_checkout(revision)
+    build = build_for_app_store
+    validate_app_store_build(build)
+    verify_testflight_checkout(revision)
+    sentry_ios("prepare", "--app", File.join(build[:archive], "Products/Applications/ThreadingMobile.app"),
+               "--debug-files", File.join(build[:archive], "dSYMs"), "--output", build[:sentry_receipt])
+    verify_testflight_checkout(revision)
     upload_to_testflight(
       api_key: asc_api_key,
       app_identifier: APP_IDENTIFIER,
-      ipa: ipa,
+      ipa: build[:ipa],
       changelog: options[:changelog] || default_changelog,
       distribute_external: false,
       uses_non_exempt_encryption: false,
       skip_waiting_for_build_processing: options[:wait] == false
     )
+    sentry_ios("deploy", "--release-file", build[:sentry_receipt], "--environment", "production")
   end
 
   desc "Build the IPA beta would upload and have App Store Connect validate it, uploading nothing."
   lane :validate do
-    ipa = build_for_app_store
-    credentials = asc_credentials
-    # altool finds the key by file name, AuthKey_<id>.p8, in this directory.
-    ENV["API_PRIVATE_KEYS_DIR"] = File.dirname(credentials[:key_path])
-    sh(
-      "xcrun", "altool", "--validate-app", "--file", ipa, "--type", "ios",
-      "--apiKey", credentials[:key_id], "--apiIssuer", credentials[:issuer_id]
-    )
+    testflight_quality_gate
+    validate_app_store_build(build_for_app_store)
+  end
+
+  desc "Update TestFlight description, privacy link and review instructions. Does not submit a build."
+  lane :beta_metadata do
+    asc_api_key
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    UI.user_error!("App Store Connect has no app for #{APP_IDENTIFIER}") unless app
+    attributes = {
+      description: File.read(File.join(FASTLANE_DIRECTORY, "beta_description.txt")).strip,
+      feedbackEmail: review_information("email_address"),
+      marketingUrl: metadata_text("en-US/marketing_url.txt"),
+      privacyPolicyUrl: metadata_text("en-US/privacy_url.txt")
+    }
+    localization = app.get_beta_app_localizations.find { |entry| entry.locale == "en-US" }
+    if localization
+      Spaceship::ConnectAPI.patch_beta_app_localizations(
+        localization_id: localization.id, attributes: attributes
+      )
+    else
+      Spaceship::ConnectAPI.post_beta_app_localizations(
+        app_id: app.id, attributes: attributes.merge(locale: "en-US")
+      )
+    end
+    Spaceship::ConnectAPI.patch_beta_app_review_detail(app_id: app.id, attributes: {
+      contactFirstName: review_information("first_name"),
+      contactLastName: review_information("last_name"),
+      contactPhone: review_information("phone_number"),
+      contactEmail: review_information("email_address"),
+      demoAccountRequired: false,
+      notes: review_information("notes")
+    })
   end
 
   desc "Create the internal TestFlight group if it is missing and add THREADING_INTERNAL_TESTERS."
@@ -223,9 +256,50 @@ end
 
 # MARK: - Building
 
+def sentry_ios(*arguments)
+  sh("env", "SENTRY_ORG=threading", "SENTRY_PROJECT=threading-ios",
+     File.join(REPOSITORY, "scripts/sentry-release.sh"), *arguments)
+end
+
+def testflight_quality_gate
+  sentry_ios("check")
+  sh(File.join(REPOSITORY, "scripts/ci.sh"))
+  sh("node", File.join(REPOSITORY, "Service/ThreadingControlPlane/scripts/verify-production.mjs"))
+end
+
+def testflight_checkout
+  status, result = Open3.capture2("git", "-C", REPOSITORY, "status", "--porcelain")
+  UI.user_error!("TestFlight requires a clean checkout, including untracked files") unless result.success? && status.empty?
+  revision, result = Open3.capture2("git", "-C", REPOSITORY, "rev-parse", "HEAD")
+  UI.user_error!("Could not identify the TestFlight commit") unless result.success?
+  revision.strip
+end
+
+def verify_testflight_checkout(revision)
+  UI.user_error!("The checkout changed after TestFlight validation") unless testflight_checkout == revision
+end
+
+def validate_app_store_build(build)
+  credentials = asc_credentials
+  ENV["API_PRIVATE_KEYS_DIR"] = File.dirname(credentials[:key_path])
+  sh("xcrun", "altool", "--validate-app", "--file", build[:ipa], "--type", "ios",
+     "--apiKey", credentials[:key_id], "--apiIssuer", credentials[:issuer_id])
+end
+
+def metadata_text(path)
+  text = File.read(File.join(METADATA_DIRECTORY, path)).strip
+  UI.user_error!("Missing metadata: #{path}") if text.empty?
+  text
+end
+
+def review_information(name)
+  metadata_text("review_information/#{name}.txt")
+end
+
 # Archives with the build number after TestFlight's latest and exports for App Store Connect.
 # The number is passed to xcodebuild rather than written into the project, so a release changes
-# no tracked file, and the widget extension receives the same number as the app. Returns the IPA.
+# no tracked file, and the widget extension receives the same number as the app. Returns the exact
+# IPA and archive pair so symbol upload can never accidentally choose another build's dSYMs.
 def build_for_app_store
   api_key = asc_api_key
   build_number = latest_testflight_build_number(
@@ -235,13 +309,14 @@ def build_for_app_store
   ).to_i + 1
   output = File.join(BUILD_DIRECTORY, build_number.to_s)
   authentication = xcodebuild_authentication
-  build_app(
+  archive = File.join(output, "ThreadingMobile.xcarchive")
+  ipa = build_app(
     project: PROJECT,
     scheme: SCHEME,
     configuration: "Release",
     destination: "generic/platform=iOS",
     derived_data_path: File.join(BUILD_DIRECTORY, "DerivedData"),
-    archive_path: File.join(output, "ThreadingMobile.xcarchive"),
+    archive_path: archive,
     output_directory: output,
     output_name: "ThreadingMobile",
     export_method: "app-store",
@@ -257,6 +332,7 @@ def build_for_app_store
     xcargs: "CURRENT_PROJECT_VERSION=#{build_number} #{authentication}",
     skip_profile_detection: true
   )
+  { ipa: ipa, archive: archive, sentry_receipt: File.join(output, "sentry-release.txt") }
 end
 
 def default_changelog

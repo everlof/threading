@@ -216,6 +216,9 @@ final class RemoteConnection: @unchecked Sendable {
             buffer.append(data)
             guard buffer.count <= RemoteAccessDefaults.maximumRequestBytes else {
                 if mode == .http {
+                    // A pipelined peer must not inject a second HTTP head between chunks of
+                    // the response already in flight. Its bounded input buffer is exhausted.
+                    guard !isHandling else { close(); return }
                     write(HTTPResponse.status(413, "Payload Too Large").serialized, thenClose: true)
                 } else {
                     write(RemoteWebSocket.closeFrame(code: RemoteWebSocket.CloseCode.messageTooBig), thenClose: true)
@@ -267,20 +270,7 @@ final class RemoteConnection: @unchecked Sendable {
                 case .browserTunnel(let grant):
                     self.startBrowserTunnel(grant)
                 case .respond(let response):
-                    // The answer is leaving, so the connection is no longer waiting on this
-                    // Mac: the fresh stretch bounds the body's transfer and, after a keep-alive
-                    // response, the silence before the next request.
-                    self.armIdleTimer()
-                    self.write(
-                        response.serialized,
-                        thenClose: response.closesConnection,
-                        limit: response.closesConnection
-                            ? RemoteAccessDefaults.maximumAttachmentResponseBytes
-                            : RemoteAccessDefaults.outboundHighWaterBytes
-                    )
-                    guard !response.closesConnection else { return }
-                    self.isHandling = false
-                    self.processHTTP()
+                    self.writeHTTPResponse(response)
                 case .upgrade(let sessionID):
                     self.upgrade(toSession: sessionID, request: request)
                 case .upgradeTerminal(let terminalID):
@@ -288,6 +278,60 @@ final class RemoteConnection: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// A finite catalogue is not a backlog from a slow terminal viewer. Pairing can carry more
+    /// than 2 MiB even on a fast LAN; applying the WebSocket high-water mark dropped the accepted
+    /// device's response and every retry. Serialize one bounded response, then send one chunk
+    /// at a time, keeping pipelined requests queued until every byte of this response is sent.
+    private func writeHTTPResponse(_ response: HTTPResponse) {
+        let limit = RemoteAccessDefaults.maximumHTTPResponseBytes
+        guard response.body.count <= limit else {
+            refuseOversizedHTTPResponse()
+            return
+        }
+        let bytes = response.serialized
+        guard bytes.count <= limit else {
+            refuseOversizedHTTPResponse()
+            return
+        }
+        if response.closesConnection {
+            isDrainingHTTP = true
+            buffer.removeAll()
+        }
+        armIdleTimer()
+        writeHTTPChunk(bytes, offset: 0, closesConnection: response.closesConnection)
+    }
+
+    private func refuseOversizedHTTPResponse() {
+        ThreadingLogger.remote.warning("Remote HTTP response exceeded its size limit")
+        var refusal = RemoteRouter.error(503, "Response Too Large", code: .responseTooLarge)
+        refusal.closesConnection = true
+        writeHTTPResponse(refusal)
+    }
+
+    private func writeHTTPChunk(_ bytes: Data, offset: Int, closesConnection: Bool) {
+        guard !isClosed else { return }
+        let end = min(offset + RemoteAccessDefaults.httpResponseChunkBytes, bytes.count)
+        let isLastChunk = end == bytes.count
+        connection.send(
+            content: bytes.subdata(in: offset..<end),
+            contentContext: isLastChunk && closesConnection ? .finalMessage : .defaultMessage,
+            isComplete: true,
+            completion: .contentProcessed { [weak self] error in
+                guard let self, !self.isClosed else { return }
+                guard error == nil else { self.close(); return }
+                self.armIdleTimer()
+                if !isLastChunk {
+                    self.writeHTTPChunk(bytes, offset: end, closesConnection: closesConnection)
+                } else if !closesConnection {
+                    self.isHandling = false
+                    self.processHTTP()
+                }
+                // A closing response leaves the read side alive until peer EOF or the idle
+                // deadline: contentProcessed is not proof that TLS delivered the final bytes.
+            }
+        )
     }
 
     private func upgrade(toSession sessionID: String, request: HTTPRequest) {

@@ -8,8 +8,8 @@
 # off-screen Xcode plan. Application-level UI scenarios stay in their separate GUI lane.
 #
 # `--mac-release` is the direct-distribution lane. Threading's downloadable artifact is the Mac
-# app, and release builds force Remote Access off; the companion is neither embedded nor
-# published. This mode therefore keeps every repository, package, service and Mac shipping gate
+# app; the companion is neither embedded nor published by that lane. This mode therefore keeps
+# every repository, package, service and Mac shipping gate
 # while omitting only the ThreadingMobile build and test lanes. Ordinary CI remains the superset.
 set -euo pipefail
 
@@ -153,6 +153,7 @@ say "Testing the local release driver"
 python3 "${repository_directory}/scripts/tests/test_local_release_driver.py"
 python3 "${repository_directory}/scripts/tests/test_local_release_credentials.py"
 python3 "${repository_directory}/scripts/tests/test_sentry_release.py"
+python3 "${repository_directory}/scripts/tests/test_testflight_release.py"
 node --test "${repository_directory}/scripts/verify_report_deployment.test.mjs"
 
 say "Installing ThreadingControlPlane test dependencies"

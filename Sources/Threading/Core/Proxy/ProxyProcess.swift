@@ -7,6 +7,9 @@ struct ProxyLaunchScope: Equatable, Sendable {
     let hosts: [String]
     let bodyLimit: Int
     let upstreamCA: String?
+    let listenAddress: String
+    let clientAddress: String
+    let asksClients: Bool
 
     init(_ arguments: TrafficStartArguments) throws {
         guard let hosts = arguments.hosts, hosts.count <= 16, Set(hosts).count == hosts.count else {
@@ -24,9 +27,31 @@ struct ProxyLaunchScope: Equatable, Sendable {
         let limit = arguments.bodyLimit ?? 65536
         guard (1...1048576).contains(limit) else { throw ProxyProcess.Failure.message("body_limit must be 1–1048576.") }
         if let path = arguments.upstreamCA, !path.hasPrefix("/") { throw ProxyProcess.Failure.message("upstream_ca must be an absolute PEM path.") }
+        guard arguments.clientAddress == nil || arguments.listenAddress != nil else {
+            throw ProxyProcess.Failure.message("Supply listen_address (Mac IPv4) for device capture with connection approval, or omit both addresses for local capture.")
+        }
+        let listener = arguments.listenAddress ?? "127.0.0.1"
+        let client = arguments.clientAddress ?? "127.0.0.1"
+        guard Self.isLocalIPv4(listener), Self.isLocalIPv4(client) else {
+            throw ProxyProcess.Failure.message("Proxy addresses must be exact private, link-local or loopback IPv4 addresses; wildcard binds and hostnames are not supported.")
+        }
         self.hosts = hosts.sorted()
         bodyLimit = limit
         upstreamCA = arguments.upstreamCA
+        listenAddress = listener
+        clientAddress = client
+        asksClients = arguments.listenAddress != nil && arguments.clientAddress == nil
+    }
+
+    static func isLocalIPv4(_ address: String) -> Bool {
+        guard address.utf8.count <= 15 else { return false }
+        let parts = address.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return false }
+        let octets = parts.compactMap { UInt8($0) }
+        guard octets.count == 4, octets.map({ String($0) }).joined(separator: ".") == address else { return false }
+        return octets[0] == 10 || octets[0] == 127 ||
+            (octets[0] == 172 && (16...31).contains(octets[1])) ||
+            (octets[0] == 192 && octets[1] == 168) || (octets[0] == 169 && octets[1] == 254)
     }
 }
 
@@ -68,10 +93,15 @@ final class ProxyProcess: @unchecked Sendable {
     private let captureID = UUID().uuidString.lowercased()
     private var sequence = 0
     private let exited = DispatchSemaphore(value: 0)
+    private var approvalTimer: DispatchSourceTimer?
+    private var clientRequests: [ProxyClientRequest] = []
+    private var clientRevision: UInt64 = 0
+    private let clientsChanged: @Sendable (ProxyClientSnapshot) -> Void
 
-    init(scope: ProxyLaunchScope, configuration: Configuration) {
+    init(scope: ProxyLaunchScope, configuration: Configuration, clientsChanged: @escaping @Sendable (ProxyClientSnapshot) -> Void = { _ in }) {
         self.scope = scope
         self.configuration = configuration
+        self.clientsChanged = clientsChanged
     }
 
     func call(_ request: TrafficRequest) async -> MCPToolResult {
@@ -114,7 +144,12 @@ final class ProxyProcess: @unchecked Sendable {
                         }
                     }
                     switch request {
-                    case .start, .status, .certificate: addSetup(to: &data)
+                    case .start:
+                        addSetup(to: &data)
+                        if scope.asksClients { startApprovalPolling() }
+                    case .stop:
+                        stopApprovalPolling()
+                    case .status, .certificate: addSetup(to: &data)
                     default: break
                     }
                     let encoded = try JSONSerialization.data(withJSONObject: data, options: [.sortedKeys])
@@ -144,7 +179,9 @@ final class ProxyProcess: @unchecked Sendable {
         let directory = configuration.temporaryRoot.appendingPathComponent("threading-proxy-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         self.directory = directory
-        var arguments = ["--mcp", "--body-limit", String(scope.bodyLimit)]
+        var arguments = ["--mcp", "--body-limit", String(scope.bodyLimit),
+                         "--listen-address", scope.listenAddress]
+        arguments += scope.asksClients ? ["--ask-clients"] : ["--client-address", scope.clientAddress]
         if !scope.hosts.isEmpty {
             let authority = try configuration.authority()
             let root = try write(authority.certificate, named: "inspection.cer")
@@ -236,13 +273,24 @@ final class ProxyProcess: @unchecked Sendable {
     }
 
     private func addSetup(to data: inout [String: Any]) {
+        data["listen_address"] = scope.listenAddress
+        data["client_address"] = scope.asksClients ? NSNull() : scope.clientAddress as Any
+        data["client_admission"] = scope.asksClients ? "ask" : "fixed"
+        let localOnly = scope.listenAddress.hasPrefix("127.")
+        data["routing"] = localOnly ? "loopback" : "device"
+        if !localOnly, let port = data["port"] as? Int, port > 0 {
+            data["ios_proxy"] = ["server": scope.listenAddress, "port": port, "authentication": false] as [String: Any]
+        }
+        data["routing_setup"] = localOnly
+            ? "Local capture only. To capture a phone, release this capture and start with listen_address (Mac Wi-Fi IPv4). Threading asks when a device connects; no phone IP is needed in advance."
+            : "On the same trusted Wi-Fi, open iPhone Settings > Wi-Fi > your network > Configure Proxy > Manual. Use the returned server and port with Authentication off. Threading asks for unknown client IPs unless an explicit client_address filter was supplied. IP addresses are not device authentication. Restore the previous proxy setting before stopping capture."
         guard let publicCertificate, let profile, let fingerprint else { return }
         data["certificate_path"] = publicCertificate.path
         data["profile_path"] = profile.path
         data["inspection_ca_sha256"] = fingerprint
         data["macos_setup_argv"] = ["python3", configuration.setupScript.path, publicCertificate.path, "--sha256", fingerprint, "--target", "macos", "--apply"]
         data["simulator_setup_argv"] = ["python3", configuration.setupScript.path, publicCertificate.path, "--sha256", fingerprint, "--target", "simulator", "--udid", "EXACT_BOOTED_SIMULATOR_UDID", "--apply"]
-        data["setup"] = "Trust installation is explicit. The helper listens on 127.0.0.1; physical iOS devices need a separate reachable route. Share only the public .mobileconfig; install it in iOS Settings, then enable full trust in General > About > Certificate Trust Settings."
+        data["setup"] = "AirDrop only profile_path (the public .mobileconfig) to the iPhone. Install it in Settings > Profile Downloaded, then enable full trust in General > About > Certificate Trust Settings. Trust installation is explicit and does not configure the Wi-Fi proxy. Remove the profile after testing."
     }
 
     private func rpc(_ method: String, params: [String: Any]) throws -> [String: Any] {
@@ -296,7 +344,71 @@ final class ProxyProcess: @unchecked Sendable {
         throw Failure.message(isCancelled ? "This capture session has ended." : "Proxy request timed out.")
     }
 
+    private func startApprovalPolling() {
+        guard approvalTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(ProxyClientLimits.pollMilliseconds), leeway: .milliseconds(100))
+        timer.setEventHandler { [weak self] in
+            guard let self, !self.isCancelled else { return }
+            do { try self.pollClients() }
+            catch {
+                self.cancellation.lock(); self.cancelled = true; self.cancellation.unlock()
+                self.stop()
+            }
+        }
+        approvalTimer = timer
+        timer.resume()
+    }
+
+    private func pollClients() throws {
+        let response = try rpc("threading/clients", params: [:])
+        guard let result = response["result"] as? [String: Any], let generation = result["generation"] as? String,
+              let pending = result["pending"] as? [[String: Any]], pending.count <= ProxyClientLimits.pendingPerCapture else {
+            throw Failure.message("Invalid proxy client approval snapshot.")
+        }
+        let requests = try pending.map { item -> ProxyClientRequest in
+            guard let id = item["id"] as? String, id.count <= 20,
+                  let address = item["address"] as? String, ProxyLaunchScope.isLocalIPv4(address) else {
+                throw Failure.message("Invalid proxy client approval request.")
+            }
+            return ProxyClientRequest(generation: generation, id: id, address: address)
+        }
+        if requests != clientRequests { publishClients(requests) }
+    }
+
+    /// Private inherited-pipe authority; deliberately absent from the app's agent tool catalogue.
+    func decideClient(_ request: ProxyClientRequest, decision: ProxyClientDecision) async -> Bool {
+        await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                guard !isCancelled, clientRequests.contains(request) else { continuation.resume(returning: false); return }
+                do {
+                    let response = try rpc("threading/decideClient", params: ["generation": request.generation,
+                        "id": request.id, "decision": decision.wireValue])
+                    let applied = (response["result"] as? [String: Any])?["applied"] as? Bool == true
+                    try pollClients()
+                    continuation.resume(returning: applied)
+                } catch {
+                    cancellation.lock(); cancelled = true; cancellation.unlock()
+                    stop()
+                    continuation.resume(returning: false)
+                }
+            }
+        }
+    }
+
+    private func stopApprovalPolling() {
+        approvalTimer?.cancel(); approvalTimer = nil
+        publishClients([])
+    }
+
+    private func publishClients(_ requests: [ProxyClientRequest]) {
+        clientRequests = requests
+        clientRevision += 1
+        clientsChanged(ProxyClientSnapshot(revision: clientRevision, requests: requests))
+    }
+
     private func stop() {
+        stopApprovalPolling()
         try? input?.close(); input = nil
         if let child = process, child.isRunning {
             if exited.wait(timeout: .now() + 0.5) == .timedOut {

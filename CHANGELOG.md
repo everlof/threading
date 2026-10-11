@@ -16,6 +16,35 @@ it for the tester: what to try, and what is known to be rough. When the stable r
 own section describes the whole change, not the difference since the last beta; nobody on stable
 saw the betas.
 
+## [0.7.0]
+
+### Added
+
+- **Android devices in the Simulator workspace.** Work with Android emulators and connected
+  Android devices alongside iPhones and up to four iOS Simulators.
+- **Traffic capture for connected devices.** Inspect selected HTTP and HTTPS traffic through a
+  session-owned proxy. Approve new client connections on the Mac and revoke remembered access
+  from Tools settings.
+- Browse independently on iPhone and open a chat's permitted localhost previews remotely.
+- Project-owned automations keep their workspace between runs. Linked workrooms and remote
+  execution hosts extend collaboration beyond one Mac.
+
+### Changed
+
+- Native Threading Direct connections verify the Mac's paired certificate across the encrypted
+  tunnel. New Hosted Access installations require a pilot invitation; existing installations
+  keep their access.
+- Themes can own the new-session welcome and extension decorations. Mermaid diagrams render in
+  attachment previews, and session title history is available in Search.
+
+### Fixed
+
+- Pairing completes when a Mac has a large chat catalogue, and concurrent iPhone requests share
+  one live Direct connection reliably.
+- iPhone terminal drafts support line breaks without sending the message. Chat presentation,
+  keyboard dismissal, attachment previews and reconnection behavior have been improved.
+- Invitation links preserve their pairing information when detected, copied or shared.
+
 ## [0.6.0]
 
 ### Added

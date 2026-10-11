@@ -7627,6 +7627,23 @@
         }
       }
     },
+    "Allow %@ to use this proxy?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow %@ to use this proxy?"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt %@ att använda denna proxy?"
+          }
+        }
+      }
+    },
     "Allow %@?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8014,6 +8031,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Alltid tillåt denna värd"
+          }
+        }
+      }
+    },
+    "Always Allow This IP" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Always Allow This IP"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt alltid denna IP-adress"
           }
         }
       }
@@ -12793,6 +12827,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Chatten är inte tillgänglig"
+          }
+        }
+      }
+    },
+    "Chat: %@\nProxy address: %@\nInspect HTTPS: %@\n\nAllow Once admits the connections waiting now. This Capture lasts until capture stops. Always Allow remembers this IP, proxy address and HTTPS scope. An IP can belong to a different device later. Forget saved IPs in Settings → Tools. Deny blocks retries until capture stops." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chat: %@\nProxy address: %@\nInspect HTTPS: %@\n\nAllow Once admits the connections waiting now. This Capture lasts until capture stops. Always Allow remembers this IP, proxy address and HTTPS scope. An IP can belong to a different device later. Forget saved IPs in Settings → Tools. Deny blocks retries until capture stops."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chatt: %@\nProxyadress: %@\nInspektera HTTPS: %@\n\nTillåt en gång släpper igenom anslutningarna som väntar nu. Denna inspelning gäller tills inspelningen stoppas. Tillåt alltid sparar denna IP-adress, proxyadress och HTTPS-omfattning. En IP-adress kan tillhöra en annan enhet senare. Glöm sparade IP-adresser i Inställningar → Verktyg. Neka blockerar nya försök tills inspelningen stoppas."
           }
         }
       }
@@ -22230,6 +22281,23 @@
         }
       }
     },
+    "Enter Pilot Invitation…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter Pilot Invitation…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange pilotinbjudan…"
+          }
+        }
+      }
+    },
     "Enter a fine-grained GitHub token beginning with github_pat_. It is saved only when the trial starts." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -22276,6 +22344,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ange ett kort namn, en fullständig HTTPS-adress utan inbäddade inloggningsuppgifter och en begränsad API-nyckel."
+          }
+        }
+      }
+    },
+    "Enter a valid pilot invitation to connect this Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter a valid pilot invitation to connect this Mac."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange en giltig pilotinbjudan för att ansluta den här Macen."
           }
         }
       }
@@ -25140,6 +25225,23 @@
         }
       }
     },
+    "Forget Saved IPs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Forget Saved IPs"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Glöm sparade IP-adresser"
+          }
+        }
+      }
+    },
     "Forget iPhone" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25153,6 +25255,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Glöm iPhone"
+          }
+        }
+      }
+    },
+    "Forget saved IP addresses and stop captures that use connection approval. New device connections will ask again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Forget saved IP addresses and stop captures that use connection approval. New device connections will ask again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Glöm sparade IP-adresser och stoppa inspelningar som använder anslutningsgodkännande. Nya enhetsanslutningar frågar igen."
           }
         }
       }
@@ -26404,6 +26523,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "HTTPS-certifikat är inte aktiverade för det här tailnetet."
+          }
+        }
+      }
+    },
+    "HTTPS inspection hosts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTPS inspection hosts"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdar för HTTPS-inspektion"
           }
         }
       }
@@ -29288,6 +29424,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Iv1.…"
+          }
+        }
+      }
+    },
+    "Join the Hosted Access Pilot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Join the Hosted Access Pilot"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gå med i piloten för värdbaserad åtkomst"
           }
         }
       }
@@ -34433,6 +34586,23 @@
         }
       }
     },
+    "No HTTPS hosts selected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No HTTPS hosts selected"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga HTTPS-värdar valda"
+          }
+        }
+      }
+    },
     "No Layout-Shift Data" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39431,6 +39601,23 @@
         }
       }
     },
+    "Paste the invitation code you received. It can be used for one Mac. Local connections do not need an invitation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paste the invitation code you received. It can be used for one Mac. Local connections do not need an invitation."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Klistra in inbjudningskoden du fick. Den kan användas för en Mac. Lokala anslutningar behöver ingen inbjudan."
+          }
+        }
+      }
+    },
     "Paste the token claude setup-token printed." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39675,6 +39862,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bildopacitet"
+          }
+        }
+      }
+    },
+    "Pilot invitation code" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pilot invitation code"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inbjudningskod till piloten"
           }
         }
       }
@@ -41527,6 +41731,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tillhandtagare tjänster"
+          }
+        }
+      }
+    },
+    "Proxy Client Access" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Proxy Client Access"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Åtkomst för proxyklienter"
           }
         }
       }
@@ -47129,6 +47350,23 @@
         }
       }
     },
+    "Saved IPs forgotten. Device captures stopped." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved IPs forgotten. Device captures stopped."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparade IP-adresser har glömts. Enhetsinspelningar har stoppats."
+          }
+        }
+      }
+    },
     "Saved appearance choices need recovery. The unreadable file has been preserved." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48481,6 +48719,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Valt"
+          }
+        }
+      }
+    },
+    "Selected hosts shown below" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Selected hosts shown below"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Valda värdar visas nedan"
           }
         }
       }
@@ -61311,6 +61566,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här %@-inloggningen behöver loggas in igen."
+          }
+        }
+      }
+    },
+    "This Capture" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This Capture"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Denna inspelning"
           }
         }
       }

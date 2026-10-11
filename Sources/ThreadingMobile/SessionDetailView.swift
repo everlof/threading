@@ -2288,8 +2288,7 @@ struct TerminalLineComposer: View {
                     isFocused: $draftIsFocused,
                     theme: theme,
                     offersFiles: { canAddAttachments && clipboard.hasFiles },
-                    pasteFiles: stageClipboardFiles,
-                    onSubmit: submit
+                    pasteFiles: stageClipboardFiles
                 )
                 .mobileUIEvidenceKeyboardFocus($draftIsFocused)
 
@@ -2636,10 +2635,9 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
     let theme: RemoteThemePalette
     let offersFiles: () -> Bool
     let pasteFiles: () -> Bool
-    let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, isFocused: $isFocused, onSubmit: onSubmit)
+        Coordinator(text: $text, isFocused: $isFocused)
     }
 
     func makeUIView(context: Context) -> IntrinsicTextView {
@@ -2660,7 +2658,7 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
         view.autocorrectionType = .default
         view.smartQuotesType = .no
         view.smartDashesType = .no
-        view.returnKeyType = .send
+        view.returnKeyType = .default
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.accessibilityLabel = MobileL10n.string("Compose on this device…")
         view.minimumIntrinsicHeight = MobileDesign.Size.minimumTapTarget
@@ -2673,7 +2671,6 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
 
     func updateUIView(_ view: IntrinsicTextView, context: Context) {
         context.coordinator.updateBindings(text: $text, isFocused: $isFocused)
-        context.coordinator.onSubmit = onSubmit
         view.offersFiles = offersFiles
         view.pasteFiles = pasteFiles
         if view.text != text {
@@ -2723,16 +2720,13 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         private var text: Binding<String>
         private var isFocused: Binding<Bool>
-        var onSubmit: () -> Void
 
         init(
             text: Binding<String>,
-            isFocused: Binding<Bool>,
-            onSubmit: @escaping () -> Void
+            isFocused: Binding<Bool>
         ) {
             self.text = text
             self.isFocused = isFocused
-            self.onSubmit = onSubmit
         }
 
         func textViewDidChange(_ textView: UITextView) {
@@ -2751,16 +2745,6 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
 
         func textViewDidEndEditing(_: UITextView) {
             isFocused.wrappedValue = false
-        }
-
-        func textView(
-            _ textView: UITextView,
-            shouldChangeTextIn _: NSRange,
-            replacementText replacement: String
-        ) -> Bool {
-            guard replacement == "\n", textView.markedTextRange == nil else { return true }
-            onSubmit()
-            return false
         }
     }
 }

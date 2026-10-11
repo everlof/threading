@@ -1094,7 +1094,7 @@
       "priority": "critical",
       "title": "Remote Access settings",
       "description": "The deterministic Remote Access setup page with connection mode, authority, listener state and pairing guidance.",
-      "states": ["Remote access disabled", "Pairing guidance", "Connection choices"],
+      "states": ["Remote access disabled", "Pairing guidance", "Connection choices", "Pilot invitation prompt"],
       "matrix": {
         "themes": ["System"],
         "appearances": ["Light", "Dark"],
@@ -2039,6 +2039,21 @@
       "capture": {
         "glob": "manager-role-*.png"
       }
+    },
+    {
+      "id": "proxy-client-access",
+      "kind": "journey",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Proxy client access",
+      "description": "The bundled proxy pauses unknown clients for a human answer, scopes one-time and capture access, remembers an IP across relaunch and revokes it from Tools settings.",
+      "states": ["Unknown client waiting", "Saved access revocation"],
+      "matrix": { "sizes": ["1400×900-point shell", "Attached approval sheet"] },
+      "source": {
+        "path": "Tests/ThreadingUITests/ProxyClientApprovalJourneyUITests.swift",
+        "test": "ThreadingUITests/ProxyClientApprovalJourneyUITests/testApproveWaitingClientRememberRelaunchAndRevoke"
+      },
+      "capture": { "journey": "Proxy client access" }
     },
     {
       "id": "automation-create-relaunch",

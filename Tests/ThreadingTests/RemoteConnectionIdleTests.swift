@@ -125,6 +125,35 @@ final class RemoteConnectionIdleTests: XCTestCase {
 
     // MARK: - Silence is still bounded
 
+    func testLargeKeepAliveResponsesDoNotInterleavePipelinedRequests() throws {
+        delegate.paddingBytes = RemoteAccessDefaults.outboundHighWaterBytes + 1
+        client.send(Self.request(path: "/first") + Self.request(path: "/second"))
+        for path in ["/first", "/second"] {
+            let response = try XCTUnwrap(client.nextResponse(timeout: Self.responseTimeout))
+            XCTAssertTrue(response.hasPrefix("HTTP/1.1 200"))
+            XCTAssertTrue(response.hasSuffix(String(repeating: "x", count: delegate.paddingBytes) + path))
+        }
+        XCTAssertEqual(delegate.requestCount, 2)
+        XCTAssertFalse(client.hasEnded)
+    }
+
+    func testOversizedHTTPResponseReturnsARefusalInsteadOfLosingTheConnection() throws {
+        delegate.paddingBytes = RemoteAccessDefaults.maximumAttachmentBytes + 128 * 1024
+        client.send(Self.request(path: "/oversized"))
+        let response = try XCTUnwrap(client.nextResponse(timeout: Self.responseTimeout))
+        XCTAssertTrue(response.hasPrefix("HTTP/1.1 503"))
+        XCTAssertTrue(response.contains("responseTooLarge"))
+    }
+
+    func testExcessPipelinedInputCannotInsertAResponseWhileTheFirstRequestIsBusy() throws {
+        delegate.answers = false
+        client.send(Self.request(path: "/busy"))
+        client.send(String(repeating: "x", count: RemoteAccessDefaults.maximumRequestBytes + 1))
+        XCTAssertTrue(client.waitForEnd(timeout: Self.responseTimeout))
+        XCTAssertEqual(delegate.requestCount, 1)
+        XCTAssertNil(client.nextResponse(timeout: Self.responseTimeout))
+    }
+
     func testAClosingResponseDrainsUntilThePeerClosesWithoutRoutingMoreRequests() throws {
         delegate.closesResponses = true
         client.send(Self.request(path: "/attachment") + Self.request(path: "/pipelined"))
@@ -193,6 +222,7 @@ final class RemoteConnectionIdleTests: XCTestCase {
             var answers = true
             var closesResponses = false
             var requestCount = 0
+            var paddingBytes = 0
         }
         private let script = OSAllocatedUnfairLock(initialState: Script())
         private let closed = DispatchSemaphore(value: 0)
@@ -203,6 +233,11 @@ final class RemoteConnectionIdleTests: XCTestCase {
         }
 
         var requestCount: Int { script.withLock { $0.requestCount } }
+
+        var paddingBytes: Int {
+            get { script.withLock { $0.paddingBytes } }
+            set { script.withLock { $0.paddingBytes = newValue } }
+        }
 
         func waitForClose(timeout: TimeInterval) -> Bool {
             closed.wait(timeout: .now() + timeout) == .success
@@ -232,7 +267,7 @@ final class RemoteConnectionIdleTests: XCTestCase {
                 status: 200,
                 reason: "OK",
                 contentType: "text/plain",
-                body: Data(request.path.utf8)
+                body: Data((String(repeating: "x", count: script.paddingBytes) + request.path).utf8)
             )
             response.closesConnection = script.closesResponses
             let answer = response

@@ -453,6 +453,13 @@ past one second: the counter is reset by a frame on the socket and by nothing el
 that keeps failing beside a healthy REST route now backs off to the sixty-second
 ceiling. `socketFailed … transport: hosted, code: url.-1004` beside `hostRefreshSucceeded …
 transport: tailscale, status: 304`, repeating, is the signature to look for in an older build.
+The 2026-10-11 TestFlight audit found another way to end a healthy tunnel: concurrent callers
+awaited the same connector task but each installed its result. The second installation treated
+the identical tunnel as a duplicate and stopped the first caller's active route. The shared task
+now owns both connection and installation and returns the installed route to every waiter.
+Invalidation still rejects and stops a late result, and an already ended result is never installed.
+`HostedRemoteConnectionManagerTests` covers concurrent callers and both disposal paths.
+
 The boundaries: `MobileLiveRoutePolicyTests` and `MobileSocketRecoveryBackoffTests` in the
 `software` connectivity lane, `PeerHostedTunnelLifetimeTests` in the package's own suite,
 `HostedRouteMirror` as the only reader of the stored hosted route, and an architecture check that
@@ -462,6 +469,18 @@ The body itself is encoded once per catalogue edition and authorization on a wor
 main queue, and served gzip-compressed to any client whose `Accept-Encoding` allows it, which
 `URLSession` and every browser do by default. See the mobile dashboard scaling contract in
 [`performance.md`](architecture/performance.md).
+
+Finite HTTP responses have their own bounded sender. During physical-device pairing on
+2026-10-11, the Mac accepted the owner device but discarded the uncompressed acceptance body
+because its catalogue exceeded the live WebSocket's 2 MiB backlog limit. Every replay discarded
+the same response, so the phone reported `URLError.networkConnectionLost` after accepting the
+certificate. HTTP now retains one response up to the existing attachment ceiling (24 MiB plus
+64 KiB for headers) and sends it in 64 KiB chunks, waiting for each send before the next. A
+pipelined request cannot overtake the response, and an oversized response receives an explicit
+`responseTooLarge` refusal. The 2 MiB live WebSocket backlog remains unchanged. Closing responses
+still send a final message and drain until peer EOF or the idle deadline; send completion alone
+does not authorize cancelling TLS. `RemoteListenerTLSTests` covers pairing and replay with a
+1,200-session catalogue over pinned TLS; `RemoteConnectionIdleTests` covers pipelining and refusal.
 
 The iOS app shows unarchived sessions from visible projects, grouped by project or ordered by
 recent activity, including dormant sessions. The remote row's `lastActiveAt` projects `AgentSession.lastUsedAt`:
@@ -1338,11 +1357,11 @@ shows the handles, the themed selection and the chip together.
 **The draft box needed the same rule, and did not have it.** The quotes were delimited and what
 was *typed* beside them never was — and the host writes a submitted line into the PTY as it
 stands before appending Return, so a draft carrying a line break arrived as several Returns: the
-first line submitted and the rest landed in whatever the agent asked next. Typing cannot produce
-a line break there, because Return sends; pasting is the only way one gets in, which is exactly
-the case that broke. `submissionText` now delimits a multi-line draft too, trimming the blank
-edges the host's own trim can no longer see past the delimiters. The quotes stay a separate
-block from the instruction rather than being folded into one: an agent's prompt collapses a
+first line submitted and the rest landed in whatever the agent asked next. `submissionText`
+delimits a multi-line draft too, whether typed with Return in the iPhone's Compose editor or
+pasted, trimming the blank edges the host's own trim can no longer see past the delimiters.
+The quotes stay a separate block from the instruction rather than being folded into one: an
+agent's prompt collapses a
 pasted block into a single token, and burying "fix this" inside it would hide what was asked.
 `RemoteTerminalPaste` owns the delimiters and the 64 KB write bound now, shared with
 `RemoteAccessDefaults.maximumTerminalInputBytes` so a client can ask the host's own question
@@ -1954,7 +1973,7 @@ What the panel says is a value, `MobileConnectionReport`, resolved from four thi
   address if the browse found one, the pinned identity's pairing code.
 - **The pin verdict** for the address in use, read from the pinning delegate the same way the
   support report reads it: *pinned and verified*, *refused* on a fingerprint mismatch, *not
-  pinned, system trust* for a Serve or hosted endpoint, and *pinned, not checked yet* before the
+  pinned, system trust* for a Serve endpoint, and *pinned, not checked yet* before the
   first challenge.
 - **The phone's own network**: `MobileNetworkPathObserver` runs one `NWPathMonitor` for as long as
   the panel is up and walks `getifaddrs` in the path handler and nowhere else, so the syscall runs
@@ -2448,6 +2467,29 @@ The initial pilot admits at most 100 accountless installations and eight active 
 credentials per installation, enforced by D1 triggers. Each installation is bound to its one
 host ID.
 
+New installations also require a 256-bit, single-use pilot invitation. D1 atomically claims its
+SHA-256 digest with the installation identity; concurrent claims, expiry and revocation fail the
+whole transaction. Existing installations renew with their Keychain secret without another code.
+The bounded Settings prompt is host-owned: extensions cannot change admission or credential
+custody. The deployment applies migration `0011` before updating the Worker; the migration accepts
+writes from the previous Worker during rollout, so invitation enforcement begins with the new
+Worker. Do not roll back to an open-enrollment Worker while relying on invitation admission.
+
+TURN issuance reserves three D1 counters in one transaction: 240 per installation/hour, 2,000 per
+installation/UTC day and 20,000 globally/UTC day. Failure to reserve keeps STUN-only connectivity;
+it never permits unmetered issuance. Eight pending/device rendezvous sessions and eight live
+native host tunnels bound concurrency. The provider receives a SHA-256 installation identifier
+for usage attribution, with no device names or transcript data. Counters and expired invitations
+are purged after seven days by indexed, bounded cleanup pages. Operator commands and the daily
+usage/cost check are in `Service/ThreadingControlPlane/README.md`.
+
+These are admission and issuance limits, not a relayed-byte ceiling. The usage command reports
+an exceeded daily byte budget with exit status 2 for operator monitoring; it is not a provider
+traffic cutoff and no scheduled alert is installed by this change. Credentials retain their
+24-hour lifetime until renewal and ICE restart have been verified on long-lived sessions.
+Shortening only the token can disconnect a healthy session. Keep the 100-installation pilot cap
+until direct success, relay usage/cost and recovery have been measured on physical devices.
+
 The enrollment method follows the configured service rather than the build channel. A local
 `dev` build talking to Production therefore shares the anonymous credential namespace and the
 **Enable Hosted Access** controls with public builds. Explicit loopback authentication and the
@@ -2512,6 +2554,22 @@ feature lock.
 
 ## Security model
 
+- **Native Hosted Direct authenticates the Mac independently of signaling.** The iPhone carries
+  HTTPS/WSS through WebRTC to a separate TLS loopback listener on the Mac, presenting the same
+  certificate as the private-network doors. Pairing payload v2 includes the Mac's 128-bit QR
+  fingerprint; the pin is verified before sending a capability or content. The local HTTP
+  listener remains separate for Serve and browser guests. Tunnel `openTLS` is a distinct opcode:
+  an old Mac or missing TLS listener refuses it, never falls back to HTTP. Origin-scoped pin
+  leases include the ephemeral loopback port and survive for the route lifetime; a retired lease
+  cannot erase a newer registration after port reuse. Saved loopback ports are never private
+  fallback candidates. Legacy hosted pairings without independently paired identity must scan
+  the Mac's current code again. `RemoteListenerTLSTests` runs real TLS through real WebRTC and
+  proves a substituted peer certificate receives no bearer, with a successful pinned positive
+  control. Physical cross-network and forced-relay verification remains a release gate.
+- **Browser guests still trust the hosted page and signaling service.** Browser JavaScript uses
+  DTLS plus the HTTP tunnel; it cannot use the native certificate-pinning delegate. It accepts v2
+  invitation links for compatibility, but must not be described as having the native independent
+  Mac-identity guarantee. The service can deny availability for either client.
 - The remote server is separate from Threading's MCP and extension servers, and it binds one
   listener per **door** rather than one listener bound to everything. A door is a network the Mac
   will answer on, and each of its listeners is pinned to one address with `requiredLocalEndpoint`;
@@ -2916,6 +2974,36 @@ everywhere. `BuildChannel.offersHostedDirect` now includes public channels:
   nightly that carries this.
 
 Ordinary uninjected `dev` builds keep Hosted Direct for development and connection-matrix testing.
+
+### Joint verification before the next TestFlight upload
+
+The October 11 native TLS and pilot-admission changes are local until deployment and device
+verification. Apply `0011` and the Worker to the isolated Development environment for the physical
+network matrix, and run the updated Mac and iPhone against it. Development uses its existing
+Cloudflare Access login and deliberately does not expose accountless enrollment. Exercise pilot
+admission against the local Worker's accountless API (as the D1 tests do), then verify the full
+fresh-Mac enrollment on an isolated pilot profile during the controlled production rollout.
+Keep the ordinary production installation and its Keychain credentials during this exercise.
+
+1. Missing, expired and already-used pilot invitations must refuse accountless enrollment. A fresh
+   code enrolls one installation; renewing that installation must work without another code.
+   The fresh-Mac UI check uses **Enable Hosted Access → Enter Pilot Invitation…** on the pilot
+   profile, without deleting or replacing the owner's normal Keychain record.
+2. Scan the updated Mac's hosted QR. The iPhone connection details must report **Pinned and
+   verified**. A legacy pinless Direct pairing must ask for a new scan. Old Macs must fail closed
+   for native Direct, while LAN/Tailscale remain available when their pinned routes work.
+3. Open a chat and transfer an attachment on Wi-Fi, switch the phone to cellular, background and
+   foreground it, then sleep/wake the Mac. Check recovery and the selected route; an asleep Mac
+   must not be reported connected.
+4. Force TURN UDP, TCP and TLS using the peer-package release probe; record route and negotiation
+   time. Run the same pinned native flow with forced relay on the device matrix. Neither a
+   same-machine WebRTC test nor an ordinary Wi-Fi test proves relay connectivity.
+5. Read the day's provider usage with `scripts/turn-usage.mjs`, confirm the tagged installation
+   appears, and choose the daily monitoring budget/schedule. Issuance caps do not cap live bytes.
+6. Confirm one-chat guest scope and revocation, plus background APNs on a distribution build.
+   Deploy the separately built invitation page before distributing v2 links to browser guests.
+   Publish the revised privacy page and then use the guarded Fastlane beta lane for the exact
+   signed archive. The privacy-site Firebase login remains an operator prerequisite.
 
 Production and development services are operated independently of this checkout. The checked-in
 Worker configurations remain templates with deliberately invalid D1 identifiers until rendered

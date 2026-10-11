@@ -125,6 +125,12 @@ final class ThemedAlert {
         }
     }
 
+    /// The themed attached dialog is a child panel, not AppKit's native attachedSheet.
+    /// Evidence capture follows this surface even when another app temporarily owns focus.
+    static func isPresentationWindow(_ window: NSWindow) -> Bool {
+        window is ThemedAlertPanel
+    }
+
     @discardableResult
     func runModal() -> NSApplication.ModalResponse {
         prepareDefaultButtonIfNeeded()

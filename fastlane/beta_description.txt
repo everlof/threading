@@ -1,0 +1,7 @@
+Threading Remote connects your iPhone to coding-agent sessions running in Threading on your Mac.
+
+Pair by scanning the code in the Mac app's Settings > Remote Access. Connect over the same Wi-Fi, a VPN or Tailscale. Optional Hosted Direct connects across networks while your Mac is awake, online and running Threading; no account is required.
+
+This beta focuses on pairing, reconnecting after network changes, reading conversations and terminal output, sending messages, reviewing changed files, and responding to approval requests. Please report problems from the app, where you can review the diagnostic information before sending it.
+
+Without a Mac, choose Try the demo on the first screen to explore the app. Hosted Direct is a limited pilot; local connections remain available independently.

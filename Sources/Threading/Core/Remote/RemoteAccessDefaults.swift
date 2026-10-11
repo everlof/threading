@@ -183,9 +183,11 @@ enum RemoteAccessDefaults {
     /// bytes exceed this, it is closed (1013). A live terminal must never back-pressure the mirror.
     static let outboundHighWaterBytes = 2 * 1024 * 1024
 
-    /// A selected image/PDF is served over a closing HTTP response rather than the live socket.
-    /// The serialized head is tiny; this margin keeps the explicit response cap easy to audit.
-    static let maximumAttachmentResponseBytes = maximumAttachmentBytes + 64 * 1024
+    /// Finite HTTP responses include catalogues and attachments, independently of the live
+    /// WebSocket backlog limit. Keep one bounded response and hand Network.framework at most
+    /// one chunk at a time. The margin admits a maximum-size attachment plus its HTTP head.
+    static let maximumHTTPResponseBytes = maximumAttachmentBytes + 64 * 1024
+    static let httpResponseChunkBytes = 64 * 1024
     static let maximumSearchResponseBytes = 1 * 1024 * 1024
 
     /// The initial conversation window and each requested history page stay well below the

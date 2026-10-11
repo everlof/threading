@@ -104,6 +104,62 @@ credentials whose routes and signaling byte bounds the Worker has validated. If 
 provisioning is temporarily unavailable or malformed, rendezvous continues with Cloudflare STUN
 so direct paths remain available.
 
+## Invited pilot admission and TURN budget
+
+Migration `0011_pilot_admission_and_turn_budget.sql` precedes the Worker update. The new Worker
+requires a one-use invitation for a new accountless Mac, while existing installations renew with
+their stored installation secret. The Settings prompt is reached after `invitationRequired` or
+`invitationInvalid`. Old clients cannot enroll new Macs until updated. The expand-compatible
+migration alone does not restrict the old Worker; do not roll back the Worker to open enrollment
+while relying on this admission boundary.
+
+Create an invitation **outside the checkout**. The command creates a new mode-0700 directory,
+with a mode-0600 bearer file and separate digest-only SQL. It never prints the code and refuses
+to overwrite existing files. Default expiry is 72 hours, maximum seven days.
+
+```sh
+node scripts/pilot-invitation.mjs --output /private/tmp/threading-pilot-tester --hours 72
+# Use the rendered Wrangler config for the intended environment and its DB binding:
+npx wrangler d1 execute DB --remote --config /private/tmp/target-wrangler.json \
+  --file /private/tmp/threading-pilot-tester/insert.sql
+```
+
+Only after D1 accepts the insert, share `invitation.txt` privately with that tester and remove
+the local bearer file. For local-only testing replace `--remote` with `--local` and use the local
+development config. The grant can be revoked before use by setting `revoked_at = unixepoch()`
+for its digest. Revoking a claimed invitation does not revoke an already enrolled installation;
+use the existing account/device revocation paths for that. Losing an enrollment response is
+recoverable with the installation secret saved before the request. Admission and installation
+capacity checks are atomic; a full pilot rolls back the invitation claim too.
+
+TURN issuance is capped at 240/hour and 2,000/UTC day per authenticated installation principal,
+and 20,000/UTC day globally. One D1 transaction reserves all counters, including across hosts'
+Durable Objects. Refused or unavailable reservations return STUN only. The counters bound
+credential issuance, **not bytes on an existing allocation**. Eight concurrent rendezvous sessions
+and eight live native host tunnels are separate limits. Keep the existing 100-installation cap.
+
+The provider receives a SHA-256 installation identifier in `customIdentifier`. Query one UTC
+day with an **Account Analytics read** token in `CLOUDFLARE_ANALYTICS_API_TOKEN`, the operated
+`CLOUDFLARE_ACCOUNT_ID` and `TURN_KEY_ID` in the environment. Supply the contracted USD/decimal-GB
+price and the operator's daily budget explicitly; neither is embedded in app code:
+
+```sh
+node scripts/turn-usage.mjs --date 2026-10-11 --price-per-gb 0.05 --budget-gb 10
+```
+
+The numbers above are an example, not a configured billing agreement. The command reports ingress,
+egress, estimated cost and the top 100 installation digests. An independent full-key aggregate
+drives the cost and budget, so the top-100 limit cannot undercount. Exit 2 means budget exceeded;
+exit 1 means the measurement failed and must not be read as zero usage. This is a manual/CI
+monitoring command; this change does not install a scheduled alert or a provider byte cutoff.
+Analytics are provider-reported estimates, not a bill. See [Cloudflare's analytics contract](https://developers.cloudflare.com/realtime/turn/analytics/).
+
+Credentials keep the 24-hour lifetime: [Cloudflare advises matching the longest expected session](https://developers.cloudflare.com/realtime/turn/generate-credentials/).
+Reducing that requires verified credential refresh and ICE restart on long sessions. Before
+expanding the pilot, run the physical network/forced-relay matrix in the peer package README,
+measure actual relay use, verify this query with the operated analytics token and set the daily
+monitoring schedule/budget. New backend code and migration are staged until joint device testing.
+
 Create a separate APNs token key for `codes.threading.mobile`; its `.p8` exists only as a Worker
 secret. A paired phone registers its token through `POST /v1/push/registrations` with its scoped
 device credential. The encrypted record is bound to account, host, device and APNs environment;

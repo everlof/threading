@@ -6,6 +6,7 @@ import hashlib
 import gzip
 import zlib
 import json
+import os
 from pathlib import Path
 import plistlib
 import queue
@@ -69,6 +70,166 @@ class MCP(Proxy):
 
 
 class MCPIntegration(unittest.TestCase):
+    def test_listener_scope_rejects_incomplete_or_ambiguous_addresses(self):
+        invalid = [
+            ["--listen-address", "127.0.0.1"], ["--client-address", "127.0.0.1"],
+            *[["--listen-address", address, "--client-address", "127.0.0.1"] for address in
+              ["0.0.0.0", "::", "::1", "localhost", "8.8.8.8", "224.0.0.1", "255.255.255.255",
+               "192.168.01.1", "127.1", "127.0.0.1:8080", "172.32.0.1", "169.253.1.2"]],
+            ["--listen-address", "127.0.0.1", "--client-address", "0.0.0.0"],
+        ]
+        for arguments in invalid:
+            with self.subTest(arguments=arguments):
+                result = subprocess.run([BINARY, "--mcp", *arguments], input=b"", capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, 2)
+
+    def test_client_filter_rejects_before_reading_or_retaining_traffic(self):
+        with MCP("--listen-address", "127.0.0.1", "--client-address", "127.0.0.2") as mcp:
+            status = mcp.start()
+            self.assertEqual(status["host"], "127.0.0.1")
+            self.assertEqual(status["client_address"], "127.0.0.2")
+            # A burst cannot pollute the owner's history or initiate DNS/upstream traffic.
+            for _ in range(32):
+                with mcp.socket() as connection:
+                    try:
+                        connection.sendall(b"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")
+                        self.assertEqual(connection.recv(1), b"")
+                    except ConnectionResetError:
+                        pass
+            self.assertEqual(mcp.tool("traffic_status")["rejected_clients"], "32")
+            self.assertEqual(mcp.tool("traffic_list")["flows"], [])
+
+    def pending_client(self, mcp, connections=1):
+        for _ in range(100):
+            snapshot = mcp.rpc("threading/clients", {})["result"]
+            if snapshot["pending"] and snapshot["pending"][0]["connections"] == connections:
+                return snapshot, snapshot["pending"][0]
+            time.sleep(0.01)
+        self.fail("No grouped client approval")
+
+    def decide_client(self, mcp, snapshot, request, decision):
+        return mcp.rpc("threading/decideClient", {"generation": snapshot["generation"],
+                       "id": request["id"], "decision": decision})["result"]["applied"]
+
+    def test_client_approval_groups_and_holds_bytes_before_upstream_then_once_expires(self):
+        reached = threading.Event()
+        def reply(connection):
+            reached.set()
+            read_headers(connection)
+            respond(connection, b"approved")
+        with origin(reply) as port, MCP("--listen-address", "127.0.0.1", "--ask-clients") as mcp:
+            self.assertEqual(mcp.start()["client_admission"], "ask")
+            with contextlib.ExitStack() as stack:
+                clients = [stack.enter_context(mcp.socket()) for _ in range(3)]
+                for client in clients:
+                    client.sendall(f"GET http://127.0.0.1:{port}/ HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode())
+                snapshot, request = self.pending_client(mcp, 3)
+                self.assertEqual(request["address"], "127.0.0.1")
+                self.assertFalse(reached.wait(0.1), "No upstream activity before a human answer")
+                self.assertEqual(mcp.tool("traffic_list")["flows"], [])
+                self.assertTrue(self.decide_client(mcp, snapshot, request, "once"))
+                self.assertFalse(self.decide_client(mcp, snapshot, request, "session"), "Duplicate answers cannot widen authority")
+                for client in clients:
+                    self.assertTrue(read_all(client).endswith(b"approved"))
+            with mcp.socket() as next_client:
+                new_snapshot, new_request = self.pending_client(mcp)
+                self.assertNotEqual(request["id"], new_request["id"])
+                self.assertTrue(self.decide_client(mcp, new_snapshot, new_request, "deny"))
+                self.assertEqual(next_client.recv(1), b"")
+            with mcp.socket() as retry:
+                self.assertEqual(retry.recv(1), b"", "Denial must not prompt on every Safari retry")
+            self.assertEqual(mcp.rpc("threading/clients", {})["result"]["pending"], [])
+
+    def test_client_session_grant_restart_and_stale_answer(self):
+        with MCP("--listen-address", "127.0.0.1", "--ask-clients") as mcp:
+            mcp.start()
+            with mcp.socket() as first:
+                snapshot, request = self.pending_client(mcp)
+                self.assertTrue(self.decide_client(mcp, snapshot, request, "session"))
+                first.sendall(b"invalid\r\n\r\n")
+                self.assertIn(b"400", read_all(first))
+            with mcp.socket() as second:
+                second.sendall(b"invalid\r\n\r\n")
+                self.assertIn(b"400", read_all(second))
+                self.assertEqual(mcp.rpc("threading/clients", {})["result"]["pending"], [])
+            mcp.tool("traffic_stop")
+            mcp.start()
+            with mcp.socket() as third:
+                new_snapshot, new_request = self.pending_client(mcp)
+                self.assertNotEqual(snapshot["generation"], new_snapshot["generation"])
+                self.assertFalse(self.decide_client(mcp, snapshot, request, "session"))
+                self.assertEqual(len(mcp.rpc("threading/clients", {})["result"]["pending"]), 1)
+                mcp.tool("traffic_stop")
+                self.assertEqual(third.recv(1), b"")
+                self.assertFalse(self.decide_client(mcp, new_snapshot, new_request, "session"))
+
+    def test_request_header_deadline_begins_after_human_approval(self):
+        def reply(connection):
+            read_headers(connection)
+            respond(connection, b"approved after thinking")
+        with origin(reply) as port, MCP("--listen-address", "127.0.0.1", "--ask-clients") as mcp:
+            mcp.start()
+            with mcp.socket() as client:
+                snapshot, request = self.pending_client(mcp)
+                time.sleep(16)  # Longer than the ordinary 15-second request-header deadline.
+                self.assertTrue(self.decide_client(mcp, snapshot, request, "once"))
+                time.sleep(0.1)  # A stale header deadline would close before these bytes arrive.
+                client.sendall(f"GET http://127.0.0.1:{port}/ HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode())
+                self.assertTrue(read_all(client).endswith(b"approved after thinking"))
+
+    def test_client_approval_expires_without_reading_and_late_answer_cannot_grant(self):
+        with MCP("--listen-address", "127.0.0.1", "--ask-clients") as mcp:
+            mcp.start()
+            with mcp.socket() as client:
+                snapshot, request = self.pending_client(mcp)
+                client.settimeout(95)
+                self.assertEqual(client.recv(1), b"")
+                self.assertFalse(self.decide_client(mcp, snapshot, request, "session"))
+                self.assertEqual(mcp.tool("traffic_list")["flows"], [])
+                self.assertEqual(mcp.rpc("threading/clients", {})["result"]["pending"], [])
+
+    def test_client_pending_connection_cap_and_private_control(self):
+        with MCP("--listen-address", "127.0.0.1", "--ask-clients") as mcp:
+            mcp.start()
+            with contextlib.ExitStack() as stack:
+                for _ in range(8): stack.enter_context(mcp.socket())
+                snapshot, request = self.pending_client(mcp, 8)
+                with mcp.socket() as excess: self.assertEqual(excess.recv(1), b"")
+                self.assertTrue(self.decide_client(mcp, snapshot, request, "deny"))
+            catalog = mcp.rpc("tools/list")["result"]["tools"]
+            self.assertFalse(any("Client" in item["name"] or "clients" in item["name"] for item in catalog))
+            self.assertIn("error", mcp.rpc("threading/decideClient", {"id": "1", "generation": "1", "decision": "always"}))
+        with MCP() as mcp:
+            self.assertIn("error", mcp.rpc("threading/clients", {}))
+
+    def test_explicit_listener_captures_and_rejects_self_proxy_targets(self):
+        self.check_listener("127.0.0.1")
+
+    @unittest.skipUnless(os.environ.get("THREADING_PROXY_TEST_LAN_ADDRESS"), "Opt-in local interface test")
+    def test_real_lan_interface_captures_and_rejects_self_proxy_targets(self):
+        self.check_listener(os.environ["THREADING_PROXY_TEST_LAN_ADDRESS"])
+
+    def check_listener(self, address):
+        def reply(connection):
+            read_headers(connection)
+            respond(connection, b"device route works")
+
+        with origin(reply) as port, MCP("--listen-address", address, "--client-address", address) as mcp:
+            self.assertEqual(mcp.start()["host"], address)
+            with socket.create_connection((address, mcp.port), timeout=5) as connection:
+                connection.sendall(f"GET http://127.0.0.1:{port}/ HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode())
+                self.assertTrue(read_all(connection).endswith(b"device route works"))
+            for host in [address, "[::ffff:" + address + "]"]:
+                with socket.create_connection((address, mcp.port), timeout=5) as connection:
+                    connection.sendall(f"CONNECT {host}:{mcp.port} HTTP/1.1\r\nHost: {host}:{mcp.port}\r\n\r\n".encode())
+                    self.assertIn(b"502", read_all(connection))
+            flows = mcp.tool("traffic_list")["flows"]
+            self.assertEqual(len(flows), 3)
+            self.assertEqual(mcp.tool("traffic_body", {"id": flows[0]["id"], "side": "response"})["data"], "device route works")
+            mcp.tool("traffic_stop")
+            with self.assertRaises(OSError):
+                socket.create_connection((address, mcp.port), timeout=1)
+
     @contextlib.contextmanager
     def raw_mcp(self):
         with tempfile.TemporaryFile() as errors:
@@ -345,7 +506,9 @@ class MCPIntegration(unittest.TestCase):
                 read_headers(connection)
                 respond(connection, b"MCP inspected TLS")
 
-            options = certificates.options() + ["--inspection-ca", certificates.path("inspection-ca.pem")]
+            address = os.environ.get("THREADING_PROXY_TEST_LAN_ADDRESS", "127.0.0.1")
+            options = certificates.options() + ["--inspection-ca", certificates.path("inspection-ca.pem"),
+                                               "--listen-address", address, "--client-address", address]
             with tls_origin(certificates, reply) as port, MCP(*options) as mcp:
                 status = mcp.start()
                 self.assertEqual(status["tls_hosts"], ["127.0.0.1"])
@@ -373,7 +536,9 @@ class MCPIntegration(unittest.TestCase):
                     invalid = subprocess.run([sys.executable, setup, str(exported), "--sha256", fingerprint,
                                               "--target", "simulator", "--udid", udid], capture_output=True)
                     self.assertEqual(invalid.returncode, 1)
-                plain, response = connect(mcp, port)
+                plain = socket.create_connection((address, mcp.port), timeout=5)
+                plain.sendall(f"CONNECT 127.0.0.1:{port} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode())
+                response = read_headers(plain)
                 self.assertIn(b"200", response)
                 with certificates.client().wrap_socket(plain, server_hostname="127.0.0.1") as connection:
                     connection.sendall(f"GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode())

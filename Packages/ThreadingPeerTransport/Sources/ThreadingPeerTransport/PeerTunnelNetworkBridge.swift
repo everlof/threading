@@ -11,6 +11,7 @@ public final class PeerTunnelLocalProxy: @unchecked Sendable {
     }
 
     private let multiplexer: PeerTunnelMultiplexer
+    private let service: PeerTunnelService
     private let queue = DispatchQueue(label: "codes.threading.peer-tunnel.local-proxy")
     private let lifecycle = NSLock()
     private var didStart = false
@@ -18,8 +19,9 @@ public final class PeerTunnelLocalProxy: @unchecked Sendable {
     private var listener: NWListener?
     private var active: [UUID: ActiveSocket] = [:]
 
-    public init(multiplexer: PeerTunnelMultiplexer) {
+    public init(multiplexer: PeerTunnelMultiplexer, service: PeerTunnelService = .http) {
         self.multiplexer = multiplexer
+        self.service = service
     }
 
     public func start() async throws -> URL {
@@ -44,7 +46,7 @@ public final class PeerTunnelLocalProxy: @unchecked Sendable {
                 self?.accept(connection)
             }
             let port = try await PeerTunnelListenerStarter.start(listener, queue: queue)
-            guard let origin = URL(string: "http://127.0.0.1:\(port.rawValue)/") else {
+            guard let origin = URL(string: "\(service.scheme)://127.0.0.1:\(port.rawValue)/") else {
                 throw PeerTunnelError.protocolViolation
             }
             return origin
@@ -80,13 +82,13 @@ public final class PeerTunnelLocalProxy: @unchecked Sendable {
             connection: connection,
             queueLabel: "codes.threading.peer-tunnel.local-socket"
         )
-        let task = Task { [weak self, socket, multiplexer] in
+        let task = Task { [weak self, socket, multiplexer, service] in
             defer {
                 self?.queue.async { [weak self] in self?.active[identifier] = nil }
             }
             do {
                 try await socket.start()
-                let stream = try await multiplexer.openStream()
+                let stream = try await multiplexer.openStream(service: service)
                 try await PeerTunnelSocketPump.run(socket: socket, stream: stream)
             } catch {
                 socket.cancel()
@@ -105,6 +107,7 @@ public final class PeerTunnelLoopbackBridge: @unchecked Sendable {
 
     private let multiplexer: PeerTunnelMultiplexer
     private let targetPort: NWEndpoint.Port
+    private let tlsTargetPort: NWEndpoint.Port?
     private let queue = DispatchQueue(label: "codes.threading.peer-tunnel.loopback-bridge")
     private let lifecycle = NSLock()
     private var didStart = false
@@ -112,12 +115,20 @@ public final class PeerTunnelLoopbackBridge: @unchecked Sendable {
     private var acceptTask: Task<Void, Never>?
     private var active: [UUID: ActiveSocket] = [:]
 
-    public init(multiplexer: PeerTunnelMultiplexer, targetPort: UInt16) throws {
+    public init(multiplexer: PeerTunnelMultiplexer, targetPort: UInt16, tlsTargetPort: UInt16? = nil) throws {
         guard let port = NWEndpoint.Port(rawValue: targetPort) else {
             throw PeerTunnelError.protocolViolation
         }
         self.multiplexer = multiplexer
         self.targetPort = port
+        if let tlsTargetPort {
+            guard let tlsPort = NWEndpoint.Port(rawValue: tlsTargetPort), tlsPort != port else {
+                throw PeerTunnelError.protocolViolation
+            }
+            self.tlsTargetPort = tlsPort
+        } else {
+            self.tlsTargetPort = nil
+        }
     }
 
     public func start() async throws {
@@ -174,13 +185,14 @@ public final class PeerTunnelLoopbackBridge: @unchecked Sendable {
     }
 
     private func connect(_ stream: PeerTunnelStream) {
-        guard active.count < PeerTunnelBounds.maximumStreams else {
+        let port = stream.service == .https ? tlsTargetPort : targetPort
+        guard let port, active.count < PeerTunnelBounds.maximumStreams else {
             Task { await stream.reset() }
             return
         }
         let identifier = UUID()
         let socket = PeerTunnelSocket(
-            connection: NWConnection(host: "127.0.0.1", port: targetPort, using: .tcp),
+            connection: NWConnection(host: "127.0.0.1", port: port, using: .tcp),
             queueLabel: "codes.threading.peer-tunnel.loopback-socket"
         )
         let task = Task { [weak self, socket, stream] in

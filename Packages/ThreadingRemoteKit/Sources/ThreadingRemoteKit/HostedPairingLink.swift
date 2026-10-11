@@ -15,6 +15,7 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
     public let rendezvousCredential: String
     public let bootstrapToken: String
     public let expiresAt: Date
+    public let pinnedFingerprintCode: String?
 
     private struct Payload: Codable {
         let v: Int
@@ -24,6 +25,7 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
         let c: String
         let b: String
         let e: Double
+        let p: String?
     }
 
     public init?(
@@ -33,8 +35,10 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
         rendezvousCredential: String,
         bootstrapToken: String,
         expiresAt: Date,
+        pinnedFingerprintCode: String? = nil,
         now: Date = Date()
     ) {
+        if let pinnedFingerprintCode, RemoteHostPin(pairingCode: pinnedFingerprintCode) == nil { return nil }
         guard let serviceURL = Self.normalizedServiceURL(serviceURL),
               Self.isIdentifier(hostID),
               Self.isIdentifier(deviceID),
@@ -50,6 +54,7 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
         self.rendezvousCredential = rendezvousCredential
         self.bootstrapToken = bootstrapToken
         self.expiresAt = expiresAt
+        self.pinnedFingerprintCode = pinnedFingerprintCode
     }
 
     public init?(string: String, now: Date = Date()) {
@@ -71,7 +76,7 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
               ),
               data.count <= Self.maximumEncodedBytes,
               let payload = try? JSONDecoder().decode(Payload.self, from: data),
-              payload.v == 1,
+              (payload.v == 1 && payload.p == nil) || (payload.v == 2 && payload.p != nil),
               let serviceURL = URL(string: payload.s),
               let validated = Self(
                 serviceURL: serviceURL,
@@ -80,6 +85,7 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
                 rendezvousCredential: payload.c,
                 bootstrapToken: payload.b,
                 expiresAt: Date(timeIntervalSince1970: payload.e),
+                pinnedFingerprintCode: payload.p,
                 now: now
               ) else {
             return nil
@@ -89,13 +95,14 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
 
     public var scannablePayload: String {
         let payload = Payload(
-            v: 1,
+            v: pinnedFingerprintCode == nil ? 1 : 2,
             s: serviceURL.absoluteString,
             h: hostID,
             d: deviceID,
             c: rendezvousCredential,
             b: bootstrapToken,
-            e: expiresAt.timeIntervalSince1970
+            e: expiresAt.timeIntervalSince1970,
+            p: pinnedFingerprintCode
         )
         guard let data = try? JSONEncoder().encode(payload) else { return "" }
         return "THREADING://PAIR#\(data.base64URLEncodedString())"

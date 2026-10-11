@@ -12,7 +12,7 @@ curl --noproxy '' --proxy http://127.0.0.1:8080 http://example.com/
 curl --noproxy '' --proxy http://127.0.0.1:8080 https://example.com/
 ```
 
-The helper prints its actual loopback port in a versioned JSONL `ready` event. With no `--port`,
+The helper prints its actual listener address and port in a versioned JSONL `ready` event. With no `--port`,
 it chooses an ephemeral port. The HTTPS example uses an opaque CONNECT tunnel and keeps the
 client's existing certificate validation. Inspection requires explicit per-host leaf identities.
 
@@ -77,7 +77,7 @@ single-exchange and protocol limits above also apply to inspected TLS.
 
 Use `--mcp` instead of `--stdio`, with the same TLS launch options. It implements newline-delimited
 JSON-RPC MCP stdio, version `2025-11-25`, and starts idle. Initialize, then call `traffic_start`
-to obtain its loopback endpoint and configure the client for it.
+to obtain its endpoint and configure the client for it. Loopback is the default.
 
 | Tool | Effect |
 |---|---|
@@ -131,6 +131,54 @@ Ordinary stop keeps the history. Session end, archival, removal, project move an
 the lease. Four helpers (including draining workers) and four pending calls per owner are admitted.
 A native Traffic workbench and paired iOS certificate-delivery UI are not implemented yet.
 
+## Capturing Safari on a physical iPhone
+
+Enable **Settings → Tools → Network traffic** in Threading. Connect the Mac and phone to the
+same trusted Wi-Fi. Start with the Mac's local IPv4 and exact HTTPS hosts; the phone IP is
+learned from its connection and presented for approval:
+
+```json
+{"hosts":["example.com"],"listen_address":"192.168.1.10"}
+```
+
+These are example addresses, not discovery defaults. `traffic_start` returns `ios_proxy.server`,
+`ios_proxy.port`, `profile_path` and the root fingerprint. On the iPhone, set that network's
+**Configure Proxy → Manual**, enter the server/port and leave Authentication off. AirDrop the
+public `.mobileconfig` at `profile_path`, install it in **Settings → Profile Downloaded**, then
+enable it under **General → About → Certificate Trust Settings**. Open `https://example.com/`
+in Safari; `traffic_list`, `traffic_get` and `traffic_body` should show the decrypted GET, status,
+headers and HTML. Other HTTPS hosts remain opaque tunnels. Plain HTTP is also captured.
+
+When the phone connects, Threading offers **Allow Once** (currently waiting connections),
+**This Capture**, **Always Allow This IP**, or **Deny** (including retries until capture stops).
+Saved IP grants match the listener address and exact TLS host scope as well as the source IP.
+They do not authenticate a device or identify a Wi-Fi network; addresses can be reassigned.
+**Settings → Tools → Forget Saved IPs** revokes them and stops captures using approval.
+
+The portable CLI uses `--mcp --listen-address LOCAL_IPV4 --ask-clients`. Its launching host owns
+presentation and persistence, through private inherited-stdio methods `threading/clients` and
+`threading/decideClient`. These are not exposed as agent-facing Threading tools. Up to eight
+unknown IPs wait, with eight connections per IP and a 90-second deadline. No request bytes are
+read and no DNS/upstream work begins before admission. Denial or timeout suppresses that IP's
+retries until capture stops. At most 32 client decisions are retained per listener. Request IDs
+and listener generations reject stale decisions. Stopping clears pending and capture grants.
+
+The legacy `--listen-address LOCAL_IPV4 --client-address PHONE_IPV4` source filter remains
+available (both flags together), as does the app's explicit `client_address` argument. Both
+modes bind one concrete private/link-local/loopback IPv4, never a wildcard. No MCP control
+endpoint or private signing key is exposed over Wi-Fi. Changing the bound Mac address requires
+capture release; approval mode simply asks again when the phone's IP changes.
+
+If no traffic appears, check for a pending approval on the Mac, its firewall and Wi-Fi client isolation.
+`traffic_status.rejected_clients` counts rejected source addresses for the current listener;
+rejected traffic never enters retained history. VPN routing can also prevent reaching the Mac.
+This mode is IPv4 only and does not capture cellular traffic. Before stopping capture, restore
+the phone's previous Wi-Fi proxy setting; remove the certificate profile when finished.
+
+The opt-in `THREADING_PROXY_TEST_LAN_ADDRESS=<Mac IPv4>` environment variable exercises a real
+local interface in the MCP process tests, including TLS/profile export and self-proxy rejection.
+Without it, the deterministic address/filter tests run on loopback. Neither installs trust.
+
 ## Apple certificate setup
 
 Decode `traffic_certificate.certificate_der_base64` into `public-root.cer`, or save its
@@ -150,8 +198,8 @@ one available, already-booted simulator. It does not restart/reset devices or se
 Actual trust mutations are opt-in and are not exercised by the test suite.
 
 On iPhone, install the profile, then enable full trust under Settings → General → About →
-Certificate Trust Settings. Delivery through ThreadingMobile and a reachable, authorized device
-proxy route remain host integration work; this helper binds loopback only. See the
+Certificate Trust Settings. Device routing uses the explicit Mac endpoint and client approval above;
+delivery through ThreadingMobile remains future work. See the
 [Apple integration design](../../docs/architecture/proxy-engine.md#apple-onboarding).
 
 ## Process contract

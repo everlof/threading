@@ -100,10 +100,11 @@ belong in the CI secret store, never source control. The shipping contract is:
 `scripts/sentry-release.sh` is the shared implementation for local and GitHub release lanes.
 The applications use separate projects: `threading/threading-macos` for macOS and
 `threading/threading-ios` for iOS. Changing the macOS slug requires updating both workflow
-environments together. The iOS app uses its own bundle-derived release identity, and its future
-App Store archive lane must set `SENTRY_PROJECT=threading-ios` and invoke the same prepare/deploy
-sequence from the archive it uploads. No iOS archive is published by the current Mac release
-workflow.
+environments together. The iOS `fastlane ios beta` lane sets `SENTRY_PROJECT=threading-ios`, checks
+access before CI/build, and invokes the same prepare/deploy sequence using the exact archive it
+uploads. Preparation follows Apple's IPA validation and precedes the TestFlight upload; a failed
+upload never records a deploy. iOS Release builds and their deploy records both use `production`.
+No iOS archive is published by the Mac release workflow.
 
 Before creating remote state, the script lists the configured organization and requires the
 selected project to be visible. It rejects credentials that `sentry-cli` reports as bound to a

@@ -8,6 +8,29 @@ import XCTest
 /// endpoint policy that decides which of a Mac's addresses a phone is allowed to try.
 final class RemoteHostPinningTests: XCTestCase {
 
+    func testTunnelPinsAreScopedToThePortAndOldLeasesCannotClearNewOnes() throws {
+        let delegate = RemoteCertificatePinningDelegate()
+        let first = RemoteHostPinSet(current: RemoteHostFingerprint(certificateDER: Data("first".utf8)).pin)
+        let second = RemoteHostPinSet(current: RemoteHostFingerprint(certificateDER: Data("second".utf8)).pin)
+        let one = URL(string: "https://127.0.0.1:51001")!
+        let two = URL(string: "https://127.0.0.1:51002")!
+        var oldLease = try XCTUnwrap(delegate.register(first, forOrigin: one)) as RemoteCertificatePinningDelegate.Registration?
+        var otherLease = try XCTUnwrap(delegate.register(second, forOrigin: two)) as RemoteCertificatePinningDelegate.Registration?
+        XCTAssertEqual(delegate.pins(forOrigin: one), first)
+        XCTAssertEqual(delegate.pins(forOrigin: two), second)
+        var replacement = try XCTUnwrap(delegate.register(second, forOrigin: one)) as RemoteCertificatePinningDelegate.Registration?
+        withExtendedLifetime(oldLease) {}
+        oldLease = nil
+        XCTAssertEqual(delegate.pins(forOrigin: one), second)
+        withExtendedLifetime(otherLease) {}
+        otherLease = nil
+        XCTAssertNil(delegate.pins(forOrigin: two))
+        withExtendedLifetime(replacement) {}
+        replacement = nil
+        XCTAssertNil(delegate.pins(forOrigin: one))
+        XCTAssertNil(delegate.register(first, forOrigin: URL(string: "http://127.0.0.1:51001")!))
+    }
+
     /// QR's alphanumeric mode: 5.5 bits a character against byte mode's 8, and this is the whole
     /// charset. Note `.` is in it, which is what makes the fragment separator free.
     private static let qrAlphanumeric = Set("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:")

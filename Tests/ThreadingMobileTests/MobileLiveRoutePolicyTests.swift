@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingPeerTransport
 import ThreadingRemoteKit
 import XCTest
 @testable import ThreadingMobile
@@ -199,6 +200,144 @@ final class MobileLiveRoutePolicyTests: XCTestCase {
                 )
             )
         )
+    }
+}
+
+final class HostedRemoteConnectionManagerTests: XCTestCase {
+    func testLegacyHostedFingerprintIsNotAProofOfPairing() async throws {
+        var legacy = try host()
+        legacy.link = RemoteConnectionLink(baseURL: URL(string: "http://127.0.0.1:53817")!, token: "fixture-bearer")!
+        legacy.pinnedFingerprint = RemoteHostFingerprint(certificateDER: Data("untrusted api/me".utf8)).hex
+        XCTAssertTrue(legacy.candidates.isEmpty, "A saved tunnel port may now belong to another process")
+        let manager = HostedRemoteConnectionManager { _, _, _ in
+            XCTFail("Legacy hosted identity must be paired again before signaling")
+            return HostedTunnelFixture()
+        }
+        do {
+            _ = try await manager.route(for: legacy)
+            XCTFail("An unpinned legacy pairing must be refused")
+        } catch HostedRemoteConnectionManager.Failure.pairingRequired {}
+    }
+
+    func testHTTPFromAConnectorIsNotInstalledAsADirectRoute() async throws {
+        let tunnel = HostedTunnelFixture(origin: URL(string: "http://127.0.0.1:53817")!)
+        let manager = HostedRemoteConnectionManager { _, _, _ in tunnel }
+        do {
+            _ = try await manager.route(for: host())
+            XCTFail("The native client must not downgrade to HTTP")
+        } catch {
+            XCTAssertFalse(tunnel.isActive)
+        }
+    }
+
+    func testConcurrentCallersKeepTheSharedTunnelAlive() async throws {
+        let tunnel = HostedTunnelFixture()
+        let gate = HostedTunnelGate(tunnel: tunnel)
+        let started = expectation(description: "connector started")
+        let callers = expectation(description: "callers started")
+        callers.expectedFulfillmentCount = 16
+        let manager = HostedRemoteConnectionManager { _, _, _ in
+            started.fulfill()
+            return await gate.connect()
+        }
+        let host = try host()
+        let tasks = (0..<16).map { _ in
+            Task {
+                callers.fulfill()
+                return try await manager.route(for: host)
+            }
+        }
+        await fulfillment(of: [started, callers], timeout: 2)
+        // Let the callers enter the actor while its connector is deliberately suspended.
+        try await Task.sleep(for: .milliseconds(50))
+        await gate.open()
+        for task in tasks {
+            let route = try await task.value
+            XCTAssertTrue(try XCTUnwrap(route).isActive)
+        }
+        let connections = await gate.connections
+        XCTAssertEqual(connections, 1)
+        XCTAssertTrue(tunnel.isActive)
+        await manager.invalidate()
+        XCTAssertFalse(tunnel.isActive)
+    }
+
+    func testInvalidationDisposesOfALateConnectionWithoutRestoringItsRoute() async throws {
+        let tunnel = HostedTunnelFixture()
+        let gate = HostedTunnelGate(tunnel: tunnel)
+        let started = expectation(description: "connector started")
+        let manager = HostedRemoteConnectionManager { _, _, _ in
+            started.fulfill()
+            return await gate.connect()
+        }
+        let host = try host()
+        let task = Task { try await manager.route(for: host) }
+        await fulfillment(of: [started], timeout: 2)
+        await manager.invalidate()
+        await gate.open()
+        do {
+            _ = try await task.value
+            XCTFail("A cancelled preparation must not restore remote access")
+        } catch is CancellationError {
+            XCTAssertFalse(tunnel.isActive)
+        }
+    }
+
+    func testAnEndedTunnelIsNotInstalled() async throws {
+        let tunnel = HostedTunnelFixture()
+        tunnel.stop()
+        let manager = HostedRemoteConnectionManager { _, _, _ in tunnel }
+        do {
+            _ = try await manager.route(for: host())
+            XCTFail("An ended tunnel is not a route")
+        } catch is CancellationError {}
+    }
+
+    private func host() throws -> PairedRemoteHost {
+        PairedRemoteHost(
+            id: "mac", hostID: "mac", shareID: "my-devices", scope: "all", name: "Mac",
+            link: RemoteConnectionLink(
+                baseURL: URL(string: "https://mac.example")!, token: "fixture-bearer",
+                pinnedFingerprintCode: RemoteHostFingerprint(certificateDER: Data("fixture".utf8)).pairingCode
+            )!,
+            lastConnectedAt: Date(),
+            hostedServiceURL: URL(string: "https://service.example"),
+            hostedCredential: PeerDeviceServiceCredential(
+                hostID: "mac", deviceID: RemoteDeviceIdentity.current,
+                credential: try PeerControlPlaneBearer("fixture-service-credential"),
+                expiresAt: Date().addingTimeInterval(3600)
+            )
+        )
+    }
+}
+
+private final class HostedTunnelFixture: HostedRemoteTunnel, @unchecked Sendable {
+    let origin: URL
+    init(origin: URL = URL(string: "https://127.0.0.1:53817")!) { self.origin = origin }
+    private let lock = NSLock()
+    private var stopped = false
+    var isActive: Bool { lock.withLock { !stopped } }
+    func stop() { lock.withLock { stopped = true } }
+}
+
+private actor HostedTunnelGate {
+    let tunnel: HostedTunnelFixture
+    private(set) var connections = 0
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(tunnel: HostedTunnelFixture) { self.tunnel = tunnel }
+
+    func connect() async -> HostedTunnelFixture {
+        connections += 1
+        if !isOpen { await withCheckedContinuation { waiters.append($0) } }
+        return tunnel
+    }
+
+    func open() {
+        isOpen = true
+        waiters.forEach { $0.resume() }
+        waiters.removeAll()
     }
 }
 

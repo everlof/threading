@@ -29,6 +29,12 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
     /// The successor the Mac has announced but not yet started presenting. Held beside the
     /// current one so a certificate can be replaced without this phone scanning a code again.
     var nextPinnedFingerprint: String? = nil
+    /// Provenance survives route changes. An old hosted HTTP response is not a pairing proof.
+    var identityWasPaired: Bool? = nil
+
+    var hasPairedIdentity: Bool {
+        identityWasPaired == true || link.pinnedFingerprintCode != nil
+    }
 
     var displayAddress: String {
         link.baseURL.host ?? link.baseURL.absoluteString
@@ -86,15 +92,19 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
         let learned = storedPinSet
         if let code = link.pinnedFingerprintCode,
            let scanned = RemoteHostPin(pairingCode: code),
-           let host = link.baseURL.host {
+           let host = link.baseURL.host, !Self.isLoopback(host) {
             result[host.lowercased()] = learned ?? RemoteHostPinSet(current: scanned)
         }
         guard let learned else { return result }
         for endpoint in endpoints ?? [] where endpoint.expectsPinnedIdentity {
-            guard let host = endpoint.baseURL.host else { continue }
+            guard let host = endpoint.baseURL.host, !Self.isLoopback(host) else { continue }
             result[host.lowercased()] = learned
         }
         return result
+    }
+
+    static func isLoopback(_ host: String) -> Bool {
+        ["127.0.0.1", "localhost", "::1"].contains(host.lowercased())
     }
 
     var hostedDeviceID: String? {
@@ -166,6 +176,9 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
     /// under its policy, so falling back to a remembered address here would violate it.
     private var advertisedAddresses: [(kind: RemoteHostEndpointKind, baseURL: URL)] {
         guard let endpoints else {
+            // A tunnel's loopback port is ephemeral. After a relaunch it can belong to a
+            // different process; only HostedRemoteConnectionManager may supply a live route.
+            guard !Self.isLoopback(link.baseURL.host ?? "") else { return [] }
             return [(Self.endpointKind(for: link.baseURL), link.baseURL)]
         }
         guard !endpoints.isEmpty else { return [] }
@@ -173,7 +186,7 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
             endpoints,
             policy: connectionPolicy ?? .privateOnly,
             currentBaseURL: link.baseURL
-        ).map { ($0.kind, $0.baseURL) }
+        ).filter { !Self.isLoopback($0.baseURL.host ?? "") }.map { ($0.kind, $0.baseURL) }
     }
 
     /// Turns an ordered list of addresses into the attempts they contribute, wave by wave.
@@ -272,6 +285,7 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
         isHosted: Bool = false,
         overPinnedChannel: Bool = false
     ) -> PinMergeOutcome {
+        if hasPairedIdentity { identityWasPaired = true }
         if !isHosted { link = successfulLink }
         activeEndpointKind = isHosted
             ? RemoteHostEndpointKind.hosted

@@ -22,12 +22,18 @@ struct ProxyCertificateAuthority {
     }
 
     static func loadOrCreate() throws -> Self {
+        #if DEBUG
+        let namespace = "codes.threading.proxy.debug.ca.v1"
+        #else
+        let namespace = "codes.threading.proxy.ca.v1"
+        #endif
+        return try loadOrCreate(namespace: namespace)
+    }
+
+    /// The host chooses storage identity; the live integration test uses a disposable namespace.
+    /// This is never an argument to a traffic tool or to the portable helper.
+    static func loadOrCreate(namespace: String) throws -> Self {
         try KeychainInteractionGate.run(allowingPrompt: false) { Result {
-            #if DEBUG
-            let namespace = "codes.threading.proxy.debug.ca.v1"
-            #else
-            let namespace = "codes.threading.proxy.ca.v1"
-            #endif
             let tag = Data(namespace.utf8)
             let keyQuery: [String: Any] = [
                 kSecClass as String: kSecClassKey, kSecAttrApplicationTag as String: tag,
@@ -57,9 +63,11 @@ struct ProxyCertificateAuthority {
             let attributes: [String: Any] = [
                 kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
                 kSecAttrKeySizeInBits as String: 256,
+                // macOS ignores extractability inside kSecPrivateKeyAttrs. Keep it at the
+                // top level: the live Keychain test verifies export actually fails after reload.
+                kSecAttrIsExtractable as String: false,
                 kSecPrivateKeyAttrs as String: [
                     kSecAttrIsPermanent as String: true,
-                    kSecAttrIsExtractable as String: false,
                     kSecAttrApplicationTag as String: tag,
                     kSecAttrLabel as String: commonName,
                 ],

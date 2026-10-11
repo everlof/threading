@@ -2,6 +2,7 @@ import Network
 import os
 import XCTest
 import ThreadingRemoteKit
+import ThreadingPeerTransport
 @testable import Threading
 
 /// The listener with an identity: what a routable door presents, what a client that pins it sees,
@@ -79,6 +80,78 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
     }
 
     // MARK: - The pinned door
+
+    func testPairingDeliversALargeCatalogueOverTLSAndReplaysTheSameAcceptance() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "tls-pairing-\(UUID().uuidString)", isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: directory))
+        let sessionCount = 1_200
+        let title = String(repeating: "Conversation ", count: 70)
+        for index in 0..<sessionCount {
+            XCTAssertNotNil(ProjectStore.shared.addSession(
+                to: project.id, kind: .claude, title: "\(index) \(title)"
+            ))
+        }
+        let redeemer = PairingRedeemer()
+        server.invitationRedeemer = redeemer
+        let port = try quietPort()
+        let outcome = await withCheckedContinuation { continuation in
+            server.start(configuration: RemoteListenerConfiguration(preferredPort: port, doors: [.lan])) {
+                continuation.resume(returning: $0)
+            }
+        }
+        XCTAssertEqual(outcome, .listening(port: port))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while server.listenerStatus.state(of: .lan).bindings.isEmpty, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(server.listenerStatus.state(of: .lan).bindings.count, 1)
+        let client = pinnedClient(fingerprint: try XCTUnwrap(identityStore.snapshot.fingerprint))
+        var request = URLRequest(url: url(port: port, path: RemoteRouter.invitationAcceptancePath))
+        request.httpMethod = "POST"
+        request.httpBody = try JSONEncoder().encode(RemoteAcceptInvitationRequestDTO(displayName: "Test phone"))
+        request.setValue("Bearer test-bootstrap", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("test-phone", forHTTPHeaderField: RemoteHeader.device.rawValue)
+        request.setValue(RemoteClientKind.iOS.rawValue, forHTTPHeaderField: RemoteHeader.client.rawValue)
+        request.setValue("pairing-request", forHTTPHeaderField: RemoteHeader.requestID.rawValue)
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        request.timeoutInterval = 15
+
+        let started = ContinuousClock.now
+        let (data, response) = try await client.session.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 201)
+        XCTAssertGreaterThan(data.count, RemoteAccessDefaults.outboundHighWaterBytes)
+        let acceptance = try JSONDecoder().decode(RemoteAcceptInvitationResponseDTO.self, from: data)
+        XCTAssertEqual(acceptance.accessToken, "paired-test-token")
+        XCTAssertEqual(acceptance.me.sessions.count, sessionCount)
+        let (replayed, replayResponse) = try await client.session.data(for: request)
+        XCTAssertEqual((replayResponse as? HTTPURLResponse)?.statusCode, 201)
+        XCTAssertEqual(replayed, data)
+        XCTAssertEqual(redeemer.calls, 1)
+        XCTAssertEqual(client.delegate.verdict(forHost: Self.lanAddress.address), .accepted)
+        print("THREADING_PERF tls-pairing sessions=\(sessionCount) bytes=\(data.count) acceptance_and_replay=\(started.duration(to: .now))")
+    }
+
+    private final class PairingRedeemer: RemoteInvitationRedeeming {
+        var calls = 0
+
+        func redeemInvitation(
+            token: String, deviceID: String, displayName: String, persistsOwnerDevice: Bool
+        ) -> RemoteInvitationRedemption? {
+            calls += 1
+            return RemoteInvitationRedemption(
+                accessToken: "paired-test-token",
+                authorization: RemoteAuthorization(
+                    shareID: "paired-phone", capability: .interact, scope: .allSessions,
+                    principal: .ownerDevice, boundDeviceID: deviceID
+                )
+            )
+        }
+    }
 
     func testAPinnedClientReceivesAnImagePreviewAfterItsThumbnail() throws {
         try assertAttachmentTransfer(side: 218)
@@ -239,7 +312,7 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
         )
     }
 
-    func testAnUnpinnedClientIsRefusedByStockEvaluation() throws {
+    func testAnUnpinnedLoopbackClientIsExplicitlyRefused() throws {
         let port = try startWithLanDoor()
         let client = pinnedClient(fingerprint: nil)
 
@@ -248,7 +321,7 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
             "a self-signed leaf is exactly what the system trust store refuses, which is the "
                 + "structural proof that the pinned path is doing the work"
         )
-        XCTAssertEqual(client.delegate.verdict(forHost: Self.lanAddress.address), .notPinned)
+        XCTAssertEqual(client.delegate.verdict(forHost: Self.lanAddress.address), .rejectedFingerprintMismatch)
     }
 
     // MARK: - What is advertised
@@ -551,6 +624,75 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
 
     // MARK: - Helpers
 
+    func testHostedTLSRejectsASubstitutedPeerBeforeSendingTheBearer() async throws {
+        let httpPort = try quietPort()
+        let outcome = await withCheckedContinuation { continuation in
+            server.start(configuration: RemoteListenerConfiguration(
+                preferredPort: httpPort, isHostedTLSEnabled: true
+            )) { continuation.resume(returning: $0) }
+        }
+        XCTAssertEqual(outcome, .listening(port: httpPort))
+        let deadline = Date().addingTimeInterval(5)
+        while server.listenerStatus.hostedTLSPort == nil, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let tlsPort = try XCTUnwrap(server.listenerStatus.hostedTLSPort)
+        XCTAssertNotEqual(httpPort, tlsPort)
+        let authorizer = HostedTLSAuthorizationProbe()
+        server.authorizer = authorizer
+
+        let configuration = try PeerTransportConfiguration(iceServers: [])
+        let phone = try WebRTCPeerTransport(role: .offerer, configuration: configuration)
+        let mac = try WebRTCPeerTransport(role: .answerer, configuration: configuration)
+        defer { Task { await phone.close(); await mac.close() } }
+        let offer = try await phone.makeOffer()
+        let answer = try await mac.makeAnswer(to: offer)
+        try await phone.accept(answer: answer)
+        async let phoneReady: Void = phone.waitUntilOpen()
+        async let macReady: Void = mac.waitUntilOpen()
+        _ = try await (phoneReady, macReady)
+        let bridge = try PeerTunnelLoopbackBridge(
+            multiplexer: PeerTunnelMultiplexer(role: .server, transport: mac),
+            targetPort: httpPort, tlsTargetPort: tlsPort
+        )
+        try await bridge.start()
+        defer { bridge.stop() }
+        let proxy = PeerTunnelLocalProxy(
+            multiplexer: PeerTunnelMultiplexer(role: .client, transport: phone), service: .https
+        )
+        let origin = try await proxy.start()
+        defer { proxy.stop() }
+        let delegate = RemoteCertificatePinningDelegate()
+        let otherMac = RemoteHostFingerprint(certificateDER: Data("another Mac".utf8))
+        let wrongTrust = try XCTUnwrap(delegate.register(RemoteHostPinSet(current: otherMac.pin), forOrigin: origin))
+        defer { withExtendedLifetime(wrongTrust) {} }
+        let rejectedSession = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+        defer { rejectedSession.invalidateAndCancel() }
+        var request = URLRequest(url: origin.appendingPathComponent("api/me"))
+        request.timeoutInterval = 5
+        request.setValue("Bearer " + String(repeating: "A", count: 52), forHTTPHeaderField: "Authorization")
+        do {
+            _ = try await rejectedSession.data(for: request)
+            XCTFail("A signaling substitution must not become an authenticated application request")
+        } catch {
+            XCTAssertEqual(delegate.verdict(forHost: "127.0.0.1"), .rejectedFingerprintMismatch)
+        }
+        XCTAssertEqual(authorizer.calls, 0, "No bearer may reach the substituted Mac")
+
+        // Positive control: the same real WebRTC byte tunnel reaches the API only with the
+        // independently paired certificate. TLS identity does not bypass bearer authorization.
+        let fingerprint = try XCTUnwrap(identityStore.snapshot.fingerprint)
+        let correctTrust = try XCTUnwrap(delegate.register(RemoteHostPinSet(current: fingerprint.pin), forOrigin: origin))
+        defer { withExtendedLifetime(correctTrust) {} }
+        let acceptedSession = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+        defer { acceptedSession.invalidateAndCancel() }
+        let (_, response) = try await acceptedSession.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 401)
+        XCTAssertEqual(delegate.verdict(forHost: "127.0.0.1"), .accepted)
+        XCTAssertGreaterThan(authorizer.calls, 0)
+        XCTAssertEqual(httpStatus(host: "127.0.0.1", port: httpPort), 200, "Serve's HTTP listener still works")
+    }
+
     private func startWithLanDoor() throws -> UInt16 {
         let port = try quietPort()
         XCTAssertEqual(
@@ -673,4 +815,14 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
         poll.invalidate()
         XCTAssertTrue(condition(), description, file: file, line: line)
     }
+}
+
+private final class HostedTLSAuthorizationProbe: RemoteAuthorizing, @unchecked Sendable {
+    private let count = OSAllocatedUnfairLock(initialState: 0)
+    var calls: Int { count.withLock { $0 } }
+    func authorization(forToken token: String) -> RemoteAuthorization? {
+        count.withLock { $0 += 1 }
+        return nil
+    }
+    func isCurrent(_ authorization: RemoteAuthorization) -> Bool { false }
 }

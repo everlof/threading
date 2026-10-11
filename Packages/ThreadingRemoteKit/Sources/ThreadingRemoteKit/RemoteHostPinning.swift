@@ -278,6 +278,38 @@ public enum RemoteCertificatePinning {
 /// silently keeps stock evaluation, and stock evaluation refuses this leaf outright.
 public final class RemoteCertificatePinningDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
 
+    private struct Origin: Hashable, Sendable {
+        let host: String
+        let port: Int
+
+        init?(url: URL) {
+            guard let host = url.host?.lowercased(),
+                  ["https", "wss"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+            self.host = host
+            port = url.port ?? 443
+        }
+
+        init(host: String, port: Int) {
+            self.host = host.lowercased()
+            self.port = port
+        }
+    }
+
+    /// A tunnel owns its registration. Releasing an old tunnel cannot remove a newer
+    /// registration if the operating system has reused the same loopback port.
+    public final class Registration: Sendable {
+        private let release: @Sendable () -> Void
+        fileprivate init(release: @escaping @Sendable () -> Void) { self.release = release }
+        deinit { release() }
+    }
+
+    private struct OriginPins {
+        let id: UUID
+        let pins: RemoteHostPinSet
+    }
+
+    private var pinsByOrigin: [Origin: OriginPins] = [:]
+
     /// Pins keyed by lower-cased host. Mutable so a client can learn a rotation announcement
     /// without rebuilding its session; guarded by `lock`, which is the only mutable state here.
     private var pinsByHost: [String: RemoteHostPinSet]
@@ -300,6 +332,29 @@ public final class RemoteCertificatePinningDelegate: NSObject, URLSessionDelegat
         return pinsByHost[host.lowercased()]
     }
 
+    public func register(_ pins: RemoteHostPinSet, forOrigin url: URL) -> Registration? {
+        guard let origin = Origin(url: url) else { return nil }
+        let id = UUID()
+        lock.withLock { pinsByOrigin[origin] = OriginPins(id: id, pins: pins) }
+        return Registration { [weak self] in
+            guard let self else { return }
+            self.lock.withLock {
+                if self.pinsByOrigin[origin]?.id == id { self.pinsByOrigin[origin] = nil }
+            }
+        }
+    }
+
+    public func pins(forOrigin url: URL) -> RemoteHostPinSet? {
+        guard let origin = Origin(url: url) else { return nil }
+        return pins(host: origin.host, port: origin.port)
+    }
+
+    private func pins(host: String, port: Int) -> RemoteHostPinSet? {
+        lock.withLock {
+            pinsByOrigin[Origin(host: host, port: port)]?.pins ?? pinsByHost[host.lowercased()]
+        }
+    }
+
     /// What the last challenge for this host decided. Nil means no challenge has been seen.
     public func verdict(forHost host: String) -> RemoteTrustVerdict? {
         lock.lock()
@@ -319,7 +374,12 @@ public final class RemoteCertificatePinningDelegate: NSObject, URLSessionDelegat
         }
 
         let host = challenge.protectionSpace.host.lowercased()
-        let verdict = RemoteCertificatePinning.evaluate(trust, against: pins(forHost: host))
+        let pins = pins(host: host, port: challenge.protectionSpace.port)
+        // A hosted origin with no living registration is not an ordinary public HTTPS site.
+        let isLoopback = ["127.0.0.1", "localhost", "::1"].contains(host)
+        let verdict: RemoteTrustVerdict = pins == nil && isLoopback
+            ? .rejectedFingerprintMismatch
+            : RemoteCertificatePinning.evaluate(trust, against: pins)
         lock.lock()
         verdictsByHost[host] = verdict
         lock.unlock()

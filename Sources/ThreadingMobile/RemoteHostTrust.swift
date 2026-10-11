@@ -59,7 +59,8 @@ enum RemoteHostTrust {
               let pin = RemoteHostPin(pairingCode: code),
               let host = link.baseURL.host else { return nil }
         let pins = RemoteHostPinSet(current: pin)
-        delegate.setPins(pins, forHost: host)
+        // Hosted pairing owns a separate, port-scoped registration for the temporary tunnel.
+        if !PairedRemoteHost.isLoopback(host) { delegate.setPins(pins, forHost: host) }
         return pins
     }
 

@@ -11,9 +11,28 @@ final class ProxyCaptureService {
     private var draining: [ObjectIdentifier: ProxyProcess] = [:]
     private var pending: [SessionID: Int] = [:]
     private var shuttingDown = false
+    typealias ApprovalPresenter = @MainActor (ProxyClientRequest, ProxyLaunchScope, SessionID,
+        @escaping @MainActor (ProxyClientDecision) -> Void) -> (@MainActor () -> Void)?
+    var presentClientApproval: ApprovalPresenter?
+    private let clientGrants: ProxyClientGrantStore
+    private struct PendingApproval {
+        let token = UUID()
+        let owner: SessionID
+        let worker: ProxyProcess
+        let request: ProxyClientRequest
+    }
+    private var approvals: [PendingApproval] = []
+    private var activeApproval: UUID?
+    private var resolvingApprovals: Set<UUID> = []
+    private var dismissApproval: (@MainActor () -> Void)?
+    private var accessRevision = 0
+    private var revokingClientAccess = false
+    private var clientSnapshotRevisions: [SessionID: UInt64] = [:]
+    private var clientLeases: [SessionID: UUID] = [:]
 
-    init(configuration: ProxyProcess.Configuration, center: NotificationCenter = .default) {
+    init(configuration: ProxyProcess.Configuration, center: NotificationCenter = .default, clientGrants: ProxyClientGrantStore = .shared) {
         self.configuration = configuration
+        self.clientGrants = clientGrants
         observations = AppEventObservations(center: center)
         observations.observe(TerminalSessionDidEnd.self) { [weak self] in self?.release($0.sessionID) }
         observations.observe(SessionArchivedStateDidChange.self) { [weak self] in
@@ -35,6 +54,7 @@ final class ProxyCaptureService {
         let worker: ProxyProcess
         do {
             if case .start(let arguments) = request {
+                guard !revokingClientAccess else { return .failure("Client access is being revoked. Retry after it finishes.") }
                 let scope = try ProxyLaunchScope(arguments)
                 if let existing = workers[sessionID] {
                     guard existing.scope == scope else {
@@ -43,7 +63,11 @@ final class ProxyCaptureService {
                     worker = existing
                 } else {
                     guard workers.count + draining.count < 4 else { return .failure("Four sessions already own captures. Release one capture with traffic_stop(release=true).") }
-                    worker = ProxyProcess(scope: scope, configuration: configuration)
+                    let lease = UUID()
+                    clientLeases[sessionID] = lease
+                    worker = ProxyProcess(scope: scope, configuration: configuration) { [weak self] requests in
+                        Task { @MainActor in self?.receiveClients(requests, owner: sessionID, lease: lease) }
+                    }
                     workers[sessionID] = worker
                 }
             } else if let existing = workers[sessionID] {
@@ -62,17 +86,130 @@ final class ProxyCaptureService {
         let result = await worker.call(request)
         if case .stop(let arguments) = request, arguments.release == true, workers[sessionID] === worker {
             release(sessionID)
-        } else if worker.isCancelled, workers[sessionID] === worker { workers.removeValue(forKey: sessionID) }
+        } else if worker.isCancelled, workers[sessionID] === worker { release(sessionID) }
         return result
     }
 
     func release(_ sessionID: SessionID) {
+        clientLeases.removeValue(forKey: sessionID)
+        clientSnapshotRevisions.removeValue(forKey: sessionID)
+        removeApprovals(for: sessionID)
         guard let worker = workers.removeValue(forKey: sessionID) else { return }
         let identity = ObjectIdentifier(worker)
         draining[identity] = worker
         worker.cancel { [weak self] in
             Task { @MainActor in self?.draining.removeValue(forKey: identity) }
         }
+    }
+
+    private func receiveClients(_ snapshot: ProxyClientSnapshot, owner: SessionID, lease: UUID) {
+        guard !revokingClientAccess, clientLeases[owner] == lease, let worker = workers[owner],
+              snapshot.revision > clientSnapshotRevisions[owner, default: 0] else { return }
+        guard !worker.isCancelled else { release(owner); return }
+        clientSnapshotRevisions[owner] = snapshot.revision
+        let requests = snapshot.requests
+        let removed = approvals.filter { $0.owner == owner && !requests.contains($0.request) }
+        approvals.removeAll { $0.owner == owner && !requests.contains($0.request) }
+        if let active = activeApproval, removed.contains(where: { $0.token == active }),
+           !resolvingApprovals.contains(active) { retirePresentation() }
+        for request in requests where !approvals.contains(where: { $0.owner == owner && $0.request == request }) {
+            guard approvals.count < ProxyClientLimits.pendingAcrossCaptures else { break }
+            let pending = PendingApproval(owner: owner, worker: worker, request: request)
+            approvals.append(pending)
+            admitRememberedClientWithoutWaitingForOtherPrompts(pending)
+        }
+        presentNextApproval()
+    }
+
+    private func removeApprovals(for owner: SessionID) {
+        let removesActive = approvals.contains { $0.owner == owner && $0.token == activeApproval }
+        approvals.removeAll { $0.owner == owner }
+        if removesActive { retirePresentation() }
+        presentNextApproval()
+    }
+
+    private func retirePresentation() {
+        activeApproval = nil
+        let dismiss = dismissApproval
+        dismissApproval = nil
+        dismiss?()
+    }
+
+    private func presentNextApproval() {
+        guard activeApproval == nil, !shuttingDown, !revokingClientAccess,
+              let next = approvals.first(where: { !resolvingApprovals.contains($0.token) }) else { return }
+        activeApproval = next.token
+        Task {
+            let grant = await clientGrants.lookup(address: next.request.address, scope: next.worker.scope)
+            guard activeApproval == next.token, workers[next.owner] === next.worker else { return }
+            if grant.remembered { resolveClient(next, decision: .capture, grantRevision: grant.revision); return }
+            dismissApproval = presentClientApproval?(next.request, next.worker.scope, next.owner) { [weak self] decision in
+                self?.resolveClient(next, decision: decision, grantRevision: grant.revision)
+            }
+            if dismissApproval == nil { resolveClient(next, decision: .deny, grantRevision: grant.revision) }
+        }
+    }
+
+    private func admitRememberedClientWithoutWaitingForOtherPrompts(_ pending: PendingApproval) {
+        Task {
+            // The active candidate already performs this lookup in presentNextApproval.
+            guard activeApproval != pending.token else { return }
+            let grant = await clientGrants.lookup(address: pending.request.address, scope: pending.worker.scope)
+            guard grant.remembered, !shuttingDown, !revokingClientAccess,
+                  activeApproval != pending.token, workers[pending.owner] === pending.worker,
+                  approvals.contains(where: { $0.token == pending.token }) else { return }
+            applyClientDecision(pending, decision: .capture, grantRevision: grant.revision)
+        }
+    }
+
+    private func resolveClient(_ pending: PendingApproval, decision: ProxyClientDecision, grantRevision: UInt64) {
+        guard activeApproval == pending.token else { return }
+        applyClientDecision(pending, decision: decision, grantRevision: grantRevision)
+    }
+
+    private func applyClientDecision(_ pending: PendingApproval, decision: ProxyClientDecision, grantRevision: UInt64) {
+        guard resolvingApprovals.insert(pending.token).inserted else { return }
+        // Keep this item as a tombstone until the helper settles. Saving an Always answer must
+        // finish before the next prompt checks that grant; other remembered IPs proceed freely.
+        if activeApproval == pending.token {
+            retirePresentation()
+            activeApproval = pending.token
+        }
+        let revision = accessRevision
+        Task {
+            let applied = await pending.worker.decideClient(pending.request, decision: decision)
+            if applied, decision == .always, workers[pending.owner] === pending.worker, revision == accessRevision {
+                await clientGrants.remember(address: pending.request.address, scope: pending.worker.scope, revision: grantRevision)
+            }
+            resolvingApprovals.remove(pending.token)
+            approvals.removeAll { $0.token == pending.token }
+            if activeApproval == pending.token { retirePresentation() }
+            presentNextApproval()
+        }
+    }
+
+    /// Stop forwarding and retire pending questions while preserving debugging history.
+    /// The store's revision also refuses an older save that resumes after revocation.
+    func revokeSavedClientAccess() async {
+        guard !revokingClientAccess else { return }
+        revokingClientAccess = true
+        accessRevision += 1
+        let captures = workers.filter { $0.value.scope.asksClients }
+        for owner in captures.keys { removeApprovals(for: owner) }
+        await clientGrants.removeAll()
+        await withTaskGroup(of: SessionID.self) { group in
+            for (owner, worker) in captures {
+                group.addTask {
+                    _ = await worker.call(.stop(TrafficStopArguments(release: false)))
+                    return owner
+                }
+            }
+            for await owner in group {
+                if let worker = captures[owner], worker.isCancelled, workers[owner] === worker { release(owner) }
+            }
+        }
+        revokingClientAccess = false
+        presentNextApproval()
     }
 
     func stopAll() {
