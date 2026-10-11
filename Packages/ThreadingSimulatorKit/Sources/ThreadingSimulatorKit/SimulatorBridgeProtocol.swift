@@ -60,6 +60,15 @@ public enum SimulatorBridgeButton: String, Codable, CaseIterable, Equatable, Sen
     // path home/lock/side use; the helper routes it accordingly.
     case volumeUp
     case volumeDown
+    // Android only. The iOS helper never advertises or receives these: the pane offers a
+    // platform's own buttons, and Android devices never route through the helper.
+    case back
+    case overview
+    case rotateLeft
+    case rotateRight
+
+    /// The buttons an iOS Simulator has.
+    public static let iOS: [SimulatorBridgeButton] = [.home, .lock, .side, .volumeUp, .volumeDown]
 }
 
 /// One phase of a live, finger-following touch. Unlike `drag`, which is a self-contained

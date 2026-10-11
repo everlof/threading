@@ -13,7 +13,11 @@ struct PersistedPanel: Codable {
   /// them cannot show a `window:` tab, and the version is what makes it say so — refusing the
   /// document with the error this decoder was built to give, rather than reading a layout it
   /// only partly understands and writing that back.
-  static let currentFormatVersion = 5
+  ///
+  /// 6 is a workspace with an Android member: a build that predates Android cannot parse its
+  /// device identity, and refusing the document is what keeps it from restoring the workspace
+  /// minus that member and saving the loss back.
+  static let currentFormatVersion = 6
 
   var tabs: [PersistedTab]
   var activeTabID: String?
@@ -143,6 +147,7 @@ extension PersistedPanel {
   /// every window slice. Stamping the version by what the document contains keeps the bump
   /// costing only the sessions that actually used the feature.
   var requiredFormatVersion: Int {
+    if tabs.contains(where: \.namesAnAndroidDevice) { return 6 }
     if tabs.contains(where: { $0.simulatorWorkspace != nil }) { return 5 }
     if tabs.contains(where: { $0.kind == .realDevice }) { return 4 }
     if tabs.contains(where: { $0.kind == .simulator }) { return 3 }
@@ -233,6 +238,13 @@ struct PersistedTab: Codable {
 
   var namesADetachedWindow: Bool {
     host?.hasPrefix(Self.detachedWindowHostPrefix) == true
+  }
+
+  /// Whether a Simulator tab holds a device a pre-Android build could not identify.
+  var namesAnAndroidDevice: Bool {
+    let members = simulatorWorkspace?.members.compactMap(\.deviceID) ?? []
+    let legacy = simulatorDeviceID.flatMap(SimulatorDeviceID.init)
+    return (members + [legacy].compactMap { $0 }).contains { $0.platform.isAndroid }
   }
 }
 

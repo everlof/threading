@@ -6533,6 +6533,31 @@ totals exclude SpringBoard and other simulated OS services. The four-member/help
 load-bearing. For landscape shared-memory delivery, vImage rotates into the existing three
 mapped buffers; codecs reuse one additional oriented surface rather than allocating per frame.
 
+## Android workspace members (2026-10-10)
+
+Contract. A workspace still holds at most four members, and Android streams have their own
+app-wide budget of four. Frames are latest-wins at most 60 fps, with the long side capped at
+1,280 so a 1080×2400 device is not copied at full size for a pane a few hundred points wide.
+Copying the frame out of the mapped region and decoding H.264 both stay off main. Catalogues are
+bounded at 512 AVDs and 64 adb devices, read once per explicit chooser or **+** click, never from
+layout, frame or pointer callbacks. `uiautomator` output is bounded at 4 MB and 5,000 nodes before
+parsing. Every `adb` and emulator command has a deadline.
+
+Measured against emulator 37.1.11, API 36, SwiftShader GPU, Debug build:
+
+| Path | Result |
+|---|---|
+| gRPC `sendTouch` round trip | median 0.5 ms, p90 0.6 ms, max 0.9 ms over 40 calls |
+| `adb shell input` (the USB-device path) | 61–67 ms per command |
+| gRPC frame gap during a launcher swipe | median 35 ms (about 29 fps on a software GPU) |
+| `adb exec-out screencap -p` fallback | 728–757 ms |
+| `uiautomator dump` element read | 2.0–2.2 s |
+
+The adb input cost is why streamed moves coalesce newest-wins rather than queueing: at about 65 ms a
+command, a queued 120 Hz trackpad pan would fall seconds behind. The 2 s element read bounds how
+quickly `simulator_wait` can notice a change on Android. Reproduce with
+`scripts/android_workspace_verify.sh`.
+
 ## Portable proxy engine baseline (2026-10-09)
 
 The first C HTTP/CONNECT engine has no prior implementation to optimize against. Its matched

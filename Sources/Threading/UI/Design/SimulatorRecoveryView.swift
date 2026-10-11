@@ -17,6 +17,15 @@ final class SimulatorRecoveryView: NSView, ThemedComponent {
     var onRetry: (() -> Void)?
     var onChoose: (() -> Void)?
 
+    /// The heading and the chooser name what the pane shows: a Simulator, or an Android device.
+    var namesDevice = false {
+        didSet {
+            guard namesDevice != oldValue else { return }
+            titleLabel.stringValue = namesDevice ? L10n.string("Device unavailable") : L10n.string("Simulator unavailable")
+            chooseButton.title = namesDevice ? L10n.string("Choose Device") : L10n.string("Choose Simulator")
+        }
+    }
+
     var detail: String {
         get { detailLabel.stringValue }
         set { detailLabel.stringValue = newValue }

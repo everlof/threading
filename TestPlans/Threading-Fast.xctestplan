@@ -43,6 +43,18 @@
         "value" : "$(THREADING_SIMULATOR_WORKSPACE_OUT)"
       },
       {
+        "key" : "THREADING_ANDROID_LIVE_AVD",
+        "value" : "$(THREADING_ANDROID_LIVE_AVD)"
+      },
+      {
+        "key" : "THREADING_ANDROID_LIVE_APK",
+        "value" : "$(THREADING_ANDROID_LIVE_APK)"
+      },
+      {
+        "key" : "THREADING_ANDROID_LIVE_PACKAGE",
+        "value" : "$(THREADING_ANDROID_LIVE_PACKAGE)"
+      },
+      {
         "key" : "THREADING_SIMULATOR_INTEGRATION_UDID",
         "value" : "$(THREADING_SIMULATOR_INTEGRATION_UDID)"
       },

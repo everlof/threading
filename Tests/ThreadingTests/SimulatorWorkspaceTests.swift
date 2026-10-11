@@ -195,13 +195,13 @@ final class SimulatorWorkspaceTests: HostedStoreTestCase {
         defer { workspace.terminate() }
         _ = workspace.view
         let chooser = try XCTUnwrap(workspace.headerForTesting.leadingViews.first as? ChipView)
-        chooser.onSelect?(ThemedMenuItem(title: "Second", representedValue: device(2).rawValue))
+        chooser.onSelect?(ThemedMenuItem(title: "Second", representedValue: SimulatorWorkspaceViewController.ChooserChoice.device(device(2))))
         XCTAssertEqual(workspace.state.members.compactMap(\.deviceID), [device(2)],
                        "Alone, choosing another device switches it, as the single pane always did.")
         _ = try workspace.adopt(device(3))
         XCTAssertEqual(workspace.state.members.compactMap(\.deviceID), [device(2), device(3)])
         let first = try XCTUnwrap(workspace.state.members.first?.id)
-        chooser.onSelect?(ThemedMenuItem(title: "First", representedValue: first.uuidString))
+        chooser.onSelect?(ThemedMenuItem(title: "First", representedValue: SimulatorWorkspaceViewController.ChooserChoice.member(first)))
         XCTAssertEqual(workspace.state.selectedID, first, "Beside peers, the chooser selects a member.")
         XCTAssertEqual(workspace.state.members.count, 2)
     }

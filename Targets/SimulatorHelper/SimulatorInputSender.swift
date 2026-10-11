@@ -8,6 +8,7 @@ final class SimulatorInputSender: @unchecked Sendable {
         case invalidDuration
         case textTooLong
         case unsupportedCharacter(Character)
+        case unsupportedButton(SimulatorBridgeButton)
 
         var errorDescription: String? {
             switch self {
@@ -17,6 +18,8 @@ final class SimulatorInputSender: @unchecked Sendable {
             case .textTooLong: return "Simulator text is limited to 1,024 characters per call."
             case .unsupportedCharacter(let character):
                 return "Simulator text does not support the character \(String(reflecting: character))."
+            case .unsupportedButton(let button):
+                return "An iOS Simulator has no \(button.rawValue) button."
             }
         }
     }
@@ -123,6 +126,8 @@ final class SimulatorInputSender: @unchecked Sendable {
                 press = { try self.bridge.sendHIDUsage(page: 12, usage: 233, down: $0) }
             case .volumeDown:
                 press = { try self.bridge.sendHIDUsage(page: 12, usage: 234, down: $0) }
+            case .back, .overview, .rotateLeft, .rotateRight:
+                throw InputError.unsupportedButton(button)
             }
             try press(true)
             do {

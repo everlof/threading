@@ -430,8 +430,8 @@ enum MCPToolCatalog {
   private static let authoredSimulator = MCPToolGroup(
     id: "simulator",
     family: .simulator,
-    title: "iOS Simulator",
-    summary: "Let agents build into and inspect an adopted Simulator in the right panel.",
+    title: "Simulators",
+    summary: "Let agents build into and inspect iOS Simulators and Android devices, side by side, in the right panel.",
     symbol: "iphone",
     tools: [],
     instruction: """
@@ -451,6 +451,20 @@ enum MCPToolCatalog {
       window. Keep build output in the session's project or DerivedData and never guess a device \
       identifier. When several devices are adopted, pass device_id to every simulator operation; \
       omission is ambiguous and refused. panel_list_tabs lists the workspace's device IDs.
+
+      The same workspace holds Android emulators and USB Android devices beside iOS Simulators, \
+      so one app can be compared side by side. simulator_prepare with platform "android" (or an \
+      exact android-avd:<name> / android-usb:<serial> device_id) adopts one and returns its \
+      adb_serial; build with Gradle in your shell, then call simulator_install_launch with the \
+      .apk and its applicationId as bundle_identifier. simulator_press_button takes back, home, \
+      overview, power and volume buttons there, and rotateLeft/rotateRight on an emulator. Do not \
+      start an emulator window or drive the device with adb input when the panel can.
+
+      To show platforms side by side, call simulator_prepare once per device: platform "ios", then \
+      platform "android" with beside true and layout "row". beside adds the automatic choice next \
+      to the existing devices instead of switching a lone one; layout also takes column, grid, focus \
+      and automatic. Each result's workspace field lists every member's device_id and platform; in \
+      a mixed workspace, platform alone also addresses that platform's only device.
       """
   )
 

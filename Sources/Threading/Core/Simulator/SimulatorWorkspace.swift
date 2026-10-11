@@ -45,6 +45,19 @@ struct SimulatorWorkspaceState: Codable, Equatable, Sendable {
     }
 }
 
+/// Where a request that names a platform but no device lands: a booted device of that platform
+/// (a running emulator or a connected phone count as booted), else the first available one, and
+/// never a device the workspace already holds. The pane's own automatic choice, the panel
+/// commands and `simulator_prepare` all ask this one rule.
+enum SimulatorAutomaticChoice {
+    static func deviceID(
+        in devices: [SimulatorDevice], android: Bool, excluding taken: Set<SimulatorDeviceID> = []
+    ) -> SimulatorDeviceID? {
+        let candidates = devices.filter { $0.platform.isAndroid == android && $0.isAdoptable && !taken.contains($0.id) }
+        return (candidates.first(where: { $0.state.isBooted }) ?? candidates.first)?.id
+    }
+}
+
 enum SimulatorWorkspaceGeometry {
     private static let nearTieRatio: CGFloat = 0.96
     /// Width over height of a modern iPhone held upright, until a member's first frame says.

@@ -16,6 +16,13 @@ enum SimulatorLiveBackend: Equatable, Sendable {
     /// Frames arrive through shared memory with no codec — the lowest-latency, same-machine path.
     case sharedMemory
     case screenshotFallback(reason: String)
+    /// An Android device's own transport: the emulator's gRPC control service, or `adb`.
+    case android(SimulatorAndroidTransport)
+}
+
+enum SimulatorAndroidTransport: Equatable, Sendable {
+    case emulatorControl
+    case screenRecord
 }
 
 enum SimulatorLiveStreamEvent: Sendable {

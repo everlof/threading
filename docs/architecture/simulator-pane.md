@@ -8,7 +8,9 @@ interaction without a Simulator.app window.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index. Read
 [`mcp-and-display.md`](mcp-and-display.md) for session routing and tab ownership and
-[`design-system.md`](design-system.md) before changing the AppKit surface.
+[`design-system.md`](design-system.md) before changing the AppKit surface. Android emulators and
+USB devices are workspace members too, behind the same seams; what differs for them is in
+[`android-devices.md`](android-devices.md).
 
 ## Why this is not view reparenting
 

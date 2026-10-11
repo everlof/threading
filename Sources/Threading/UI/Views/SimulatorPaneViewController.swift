@@ -29,6 +29,12 @@ enum SimulatorPaneShortcuts {
     static let volumeUp = KeyboardShortcut(key: "\u{F700}", modifiers: .command)
     static let volumeDown = KeyboardShortcut(key: "\u{F701}", modifiers: .command)
     static let toggleAppearance = KeyboardShortcut(key: "a", modifiers: [.command, .shift])
+    // Android follows Android Studio's emulator chords.
+    static let back = KeyboardShortcut(key: "\u{7F}", modifiers: .command)
+    static let overview = KeyboardShortcut(key: "o", modifiers: .command)
+    static let power = KeyboardShortcut(key: "p", modifiers: .command)
+    static let rotateLeft = KeyboardShortcut(key: "\u{F702}", modifiers: .command)
+    static let rotateRight = KeyboardShortcut(key: "\u{F703}", modifiers: .command)
 }
 
 /// The pane's glyphs, named once so the toolbar, its menus and the commands agree. Each was chosen
@@ -89,12 +95,12 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private enum ControlAuthorizationError: LocalizedError {
-        case denied(String)
+        case denied(String, SimulatorDevicePlatform)
 
         var errorDescription: String? {
             switch self {
-            case .denied(let deviceName):
-                L10n.format("Simulator control was not allowed for %@.", deviceName)
+            case .denied(let deviceName, let platform):
+                SimulatorPlatformTraits.traits(for: platform).controlDenied(for: deviceName)
             }
         }
     }
@@ -105,6 +111,8 @@ final class SimulatorPaneViewController: NSViewController {
     private let streamCoordinator: any SimulatorLiveStreamCoordinating
     private let inputAuthorizer: any SimulatorInputAuthorizing
     private var preferredDeviceID: SimulatorDeviceID?
+    /// Which platform an automatic device choice comes from; an agent can ask for Android.
+    private var automaticChoiceIsAndroid = false
     private var devices: [SimulatorDevice] = [] {
         // The workspace's Add menu and chooser read this catalogue.
         didSet { if devices != oldValue { onWorkspaceIdentityChange?() } }
@@ -171,6 +179,7 @@ final class SimulatorPaneViewController: NSViewController {
     /// The member's own actions for the workspace's shared header row.
     var workspaceActions: NSView { workspaceActionButtons }
     var workspaceHardwareControls: NSView { hardwareButtonRow }
+    var workspaceDeviceSymbol: String { deviceSymbol(adoptedDevice ?? devices.first { $0.id == selectedDeviceID }) }
     var availableWorkspaceDevices: [SimulatorDevice] { devices }
     var workspaceFrameSize: NSSize? { screenView.image?.size }
     var hasActiveWorkspaceGesture: Bool { touchStreamActive }
@@ -454,7 +463,7 @@ final class SimulatorPaneViewController: NSViewController {
     var workspaceDeviceName: String {
         switch presentationState {
         case .ready(let device): return device.name
-        case .preparing(let id): return devices.first(where: { $0.id == id })?.name ?? L10n.string("iPhone")
+        case .preparing(let id): return devices.first(where: { $0.id == id })?.name ?? platformTraits.placeholderName
         case .idle, .discovering, .failed:
             if let id = selectedDeviceID, let device = devices.first(where: { $0.id == id }) { return device.name }
             if let device = lease?.device { return device.name }
@@ -601,12 +610,89 @@ final class SimulatorPaneViewController: NSViewController {
         shortcut: SimulatorPaneShortcuts.volumeUp
     )
 
-    private var hardwareButtons: [ThemedIconButton] {
-        [homeButton, lockButton, sideButton, volumeDownButton, volumeUpButton]
+    private lazy var backButton = makeHardwareButton(
+        symbol: "arrow.uturn.backward", title: L10n.string("Back"),
+        identifier: "simulator.button.back", button: .back,
+        shortcut: SimulatorPaneShortcuts.back
+    )
+    private lazy var overviewButton = makeHardwareButton(
+        symbol: "square.on.square", title: L10n.string("Overview"),
+        identifier: "simulator.button.overview", button: .overview,
+        shortcut: SimulatorPaneShortcuts.overview
+    )
+    private lazy var powerButton = makeHardwareButton(
+        symbol: "power", title: L10n.string("Power"),
+        identifier: "simulator.button.power", button: .lock,
+        shortcut: SimulatorPaneShortcuts.power
+    )
+    private lazy var rotateLeftButton = makeHardwareButton(
+        symbol: "rotate.left", title: L10n.string("Rotate Left"),
+        identifier: "simulator.button.rotateLeft", button: .rotateLeft,
+        shortcut: SimulatorPaneShortcuts.rotateLeft
+    )
+    private lazy var rotateRightButton = makeHardwareButton(
+        symbol: "rotate.right", title: L10n.string("Rotate Right"),
+        identifier: "simulator.button.rotateRight", button: .rotateRight,
+        shortcut: SimulatorPaneShortcuts.rotateRight
+    )
+
+    /// Every platform's buttons in one order that reads correctly for each once the others are
+    /// hidden: iOS is Home, Lock, Side, volume; Android is Back, Home, Overview, Power, volume,
+    /// then rotation.
+    private var allHardwareButtons: [ThemedIconButton] {
+        [backButton, homeButton, overviewButton, lockButton, powerButton, sideButton,
+         volumeDownButton, volumeUpButton, rotateLeftButton, rotateRightButton]
+    }
+
+    /// The buttons the held device actually has.
+    private var hardwareButtons: [ThemedIconButton] { allHardwareButtons.filter { !$0.isHidden } }
+
+    var platformTraits: SimulatorPlatformTraits {
+        SimulatorPlatformTraits.traits(for: selectedDeviceID?.platform ?? .iOSSimulator)
+    }
+
+    /// Shows the held device's own buttons. Lock and Power are the same bridge button; which one
+    /// is shown is the platform's name for it.
+    private func applyPlatformButtons() {
+        let traits = platformTraits
+        let shown: [ThemedIconButton: Bool] = [
+            backButton: traits.buttons.contains(.back),
+            homeButton: traits.buttons.contains(.home),
+            overviewButton: traits.buttons.contains(.overview),
+            lockButton: traits.buttons.contains(.lock) && !traits.platform.isAndroid,
+            powerButton: traits.buttons.contains(.lock) && traits.platform.isAndroid,
+            sideButton: traits.buttons.contains(.side),
+            volumeDownButton: traits.buttons.contains(.volumeDown),
+            volumeUpButton: traits.buttons.contains(.volumeUp),
+            rotateLeftButton: traits.buttons.contains(.rotateLeft),
+            rotateRightButton: traits.buttons.contains(.rotateRight),
+        ]
+        var changed = false
+        for (button, isShown) in shown where button.isHidden == isShown {
+            button.isHidden = !isShown
+            changed = true
+        }
+        guard changed else { return }
+        (hardwareButtonRow as? SimulatorHardwareControlsView)?.buttonsChanged()
+        logsButton.isHidden = !traits.hasDeviceLogs
+    }
+
+    /// Names the pane's own controls for the held device, once per platform change.
+    private func applyPlatformWording() {
+        let traits = platformTraits
+        let namesDevice = traits.platform.isAndroid
+        guard screenView.namesDevice != namesDevice else { return }
+        screenView.namesDevice = namesDevice
+        recoveryView?.namesDevice = namesDevice
+        retryButton.setSymbol("arrow.clockwise", accessibility: traits.string(.refresh))
+        retryButton.toolTip = traits.string(.refresh)
+        workspaceMenuButton.setSymbol("ellipsis", accessibility: traits.string(.options))
+        presenter?.screenView.namesDevice = namesDevice
     }
 
     /// Each chord presses its button rather than calling the action beside it, so a shortcut is
-    /// enabled, consented and fails closed exactly as a click on that button would.
+    /// enabled, consented and fails closed exactly as a click on that button would. A button the
+    /// held device does not have claims no chord.
     private var shortcutButtons: [(shortcut: KeyboardShortcut, button: ThemedIconButton)] {
         [
             (SimulatorPaneShortcuts.home, homeButton),
@@ -614,8 +700,13 @@ final class SimulatorPaneViewController: NSViewController {
             (SimulatorPaneShortcuts.sideButton, sideButton),
             (SimulatorPaneShortcuts.volumeUp, volumeUpButton),
             (SimulatorPaneShortcuts.volumeDown, volumeDownButton),
+            (SimulatorPaneShortcuts.back, backButton),
+            (SimulatorPaneShortcuts.overview, overviewButton),
+            (SimulatorPaneShortcuts.power, powerButton),
+            (SimulatorPaneShortcuts.rotateLeft, rotateLeftButton),
+            (SimulatorPaneShortcuts.rotateRight, rotateRightButton),
             (SimulatorPaneShortcuts.toggleAppearance, appearanceButton),
-        ]
+        ].filter { !$0.button.isHidden }
     }
 
     /// The device's hardware buttons, then its appearance. A press converges on the same consented
@@ -623,11 +714,11 @@ final class SimulatorPaneViewController: NSViewController {
     /// or consent is gone. Appearance is a device setting rather than HID input, and sits apart.
     private lazy var hardwareButtonRow: NSView = {
         if isWorkspaceMember {
-            let group = SimulatorHardwareControlsView(buttons: hardwareButtons + [appearanceButton])
+            let group = SimulatorHardwareControlsView(buttons: allHardwareButtons + [appearanceButton])
             group.setAccessibilityIdentifier("simulator.hardwareButtons")
             return group
         }
-        let stack = NSStackView(views: hardwareButtons + [appearanceButton])
+        let stack = NSStackView(views: allHardwareButtons + [appearanceButton])
         stack.orientation = .horizontal
         stack.spacing = Design.Spacing.large
         stack.setCustomSpacing(Design.Spacing.pane, after: volumeUpButton)
@@ -681,7 +772,7 @@ final class SimulatorPaneViewController: NSViewController {
         isWorkspaceMember: Bool = false,
         control: any SimulatorControlling,
         leaseManager: (any SimulatorLeaseManaging)? = nil,
-        streamCoordinator: any SimulatorLiveStreamCoordinating = SimulatorLiveStreamCoordinator.shared,
+        streamCoordinator: any SimulatorLiveStreamCoordinating = PlatformRoutingStreamCoordinator.shared,
         inputAuthorizer: any SimulatorInputAuthorizing = SimulatorInputConsentController.shared,
         hiddenTransportGrace: Duration? = nil,
         liveFrameWait: Duration? = nil,
@@ -1010,15 +1101,40 @@ final class SimulatorPaneViewController: NSViewController {
         prepare(id, releasingCurrentLease: true)
     }
 
+    /// Which platform this pane's automatic choice comes from, set before its first preparation so
+    /// a tab opened for Android never boots an iPhone on the way.
+    func setAutomaticPlatform(android: Bool) {
+        automaticChoiceIsAndroid = android
+    }
+
+    /// One fresh read of every platform's catalogue, for a workspace adding a member beside this
+    /// one. It runs off main like every other discovery, once per explicit request.
+    func refreshWorkspaceCatalogue() async throws -> [SimulatorDevice] {
+        let devices = try await leaseManager.availableDevices()
+        self.devices = devices
+        return devices
+    }
+
     /// Agent commands enter through the same lease as the visible pane. This is the adoption
     /// boundary: the agent asks Threading for a device instead of launching Simulator.app and
     /// cannot accidentally create a second, invisible CoreSimulator owner.
     func prepareForAgent(
         deviceID: SimulatorDeviceID?,
+        preferAndroid: Bool? = nil,
         completion: @escaping @MainActor @Sendable (
             SimulatorPaneAgentResult<SimulatorDeviceLease>
         ) -> Void
     ) {
+        if let preferAndroid, deviceID == nil {
+            automaticChoiceIsAndroid = preferAndroid
+            // An adopted device of the other platform does not answer a request for this one.
+            if let lease, lease.device.platform.isAndroid != preferAndroid {
+                preparationCompletions.append(completion)
+                preferredDeviceID = nil
+                prepare(nil, releasingCurrentLease: true)
+                return
+            }
+        }
         if !requiresLeaseRefresh, let lease, deviceID == nil || lease.device.id == deviceID {
             completion(.success(lease))
             return
@@ -1293,11 +1409,15 @@ final class SimulatorPaneViewController: NSViewController {
                 try Task.checkCancellation()
                 guard self != nil else { return }
                 self?.devices = devices
+                // With no device named, the choice stays on the requested platform — iOS unless an
+                // agent asked for Android — so a running emulator never displaces the iPhone a
+                // pane has always opened.
+                let wantsAndroid = self?.automaticChoiceIsAndroid ?? false
                 let targetID = requestedID
-                    ?? devices.first(where: { $0.state.isBooted })?.id
-                    ?? devices.first?.id
+                    ?? SimulatorAutomaticChoice.deviceID(in: devices, android: wantsAndroid)
                 guard let targetID else {
-                    throw SimulatorControlError.noAvailableIOSDevices
+                    throw wantsAndroid ? SimulatorControlError.noAvailableAndroidDevices
+                        : SimulatorControlError.noAvailableIOSDevices
                 }
                 guard devices.contains(where: { $0.id == targetID }) else {
                     throw SimulatorControlError.deviceNotFound(targetID)
@@ -1483,7 +1603,7 @@ final class SimulatorPaneViewController: NSViewController {
                     self.startFrameLoop()
                     return
                 }
-                let reason = terminalFailure ?? L10n.string("The direct Simulator stream ended.")
+                let reason = terminalFailure ?? self.platformTraits.string(.streamEnded)
                 // A hidden pane takes no fallback; the reason still answers the agent command
                 // that is waiting on this transport.
                 self.lastStreamFailure = reason
@@ -1925,7 +2045,7 @@ final class SimulatorPaneViewController: NSViewController {
         controlAuthorizationDecisions[device.id] = approved
         renderState()
         guard approved else {
-            throw ControlAuthorizationError.denied(device.name)
+            throw ControlAuthorizationError.denied(device.name, device.platform)
         }
         guard lease?.device.id == device.id,
               streamSession === session else {
@@ -1992,7 +2112,7 @@ final class SimulatorPaneViewController: NSViewController {
     private func nextLiveFrame() async -> SimulatorLiveFrame? {
         guard wantsFrames, streamSession != nil, liveCapabilities != nil else { return nil }
         switch liveBackend {
-        case .direct, .sharedMemory: break
+        case .direct, .sharedMemory, .android: break
         case .screenshotFallback, nil: return nil
         }
         let id = UUID()
@@ -2052,14 +2172,14 @@ final class SimulatorPaneViewController: NSViewController {
         }
         switch controlActivity {
         case .connecting:
-            return L10n.string("Connecting Simulator control…")
+            return platformTraits.string(.connectingControl)
         case .failed(let message):
             return message
         case .idle:
             break
         }
         switch liveBackend {
-        case .direct, .sharedMemory:
+        case .direct, .sharedMemory, .android:
             guard let capabilities = liveCapabilities,
                   capabilities.supportsTouch || capabilities.supportsKeyboard else {
                 return L10n.string("View only")
@@ -2079,21 +2199,22 @@ final class SimulatorPaneViewController: NSViewController {
         let hasDirectHumanControl = liveCapabilities.map {
             $0.supportsTouch || $0.supportsKeyboard
         } ?? false
+        let traits = platformTraits
         let title: String
         switch controlActivity {
         case .connecting:
-            title = L10n.string("Connecting Simulator control…")
+            title = traits.string(.connectingControl)
         case .failed:
-            title = L10n.string("Enable Simulator Control")
+            title = traits.string(.enableControl)
         case .idle:
             if decision == false {
-                title = L10n.string("Retry Simulator Control")
+                title = traits.string(.retryControl)
             } else if decision == true, hasDirectHumanControl {
-                title = L10n.string("Simulator control ready")
+                title = traits.string(.controlReady)
             } else if case .screenshotFallback = liveBackend {
-                title = L10n.string("Reconnect Simulator Control")
+                title = traits.string(.reconnectControl)
             } else {
-                title = L10n.string("Enable Simulator Control")
+                title = traits.string(.enableControl)
             }
         }
         controlButton.setSymbol(
@@ -2115,7 +2236,7 @@ final class SimulatorPaneViewController: NSViewController {
         let enabled = isPresented
             && !requiresLeaseRefresh
             && (liveCapabilities?.supportsButtons ?? false)
-        for button in hardwareButtons {
+        for button in allHardwareButtons {
             button.isEnabled = enabled
         }
     }
@@ -2819,13 +2940,16 @@ final class SimulatorPaneViewController: NSViewController {
                 onChoose: { [weak self] in self?.stopRecording() }
             ))]
         }
+        let stream = ThemedMenuEntry.item(ThemedMenuItem(
+            title: L10n.string("Record Video"),
+            subtitle: explained ? L10n.string("What the pane shows, touches included") : nil,
+            isEnabled: canRecord,
+            onChoose: { [weak self] in self?.startStreamRecording() }
+        ))
+        // Full-resolution recording is CoreSimulator's own; an Android device records the stream.
+        guard !platformTraits.platform.isAndroid else { return [stream] }
         return [
-            .item(ThemedMenuItem(
-                title: L10n.string("Record Video"),
-                subtitle: explained ? L10n.string("What the pane shows, touches included") : nil,
-                isEnabled: canRecord,
-                onChoose: { [weak self] in self?.startStreamRecording() }
-            )),
+            stream,
             .item(ThemedMenuItem(
                 title: L10n.string("Record High-Quality Video"),
                 subtitle: explained ? L10n.string("Full resolution from Simulator, without touches") : nil,
@@ -3000,6 +3124,7 @@ final class SimulatorPaneViewController: NSViewController {
         guard presenter == nil, let device = lease?.device else { return }
         let controller = SimulatorPresenterWindowController(deviceName: device.name)
         let mirror = controller.screenView
+        mirror.namesDevice = screenView.namesDevice
         mirror.onTap = { [weak self] point in
             self?.submitInput(.tap(x: Double(point.x), y: Double(point.y)))
         }
@@ -3274,7 +3399,7 @@ final class SimulatorPaneViewController: NSViewController {
         preparationFailureDetail = String(detail.prefix(Self.maximumDiagnosticCharacters))
         let message: String
         if case .commandFailed = error as? SimulatorControlError {
-            message = L10n.string("Threading can’t reach this Simulator. Retry or choose another device.")
+            message = platformTraits.string(.unreachable)
         } else {
             message = error.localizedDescription
         }
@@ -3287,6 +3412,7 @@ final class SimulatorPaneViewController: NSViewController {
             recovery = recoveryView
         } else {
             recovery = SimulatorRecoveryView()
+            recovery.namesDevice = screenView.namesDevice
             recovery.onRetry = { [weak self] in self?.retry() }
             recovery.onChoose = { [weak self] in self?.chooseRecoveryDevice() }
             view.addSubview(recovery)
@@ -3321,9 +3447,10 @@ final class SimulatorPaneViewController: NSViewController {
                 try Task.checkCancellation()
                 guard let self, let recovery = self.recoveryView, !recovery.isHidden else { return }
                 self.devices = devices
-                let entries: [ThemedMenuEntry] = devices.map { device in
-                    .item(ThemedMenuItem(title: device.name, subtitle: device.runtimeName,
-                        onChoose: { [weak self] in self?.selectRecoveryDevice(device.id) }))
+                let entries = SimulatorWorkspaceViewController.groupedDeviceEntries(devices) { device in
+                    ThemedMenuItem(title: device.name, subtitle: device.unavailableReason ?? device.runtimeName,
+                                   isEnabled: device.isAdoptable,
+                                   onChoose: { [weak self] in self?.selectRecoveryDevice(device.id) })
                 }
                 guard !entries.isEmpty else {
                     recovery.detail = L10n.string("No available iOS Simulator device is installed in Xcode.")
@@ -3347,12 +3474,20 @@ final class SimulatorPaneViewController: NSViewController {
         else { selectDevice(id) }
     }
 
+    private func deviceSymbol(_ device: SimulatorDevice?) -> String {
+        SimulatorPlatformTraits.symbolName(
+            for: device?.family, platform: device?.platform ?? selectedDeviceID?.platform ?? .iOSSimulator
+        )
+    }
+
     private func renderState() {
         guard isViewLoaded else { return }
+        applyPlatformButtons()
+        applyPlatformWording()
         recoveryView?.isHidden = true
         switch presentationState {
         case .idle:
-            deviceChip.configure(symbolName: "iphone", title: L10n.string("Choose Simulator"))
+            deviceChip.configure(symbolName: deviceSymbol(nil), title: L10n.string("Choose Simulator"))
             statusLabel.stringValue = L10n.string("Starting…")
             statusLabel.textColor = Design.Text.tertiary
             retryButton.isEnabled = true
@@ -3361,13 +3496,14 @@ final class SimulatorPaneViewController: NSViewController {
             statusLabel.textColor = Design.Text.tertiary
             retryButton.isEnabled = false
         case .preparing(let id):
-            let name = devices.first(where: { $0.id == id })?.name ?? L10n.string("iPhone")
-            deviceChip.configure(symbolName: "iphone", title: name)
+            let candidate = devices.first(where: { $0.id == id })
+            let name = candidate?.name ?? SimulatorPlatformTraits.traits(for: id.platform).placeholderName
+            deviceChip.configure(symbolName: deviceSymbol(candidate), title: name)
             statusLabel.stringValue = L10n.format("Preparing %@…", name)
             statusLabel.textColor = Design.Text.tertiary
             retryButton.isEnabled = false
         case .ready(let device):
-            deviceChip.configure(symbolName: "iphone", title: device.name)
+            deviceChip.configure(symbolName: deviceSymbol(device), title: device.name)
             // The chip already names the device, and a live stream under granted control is the
             // default: the line stays quiet then and speaks up only for what needs attention.
             // Which transport carries the pixels is a diagnostic, so it moves to the tooltip.
@@ -3375,7 +3511,7 @@ final class SimulatorPaneViewController: NSViewController {
             switch liveBackend {
             case .screenshotFallback: status.append(L10n.string("Disconnected"))
             case nil: status.append(L10n.string("Connecting…"))
-            case .direct, .sharedMemory: break
+            case .direct, .sharedMemory, .android: break
             }
             if let control = controlStatus() { status.append(control) }
             // A tile beside peers is narrow: what needs attention leads, and the runtime (also in
@@ -3445,19 +3581,22 @@ final class SimulatorPaneViewController: NSViewController {
         case .direct(.h264): L10n.string("Live H.264")
         case .direct(.jpeg): L10n.string("Live JPEG")
         case .sharedMemory: L10n.string("Live shared memory")
+        case .android(.emulatorControl): L10n.string("Live emulator gRPC")
+        case .android(.screenRecord): L10n.string("Live adb")
         case .screenshotFallback: L10n.string("Preview fallback")
         case nil: nil
         }
     }
 
     private func deviceEntries() -> [ThemedMenuEntry] {
-        devices.map { device in
-            .item(ThemedMenuItem(
+        SimulatorWorkspaceViewController.groupedDeviceEntries(devices) { device in
+            ThemedMenuItem(
                 title: device.name,
-                subtitle: device.runtimeName,
+                subtitle: device.unavailableReason ?? device.runtimeName,
                 representedValue: device.id.rawValue,
-                isSelected: device.id == selectedDeviceID
-            ))
+                isSelected: device.id == selectedDeviceID,
+                isEnabled: device.isAdoptable || device.id == selectedDeviceID
+            )
         }
     }
 

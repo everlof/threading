@@ -2318,9 +2318,17 @@ struct SimulatorTargetArguments: Codable, Sendable {
 
 struct SimulatorPrepareArguments: Codable, Sendable {
   let deviceID: String?
+  /// "ios" or "android": where an automatic choice comes from when no device_id is given.
+  var platform: String? = nil
+  /// Add the automatic choice as a new member beside the workspace's devices instead of
+  /// switching a lone member to it.
+  var beside: Bool? = nil
+  /// A `SimulatorWorkspaceLayout` name for the whole workspace.
+  var layout: String? = nil
 
   private enum CodingKeys: String, CodingKey {
     case deviceID = "device_id"
+    case platform, beside, layout
   }
 }
 
@@ -6632,7 +6640,7 @@ enum MCPTools {
         openWorldHint: false
       ),
       title: "Prepare Simulator",
-      detail: "Adopt an iOS Simulator device in this session's right panel.",
+      detail: "Adopt an iOS Simulator or Android device in this session's right panel.",
       symbol: "iphone.gen3",
       decodeArguments: { container in
         try container.decodeIfPresent(SimulatorPrepareArguments.self, forKey: .arguments)
@@ -6643,21 +6651,42 @@ enum MCPTools {
         handler.simulatorPrepare(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Add or reuse an exact iOS Simulator in this session's workspace in Threading's right \
-        display panel, then boot or adopt the device and return its exact UDID. Call this before \
-        building when the user should see the app in Threading instead of a separate Apple \
-        Simulator window. Omit device_id to prefer an already booted device, then the most \
-        recently used available iPhone, when the workspace has at most one device. With several \
-        devices, provide device_id; another exact UDID adds a member up to the four-device limit. \
-        Pass device_id to every operation when several devices are adopted. The returned UDID is the authority for an \
-        xcodebuild -destination id=<device_id> invocation.
+        Add or reuse an exact iOS Simulator, Android emulator or USB Android device in this session's \
+        workspace in Threading's right display panel, then boot or adopt the device and return its exact \
+        device_id. Call this before building when the user should see the app in Threading instead of a \
+        separate Simulator or emulator window. Omit device_id to prefer an already booted device of \
+        platform ("ios" by default), then the first available one. The workspace holds up to four \
+        devices side by side: an exact device_id that is not a member yet is added, and beside: true \
+        adds the automatic choice for platform next to the existing members instead of switching a lone \
+        member to it. To show iOS and Android side by side: call with platform "ios", then with \
+        platform "android", beside true and layout "row" (row = side by side, column = stacked, grid, \
+        focus = one large, automatic = fit the panel). In a workspace with several devices, platform \
+        alone addresses its only member of that platform; otherwise pass device_id, here and to every \
+        other simulator_* tool. The result lists every member under workspace. For iOS the returned \
+        device_id is the authority for xcodebuild -destination id=<device_id>; for Android the result \
+        carries adb_serial and a Gradle build hint.
         """,
       inputSchema: MCPInputSchema(
         properties: [
           "device_id": MCPPropertySchema(
             type: .string,
-            description: "Optional exact CoreSimulator device UUID. Never guess this value."
-          )
+            description: "Optional exact device id: a CoreSimulator UUID, android-avd:<AVD name> or "
+              + "android-usb:<adb serial>. Never guess this value."
+          ),
+          "platform": MCPPropertySchema(
+            type: .string,
+            description: "Optional: \"ios\" (the default) or \"android\", where an automatic choice comes from."
+          ),
+          "beside": MCPPropertySchema(
+            type: .boolean,
+            description: "Optional: true adds the automatic choice for platform as a new device beside the "
+              + "workspace's current devices (up to four) rather than switching a lone device to it."
+          ),
+          "layout": MCPPropertySchema(
+            type: .string,
+            description: "Optional workspace arrangement: \"row\" (side by side), \"column\", \"grid\", "
+              + "\"focus\" or \"automatic\"."
+          ),
         ],
         required: []
       )
@@ -6674,7 +6703,7 @@ enum MCPTools {
         openWorldHint: false
       ),
       title: "Install and launch app",
-      detail: "Install a built .app and launch it on the adopted panel device.",
+      detail: "Install a built .app or .apk and launch it on the adopted panel device.",
       symbol: "play.square.stack",
       decodeArguments: { container in
         try container.decodeIfPresent(
@@ -6691,21 +6720,23 @@ enum MCPTools {
         handler.simulatorInstallLaunch(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Install a built iOS .app on the device already adopted by simulator_prepare, terminate \
-        any running instance of the same bundle, and launch it in the right-panel Simulator. \
+        Install a built iOS .app (or, on an Android device, a built .apk) on the device already \
+        adopted by simulator_prepare, terminate any running instance of the same bundle, and \
+        launch it in the right panel. On Android, bundle_identifier is the applicationId and each \
+        argument arrives as a string extra threading.argument.<index>. \
         The application path may be absolute or relative to the session project. This tool \
         never opens Apple Simulator.app and refuses to choose a second device implicitly.
         """,
       inputSchema: MCPInputSchema(
         properties: [
-          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted device id (from simulator_prepare); required with multiple devices."),
           "application_path": MCPPropertySchema(
             type: .string,
-            description: "Existing built .app path, absolute or relative to the session project."
+            description: "Existing built .app (iOS) or .apk (Android) path, absolute or relative to the session project."
           ),
           "bundle_identifier": MCPPropertySchema(
             type: .string,
-            description: "The app's exact bundle identifier."
+            description: "The app's exact bundle identifier, or its applicationId on Android."
           ),
           "arguments": MCPPropertySchema(
             type: .array,
@@ -6750,7 +6781,7 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
-          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted device id (from simulator_prepare); required with multiple devices."),
           "include_image": MCPPropertySchema(
             type: .boolean,
             description: "Include the PNG in the result. Defaults to true."
@@ -6809,7 +6840,7 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
-          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted device id (from simulator_prepare); required with multiple devices."),
           "interactive_only": MCPPropertySchema(
             type: .boolean,
             description: "List only labelled or interactive elements. Defaults to true."
@@ -6849,7 +6880,7 @@ enum MCPTools {
         Call simulator_prepare first.
         """,
       inputSchema: MCPInputSchema(properties: [
-        "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices.")
+        "device_id": MCPPropertySchema(type: .string, description: "Exact adopted device id (from simulator_prepare); required with multiple devices.")
       ], required: [])
     ),
     MCPToolDefinition(
@@ -6886,7 +6917,7 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
-          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted device id (from simulator_prepare); required with multiple devices."),
           "label": MCPPropertySchema(type: .string, description: "Element label to wait for."),
           "identifier": MCPPropertySchema(
             type: .string,
@@ -6940,7 +6971,7 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
-          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted device id (from simulator_prepare); required with multiple devices."),
           "ref": MCPPropertySchema(
             type: .string,
             description: "An element ref from a recent simulator_snapshot, like \"e12\"."
@@ -6994,7 +7025,7 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
-          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted device id (from simulator_prepare); required with multiple devices."),
           "from_x": MCPPropertySchema(type: .number, description: "Starting x from 0 to 1."),
           "from_y": MCPPropertySchema(type: .number, description: "Starting y from 0 to 1."),
           "to_x": MCPPropertySchema(type: .number, description: "Ending x from 0 to 1."),
@@ -7042,7 +7073,7 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
-          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted device id (from simulator_prepare); required with multiple devices."),
           "text": MCPPropertySchema(
             type: .string,
             description: "Bounded printable US-keyboard text, tab, newline, or backspace."
@@ -7079,7 +7110,7 @@ enum MCPTools {
         openWorldHint: false
       ),
       title: "Press Simulator button",
-      detail: "Press Home, Lock, or Side on the adopted panel device.",
+      detail: "Press a hardware button on the adopted panel device.",
       symbol: "iphone.gen3",
       decodeArguments: { container in
         try container.decodeIfPresent(SimulatorPressButtonArguments.self, forKey: .arguments)
@@ -7090,15 +7121,18 @@ enum MCPTools {
         handler.simulatorPressButton(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Press Home, Lock, or Side on the exact Simulator shown live in Threading's right panel. \
+        Press a hardware button on the exact device shown live in Threading's right panel: Home, \
+        Lock, Side or volume on an iOS Simulator; Back, Home, Overview, Power or volume on Android, \
+        and rotateLeft/rotateRight on an Android emulator. \
         The user is asked once before this device accepts input. Call simulator_prepare first.
         """,
       inputSchema: MCPInputSchema(
         properties: [
-          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted Simulator UDID; required with multiple devices."),
+          "device_id": MCPPropertySchema(type: .string, description: "Exact adopted device id (from simulator_prepare); required with multiple devices."),
           "button": MCPPropertySchema(
             type: .string,
-            description: "One of: home, lock, side."
+            description: "iOS: home, lock, side, volumeUp, volumeDown. Android: back, home, overview, power, "
+              + "volumeUp, volumeDown; an emulator also rotateLeft, rotateRight."
           )
         ],
         required: ["button"]

@@ -266,8 +266,8 @@ final class PaneTab {
       return "eye"
     case .supervision:
       return "person.3"
-    case .simulator:
-      return "iphone"
+    case .simulator(let workspace):
+      return workspace.platformMix == .android ? "candybarphone" : "iphone"
     case .realDevice:
       return "iphone.gen2"
     case .notificationTest:
@@ -315,8 +315,14 @@ final class PaneTab {
       return "Sharing"
     case .supervision:
       return L10n.string("Chats")
-    case .simulator:
-      return L10n.string("iOS Simulator")
+    case .simulator(let workspace):
+      // Named for what it holds: an Android-only workspace is not an iOS Simulator, and a mixed
+      // one is both.
+      switch workspace.platformMix {
+      case .android: return L10n.string("Android")
+      case .mixed: return L10n.string("Simulators")
+      case .iOS: return L10n.string("iOS Simulator")
+      }
     case .realDevice:
       return L10n.string("iPhone Device")
     case .notificationTest:

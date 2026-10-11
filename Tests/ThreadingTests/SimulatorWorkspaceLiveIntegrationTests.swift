@@ -170,7 +170,7 @@ final class SimulatorWorkspaceLiveIntegrationTests: HostedStoreTestCase {
 
     private func isDirect(_ pane: SimulatorPaneViewController) -> Bool {
         switch pane.liveBackendForTesting {
-        case .direct, .sharedMemory: return pane.frameImageForTesting != nil
+        case .direct, .sharedMemory, .android: return pane.frameImageForTesting != nil
         case .screenshotFallback, nil: return false
         }
     }

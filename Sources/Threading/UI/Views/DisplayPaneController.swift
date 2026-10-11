@@ -372,8 +372,8 @@ final class DisplayPaneController: NSViewController {
     browserFactory: @escaping @MainActor (BrowserContextKind, ProjectID?) -> BrowserViewController = {
       BrowserViewController(contextKind: $0, projectID: $1)
     },
-    simulatorControl: any SimulatorControlling = SimctlSimulatorControl(),
-    simulatorStreamCoordinator: any SimulatorLiveStreamCoordinating = SimulatorLiveStreamCoordinator.shared,
+    simulatorControl: any SimulatorControlling = PlatformRoutingSimulatorControl.shared,
+    simulatorStreamCoordinator: any SimulatorLiveStreamCoordinating = PlatformRoutingStreamCoordinator.shared,
     simulatorInputAuthorizer: any SimulatorInputAuthorizing = SimulatorInputConsentController.shared,
     physicalDeviceControl: (any PhysicalDeviceControlling)? = nil,
     extensionBackdropImageResolver: @escaping ComponentCustomizationHost.ImageResolver =
@@ -383,7 +383,7 @@ final class DisplayPaneController: NSViewController {
     self.customizationLookup = customizationLookup
     self.browserFactory = browserFactory
     self.simulatorControl = simulatorControl
-    if simulatorControl is SimctlSimulatorControl {
+    if simulatorControl is PlatformRoutingSimulatorControl {
       self.simulatorLeaseManager = SimulatorLeaseManager.shared
     } else {
       self.simulatorLeaseManager = SimulatorLeaseManager(control: simulatorControl)
@@ -577,6 +577,12 @@ final class DisplayPaneController: NSViewController {
 
   func panelCommandRefusal(_ target: PanelCommandTarget, for sessionID: SessionID) -> String? {
     switch target {
+    case .simulator, .androidDevice:
+      let android = target == .androidDevice
+      if let workspace = simulatorWorkspace(for: sessionID), workspace.memberID(onAndroid: android) == nil,
+         workspace.state.members.count >= SimulatorWorkspaceState.maximumMembers {
+        return SimulatorWorkspaceViewController.Failure.full.errorDescription
+      }
     case .browser, .privateBrowser, .audit:
       let tabs = tabs(for: sessionID)
       if target == .audit, tabs.contains(where: { $0.audit != nil }) { return nil }
@@ -597,7 +603,8 @@ final class DisplayPaneController: NSViewController {
   func performPanelCommand(_ target: PanelCommandTarget, title: String, for sessionID: SessionID) -> Bool {
     guard panelCommandRefusal(target, for: sessionID) == nil else { return false }
     switch target {
-    case .simulator: _ = try? activateSimulator(for: sessionID); return true
+    case .simulator: showSimulatorPlatform(android: false, for: sessionID); return true
+    case .androidDevice: showSimulatorPlatform(android: true, for: sessionID); return true
     case .realDevice: activateRealDevice(for: sessionID); return true
     case .deviceLogs: return activateDeviceLog(for: sessionID) != nil
     case .notificationTest: return activateNotificationTest(for: sessionID) != nil
@@ -1479,7 +1486,8 @@ final class DisplayPaneController: NSViewController {
   @discardableResult
   func activateSimulator(
     for sessionID: SessionID,
-    deviceID: SimulatorDeviceID? = nil
+    deviceID: SimulatorDeviceID? = nil,
+    automaticChoiceIsAndroid: Bool = false
   ) throws -> SimulatorPaneViewController {
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
@@ -1495,6 +1503,8 @@ final class DisplayPaneController: NSViewController {
     let workspace = makeSimulatorWorkspace(
       for: sessionID, state: SimulatorWorkspaceState(deviceID: deviceID, memberID: id)
     )
+    // Before the first render presents the member, so its first preparation is on that platform.
+    workspace.selectedSimulator.setAutomaticPlatform(android: automaticChoiceIsAndroid)
     let tab = DisplayTab(id: id, body: .simulator(workspace), owningSessionID: sessionID)
     tabs.append(tab)
     tabsBySession[sessionID] = tabs
@@ -1502,6 +1512,41 @@ final class DisplayPaneController: NSViewController {
     persist(sessionID)
     if sessionID == currentSessionID { render() }
     return workspace.selectedSimulator
+  }
+
+  /// The iOS Simulator and Android Emulator panel commands. With no tab yet, the new one opens on
+  /// a device of that platform. With one, it shows its member of that platform, or adds one beside
+  /// the members already there — so asking for Android in an iOS workspace puts the two side by
+  /// side instead of replacing the iPhone.
+  func showSimulatorPlatform(android: Bool, for sessionID: SessionID) {
+    restoreIfNeeded(sessionID)
+    guard let workspace = simulatorWorkspace(for: sessionID) else {
+      _ = try? activateSimulator(for: sessionID, automaticChoiceIsAndroid: android)
+      return
+    }
+    _ = try? activateSimulator(for: sessionID)
+    if let member = workspace.memberID(onAndroid: android) {
+      workspace.select(member)
+      return
+    }
+    // A lone member that holds nothing yet (it found no device of its own platform) simply chooses
+    // again on this one.
+    if workspace.state.members.count == 1, workspace.selectedSimulator.selectedDeviceID == nil {
+      workspace.selectedSimulator.prepareForAgent(deviceID: nil, preferAndroid: android) { _ in }
+      return
+    }
+    Task { @MainActor [weak self, weak workspace] in
+      do {
+        _ = try await workspace?.addAutomaticMember(android: android)
+      } catch {
+        guard let window = self?.view.window else { return }
+        let alert = ThemedAlert(error: error)
+        alert.messageText = android ? L10n.string("Couldn’t Add an Android Device")
+          : L10n.string("Couldn’t Add an iOS Simulator")
+        alert.informativeText = error.localizedDescription
+        alert.beginSheetModal(for: window)
+      }
+    }
   }
 
   func simulatorWorkspace(for sessionID: SessionID) -> SimulatorWorkspaceViewController? {
@@ -1525,7 +1570,16 @@ final class DisplayPaneController: NSViewController {
       return controller
     }
     addChild(workspace)
-    workspace.onChange = { [weak self] in self?.persist(sessionID) }
+    workspace.onChange = { [weak self] in
+      guard let self else { return }
+      self.persist(sessionID)
+      // The tab is named for the platforms it holds, so membership can change its title. Only
+      // the strip is redrawn: the content is the workspace itself.
+      if self.isViewLoaded, !self.isShowingCurrentTheme, self.currentSessionID == sessionID,
+         let tabs = self.tabsBySession[sessionID], !tabs.isEmpty {
+        self.renderTabBar(tabs: tabs, active: self.activeTab(for: sessionID))
+      }
+    }
     return workspace
   }
 
@@ -3133,7 +3187,11 @@ final class DisplayPaneController: NSViewController {
         html: nil,
         cacheFile: nil,
         simulatorDeviceID: simulator.selectedDeviceID?.rawValue,
-        simulatorWorkspace: workspace.state.members.count > 1 || workspace.state.layout != .automatic ? workspace.state : nil
+        // The legacy single-device field is kept only for documents an older build can read in
+        // full; an Android member always travels inside the versioned workspace.
+        simulatorWorkspace: workspace.state.members.count > 1 || workspace.state.layout != .automatic
+          || workspace.state.members.contains(where: { $0.deviceID?.platform.isAndroid == true })
+          ? workspace.state : nil
       )
     }
 

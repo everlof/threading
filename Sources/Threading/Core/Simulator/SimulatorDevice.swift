@@ -2,17 +2,66 @@ import Foundation
 
 // MARK: - Identity
 
-/// The canonical CoreSimulator device identifier.
+/// The exact identity of one device a Simulator workspace can adopt.
+///
+/// An iOS Simulator is its canonical CoreSimulator UUID, stored bare so every value persisted
+/// before Android existed still decodes to the same device. An Android emulator is its AVD name
+/// (`android-avd:<name>`), which is stable across boots the way a UDID is, while its adb serial
+/// is not; a USB Android device is its adb serial (`android-usb:<serial>`).
 ///
 /// Keeping this distinct from session, project and tab UUIDs prevents an agent-facing device
 /// argument from being routed through the wrong identity namespace. Decoding re-enters the
-/// validating initializer so persisted or wire values cannot bypass the UUID invariant.
+/// validating initializer so persisted or wire values cannot bypass the invariant.
 struct SimulatorDeviceID: Hashable, Codable, Sendable, CustomStringConvertible {
+    static let androidEmulatorPrefix = "android-avd:"
+    static let androidDevicePrefix = "android-usb:"
+    /// AVD names and adb serials are short ASCII tokens; anything else is not one we produced.
+    static let maximumAndroidNameLength = 128
+
     let rawValue: String
 
     init?(_ rawValue: String) {
-        guard let uuid = UUID(uuidString: rawValue) else { return nil }
-        self.rawValue = uuid.uuidString
+        if let uuid = UUID(uuidString: rawValue) {
+            self.rawValue = uuid.uuidString
+            return
+        }
+        for prefix in [Self.androidEmulatorPrefix, Self.androidDevicePrefix]
+        where rawValue.hasPrefix(prefix) {
+            guard Self.isValidAndroidName(String(rawValue.dropFirst(prefix.count))) else { return nil }
+            self.rawValue = rawValue
+            return
+        }
+        return nil
+    }
+
+    static func androidEmulator(avdName: String) -> SimulatorDeviceID? {
+        SimulatorDeviceID(androidEmulatorPrefix + avdName)
+    }
+
+    static func androidDevice(serial: String) -> SimulatorDeviceID? {
+        SimulatorDeviceID(androidDevicePrefix + serial)
+    }
+
+    var platform: SimulatorDevicePlatform {
+        if rawValue.hasPrefix(Self.androidEmulatorPrefix) { return .androidEmulator }
+        if rawValue.hasPrefix(Self.androidDevicePrefix) { return .androidDevice }
+        return .iOSSimulator
+    }
+
+    /// The AVD name or adb serial for an Android identity; nil for an iOS Simulator.
+    var androidName: String? {
+        switch platform {
+        case .iOSSimulator: return nil
+        case .androidEmulator: return String(rawValue.dropFirst(Self.androidEmulatorPrefix.count))
+        case .androidDevice: return String(rawValue.dropFirst(Self.androidDevicePrefix.count))
+        }
+    }
+
+    private static func isValidAndroidName(_ name: String) -> Bool {
+        guard !name.isEmpty, name.utf8.count <= maximumAndroidNameLength else { return false }
+        return name.unicodeScalars.allSatisfy { scalar in
+            scalar.isASCII && (CharacterSet.alphanumerics.contains(scalar) || "._:-".unicodeScalars.contains(scalar))
+        }
     }
 
     init(from decoder: Decoder) throws {
@@ -21,7 +70,7 @@ struct SimulatorDeviceID: Hashable, Codable, Sendable, CustomStringConvertible {
         guard let value = SimulatorDeviceID(rawValue) else {
             throw DecodingError.dataCorruptedError(
                 in: container,
-                debugDescription: "A simulator device id must be a UUID."
+                debugDescription: "A simulator device id must be a UUID or an Android device id."
             )
         }
         self = value
@@ -36,6 +85,16 @@ struct SimulatorDeviceID: Hashable, Codable, Sendable, CustomStringConvertible {
 }
 
 // MARK: - Device
+
+/// Which control plane owns a device. Derived from the identity, never stored beside it, so the
+/// two cannot disagree.
+enum SimulatorDevicePlatform: String, Equatable, Codable, Sendable, CaseIterable {
+    case iOSSimulator = "ios"
+    case androidEmulator = "android-emulator"
+    case androidDevice = "android-device"
+
+    var isAndroid: Bool { self != .iOSSimulator }
+}
 
 enum SimulatorDeviceState: Equatable, Sendable {
     case shutdown
@@ -62,6 +121,8 @@ enum SimulatorDeviceState: Equatable, Sendable {
 enum SimulatorDeviceFamily: String, Equatable, Codable, Sendable {
     case iPhone
     case iPad
+    case androidPhone
+    case androidTablet
     case other
 
     init(deviceTypeIdentifier: String) {
@@ -84,6 +145,12 @@ struct SimulatorDevice: Equatable, Sendable, Identifiable {
     let family: SimulatorDeviceFamily
     let state: SimulatorDeviceState
     let lastBootedAt: Date?
+    /// Why a listed device cannot be adopted (an Android phone that has not authorized this Mac's
+    /// debugging key, say). Nil for a device that can be prepared.
+    var unavailableReason: String? = nil
+
+    var platform: SimulatorDevicePlatform { id.platform }
+    var isAdoptable: Bool { unavailableReason == nil }
 
     func withState(_ state: SimulatorDeviceState) -> SimulatorDevice {
         SimulatorDevice(
@@ -94,7 +161,8 @@ struct SimulatorDevice: Equatable, Sendable, Identifiable {
             deviceTypeIdentifier: deviceTypeIdentifier,
             family: family,
             state: state,
-            lastBootedAt: lastBootedAt
+            lastBootedAt: lastBootedAt,
+            unavailableReason: unavailableReason
         )
     }
 }
@@ -193,7 +261,9 @@ enum SimulatorDeviceCatalog {
         switch family {
         case .iPhone: return 0
         case .iPad: return 1
-        case .other: return 2
+        case .androidPhone: return 2
+        case .androidTablet: return 3
+        case .other: return 4
         }
     }
 }

@@ -14,7 +14,7 @@ protocol SimulatorLeaseManaging: Sendable {
 /// counting the original capability is what preserves the real owner, while the short grace avoids
 /// boot/shutdown churn when a tab is immediately restored or moved.
 actor SimulatorLeaseManager: SimulatorLeaseManaging {
-    static let shared = SimulatorLeaseManager(control: SimctlSimulatorControl())
+    static let shared = SimulatorLeaseManager(control: PlatformRoutingSimulatorControl.shared)
 
     private struct Entry {
         let lease: SimulatorDeviceLease

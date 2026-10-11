@@ -7,26 +7,62 @@ extension AgentToolCoordinator {
         for sessionID: SessionID,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
-        let requestedID: SimulatorDeviceID?
-        switch SimulatorAgentCommandService.requestedDeviceID(from: arguments) {
-        case .accepted(let deviceID): requestedID = deviceID
-        case .rejected(let result):
-            completion(result)
-            return
+        let request: SimulatorAgentCommandService.PreparationRequest
+        switch SimulatorAgentCommandService.preparationRequest(from: arguments) {
+        case .accepted(let value): request = value
+        case .rejected(let result): completion(result); return
         }
-        if requestedID == nil, let workspace = displayPaneController.simulatorWorkspace(for: sessionID),
-           workspace.state.members.count > 1 {
-            completion(.failure("Provide device_id when the workspace contains multiple Simulators."))
+        let android = request.preferAndroid ?? false
+        let existing = displayPaneController.simulatorWorkspace(for: sessionID)
+        let targetID: SimulatorDeviceID?
+        switch SimulatorAgentCommandService.preparationRoute(for: request, in: existing?.agentShape(android: android)) {
+        case .rejected(let result): completion(result); return
+        case .accepted(.prepare(let id)): targetID = id
+        case .accepted(.addBeside):
+            guard let existing else { return }
+            _ = try? displayPaneController.activateSimulator(for: sessionID)
+            if let layout = request.layout { existing.setLayout(layout) }
+            revealDisplayPane(for: sessionID)
+            Task { @MainActor in
+                do {
+                    let simulator = try await existing.addAutomaticMember(android: android)
+                    self.finishPreparation(simulator, deviceID: simulator.selectedDeviceID, preferAndroid: nil,
+                                           workspace: existing, completion: completion)
+                } catch { completion(.failure(error.localizedDescription)) }
+            }
             return
         }
         let simulator: SimulatorPaneViewController
-        do { simulator = try displayPaneController.activateSimulator(for: sessionID, deviceID: requestedID) }
-        catch { completion(.failure(error.localizedDescription)); return }
+        do {
+            simulator = try displayPaneController.activateSimulator(
+                for: sessionID, deviceID: targetID, automaticChoiceIsAndroid: android)
+        } catch { completion(.failure(error.localizedDescription)); return }
+        let workspace = displayPaneController.simulatorWorkspace(for: sessionID)
+        if let layout = request.layout { workspace?.setLayout(layout) }
         revealDisplayPane(for: sessionID)
-        simulator.prepareForAgent(deviceID: requestedID) { result in
+        finishPreparation(simulator, deviceID: targetID, preferAndroid: targetID == nil ? request.preferAndroid : nil,
+                          workspace: workspace, completion: completion)
+    }
+
+    private func finishPreparation(
+        _ simulator: SimulatorPaneViewController,
+        deviceID: SimulatorDeviceID?,
+        preferAndroid: Bool?,
+        workspace: SimulatorWorkspaceViewController?,
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
+        simulator.prepareForAgent(deviceID: deviceID, preferAndroid: preferAndroid) { [weak workspace] result in
+            let summary = workspace?.agentSummary
             switch result {
+            case .success(let lease) where lease.device.platform.isAndroid:
+                // The adb serial changes with every emulator boot, so it is read now, not stored.
+                Task { @MainActor in
+                    let serial = try? await AndroidDeviceControl.shared?.target(for: lease.device.id).serial
+                    completion(SimulatorAgentCommandService.preparationResult(
+                        for: lease, adbSerial: serial, workspace: summary))
+                }
             case .success(let lease):
-                completion(SimulatorAgentCommandService.preparationResult(for: lease))
+                completion(SimulatorAgentCommandService.preparationResult(for: lease, workspace: summary))
             case .failure(let message):
                 completion(.failure(message))
             }
@@ -38,15 +74,17 @@ extension AgentToolCoordinator {
         for sessionID: SessionID,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
-        let request = SimulatorAgentCommandService.launchRequest(from: arguments) {
+        guard let simulator = resolveSimulatorTarget(arguments.deviceID, for: sessionID,
+            missingMessage: "Call simulator_prepare before installing an app.", completion: completion) else { return }
+        let request = SimulatorAgentCommandService.launchRequest(
+            from: arguments, platform: simulator.selectedDeviceID?.platform ?? .iOSSimulator
+        ) {
             self.resolve(path: $0, for: sessionID)
         }
         guard case .accepted(let launch) = request else {
             if case .rejected(let result) = request { completion(result) }
             return
         }
-        guard let simulator = resolveSimulatorTarget(arguments.deviceID, for: sessionID,
-            missingMessage: "Call simulator_prepare before installing an app.", completion: completion) else { return }
 
         _ = try? displayPaneController.activateSimulator(for: sessionID)
         revealDisplayPane(for: sessionID)
@@ -161,7 +199,7 @@ extension AgentToolCoordinator {
         }
         if let rawDeviceID {
             guard let id = SimulatorDeviceID(rawDeviceID) else {
-                completion(.failure("device_id must be an exact Simulator UDID."))
+                completion(.failure(SimulatorAgentCommandService.deviceIDFormatFailure))
                 return nil
             }
             guard let controller = workspace.simulators.first(where: { $0.selectedDeviceID == id }) else {

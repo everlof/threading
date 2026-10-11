@@ -6206,6 +6206,23 @@
         }
       }
     },
+    "Add Device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Device"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till enhet"
+          }
+        }
+      }
+    },
     "Add Existing Folder…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6736,6 +6753,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Adoptera en iOS-simulatorenhet i sessionens högra panel."
+          }
+        }
+      }
+    },
+    "Adopt an iOS Simulator or Android device in this session's right panel." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adopt an iOS Simulator or Android device in this session's right panel."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Koppla en iOS-simulator eller Android-enhet i den här sessionens högra panel."
           }
         }
       }
@@ -7681,6 +7715,23 @@
         }
       }
     },
+    "Allow USB debugging on the device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow USB debugging on the device"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt USB-felsökning på enheten"
+          }
+        }
+      }
+    },
     "Allow Until I Quit" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8217,6 +8268,51 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Analyserar ljud lokalt."
+          }
+        }
+      }
+    },
+    "Android" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Android"
+          }
+        }
+      }
+    },
+    "Android Device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Android Device"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Android-enhet"
+          }
+        }
+      }
+    },
+    "Android Emulator" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Android Emulator"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Android-emulator"
           }
         }
       }
@@ -13136,6 +13232,23 @@
         }
       }
     },
+    "Choose Device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Device"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj enhet"
+          }
+        }
+      }
+    },
     "Choose Enroll iPhone, then on the iPhone open Threading › Settings › Security › Face ID Approvals and type the code shown here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16415,6 +16528,23 @@
         }
       }
     },
+    "Connecting device control…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connecting device control…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ansluter enhetsstyrning…"
+          }
+        }
+      }
+    },
     "Connecting live preview…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17923,6 +18053,40 @@
         }
       }
     },
+    "Couldn’t Add an Android Device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t Add an Android Device"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte lägga till en Android-enhet"
+          }
+        }
+      }
+    },
+    "Couldn’t Add an iOS Simulator" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t Add an iOS Simulator"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte lägga till en iOS-simulator"
+          }
+        }
+      }
+    },
     "Couldn’t Capture This Baseline" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18211,6 +18375,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det gick inte att starta agentuppdateringar"
+          }
+        }
+      }
+    },
+    "Couldn’t start the Android screen stream." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t start the Android screen stream."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att starta Android-skärmströmmen."
           }
         }
       }
@@ -20161,6 +20342,23 @@
         }
       }
     },
+    "Device Options" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device Options"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enhetsalternativ"
+          }
+        }
+      }
+    },
     "Device Toolbar" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20172,6 +20370,57 @@
         }
       }
     },
+    "Device control is unavailable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device control is unavailable."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enhetsstyrning är inte tillgänglig."
+          }
+        }
+      }
+    },
+    "Device control ready" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device control ready"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enhetsstyrning klar"
+          }
+        }
+      }
+    },
+    "Device control was not allowed for %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device control was not allowed for %@."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enhetsstyrning tilläts inte för %@."
+          }
+        }
+      }
+    },
     "Device logs" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20179,6 +20428,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Enhetsloggar"
+          }
+        }
+      }
+    },
+    "Device screen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device screen"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enhetens skärm"
+          }
+        }
+      }
+    },
+    "Device unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device unavailable"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enheten är inte tillgänglig"
           }
         }
       }
@@ -21550,6 +21833,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktivera tillägget %@"
+          }
+        }
+      }
+    },
+    "Enable Device Control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable Device Control"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera enhetsstyrning"
           }
         }
       }
@@ -27954,6 +28254,23 @@
         }
       }
     },
+    "Install a built .app or .apk and launch it on the adopted panel device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Install a built .app or .apk and launch it on the adopted panel device."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera en byggd .app eller .apk och starta den på den kopplade panelenheten."
+          }
+        }
+      }
+    },
     "Install adds %@, so threading-ptyd runs in any terminal and keeps working after Threading is updated or moved." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28947,6 +29264,23 @@
         }
       }
     },
+    "Its system image is not installed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Its system image is not installed"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dess systemavbild är inte installerad"
+          }
+        }
+      }
+    },
     "Iv1.…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29860,6 +30194,40 @@
         }
       }
     },
+    "Let agents build into and inspect an adopted iOS Simulator or Android device in the right panel." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Let agents build into and inspect an adopted iOS Simulator or Android device in the right panel."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Låt agenter bygga till och inspektera en kopplad iOS-simulator eller Android-enhet i den högra panelen."
+          }
+        }
+      }
+    },
+    "Let agents build into and inspect iOS Simulators and Android devices, side by side, in the right panel." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Let agents build into and inspect iOS Simulators and Android devices, side by side, in the right panel."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Låt agenter bygga till och granska iOS-simulatorer och Android-enheter, sida vid sida, i högra panelen."
+          }
+        }
+      }
+    },
     "Let agents discover, validate and preview Threading UI extension components." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30636,6 +31004,23 @@
         }
       }
     },
+    "Live adb" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live adb"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live adb"
+          }
+        }
+      }
+    },
     "Live audio spectrum" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30665,6 +31050,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktuell totalsumma för underagenter; kategori och kostnad är ännu inte tillgängliga"
+          }
+        }
+      }
+    },
+    "Live emulator gRPC" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live emulator gRPC"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live emulator-gRPC"
           }
         }
       }
@@ -34771,6 +35173,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Högst %1$@ av %2$@ under %3$@"
+          }
+        }
+      }
+    },
+    "No other Android emulator or USB Android device is available to add." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No other Android emulator or USB Android device is available to add."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen annan Android-emulator eller USB-ansluten Android-enhet finns att lägga till."
+          }
+        }
+      }
+    },
+    "No other iOS Simulator is available to add." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No other iOS Simulator is available to add."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen annan iOS-simulator finns att lägga till."
           }
         }
       }
@@ -39848,6 +40284,23 @@
         }
       }
     },
+    "Press a hardware button on the adopted panel device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Press a hardware button on the adopted panel device."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tryck på en hårdvaruknapp på den kopplade panelenheten."
+          }
+        }
+      }
+    },
     "Press a key" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39921,6 +40374,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tryck för att återansluta och styra simulatorn."
+          }
+        }
+      }
+    },
+    "Press to reconnect and control the device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Press to reconnect and control the device."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tryck för att återansluta och styra enheten."
           }
         }
       }
@@ -42635,6 +43105,23 @@
         }
       }
     },
+    "Reconnect Device Control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reconnect Device Control"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återanslut enhetsstyrning"
+          }
+        }
+      }
+    },
     "Reconnect Simulator Control" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42884,6 +43371,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppdatera"
+          }
+        }
+      }
+    },
+    "Refresh Device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh Device"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdatera enhet"
           }
         }
       }
@@ -45065,6 +45569,23 @@
         }
       }
     },
+    "Retry Device Control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry Device Control"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Försök styra enheten igen"
+          }
+        }
+      }
+    },
     "Retry Secure Relay" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45689,6 +46210,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det rullande fönstrets längd i timmar"
+          }
+        }
+      }
+    },
+    "Rotate Left" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rotate Left"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rotera åt vänster"
+          }
+        }
+      }
+    },
+    "Rotate Right" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rotate Right"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rotera åt höger"
           }
         }
       }
@@ -49904,6 +50459,23 @@
         }
       }
     },
+    "Show an Android emulator or a USB Android phone, beside any iOS Simulator" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show an Android emulator or a USB Android phone, beside any iOS Simulator"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa en Android-emulator eller en USB-ansluten Android-telefon bredvid en iOS-simulator"
+          }
+        }
+      }
+    },
     "Show an adopted Simulator first." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51358,6 +51930,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "SimulatorWorkspaceCanvas"
+          }
+        }
+      }
+    },
+    "Simulators" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulators"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorer"
           }
         }
       }
@@ -53994,6 +54583,23 @@
         }
       }
     },
+    "Tap, drag, or type to control the device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap, drag, or type to control the device."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tryck, dra eller skriv för att styra enheten."
+          }
+        }
+      }
+    },
     "Task" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54778,6 +55384,91 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1Password-objektet länkades inte"
+          }
+        }
+      }
+    },
+    "The Android device stopped answering." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Android device stopped answering."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Android-enheten slutade svara."
+          }
+        }
+      }
+    },
+    "The Android emulator sent an unreadable frame." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Android emulator sent an unreadable frame."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Android-emulatorn skickade en oläsbar bildruta."
+          }
+        }
+      }
+    },
+    "The Android emulator stopped answering." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Android emulator stopped answering."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Android-emulatorn slutade svara."
+          }
+        }
+      }
+    },
+    "The Android screen stream keeps stopping." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Android screen stream keeps stopping."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Android-skärmströmmen stannar hela tiden."
+          }
+        }
+      }
+    },
+    "The Android screen stream sent an unreadable picture." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Android screen stream sent an unreadable picture."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Android-skärmströmmen skickade en oläsbar bild."
           }
         }
       }
@@ -56402,6 +57093,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Standardtemat används av alla terminaler som inte har fått ett eget tema. Ett projekt eller en enskild konversation kan åsidosätta det från ⋯-menyn i sidofältet."
+          }
+        }
+      }
+    },
+    "The device is offline" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The device is offline"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enheten är offline"
+          }
+        }
+      }
+    },
+    "The device stream ended." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The device stream ended."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enhetens ström avslutades."
           }
         }
       }
@@ -61407,6 +62132,23 @@
         }
       }
     },
+    "This is a real Android device. Threading and this session's agent will be able to tap, swipe, type, and press buttons on it while it is adopted in the right panel, including in its other apps. Threading remembers this choice for this device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This is a real Android device. Threading and this session's agent will be able to tap, swipe, type, and press buttons on it while it is adopted in the right panel, including in its other apps. Threading remembers this choice for this device."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det här är en riktig Android-enhet. Threading och sessionens agent kommer att kunna trycka, svepa, skriva och trycka på knappar på den medan den är kopplad i den högra panelen, även i dess andra appar. Threading kommer ihåg valet för den här enheten."
+          }
+        }
+      }
+    },
     "This is a throwaway test account" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -61997,6 +62739,23 @@
         }
       }
     },
+    "This workspace already has four devices. Remove one before adding another." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This workspace already has four devices. Remove one before adding another."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbetsytan har redan fyra enheter. Ta bort en innan du lägger till en till."
+          }
+        }
+      }
+    },
     "Threading" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62175,6 +62934,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading kan inte nå den här simulatorn. Försök igen eller välj en annan enhet."
+          }
+        }
+      }
+    },
+    "Threading can’t reach this device. Retry or choose another device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading can’t reach this device. Retry or choose another device."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading når inte den här enheten. Försök igen eller välj en annan enhet."
           }
         }
       }
@@ -63952,6 +64728,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spåra konversationens livscykel"
+          }
+        }
+      }
+    },
+    "Traffic capture" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Traffic capture"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trafikinspelning"
           }
         }
       }
@@ -70827,6 +71620,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "https://forge.example.com"
+          }
+        }
+      }
+    },
+    "iOS" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iOS"
           }
         }
       }

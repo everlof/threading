@@ -97,14 +97,23 @@ final class SimulatorInputConsentController: SimulatorInputAuthorizing {
         }
         pending[device.id] = [completion]
 
+        // A USB Android device is somebody's real phone, with their accounts and data on it; it
+        // asks under the physical-device prompt, as a paired iPhone does.
+        let isPhone = device.platform == .androidDevice
         let request = ConfirmationRequest(
-            prompt: .controlSimulatorDevice,
+            prompt: isPhone ? .controlPhysicalDevice : .controlSimulatorDevice,
             title: L10n.format("Control %@?", device.name),
-            message: L10n.string(
-                "Threading and this session's agent will be able to tap, swipe, type, and press "
-                    + "buttons on this exact device while it is adopted in the right panel. "
-                    + "Threading remembers this choice for this device."
-            ),
+            message: isPhone
+                ? L10n.string(
+                    "This is a real Android device. Threading and this session's agent will be able to tap, "
+                        + "swipe, type, and press buttons on it while it is adopted in the right panel, "
+                        + "including in its other apps. Threading remembers this choice for this device."
+                )
+                : L10n.string(
+                    "Threading and this session's agent will be able to tap, swipe, type, and press "
+                        + "buttons on this exact device while it is adopted in the right panel. "
+                        + "Threading remembers this choice for this device."
+                ),
             confirmTitle: L10n.string("Allow Control"),
             style: .warning
         )

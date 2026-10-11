@@ -15,9 +15,19 @@ final class SimulatorWorkspaceViewController: NSViewController {
     /// pane), so the layout chooser moves into the options menu, where it is always offered too.
     private static let compactHeaderWidth: CGFloat = 340
 
-    enum Failure: LocalizedError {
+    enum Failure: LocalizedError, Equatable {
         case full
-        var errorDescription: String? { L10n.string("This workspace already has four Simulators. Remove one before adding another.") }
+        case noOtherDevice(android: Bool)
+        var errorDescription: String? {
+            switch self {
+            case .full:
+                L10n.string("This workspace already has four devices. Remove one before adding another.")
+            case .noOtherDevice(android: true):
+                L10n.string("No other Android emulator or USB Android device is available to add.")
+            case .noOtherDevice(android: false):
+                L10n.string("No other iOS Simulator is available to add.")
+            }
+        }
     }
 
     private(set) var state: SimulatorWorkspaceState
@@ -86,7 +96,7 @@ final class SimulatorWorkspaceViewController: NSViewController {
         return chip
     }()
     private lazy var addButton: ThemedIconButton = {
-        let button = ThemedIconButton(symbolName: "plus", accessibility: L10n.string("Add Simulator"),
+        let button = ThemedIconButton(symbolName: "plus", accessibility: L10n.string("Add Device"),
                                       target: .inline, inkSource: .chrome)
         button.presentsMenu = true
         button.setAccessibilityIdentifier("simulator.workspace.add")
@@ -185,6 +195,75 @@ final class SimulatorWorkspaceViewController: NSViewController {
         return controllers[member.id]!
     }
 
+    /// The device a member holds or is reaching for, so a member still preparing counts as taken.
+    private func heldDevice(_ member: SimulatorWorkspaceState.Member) -> SimulatorDeviceID? {
+        member.deviceID ?? controllers[member.id]?.selectedDeviceID
+    }
+
+    func deviceID(ofMember id: UUID) -> SimulatorDeviceID? {
+        state.members.first { $0.id == id }.flatMap(heldDevice)
+    }
+
+    /// Every member as an agent sees it, in order, for `simulator_prepare`'s result.
+    var agentSummary: SimulatorAgentCommandService.WorkspaceSummary {
+        SimulatorAgentCommandService.WorkspaceSummary(
+            layout: state.layout.rawValue,
+            devices: state.members.map { member in
+                SimulatorAgentCommandService.WorkspaceMember(
+                    deviceID: heldDevice(member), name: controllers[member.id]?.adoptedDevice?.name,
+                    selected: member.id == state.selectedID
+                )
+            }
+        )
+    }
+
+    func agentShape(android: Bool) -> SimulatorAgentCommandService.WorkspaceShape {
+        SimulatorAgentCommandService.WorkspaceShape(
+            memberCount: state.members.count,
+            isLoneAndEmpty: state.members.count == 1 && selectedSimulator.selectedDeviceID == nil,
+            deviceOnPlatform: memberID(onAndroid: android).flatMap(deviceID(ofMember:))
+        )
+    }
+
+    enum PlatformMix { case iOS, android, mixed }
+
+    /// What the workspace holds, for the tab's name and glyph. A member still choosing counts as
+    /// the device it is reaching for; with nothing chosen, the tab is the iOS Simulator it always was.
+    var platformMix: PlatformMix {
+        let platforms = Set(state.members.compactMap { heldDevice($0)?.platform.isAndroid })
+        switch (platforms.contains(false), platforms.contains(true)) {
+        case (false, true): return .android
+        case (true, true): return .mixed
+        default: return .iOS
+        }
+    }
+
+    /// The first member on that platform, if the workspace has one.
+    func memberID(onAndroid android: Bool) -> UUID? {
+        state.members.first { heldDevice($0)?.platform.isAndroid == android }?.id
+    }
+
+    /// Adds a device of that platform beside the members already here — the one an unnamed
+    /// request would choose, never one already held — and selects it. This is how a panel command
+    /// or an agent asks for "iOS and Android side by side" without knowing any device id.
+    @discardableResult
+    func addAutomaticMember(android: Bool) async throws -> SimulatorPaneViewController {
+        guard state.members.count < SimulatorWorkspaceState.maximumMembers else { throw Failure.full }
+        let devices = try await selectedSimulator.refreshWorkspaceCatalogue()
+        // Membership may have moved during discovery.
+        guard state.members.count < SimulatorWorkspaceState.maximumMembers else { throw Failure.full }
+        let taken = Set(state.members.compactMap(heldDevice))
+        guard let deviceID = SimulatorAutomaticChoice.deviceID(in: devices, android: android, excluding: taken) else {
+            throw Failure.noOtherDevice(android: android)
+        }
+        // A lone member already reaching for a device keeps it; the new one goes beside it rather
+        // than replacing it, which is what `adopt` does with an unbound lone member.
+        if state.members.count == 1, state.members[0].deviceID == nil, let held = heldDevice(state.members[0]) {
+            state.members[0].deviceID = held
+        }
+        return try adopt(deviceID)
+    }
+
     func select(_ id: UUID) {
         guard controllers[id] != nil, state.selectedID != id else { return }
         state.selectedID = id
@@ -230,12 +309,13 @@ final class SimulatorWorkspaceViewController: NSViewController {
     }
 
     func showAddMenu() {
-        let entries = addableDevices.map { device in
-            ThemedMenuEntry.item(ThemedMenuItem(
-                title: device.name, subtitle: device.runtimeName,
-                isEnabled: state.members.count < SimulatorWorkspaceState.maximumMembers,
+        let full = state.members.count >= SimulatorWorkspaceState.maximumMembers
+        let entries = Self.groupedDeviceEntries(addableDevices) { device in
+            ThemedMenuItem(
+                title: device.name, subtitle: device.unavailableReason ?? device.runtimeName,
+                isEnabled: !full && device.isAdoptable,
                 onChoose: { [weak self] in _ = try? self?.adopt(device.id) }
-            ))
+            )
         }
         guard !entries.isEmpty else { return }
         menuSession = ThemedMenuPresenter.present(
@@ -243,6 +323,43 @@ final class SimulatorWorkspaceViewController: NSViewController {
             from: addButton, selectedEntryIndex: nil, onChoose: { _, item in item.onChoose?() },
             onDismiss: { [weak self] in self?.menuSession = nil }
         )
+    }
+
+    /// One list of every platform's devices, under a header per platform once there is more than
+    /// one — so an iOS-only machine sees exactly the list it always did.
+    static func groupedDeviceEntries(
+        _ devices: [SimulatorDevice], item: (SimulatorDevice) -> ThemedMenuItem
+    ) -> [ThemedMenuEntry] {
+        let groups = DevicePlatformGroup.allCases.compactMap { group -> (DevicePlatformGroup, [SimulatorDevice])? in
+            let members = devices.filter { DevicePlatformGroup($0.platform) == group }
+            return members.isEmpty ? nil : (group, members)
+        }
+        guard groups.count > 1 else { return devices.map { .item(item($0)) } }
+        return groups.flatMap { group, members in
+            [ThemedMenuEntry.header(group.title)] + members.map { .item(item($0)) }
+        }
+    }
+
+    /// The sections the device menus are grouped under: an emulator and a USB phone are both
+    /// "Android" to the person choosing.
+    enum DevicePlatformGroup: CaseIterable {
+        case iOS, android
+
+        init(_ platform: SimulatorDevicePlatform) { self = platform.isAndroid ? .android : .iOS }
+
+        var title: String {
+            switch self {
+            case .iOS: return L10n.string("iOS")
+            case .android: return L10n.string("Android")
+            }
+        }
+    }
+
+    /// What a device-chooser row stands for. Typed, so a member's UUID can never be mistaken for
+    /// an iOS device UUID however the membership changed while the menu was open.
+    enum ChooserChoice {
+        case member(UUID)
+        case device(SimulatorDeviceID)
     }
 
     var canvasForTesting: SimulatorWorkspaceCanvas { canvas }
@@ -328,13 +445,13 @@ final class SimulatorWorkspaceViewController: NSViewController {
     /// chooser once there is more than one device to arrange.
     private func refreshHeader() {
         let selected = selectedSimulator
-        deviceChip.configure(symbolName: "iphone", title: selected.workspaceDeviceName)
+        deviceChip.configure(symbolName: selected.workspaceDeviceSymbol, title: selected.workspaceDeviceName)
         deviceChip.isEnabled = !selected.availableWorkspaceDevices.isEmpty || state.members.count > 1
         layoutChip.configure(symbolName: state.layout.symbolName, title: state.layout.displayTitle)
         addButton.isEnabled = canAddSimulator
         addButton.toolTip = state.members.count >= SimulatorWorkspaceState.maximumMembers
-            ? L10n.string("This workspace already has four Simulators. Remove one before adding another.")
-            : L10n.string("Add Simulator")
+            ? L10n.string("This workspace already has four devices. Remove one before adding another.")
+            : L10n.string("Add Device")
         // Nothing to arrange with one device, so the chooser leaves the row rather than idling in it;
         // a narrow pane keeps it in the options menu instead.
         let showsLayout = state.members.count > 1 && !headerIsCompact
@@ -349,10 +466,11 @@ final class SimulatorWorkspaceViewController: NSViewController {
     private func deviceEntries() -> [ThemedMenuEntry] {
         guard state.members.count > 1 else {
             let selected = selectedSimulator
-            return selected.availableWorkspaceDevices.map { device in
-                .item(ThemedMenuItem(title: device.name, subtitle: device.runtimeName,
-                                     representedValue: device.id.rawValue,
-                                     isSelected: device.id == selected.selectedDeviceID))
+            return Self.groupedDeviceEntries(selected.availableWorkspaceDevices) { device in
+                ThemedMenuItem(title: device.name, subtitle: device.unavailableReason ?? device.runtimeName,
+                               representedValue: ChooserChoice.device(device.id),
+                               isSelected: device.id == selected.selectedDeviceID,
+                               isEnabled: device.isAdoptable || device.id == selected.selectedDeviceID)
             }
         }
         return state.members.map { member in
@@ -360,24 +478,26 @@ final class SimulatorWorkspaceViewController: NSViewController {
             return .item(ThemedMenuItem(
                 title: controller?.workspaceDeviceName ?? L10n.string("Choose Simulator"),
                 subtitle: controller?.adoptedDevice?.runtimeName,
-                representedValue: member.id.uuidString,
+                representedValue: ChooserChoice.member(member.id),
                 isSelected: member.id == state.selectedID
             ))
         }
     }
 
     private func chooseDevice(_ value: Any?) {
-        guard let raw = value as? String else { return }
-        if state.members.count > 1 {
-            if let id = UUID(uuidString: raw) { select(id) }
+        switch value as? ChooserChoice {
+        case .member(let id)?:
+            if state.members.contains(where: { $0.id == id }) { select(id) }
+        case .device(let device)?:
+            // Alone, the chooser switches the device, exactly like the single pane: + adds one.
+            guard state.members.count == 1, state.members[0].deviceID != device else { return }
+            state.members[0].deviceID = device
+            selectedSimulator.selectDevice(device)
+            refreshHeader()
+            onChange?()
+        case nil:
             return
         }
-        // Alone, the chooser switches the device, exactly like the single pane: + adds one.
-        guard let device = SimulatorDeviceID(raw), state.members[0].deviceID != device else { return }
-        state.members[0].deviceID = device
-        selectedSimulator.selectDevice(device)
-        refreshHeader()
-        onChange?()
     }
 
     private func install(_ child: NSView, in host: NSView) {

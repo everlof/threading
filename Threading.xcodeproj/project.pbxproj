@@ -72,6 +72,7 @@
 		7C000007000000000000A0F2 /* ThreadingPluginKit in Embed Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C0F0 /* ThreadingPluginKit */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		7C000007000000000000A0F1 /* ThreadingPluginKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C0F1 /* ThreadingPluginKit */; };
 		7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C011 /* ThreadingSimulatorKit */; };
+		AD0D00010000000000000001 /* ThreadingAndroidKit in Frameworks */ = {isa = PBXBuildFile; productRef = AD0D00010000000000000003 /* ThreadingAndroidKit */; };
 		7C000006000000000000A001 /* codes.threading.ptyd.plist in Embed Launch Agents */ = {isa = PBXBuildFile; fileRef = 7C000006000000000000B001 /* codes.threading.ptyd.plist */; };
 		7C00000C000000000000A001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B001 /* main.swift */; };
 		7C00000C000000000000A004 /* TriggerProbeSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B005 /* TriggerProbeSources.swift */; };
@@ -763,6 +764,7 @@
 				7C000004000000000000000A /* ThreadingPTYHostKit in Frameworks */,
 				D7C100010000000000000001 /* ThreadingPTYClient in Frameworks */,
 				7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */,
+				AD0D00010000000000000001 /* ThreadingAndroidKit in Frameworks */,
 				7C000007000000000000A0F0 /* ThreadingPluginKit in Frameworks */,
 				D3EE00010000000000000001 /* ThreadingPeerTransport in Frameworks */,
 				D1FF00010000000000000011 /* NativeDiffCore in Frameworks */,
@@ -1394,6 +1396,7 @@
                 A07000010000000000000003 /* ThreadingController */,
                 A07100010000000000000003 /* ThreadingUsage */,
 				7C000007000000000000C011 /* ThreadingSimulatorKit */,
+				AD0D00010000000000000003 /* ThreadingAndroidKit */,
 				7C000007000000000000C0F0 /* ThreadingPluginKit */,
 				D3EE00010000000000000004 /* ThreadingPeerTransport */,
 				D1FF00010000000000000001 /* NativeDiffCore */,
@@ -1490,6 +1493,7 @@
 				7C000004000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingPTYHostKit" */,
 				D7C100010000000000000011 /* XCLocalSwiftPackageReference "Packages/ThreadingPTYClient" */,
 				7C000007000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingSimulatorKit" */,
+				AD0D00010000000000000002 /* XCLocalSwiftPackageReference "Packages/ThreadingAndroidKit" */,
 				7C00000700000000000000F0 /* XCLocalSwiftPackageReference "Packages/ThreadingPluginKit" */,
 				7C000009000000000000F000 /* XCLocalSwiftPackageReference "Packages/ThreadingDesignKit" */,
 				7C00000A000000000000F000 /* XCLocalSwiftPackageReference "Packages/Vendor/TimberLineParser" */,
@@ -3195,6 +3199,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingSimulatorKit;
 		};
+		AD0D00010000000000000002 /* XCLocalSwiftPackageReference "Packages/ThreadingAndroidKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ThreadingAndroidKit;
+		};
 		7C00000700000000000000F0 /* XCLocalSwiftPackageReference "Packages/ThreadingPluginKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingPluginKit;
@@ -3351,6 +3359,11 @@
 		7C000007000000000000C011 /* ThreadingSimulatorKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ThreadingSimulatorKit;
+		};
+		AD0D00010000000000000003 /* ThreadingAndroidKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AD0D00010000000000000002 /* XCLocalSwiftPackageReference "Packages/ThreadingAndroidKit" */;
+			productName = ThreadingAndroidKit;
 		};
 		D1FF00010000000000000001 /* NativeDiffCore */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -189,6 +189,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Standalone Markdown editor, shared native parser, Finder Quick Look, explicit saves and opt-in file associations | [`markdown-editor.md`](docs/architecture/markdown-editor.md) |
 | iOS usage widgets, the bounded capacity feed, App Group publication, freshness and usage deep links | [`ios-glanceable-surfaces.md`](docs/architecture/ios-glanceable-surfaces.md) |
 | The session-owned in-panel iOS Simulator, CoreSimulator lifecycle, direct framebuffer/input helper, leases and agent route | [`simulator-pane.md`](docs/architecture/simulator-pane.md) |
+| Android emulators and USB Android devices as Simulator workspace members: the platform-tagged identity, per-member routing, the emulator gRPC client and its JWT grant, the adb screenrecord fallback | [`android-devices.md`](docs/architecture/android-devices.md) |
 | The paired physical-iPhone pane, CoreDevice identity, bounded screenshot fallback, explicit preparation and exact-device user touch authority | [`physical-iphone-pane.md`](docs/architecture/physical-iphone-pane.md) |
 | The live browser an agent drives: origin grants, the accessibility snapshot, refs and semantic locators, the browser tools | [`agent-browser.md`](docs/architecture/agent-browser.md) |
 | Natively rendered conversations: the Claude/Codex stream transports, permission brokering, transcript replay, the timeline model, tool rows, diffs, the turn rail | [`native-conversations.md`](docs/architecture/native-conversations.md) |

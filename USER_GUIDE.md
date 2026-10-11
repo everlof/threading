@@ -3772,6 +3772,35 @@ plate. **Remove … from Workspace** in the **…** menu, or in the device's rig
 only that device and selects its neighbour. Close the tab to remove the last one. Device order,
 selection and layout come back after relaunch.
 
+**Android beside iOS.** The same workspace holds Android emulators and USB Android devices, so
+one app can sit side by side on both platforms. When the Android SDK is installed (Android
+Studio's default location, or `ANDROID_HOME`), **+** and the device chooser list your emulators and
+connected devices under an **Android** heading. A device that has not allowed USB debugging is
+listed but unavailable until you accept the prompt on it. Adopting an emulator that is already
+running leaves it running. If it is not running, Threading starts it without a window and without
+changing the emulator, and stops it again when the last lease is released. A USB device is never
+restarted or shut down.
+
+An Android device's buttons sit under its screen: **Back**, **Home**, **Overview**, **Power**,
+volume and appearance, plus **Rotate Left** and **Rotate Right** on an emulator. With the device
+focused, **⌘⌫** is Back, **⇧⌘H** Home, **⌘O** Overview, **⌘P** Power, **⌘↑ / ⌘↓** volume and
+**⌘← / ⌘→** rotate an emulator. Emulators stream through the emulator's own control service, the
+same one Android Studio uses, so touches are immediate. Connected devices and emulators started
+without it use `adb`, which is slower to respond to input. Hover the status line to see which.
+Controlling a connected device asks first and says it is a real device. Device Logs is not
+available for Android yet. An agent can build with Gradle and install the resulting `.apk` on
+the device you see. The tab is called **Android** when it holds only Android devices, and
+**Simulators** when it holds both platforms. Where the device is an Android one, its controls say
+"device" rather than "Simulator".
+
+**Opening one platform beside the other.** The new-tab menu and the command palette have both
+**iOS Simulator** and **Android Emulator**. With no Simulator tab yet, each opens one on a device
+of its own platform: a booted device first (a running emulator or a connected phone), otherwise
+the first available one, which Threading starts. With the tab already open, choosing the other
+platform adds one of its devices beside the ones there, so **iOS Simulator** then **Android
+Emulator** gives you both side by side. Choosing a platform the tab already holds just shows it.
+If no other device of that platform is available, Threading says so instead.
+
 **Layouts.** **Auto** considers the available pane space and each device's current screen shape:
 portrait phones normally sit side by side, landscape phones normally stack above and below.
 Choose **Row**, **Column** or **Grid** to hold an arrangement, or **Focus** to show the selected
@@ -6702,6 +6731,11 @@ Everywhere else the same keys keep their app command.
 | Simulator: Side Button (instead of Browser) | Cmd+Shift+B |
 | Simulator: Volume Up / Volume Down | Cmd+Up / Cmd+Down |
 | Simulator: Toggle Appearance | Cmd+Shift+A |
+| Android: Back | Cmd+Delete |
+| Android: Home | Cmd+Shift+H |
+| Android: Overview | Cmd+O |
+| Android: Power | Cmd+P |
+| Android emulator: Rotate Left / Rotate Right | Cmd+Left / Cmd+Right |
 
 ### Changing shortcuts
 

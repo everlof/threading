@@ -72,7 +72,7 @@ final class SimulatorAgentToolTests: HostedStoreTestCase {
         )
 
         XCTAssertTrue(result.isError)
-        XCTAssertTrue(result.text.contains("exact CoreSimulator device UUID"))
+        XCTAssertTrue(result.text.contains("exact device id"), result.text)
         XCTAssertTrue(fixture.pane.tabs(for: fixture.sessionID).isEmpty)
     }
 

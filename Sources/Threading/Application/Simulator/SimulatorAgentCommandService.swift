@@ -26,6 +26,24 @@ enum SimulatorAgentCommandService {
         case side
         case volumeUp
         case volumeDown
+        // Android. `power` is Android's name for the button iOS calls lock.
+        case back
+        case overview
+        case power
+        case rotateLeft
+        case rotateRight
+
+        static let iOS: [Button] = [.home, .lock, .side, .volumeUp, .volumeDown]
+        static let androidDevice: [Button] = [.back, .home, .overview, .power, .volumeUp, .volumeDown]
+        static let androidEmulator: [Button] = androidDevice + [.rotateLeft, .rotateRight]
+
+        static func available(on platform: SimulatorDevicePlatform) -> [Button] {
+            switch platform {
+            case .iOSSimulator: return iOS
+            case .androidEmulator: return androidEmulator
+            case .androidDevice: return androidDevice
+            }
+        }
     }
 
     struct LaunchRequest {
@@ -199,15 +217,122 @@ enum SimulatorAgentCommandService {
     ) -> Request<SimulatorDeviceID?> {
         guard let rawValue = arguments.deviceID else { return .accepted(nil) }
         guard let parsed = SimulatorDeviceID(rawValue) else {
-            return .rejected(.failure(
-                "device_id must be an exact CoreSimulator device UUID."
-            ))
+            return .rejected(.failure(deviceIDFormatFailure))
         }
         return .accepted(parsed)
     }
 
+    static let deviceIDFormatFailure = "device_id must be an exact device id from simulator_prepare or "
+        + "panel_list_tabs: a CoreSimulator UUID, android-avd:<AVD name> or android-usb:<adb serial>."
+
+    /// Whether an automatic choice should come from Android: nil when the agent did not say.
+    static func requestedPlatform(from arguments: SimulatorPrepareArguments) -> Request<Bool?> {
+        guard let raw = arguments.platform?.lowercased(), !raw.isEmpty else { return .accepted(nil) }
+        switch raw {
+        case "ios": return .accepted(false)
+        case "android": return .accepted(true)
+        default: return .rejected(.failure("platform must be \"ios\" or \"android\"."))
+        }
+    }
+
+    /// The workspace arrangement an agent asked for, by the layout chooser's own names.
+    static func requestedLayout(from arguments: SimulatorPrepareArguments) -> Request<SimulatorWorkspaceLayout?> {
+        guard let raw = arguments.layout?.lowercased(), !raw.isEmpty else { return .accepted(nil) }
+        guard let layout = SimulatorWorkspaceLayout(rawValue: raw) else {
+            let names = SimulatorWorkspaceLayout.allCases.map { "\"\($0.rawValue)\"" }.joined(separator: ", ")
+            return .rejected(.failure("layout must be one of \(names)."))
+        }
+        return .accepted(layout)
+    }
+
+    /// What `simulator_prepare` does once its arguments are read.
+    enum PreparationRoute: Equatable {
+        /// Prepare this exact device (adding it when it is not a member), or with nil the
+        /// workspace's lone member by its automatic choice.
+        case prepare(SimulatorDeviceID?)
+        /// Add the platform's automatic choice as a new member beside the others.
+        case addBeside
+    }
+
+    /// The parts of the current workspace the route depends on; nil when there is no tab yet.
+    struct WorkspaceShape: Equatable {
+        let memberCount: Int
+        /// One member that holds no device yet, which simply chooses on the requested platform.
+        let isLoneAndEmpty: Bool
+        /// The device of the first member on the requested platform.
+        let deviceOnPlatform: SimulatorDeviceID?
+    }
+
+    struct PreparationRequest: Equatable {
+        let deviceID: SimulatorDeviceID?
+        let preferAndroid: Bool?
+        let layout: SimulatorWorkspaceLayout?
+        let beside: Bool
+    }
+
+    static func preparationRequest(from arguments: SimulatorPrepareArguments) -> Request<PreparationRequest> {
+        let deviceID: SimulatorDeviceID?
+        switch requestedDeviceID(from: arguments) {
+        case .accepted(let value): deviceID = value
+        case .rejected(let result): return .rejected(result)
+        }
+        let preferAndroid: Bool?
+        switch requestedPlatform(from: arguments) {
+        case .accepted(let value): preferAndroid = value
+        case .rejected(let result): return .rejected(result)
+        }
+        switch requestedLayout(from: arguments) {
+        case .accepted(let layout):
+            return .accepted(PreparationRequest(deviceID: deviceID, preferAndroid: preferAndroid,
+                                                layout: layout, beside: arguments.beside == true))
+        case .rejected(let result): return .rejected(result)
+        }
+    }
+
+    /// Without a device_id the platform decides: in a workspace of several devices, its member of
+    /// that platform, or a new member beside the others when it has none. beside always adds,
+    /// except to a lone member that holds nothing yet. A lone member asked for the other platform
+    /// without beside switches to it, as it always has.
+    static func preparationRoute(
+        for request: PreparationRequest, in workspace: WorkspaceShape?
+    ) -> Request<PreparationRoute> {
+        guard request.deviceID == nil, let workspace else { return .accepted(.prepare(request.deviceID)) }
+        if request.beside { return .accepted(workspace.isLoneAndEmpty ? .prepare(nil) : .addBeside) }
+        guard workspace.memberCount > 1 else { return .accepted(.prepare(nil)) }
+        guard request.preferAndroid != nil else {
+            return .rejected(.failure("Provide device_id or platform when the workspace contains multiple devices."))
+        }
+        return .accepted(workspace.deviceOnPlatform.map { .prepare($0) } ?? .addBeside)
+    }
+
+    /// One workspace member as an agent sees it: enough to address it and to know what it is.
+    struct WorkspaceMember: Encodable, Equatable {
+        let deviceID: String?
+        let platform: String?
+        let name: String?
+        let selected: Bool
+
+        init(deviceID: SimulatorDeviceID?, name: String?, selected: Bool) {
+            self.deviceID = deviceID?.rawValue
+            self.platform = deviceID.map { $0.platform.isAndroid ? "android" : "ios" }
+            self.name = name
+            self.selected = selected
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case deviceID = "device_id"
+            case platform, name, selected
+        }
+    }
+
+    struct WorkspaceSummary: Encodable, Equatable {
+        let layout: String
+        let devices: [WorkspaceMember]
+    }
+
     static func launchRequest(
         from arguments: SimulatorInstallLaunchArguments,
+        platform: SimulatorDevicePlatform = .iOSSimulator,
         resolve: (String) -> URL?
     ) -> Request<LaunchRequest> {
         guard let path = arguments.applicationPath, !path.isEmpty else {
@@ -219,8 +344,11 @@ enum SimulatorAgentCommandService {
         guard let applicationURL = resolve(path) else {
             return .rejected(.failure("No such application: \(path)"))
         }
-        guard applicationURL.pathExtension.caseInsensitiveCompare("app") == .orderedSame else {
-            return .rejected(.failure("application_path must name a built .app bundle."))
+        let isAndroid = platform.isAndroid
+        guard applicationURL.pathExtension.caseInsensitiveCompare(isAndroid ? "apk" : "app") == .orderedSame else {
+            return .rejected(.failure(isAndroid
+                ? "application_path must name a built .apk for an Android device."
+                : "application_path must name a built .app bundle."))
         }
         return .accepted(LaunchRequest(
             applicationURL: applicationURL,
@@ -229,16 +357,28 @@ enum SimulatorAgentCommandService {
         ))
     }
 
-    static func preparationResult(for lease: SimulatorDeviceLease) -> MCPToolResult {
+    static func preparationResult(
+        for lease: SimulatorDeviceLease, adbSerial: String? = nil, workspace: WorkspaceSummary? = nil
+    ) -> MCPToolResult {
         let device = lease.device
+        let android = device.platform.isAndroid
         return encoded(PreparationPayload(
             deviceID: device.id.rawValue,
+            platform: android ? "android" : "ios",
             name: device.name,
             runtime: device.runtimeName,
             family: device.family.rawValue,
             bootOwnership: lease.bootOwnership.rawValue,
             surface: "Threading right panel",
-            xcodebuildDestination: "platform=iOS Simulator,id=\(device.id.rawValue)"
+            xcodebuildDestination: android ? nil : "platform=iOS Simulator,id=\(device.id.rawValue)",
+            adbSerial: android ? adbSerial : nil,
+            buildHint: android
+                ? "Build with Gradle in your shell (for example ./gradlew assembleDebug"
+                    + (adbSerial.map { " with ANDROID_SERIAL=\($0)" } ?? "")
+                    + "), then call simulator_install_launch with the .apk and its applicationId."
+                : nil,
+            buttons: Button.available(on: device.platform).map(\.rawValue),
+            workspace: workspace
         ))
     }
 
@@ -292,13 +432,15 @@ enum SimulatorAgentCommandService {
     }
 
     static func buttonInput(
-        from arguments: SimulatorPressButtonArguments
+        from arguments: SimulatorPressButtonArguments,
+        platform: SimulatorDevicePlatform = .iOSSimulator
     ) -> Request<Input> {
         guard let rawValue = arguments.button, !rawValue.isEmpty else {
             return .rejected(.failure("Missing required argument: button"))
         }
-        guard let button = Button(rawValue: rawValue) else {
-            let valid = Button.allCases.map(\.rawValue).joined(separator: ", ")
+        let available = Button.available(on: platform)
+        guard let button = Button(rawValue: rawValue), available.contains(button) else {
+            let valid = available.map(\.rawValue).joined(separator: ", ")
             return .rejected(.failure("button must be one of: \(valid)."))
         }
         return .accepted(.button(button))
@@ -343,19 +485,28 @@ enum SimulatorAgentCommandService {
 
 private struct PreparationPayload: Encodable {
     let deviceID: String
+    let platform: String
     let name: String
     let runtime: String
     let family: String
     let bootOwnership: String
     let surface: String
-    let xcodebuildDestination: String
+    let xcodebuildDestination: String?
+    let adbSerial: String?
+    let buildHint: String?
+    let buttons: [String]
+    /// Every member beside this one, so an agent that built a side-by-side view can see it.
+    let workspace: SimulatorAgentCommandService.WorkspaceSummary?
 
     private enum CodingKeys: String, CodingKey {
         case deviceID = "device_id"
-        case name, runtime, family
+        case platform, name, runtime, family
         case bootOwnership = "boot_ownership"
         case surface
         case xcodebuildDestination = "xcodebuild_destination"
+        case adbSerial = "adb_serial"
+        case buildHint = "build_hint"
+        case buttons, workspace
     }
 }
 

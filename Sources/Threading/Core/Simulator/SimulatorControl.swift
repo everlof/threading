@@ -63,6 +63,7 @@ enum SimulatorControlError: LocalizedError, Equatable, Sendable {
     case invalidResponse(String)
     case tooManyDevices(maximum: Int)
     case noAvailableIOSDevices
+    case noAvailableAndroidDevices
     case deviceNotFound(SimulatorDeviceID)
     case deviceUnavailable(SimulatorDeviceID, detail: String)
     case invalidApplication(String)
@@ -89,6 +90,9 @@ enum SimulatorControlError: LocalizedError, Equatable, Sendable {
             return "More than \(maximum) iOS Simulator devices are installed."
         case .noAvailableIOSDevices:
             return "No available iOS Simulator device is installed in Xcode."
+        case .noAvailableAndroidDevices:
+            return "No Android emulator or device is available. Create an emulator in Android Studio, "
+                + "or connect a device with USB debugging on."
         case .deviceNotFound, .deviceUnavailable:
             return L10n.string(
                 "The selected Simulator is no longer available. Choose another device."

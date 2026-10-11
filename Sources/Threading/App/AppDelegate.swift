@@ -3302,7 +3302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 return .unavailable(L10n.string("Show an adopted Simulator first."))
             }
             if command.id == AppCommands.ID.addSimulator, !workspace.canAddSimulator {
-                return .unavailable(L10n.string("This workspace already has four Simulators. Remove one before adding another."))
+                return .unavailable(L10n.string("This workspace already has four devices. Remove one before adding another."))
             }
             if command.id == AppCommands.ID.removeSimulator, workspace.state.members.count <= 1 {
                 return .unavailable(L10n.string("Close the tab to remove the last Simulator."))

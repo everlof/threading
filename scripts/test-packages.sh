@@ -34,6 +34,7 @@ readonly packages=(
     ThreadingScenarioKit
     ThreadingPeerTransport
     ThreadingSimulatorKit
+    ThreadingAndroidKit
     ThreadingUsage
 )
 

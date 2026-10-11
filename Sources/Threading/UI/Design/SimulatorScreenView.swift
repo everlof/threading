@@ -40,6 +40,14 @@ final class SimulatorScreenView: ThemedControl {
         }
     }
 
+    /// An iOS Simulator is named a Simulator; an Android emulator or phone, a device.
+    var namesDevice = false {
+        didSet {
+            guard namesDevice != oldValue else { return }
+            updateAccessibilityContract()
+        }
+    }
+
     var interactionState: InteractionState = .unavailable {
         didSet {
             guard interactionState != oldValue else { return }
@@ -735,7 +743,9 @@ final class SimulatorScreenView: ThemedControl {
 
     override func accessibilityRole() -> NSAccessibility.Role? { .image }
 
-    override func accessibilityLabel() -> String? { L10n.string("Simulator screen") }
+    override func accessibilityLabel() -> String? {
+        namesDevice ? L10n.string("Device screen") : L10n.string("Simulator screen")
+    }
 
     override var restingPointer: NSCursor? { .arrow }
 
@@ -790,13 +800,19 @@ final class SimulatorScreenView: ThemedControl {
 
     private func updateAccessibilityContract() {
         let help: String
-        switch interactionState {
-        case .unavailable:
+        switch (interactionState, namesDevice) {
+        case (.unavailable, false):
             help = L10n.string("Simulator control is unavailable.")
-        case .recoverable:
+        case (.recoverable, false):
             help = L10n.string("Press to reconnect and control the Simulator.")
-        case .ready:
+        case (.ready, false):
             help = L10n.string("Tap, drag, or type to control the Simulator.")
+        case (.unavailable, true):
+            help = L10n.string("Device control is unavailable.")
+        case (.recoverable, true):
+            help = L10n.string("Press to reconnect and control the device.")
+        case (.ready, true):
+            help = L10n.string("Tap, drag, or type to control the device.")
         }
         setAccessibilityHelp(help)
         setAccessibilityEnabled(interactionState != .unavailable)

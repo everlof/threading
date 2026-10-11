@@ -8,6 +8,9 @@ pairs normally sit beside each other and landscape pairs stack. Row, Column, Gri
 persisted overrides. The shared controls follow selection and keyboard input follows the focused
 member. Agent operations require an exact device ID when several members are adopted.
 
+Android members (emulators and USB devices beside iOS Simulators) followed on 2026-10-10; see
+[android-devices.md](../architecture/android-devices.md).
+
 The durable decisions are in [simulator-pane.md](../architecture/simulator-pane.md), with the
 [viewport measurements](../architecture/performance.md#simulator-workspace-viewport-contract-2026-10-07)
 and the host-only customization boundary in

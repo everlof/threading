@@ -241,7 +241,8 @@ enum SimulatorCompatibilityProbe {
                         switch backend {
                         case .direct(let selected): codec = selected
                         case .sharedMemory: codec = nil
-                        case .screenshotFallback: continue
+                        // The probe exercises the iOS helper; an Android transport is not its evidence.
+                        case .screenshotFallback, .android: continue
                         }
                         ready = (codec, coreSimulatorVersion, simulatorKitVersion)
                     case .frame(let frame):

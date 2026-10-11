@@ -196,6 +196,44 @@ final class SimulatorPaneRenderTests: XCTestCase {
         print("Rendered the adopted Simulator pane to \(Render.directory.path)")
     }
 
+    /// One app on both platforms: an iPhone and a Pixel side by side. Each member's hardware row is
+    /// its own platform's, the tab names both, and selecting the Android member swaps the shared
+    /// row to Back/Home/Overview/Power/volume/rotate without a target escaping it.
+    func testRendersAndroidBesideIOSInTheWorkspace() throws {
+        for (name, appearance) in Render.appearances {
+            AppThemePalette.set(.system)
+            let fixture = try makeFixture(appearance: appearance, deviceFrame: try makeDeviceFramePNG(),
+                                          additionalDeviceCount: 1, androidSecond: true)
+            defer { fixture.tearDown() }
+            let workspace = try XCTUnwrap(fixture.panel.currentSimulatorWorkspace)
+            eventually { workspace.simulators.allSatisfy { $0.frameImageForTesting != nil } }
+            XCTAssertEqual(workspace.state.members.compactMap(\.deviceID?.platform), [.iOSSimulator, .androidEmulator])
+            workspace.select(workspace.state.members[1].id)
+            settle(fixture.window)
+            let hardware = workspace.selectedSimulator.workspaceHardwareControls
+            let shown = hardware.subviews.filter { !$0.isHidden }.map { $0.accessibilityIdentifier() }
+            XCTAssertEqual(shown, ["simulator.button.back", "simulator.button.home", "simulator.button.overview",
+                                   "simulator.button.power", "simulator.button.volumeDown", "simulator.button.volumeUp",
+                                   "simulator.button.rotateLeft", "simulator.button.rotateRight", "simulator.appearance"])
+            for button in hardware.subviews where !button.isHidden {
+                XCTAssertTrue(hardware.bounds.contains(button.frame), "A hardware target escaped its shared viewport.")
+            }
+            assertTilesHugTheirDevices(workspace, compact: false)
+            let root = try XCTUnwrap(fixture.window.contentView)
+            let bitmap = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+            root.cacheDisplay(in: root.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent("simulator-pane-workspace-android-\(name).png"))
+            workspace.select(workspace.state.members[0].id)
+            settle(fixture.window)
+            let iOSShown = workspace.selectedSimulator.workspaceHardwareControls.subviews.filter { !$0.isHidden }
+                .map { $0.accessibilityIdentifier() }
+            XCTAssertEqual(iOSShown, ["simulator.button.home", "simulator.button.lock", "simulator.button.side",
+                                      "simulator.button.volumeDown", "simulator.button.volumeUp", "simulator.appearance"],
+                           "the iOS member keeps exactly the row it always had")
+        }
+    }
+
     private func renderWorkspaceLayouts() throws {
         let variants: [(String, AppTheme, NSAppearance.Name, Int, Bool, Bool, SimulatorWorkspaceLayout)] = [
             ("portraits-light", .system, .aqua, 2, false, false, .automatic),
@@ -736,7 +774,8 @@ final class SimulatorPaneRenderTests: XCTestCase {
         bootFailure: String? = nil,
         additionalDeviceCount: Int = 0,
         alternateFrame: Data? = nil,
-        panelWidth: CGFloat = Render.panelWidth
+        panelWidth: CGFloat = Render.panelWidth,
+        androidSecond: Bool = false
     ) throws -> SimulatorPaneRenderFixture {
         let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
         let device = SimulatorDevice(
@@ -752,7 +791,14 @@ final class SimulatorPaneRenderTests: XCTestCase {
             lastBootedAt: nil
         )
         let additionalDevices = (0..<additionalDeviceCount).map { index in
-            SimulatorDevice(id: SimulatorDeviceID(String(format: "00000000-0000-0000-0000-%012d", index + 1))!,
+            if androidSecond, index == 0 {
+                return SimulatorDevice(
+                    id: SimulatorDeviceID.androidEmulator(avdName: "Pixel_8_API_36")!, name: "Pixel 8",
+                    runtimeIdentifier: "android-36", runtimeName: "Android 16 · API 36",
+                    deviceTypeIdentifier: "android.avd", family: .androidPhone, state: .booted, lastBootedAt: nil
+                )
+            }
+            return SimulatorDevice(id: SimulatorDeviceID(String(format: "00000000-0000-0000-0000-%012d", index + 1))!,
                 name: ["iPhone SE", "iPhone 16", "iPhone 17"][index],
                 runtimeIdentifier: device.runtimeIdentifier, runtimeName: device.runtimeName,
                 deviceTypeIdentifier: device.deviceTypeIdentifier, family: .iPhone,

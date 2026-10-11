@@ -93,8 +93,12 @@ enum SimulatorAgentInputRouter {
         through coordinator: AgentToolCoordinator,
         _ completion: @escaping Completion
     ) {
+        // The valid buttons are the target device's own, so the target is resolved first.
+        let platform = coordinator.displayPaneController.simulatorWorkspace(for: sessionID)?.simulators
+            .first { arguments.deviceID == nil || $0.selectedDeviceID?.rawValue == arguments.deviceID }?
+            .selectedDeviceID?.platform ?? .iOSSimulator
         send(
-            SimulatorAgentCommandService.buttonInput(from: arguments),
+            SimulatorAgentCommandService.buttonInput(from: arguments, platform: platform),
             action: "press_button",
             deviceID: arguments.deviceID, sessionID: sessionID,
             through: coordinator,
@@ -205,6 +209,11 @@ enum SimulatorAgentInputRouter {
             case .side: return .button(.side)
             case .volumeUp: return .button(.volumeUp)
             case .volumeDown: return .button(.volumeDown)
+            case .back: return .button(.back)
+            case .overview: return .button(.overview)
+            case .power: return .button(.lock)
+            case .rotateLeft: return .button(.rotateLeft)
+            case .rotateRight: return .button(.rotateRight)
             }
         }
     }
