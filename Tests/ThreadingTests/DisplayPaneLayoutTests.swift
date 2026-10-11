@@ -1683,7 +1683,7 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
             descendants(of: attachments.view).compactMap { $0 as? ThemedSegmentedControl }.first,
             "the pane offered no filter for a list with both sides in it"
         )
-        let user = try XCTUnwrap(AttachmentFilter.allCases.firstIndex(of: .user))
+        let user = try XCTUnwrap(filter.titles.firstIndex(of: AttachmentFilter.user.title))
         filter.selectedIndex = user
         filter.onSelect?(user)
         XCTAssertEqual(try attachmentsTable(in: attachments.view).numberOfRows, 1)
