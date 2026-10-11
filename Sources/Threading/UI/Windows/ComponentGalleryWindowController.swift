@@ -117,6 +117,7 @@ final class ComponentGalleryViewController: NSViewController {
         "BrowserBaselineOverlayHandle",
         "BrowserDeviceToolbar",
         "BrowserFindBar",
+        "BrowserViewportClipView",
         "ChipView",
         "ColorPairSpecimenView",
         "ConversationChoiceRow",
@@ -184,6 +185,7 @@ final class ComponentGalleryViewController: NSViewController {
         "SidebarBrandView",
         "SidebarEdgeRevealCoordinator",
         "SimulatorRecordingBadge",
+        "SimulatorRecoveryView",
         "SimulatorScreenView",
         "SimulatorWorkspaceCanvas",
         "SimulatorHardwareControlsView",
@@ -3107,6 +3109,11 @@ final class ComponentGalleryViewController: NSViewController {
                     makeSimulatorHardwareSample()
                 ),
                 story(
+                    "SimulatorRecoveryView",
+                    "An unavailable device keeps Retry and Choose Simulator reachable; switch the device kind to review both labels.",
+                    makeSimulatorRecoverySample()
+                ),
+                story(
                     "SimulatorRecordingBadge",
                     "A running recording over the device it records, and its stop control; "
                         + "saving refuses a second stop.",
@@ -3524,6 +3531,29 @@ final class ComponentGalleryViewController: NSViewController {
             screen.heightAnchor.constraint(equalToConstant: 390)
         ])
         return screen
+    }
+
+    private func makeSimulatorRecoverySample() -> NSView {
+        let recovery = SimulatorRecoveryView()
+        recovery.detail = L10n.string("The device disconnected. Retry the connection or choose another device.")
+        recovery.onRetry = { [weak self] in
+            self?.showReceipt(L10n.string("SimulatorRecoveryView asked to retry."))
+        }
+        recovery.onChoose = { [weak self] in
+            self?.showReceipt(L10n.string("SimulatorRecoveryView asked to choose a device."))
+        }
+        let deviceKind = ThemedCheckbox(title: L10n.string("Android device")) { [weak recovery] state in
+            recovery?.namesDevice = state == .on
+        }
+        let column = NSStackView(views: [recovery, deviceKind])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = Design.Spacing.small
+        NSLayoutConstraint.activate([
+            recovery.widthAnchor.constraint(equalToConstant: 320),
+            recovery.heightAnchor.constraint(equalToConstant: 210)
+        ])
+        return column
     }
 
     private func makeSimulatorWorkspaceSample() -> NSView {
@@ -5888,6 +5918,11 @@ final class ComponentGalleryViewController: NSViewController {
                     deviceToolbar
                 ),
                 story(
+                    "BrowserViewportClipView",
+                    "Pan the oversized responsive canvas. Turning panning off returns it to its origin, as a fitted browser does.",
+                    makeBrowserViewportSample()
+                ),
+                story(
                     "BrowserAnnotationOverlay / AnnotationSendBar / KeyEquivalentScopeView",
                     "Place pins and send notes. With focus inside, ⌘R reports the scoped Reload action.",
                     annotationScope
@@ -5909,6 +5944,45 @@ final class ComponentGalleryViewController: NSViewController {
                 )
             ]
         )
+    }
+
+    private func makeBrowserViewportSample() -> NSView {
+        let clip = BrowserViewportClipView()
+        clip.allowsPanning = true
+        let scroll = ThemedScrollView()
+        scroll.contentView = clip
+        scroll.hasHorizontalScroller = true
+        scroll.hasVerticalScroller = true
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        let canvas = ThemedSurfaceView()
+        canvas.translatesAutoresizingMaskIntoConstraints = true
+        canvas.frame = NSRect(x: 0, y: 0, width: 600, height: 320)
+        canvas.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+        let origin = smallLabel(L10n.string("Canvas origin"))
+        let edge = smallLabel(L10n.string("Far edge"))
+        for label in [origin, edge] {
+            label.translatesAutoresizingMaskIntoConstraints = false
+            canvas.addSubview(label)
+        }
+        scroll.documentView = canvas
+        let panning = ThemedCheckbox(title: L10n.string("Allow panning"), state: .on) { [weak clip, weak scroll] state in
+            guard let clip else { return }
+            clip.allowsPanning = state == .on
+            scroll?.reflectScrolledClipView(clip)
+        }
+        let column = NSStackView(views: [panning, scroll])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = Design.Spacing.small
+        NSLayoutConstraint.activate([
+            scroll.widthAnchor.constraint(equalToConstant: 320),
+            scroll.heightAnchor.constraint(equalToConstant: 160),
+            origin.leadingAnchor.constraint(equalTo: canvas.leadingAnchor, constant: Design.Spacing.inset),
+            origin.bottomAnchor.constraint(equalTo: canvas.bottomAnchor, constant: -Design.Spacing.inset),
+            edge.trailingAnchor.constraint(equalTo: canvas.trailingAnchor, constant: -Design.Spacing.inset),
+            edge.topAnchor.constraint(equalTo: canvas.topAnchor, constant: Design.Spacing.inset)
+        ])
+        return column
     }
 
     @objc private func baselineOverlayPassThroughClicked() {

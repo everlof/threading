@@ -7837,6 +7837,17 @@
         }
       }
     },
+    "Allow panning" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt panorering"
+          }
+        }
+      }
+    },
     "Allow the agent to use %@?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8273,6 +8284,17 @@
         }
       }
     },
+    "An unavailable device keeps Retry and Choose Simulator reachable; switch the device kind to review both labels." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När en enhet är otillgänglig går det fortfarande att välja Försök igen och Välj simulator. Byt enhetstyp för att granska båda etiketterna."
+          }
+        }
+      }
+    },
     "An undeclared slot is rejected atomically and the native row stays visible." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8347,6 +8369,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Android-emulator"
+          }
+        }
+      }
+    },
+    "Android device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Android-enhet"
           }
         }
       }
@@ -11585,6 +11618,17 @@
         }
       }
     },
+    "BrowserViewportClipView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrowserViewportClipView"
+          }
+        }
+      }
+    },
     "Budget" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12318,6 +12362,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kanoniserad"
+          }
+        }
+      }
+    },
+    "Canvas origin" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ytans startpunkt"
           }
         }
       }
@@ -23981,6 +24036,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sprid ut webbsökningar, kontrollera påståendena, skriv en källhänvisad rapport"
+          }
+        }
+      }
+    },
+    "Far edge" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bortre kanten"
           }
         }
       }
@@ -39315,6 +39381,17 @@
         }
       }
     },
+    "Pan the oversized responsive canvas. Turning panning off returns it to its origin, as a fitted browser does." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Panorera över den större responsiva ytan. När panorering stängs av återgår den till startläget, precis som en anpassad webbläsarvy."
+          }
+        }
+      }
+    },
     "Pane divider" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -52106,6 +52183,39 @@
         }
       }
     },
+    "SimulatorRecoveryView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SimulatorRecoveryView"
+          }
+        }
+      }
+    },
+    "SimulatorRecoveryView asked to choose a device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SimulatorRecoveryView bad om att välja en enhet."
+          }
+        }
+      }
+    },
+    "SimulatorRecoveryView asked to retry." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SimulatorRecoveryView bad om ett nytt försök."
+          }
+        }
+      }
+    },
     "SimulatorScreenView" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -57348,6 +57458,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Standardtemat används av alla terminaler som inte har fått ett eget tema. Ett projekt eller en enskild konversation kan åsidosätta det från ⋯-menyn i sidofältet."
+          }
+        }
+      }
+    },
+    "The device disconnected. Retry the connection or choose another device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enheten kopplades från. Försök ansluta igen eller välj en annan enhet."
           }
         }
       }
