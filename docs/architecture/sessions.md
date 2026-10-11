@@ -1089,6 +1089,32 @@ stays reachable even when it stops being first. And an absent or empty `PATH` is
 rather than invented: a child with no `PATH` gets `execvp`'s default, and replacing that with a
 directory holding two symlinks would break every command in the session.
 
+**A local terminal agent gets a prompt editor when the person has not set `EDITOR`.**
+`AgentLauncher.plan` puts `EDITOR=<running bundle executable> --prompt-editor` in the PTY spawn
+environment when inherited `EDITOR` is absent. Codex and Claude give a separately configured
+`VISUAL` priority; OpenCode reads `EDITOR`, so a VISUAL-only environment still gets a working
+default there. The login shell can still export either variable before it starts the CLI.
+`AgentLaunchPlan.environmentEntries(on:)` applies
+the override on both the direct PTY and local daemon paths; a remote host gets neither the Mac
+bundle path nor this fallback, so its own editor configuration remains authoritative. Native
+conversations already use `PromptView` and never launch this child.
+
+The CLI's external-editor shortcut owns the draft file and blocks until the editor process
+exits. The same signed Threading executable enters a narrow `--prompt-editor <file>` mode before
+ordinary app startup, without acquiring the single-instance lock or touching the session store.
+It restores the chosen app theme, opens a themed, multiline text window, and reads and writes the
+CLI-owned UTF-8 draft off the UI actor with a 1 MiB bound. It refuses to replace a file changed
+while the window was open.
+Save and Return updates the file and exits; Cancel exits without writing. The CLI then restores
+the draft to its own composer and keeps submission authority. This short-lived window is
+deliberately host-only: extension presentation cannot receive unsent prompt text or take over
+the file handoff, focus and save/cancel contract.
+
+The expected draft is 1–64 KiB; the stress bound is 1 MiB. One scrolling TextKit document owns
+the whole draft, as in the standalone Markdown editor. There are no per-line views, polling
+callbacks, file watchers or per-keystroke whole-draft conversions; the complete string is read
+from TextKit only on Save and Return, and all file I/O runs in `ExternalPromptEditorFileStore`.
+
 Claude and Grok accept `--session-id <uuid>`, so the id is minted up front. Grok does not persist
 that id while its first-login browser authentication screen is open, so `GrokSessionDiscovery`
 polls the supported `grok sessions list` command and marks it resumable only after it appears.

@@ -619,7 +619,7 @@ final class TerminalSession: NSObject {
         terminalView.startProcess(
             executable: plan.executable,
             args: plan.arguments,
-            environment: plan.credentialEnvironment.applied(toEntries: buildEnvironment()),
+            environment: plan.environmentEntries(on: buildEnvironment()),
             execName: (plan.executable as NSString).lastPathComponent
         )
 
@@ -1063,7 +1063,7 @@ final class TerminalSession: NSObject {
     private func hostSpawnEnvironment(for plan: AgentLaunchPlan) -> [String] {
         switch hostPlacement {
         case .local:
-            return plan.credentialEnvironment.applied(toEntries: buildEnvironment())
+            return plan.environmentEntries(on: buildEnvironment())
         case .remote(let environment):
             return environment + ["\(EnvironmentKeys.colorFGBG)=\(profile.theme.colorFGBG)"]
         }

@@ -65,8 +65,29 @@ enum AgentLauncher {
         return launchPlan(
             route: routed(command, for: session, rendersTerminalUI: true),
             in: executionProject.folderPath,
-            resumeState: resumeState
+            resumeState: resumeState,
+            environmentOverrides: project.executionHost == nil
+                ? defaultPromptEditorEnvironment(
+                    inherited: ProcessInfo.processInfo.environment,
+                    executablePath: Bundle.main.executablePath
+                )
+                : [:]
         )
+    }
+
+    /// A local TUI gets a native EDITOR fallback when the person has not set EDITOR. Codex and
+    /// Claude prefer VISUAL if present; OpenCode uses EDITOR, so a VISUAL-only environment still
+    /// needs this fallback. The login shell may replace either variable after spawn. Remote
+    /// launches resolve an editor on their own machine.
+    static func defaultPromptEditorEnvironment(
+        inherited: [String: String],
+        executablePath: String?
+    ) -> [String: String] {
+        guard inherited["EDITOR"]?.isEmpty != false,
+              let executablePath else { return [:] }
+        var editorCommand = ShellCommand(word: executablePath)
+        editorCommand.append(flag: "--prompt-editor")
+        return ["EDITOR": editorCommand.source]
     }
 
     /// Builds the plan for a session Threading renders itself, rather than showing a terminal.

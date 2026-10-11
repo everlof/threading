@@ -4,6 +4,25 @@
   "platform": "macOS",
   "entries": [
     {
+      "id": "external-prompt-editor",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "External prompt editor",
+      "description": "The CLI draft opens in Threading's shipping themed editor window and returns to its composer without sending.",
+      "states": ["Loaded draft", "Save and Return", "Cancel"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk"],
+        "appearances": ["Light", "Dark", "Authored"],
+        "sizes": ["800×560-point editor window"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ExternalPromptEditorTests.swift",
+        "test": "ThreadingTests/ExternalPromptEditorTests/testRendersDraftInTheShippingWindow"
+      },
+      "capture": { "glob": "external-prompt-editor-*.png" }
+    },
+    {
       "id": "app-theme-preview",
       "kind": "surface",
       "status": "implemented",

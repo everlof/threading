@@ -1494,6 +1494,20 @@ Ctrl+D or the row appears dormant. The conversation, account, and checkout stay 
 any work currently running is interrupted. A failed stop is reported instead of launching
 a second agent. This action applies to chats using the Terminal interface.
 
+### Editing a long terminal prompt
+
+In a local Claude Code or Codex terminal, press **Ctrl+G** to edit the current draft in a larger
+text window. Claude Code also accepts **Ctrl+X, Ctrl+E**. In OpenCode, use **/editor** or
+**Ctrl+X, E**. **Save and Return** (or **Cmd+S** / **Cmd+Return**) puts the text back in the
+agent's draft; it does not send the message. **Cancel** or **Escape** leaves the original draft.
+
+Threading supplies its own editor when `EDITOR` is not configured. Set `EDITOR` in your login
+shell profile (for example, `~/.zprofile` for zsh) to use a different editor; Codex and Claude
+Code also prefer `VISUAL` when it is set. For a GUI editor, its command needs
+to wait until you close the edited document (for example, `EDITOR="code --wait"`). The choice
+takes effect when you start or restart the terminal session. Remote-host sessions use the
+editor configured on that host.
+
 ### Closing
 - **Cmd+W**: closes the focused drawer/panel tab, or the page on screen — never the agent
 - Right-click > **Close Session**: ends the agent, leaving the session dormant and resumable

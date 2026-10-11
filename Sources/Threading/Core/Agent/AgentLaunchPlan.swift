@@ -16,14 +16,12 @@ struct AgentLaunchPlan {
 
     /// Environment entries this launch needs that the shared launch environment does not carry.
     ///
-    /// A terminal launch states its environment as `env NAME=value` words inside the login-shell
-    /// command, which a native launch has no room for: it spawns the child directly and hands it
-    /// a dictionary. Empty for every plan that has nothing to add, so the mechanism costs the
-    /// other runtimes nothing — the first user is Cursor, whose CLI opens a browser to
-    /// authenticate unless `BROWSER` and `NO_OPEN_BROWSER` say otherwise.
+    /// Both terminal and native launches merge these into the child's spawn environment. The
+    /// login shell can still replace ordinary values such as EDITOR from its own profile.
+    /// Empty for every plan that has nothing to add, so the mechanism costs those runs nothing.
     ///
-    /// Read through `launchEnvironment()` rather than merged at each call site, so a transport
-    /// cannot pick up the plan and silently drop what it asked for.
+    /// Read through `launchEnvironment()` or `environmentEntries(on:)` rather than merged at
+    /// each transport call site, so a transport cannot silently drop what the plan asked for.
     let environmentOverrides: [String: String]
 
     /// Credentials this launch's child needs, such as a login's long-lived token.
@@ -64,5 +62,19 @@ struct AgentLaunchPlan {
             environmentOverrides: environmentOverrides,
             credentialEnvironment: credentialEnvironment
         )
+    }
+
+    /// PTY transports use KEY=value entries rather than a dictionary. Apply ordinary plan
+    /// overrides before credentials, replacing a prior entry for the same key in both cases.
+    func environmentEntries(on inherited: [String]) -> [String] {
+        let keys = Set(environmentOverrides.keys)
+        let kept = inherited.filter { entry in
+            guard let separator = entry.firstIndex(of: "=") else { return true }
+            return !keys.contains(String(entry[..<separator]))
+        }
+        let overrides = environmentOverrides.keys.sorted().map { key in
+            "\(key)=\(environmentOverrides[key] ?? "")"
+        }
+        return credentialEnvironment.applied(toEntries: kept + overrides)
     }
 }

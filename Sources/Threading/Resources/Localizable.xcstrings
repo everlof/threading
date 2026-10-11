@@ -21273,6 +21273,17 @@
         }
       }
     },
+    "Edit Prompt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redigera prompt"
+          }
+        }
+      }
+    },
     "Edit Themes…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21324,6 +21335,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Redigera med en agent"
+          }
+        }
+      }
+    },
+    "Edit your message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redigera ditt meddelande"
           }
         }
       }
@@ -40830,6 +40852,17 @@
         }
       }
     },
+    "Prompt text" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prompttext"
+          }
+        }
+      }
+    },
     "PromptCompletionPresenter" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46449,6 +46482,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spara en ögonblicksbild av enheten (högerklicka för alternativ)"
+          }
+        }
+      }
+    },
+    "Save and Return" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara och återgå"
+          }
+        }
+      }
+    },
+    "Save and return to your draft. The message is not sent yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara och återgå till ditt utkast. Meddelandet skickas inte ännu."
           }
         }
       }
@@ -58115,6 +58170,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Projektets egen utcheckning"
+          }
+        }
+      }
+    },
+    "The prompt file changed while this editor was open." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Promptfilen ändrades medan redigeraren var öppen."
+          }
+        }
+      }
+    },
+    "The prompt file is not UTF-8 text." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Promptfilen innehåller inte UTF-8-text."
+          }
+        }
+      }
+    },
+    "The prompt file is unavailable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Promptfilen är inte tillgänglig."
+          }
+        }
+      }
+    },
+    "The prompt is too large to open here (1 MB maximum)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prompten är för stor för att öppnas här (högst 1 MB)."
           }
         }
       }
