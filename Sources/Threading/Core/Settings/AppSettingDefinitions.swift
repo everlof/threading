@@ -1656,18 +1656,18 @@ enum AppSettingDefinitions {
     ]
 
     private static let surfaceDefinitions: [AppSettingDefinition] = [
-        surfaced("tools.proxyClientAccess", pageID: "tools", order: 0, section: nil,
+        surfaced("tools.proxyClientAccess", pageID: "tools", order: 1, section: nil,
                   title: "Proxy Client Access", "proxy", "IP", "approve", "revoke", "forget", "device"),
-        surfaced("tools.network.requestHeaders", pageID: "tools", order: 1,
+        surfaced("tools.network.requestHeaders", pageID: "tools", order: 2,
                   section: "Browser Network Capture", title: "Capture request headers",
                   "browser", "network", "headers", "bodies", "capture", "development"),
-        surfaced("tools.network.responseHeaders", pageID: "tools", order: 2,
+        surfaced("tools.network.responseHeaders", pageID: "tools", order: 3,
                   section: "Browser Network Capture", title: "Capture response headers",
                   "browser", "network", "headers", "bodies", "capture", "development"),
-        surfaced("tools.network.requestBody", pageID: "tools", order: 3,
+        surfaced("tools.network.requestBody", pageID: "tools", order: 4,
                   section: "Browser Network Capture", title: "Capture request bodies",
                   "browser", "network", "headers", "bodies", "capture", "development"),
-        surfaced("tools.network.responseBody", pageID: "tools", order: 4,
+        surfaced("tools.network.responseBody", pageID: "tools", order: 5,
                   section: "Browser Network Capture", title: "Capture response bodies",
                   "browser", "network", "headers", "bodies", "capture", "development"),
         surfaced("general.agentTools", pageID: "general", order: 7,
