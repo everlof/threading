@@ -62,6 +62,11 @@ uses its durable device credential.
 `Packages/ThreadingPeerTransport` is linked into both application targets behind the existing
 loopback remote interface.
 
+Opening a logical socket yields while its OPEN frame is sent. The receive actor may already
+have consumed OPENED or RESET when that send completes: the opening path must return the accepted
+stream or its closed error before installing a waiter. A deterministic transport fixture holds
+the send return until the reply has been processed, covering both outcomes without timing sleeps.
+
 | Check | Result |
 | --- | --- |
 | macOS native data channel | Passed: offer/answer, DTLS/SCTP open and bidirectional binary data |

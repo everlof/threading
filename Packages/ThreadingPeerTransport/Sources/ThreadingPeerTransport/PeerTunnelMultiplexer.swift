@@ -413,9 +413,11 @@ public actor PeerTunnelMultiplexer {
     }
 
     private func waitUntilAccepted(streamID: UInt32) async throws {
-        guard var state = streams[streamID], state.phase == .opening else {
-            throw PeerTunnelError.streamNotOpen(streamID)
-        }
+        try ensureStarted()
+        guard var state = streams[streamID] else { throw PeerTunnelError.streamClosed(streamID) }
+        // Sending OPEN suspends this actor. The receive loop can consume OPENED or RESET
+        // before the send returns, so observe that outcome before installing a waiter.
+        if state.phase == .open { return }
         let identifier = UUID()
         return try await withCheckedThrowingContinuation { continuation in
             state.pendingOpen = PendingWait(identifier: identifier, continuation: continuation)

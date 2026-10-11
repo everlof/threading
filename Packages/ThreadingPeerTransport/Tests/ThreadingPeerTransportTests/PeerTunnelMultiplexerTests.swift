@@ -4,6 +4,41 @@ import XCTest
 @testable import ThreadingPeerTransport
 
 final class PeerTunnelMultiplexerTests: XCTestCase {
+    func testOpeningObservesAReplyProcessedBeforeTheSendReturns() async throws {
+        for accepts in [true, false] {
+            let pair = await InMemoryMessageTransport.makePair()
+            let heldTransport = OpenSendHeldUntilReplyTransport(base: pair.left)
+            let client = PeerTunnelMultiplexer(role: .client, transport: heldTransport)
+            let server = PeerTunnelMultiplexer(role: .server, transport: pair.right)
+            addTeardownBlock {
+                await client.close()
+                await server.close()
+            }
+            try await client.start()
+            try await server.start()
+            let opening = Task { try await client.openStream(service: .https) }
+            let incoming = try await server.acceptStream()
+            if accepts {
+                try await incoming.accept()
+            } else {
+                await incoming.reset()
+            }
+            await heldTransport.waitForReplyBeforeSendReturns()
+            await heldTransport.releaseSend()
+            if accepts {
+                let outgoing = try await opening.value
+                XCTAssertEqual(outgoing.service, .https)
+            } else {
+                do {
+                    _ = try await opening.value
+                    XCTFail("A reset opening must remain refused")
+                } catch {
+                    XCTAssertEqual(error as? PeerTunnelError, .streamClosed(incoming.id))
+                }
+            }
+        }
+    }
+
     func testTLSOpenKeepsItsServiceAndCannotFallBackToTheHTTPBridge() async throws {
         let pair = await InMemoryMessageTransport.makePair()
         let client = PeerTunnelMultiplexer(role: .client, transport: pair.left)
@@ -291,6 +326,62 @@ final class PeerTunnelMultiplexerTests: XCTestCase {
         try await socket.send(payload, isComplete: false)
         let echoed = try await socket.receiveExactly(payload.count)
         XCTAssertEqual(echoed, payload)
+    }
+}
+
+/// Returning from a send need not precede receipt of the peer's reply. Hold that return until
+/// the receive loop asks for its next frame, which proves it processed OPENED or RESET already.
+private actor OpenSendHeldUntilReplyTransport: PeerMessageTransport {
+    let base: InMemoryMessageTransport
+    private var pendingSend: CheckedContinuation<Void, Never>?
+    private var pendingReply: CheckedContinuation<Void, Never>?
+    private var returnedReply = false
+    private var processedReply = false
+
+    init(base: InMemoryMessageTransport) { self.base = base }
+
+    func sendWhenWritable(_ data: Data) async throws {
+        try await base.sendWhenWritable(data)
+        let frame = try PeerTunnelFrame(decoding: data)
+        guard frame.operation == .open || frame.operation == .openTLS else { return }
+        await withCheckedContinuation { continuation in
+            pendingSend = continuation
+            signalReplyIfReady()
+        }
+    }
+
+    func receive() async throws -> Data {
+        if returnedReply {
+            processedReply = true
+            signalReplyIfReady()
+        }
+        let data = try await base.receive()
+        let frame = try PeerTunnelFrame(decoding: data)
+        if frame.operation == .opened || frame.operation == .reset { returnedReply = true }
+        return data
+    }
+
+    func waitForReplyBeforeSendReturns() async {
+        if processedReply, pendingSend != nil { return }
+        await withCheckedContinuation { pendingReply = $0 }
+    }
+
+    func releaseSend() {
+        pendingSend?.resume()
+        pendingSend = nil
+    }
+
+    func close() async {
+        releaseSend()
+        pendingReply?.resume()
+        pendingReply = nil
+        await base.close()
+    }
+
+    private func signalReplyIfReady() {
+        guard processedReply, pendingSend != nil else { return }
+        pendingReply?.resume()
+        pendingReply = nil
     }
 }
 
