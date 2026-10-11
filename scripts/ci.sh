@@ -107,7 +107,7 @@ say "Validating recorded agent scenarios"
 "${script_directory}/check_agent_scenarios.sh"
 
 say "Testing localization boundary tooling"
-python3 -m unittest "${repository_directory}/scripts/tests/test_localization_boundary_lint.py"
+python3 "${repository_directory}/scripts/tests/test_localization_boundary_lint.py"
 
 say "Testing public extension schemas"
 python3 "${repository_directory}/scripts/tests/test_workspace_navigator_schema.py"
