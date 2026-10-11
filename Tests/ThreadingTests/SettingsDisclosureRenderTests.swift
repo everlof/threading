@@ -185,13 +185,13 @@ final class SettingsDisclosureRenderTests: HostedStoreTestCase {
             descendants(of: page, type: ThemedButton.self).first { $0.title == "Ask Again" }
         )
 
-        XCTAssertEqual(controller.virtualRowCount, 91)
+        XCTAssertEqual(controller.virtualRowCount, 92)
         XCTAssertLessThan(controller.materializedRowCount, controller.virtualRowCount)
         XCTAssertTrue(askAgain.performPrimaryAction())
         host.layoutSubtreeIfNeeded()
 
         XCTAssertEqual(exemptions.grants.count, 79)
-        XCTAssertEqual(controller.virtualRowCount, 90)
+        XCTAssertEqual(controller.virtualRowCount, 91)
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])
         withExtendedLifetime(window) {}
     }
@@ -217,7 +217,7 @@ final class SettingsDisclosureRenderTests: HostedStoreTestCase {
         window.contentView?.layoutSubtreeIfNeeded()
 
         XCTAssertTrue(labels(in: page).contains { $0.stringValue == "No test credentials stored" })
-        XCTAssertEqual(controller.virtualRowCount, 12)
+        XCTAssertEqual(controller.virtualRowCount, 13)
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])
         withExtendedLifetime(window) {}
     }
