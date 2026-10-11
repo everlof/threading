@@ -157,9 +157,12 @@ Application Support directory. A candidate is validated before its atomic activa
 updates preserve the active version, and no background update check or download occurs. Resolution
 then considers the developer override `THREADING_PHYSICAL_DEVICE_PROBE_PATH`, the managed path, and
 fixed Homebrew/local/system paths. Its version is checked during background source discovery,
-never while the main actor starts the stream. Finite discovery commands drain stdout on a separate
-worker and have enforced deadlines; a connected phone or external tool that stays alive without
-writing cannot wedge Rescan. The device also needs an existing pairing record; any Mac that has
+never while the main actor starts the stream. Finite discovery commands poll a nonblocking pipe
+on that same worker, draining at most 256 KiB between deadline checks and retaining at most 8 MiB.
+That worker alone closes the pipe: a separately queued `availableData` reader could start after
+timeout had closed its handle and crash the host. A silent child, an early stdout close, or a
+descendant retaining stdout cannot leave a blocked reader behind. The device also needs an
+existing pairing record; any Mac that has
 run Xcode against it has one.
 
 Cost: `--age-limit 60` produced a **284 MB** archive; `--age-limit 600` produced **296 MB**.

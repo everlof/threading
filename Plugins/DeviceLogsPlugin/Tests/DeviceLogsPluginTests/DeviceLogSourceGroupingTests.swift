@@ -173,6 +173,26 @@ final class DeviceLogSourceGroupingTests: XCTestCase {
         )
     }
 
+    func testDiscoveryDrainsMoreThanAPipeBufferWithoutWaitingForTheChildToExit() {
+        let count = 256 * 1_024
+        let output = BoundedDeviceLogCommand.run("/usr/bin/head", ["-c", String(count), "/dev/zero"])
+        XCTAssertEqual(output?.utf8.count, count)
+    }
+
+    func testDiscoveryRefusesOutputAboveItsByteLimit() {
+        let count = DeviceLogLimits.maximumDiscoveryOutputBytes + 1
+        XCTAssertNil(BoundedDeviceLogCommand.run("/usr/bin/head", ["-c", String(count), "/dev/zero"]))
+    }
+
+    func testDiscoveryDeadlineStillAppliesAfterStdoutCloses() {
+        let started = Date()
+        XCTAssertNil(BoundedDeviceLogCommand.run(
+            "/bin/sh", ["-c", "exec 1>&-; exec /bin/sleep 30"], deadline: 0.05
+        ))
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+        XCTAssertEqual(BoundedDeviceLogCommand.run("/bin/echo", ["next command"]), "next command\n")
+    }
+
     func testTheStructuredReaderPinsOnePhoneAndClearsConflictingTransportModes() {
         let environment = StructuredPairedDeviceLogRowSource.environment(
             udid: phone.id,

@@ -365,12 +365,9 @@ public enum DeviceLogLimits {
     public static let containerDeadline: TimeInterval = 40
 }
 
-/// Runs one finite device-discovery command while draining its output concurrently.
-///
-/// Reading `FileHandle.availableData` on the caller blocks until bytes arrive. Doing that inside a
-/// deadline loop made the deadline fictional for the most important failure shape: a child that
-/// stayed alive and said nothing. The reader has its own worker now, so the caller can enforce the
-/// timeout and reclaim the child independently of whether stdout ever becomes readable.
+/// Runs one finite command on the discovery worker with a nonblocking, byte-bounded pipe drain.
+/// The same worker owns reading and closing: a queued background reader must never outlive the
+/// deadline and start using a FileHandle the caller has already closed.
 enum BoundedDeviceLogCommand {
     private static let terminationGrace: TimeInterval = 0.5
 
@@ -379,41 +376,64 @@ enum BoundedDeviceLogCommand {
         _ arguments: [String],
         deadline seconds: TimeInterval = DeviceLogLimits.discoveryDeadline
     ) -> String? {
-        guard FileManager.default.isExecutableFile(atPath: executable) else { return nil }
+        guard seconds.isFinite, seconds > 0,
+              FileManager.default.isExecutableFile(atPath: executable) else { return nil }
 
         let task = Process()
         task.executableURL = URL(fileURLWithPath: executable)
         task.arguments = arguments
         let pipe = Pipe()
+        let descriptor = pipe.fileHandleForReading.fileDescriptor
+        defer {
+            try? pipe.fileHandleForReading.close()
+            try? pipe.fileHandleForWriting.close()
+        }
+        let flags = fcntl(descriptor, F_GETFL)
+        guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) == 0 else { return nil }
         task.standardOutput = pipe
         task.standardError = FileHandle.nullDevice
 
         let processFinished = DispatchSemaphore(value: 0)
         task.terminationHandler = { _ in processFinished.signal() }
         guard (try? task.run()) != nil else { return nil }
+        try? pipe.fileHandleForWriting.close()
 
-        let output = BoundedDeviceLogCommandOutput()
-        let outputFinished = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .utility).async {
-            output.drain(pipe.fileHandleForReading)
-            outputFinished.signal()
+        var output = BoundedDeviceLogCommandOutput()
+        var buffer = [UInt8](repeating: 0, count: 32 * 1_024)
+        var expiresAt = DispatchTime.now() + seconds
+        var exited = false
+        while DispatchTime.now() < expiresAt {
+            switch output.drainAvailable(from: descriptor, buffer: &buffer) {
+            case .failed:
+                stop(task, processFinished: processFinished)
+                return nil
+            case .ended:
+                if exited || processFinished.wait(timeout: expiresAt) == .success {
+                    return output.text()
+                }
+                stop(task, processFinished: processFinished)
+                return nil
+            case .open:
+                break
+            }
+            if !exited, processFinished.wait(timeout: .now()) == .success {
+                exited = true
+                // A descendant may retain stdout after the direct child exits. That pipe must
+                // not keep discovery, or a second background reader, alive indefinitely.
+                expiresAt = min(expiresAt, .now() + terminationGrace)
+            }
+            let now = DispatchTime.now()
+            guard now < expiresAt else { break }
+            let remaining = (expiresAt.uptimeNanoseconds - now.uptimeNanoseconds) / 1_000_000
+            var readiness = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+            _ = poll(&readiness, 1, Int32(min(50, max(1, remaining))))
         }
-
-        guard processFinished.wait(timeout: .now() + seconds) == .success else {
-            stop(task, processFinished: processFinished)
-            try? pipe.fileHandleForReading.close()
-            _ = outputFinished.wait(timeout: .now() + terminationGrace)
-            return nil
-        }
-
-        guard outputFinished.wait(timeout: .now() + terminationGrace) == .success else {
-            try? pipe.fileHandleForReading.close()
-            return nil
-        }
-        return output.text()
+        if !exited { stop(task, processFinished: processFinished) }
+        return nil
     }
 
     private static func stop(_ task: Process, processFinished: DispatchSemaphore) {
+        guard task.isRunning else { return }
         task.terminate()
         guard processFinished.wait(timeout: .now() + terminationGrace) != .success,
               task.isRunning
@@ -424,36 +444,42 @@ enum BoundedDeviceLogCommand {
     }
 }
 
-private final class BoundedDeviceLogCommandOutput: @unchecked Sendable {
-    private let lock = NSLock()
+private struct BoundedDeviceLogCommandOutput {
+    enum PipeState { case open, ended, failed }
+
     private var data = Data()
     private var exceededLimit = false
 
-    func drain(_ handle: FileHandle) {
-        while true {
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else { return }
-            append(chunk)
+    mutating func drainAvailable(from descriptor: Int32, buffer: inout [UInt8]) -> PipeState {
+        // Check the process deadline after at most 256 KiB, even for a continuously writable child.
+        for _ in 0..<8 {
+            let count = buffer.withUnsafeMutableBytes { Darwin.read(descriptor, $0.baseAddress, $0.count) }
+            if count > 0 {
+                append(buffer.prefix(count))
+            } else if count == 0 {
+                return .ended
+            } else if errno == EAGAIN || errno == EWOULDBLOCK {
+                return .open
+            } else if errno != EINTR {
+                return .failed
+            }
         }
+        return .open
     }
 
     func text() -> String? {
-        lock.lock()
-        defer { lock.unlock() }
         guard !exceededLimit else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    private func append(_ chunk: Data) {
-        lock.lock()
-        defer { lock.unlock() }
+    private mutating func append(_ chunk: ArraySlice<UInt8>) {
         guard !exceededLimit else { return }
         guard data.count + chunk.count <= DeviceLogLimits.maximumDiscoveryOutputBytes else {
             exceededLimit = true
             data.removeAll(keepingCapacity: false)
             return
         }
-        data.append(chunk)
+        data.append(contentsOf: chunk)
     }
 }
 

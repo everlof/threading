@@ -16,7 +16,18 @@ final class SimulatorSocketIOTests: XCTestCase {
         let parentWrite = dup(parentRead)
         let peer = sockets[1]
         XCTAssertGreaterThanOrEqual(parentWrite, 0)
+        var noSignal: Int32 = 1
+        for descriptor in sockets {
+            XCTAssertEqual(setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSignal,
+                                     socklen_t(MemoryLayout.size(ofValue: noSignal))), 0)
+        }
+        let workers = DispatchGroup()
         defer {
+            // A timeout must wake and join both readers before these descriptor numbers can
+            // be reused by the next test. Closing alone does not cancel an in-flight read.
+            shutdown(parentRead, SHUT_RDWR)
+            shutdown(peer, SHUT_RDWR)
+            workers.wait()
             close(parentRead)
             if parentWrite >= 0 { close(parentWrite) }
             close(peer)
@@ -32,7 +43,11 @@ final class SimulatorSocketIOTests: XCTestCase {
             peer: Result<Data, SocketFailure>?.none
         ))
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        // These deliberately blocking readers need their own two threads. The global queue
+        // may be occupied by unrelated device discovery during the complete hosted test plan.
+        workers.enter()
+        Thread {
+            defer { workers.leave() }
             var buffer = [UInt8](repeating: 0, count: 32)
             parentReaderStarted.signal()
             do {
@@ -48,12 +63,14 @@ final class SimulatorSocketIOTests: XCTestCase {
                 }
             }
             parentAnswered.fulfill()
-        }
+        }.start()
 
         XCTAssertEqual(parentReaderStarted.wait(timeout: .now() + 1), .success)
         Thread.sleep(forTimeInterval: 0.02)
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        workers.enter()
+        Thread {
+            defer { workers.leave() }
             var buffer = [UInt8](repeating: 0, count: 32)
             do {
                 let data = try SimulatorSocketIO.read(
@@ -69,7 +86,7 @@ final class SimulatorSocketIOTests: XCTestCase {
                 }
             }
             peerAnswered.fulfill()
-        }
+        }.start()
 
         try SimulatorSocketIO.writeAll(request, to: parentWrite)
         wait(for: [parentAnswered, peerAnswered], timeout: 2)
