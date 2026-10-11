@@ -61,3 +61,12 @@ cc509f204580817f1640fc0b0600e7141cd73a3d:ThreadingRemoteKit/Tests/ThreadingRemot
 6bd8c008dd19ea6f8eb0ca46281922cdbd397e3a:ThreadingRemoteKit/Tests/ThreadingRemoteKitTests/RemoteProtocolTests.swift:generic-api-key:764
 # Synthetic redaction fixture: sk-fixture-0123456789, never an issued credential.
 faa85f7e03252d0a95546208f369232b953e744f:Packages/ThreadingController/Tests/ThreadingControllerTests/ControllerRecoveryTests.swift:generic-api-key:77
+# The same synthetic redaction fixture in the committed controller recovery revision.
+f9a047a10b2406ffa3e8f7a5809c88b8c9383b0c:Packages/ThreadingController/Tests/ThreadingControllerTests/ControllerRecoveryTests.swift:generic-api-key:77
+# Swift type annotations and a fresh P256 key constructor, not embedded key material.
+d66cefeb7e2c3677c1e92ed0cbfde3343b12f27a:Packages/ThreadingAndroidKit/Sources/ThreadingAndroidKit/EmulatorAuthorization.swift:generic-api-key:16
+d66cefeb7e2c3677c1e92ed0cbfde3343b12f27a:Packages/ThreadingAndroidKit/Sources/ThreadingAndroidKit/EmulatorAuthorization.swift:generic-api-key:19
+# RFC 6455's public example WebSocket nonce ("the sample nonce") in a socket test.
+7d275de92caf9ae971c9c40581d52f19ca9bd89e:Tests/ThreadingTests/RemoteBrowserTunnelTests.swift:generic-api-key:125
+# Minified upstream Mermaid variable expressions following m.keyCount, not a credential.
+884e875f972cc7267667c9682b3693f3a46b270a:Sources/Threading/Resources/Mermaid/mermaid.min.js:generic-api-key:636
