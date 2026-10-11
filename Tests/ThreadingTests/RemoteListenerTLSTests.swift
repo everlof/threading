@@ -90,11 +90,19 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
         let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: directory))
         let sessionCount = 1_200
         let title = String(repeating: "Conversation ", count: 70)
-        for index in 0..<sessionCount {
-            XCTAssertNotNil(ProjectStore.shared.addSession(
-                to: project.id, kind: .claude, title: "\(index) \(title)"
-            ))
+        let lastActiveAt = Date()
+        let conversations = (0..<sessionCount).map { index in
+            ImportableSession(
+                agentSessionID: TranscriptID("tls-pairing-\(index)"),
+                kind: .claude,
+                accountHandle: .standard,
+                title: "\(index) \(title)",
+                lastActiveAt: lastActiveAt
+            )
         }
+        // Exercise the shipping batch-import path once. Adding 1,200 sessions individually
+        // also rebuilds any mounted sidebar 1,200 times before this transport test even starts.
+        XCTAssertEqual(ProjectStore.shared.importSessions(conversations, into: project.id).count, sessionCount)
         let redeemer = PairingRedeemer()
         server.invitationRedeemer = redeemer
         let port = try quietPort()
