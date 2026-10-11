@@ -230,9 +230,10 @@ final class RemoteAccessHostedDisabledCoordinatorTests: HostedStoreTestCase {
 
         XCTAssertEqual(
             coordinator.hostedServiceState,
-            .notConfigured,
-            "a hosted-disabled controller has an endpoint to contact"
+            .stopped,
+            "a hosted-disabled controller started its transport"
         )
+        XCTAssertNil(coordinator.listenerStatus.hostedTLSPort)
         XCTAssertFalse(coordinator.canIssueHostedDeviceCredentials)
         if let payload = coordinator.pairingCodePayload,
            case .hostedPairing = RemoteInvitation(payload: payload) {

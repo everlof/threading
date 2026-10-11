@@ -198,9 +198,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         self.guestShareStore = guestShareStore ?? Self.defaultGuestShareStore()
         hostedServiceWasInjected = hostedService != nil
         // A build that does not offer Hosted Direct holds an inert controller rather than none,
-        // so every hosted branch — push, the pairing link, guest invitations, device credentials
-        // — resolves through the `.notConfigured` state it already handles, and nothing reads the
-        // hosted Keychain record or contacts the service.
+        // so push, pairing links, guest invitations and device credentials remain unavailable.
+        // Without a hosted TLS listener the controller stays stopped; nothing reads the hosted
+        // Keychain record or contacts the service.
         self.hostedService = hostedService ?? (appSettings.hostedDirectIsOffered
             ? RemoteHostedServiceController(
                 endpoint: RemoteHostedServiceController.configuredEndpoint(

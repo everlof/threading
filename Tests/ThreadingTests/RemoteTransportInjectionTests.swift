@@ -244,7 +244,8 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
         XCTAssertTrue(settings.remoteAccessEnabled)
         XCTAssertEqual(activity.beginCount, 1, "the public build never crossed the start boundary")
         XCTAssertEqual(tailnet.startedPorts, [], "a way in that is off started its transport")
-        XCTAssertEqual(coordinator.hostedServiceState, .notConfigured)
+        XCTAssertEqual(coordinator.hostedServiceState, .stopped)
+        XCTAssertNil(coordinator.listenerStatus.hostedTLSPort)
         XCTAssertFalse(coordinator.canIssueHostedDeviceCredentials)
     }
 
