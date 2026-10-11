@@ -44,6 +44,7 @@ saw the betas.
 - iPhone terminal drafts support line breaks without sending the message. Chat presentation,
   keyboard dismissal, attachment previews and reconnection behavior have been improved.
 - Invitation links preserve their pairing information when detected, copied or shared.
+- Fixed a crash when device discovery timed out.
 
 ## [0.6.0]
 
