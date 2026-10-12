@@ -5,14 +5,14 @@ import AppKit
 ///
 /// The header is one row, the same height as the single pane's: the device chooser, Add, the
 /// layout chooser (only once there is something to arrange), then the selected member's own
-/// capture, recording, Device Logs and options. A lone member therefore looks like the pane always
-/// did, with one extra +.
+/// capture, recording and Device Logs. Each titled device has its own options menu; the shared
+/// menu carries touch settings and, when the header is narrow, Layout.
 @MainActor
 final class SimulatorWorkspaceViewController: NSViewController {
     private static let deviceMenuWidth: CGFloat = 260
     /// Below this header width the device chooser, Add, the layout chooser and four actions no
     /// longer fit without truncating two labels to a letter each (measured at the protected 260pt
-    /// pane), so the layout chooser moves into the options menu, where it is always offered too.
+    /// pane), so the layout chooser moves into the shared options menu.
     private static let compactHeaderWidth: CGFloat = 340
 
     enum Failure: LocalizedError, Equatable {
@@ -389,17 +389,17 @@ final class SimulatorWorkspaceViewController: NSViewController {
         }
         controller.workspaceMenuExtras = { [weak self, weak controller] in
             guard let self, let controller, self.state.members.count > 1 else { return [] }
-            let layouts: [ThemedMenuEntry] = SimulatorWorkspaceLayout.allCases.map { layout in
+            return [.item(ThemedMenuItem(
+                title: L10n.format("Remove %@ from Workspace", controller.workspaceDeviceName),
+                onChoose: { [weak self] in self?.remove(member.id) }
+            ))]
+        }
+        controller.workspaceLayoutMenu = { [weak self] in
+            guard let self, self.state.members.count > 1 else { return [] }
+            return SimulatorWorkspaceLayout.allCases.map { layout in
                 .item(ThemedMenuItem(title: layout.displayTitle, isSelected: self.state.layout == layout,
                                      onChoose: { [weak self] in self?.setLayout(layout) }))
             }
-            return [
-                .item(ThemedMenuItem(title: L10n.string("Layout"), submenu: layouts)),
-                .item(ThemedMenuItem(
-                    title: L10n.format("Remove %@ from Workspace", controller.workspaceDeviceName),
-                    onChoose: { [weak self] in self?.remove(member.id) }
-                )),
-            ]
         }
         controller.onSelectedDeviceChange = { [weak self] device in
             guard let self, let index = self.state.members.firstIndex(where: { $0.id == member.id }) else { return }
@@ -455,6 +455,7 @@ final class SimulatorWorkspaceViewController: NSViewController {
         // Nothing to arrange with one device, so the chooser leaves the row rather than idling in it;
         // a narrow pane keeps it in the options menu instead.
         let showsLayout = state.members.count > 1 && !headerIsCompact
+        selected.workspaceHeaderShowsLayout = showsLayout
         let leading: [NSView] = showsLayout ? [deviceChip, addButton, layoutChip] : [deviceChip, addButton]
         let trailing = [selected.workspaceActions]
         if !headerRow.leadingViews.elementsEqual(leading, by: ===)

@@ -174,8 +174,10 @@ final class SimulatorPaneViewController: NSViewController {
     var onFocusRequest: (() -> Void)?
     var onFrameAspectChange: ((CGFloat) -> Void)?
     var onGestureEnd: (() -> Void)?
-    /// Workspace actions about this member, appended to its menus (Remove from Workspace).
+    /// Actions about this member, appended to its device menus (Remove from Workspace).
     var workspaceMenuExtras: (() -> [ThemedMenuEntry])?
+    /// Workspace-wide choices in the shared header when several devices are shown.
+    var workspaceLayoutMenu: (() -> [ThemedMenuEntry])?
     /// The member's own actions for the workspace's shared header row.
     var workspaceActions: NSView { workspaceActionButtons }
     var workspaceHardwareControls: NSView { hardwareButtonRow }
@@ -194,6 +196,7 @@ final class SimulatorPaneViewController: NSViewController {
             applyWorkspaceRole()
         }
     }
+    var workspaceHeaderShowsLayout = false
     var onOpenDeviceLogs: ((SimulatorDeviceID) -> Void)?
 
     private lazy var deviceChip: ChipView = {
@@ -456,6 +459,26 @@ final class SimulatorPaneViewController: NSViewController {
         return button
     }()
 
+    private lazy var workspaceTileMenuButton: ThemedIconButton = {
+        let button = ThemedIconButton(symbolName: "chevron.down", accessibility: L10n.string("Device Options"),
+                                      target: .besidePrimary, inkSource: .chrome)
+        button.presentsMenu = true
+        button.toolTip = L10n.string("Device Options")
+        button.setAccessibilityIdentifier("simulator.workspace.memberOptions")
+        button.isHidden = true
+        button.onPress = { [weak self] in self?.showMemberMenu() }
+        return button
+    }()
+
+    private lazy var workspaceTitleActions: NSStackView = {
+        let stack = NSStackView(views: [workspaceTitle, workspaceTileMenuButton])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = Design.Spacing.hairline
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
+
     /// Called when the name the workspace shows for this member changes.
     var onWorkspaceIdentityChange: (() -> Void)?
 
@@ -539,9 +562,39 @@ final class SimulatorPaneViewController: NSViewController {
     private var workspaceMenuSession: AnyObject?
 
     private func showWorkspaceMenu() {
+        let entries = workspaceHeaderMenuEntries()
+        guard !entries.isEmpty else { return }
+        workspaceMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: Self.menuWidth),
+            from: workspaceMenuButton, selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.workspaceMenuSession = nil }
+        )
+    }
+
+    private func showMemberMenu() {
+        onFocusRequest?()
+        workspaceMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: memberMenuEntries(), minimumWidth: Self.menuWidth),
+            from: workspaceTileMenuButton, selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.workspaceMenuSession = nil }
+        )
+    }
+
+    func workspaceHeaderMenuEntries() -> [ThemedMenuEntry] {
+        guard workspaceRole != .solo else { return memberMenuEntries() }
+        var entries: [ThemedMenuEntry] = workspaceHeaderShowsLayout ? [] : (workspaceLayoutMenu?() ?? [])
+        if !entries.isEmpty { entries.append(.separator) }
+        entries += sharedTouchSettingEntries()
+        return entries
+    }
+
+    func memberMenuEntries() -> [ThemedMenuEntry] {
         if noteEditor != nil { commitNoteEditor() }
         let request = SimulatorScreenView.ContextMenuRequest(anchor: .control, point: nil, noteID: nil)
-        var entries = screenMenuEntries(for: request, includesNotes: true, includesWorkspaceActions: false)
+        var entries = screenMenuEntries(for: request, includesNotes: true, includesWorkspaceActions: false,
+                                        includesSharedTouchSettings: workspaceRole == .solo)
         entries.append(.separator)
         // Device Logs keeps its own button in the header; these two have none there.
         for button in [controlButton, retryButton] {
@@ -557,12 +610,17 @@ final class SimulatorPaneViewController: NSViewController {
             entries.append(.separator)
             entries += extras
         }
-        workspaceMenuSession = ThemedMenuPresenter.present(
-            ThemedMenuPresentation(entries: entries, minimumWidth: Self.menuWidth),
-            from: workspaceMenuButton, selectedEntryIndex: nil,
-            onChoose: { _, item in item.onChoose?() },
-            onDismiss: { [weak self] in self?.workspaceMenuSession = nil }
-        )
+        return entries
+    }
+
+    private func sharedTouchSettingEntries() -> [ThemedMenuEntry] {
+        [
+            .item(ThemedMenuItem(
+                title: L10n.string("Show Touches"), isSelected: showTouches,
+                onChoose: { [weak self] in self?.toggleShowTouches() }
+            )),
+            .item(ThemedMenuItem(title: L10n.string("Touch Style"), submenu: touchStyleEntries())),
+        ]
     }
 
     private func makeHardwareButton(
@@ -930,7 +988,9 @@ final class SimulatorPaneViewController: NSViewController {
     private func setupWorkspaceMemberUI() {
         view.addLayoutGuide(workspaceContentTop)
         view.addLayoutGuide(workspaceTitleBand)
-        for child in [workspaceTitle, screenView, statusLabel, noteSendBar, recordingBadge] { view.addSubview(child) }
+        for child in [workspaceTitleActions, screenView, statusLabel, noteSendBar, recordingBadge] {
+            view.addSubview(child)
+        }
         let fillsWidth = screenView.widthAnchor.constraint(equalTo: view.widthAnchor)
         fillsWidth.priority = .defaultHigh - 10
         // Just below required: a tile briefly smaller than its own chrome clips rather than
@@ -945,10 +1005,10 @@ final class SimulatorPaneViewController: NSViewController {
             workspaceContentTop.topAnchor.constraint(equalTo: view.topAnchor),
             workspaceTitleBand.topAnchor.constraint(equalTo: view.topAnchor),
             workspaceTitleBandHeight,
-            workspaceTitle.centerYAnchor.constraint(equalTo: workspaceTitleBand.centerYAnchor),
-            workspaceTitle.centerXAnchor.constraint(equalTo: screenView.centerXAnchor),
-            workspaceTitle.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor),
-            workspaceTitle.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor),
+            workspaceTitleActions.centerYAnchor.constraint(equalTo: workspaceTitleBand.centerYAnchor),
+            workspaceTitleActions.centerXAnchor.constraint(equalTo: screenView.centerXAnchor),
+            workspaceTitleActions.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor),
+            workspaceTitleActions.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor),
             screenTopToControlRow,
             screenView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             screenView.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor),
@@ -971,6 +1031,7 @@ final class SimulatorPaneViewController: NSViewController {
         guard isWorkspaceMember else { return }
         let titled = workspaceRole != .solo
         workspaceTitle.isHidden = !titled
+        workspaceTileMenuButton.isHidden = !titled
         NSLayoutConstraint.deactivate(titled ? workspaceUntitledConstraints : workspaceTitledConstraints)
         NSLayoutConstraint.activate(titled ? workspaceTitledConstraints : workspaceUntitledConstraints)
         let selected = workspaceRole == .selected
@@ -3202,7 +3263,8 @@ final class SimulatorPaneViewController: NSViewController {
     func screenMenuEntries(
         for request: SimulatorScreenView.ContextMenuRequest,
         includesNotes: Bool,
-        includesWorkspaceActions: Bool = true
+        includesWorkspaceActions: Bool = true,
+        includesSharedTouchSettings: Bool = true
     ) -> [ThemedMenuEntry] {
         var entries: [ThemedMenuEntry] = []
 
@@ -3238,17 +3300,12 @@ final class SimulatorPaneViewController: NSViewController {
             entries += annotationEntries(omittingUnavailable: true)
         }
 
-        entries.append(.separator)
-        entries.append(.item(ThemedMenuItem(
-            title: L10n.string("Show Touches"),
-            isSelected: showTouches,
-            onChoose: { [weak self] in self?.toggleShowTouches() }
-        )))
-        entries.append(.item(ThemedMenuItem(
-            title: L10n.string("Touch Style"),
-            submenu: touchStyleEntries()
-        )))
+        if includesSharedTouchSettings {
+            entries.append(.separator)
+            entries += sharedTouchSettingEntries()
+        }
         if includesNotes {
+            if !includesSharedTouchSettings { entries.append(.separator) }
             entries.append(.item(ThemedMenuItem(
                 title: L10n.string("Inspect Elements"),
                 isSelected: isInspecting,
@@ -3562,6 +3619,9 @@ final class SimulatorPaneViewController: NSViewController {
             workspaceTitle.title = name
             workspaceTitle.toolTip = [name, adoptedDevice?.runtimeName].compactMap { $0 }.joined(separator: " · ")
             if name != reportedWorkspaceName {
+                let optionsTitle = "\(L10n.string("Device Options")): \(name)"
+                workspaceTileMenuButton.setSymbol("chevron.down", accessibility: optionsTitle)
+                workspaceTileMenuButton.toolTip = optionsTitle
                 reportedWorkspaceName = name
                 onWorkspaceIdentityChange?()
             }

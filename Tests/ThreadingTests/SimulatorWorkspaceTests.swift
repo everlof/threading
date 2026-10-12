@@ -222,6 +222,58 @@ final class SimulatorWorkspaceTests: HostedStoreTestCase {
         XCTAssertEqual(workspace.state.members.last?.id, workspace.state.selectedID)
     }
 
+    func testEachDeviceMenuRemovesItsOwnMemberAndSharedMenuKeepsSharedSettings() throws {
+        let workspace = SimulatorWorkspaceViewController(state: SimulatorWorkspaceState(deviceID: device(1))) { id in
+            SimulatorPaneViewController(preferredDeviceID: id, isWorkspaceMember: true, control: WorkspaceControlFake())
+        }
+        defer { workspace.terminate() }
+        _ = workspace.view
+        let first = workspace.selectedSimulator
+        let second = try workspace.adopt(device(2))
+        let headerItems = first.workspaceHeaderMenuEntries().compactMap { entry -> ThemedMenuItem? in
+            if case .item(let item) = entry { return item }
+            return nil
+        }
+        XCTAssertEqual(headerItems.map(\.title), SimulatorWorkspaceLayout.allCases.map(\.displayTitle)
+                       + [L10n.string("Show Touches"), L10n.string("Touch Style")])
+        XCTAssertFalse(headerItems.contains { $0.title.contains("Remove") })
+        first.workspaceHeaderShowsLayout = true
+        let wideHeaderItems = first.workspaceHeaderMenuEntries().compactMap { entry -> ThemedMenuItem? in
+            if case .item(let item) = entry { return item }
+            return nil
+        }
+        XCTAssertEqual(wideHeaderItems.map(\.title), [L10n.string("Show Touches"), L10n.string("Touch Style")])
+
+        func memberMenu(in simulator: SimulatorPaneViewController) -> ThemedIconButton? {
+            let button = simulator.view.subviews.compactMap { $0 as? NSStackView }
+                .flatMap(\.arrangedSubviews)
+                .first { $0.accessibilityIdentifier() == "simulator.workspace.memberOptions" }
+            return button as? ThemedIconButton
+        }
+        let firstMenu = try XCTUnwrap(memberMenu(in: first))
+        let secondMenu = try XCTUnwrap(memberMenu(in: second))
+        XCTAssertFalse(firstMenu.isHidden)
+        XCTAssertFalse(secondMenu.isHidden)
+        XCTAssertTrue(secondMenu.accessibilityTitle()?.contains(second.workspaceDeviceName) == true)
+        let deviceTitles = second.memberMenuEntries().compactMap { entry -> String? in
+            if case .item(let item) = entry { return item.title }
+            return nil
+        }
+        XCTAssertTrue(deviceTitles.contains { $0.hasPrefix("Remove ") })
+        XCTAssertFalse(deviceTitles.contains(L10n.string("Show Touches")))
+        XCTAssertFalse(deviceTitles.contains(L10n.string("Touch Style")))
+
+        let secondExtras = second.workspaceMenuExtras?() ?? []
+        let removeSecond = try XCTUnwrap(secondExtras.compactMap { entry -> ThemedMenuItem? in
+            if case .item(let item) = entry { return item }
+            return nil
+        }.first)
+        workspace.select(workspace.state.members[0].id)
+        removeSecond.onChoose?()
+        XCTAssertEqual(workspace.state.members.compactMap(\.deviceID), [device(1)])
+        XCTAssertTrue(workspace.selectedSimulator === first)
+    }
+
     func testPublicCapturesTurnUprightInTheAxesInputMapsBackThrough() throws {
         for orientation in SimulatorScreenOrientation.allCases {
             let capture = try XCTUnwrap(SimulatorUprightCapture.uprightNow(try markedNativePNG(), orientation: orientation))

@@ -228,12 +228,16 @@ and focus changes. Removing a member releases only its lease; closing the tab re
 `SimulatorWorkspaceViewController` hosts one header row for its selected member and a bounded
 `SimulatorWorkspaceCanvas`. The row is the device chooser, **+**, the layout chooser (only with two
 or more members, and only while the header is at least 340 points wide), then the member's own
-screenshot, recording, Device Logs and options buttons. A lone member therefore looks like the
-single pane plus one **+**; the first version stacked a layout row and an "N Simulators" chooser
-above it, said "1 Simulators", and truncated both choosers to a letter at 260 points. Alone, the
-chooser switches the device as the single pane's did; beside peers it selects a member. The
-options and screen menus carry **Layout** and **Remove … from Workspace**; removal selects the
-neighbour. The six hardware controls retain their full targets and wrap into rows as width shrinks.
+screenshot, recording and Device Logs buttons. A lone member keeps its options button and looks
+like the single pane plus one **+**; the first version stacked a layout row and an "N Simulators"
+chooser above it, said "1 Simulators", and truncated both choosers to a letter at 260 points.
+Alone, the chooser switches the device as the single pane's did; beside peers it selects a member.
+With several devices, each name band has its own chevron menu for device actions, including
+**Remove … from Workspace**. Shared touch settings stay in the header's options menu. Layout
+stays in the shared header chooser, or that options menu at narrow widths. The device's screen
+context menu also offers removal; either route
+selects the neighbour. The six hardware controls retain their full targets and wrap into rows as
+width shrinks.
 
 A member hugs its device: its screen view is constrained to the confirmed frame's aspect, as wide
 as the cell allows, with the name in a fixed band above it and the status line directly under it.
