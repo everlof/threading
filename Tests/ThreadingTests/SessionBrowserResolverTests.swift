@@ -311,6 +311,7 @@ final class SessionBrowserResolverTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        drawerWindow.animationBehavior = .none
         drawerWindow.isReleasedWhenClosed = false
         drawerWindow.contentViewController = drawer
 

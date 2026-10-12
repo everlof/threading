@@ -56,6 +56,7 @@ final class BrowserReloadShortcutTests: HostedStoreTestCase {
         let window: NSWindow = throughApplication
             ? ReloadShortcutKeyPanel(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             : NSWindow(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         window.contentViewController = host
         NSLayoutConstraint.activate([

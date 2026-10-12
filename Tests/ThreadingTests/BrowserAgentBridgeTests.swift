@@ -483,6 +483,7 @@ final class BrowserAgentBridgeTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.animationBehavior = .none
         window.contentViewController = controller
         let table = try XCTUnwrap(
             descendants(in: controller.view).compactMap { $0 as? ThemedGroupedTableView }.first
@@ -2210,6 +2211,7 @@ final class BrowserAgentBridgeTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         let overlay = BrowserAnnotationOverlay(
             frame: NSRect(x: 0, y: 0, width: 390, height: 844)
@@ -2274,6 +2276,7 @@ final class BrowserAgentBridgeTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         let overlay = BrowserAnnotationOverlay(frame: window.contentView?.bounds ?? .zero)
         window.contentView?.addSubview(overlay)
@@ -2296,6 +2299,7 @@ final class BrowserAgentBridgeTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        otherWindow.animationBehavior = .none
         otherWindow.isReleasedWhenClosed = false
         ApplicationEventDispatchContext.withEvent(
             type: .scrollWheel,
@@ -2380,6 +2384,7 @@ final class BrowserAgentBridgeTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         window.appearance = appearance
         window.contentView?.addSubview(overlay)
@@ -2667,6 +2672,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         let browser = BrowserViewController(networkCaptureSettings: settings)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
                               styleMask: [.titled], backing: .buffered, defer: false)
+        window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         window.contentViewController = browser
         window.orderFront(nil)

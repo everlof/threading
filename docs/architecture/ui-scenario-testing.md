@@ -22,6 +22,20 @@ adapter tests remain the right tool for every protocol shape. A shared product j
 with one representative provider, while a provider-specific visible behavior earns its own UI
 scenario. This prevents the suite from becoming the cross-product of every feature and runtime.
 
+## In-process window fixtures
+
+Temporary AppKit fixture windows set `animationBehavior = .none` before attaching or presenting
+content. They often disappear before a normal window-opening animation would finish. A complete
+release run on macOS 26.5 retained 57 `_NSWindowTransformAnimation` workers after fixture
+teardown, reached libdispatch's 64-thread soft limit, and then starved transcript reads and a
+real-process probe. Increasing their timeouts could not make a queued worker run.
+
+`makeMainWindowController` applies this rule for the shared main-window fixture; standalone
+browser, attachment and dialog fixtures apply it at construction. This disables only AppKit's
+automatic window show/hide transition in the test process. Component motion remains active;
+the shipping application's window behavior is unchanged. A fixture that calls `close()` also
+sets `isReleasedWhenClosed = false` so AppKit and ARC cannot both release it.
+
 ## Current foundation
 
 `ThreadingUITests` is a real UI-testing bundle with its own `ThreadingUI` scheme and

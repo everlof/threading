@@ -348,6 +348,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.animationBehavior = .none
         window.contentViewController = pane
         pane.view.layoutSubtreeIfNeeded()
         return (pane, window)
@@ -751,6 +752,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        quickLookWindow.animationBehavior = .none
         quickLookWindow.contentViewController = pane
         Self.parkedQuickLookWindows.append(quickLookWindow)
 
@@ -1419,6 +1421,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.animationBehavior = .none
         window.contentViewController = SessionAttachmentsViewController(sessionID: sessionID)
         window.setContentSize(NSSize(width: 353, height: 700))
         // Twice for the same fixpoint the detached fixtures reach: the first pass gives the
@@ -1566,6 +1569,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.animationBehavior = .none
         window.contentViewController = pane
         let layoutStarted = DispatchTime.now().uptimeNanoseconds
         pane.view.layoutSubtreeIfNeeded()
@@ -1623,6 +1627,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        warmWindow.animationBehavior = .none
         warmWindow.contentViewController = warmPane
         print(
             "THREADING_PERF attachment-formats "
@@ -1752,6 +1757,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.animationBehavior = .none
         window.contentViewController = fixture.pane
         defer { window.orderOut(nil) }
 

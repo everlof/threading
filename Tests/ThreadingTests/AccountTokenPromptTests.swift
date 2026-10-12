@@ -36,6 +36,7 @@ final class AccountTokenPromptTests: XCTestCase {
             contentRect: NSRect(x: -10_000, y: -10_000, width: 720, height: 500),
             styleMask: [.borderless], backing: .buffered, defer: false
         )
+        window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         defer { window.orderOut(nil) }
         let row = section.rowContent(forAccountAt: 0)
@@ -77,6 +78,7 @@ final class AccountTokenPromptTests: XCTestCase {
             contentRect: NSRect(x: -10_000, y: -10_000, width: 720, height: 500),
             styleMask: [.borderless], backing: .buffered, defer: false
         )
+        window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         defer { window.orderOut(nil) }
 

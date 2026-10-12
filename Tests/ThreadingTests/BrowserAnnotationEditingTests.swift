@@ -355,6 +355,7 @@ final class BrowserAnnotationEditingTests: XCTestCase {
 
     func testEditorClampsAfterViewportShrinks() throws {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 520), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.animationBehavior = .none
         let overlay = BrowserAnnotationOverlay(frame: window.contentView!.bounds)
         window.contentView?.addSubview(overlay)
         overlay.isAnnotating = true
@@ -627,6 +628,7 @@ final class BrowserAnnotationEditingTests: XCTestCase {
         let window: NSWindow = keyPanel
             ? AnnotationKeyPanel(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             : NSWindow(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         window.contentViewController = host
         host.addBrowserTab()

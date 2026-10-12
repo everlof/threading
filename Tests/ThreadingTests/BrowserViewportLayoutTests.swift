@@ -78,6 +78,7 @@ final class BrowserViewportLayoutTests: XCTestCase {
             contentRect: CGRect(x: 0, y: 0, width: 1_440, height: 600),
             styleMask: [.borderless], backing: .buffered, defer: false
         )
+        window.animationBehavior = .none
         window.contentViewController = host
         defer { window.contentViewController = nil }
         let browser = try XCTUnwrap(host.addBrowserTab(contextKind: .private))
@@ -131,6 +132,7 @@ final class BrowserViewportLayoutTests: XCTestCase {
             contentRect: CGRect(x: 0, y: 0, width: 760, height: 600),
             styleMask: [.borderless], backing: .buffered, defer: false
         )
+        window.animationBehavior = .none
         window.contentViewController = browser
         if fixedSize {
             // A split pane supplies a measure independently of its child's fitting size.

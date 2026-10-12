@@ -550,6 +550,7 @@ final class BrowserBaselineUITests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.animationBehavior = .none
         window.contentView = host
         return window
     }

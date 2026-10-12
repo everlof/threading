@@ -68,6 +68,9 @@ extension HostedStoreTestCase {
             nativeWorkspaceNavigatorRegistry: nativeWorkspaceNavigatorRegistry,
             nativeWorkspaceNavigatorPluginLoader: nativeWorkspaceNavigatorPluginLoader
         )
+        // These windows may leave the screen immediately after a fixture is captured.
+        // AppKit's default show/hide animation can otherwise park a shared worker forever.
+        controller.window?.animationBehavior = .none
         retainMainWindowFixture(
             MainWindowTestFixtureOwner(controller: controller, directory: directory)
         )

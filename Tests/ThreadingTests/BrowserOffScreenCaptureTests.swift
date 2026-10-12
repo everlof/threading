@@ -101,6 +101,7 @@ final class BrowserOffScreenCaptureTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        cover.animationBehavior = .none
         cover.isOpaque = true
         cover.backgroundColor = .black
         cover.level = .floating

@@ -31,6 +31,7 @@ final class BrowserAnnotationContrastTests: XCTestCase {
                     do {
                         let root = AnnotationContrastBackdrop(frame: CGRect(x: 0, y: 0, width: 400, height: 220))
                         let window = NSWindow(contentRect: root.bounds, styleMask: [.borderless], backing: .buffered, defer: false)
+                        window.animationBehavior = .none
                         window.isReleasedWhenClosed = false
                         window.appearance = appearance
                         window.contentView = root
@@ -79,6 +80,7 @@ final class BrowserAnnotationContrastTests: XCTestCase {
     func testEditorSurfaceStaysOpaqueWithAContrastingBoundary() throws {
         let root = AnnotationContrastBackdrop(frame: CGRect(x: 0, y: 0, width: 400, height: 220))
         let window = NSWindow(contentRect: root.bounds, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         window.contentView = root
         defer { window.contentView = nil }

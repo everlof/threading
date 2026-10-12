@@ -63,6 +63,7 @@ final class ThemedAlertInputTests: XCTestCase {
             contentRect: NSRect(x: -10_000, y: -10_000, width: 600, height: 400),
             styleMask: [.borderless], backing: .buffered, defer: false
         )
+        window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         return window
     }

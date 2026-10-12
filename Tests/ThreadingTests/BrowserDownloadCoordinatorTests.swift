@@ -16,6 +16,7 @@ final class BrowserDownloadCoordinatorTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.animationBehavior = .none
         window.appearance = appearance
         appearance.performAsCurrentDrawingAppearance {
             window.contentViewController = browser
