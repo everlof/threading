@@ -59,6 +59,7 @@ extension Design {
         case inlineCode
         case previewCode
         case compactCode
+        case emphasizedCompactCode
         case compactToolName
 
         // Numeric — SF's monospaced digits, so columns keep aligning.
@@ -99,6 +100,7 @@ extension Design {
             case .inlineCode: return Typography.inlineCode()
             case .previewCode: return Typography.previewCode()
             case .compactCode: return Typography.compactCode()
+            case .emphasizedCompactCode: return Typography.compactCode(weight: .bold)
             case .compactToolName: return Typography.compactToolName()
             case .numericDisplay: return Typography.numericDisplay()
             case .numericBody: return Typography.numericBody()
@@ -135,7 +137,7 @@ extension Design {
                 return .numericDetail(weight: weight == .regular ? .semibold : weight)
             case .heading, .placeholderTitle, .emphasizedBody, .strongBody, .control, .caption,
                  .markdownHeading, .wordmark, .welcomeGreeting, .welcomeCaption,
-                 .inlineCode, .previewCode, .compactCode,
+                 .inlineCode, .previewCode, .compactCode, .emphasizedCompactCode,
                  .compactToolName, .numericDisplay, .numericBody, .accountEmoji, .emojiPickerCell:
                 return self
             }
@@ -152,7 +154,7 @@ extension Design {
                  .control, .controlRegular, .caption, .detail, .markdownHeading, .wordmark,
                  .welcomeGreeting, .welcomeCaption:
                 return true
-            case .code, .inlineCode, .previewCode, .compactCode, .compactToolName,
+            case .code, .inlineCode, .previewCode, .compactCode, .emphasizedCompactCode, .compactToolName,
                  .numericDisplay, .numericBody, .numericControl, .numericDetail,
                  .accountEmoji, .emojiPickerCell:
                 return false

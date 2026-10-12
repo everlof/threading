@@ -1231,6 +1231,18 @@ and the singleton surfaces stay panel-side. `panel_list_tabs` / `panel_activate_
 display-panel-scoped: a tab moved out disappears from them exactly as a user-closed one does,
 and the existing "the user changed it while you were away" prose covers it.
 
+The shared strip owns drag presentation, including the insertion marker, travelling chip and
+edge autoscroll. Resting chips keep their slots throughout the gesture; reordering the stack's
+constraints on every crossed midpoint caused long layout pauses with many tabs. Hosts still
+own eligibility, selection, final order, transfer and persistence;
+the existing `display.tab-header@1` decoration cannot replace those behaviors. Capture the grab
+offset from mouse-down, process the first dragged sample, and re-evaluate mouse-up: sampling only
+later movement lost fast drags. Cross-host highlighting carries the screen point into the
+destination strip so its marker uses the same insertion index as the drop. Escape restores the
+original slots. Deferred title/selection updates land before the host commits the move, otherwise
+an older presentation could overwrite the new order. Product-shell evidence drives the decorated
+Device Logs chip through this gesture and verifies that its controller survives the reorder.
+
 **`browser_*` follows the browser, and one type says where it went.** `SessionBrowserResolver`
 (window-owned, for `TabTransferCoordinator`'s reason — only the window sees every host) asks
 each host in preference order and hands back the browser, its tab id, and its `TabHostID`. The

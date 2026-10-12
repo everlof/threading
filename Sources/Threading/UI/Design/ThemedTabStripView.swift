@@ -1,5 +1,15 @@
 import AppKit
 
+/// Above the travelling chip, without intercepting its gesture or an adjacent close button.
+private final class TabLandingMarker: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        AppThemePalette.color(.accent).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: bounds.width / 2, yRadius: bounds.width / 2).fill()
+    }
+}
+
 // MARK: - Tab Strip Item
 
 /// One tab's worth of strip data, so a strip can draw itself without reaching into a tab's
@@ -97,10 +107,25 @@ final class ThemedTabStripView: NSView {
     /// move is happening, this only answers *where*.
     var isDropTarget = false {
         didSet {
+            if !isDropTarget { externalLandingPoint = nil }
             guard isDropTarget != oldValue else { return }
             needsDisplay = true
+            updateLandingMarker()
         }
     }
+
+    /// The same pointer and midpoint rule used to commit a cross-host drop.
+    func showDropTarget(atWindowPoint point: NSPoint?) {
+        externalLandingPoint = point
+        isDropTarget = point != nil
+        updateLandingMarker()
+        updateAutoscroll()
+    }
+
+    private var externalLandingPoint: NSPoint?
+    private let landingMarker = TabLandingMarker()
+    private(set) var landingIndex: Int?
+    var landingMarkerFrame: NSRect? { landingMarker.isHidden ? nil : landingMarker.frame }
 
     // MARK: - Configuration
 
@@ -236,6 +261,8 @@ final class ThemedTabStripView: NSView {
         scrollView.documentView = stack
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)
+        landingMarker.isHidden = true
+        addSubview(landingMarker)
         addLayoutGuide(contentAreaGuide)
 
         scrollView.wantsLayer = true
@@ -422,6 +449,8 @@ final class ThemedTabStripView: NSView {
     }
 
     private var drag: DragState?
+    private var lastDragEvent: NSEvent?
+    private var autoscrollTimer: Timer?
 
     /// Items that arrived while a drag was in flight, applied when it lands.
     private var pendingItems: [TabStripItem]?
@@ -431,6 +460,7 @@ final class ThemedTabStripView: NSView {
         case .began: beginDrag(of: id, event: event)
         case .changed: continueDrag(event: event)
         case .ended: endDrag(event: event)
+        case .cancelled: endDrag(event: event, cancelled: true)
         }
     }
 
@@ -443,7 +473,7 @@ final class ThemedTabStripView: NSView {
               let index = stack.arrangedSubviews.firstIndex(where: { $0 === chip.arranged })
         else { return }
 
-        let pointer = stack.convert(event.locationInWindow, from: nil)
+        let pointer = stack.convert(chip.tab.dragOrigin ?? event.locationInWindow, from: nil)
         drag = DragState(
             id: id,
             grabOffsetX: pointer.x - chip.arranged.frame.minX,
@@ -454,10 +484,12 @@ final class ThemedTabStripView: NSView {
         // neighbour it is crossing — and opaque, so the neighbour does not show through it.
         chip.arranged.layer?.zPosition = 1
         chip.tab.isLifted = true
+        continueDrag(event: event)
     }
 
     private func continueDrag(event: NSEvent) {
         guard var state = drag, let chip = chipsByID[state.id] else { return }
+        lastDragEvent = event
         let arranged = chip.arranged
 
         let overExternal = externalDropTarget?(state.id, event.locationInWindow) ?? false
@@ -473,25 +505,19 @@ final class ThemedTabStripView: NSView {
             max(stack.bounds.width - width, 0)
         )
 
-        // The slot the travelling chip is over: how many resting chips its midpoint has
-        // passed. Frozen while the pointer is over another pane — a chip about to leave has
+        // The slot the pointer names, using the same midpoint rule as an incoming tab.
+        // Using the traveller's clamped midpoint made a wide tab unable to pass a narrow
+        // final tab. Frozen over another pane — a chip about to leave has
         // no business rearranging the strip it is leaving.
         if !overExternal {
-            let midX = desiredMinX + width / 2
             let target = stack.arrangedSubviews
                 .filter { $0 !== arranged }
-                .count { $0.frame.midX < midX }
+                .count { $0.frame.midX < pointer.x }
 
-            if target != state.currentIndex {
-                stack.removeArrangedSubview(arranged)
-                stack.insertArrangedSubview(arranged, at: target)
-                state.currentIndex = target
-                NSAnimationContext.runAnimationGroup { context in
-                    context.duration = Design.Motion.quick
-                    context.allowsImplicitAnimation = true
-                    stack.layoutSubtreeIfNeeded()
-                }
-            }
+            // Keep resting slots stable until release. Rebuilding the stack's constraints
+            // at each crossed midpoint stalls a crowded strip and moves the hit targets.
+            // The marker states the pending order; only the travelling pixels move now.
+            state.currentIndex = target
         }
         drag = state
 
@@ -504,17 +530,25 @@ final class ThemedTabStripView: NSView {
             CGAffineTransform(translationX: desiredMinX - arranged.frame.minX, y: 0)
         )
         CATransaction.commit()
+        updateLandingMarker()
+        updateAutoscroll()
     }
 
-    private func endDrag(event: NSEvent) {
+    private func endDrag(event: NSEvent, cancelled: Bool = false) {
+        // Mouse-up may be the first sample over the destination after a fast drag.
+        if !cancelled { continueDrag(event: event) }
         guard let state = drag else { return }
         drag = nil
+        lastDragEvent = nil
+        autoscrollTimer?.invalidate()
+        autoscrollTimer = nil
+        updateLandingMarker()
 
         if let chip = chipsByID[state.id] {
             // Landing over another pane restores the strip's geometry without ceremony — the
             // tab is about to leave it, and an eased return under a disappearing chip reads
             // as a refusal.
-            if state.isOverExternal {
+            if state.isOverExternal || !cancelled {
                 chip.arranged.layer?.setAffineTransform(.identity)
             } else {
                 NSAnimationContext.runAnimationGroup { context in
@@ -528,16 +562,83 @@ final class ThemedTabStripView: NSView {
             chip.tab.isLifted = false
         }
 
-        if state.isOverExternal {
-            onDropOut?(state.id, event.locationInWindow)
-        } else if state.currentIndex != state.originalIndex {
-            onReorder?(state.id, state.currentIndex)
-        }
+        // Apply deferred presentation before the host commits. A stale title/selection update
+        // must not overwrite the newly committed tab order after onReorder returns.
         if let items = pendingItems {
             pendingItems = nil
             update(items: items)
         }
+        if !cancelled {
+            if state.isOverExternal { onDropOut?(state.id, event.locationInWindow) }
+            else if state.currentIndex != state.originalIndex { onReorder?(state.id, state.currentIndex) }
+        }
         onDragEnded?(state.id)
+    }
+
+    private func updateLandingMarker() {
+        let index: Int?
+        if let drag, !drag.isOverExternal { index = drag.currentIndex }
+        else if isDropTarget, let point = externalLandingPoint { index = insertionIndex(forWindowPoint: point) }
+        else { index = nil }
+        landingIndex = index
+        landingMarker.isHidden = index == nil
+        guard let index else { return }
+        let originalSlot = drag.flatMap { chipsByID[$0.id]?.arranged }
+        let chips = stack.arrangedSubviews.filter { $0 !== originalSlot }
+        let x: CGFloat
+        if let drag, drag.currentIndex == drag.originalIndex, let originalSlot {
+            x = originalSlot.frame.minX - stack.spacing / 2
+        } else if index < chips.count { x = chips[index].frame.minX - stack.spacing / 2 }
+        else { x = (chips.last?.frame.maxX ?? stack.edgeInsets.left) + stack.spacing / 2 }
+        let position = convert(NSPoint(x: x, y: 0), from: stack).x
+        let thickness = Design.Spacing.hairline
+        landingMarker.frame = NSRect(
+            x: min(max(position - thickness / 2, 0), max(0, bounds.width - thickness)),
+            y: Design.Spacing.tight,
+            width: thickness,
+            height: max(0, bounds.height - 2 * Design.Spacing.tight)
+        )
+        landingMarker.needsDisplay = true
+    }
+
+    private var autoscrollStep: CGFloat {
+        guard let point = externalLandingPoint ?? lastDragEvent?.locationInWindow,
+              drag?.isOverExternal != true else { return 0 }
+        let pointer = scrollView.convert(point, from: nil)
+        guard scrollView.bounds.contains(pointer) else { return 0 }
+        let clip = scrollView.contentView.bounds
+        let edge = Design.Spacing.large
+        if pointer.x < edge, clip.minX > 0 { return -Design.Spacing.inset }
+        if pointer.x > scrollView.bounds.width - edge, clip.maxX < stack.frame.width {
+            return Design.Spacing.inset
+        }
+        return 0
+    }
+
+    private func updateAutoscroll() {
+        guard autoscrollStep != 0 else {
+            autoscrollTimer?.invalidate()
+            autoscrollTimer = nil
+            return
+        }
+        guard autoscrollTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else { timer.invalidate(); return }
+                self.advanceDragAutoscroll()
+            }
+        }
+        autoscrollTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func advanceDragAutoscroll() {
+        let clip = scrollView.contentView.bounds
+        let x = min(max(0, clip.minX + autoscrollStep), max(0, stack.frame.width - clip.width))
+        scrollView.contentView.scroll(to: NSPoint(x: x, y: clip.minY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        if let event = lastDragEvent, drag != nil { continueDrag(event: event) }
+        else { updateLandingMarker(); updateAutoscroll() }
     }
 
     // MARK: - Sizing
@@ -600,6 +701,7 @@ final class ThemedTabStripView: NSView {
     }
 
     @objc private func updateFade() {
+        updateLandingMarker()
         let clip = scrollView.contentView.bounds
         let content = stack.frame
         guard clip.width > 0 else { return }

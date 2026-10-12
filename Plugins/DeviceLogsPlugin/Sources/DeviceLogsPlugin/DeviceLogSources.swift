@@ -293,19 +293,33 @@ public enum DeviceRelayReclaim {
 
     @discardableResult
     public static func reclaimOrphanedReaders(udid: String, toolPath: String) -> Int {
+        guard !udid.isEmpty, !toolPath.isEmpty else { return 0 }
+        let resolvedPath = URL(fileURLWithPath: toolPath).resolvingSymlinksInPath().path
+        let candidates = candidates(toolPath: resolvedPath)
+        guard !candidates.isEmpty,
+              let result = BoundedDeviceLogCommand.runResult(
+                "/bin/ps", ["-p", candidates.map { String($0.pid) }.joined(separator: ","), "-o", "pid=,ppid=,args="],
+                deadline: 0.5, maximumOutputBytes: 32 * 1_024
+              ), result.exitStatus == 0 else { return 0 }
+        let matches = Set(orphanPIDs(in: result.output, udid: udid, toolPath: toolPath)
+            + orphanPIDs(in: result.output, udid: udid, toolPath: resolvedPath))
         var reclaimed = 0
-        for pid in orphanPIDs(udid: udid, toolPath: toolPath) {
-            if kill(pid, SIGTERM) == 0 { reclaimed += 1 }
+        for candidate in candidates where matches.contains(candidate.pid) {
+            // A pid may have been recycled during the bounded argv lookup. Revalidate its
+            // kernel identity, owner, parent and executable before sending any signal.
+            guard identity(pid: candidate.pid, toolPath: resolvedPath) == candidate else { continue }
+            if kill(candidate.pid, SIGTERM) == 0 { reclaimed += 1 }
         }
         return reclaimed
     }
 
-    /// Which of `ps -Ao pid=,ppid=,args=` output names a reader we abandoned.
+    /// Which rows from a scoped `ps -p <candidates> -o pid=,ppid=,args=` name an abandoned reader.
     ///
     /// Pure so the rule can be tested without killing anything, because the rule is the whole
     /// safety of this: too loose and it kills a reader the user is running on purpose.
     public static func orphanPIDs(in listing: String, udid: String, toolPath: String) -> [pid_t] {
-        listing.split(separator: "\n").compactMap { line -> pid_t? in
+        guard !udid.isEmpty, !toolPath.isEmpty else { return [] }
+        return listing.split(separator: "\n").compactMap { line -> pid_t? in
             let fields = line.split(separator: " ", omittingEmptySubsequences: true)
             guard fields.count >= 3,
                   let pid = pid_t(fields[0]),
@@ -313,25 +327,47 @@ public enum DeviceRelayReclaim {
                   // Orphaned to launchd: its owner is gone, so nobody is reading it.
                   parent == 1,
                   pid != getpid(),
-                  line.contains(toolPath),
-                  line.contains(udid)
+                  fields[2] == Substring(toolPath),
+                  fields.indices.dropLast().contains(where: { index in
+                      (fields[index] == "-u" || fields[index] == "--udid") && fields[index + 1] == Substring(udid)
+                  })
             else { return nil }
             return pid
         }
     }
 
-    private static func orphanPIDs(udid: String, toolPath: String) -> [pid_t] {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/ps")
-        task.arguments = ["-Ao", "pid=,ppid=,args="]
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
-        guard (try? task.run()) != nil else { return [] }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        task.waitUntilExit()
-        guard let listing = String(data: data, encoding: .utf8) else { return [] }
-        return orphanPIDs(in: listing, udid: udid, toolPath: toolPath)
+    private struct Identity: Equatable {
+        let pid: pid_t
+        let seconds: UInt64
+        let microseconds: UInt64
+    }
+
+    /// Numeric inventory first; argv is never requested for unrelated processes. A global
+    /// argv scan hung for 98–217 seconds on the reported machine, holding source teardown.
+    private static func candidates(toolPath: String) -> [Identity] {
+        let capacity = min(65_536, max(256, Int(proc_listallpids(nil, 0)) + 256))
+        var pids = [pid_t](repeating: 0, count: capacity)
+        let count = Int(proc_listallpids(&pids, Int32(capacity * MemoryLayout<pid_t>.size)))
+        guard count > 0 else { return [] }
+        let deadline = DispatchTime.now() + .milliseconds(250)
+        var result: [Identity] = []
+        for pid in pids.prefix(min(count, capacity)) where pid > 0 && pid != getpid() {
+            guard DispatchTime.now() < deadline, result.count < 32 else { break }
+            if let candidate = identity(pid: pid, toolPath: toolPath) { result.append(candidate) }
+        }
+        return result
+    }
+
+    private static func identity(pid: pid_t, toolPath: String) -> Identity? {
+        var info = proc_bsdinfo()
+        let size = MemoryLayout<proc_bsdinfo>.size
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(size)) == size,
+              info.pbi_ppid == 1, info.pbi_uid == getuid(), info.pbi_start_tvsec > 0 else { return nil }
+        // PROC_PIDPATHINFO_MAXSIZE is a C expression macro Swift cannot import.
+        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &path, UInt32(path.count)) > 0,
+              String(cString: path) == toolPath else { return nil }
+        return Identity(pid: pid, seconds: info.pbi_start_tvsec, microseconds: info.pbi_start_tvusec)
     }
 }
 
@@ -541,6 +577,23 @@ public final class SimulatorLogRowSource: BufferedDeviceLogSource {
 
 // MARK: - Real device
 
+/// Cancels queued launches immediately without waiting for transport work on the lifecycle queue.
+private final class DeviceLogLifecycleGeneration: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    func advance() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        value += 1
+        return value
+    }
+
+    func contains(_ generation: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return value == generation
+    }
+}
+
 /// `idevicesyslog` from a paired iPhone.
 ///
 /// Text rather than NDJSON: the syslog relay flattens the unified log, so this is the one source
@@ -549,12 +602,18 @@ public final class SimulatorLogRowSource: BufferedDeviceLogSource {
 /// ordinary `os_log` entries which arrive here like any other line.
 ///
 /// The tool is libimobiledevice's, never bundled, resolved on the user's `PATH`.
-public final class PairedDeviceLogRowSource: BufferedDeviceLogSource {
+public final class PairedDeviceLogRowSource: BufferedDeviceLogSource, @unchecked Sendable {
     private let processName: String?
     private let reader = DeviceLogLineReader(label: "device")
     private let udid: String
     private let overNetwork: Bool
     private let toolPath: String
+    private let lifecycle = DispatchQueue(label: "codes.threading.devicelog.legacy-lifecycle")
+    private let generation = DeviceLogLifecycleGeneration()
+    // Configure before start; the lifecycle queue owns this callback and the reader thereafter.
+    var reclaimRelay: @Sendable (String, String) -> Void = { device, path in
+        DeviceRelayReclaim.reclaimOrphanedReaders(udid: device, toolPath: path)
+    }
 
     public init(udid: String, overNetwork: Bool, toolPath: String, processName: String? = nil) {
         self.processName = processName
@@ -564,23 +623,39 @@ public final class PairedDeviceLogRowSource: BufferedDeviceLogSource {
     }
 
     public override func start() {
+        let request = generation.advance()
+        lifecycle.async { [self] in startOnQueue(request: request) }
+    }
+
+    private func startOnQueue(request: Int) {
+        guard generation.contains(request) else { return }
         // A reader we abandoned earlier still holds the relay, and the symptom is silence rather
         // than an error. Reclaim before connecting, or this source starts already broken.
-        DeviceRelayReclaim.reclaimOrphanedReaders(udid: udid, toolPath: toolPath)
+        reclaimRelay(udid, toolPath)
+        guard generation.contains(request) else { return }
         var arguments = ["-u", udid, "--no-colors"]
         if overNetwork { arguments.append("-n") }
         reader.run(
             executable: toolPath,
             arguments: arguments,
             onLine: { [weak self] line in
-                if let self, let row = DeviceLogDecoding.syslog(line),
+                if let self, self.generation.contains(request), let row = DeviceLogDecoding.syslog(line),
                    self.processName == nil || row.process == self.processName { self.enqueue(row) }
             },
-            onEnd: { [weak self] reason in self?.onStreamEnded?(reason) }
+            onEnd: { [weak self] reason in
+                guard let self, self.generation.contains(request) else { return }
+                self.onStreamEnded?(reason)
+            }
         )
     }
 
-    public override func stop() { reader.stop() }
+    public override func stop() {
+        let request = generation.advance()
+        lifecycle.async { [self] in
+            guard generation.contains(request) else { return }
+            reader.stop()
+        }
+    }
 }
 
 /// Structured unified-log entries from a paired iPhone through `pymobiledevice3`'s native RSD
@@ -599,6 +674,7 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
     private let structuredReader = DeviceLogLineReader(label: "device-structured")
     private let fallbackReader = DeviceLogLineReader(label: "device-fallback")
     private let lifecycle = DispatchQueue(label: "codes.threading.devicelog.device-lifecycle")
+    private let generation = DeviceLogLifecycleGeneration()
     private let decodedLock = NSLock()
     private let udid: String
     private let overNetwork: Bool
@@ -609,6 +685,9 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
     private var stopped = true
     private var fallbackStarted = false
     private var decodedStructuredRows = 0
+    var reclaimRelay: @Sendable (String, String) -> Void = { device, path in
+        DeviceRelayReclaim.reclaimOrphanedReaders(udid: device, toolPath: path)
+    }
 
     public init(
         udid: String,
@@ -627,19 +706,23 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
     }
 
     public override func start() {
-        lifecycle.sync {
+        let request = generation.advance()
+        lifecycle.async { [self] in
+            guard generation.contains(request) else { return }
             structuredReader.stop()
             fallbackReader.stop()
             stopped = false
             fallbackStarted = false
             setDecodedStructuredRows(0)
-            startStructuredReader()
-            scheduleFallbackIfSilent()
+            startStructuredReader(request: request)
+            scheduleFallbackIfSilent(request: request)
         }
     }
 
     public override func stop() {
-        lifecycle.sync {
+        let request = generation.advance()
+        lifecycle.async { [self] in
+            guard generation.contains(request) else { return }
             stopped = true
             cancelFallbackTimer()
             structuredReader.stop()
@@ -654,7 +737,7 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
         return decodedStructuredRows > 0
     }
 
-    private func startStructuredReader() {
+    private func startStructuredReader(request: Int) {
         structuredReader.run(
             executable: toolPath,
             arguments: [
@@ -662,52 +745,55 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
             ],
             environment: Self.environment(udid: udid),
             onLine: { [weak self] line in
-                guard let self, let row = DeviceLogDecoding.pymobiledevice3(line) else { return }
+                guard let self, self.generation.contains(request), let row = DeviceLogDecoding.pymobiledevice3(line) else { return }
                 let isFirstStructuredRow = self.markDecodedStructuredRow()
                 if self.processName == nil || row.process == self.processName { self.enqueue(row) }
                 if isFirstStructuredRow {
-                    self.lifecycle.async { [weak self] in self?.cancelFallbackTimer() }
+                    self.lifecycle.async { [weak self] in
+                        guard let self, self.generation.contains(request) else { return }
+                        self.cancelFallbackTimer()
+                    }
                 }
             },
             onEnd: { [weak self] reason in
-                self?.structuredReaderEnded(reason: reason)
+                self?.structuredReaderEnded(reason: reason, request: request)
             }
         )
     }
 
-    private func structuredReaderEnded(reason: String) {
+    private func structuredReaderEnded(reason: String, request: Int) {
         lifecycle.async { [weak self] in
-            guard let self, !self.stopped else { return }
+            guard let self, self.generation.contains(request), !self.stopped else { return }
             self.cancelFallbackTimer()
             guard !self.didDecodeStructuredRow, let fallbackToolPath = self.fallbackToolPath else {
                 self.onStreamEnded?(reason)
                 return
             }
-            self.startFallbackOnce(toolPath: fallbackToolPath)
+            self.startFallbackOnce(toolPath: fallbackToolPath, request: request)
         }
     }
 
     /// A command that stays alive but never produces a row is not a working route. This is the
     /// exact failure shape of a contended relay, and waiting forever would prevent the fallback
     /// from doing the one job it exists for.
-    private func scheduleFallbackIfSilent() {
+    private func scheduleFallbackIfSilent(request: Int) {
         guard let fallbackToolPath else { return }
         let timer = DispatchSource.makeTimerSource(queue: lifecycle)
         timer.schedule(deadline: .now() + structuredStartupDeadline)
         timer.setEventHandler { [weak self] in
-            guard let self, !self.stopped, !self.didDecodeStructuredRow else { return }
+            guard let self, self.generation.contains(request), !self.stopped, !self.didDecodeStructuredRow else { return }
             self.structuredReader.stop()
-            self.startFallbackOnce(toolPath: fallbackToolPath)
+            self.startFallbackOnce(toolPath: fallbackToolPath, request: request)
         }
         fallbackTimer = timer
         timer.resume()
     }
 
-    private func startFallbackOnce(toolPath: String) {
+    private func startFallbackOnce(toolPath: String, request: Int) {
         guard !fallbackStarted else { return }
         fallbackStarted = true
         cancelFallbackTimer()
-        startFallbackReader(toolPath: toolPath)
+        startFallbackReader(toolPath: toolPath, request: request)
     }
 
     private func cancelFallbackTimer() {
@@ -716,21 +802,23 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
         fallbackTimer = nil
     }
 
-    private func startFallbackReader(toolPath: String) {
+    private func startFallbackReader(toolPath: String, request: Int) {
         // The fallback is the same single-client relay as `PairedDeviceLogRowSource`, including
         // its orphan-reclaim rule. Skipping this step can make a successful fallback stay silent.
-        DeviceRelayReclaim.reclaimOrphanedReaders(udid: udid, toolPath: toolPath)
+        reclaimRelay(udid, toolPath)
+        guard generation.contains(request) else { return }
         var arguments = ["-u", udid, "--no-colors"]
         if overNetwork { arguments.append("-n") }
         fallbackReader.run(
             executable: toolPath,
             arguments: arguments,
             onLine: { [weak self] line in
-                if let self, let row = DeviceLogDecoding.syslog(line),
+                if let self, self.generation.contains(request), let row = DeviceLogDecoding.syslog(line),
                    self.processName == nil || row.process == self.processName { self.enqueue(row) }
             },
             onEnd: { [weak self] fallbackReason in
-                self?.onStreamEnded?(fallbackReason)
+                guard let self, self.generation.contains(request) else { return }
+                self.onStreamEnded?(fallbackReason)
             }
         )
     }

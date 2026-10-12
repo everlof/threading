@@ -1134,6 +1134,58 @@ THREADING_AUTOMATION_STRESS=1 scripts/test.sh fast \
 
 ## Implementation-time scaling gate
 
+USB Device Logs must sustain roughly 5,800 rows/s with a 50,000-row ring while the table is
+onscreen. The regression workload uses 1,000-row batches, long messages and a full ring, and
+measures drain, AppKit layout and display together; the earlier dual-stream benchmark excluded
+layout and cannot establish UI responsiveness. Rendering must reuse viewport cells and their
+content, preserve paused scrolling and selection, and avoid full-ring filtering on stream ticks.
+Workspace tab dragging expects 2–12 tabs and stresses 200: pointer updates change one indicator
+and the travelling chip; model order changes only on drop, with no content-controller rebuild.
+
+The 2026-10-12 USB freeze reproduced in the installed app's main-thread sample as repeated
+`NSTableView.reloadData`, cell/label destruction and constraint solving. The matched Debug
+workload fills the ring, then measures 30 batches of 1,000 roughly 1 KiB messages in a real
+1,000 × 760 window. At the production 100 ms cadence, baseline `202177dbb9` took **170.7 ms
+median / 275.8 ms maximum** for drain + layout + display; the retained-cell path took **14.7 /
+45.2 ms**. Both materialized 42 rows × 5 columns (210 cells), reached the exact last row and
+kept the same 50,000-row ceiling. Earlier baseline repeats were 141.8–166.4 ms median. Builds
+were active during these Debug measurements; these are observations, not a hardware-independent
+deadline or a measurement of Bluetooth transport. The opt-in fixture gates the rendered median
+at 60 ms and the live cell count at 500. Its first unpaced version ran much faster after the fix
+and introduced compositor/recorder backpressure; the fixture now leaves the remainder of each
+100 ms tick to the run loop, just as production does. The product's capture cadence is unchanged.
+
+Streaming uses `noteNumberOfRowsChanged` and configures existing viewport labels in place;
+fixed-height cells keep their labels and use frame layout. Programmatic updates preserve follow,
+paused line position and selection. Context projection and filtered bursts above 2,048 rows use
+the cancellable snapshot worker, while ordinary strict filtering tests only incoming rows.
+Tests also hold a displayed snapshot steady while capture rolls, then restore its selected line.
+
+The same investigation found a second freeze in USB source lifecycle: global `ps -Ao … args=`
+scans took 98–217 seconds, and a main-thread `stop()` waited behind that scan on the structured
+reader's serial queue. The legacy reader performed it directly in `start()`. Both source
+lifecycles now enqueue transport work and invalidate cancelled requests immediately. Orphan
+reclaim first collects numeric kernel identities, checks exact executable/owner/parent, then
+requests argv for at most 32 candidates with a 500 ms subprocess deadline and 32 KiB output cap.
+The numeric candidate walk has a 250 ms budget. Identity is checked again before signalling.
+The formerly 217-second fallback test completed in 32 ms afterward. Regression tests hold
+reclaim blocked for up to two seconds and require start/stop to return within 100 ms, with no
+child launched after cancellation; these tests exercise both USB source types.
+
+The 200-tab workload exposed a 176.9 ms tail from rearranging the stack during the gesture.
+Keeping resting slots stable until drop reduced pointer + layout + display to **0.10 ms median /
+1.80 ms maximum**, with the pointer callback itself at 1.70 ms maximum. All 200 chips survived
+300 updates and the host committed once. The marker uses pointer-to-midpoint geometry (including
+wide-to-narrow moves), and common-run-loop edge scrolling stops on exit/drop/cancel.
+
+```bash
+THREADING_DEVICE_LOG_RENDER_STRESS=1 swift test --package-path Plugins/DeviceLogsPlugin \
+  --filter DeviceLogStreamingPerformanceTests
+# After building the normal hosted test bundle, run this gate through xcrun xctest;
+# Xcode test plans sanitize arbitrary environment variables.
+# THREADING_TAB_DRAG_STRESS=1 … -XCTest ThreadingTests.ThemedTabStripViewTests/testDragStressKeepsChipsAndCommitsOnlyOnce
+```
+
 Device Logs' Regular Logs and Bluetooth tabs admit at most two readers per visible workspace.
 Each keeps the existing 20,000-row handoff, 50,000-row ring and 500,000-row history; histories
 have distinct files. Expect about 5,800 regular rows/s plus 100–6,000 Bluetooth packets/s;

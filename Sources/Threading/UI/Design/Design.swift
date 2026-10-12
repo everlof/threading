@@ -803,8 +803,8 @@ public enum Design {
         }
 
         /// Dense process metadata and compact hexadecimal values.
-        public static func compactCode() -> NSFont {
-            SystemFontFaces.monospaced(ofSize: scaled(10), weight: .regular)
+        public static func compactCode(weight: NSFont.Weight = .regular) -> NSFont {
+            SystemFontFaces.monospaced(ofSize: scaled(10), weight: weight)
         }
 
         /// A compact tool identifier; deliberately halfway between code and metadata.

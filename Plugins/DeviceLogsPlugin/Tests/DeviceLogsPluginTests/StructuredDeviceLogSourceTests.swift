@@ -108,4 +108,64 @@ final class StructuredDeviceLogSourceTests: XCTestCase {
         try Data(script.utf8).write(to: url)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
     }
+
+    func testLegacyStartAndStopDoNotWaitForReclaimOrLaunchAfterCancellation() throws {
+        try assertCancellationWhileReclaiming(structured: false)
+    }
+
+    func testStructuredStopDoesNotWaitForReclaimOrLaunchFallbackAfterCancellation() throws {
+        try assertCancellationWhileReclaiming(structured: true)
+    }
+
+    private func assertCancellationWhileReclaiming(structured: Bool) throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-log-cancellation-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let structuredTool = directory.appendingPathComponent("structured")
+        let fallbackTool = directory.appendingPathComponent("legacy")
+        let marker = directory.appendingPathComponent("launched")
+        try makeExecutable(at: structuredTool, script: "#!/bin/sh\nexit 1\n")
+        try makeExecutable(at: fallbackTool, script: "#!/bin/sh\ntouch '\(marker.path)'\n")
+
+        let entered = expectation(description: "reclaim entered")
+        let released = expectation(description: "reclaim released")
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        let reclaim: @Sendable (String, String) -> Void = { _, _ in
+            entered.fulfill()
+            _ = release.wait(timeout: .now() + 2)
+            released.fulfill()
+        }
+        let source: BufferedDeviceLogSource
+        if structured {
+            let reader = StructuredPairedDeviceLogRowSource(
+                udid: "PHONE", overNetwork: false, toolPath: structuredTool.path,
+                fallbackToolPath: fallbackTool.path
+            )
+            reader.reclaimRelay = reclaim
+            source = reader
+        } else {
+            let reader = PairedDeviceLogRowSource(
+                udid: "PHONE", overNetwork: false, toolPath: fallbackTool.path
+            )
+            reader.reclaimRelay = reclaim
+            source = reader
+        }
+        let unexpectedEnd = expectation(description: "cancelled reader must not launch")
+        unexpectedEnd.isInverted = true
+        source.onStreamEnded = { _ in unexpectedEnd.fulfill() }
+        let startTime = CFAbsoluteTimeGetCurrent()
+        source.start()
+        XCTAssertLessThan(CFAbsoluteTimeGetCurrent() - startTime, 0.1)
+        wait(for: [entered], timeout: 1)
+        let stopTime = CFAbsoluteTimeGetCurrent()
+        source.stop()
+        XCTAssertLessThan(CFAbsoluteTimeGetCurrent() - stopTime, 0.1)
+        release.signal()
+        wait(for: [released], timeout: 1)
+        wait(for: [unexpectedEnd], timeout: 0.2)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+        XCTAssertTrue(source.drain().isEmpty)
+    }
 }

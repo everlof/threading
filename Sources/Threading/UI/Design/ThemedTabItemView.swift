@@ -75,6 +75,7 @@ final class ThemedTabItemView: BackdropThemedControl {
         case began
         case changed
         case ended
+        case cancelled
     }
 
     var onDrag: ((DragPhase, NSEvent) -> Void)?
@@ -403,7 +404,7 @@ final class ThemedTabItemView: BackdropThemedControl {
     // MARK: - Interaction
 
     /// Where the press landed, kept so a drag can be told from a press with a wobble.
-    private var dragOrigin: NSPoint?
+    private(set) var dragOrigin: NSPoint?
     private var isDragging = false
     private var isTrackingMiddleClose = false
     private var isMiddleCloseInside = false
@@ -440,6 +441,14 @@ final class ThemedTabItemView: BackdropThemedControl {
             isDragging = false
             onDrag?(.ended, event)
         }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard isDragging, event.keyCode == 53 else { super.keyDown(with: event); return }
+        isDragging = false
+        isPressed = false
+        dragOrigin = nil
+        onDrag?(.cancelled, event)
     }
 
     override func rightMouseDown(with event: NSEvent) {

@@ -141,6 +141,9 @@ final class TabStripRenderTests: XCTestCase {
             ])
             AppThemeRefresh.repaint(host)
             host.layoutSubtreeIfNeeded()
+            if isDropTarget {
+                strip.showDropTarget(atWindowPoint: strip.convert(NSPoint(x: width / 2, y: strip.bounds.midY), to: nil))
+            }
 
             guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
             host.cacheDisplay(in: host.bounds, to: rep)

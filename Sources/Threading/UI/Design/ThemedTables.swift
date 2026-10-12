@@ -172,6 +172,33 @@ public class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, S
 
 // MARK: - Virtual Content Rows
 
+/// A fixed-height, single-line cell whose label survives reuse and streaming updates.
+/// Frame layout avoids installing constraints for every line of a live table. The table still
+/// owns selection, scrolling, accessibility and the lifetime of offscreen cells.
+public final class ThemedTableTextCell: NSTableCellView {
+    public let label = NSTextField(labelWithString: "")
+    public var horizontalInset: CGFloat = Design.Spacing.tight {
+        didSet { needsLayout = true }
+    }
+
+    public override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        label.applyFont(.compactCode)
+        label.lineBreakMode = .byTruncatingTail
+        label.isSelectable = true
+        addSubview(label)
+        textField = label
+    }
+
+    @available(*, unavailable)
+    public required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    public override func layout() {
+        super.layout()
+        label.frame = bounds.insetBy(dx: horizontalInset, dy: 0)
+    }
+}
+
 /// A recycled table-cell shell for content whose height comes from Auto Layout.
 ///
 /// AppKit does not state a view-based table cell's column width while asking Auto Layout for its

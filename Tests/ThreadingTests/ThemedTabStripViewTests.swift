@@ -270,9 +270,170 @@ final class ThemedTabStripViewTests: XCTestCase {
         XCTAssertEqual(order, ["drop", "ended"], "The move happens first, the settle last")
     }
 
-    private func dragEvent(at point: NSPoint) throws -> NSEvent {
+    func testFastPointerDragUsesTheOriginalGrabAndShowsItsLandingSlot() throws {
+        let items = items([("One", true), ("Two", false), ("Three", false)])
+        let strip = makeStrip(items: items)
+        let chip = try XCTUnwrap(strip.chipView(for: items[0].id))
+        let last = try XCTUnwrap(strip.chipView(for: items[2].id))
+        var destination: Int?
+        strip.onReorder = { _, index in destination = index }
+        let start = chip.convert(NSPoint(x: chip.bounds.midX, y: chip.bounds.midY), to: nil)
+        let finish = last.convert(NSPoint(x: last.bounds.maxX - 6, y: last.bounds.midY), to: nil)
+        let content = try XCTUnwrap(window?.contentView)
+        XCTAssertTrue(content.hitTest(content.convert(start, from: nil)) === chip)
+
+        chip.mouseDown(with: try dragEvent(at: start, type: .leftMouseDown))
+        chip.mouseDragged(with: try dragEvent(at: finish))
+        XCTAssertNil(destination, "The model changes only on drop")
+        XCTAssertEqual(strip.landingIndex, 2)
+        XCTAssertNotNil(strip.landingMarkerFrame)
+        chip.mouseUp(with: try dragEvent(at: finish, type: .leftMouseUp))
+        XCTAssertEqual(destination, 2, "One dragged sample must be enough to reorder")
+        XCTAssertNil(strip.landingMarkerFrame)
+    }
+
+    func testMouseUpReevaluatesTheDestinationAndDeferredUpdatesCannotUndoTheDrop() throws {
+        let items = items([("One", true), ("Two", false), ("Three", false)])
+        let strip = makeStrip(items: items)
+        let chip = try XCTUnwrap(strip.chipView(for: items[0].id))
+        let last = try XCTUnwrap(strip.chipView(for: items[2].id))
+        var destination: Int?
+        strip.onReorder = { id, index in
+            destination = index
+            var reordered = items.filter { $0.id != id }
+            reordered.insert(items[0], at: index)
+            strip.update(items: reordered)
+        }
+        let start = chip.convert(NSPoint(x: chip.bounds.midX, y: chip.bounds.midY), to: nil)
+        let finish = last.convert(NSPoint(x: last.bounds.maxX - 6, y: last.bounds.midY), to: nil)
+        chip.mouseDown(with: try dragEvent(at: start, type: .leftMouseDown))
+        chip.mouseDragged(with: try dragEvent(at: NSPoint(x: start.x + 6, y: start.y)))
+        strip.update(items: items)
+        chip.mouseUp(with: try dragEvent(at: finish, type: .leftMouseUp))
+        strip.layoutSubtreeIfNeeded()
+        XCTAssertEqual(destination, 2)
+        XCTAssertGreaterThan(chip.frame.minX, last.frame.minX)
+    }
+
+    func testAWideTabCanLandAfterANarrowFinalTab() throws {
+        let items = items([("A very wide workspace tab", true), ("A", false)])
+        let strip = makeStrip(items: items, chipMaxWidth: 260)
+        let chip = try XCTUnwrap(strip.chipView(for: items[0].id))
+        let last = try XCTUnwrap(strip.chipView(for: items[1].id))
+        var destination: Int?
+        strip.onReorder = { _, index in destination = index }
+        let start = chip.convert(NSPoint(x: 10, y: chip.bounds.midY), to: nil)
+        let finish = last.convert(NSPoint(x: last.bounds.midX + 1, y: last.bounds.midY), to: nil)
+        chip.mouseDown(with: try dragEvent(at: start, type: .leftMouseDown))
+        chip.mouseDragged(with: try dragEvent(at: finish))
+        XCTAssertEqual(strip.landingIndex, 1)
+        chip.mouseUp(with: try dragEvent(at: finish, type: .leftMouseUp))
+        XCTAssertEqual(destination, 1)
+    }
+
+    func testExternalLandingMarkerTracksTheSameSlotAsTheDropAndClearsOnExit() throws {
+        let items = items([("One", true), ("Two", false), ("Three", false)])
+        let strip = makeStrip(items: items)
+        for item in items {
+            let chip = try XCTUnwrap(strip.chipView(for: item.id))
+            let point = chip.convert(NSPoint(x: chip.bounds.midX + 1, y: chip.bounds.midY), to: nil)
+            strip.showDropTarget(atWindowPoint: point)
+            XCTAssertEqual(strip.landingIndex, strip.insertionIndex(forWindowPoint: point))
+            XCTAssertTrue(strip.bounds.contains(try XCTUnwrap(strip.landingMarkerFrame)))
+        }
+        strip.showDropTarget(atWindowPoint: nil)
+        XCTAssertNil(strip.landingIndex)
+        XCTAssertNil(strip.landingMarkerFrame)
+        XCTAssertFalse(strip.isDropTarget)
+    }
+
+    func testEscapeCancelsTheMoveAndRestoresTheOriginalSlots() throws {
+        let items = items([("One", true), ("Two", false), ("Three", false)])
+        let strip = makeStrip(items: items)
+        let chip = try XCTUnwrap(strip.chipView(for: items[0].id))
+        let last = try XCTUnwrap(strip.chipView(for: items[2].id))
+        var moves = 0, ended = 0
+        strip.onReorder = { _, _ in moves += 1 }
+        strip.onDragEnded = { _ in ended += 1 }
+        let start = chip.convert(NSPoint(x: chip.bounds.midX, y: chip.bounds.midY), to: nil)
+        let finish = last.convert(NSPoint(x: last.bounds.maxX - 6, y: last.bounds.midY), to: nil)
+        chip.mouseDown(with: try dragEvent(at: start, type: .leftMouseDown))
+        chip.mouseDragged(with: try dragEvent(at: finish))
+        XCTAssertEqual(strip.landingIndex, 2)
+        chip.keyDown(with: try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: window?.windowNumber ?? 0, context: nil,
+            characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53
+        )))
+        chip.mouseUp(with: try dragEvent(at: finish, type: .leftMouseUp))
+        strip.layoutSubtreeIfNeeded()
+        XCTAssertEqual(moves, 0)
+        XCTAssertEqual(ended, 1)
+        XCTAssertFalse(chip.isLifted)
+        XCTAssertNil(strip.landingMarkerFrame)
+        XCTAssertLessThan(chip.frame.minX, last.frame.minX)
+    }
+
+    func testDraggingAtTheOverflowEdgeScrollsUntilThePointerLeaves() throws {
+        let items = items((0..<20).map { ("Workspace \($0)", $0 == 0) })
+        let strip = makeStrip(items: items)
+        strip.onReorder = { _, _ in }
+        let chip = try XCTUnwrap(strip.chipView(for: items[0].id))
+        let scroll = try XCTUnwrap(strip.subviews.first { $0 is NSScrollView } as? NSScrollView)
+        let start = chip.convert(NSPoint(x: chip.bounds.midX, y: chip.bounds.midY), to: nil)
+        let edge = strip.convert(NSPoint(x: strip.bounds.maxX - 2, y: strip.bounds.midY), to: nil)
+        chip.mouseDown(with: try dragEvent(at: start, type: .leftMouseDown))
+        chip.mouseDragged(with: try dragEvent(at: edge))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        XCTAssertGreaterThan(scroll.contentView.bounds.minX, 0)
+        chip.mouseDragged(with: try dragEvent(at: strip.convert(NSPoint(x: strip.bounds.midX, y: strip.bounds.midY), to: nil)))
+        let stopped = scroll.contentView.bounds.minX
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(scroll.contentView.bounds.minX, stopped)
+        chip.mouseUp(with: try dragEvent(at: edge, type: .leftMouseUp))
+    }
+
+    func testDragStressKeepsChipsAndCommitsOnlyOnce() throws {
+        guard ProcessInfo.processInfo.environment["THREADING_TAB_DRAG_STRESS"] == "1" else {
+            throw XCTSkip("Opt-in 200-tab pointer and layout workload")
+        }
+        let items = items((0..<200).map { ("Workspace \($0)", $0 == 0) })
+        let strip = makeStrip(items: items)
+        window?.orderFront(nil)
+        defer { window?.orderOut(nil) }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        window?.contentView?.layoutSubtreeIfNeeded()
+        window?.displayIfNeeded()
+        CATransaction.flush()
+        let originalChips = items.compactMap { strip.chipView(for: $0.id) }
+        let chip = try XCTUnwrap(originalChips.first)
+        var commits = 0
+        strip.onReorder = { _, _ in commits += 1 }
+        let start = chip.convert(NSPoint(x: chip.bounds.midX, y: chip.bounds.midY), to: nil)
+        chip.mouseDown(with: try dragEvent(at: start, type: .leftMouseDown))
+        var timings: [Double] = []
+        var dragTimings: [Double] = []
+        for step in 0..<300 {
+            let event = try dragEvent(at: strip.convert(NSPoint(x: CGFloat(40 + (step % 400)), y: strip.bounds.midY), to: nil))
+            let started = CFAbsoluteTimeGetCurrent()
+            chip.mouseDragged(with: event)
+            dragTimings.append((CFAbsoluteTimeGetCurrent() - started) * 1_000)
+            window?.contentView?.layoutSubtreeIfNeeded()
+            window?.displayIfNeeded()
+            timings.append((CFAbsoluteTimeGetCurrent() - started) * 1_000)
+        }
+        XCTAssertEqual(commits, 0)
+        chip.mouseUp(with: try dragEvent(at: strip.convert(NSPoint(x: 400, y: strip.bounds.midY), to: nil), type: .leftMouseUp))
+        XCTAssertEqual(commits, 1)
+        XCTAssertTrue(zip(items, originalChips).allSatisfy { strip.chipView(for: $0.0.id) === $0.1 })
+        timings.sort()
+        print("TAB_DRAG_STRESS 200 retained chips; pointer max=\(dragTimings.max()!)ms; pointer+layout median=\(timings[150])ms max=\(timings.last!)ms")
+        XCTAssertLessThan(timings[150], 16)
+    }
+
+    private func dragEvent(at point: NSPoint, type: NSEvent.EventType = .leftMouseDragged) throws -> NSEvent {
         try XCTUnwrap(NSEvent.mouseEvent(
-            with: .leftMouseDragged,
+            with: type,
             location: point,
             modifierFlags: [],
             timestamp: 0,

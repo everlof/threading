@@ -84,8 +84,8 @@ protocol TabDropBandHosting: AnyObject {
     /// The slot a drop at this screen point takes, by the strip's own midpoint rule.
     func dropInsertionIndex(screenPoint: NSPoint) -> Int
 
-    /// The wash on this host's strip while another's chip would land here.
-    func setDropTargetHighlighted(_ highlighted: Bool)
+    /// The landing slot on this host's strip; nil clears the drag feedback.
+    func showDropTarget(atScreenPoint point: NSPoint?)
 }
 
 // MARK: - Tab Hosting

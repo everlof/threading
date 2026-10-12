@@ -90,16 +90,15 @@ final class LogFocusTests: XCTestCase {
         XCTAssertEqual(entries.filter { $0.hiddenCount == 0 }.count, 2, "the two errors")
     }
 
-    /// The layout runs over the whole ring whenever the stream ticks, so its cost is the thing
-    /// that decides whether focus can stay on while a device is talking.
+    /// A context projection scans the ring on a cancellable worker. Keep that scan bounded
+    /// so completed snapshots stay fresh while a device is talking.
     ///
-    /// **Measured 8.9 ms in Release** for a full 50,000-row ring — 9% of one 100 ms drain, which is
-    /// what the app actually runs. Debug is normally ~30–40 ms because none of this inlines; the
+    /// **Measured 8.9 ms in Release** for a full 50,000-row ring. Debug is normally ~30–40 ms because none of this inlines; the
     /// bound below is set for Debug, where the suite runs, and is still tight enough to catch the
     /// regression that matters. Two other spellings of the same search were tried: `lowercased()` per field cost
     /// 57 ms and `range(of:options:.caseInsensitive)` cost 158 ms, so a return to either fails
     /// here rather than quietly making focus unusable while a device is talking.
-    func testLayingOutAFullRingIsCheapEnoughToDoOnEveryTick() {
+    func testProjectingAFullRingRemainsBounded() {
         let full = rows(DeviceLogLimits.ringCapacity)
         let focus = LogFocus(pattern: "failed", context: 2)
         var slowest = 0.0
@@ -109,6 +108,6 @@ final class LogFocusTests: XCTestCase {
             slowest = max(slowest, Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000)
         }
         print(String(format: "FOCUS layout of %d rows: %.1f ms worst of 5", full.count, slowest))
-        XCTAssertLessThan(slowest, 120, "a drain happens ten times a second")
+        XCTAssertLessThan(slowest, 120, "the background projection must keep up with capture")
     }
 }

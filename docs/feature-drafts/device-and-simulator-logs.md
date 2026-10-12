@@ -103,10 +103,15 @@ from `stop()`. Force-quit the app, kill a probe, crash — and the child reparen
 holds the relay indefinitely. So: use the device source once, exit uncleanly, and the device source
 is silently broken for every later reader until somebody finds the orphan.
 
-`DeviceRelayReclaim` now sweeps before connecting, bounded to processes orphaned to `launchd` whose
-arguments name this exact tool and device — a reader started in the user's own terminal has their
-shell as its parent and is left alone. `DeviceLogLineReader` also terminates its child on `deinit`.
-`DeviceRelayReclaimTests` holds the bound.
+`DeviceRelayReclaim` checks before connecting, restricted to this user's processes orphaned to
+`launchd` whose executable and arguments name this exact tool and device. A reader started in
+the user's own terminal has their shell as its parent and is left alone. Numeric kernel identity
+discovery precedes a bounded argv lookup for at most 32 candidates; global `ps` argument scans
+caused 98–217 second stalls on the reported Mac. The identity, owner, parent and executable are
+revalidated before signalling, including the process start time to guard against recycled PIDs.
+Both USB source types run lifecycle work off-main; cancellation immediately invalidates a pending
+launch without waiting for cleanup. `DeviceLogLineReader` also terminates its child on `deinit`.
+`DeviceRelayReclaimTests` and `StructuredDeviceLogSourceTests` hold these bounds.
 
 #### `--console` is the device answer
 

@@ -2059,9 +2059,9 @@ final class DisplayPaneController: NSViewController {
   }
 
   /// The wash on this pane's strip while another pane's chip would land here.
-  func setDropTargetHighlighted(_ highlighted: Bool) {
+  func showDropTarget(atScreenPoint point: NSPoint?) {
     guard isViewLoaded else { return }
-    tabBar.isDropTarget = highlighted
+    tabBar.showDropTarget(atWindowPoint: point.flatMap { windowPoint(from: $0) })
   }
 
   func dropInsertionIndex(screenPoint: NSPoint) -> Int {

@@ -450,6 +450,24 @@ against the current theme as well as rendering it in dark, Cyberpunk and Swiss a
 History and source recents are separated by stream; legacy history remains with Regular Logs.
 Agent tools read the selected tab, and `bluetooth` selects the Bluetooth tab for its exact UDID.
 
+Streaming presentation updates the table's row count and existing viewport cells in place.
+`ThemedTableTextCell` retains its selectable label with frame layout: the previous `reloadData`
+plus fresh labels and constraints on every 100 ms batch spent most of its time in AppKit cell
+destruction and layout. Ring trimming shifts selected lines and a paused viewport; programmatic
+updates cannot turn following off. Context scans and user filter changes publish immutable
+snapshots from a cancellable worker. Entries keep addressing that snapshot while capture advances,
+then selection and the viewport are restored by absolute line position. Completed snapshots are
+published before catching up, so sustained traffic cannot starve the view by invalidating every
+result. The synchronous agent focus receipt remains a one-time scan; streaming never repeats it
+on the main actor. See the matched rendered workload in `performance.md`.
+
+USB reader start/stop never synchronously waits for transport work. Each serial lifecycle queue
+checks a cancellation generation before launching and before delivering callbacks, including a
+fallback delayed by orphan reclaim. Reclaim uses numeric kernel identity discovery and a bounded
+argv lookup for exact executable candidates; a global process-argument scan previously held
+teardown for minutes. See `DeviceRelayReclaimTests` and `StructuredDeviceLogSourceTests` for the
+exact-device rule and cancellation while cleanup is blocked.
+
 Paired phones offer **Bluetooth (USB/Wi-Fi)** in that tab. This reads HCI traffic through the external
 `idevicebtlogger` executable from libimobiledevice. Apple documents the connected-phone capture
 route and the Bluetooth logging profile in [WWDC19 session 901](https://developer.apple.com/videos/play/wwdc2019/901/).

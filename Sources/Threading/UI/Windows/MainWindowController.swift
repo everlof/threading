@@ -3273,7 +3273,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     ) -> DragLanding? {
         springDestinationOpen(from: sourceID, tabID: tabID, at: screenPoint)
         let landing = dragDestination(from: sourceID, tabID: tabID, at: screenPoint)
-        highlightDropTarget(landing?.hostID)
+        highlightDropTarget(landing?.hostID, at: screenPoint)
         return landing
     }
 
@@ -3331,9 +3331,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             .dropBandContains(screenPoint: screenPoint) ?? false
     }
 
-    private func highlightDropTarget(_ destinationID: TabHostID?) {
+    private func highlightDropTarget(_ destinationID: TabHostID?, at point: NSPoint? = nil) {
         for (hostID, host) in dropBandHosts {
-            host.setDropTargetHighlighted(hostID == destinationID)
+            host.showDropTarget(atScreenPoint: hostID == destinationID ? point : nil)
         }
     }
 

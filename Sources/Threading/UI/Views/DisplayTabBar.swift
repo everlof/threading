@@ -72,6 +72,10 @@ final class DisplayTabBar: NSView {
         strip.insertionIndex(forWindowPoint: point)
     }
 
+    func showDropTarget(atWindowPoint point: NSPoint?) {
+        strip.showDropTarget(atWindowPoint: point)
+    }
+
     func keyboardFocusOwner(for id: UUID) -> NSView? {
         strip.chipView(for: id)
     }

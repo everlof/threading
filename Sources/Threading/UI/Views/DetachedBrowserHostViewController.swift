@@ -430,9 +430,9 @@ extension DetachedBrowserHostViewController: TabDropBandHosting {
         )
     }
 
-    func setDropTargetHighlighted(_ highlighted: Bool) {
+    func showDropTarget(atScreenPoint point: NSPoint?) {
         guard isViewLoaded else { return }
-        strip.isDropTarget = highlighted
+        strip.showDropTarget(atWindowPoint: point.flatMap { view.window?.convertPoint(fromScreen: $0) })
     }
 
     fileprivate func screenPoint(from windowPoint: NSPoint) -> NSPoint? {

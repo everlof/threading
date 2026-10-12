@@ -500,6 +500,45 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 to: Render.directory.appendingPathComponent("device-log-shell-\(name).png")
             )
 
+            // Drag the real decorated workspace chip through its pointer path. The marker
+            // must be visible in the product shell before the host persists the new order.
+            func tabStrip(in view: NSView) -> ThemedTabStripView? {
+                if let strip = view as? ThemedTabStripView { return strip }
+                return view.subviews.lazy.compactMap { tabStrip(in: $0) }.first
+            }
+            let strip = try XCTUnwrap(tabStrip(in: fixture.panel.view))
+            let originalOrder = fixture.panel.tabs(for: fixture.sessionID).map(\.id)
+            let activeID = try XCTUnwrap(fixture.panel.activeTabID(for: fixture.sessionID))
+            let chip = try XCTUnwrap(strip.chipView(for: activeID))
+            let first = try XCTUnwrap(strip.chipView(for: try XCTUnwrap(originalOrder.first)))
+            let start = chip.convert(NSPoint(x: chip.bounds.midX, y: chip.bounds.midY), to: nil)
+            let finish = first.convert(NSPoint(x: 4, y: first.bounds.midY), to: nil)
+            func event(_ type: NSEvent.EventType, _ point: NSPoint) throws -> NSEvent {
+                try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: 0,
+                                                windowNumber: fixture.window.windowNumber, context: nil,
+                                                eventNumber: 0, clickCount: 1, pressure: 1))
+            }
+            let content = try XCTUnwrap(fixture.window.contentView)
+            XCTAssertTrue(content.hitTest(content.convert(start, from: nil)) === chip)
+            chip.mouseDown(with: try event(.leftMouseDown, start))
+            chip.mouseDragged(with: try event(.leftMouseDragged, finish))
+            settle(fixture.window)
+            XCTAssertEqual(strip.landingIndex, 0)
+            XCTAssertNotNil(strip.landingMarkerFrame)
+            XCTAssertEqual(fixture.panel.tabs(for: fixture.sessionID).map(\.id), originalOrder)
+            let dragImage = try XCTUnwrap(CGWindowListCreateImage(
+                .null, .optionIncludingWindow, CGWindowID(fixture.window.windowNumber),
+                [.boundsIgnoreFraming, .nominalResolution]
+            ))
+            try XCTUnwrap(NSBitmapImageRep(cgImage: dragImage).representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent("device-log-shell-tab-drag-\(name).png")
+            )
+            chip.mouseUp(with: try event(.leftMouseUp, finish))
+            settle(fixture.window)
+            XCTAssertEqual(fixture.panel.tabs(for: fixture.sessionID).first?.id, activeID)
+            XCTAssertNil(strip.landingMarkerFrame)
+            XCTAssertTrue(fixture.panel.activateDeviceLog(for: fixture.sessionID) === logs)
+
             let plugin = try XCTUnwrap(logs.loaded as? NSObject)
             let selector = NSSelectorFromString("installBluetoothCaptureForTesting:")
             XCTAssertTrue(plugin.responds(to: selector))

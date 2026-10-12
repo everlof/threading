@@ -89,9 +89,9 @@ final class DrawerHostViewController: NSViewController {
     }
 
     /// The wash on this host's strip while another pane's chip would land here.
-    func setDropTargetHighlighted(_ highlighted: Bool) {
+    func showDropTarget(atScreenPoint point: NSPoint?) {
         guard isViewLoaded else { return }
-        strip.isDropTarget = highlighted
+        strip.showDropTarget(atWindowPoint: point.flatMap { view.window?.convertPoint(fromScreen: $0) })
     }
 
     func dropInsertionIndex(screenPoint: NSPoint) -> Int {

@@ -36,6 +36,16 @@ final class DeviceRelayReclaimTests: XCTestCase {
         XCTAssertTrue(pids(listing).isEmpty)
     }
 
+    func testExecutableAndDeviceMustMatchWholeArguments() {
+        let listing = """
+             41493     1 \(tool)-wrapper -u \(udid)
+             41494     1 \(tool) -u \(udid)FFFF
+             41495     1 /bin/echo \(tool) -u \(udid)
+             41496     1 \(tool) --udid \(udid)
+            """
+        XCTAssertEqual(pids(listing), [41496])
+    }
+
     func testAnUnrelatedOrphanIsNotTouched() {
         let listing = """
              1234     1 /usr/bin/some-other-tool -u \(udid)

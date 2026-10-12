@@ -136,7 +136,9 @@ public enum LogFocusLayout {
         let context = max(0, focus.context)
         var keptRanges: [Range<Int>] = []
         keptRanges.reserveCapacity(min(rows.count, 1_024))
-        for (index, row) in rows.enumerated() where focus.matches(row) {
+        for (index, row) in rows.enumerated() {
+            if index % 128 == 0, Task.isCancelled { return [] }
+            guard focus.matches(row) else { continue }
             let lower = max(0, index - context)
             let upper = min(rows.count, index + context + 1)
             if let previous = keptRanges.last, lower <= previous.upperBound {

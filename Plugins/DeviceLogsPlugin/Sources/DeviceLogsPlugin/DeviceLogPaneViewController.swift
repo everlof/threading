@@ -59,7 +59,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         /// bare zero. Long enough that an ordinarily quiet moment does not read as a fault.
         static let silenceGrace: TimeInterval = 6
         static let maximumProcessChoices = 512
-        static let maximumProjectionCatchUp = 2048
+        static let maximumSynchronousMatches = 2_048
         static let maximumProcessControlWidth: CGFloat = 200
         static let bluetoothTimeWidth: CGFloat = 112
         static let bluetoothProtocolWidth: CGFloat = 66
@@ -157,6 +157,7 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     /// Ring positions an agent's search matched, marked so its reading is something you can see.
     private var agentHits: Set<Int> = []
+    private var agentHitOffset = 0
     private var filter = ""
     /// Whole-device Debug output is thousands of rows per second on a paired iPhone. Start at
     /// Info so the pane opens as a useful console; Debug remains one explicit menu choice away.
@@ -167,6 +168,10 @@ public final class DeviceLogPaneViewController: NSViewController {
     private var showingContext = false
     private var projectionGeneration = 0
     private var projectionTask: Task<Void, Never>?
+    // Context projection scans on a worker. Its entries refer to this immutable snapshot until
+    // the next result arrives, so a rolling capture cannot silently change the lines on screen.
+    private var projectedRows: [DeviceLogRow]?
+    private var projectedRowOffset = 0
     private var rowOffset = 0
 
     /// The controls, as the fold layout reads them. Built rather than stored so the two cannot
@@ -185,6 +190,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// again the moment they come back to the bottom — so following is something you leave and
     /// rejoin rather than a mode you have to remember to switch.
     private var isFollowing = true
+    private var updatingTable = false
     private var rateTimer: Timer?
     private var received = 0
     private var lastCount = 0
@@ -306,6 +312,10 @@ public final class DeviceLogPaneViewController: NSViewController {
     func setRowsPresented(_ presented: Bool) {
         presentsRows = presented
         if !presented {
+            if projectedRows == nil {
+                projectedRows = rows
+                projectedRowOffset = rowOffset
+            }
             bluetoothProfileSetup.cancelBrowser()
             projectionGeneration += 1
             projectionTask?.cancel()
@@ -320,7 +330,6 @@ public final class DeviceLogPaneViewController: NSViewController {
         processChoices.forEach { processPopUp.addItem(withTitle: $0) }
         processPopUp.selectItem(at: selectedProcess.flatMap { processChoices.firstIndex(of: $0).map { $0 + 1 } } ?? 0)
         recomputeVisible(backgroundContext: true)
-        table.reloadData()
         updateStatus()
     }
 
@@ -881,7 +890,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         showingContext = contextPopUp.indexOfSelectedItem == 1
         expandedGaps.removeAll()
         clearAgentNote()
-        recomputeVisible()
+        recomputeVisible(backgroundContext: true)
         table.reloadData()
         updateStatus()
     }
@@ -900,6 +909,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         projectionTask?.cancel()
         projectionTask = nil
         rowOffset = 0
+        projectedRows = nil
         rows.removeAll(keepingCapacity: true)
         entries.removeAll(keepingCapacity: true)
         expandedGaps.removeAll()
@@ -912,6 +922,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// `design-system.md` asks for a rendered state on a new component, and this surface earns it:
     /// its header sat *on top of* the first rows for a whole build because nothing drew it.
     public func installRowsForTesting(_ fixture: [DeviceLogRow], focusing pattern: String = "") {
+        projectedRows = nil
         rows = fixture
         discoverProcesses(in: fixture)
         filter = pattern
@@ -949,6 +960,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     public func noteAgentAction(_ note: String, searching pattern: String? = nil) {
         agentNote = note
         agentHits.removeAll()
+        agentHitOffset = rowOffset
         if let pattern, !pattern.isEmpty {
             let focus = LogFocus(pattern: pattern, minimumSeverity: 0, context: 0)
             for (index, row) in rows.enumerated() where focus.matches(row) {
@@ -1016,8 +1028,9 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     /// The rows currently visible, newest last, for a tool asked what is on screen.
     public func visibleRowsForTools(limit: Int) -> [DeviceLogRow] {
-        entries.suffix(limit).compactMap { entry in
-            if case .row(let index) = entry, rows.indices.contains(index) { return rows[index] }
+        let displayed = projectedRows ?? rows
+        return entries.suffix(limit).compactMap { entry in
+            if case .row(let index) = entry, displayed.indices.contains(index) { return displayed[index] }
             return nil
         }
     }
@@ -1025,6 +1038,10 @@ public final class DeviceLogPaneViewController: NSViewController {
     // MARK: Filtering
 
     private var isFiltering: Bool { focus.isActive }
+
+    private func expandedGaps(at offset: Int) -> Set<Int> {
+        Set(expandedGaps.compactMap { $0 >= offset ? $0 - offset : nil })
+    }
 
     private func recomputeVisible(backgroundContext: Bool = false) {
         projectionGeneration += 1
@@ -1034,14 +1051,20 @@ public final class DeviceLogPaneViewController: NSViewController {
         // The legacy agent focus keeps its synchronous receipt contract. User filtering scans
         // the fixed 50k ring off-main; ordinary streaming below tests only incoming rows.
         if showingContext && !backgroundContext {
-            entries = LogFocusLayout.entries(rows: rows, focus: focus, expanded: expandedGaps)
+            entries = LogFocusLayout.entries(rows: rows, focus: focus, expanded: expandedGaps(at: rowOffset))
+            projectedRows = rows
+            projectedRowOffset = rowOffset
             return
+        }
+        if projectedRows == nil {
+            projectedRows = rows
+            projectedRowOffset = rowOffset
         }
         let snapshot = rows
         let selectedFocus = focus
         let offset = rowOffset
         let context = showingContext
-        let expanded = expandedGaps
+        let expanded = expandedGaps(at: offset)
         projectionTask = Task { [weak self] in
             let worker = Task.detached(priority: .userInitiated) {
                 if context {
@@ -1060,29 +1083,37 @@ public final class DeviceLogPaneViewController: NSViewController {
                 worker.cancel()
             }
             guard let self, !Task.isCancelled, self.projectionGeneration == generation else { return }
-            if context, self.rowOffset != offset || self.rows.count != snapshot.count {
-                self.recomputeVisible(backgroundContext: true)
-                return
+            let oldOffset = self.projectedRows == nil ? self.rowOffset : self.projectedRowOffset
+            let selectedLines = self.table.selectedRowIndexes.compactMap { position -> Int? in
+                guard self.entries.indices.contains(position), case .row(let index) = self.entries[position] else { return nil }
+                return oldOffset + index
             }
-            let removed = self.rowOffset - offset
-            let tailStart = max(0, snapshot.count - removed)
-            // If the worker fell far behind, take a new snapshot instead of moving a large scan
-            // onto the main actor. A normal 100ms batch is hundreds of rows, not the whole ring.
-            guard self.rows.count - tailStart <= Metrics.maximumProjectionCatchUp else { self.recomputeVisible(backgroundContext: true); return }
-            self.entries = context ? projected : projected.compactMap { entry in
-                guard case .row(let index) = entry, index >= removed else { return nil }
-                return .row(index - removed)
-            }
-            if tailStart < self.rows.count {
-                for index in tailStart..<self.rows.count where selectedFocus.matches(self.rows[index]) {
-                    self.entries.append(.row(index))
-                }
-            }
+            let first = self.table.rows(in: self.table.visibleRect).location
+            let anchor = self.entries.indices.contains(first) ? self.entryStart(self.entries[first]) + oldOffset : nil
+            let oldOrigin = self.scroll?.contentView.bounds.origin ?? .zero
+            let pitch = self.table.rowHeight + self.table.intercellSpacing.height
+            self.entries = projected
+            self.projectedRows = snapshot
+            self.presentationNeedsRefresh = false
+            self.projectedRowOffset = offset
             self.projectionTask = nil
-            self.table.reloadData()
-            if self.isFollowing, !self.entries.isEmpty { self.table.scrollRowToVisible(self.entries.count - 1) }
-            self.updateFollowAffordance()
+            let selection = IndexSet(selectedLines.compactMap { line -> Int? in
+                guard let position = self.displayIndex(containing: line - offset),
+                      case .row = self.entries[position] else { return nil }
+                return position
+            })
+            let origin = anchor.flatMap { self.displayIndex(containing: $0 - offset) }.map {
+                NSPoint(x: oldOrigin.x, y: max(0, oldOrigin.y + CGFloat($0 - first) * pitch))
+            }
+            if self.presentsRows { self.refreshStreamingTable(selection: selection, origin: origin) }
             self.updateStatus()
+            // Publish each completed snapshot, then catch up. Discarding every result
+            // when more rows arrived would starve a busy device's view indefinitely.
+            if self.rowOffset != offset || self.rows.count != snapshot.count {
+                self.recomputeVisible(backgroundContext: true)
+            } else if !context {
+                self.projectedRows = nil
+            }
         }
     }
 
@@ -1100,19 +1131,34 @@ public final class DeviceLogPaneViewController: NSViewController {
         // question can reach back through once the ring has moved on.
         recorder?.record(incoming)
 
+        let projectBurst = !showingContext && isFiltering && incoming.count > Metrics.maximumSynchronousMatches
+        if presentsRows, projectBurst, projectedRows == nil {
+            projectedRows = rows
+            projectedRowOffset = rowOffset
+        }
         let previousCount = rows.count
         rows.append(contentsOf: incoming)
         let removedCount = max(0, rows.count - DeviceLogLimits.ringCapacity)
+        let removedEntries = entries.prefix { entry in
+            guard case .row(let index) = entry else { return false }
+            return index < removedCount
+        }.count
         rowOffset += removedCount
         if rows.count > DeviceLogLimits.ringCapacity {
             rows.removeFirst(rows.count - DeviceLogLimits.ringCapacity)
         }
 
-        guard presentsRows, !(showingContext && projectionTask != nil) else {
+        guard presentsRows, projectionTask == nil else {
             presentationNeedsRefresh = true
             return
         }
         presentationUpdateCount += 1
+
+        if (showingContext && isFiltering) || projectBurst {
+            recomputeVisible(backgroundContext: true)
+            return
+        }
+        projectedRows = nil
 
         if !showingContext {
             // Strict mode tests new rows only. Old matches shift with the ring; a whole-ring
@@ -1125,21 +1171,83 @@ public final class DeviceLogPaneViewController: NSViewController {
             for index in max(0, previousCount - removedCount)..<rows.count where selectedFocus.matches(rows[index]) {
                 entries.append(.row(index))
             }
-        } else if isFiltering {
-            entries = LogFocusLayout.entries(rows: rows, focus: focus, expanded: expandedGaps)
         } else {
             entries = rows.indices.map { .row($0) }
         }
 
-        table.reloadData()
+        // Strict/unfiltered streams only remove entries at the head. Keep the reader's
+        // selected lines and paused viewport attached to those surviving entries.
+        refreshStreamingTable(removing: removedEntries)
+    }
+
+    private func entryStart(_ entry: LogDisplayEntry) -> Int {
+        switch entry {
+        case .row(let index): return index
+        case .gap(let range): return range.lowerBound
+        }
+    }
+
+    /// Entries are ordered, so restoring a selected line or viewport anchor never scans the ring.
+    private func displayIndex(containing row: Int) -> Int? {
+        guard row >= 0, !entries.isEmpty else { return nil }
+        var lower = 0, upper = entries.count
+        while lower < upper {
+            let middle = (lower + upper) / 2
+            if entryStart(entries[middle]) <= row { lower = middle + 1 }
+            else { upper = middle }
+        }
+        guard lower > 0 else { return nil }
+        let position = lower - 1
+        switch entries[position] {
+        case .row(let index): return index == row ? position : nil
+        case .gap(let range): return range.contains(row) ? position : nil
+        }
+    }
+
+    private func refreshStreamingTable(removing removedEntries: Int = 0,
+                                       selection: IndexSet? = nil, origin restoredOrigin: NSPoint? = nil) {
+        updatingTable = true
+        defer { updatingTable = false }
+        let selected = table.selectedRowIndexes
+        let origin = scroll?.contentView.bounds.origin ?? .zero
+        // reloadData destroys every visible row and its cells. A live tail needs only its
+        // count and the text in the existing viewport to change, including at a full ring.
+        table.noteNumberOfRowsChanged()
+        if let selection {
+            table.selectRowIndexes(selection, byExtendingSelection: false)
+        } else if removedEntries > 0 {
+            let surviving = IndexSet(selected.compactMap { index in
+                index >= removedEntries ? index - removedEntries : nil
+            })
+            table.selectRowIndexes(surviving, byExtendingSelection: false)
+        }
         if isFollowing, !entries.isEmpty {
             table.scrollRowToVisible(entries.count - 1)
+        } else if let restoredOrigin, let scroll {
+            scroll.contentView.scroll(to: restoredOrigin)
+            scroll.reflectScrolledClipView(scroll.contentView)
+        } else if removedEntries > 0, let scroll {
+            let pitch = table.rowHeight + table.intercellSpacing.height
+            scroll.contentView.scroll(to: NSPoint(x: origin.x, y: max(0, origin.y - CGFloat(removedEntries) * pitch)))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+        let visible = table.rows(in: table.visibleRect)
+        if visible.location != NSNotFound {
+            let selectedFocus = focus
+            for row in visible.location..<min(NSMaxRange(visible), entries.count) {
+                for (column, definition) in table.tableColumns.enumerated() where !definition.isHidden {
+                    guard let cell = table.view(atColumn: column, row: row, makeIfNecessary: false)
+                        as? ThemedTableTextCell else { continue }
+                    configure(cell, column: definition.identifier, row: row, focus: selectedFocus)
+                }
+            }
         }
         updateFollowAffordance()
     }
 
     /// The reader moved the view. Leaving the bottom stops the follow; arriving back resumes it.
     private func scrollPositionChanged() {
+        guard !updatingTable else { return }
         let atBottom = isPinnedToBottom()
         guard atBottom != isFollowing else { return }
         isFollowing = atBottom
@@ -1256,13 +1364,16 @@ extension DeviceLogPaneViewController: NSTableViewDelegate {
         guard let tableColumn, entries.indices.contains(row) else { return nil }
         let identifier = tableColumn.identifier
         let host = tableView.makeView(withIdentifier: identifier, owner: self)
-            as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
+            as? ThemedTableTextCell ?? ThemedTableTextCell()
         host.identifier = identifier
+        configure(host, column: identifier, row: row, focus: focus)
+        return host
+    }
 
-        let label = NSTextField(labelWithString: "")
-        label.font = Design.Typography.compactCode()
-        label.lineBreakMode = .byTruncatingTail
-        label.isSelectable = true
+    private func configure(_ host: ThemedTableTextCell, column identifier: NSUserInterfaceItemIdentifier,
+                           row: Int, focus: LogFocus) {
+        let label = host.label
+        var font: Design.FontRole = .compactCode
 
         switch entries[row] {
         case .gap(let range):
@@ -1273,8 +1384,9 @@ extension DeviceLogPaneViewController: NSTableViewDelegate {
                 : ""
             label.textColor = Design.Text.tertiary
         case .row(let index):
-            guard rows.indices.contains(index) else { return nil }
-            let entry = rows[index]
+            let displayed = projectedRows ?? rows
+            guard displayed.indices.contains(index) else { label.stringValue = ""; return }
+            let entry = displayed[index]
             label.stringValue = text(for: entry, column: identifier)
             label.textColor = ink(for: entry, column: identifier)
             // A row the agent's search matched, marked in the time column: a stripe down the left
@@ -1283,36 +1395,35 @@ extension DeviceLogPaneViewController: NSTableViewDelegate {
             // Weight as well as colour, because colour alone did not work — an error row already
             // draws its clock in the accent, so a hit on an error was indistinguishable from the
             // error, and only a rendered picture showed it.
-            if agentHits.contains(index), identifier == Columns.time {
+            let displayedOffset = projectedRows == nil ? rowOffset : projectedRowOffset
+            if agentHits.contains(index + displayedOffset - agentHitOffset), identifier == Columns.time {
                 label.textColor = AppThemePalette.color(.accent)
-                label.font = .monospacedSystemFont(
-                    ofSize: Design.Typography.compactCode().pointSize,
-                    weight: .bold
-                )
+                font = .emphasizedCompactCode
             }
             // The match is why the fold opened around it, so it is what the eye should land on.
             if focus.isActive, focus.matches(entry), identifier == Columns.message {
                 // Same metrics as the rows around it, heavier ink: a bolder weight at the same size
                 // keeps the column aligned, which a larger one would not.
-                label.font = .monospacedSystemFont(
-                    ofSize: Design.Typography.compactCode().pointSize,
-                    weight: .bold
-                )
+                font = .emphasizedCompactCode
             }
         }
+        label.applyFont(font)
         label.toolTip = label.stringValue
-        host.install(label, columnWidth: tableColumn.width, horizontalInset: Design.Spacing.tight)
-        return host
     }
 
     /// Opening a fold is a click on it, which is the only affordance a folded run needs.
     public func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !updatingTable else { return }
         let selected = table.selectedRow
         guard entries.indices.contains(selected), case .gap(let range) = entries[selected] else {
             return
         }
-        expandedGaps.insert(range.lowerBound)
-        entries = LogFocusLayout.entries(rows: rows, focus: focus, expanded: expandedGaps)
+        let offset = projectedRows == nil ? rowOffset : projectedRowOffset
+        expandedGaps.insert(range.lowerBound + offset)
+        let displayed = projectedRows ?? rows
+        entries = LogFocusLayout.entries(rows: displayed, focus: focus, expanded: expandedGaps(at: offset))
+        // A result already in flight was computed before the fold opened.
+        if projectionTask != nil { recomputeVisible(backgroundContext: true) }
         table.reloadData()
     }
 
