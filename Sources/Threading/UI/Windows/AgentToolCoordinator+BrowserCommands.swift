@@ -426,12 +426,12 @@ extension AgentToolCoordinator {
         for sessionID: SessionID,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
-        let hasRef = arguments.ref?.isEmpty == false
-        let hasSelector = arguments.selector?.isEmpty == false
-        let hasLocator = arguments.locator != nil
-        guard [hasRef, hasSelector, hasLocator].filter({ $0 }).count == 1 else {
+        let mode = arguments.mode ?? .chooser
+        let targetCount = [arguments.ref?.isEmpty == false, arguments.selector?.isEmpty == false,
+                           arguments.locator != nil].filter { $0 }.count
+        guard targetCount == 1 else {
             completion(.failure(
-                "Provide exactly one file-input target: ref, selector, or locator."
+                "Provide exactly one upload target: ref, selector, or locator."
             ))
             return
         }
@@ -443,7 +443,6 @@ extension AgentToolCoordinator {
             ))
             return
         }
-
         var suggestions: [URL] = []
         var seen: Set<String> = []
         for (index, rawPath) in paths.enumerated() {
@@ -454,11 +453,13 @@ extension AgentToolCoordinator {
             }
             let url = URL(fileURLWithPath: path).standardizedFileURL
             var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(
-                atPath: url.path,
-                isDirectory: &isDirectory
-            ) else {
+            let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            guard exists else {
                 completion(.failure("Upload path \(index + 1) does not exist."))
+                return
+            }
+            if mode == .direct && isDirectory.boolValue {
+                completion(.failure("Direct upload path \(index + 1) must be a file."))
                 return
             }
             guard seen.insert(url.path).inserted else {
@@ -470,7 +471,7 @@ extension AgentToolCoordinator {
 
         withAuthorizedBrowser(
             for: sessionID,
-            purpose: "suggest files to the native chooser on"
+            purpose: mode == .direct ? "supply local files directly to" : "suggest files to the native chooser on"
         ) { [weak self] browser in
             guard let self, let browser else {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
@@ -483,7 +484,8 @@ extension AgentToolCoordinator {
                         ref: arguments.ref,
                         selector: arguments.selector,
                         locator: arguments.locator,
-                        suggestedURLs: suggestions
+                        suggestedURLs: suggestions,
+                        mode: mode
                     )
                     completion(await self.browserActionResult(
                         outcome,
@@ -492,7 +494,7 @@ extension AgentToolCoordinator {
                     ))
                 } catch {
                     completion(.failure(
-                        "Native file selection failed: \(error.localizedDescription)"
+                        "File selection failed: \(error.localizedDescription)"
                     ))
                 }
             }

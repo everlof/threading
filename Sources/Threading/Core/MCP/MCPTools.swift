@@ -235,11 +235,17 @@ struct BrowserTraceArguments: Codable, Sendable {
   let action: String?
 }
 
+enum BrowserUploadMode: String, Codable, Sendable {
+  case chooser
+  case direct
+}
+
 struct BrowserUploadArguments: Codable, Sendable {
   let paths: [String]?
   let ref: String?
   let selector: String?
   var locator: BrowserSemanticLocator? = nil
+  var mode: BrowserUploadMode? = nil
 }
 
 struct BrowserDownloadArguments: Codable, Sendable {
@@ -4634,45 +4640,53 @@ enum MCPTools {
         idempotentHint: false,
         openWorldHint: true
       ),
-      title: "Choose files",
-      detail: "Suggest files through a native user-approved file chooser.",
+      title: "Upload files",
+      detail: "Choose files in a native panel or supply exact local files directly.",
       symbol: "arrow.up.doc",
       decodeArguments: { container in
         try container.decodeIfPresent(BrowserUploadArguments.self, forKey: .arguments)
           ?? BrowserUploadArguments(paths: nil, ref: nil, selector: nil)
       },
-      browserTraceDetail: { arguments in "\(arguments.paths?.count ?? 0) suggested paths; " + MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: arguments.locator) },
+      browserTraceDetail: { arguments in "\(arguments.paths?.count ?? 0) paths; \(arguments.mode?.rawValue ?? "chooser"); " + MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: arguments.locator) },
       browserWorkspaceEffect: { _ in .invalidate },
       observesPanel: true,
       executeArguments: { handler, arguments, sessionID, completion in
         handler.browserUpload(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Suggest one or more existing local paths to one exact file input, then open \
-        WebKit's native file chooser. The chooser displays the suggestions and the user \
-        must click Open before the website receives anything; the user may change the \
-        selection, and any user-chosen paths are not returned to the agent. File-input \
-        change handlers remain under the browser's no-unapproved-form-submission guard.
+        In chooser mode (the default), suggest local paths to one visible file input. \
+        WebKit opens a native chooser and the user must click Open before the website \
+        receives anything; the user may change the selection, and user-chosen paths are \
+        not returned to the agent. In direct mode, activate one exact visible upload \
+        control and supply the specified local files to WebKit without a chooser. This \
+        also works when that control opens a hidden file input. The website may still \
+        need to finish uploading the selected files. File-input change handlers remain \
+        under the browser's no-unapproved-form-submission guard.
         """,
       inputSchema: MCPInputSchema(
         properties: [
           "paths": MCPPropertySchema(
             type: .array,
             description: """
-              One to ten absolute existing file or directory paths to suggest. The \
-              native chooser and input's multiple/directory policy remain authoritative.
+              One to ten absolute existing paths. Chooser mode suggests them and permits \
+              directories when the input does. Direct mode supplies exactly these files; \
+              directories are not supported.
               """,
             items: MCPArrayItemSchema(type: .string)
           ),
           "ref": MCPPropertySchema(
             type: .string,
-            description: "Current snapshot ref for the file input."
+            description: "Current snapshot ref for the file input or, in direct mode, its visible upload control."
           ),
           "selector": MCPPropertySchema(
             type: .string,
-            description: "Optional strict fallback selector for the file input."
+            description: "Optional strict selector for the file input or visible upload control."
           ),
           "locator": browserSemanticLocatorSchema,
+          "mode": MCPPropertySchema(
+            type: .string,
+            description: "chooser (default) or direct. Direct supplies exact files without a native picker."
+          ),
         ],
         required: ["paths"]
       )

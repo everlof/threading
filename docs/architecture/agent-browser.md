@@ -793,11 +793,17 @@ let one click, key press or page handler submit twice.
 authenticated is reachable, and the way to keep a promise like that is to not add a flag to the
 function that makes it. `browser_attach_chrome` is untouched: it has the real 1Password extension.
 
-Files remain user-controlled boundaries. A plain file-input click reveals the browser and uses a
-native open panel. `browser_upload` can seed that same panel with up to ten existing absolute paths,
-but the user sees the suggestions, may change them, and must click Open; user-chosen paths are never
-returned to the agent. The browser-level navigation guard remains active through the panel and file
-input change events, so an indirect `requestSubmit()` is still blocked. `browser_download` binds one
+File selection has two explicit modes. A plain file-input click reveals the browser and uses a
+native open panel. `browser_upload` defaults to `chooser`: it seeds that panel with up to ten
+existing absolute paths, but the user sees the suggestions, may change them, and must click Open;
+user-chosen paths are never returned to the agent. `mode: "direct"` supplies exactly the named local
+files to WebKit's open-panel callback without presenting a panel. Its target is a visible upload
+control, which may open a hidden file input. It refuses directories and multiple files when the
+input accepts only one. The call reports file selection, not completion of a website's asynchronous
+upload. The browser-level navigation guard remains active through file-input change events in both
+modes, so an indirect `requestSubmit()` is still blocked. The direct mode's ten-path limit bounds
+the callback; WebKit reads file contents only after selection, with no file bytes copied through
+Threading's JavaScript bridge. `browser_download` binds one
 semantic action to the next WebKit download and waits through a native save panel whose copy says
 the chosen destination will be returned to the agent; cancellation and targets that do not start a
 download are explicit failures. Ordinary downloads still use the same native save panel. Successful

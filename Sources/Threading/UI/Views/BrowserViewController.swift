@@ -1769,33 +1769,39 @@ final class BrowserViewController: NSViewController {
         )
     }
 
-    /// Opens WebKit's native file chooser for one exact file input. Suggested paths merely seed
-    /// the chooser: the user sees them, may change them, and must click Open before the website
-    /// receives any file handle. The result never reveals a user-chosen path back to the agent.
+    /// Activates one file input or visible upload control. Chooser mode seeds WebKit's native
+    /// panel; direct mode supplies the exact local files through WebKit's open-panel callback.
     func agentChooseFiles(
         ref: String?,
         selector: String?,
         locator: BrowserSemanticLocator?,
-        suggestedURLs: [URL]
+        suggestedURLs: [URL],
+        mode: BrowserUploadMode
     ) async throws -> BrowserActionOutcome {
         guard pendingAgentFileSelection == nil else {
             return BrowserActionOutcome(
                 ok: false,
-                message: "Another agent-requested file chooser is already open in this tab."
+                message: "Another agent-requested file selection is already active in this tab."
             )
         }
         let target = try await describeTarget(ref: ref, selector: selector, locator: locator)
         guard target.ok else {
             return BrowserActionOutcome(ok: false, message: target.message)
         }
-        guard target.tag == "input", target.inputType == "file" else {
+        if mode == .chooser && (target.tag != "input" || target.inputType != "file") {
             return BrowserActionOutcome(
                 ok: false,
                 message: "The target is not a file input."
             )
         }
+        if mode == .direct && target.isSubmit {
+            return BrowserActionOutcome(
+                ok: false,
+                message: "A submit control cannot be used as a direct upload trigger."
+            )
+        }
 
-        let request = BrowserAgentFileSelectionRequest(suggestedURLs: suggestedURLs)
+        let request = BrowserAgentFileSelectionRequest(suggestedURLs: suggestedURLs, mode: mode)
         pendingAgentFileSelection = request
         let actionID = agentNavigationPolicy.beginAction(allowsFormSubmission: false)
         defer {
@@ -1817,6 +1823,14 @@ final class BrowserViewController: NSViewController {
             return click
         }
 
+        if mode == .direct {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: BrowserDefaults.agentFileSelectionTimeoutNanoseconds)
+                request.finish(.cancelled(
+                    "The upload control did not open a WebKit file input."
+                ))
+            }
+        }
         let result = await request.wait()
         try? await Task.sleep(nanoseconds: BrowserDefaults.agentNavigationGuardNanoseconds)
         if agentNavigationPolicy.wasFormSubmissionBlocked(during: actionID) {
@@ -1827,6 +1841,12 @@ final class BrowserViewController: NSViewController {
         }
         switch result {
         case .selected(let count):
+            if mode == .direct {
+                return BrowserActionOutcome(
+                    ok: true,
+                    message: "Selected \(count) local file\(count == 1 ? "" : "s") for the page without a native chooser."
+                )
+            }
             return BrowserActionOutcome(
                 ok: true,
                 message: """
@@ -4180,6 +4200,19 @@ extension BrowserViewController: WKUIDelegate {
         } else {
             agentRequest = nil
         }
+        if let agentRequest, agentRequest.mode == .direct {
+            let urls = agentRequest.suggestedURLs
+            guard parameters.allowsMultipleSelection || urls.count == 1 else {
+                completionHandler(nil)
+                agentRequest.finish(.cancelled(
+                    "This file input does not allow multiple files."
+                ))
+                return
+            }
+            completionHandler(urls)
+            agentRequest.finish(.selected(urls.count))
+            return
+        }
         let host = frame.request.url?.host ?? L10n.string("this website")
         let message: String
         if let agentRequest {
@@ -4475,12 +4508,14 @@ private enum BrowserAgentFileSelectionResult {
 @MainActor
 private final class BrowserAgentFileSelectionRequest {
     let suggestedURLs: [URL]
+    let mode: BrowserUploadMode
     var panelPresented = false
     private var result: BrowserAgentFileSelectionResult?
     private var continuation: CheckedContinuation<BrowserAgentFileSelectionResult, Never>?
 
-    init(suggestedURLs: [URL]) {
+    init(suggestedURLs: [URL], mode: BrowserUploadMode) {
         self.suggestedURLs = suggestedURLs
+        self.mode = mode
     }
 
     func wait() async -> BrowserAgentFileSelectionResult {
@@ -4532,6 +4567,7 @@ enum BrowserDefaults {
     static let maximumTraceEvents = 500
     static let maximumTraceDetailLength = 500
     static let maximumAgentUploadPaths = 10
+    static let agentFileSelectionTimeoutNanoseconds: UInt64 = 10_000_000_000
     static let agentNavigationGuardNanoseconds: UInt64 = 150_000_000
     static let blockedAgentFormSubmissionMessage = """
         The page attempted to submit a form without an app-owned approval, so Threading blocked it.

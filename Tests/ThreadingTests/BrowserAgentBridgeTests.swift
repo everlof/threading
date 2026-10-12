@@ -966,6 +966,7 @@ final class BrowserAgentBridgeTests: XCTestCase {
                     "name":"browser_upload",
                     "arguments":{
                       "paths":["/tmp/one.txt","/tmp/two.txt"],
+                      "mode":"direct",
                       "locator":{"label":"Attachments"}
                     }
                   }
@@ -978,6 +979,7 @@ final class BrowserAgentBridgeTests: XCTestCase {
           tool: .browserUpload
         )
         XCTAssertEqual(upload.paths, ["/tmp/one.txt", "/tmp/two.txt"])
+        XCTAssertEqual(upload.mode, .direct)
         XCTAssertEqual(upload.locator?.label, "Attachments")
 
         let downloadRequest = try JSONDecoder().decode(
@@ -3288,6 +3290,11 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
                       <head><title>File workflow fixture</title></head>
                       <body>
                         <label>Attachments <input id="upload" type="file"></label>
+                        <input id="hidden-upload" type="file" hidden>
+                        <button id="upload-trigger" type="button"
+                          onclick="document.querySelector('#hidden-upload').click()">
+                          Add receipt
+                        </button>
                         <form action="/submitted" method="post">
                           <label>Dangerous attachment
                             <input id="danger-upload" type="file"
@@ -3295,12 +3302,20 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
                           </label>
                           <button type="submit">Submit</button>
                         </form>
+                        <button id="danger-trigger" type="button"
+                          onclick="document.querySelector('#danger-upload').click()">
+                          Add dangerous attachment
+                        </button>
                         <a id="download" href="/artifact.bin" download>Download artifact</a>
                         <script>
                           document.querySelector('#upload').addEventListener('change', event => {
                             document.body.dataset.selectedCount =
                               String(event.target.files.length);
                             document.body.dataset.selectedName =
+                              event.target.files[0]?.name || '';
+                          });
+                          document.querySelector('#hidden-upload').addEventListener('change', event => {
+                            document.body.dataset.directSelectedName =
                               event.target.files[0]?.name || '';
                           });
                         </script>
@@ -3407,6 +3422,38 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         XCTAssertEqual(selectedCount, "1")
         XCTAssertEqual(selectedName, chosenURL.lastPathComponent)
 
+        let directUpload = await call(
+            coordinator,
+            .browserUpload(.init(
+                paths: [suggestionURL.path],
+                ref: nil,
+                selector: "#upload-trigger",
+                mode: .direct
+            )),
+            sessionID: sessionID
+        )
+        XCTAssertFalse(directUpload.isError, directUpload.text)
+        XCTAssertTrue(directUpload.text.contains("without a native chooser"), directUpload.text)
+        XCTAssertEqual(openPanelMessages.count, 1)
+        let directSelectedName = try await browser.evaluate(
+            "document.body.dataset.directSelectedName"
+        ) as? String
+        XCTAssertEqual(directSelectedName, suggestionURL.lastPathComponent)
+
+        let tooManyFiles = await call(
+            coordinator,
+            .browserUpload(.init(
+                paths: [suggestionURL.path, chosenURL.path],
+                ref: nil,
+                selector: "#upload-trigger",
+                mode: .direct
+            )),
+            sessionID: sessionID
+        )
+        XCTAssertTrue(tooManyFiles.isError)
+        XCTAssertTrue(tooManyFiles.text.contains("does not allow multiple files"), tooManyFiles.text)
+        XCTAssertEqual(openPanelMessages.count, 1)
+
         let blockedSubmission = await call(
             coordinator,
             .browserUpload(.init(
@@ -3422,6 +3469,24 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             blockedSubmission.text
         )
         XCTAssertEqual(browser.currentURL, pageURL)
+
+        let blockedDirectSubmission = await call(
+            coordinator,
+            .browserUpload(.init(
+                paths: [suggestionURL.path],
+                ref: nil,
+                selector: "#danger-trigger",
+                mode: .direct
+            )),
+            sessionID: sessionID
+        )
+        XCTAssertTrue(blockedDirectSubmission.isError)
+        XCTAssertTrue(
+            blockedDirectSubmission.text.contains("attempted to submit a form"),
+            blockedDirectSubmission.text
+        )
+        XCTAssertEqual(browser.currentURL, pageURL)
+        XCTAssertEqual(openPanelMessages.count, 2)
 
         let download = await call(
             coordinator,
