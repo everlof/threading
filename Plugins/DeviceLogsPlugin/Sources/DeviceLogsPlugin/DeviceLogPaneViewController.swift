@@ -36,6 +36,8 @@ public final class DeviceLogPaneViewController: NSViewController {
         static let maximumProcessChoices = 512
         static let maximumProjectionCatchUp = 2048
         static let maximumProcessControlWidth: CGFloat = 200
+        static let bluetoothTimeWidth: CGFloat = 112
+        static let bluetoothProtocolWidth: CGFloat = 66
     }
 
     private enum Columns {
@@ -64,6 +66,11 @@ public final class DeviceLogPaneViewController: NSViewController {
     private let contextPopUp = ThemedPopUp()
     private let filterField = ThemedTextField()
     private let statusLabel = NSTextField(labelWithString: "")
+    private lazy var bluetoothProfileSetup = BluetoothProfileSetupView(preferredToolPath: preferredPymobiledevice3Path)
+    private lazy var bluetoothSetupButton = ThemedButton(
+        title: L10n.string("Set Up…"), target: self, action: #selector(toggleBluetoothSetup)
+    )
+    private var bluetoothSetupDeviceID: String?
     /// The opaque ground the Resume button stands on while it floats over the rows.
     ///
     /// A view rather than a layer colour on purpose: a theme colour baked into a `CGColor` is not
@@ -102,6 +109,8 @@ public final class DeviceLogPaneViewController: NSViewController {
     private var options: [DeviceLogSourceOption] = []
     private var source: DeviceLogRowSource?
     private var sourceGeneration = 0
+    private var discoveryGeneration = 0
+    private var savedLogColumnWidths: [NSUserInterfaceItemIdentifier: CGFloat]?
     private var runningSourceTitle: String?
     private var route: DeviceLogSourceOption.Route = .appLog
     private var rows: [DeviceLogRow] = []
@@ -239,6 +248,8 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     public override func viewWillDisappear() {
         super.viewWillDisappear()
+        bluetoothProfileSetup.cancelBrowser()
+        discoveryGeneration += 1
         sourceGeneration += 1
         // A hidden tab must not keep a child process reading a firehose.
         //
@@ -391,7 +402,11 @@ public final class DeviceLogPaneViewController: NSViewController {
         statusLabel.font = Design.Typography.compactCode()
         statusLabel.textColor = Design.Text.secondary
 
-        let bar = NSStackView(views: [devicePopUp, sourcePopUp, routePopUp, rescan, clear])
+        bluetoothSetupButton.isHidden = true
+        bluetoothSetupButton.setAccessibilityIdentifier("bluetooth-profile-setup")
+        bluetoothProfileSetup.isHidden = true
+        let bar = NSStackView(views: [devicePopUp, sourcePopUp, routePopUp, bluetoothSetupButton, rescan, clear])
+        bar.setAccessibilityIdentifier("device-log-source-bar")
         bar.orientation = .horizontal
         bar.spacing = Design.Spacing.small
         bar.alignment = .centerY
@@ -402,11 +417,12 @@ public final class DeviceLogPaneViewController: NSViewController {
             right: Design.Spacing.medium
         )
         let filters = NSStackView(views: [processPopUp, levelPopUp, filterField, contextPopUp])
+        filters.setAccessibilityIdentifier("device-log-filter-bar")
         filters.orientation = .horizontal
         filters.spacing = Design.Spacing.small
         filters.alignment = .centerY
         filters.edgeInsets = bar.edgeInsets
-        for control in [devicePopUp, sourcePopUp, routePopUp, levelPopUp, processPopUp, contextPopUp] as [NSView] + [rescan, clear, filterField] {
+        for control in [devicePopUp, sourcePopUp, routePopUp, levelPopUp, processPopUp, contextPopUp] as [NSView] + [bluetoothSetupButton, rescan, clear, filterField] {
             control.heightAnchor.constraint(equalToConstant: Metrics.controlHeight).isActive = true
         }
 
@@ -421,7 +437,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         )
 
         guard let scroll else { return }
-        let stack = NSStackView(views: [bar, filters, scroll, footer])
+        let stack = NSStackView(views: [bar, bluetoothProfileSetup, filters, scroll, footer])
         stack.orientation = .vertical
         stack.spacing = 0
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -431,6 +447,7 @@ public final class DeviceLogPaneViewController: NSViewController {
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             stack.topAnchor.constraint(equalTo: view.topAnchor),
             stack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            bluetoothProfileSetup.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
 
         // Over the rows rather than in the chrome: it belongs to the thing that stopped moving,
@@ -482,11 +499,13 @@ public final class DeviceLogPaneViewController: NSViewController {
     // MARK: Sources
 
     @objc private func reloadSources() {
+        discoveryGeneration += 1
+        let generation = discoveryGeneration
         DeviceLogSourceCatalog.discover(
             preferredPymobiledevice3Path: preferredPymobiledevice3Path
         ) { [weak self] found in
             MainActor.assumeIsolated {
-                guard let self else { return }
+                guard let self, self.discoveryGeneration == generation else { return }
                 self.options = found
                 self.rebuildMenus()
                 self.startSelectedSource()
@@ -532,6 +551,7 @@ public final class DeviceLogPaneViewController: NSViewController {
             devicePopUp.isEnabled = false
             sourcePopUp.isEnabled = false
             selectedMachine = nil
+            updateRouteVisibility()
             return
         }
         devicePopUp.isEnabled = true
@@ -569,6 +589,23 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// which has one log and no choice to make — a control offering a decision that does not
     /// exist.
     private func updateRouteVisibility() {
+        processPopUp.isHidden = false
+        let isBluetooth: Bool
+        if let option = selectedOption, case .bluetooth = option.kind { isBluetooth = true }
+        else { isBluetooth = false }
+        bluetoothSetupButton.isHidden = !isBluetooth
+        let setupTarget: BluetoothProfileSetupView.Target?
+        if let option = selectedOption, case .bluetooth(let udid, _, _) = option.kind {
+            setupTarget = .init(deviceID: udid, title: option.machine.title)
+        } else {
+            setupTarget = nil
+        }
+        if bluetoothSetupDeviceID != setupTarget?.deviceID || !isBluetooth {
+            bluetoothProfileSetup.isHidden = true
+        }
+        bluetoothSetupDeviceID = setupTarget?.deviceID
+        bluetoothProfileSetup.configure(target: setupTarget)
+        updateBluetoothColumns(isBluetooth: isBluetooth)
         guard let option = selectedOption else {
             routePopUp.isHidden = true
             return
@@ -578,6 +615,37 @@ public final class DeviceLogPaneViewController: NSViewController {
         } else {
             routePopUp.isHidden = true
         }
+        if case .bluetooth = option.kind { processPopUp.isHidden = true }
+    }
+
+    @objc private func toggleBluetoothSetup() {
+        guard let option = selectedOption, case .bluetooth = option.kind else { return }
+        bluetoothProfileSetup.isHidden.toggle()
+        if bluetoothProfileSetup.isHidden { bluetoothProfileSetup.cancelBrowser() }
+    }
+
+    #if DEBUG
+    func showBluetoothProfileBrowserForTesting() {
+        bluetoothProfileSetup.isHidden = false
+        bluetoothProfileSetup.showBrowserForTesting()
+    }
+    #endif
+
+    private func updateBluetoothColumns(isBluetooth: Bool) {
+        guard isBluetooth != (savedLogColumnWidths != nil) else { return }
+        if isBluetooth {
+            savedLogColumnWidths = Dictionary(uniqueKeysWithValues: table.tableColumns.map { ($0.identifier, $0.width) })
+            table.tableColumn(withIdentifier: Columns.process)?.isHidden = true
+            table.tableColumn(withIdentifier: Columns.time)?.width = Metrics.bluetoothTimeWidth
+            table.tableColumn(withIdentifier: Columns.subsystem)?.width = Metrics.bluetoothProtocolWidth
+        } else {
+            table.tableColumn(withIdentifier: Columns.process)?.isHidden = false
+            for column in table.tableColumns {
+                if let width = savedLogColumnWidths?[column.identifier] { column.width = width }
+            }
+            savedLogColumnWidths = nil
+        }
+        scroll?.hasHorizontalScroller = isBluetooth
     }
 
     @objc private func deviceChanged() {
@@ -602,6 +670,27 @@ public final class DeviceLogPaneViewController: NSViewController {
         if wasReading { startSelectedSource() }
     }
 
+    /// Same selection/start path as the source menu, with exact phone identity for agent calls.
+    public func selectBluetooth(deviceID: String) -> Bool {
+        guard let option = options.first(where: {
+            guard $0.machine.id == deviceID else { return false }
+            if case .bluetooth = $0.kind { return true }
+            return false
+        }) else { return false }
+        requestedMachineID = deviceID
+        rebuildMenus()
+        let sources = self.sources(of: selectedMachine)
+        guard let index = sources.firstIndex(of: option) else { return false }
+        sourcePopUp.selectItem(at: index)
+        levelPopUp.selectItem(at: 0)
+        applyFocus(pattern: "", minimumSeverity: 0)
+        startSelectedSource()
+        return true
+    }
+
+    public var readerStatus: String { statusLabel.stringValue }
+    public var isVisibleForCapture: Bool { drainTimer != nil }
+
     /// The selected source, resolved through the machine rather than through a flat index.
     private var selectedOption: DeviceLogSourceOption? {
         let sources = self.sources(of: selectedMachine)
@@ -619,13 +708,18 @@ public final class DeviceLogPaneViewController: NSViewController {
         var isApp = false
         if case .app = option.kind { isApp = true }
         updateRouteVisibility()
+        if case .bluetooth = option.kind {
+            // HCI packets have no app PID; an inherited process filter must not hide them.
+            selectedProcess = nil
+            processPopUp.selectItem(at: 0)
+        }
         // Scoped to the machine, because two phones both offer a "System log" and only the
         // machine tells them apart. A bare title would make switching between them look like
         // staying put, and the pane would never restart the reader.
         let identity = "\(option.machine.id)/\(option.title)" + (isApp ? "#\(route.rawValue)" : "")
             + (selectedProcess.map { "#process=\($0)" } ?? "")
         // Already reading this one: restarting would throw away every row read so far.
-        guard identity != runningSourceTitle || source == nil else { return }
+        guard identity != runningSourceTitle || source == nil || endedReason != nil else { return }
         // Resuming the same source after the pane was hidden keeps what is on screen. Only a
         // genuine change of source discards it, because those rows are no longer about the thing
         // being read. Resuming does leave a gap where the pane was not listening, which is honest
@@ -818,6 +912,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     }
 
     public var isRouteControlHiddenForTesting: Bool { routePopUp.isHidden }
+    public var isProcessControlHiddenForTesting: Bool { processPopUp.isHidden }
     public var selectedMachineIDForTesting: String? { selectedMachine?.id }
 
     public var agentNoteForTesting: String? { agentNote }
@@ -1017,7 +1112,11 @@ public final class DeviceLogPaneViewController: NSViewController {
         // that exact case cost an afternoon: `os_trace_relay` connects, streams nothing, and the
         // archive route through the same service works fine.
         if received == 0, let startedAt, Date().timeIntervalSince(startedAt) > Metrics.silenceGrace {
-            statusLabel.stringValue = appending(L10n.string("Connected, but no log lines yet."))
+            if let option = selectedOption, case .bluetooth = option.kind {
+                statusLabel.stringValue = appending(L10n.string("Waiting for Bluetooth packets. Check the iPhone logging profile and generate Bluetooth activity."))
+            } else {
+                statusLabel.stringValue = appending(L10n.string("Connected, but no log lines yet."))
+            }
             statusLabel.textColor = Design.Status.warning
             return
         }
@@ -1109,6 +1208,7 @@ extension DeviceLogPaneViewController: NSTableViewDelegate {
                 )
             }
         }
+        label.toolTip = label.stringValue
         host.install(label, columnWidth: tableColumn.width, horizontalInset: Design.Spacing.tight)
         return host
     }

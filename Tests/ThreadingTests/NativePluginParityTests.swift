@@ -103,7 +103,7 @@ final class NativePluginParityTests: XCTestCase {
         XCTAssertEqual(type(of: plugin).pluginAPIVersion, ThreadingPluginAPI.version)
 
         let thirdParty = Set((plugin.pluginTools ?? []).map(\.name))
-        XCTAssertEqual(thirdParty.count, 5, "found \(thirdParty.sorted())")
+        XCTAssertEqual(thirdParty.count, 6, "found \(thirdParty.sorted())")
 
         // The bundled copy is the comparison, so a capability that only the shipped one has is a
         // failure here rather than a discovery later.

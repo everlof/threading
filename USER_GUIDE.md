@@ -4055,6 +4055,33 @@ to `idevicesyslog`. That fallback remains live but has only the flattened metada
 supplies. Hiding the pane stops either reader; showing it resumes the selected source without
 clearing the rows already on screen.
 
+For Bluetooth protocol traffic, choose **Bluetooth (USB)** or **Bluetooth (Wi-Fi)** for that
+iPhone. Install `libimobiledevice` on the Mac (`brew install libimobiledevice`), then Rescan.
+The iPhone needs Apple's current **Bluetooth logging profile**, available under
+[Bluetooth for iOS/iPadOS](https://developer.apple.com/bug-reporting/profiles-and-logs/?name=bluetooth).
+In the Bluetooth source, choose **Set Up… → Install from Apple…**. Sign in on Apple's page
+inside Threading; the profile downloads internally and is sent to the selected, trusted and
+unlocked iPhone. Complete installation in **Settings → General → VPN & Device Management**,
+restart the iPhone, then press **Rescan** and generate Bluetooth activity. Sending the profile
+requires **iPhone Tooling** from Threading's **Settings → Advanced**, or a local `pymobiledevice3`.
+**Choose Downloaded File…** also accepts a profile you downloaded yourself. The sign-in browser
+uses temporary website storage and is separate from the agent-controlled Browser. Closing setup,
+hiding the pane or choosing another phone cancels a pending download. Once a transfer to the phone
+has started, it finishes for that phone. Threading removes its temporary profile copies afterward.
+PacketLogger itself is not required. Follow Apple's profile instructions for expiry and removal.
+
+The stream shows HCI commands and events, connection handles, complete ATT reads/writes and
+notifications, plus raw hex previews (up to 256 bytes per packet). Fragmented L2CAP traffic is
+labelled but not reassembled. Capture covers the phone's Bluetooth controller traffic; packets
+do not carry an app process, so the process selector is hidden. Packet payloads can include private
+data and are saved in the same local history as other Device Logs. A quiet stream shows setup
+guidance; it does not prove the logging profile is active.
+
+Agents can select it with `plugin__devicelogs__bluetooth` using the exact iPhone hardware UDID,
+then read it with the existing `visible`, `search` and `time_range` tools. Hiding the pane stops
+capture. To keep a full raw capture for PacketLogger or Wireshark, use the external tool separately:
+`idevicebtlogger -u <UDID> -x -f pcap capture.pcap` (add `-n` for Wi-Fi).
+
 ### Overview
 
 Overview combines the two ways to inspect a session in one tab. Its **Info** section shows what

@@ -44,6 +44,32 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
         }
     }
 
+    #if DEBUG
+    /// The app's render test loads the real bundle through PluginKit; it cannot import this
+    /// module's private Swift types. This fixture seam supplies a bounded synthetic capture
+    /// through the production decoder, then uses the same table and source controls.
+    @objc public func installBluetoothCaptureForTesting(_ data: Data) {
+        MainActor.assumeIsolated {
+            guard let pane, data.count <= BluetoothPacketDecoder.Limits.chunkBytes else { return }
+            var decoder = BluetoothPacketDecoder()
+            guard let rows = try? decoder.append(data) else { return }
+            pane.viewWillDisappear()
+            pane.installSourcesForTesting([
+                DeviceLogSourceOption(
+                    machine: .init(id: "bluetooth-fixture", title: "Test iPhone", isSimulator: false),
+                    title: L10n.format("Bluetooth (%@)", "USB"),
+                    kind: .bluetooth(udid: "bluetooth-fixture", overNetwork: false, toolPath: nil)
+                ),
+            ])
+            pane.installRowsForTesting(rows)
+        }
+    }
+
+    @objc public func showBluetoothProfileBrowserForTesting() {
+        MainActor.assumeIsolated { pane?.showBluetoothProfileBrowserForTesting() }
+    }
+    #endif
+
     // MARK: - Tools
 
     public var pluginTools: [PluginTool] {
@@ -100,6 +126,16 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 summary: "What the pane is showing right now, after any focus you applied.",
                 inputSchemaJSON: #"{"type":"object","properties":{}}"#
             ),
+            PluginTool(
+                name: DeviceLogToolNames.bluetooth,
+                title: "Bluetooth logs",
+                detail: "Read a paired iPhone's Bluetooth packets",
+                symbol: "antenna.radiowaves.left.and.right",
+                summary: """
+                    Select Bluetooth packet capture for one paired iPhone in this chat's Device Logs pane. Requires its exact hardware UDID, external idevicebtlogger (brew install libimobiledevice), and Apple's Bluetooth logging profile on the phone. Captures phone-wide HCI traffic, not an app's text logs or an over-the-air sniffer. Use visible/search/time_range to read packet summaries and bounded raw hex. Starting is not proof of received packets; visible reports reader status. Rescan in the pane after connecting a phone or installing tools. Hiding the pane stops capture.
+                    """,
+                inputSchemaJSON: #"{"type":"object","properties":{"device_id":{"type":"string","description":"Exact paired iPhone hardware UDID."}},"required":["device_id"]}"#
+            ),
         ]
     }
 
@@ -115,6 +151,17 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 return completion("The log pane is not open.", true)
             }
             switch name {
+            case DeviceLogToolNames.bluetooth:
+                guard let deviceID = arguments["device_id"] as? String, !deviceID.isEmpty else {
+                    return completion("Give the paired iPhone's exact device_id (hardware UDID).", true)
+                }
+                guard pane.isVisibleForCapture else {
+                    return completion("Show this chat's Device Logs pane before starting Bluetooth capture (device_log_prepare can reveal it).", true)
+                }
+                guard pane.selectBluetooth(deviceID: deviceID) else {
+                    return completion("That iPhone has no discovered Bluetooth source. Connect and trust it, then Rescan in Device Logs.", true)
+                }
+                completion("Starting Bluetooth capture for \(deviceID). Use visible to check for packets or setup errors.", false)
             case DeviceLogToolNames.search:
                 search(arguments, pane: pane, completion: completion)
             case DeviceLogToolNames.timeRange:
@@ -146,7 +193,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 completion(
                     DeviceLogToolFormatting.answer(
                         rows: rows, total: summary.shown, subject: "on screen"
-                    ),
+                    ) + "\nReader: " + pane.readerStatus,
                     false
                 )
             default:

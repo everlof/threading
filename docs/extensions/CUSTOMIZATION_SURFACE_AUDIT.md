@@ -686,6 +686,15 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+**Bluetooth packet capture** extends the existing host-owned Device Logs native plugin. Themes
+style its source menu and virtual table. Exact phone identity, profile/tooling setup truth,
+capture lifetime, packet parsing limits, local history and agent source selection stay owned by
+Threading and its bundled plugin. This adds no safe-extension presentation slot or data authority.
+Its profile setup and dedicated Apple sign-in view are host-only too: the host retains the
+official download origin, temporary authentication state, exact-phone install action, file and
+process bounds, iOS consent handoff and cleanup. Themes style controls; agents receive no profile
+installation action or access to this authentication browser.
+
 **Proxy debugging commands** are deliberately host-only. The existing Tools settings group and
 session MCP transport expose bounded HTTP(S) capture. Threading owns exact TLS scope, CA key
 custody, process lifetime, payload/raw-read authority, certificate exports and trust setup.

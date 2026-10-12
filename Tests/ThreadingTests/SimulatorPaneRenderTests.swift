@@ -488,6 +488,77 @@ final class SimulatorPaneRenderTests: XCTestCase {
             try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
                 to: Render.directory.appendingPathComponent("device-log-shell-\(name).png")
             )
+
+            let plugin = try XCTUnwrap(logs.loaded as? NSObject)
+            let selector = NSSelectorFromString("installBluetoothCaptureForTesting:")
+            XCTAssertTrue(plugin.responds(to: selector))
+            // PCAP link type 201, then Reset and an ATT Write Command to attribute 0x0025.
+            var capture = Data([
+                0xa1, 0xb2, 0xc3, 0xd4, 0, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 8, 0, 0, 0, 0, 201,
+            ])
+            let packets: [[UInt8]] = [[1, 3, 12, 0], [2, 1, 0x20, 8, 0, 4, 0, 4, 0, 0x52, 0x25, 0, 0xab]]
+            for h4 in packets {
+                for value in [UInt32(1), 123_456, UInt32(h4.count + 4), UInt32(h4.count + 4)] {
+                    capture.append(contentsOf: [24, 16, 8, 0].map { UInt8(truncatingIfNeeded: value >> $0) })
+                }
+                capture.append(contentsOf: [0, 0, 0, 0])
+                capture.append(contentsOf: h4)
+            }
+            plugin.perform(selector, with: capture as NSData)
+            settle(fixture.window)
+            let process = try XCTUnwrap(find("device-log-process", in: logs.view))
+            XCTAssertTrue(process.isHidden, "Bluetooth packets have no app process")
+            func findTable(in view: NSView) -> NSTableView? {
+                if let table = view as? NSTableView { return table }
+                return view.subviews.lazy.compactMap { findTable(in: $0) }.first
+            }
+            let table = try XCTUnwrap(findTable(in: logs.view))
+            XCTAssertTrue(try XCTUnwrap(table.tableColumn(withIdentifier: .init("process"))).isHidden)
+            let messageColumn = table.column(withIdentifier: .init("message"))
+            let messageFrame = table.convert(table.rect(ofColumn: messageColumn), to: logs.view)
+            XCTAssertGreaterThan(messageFrame.intersection(logs.view.bounds).width, 350,
+                                 "packet summaries must be readable without first scrolling past metadata")
+            var packetText = ""
+            logs.loaded?.invokeTool?(named: "visible", argumentsJSON: "{}") { answer, isError in
+                XCTAssertFalse(isError)
+                packetText = answer
+            }
+            XCTAssertTrue(packetText.contains("Write Command attribute=0x0025"), packetText)
+            let setup = try XCTUnwrap(find("bluetooth-profile-setup", in: logs.view))
+            XCTAssertFalse(setup.isHiddenOrHasHiddenAncestor)
+            XCTAssertTrue(setup.accessibilityPerformPress())
+            settle(fixture.window)
+            for id in ["bluetooth-profile-install", "bluetooth-profile-download"] {
+                let action = try XCTUnwrap(find(id, in: logs.view))
+                XCTAssertFalse(action.isHiddenOrHasHiddenAncestor)
+                XCTAssertTrue(logs.view.bounds.contains(action.convert(action.bounds, to: logs.view)))
+            }
+            settle(fixture.window)
+            let bluetoothImage = try XCTUnwrap(CGWindowListCreateImage(
+                .null, .optionIncludingWindow, CGWindowID(fixture.window.windowNumber),
+                [.boundsIgnoreFraming, .nominalResolution]
+            ))
+            try XCTUnwrap(NSBitmapImageRep(cgImage: bluetoothImage).representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent("device-log-shell-bluetooth-\(name).png")
+            )
+            if name == "system-dark" {
+                // The dedicated production WebKit surface, left blank so no sign-in details or
+                // changing Apple page content enter deterministic UI evidence.
+                plugin.perform(NSSelectorFromString("showBluetoothProfileBrowserForTesting"))
+                settle(fixture.window)
+                let browser = try XCTUnwrap(find("bluetooth-profile-browser", in: logs.view))
+                XCTAssertTrue(logs.view.bounds.contains(browser.convert(browser.bounds, to: logs.view)))
+                let download = try XCTUnwrap(find("bluetooth-profile-download", in: logs.view))
+                XCTAssertFalse(download.isAccessibilityEnabled())
+                let browserImage = try XCTUnwrap(CGWindowListCreateImage(
+                    .null, .optionIncludingWindow, CGWindowID(fixture.window.windowNumber),
+                    [.boundsIgnoreFraming, .nominalResolution]
+                ))
+                try XCTUnwrap(NSBitmapImageRep(cgImage: browserImage).representation(using: .png, properties: [:])).write(
+                    to: Render.directory.appendingPathComponent("device-log-shell-bluetooth-browser.png")
+                )
+            }
         }
     }
 

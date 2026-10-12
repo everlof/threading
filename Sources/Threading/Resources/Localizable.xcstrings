@@ -8649,6 +8649,17 @@
         }
       }
     },
+    "Another profile transfer is running. Wait for it to finish, then try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En annan profilöverföring pågår. Vänta tills den är klar och försök sedan igen."
+          }
+        }
+      }
+    },
     "Another program rings" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10892,6 +10903,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Blå"
+          }
+        }
+      }
+    },
+    "Bluetooth (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth (%@)"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth (%@)"
           }
         }
       }
@@ -13338,6 +13366,17 @@
         }
       }
     },
+    "Choose Apple's Bluetooth logging .mobileconfig file. This file could not be read or is not a Bluetooth logging profile." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj Apples .mobileconfig-fil för Bluetooth-loggning. Filen kunde inte läsas eller är inte en profil för Bluetooth-loggning."
+          }
+        }
+      }
+    },
     "Choose Device" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13351,6 +13390,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj enhet"
+          }
+        }
+      }
+    },
+    "Choose Downloaded File…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj hämtad fil…"
           }
         }
       }
@@ -28390,6 +28440,17 @@
         }
       }
     },
+    "Install Bluetooth Logging Profile" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera profil för Bluetooth-loggning"
+          }
+        }
+      }
+    },
     "Install Latest" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28535,6 +28596,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Installationskommando: %@"
+          }
+        }
+      }
+    },
+    "Install from Apple…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera från Apple…"
+          }
+        }
+      }
+    },
+    "Install iPhone Tooling in Threading Settings → Advanced, then try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera iPhone-verktyg i Threadings Inställningar → Avancerat och försök sedan igen."
           }
         }
       }
@@ -41166,6 +41249,28 @@
         }
       }
     },
+    "Profile download cancelled." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hämtningen av profilen avbröts."
+          }
+        }
+      }
+    },
+    "Profile sent to %@. Finish installation in Settings → General → VPN & Device Management, restart the iPhone, then press Rescan." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Profilen har skickats till %@. Slutför installationen i Inställningar → Allmänt → VPN och enhetshantering, starta om iPhone och tryck sedan på Sök igen."
+          }
+        }
+      }
+    },
     "Profiles" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49032,6 +49137,17 @@
         }
       }
     },
+    "Send Apple's Bluetooth logging profile to %@. Unlock the iPhone and approve installation when prompted." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka Apples profil för Bluetooth-loggning till %@. Lås upp iPhone och godkänn installationen när du tillfrågas."
+          }
+        }
+      }
+    },
     "Send Code" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49050,6 +49166,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skicka anteckningar"
+          }
+        }
+      }
+    },
+    "Send Profile" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka profil"
           }
         }
       }
@@ -49370,6 +49497,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skickar"
+          }
+        }
+      }
+    },
+    "Sending profile to %@. Keep the iPhone unlocked and follow its installation prompts." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skickar profilen till %@. Håll iPhone upplåst och följ anvisningarna för installation."
           }
         }
       }
@@ -49931,6 +50069,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Konfigurera din iPhone"
+          }
+        }
+      }
+    },
+    "Set Up…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurera…"
           }
         }
       }
@@ -51735,6 +51884,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Logga in i Groks terminalgränssnitt. Threading använder en Grok-inloggning."
+          }
+        }
+      }
+    },
+    "Sign in to Apple here. Threading downloads the Bluetooth profile and sends it to the selected iPhone. Approve installation in Settings, then restart the iPhone before capturing." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logga in hos Apple här. Threading hämtar Bluetooth-profilen och skickar den till vald iPhone. Godkänn installationen i Inställningar och starta sedan om iPhone innan du börjar läsa paket."
           }
         }
       }
@@ -55838,6 +55998,17 @@
         }
       }
     },
+    "The Apple profile download failed. Try again, or download Bluetooth for iOS/iPadOS from Apple's Profiles and Logs page and choose the file here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att hämta profilen från Apple. Försök igen, eller hämta Bluetooth för iOS/iPadOS från Apples sida Profiles and Logs och välj filen här."
+          }
+        }
+      }
+    },
     "The Attachments reader for a Mermaid file, offline: the diagram fitted to the width, with Diagram/Source and zoom around a canvas that reads a real file. Zoom in, scroll, and switch to Source and back; in the pane, a hidden reader releases its canvas but keeps all three for when it returns." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58278,6 +58449,17 @@
         }
       }
     },
+    "The iPhone did not accept the profile: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone accepterade inte profilen: %@"
+          }
+        }
+      }
+    },
     "The iPhone tooling installation failed. Check the network connection and try again." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60443,6 +60625,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Token sparades inte"
+          }
+        }
+      }
+    },
+    "The transfer could not be confirmed. Check Settings → General → VPN & Device Management on the iPhone before retrying. Keep it connected, trusted and unlocked." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Överföringen kunde inte bekräftas. Kontrollera Inställningar → Allmänt → VPN och enhetshantering på iPhone innan du försöker igen. Håll den ansluten och upplåst och se till att datorn är betrodd."
           }
         }
       }
@@ -62781,6 +62974,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här sonden körs utan sandlåda. Den körs som du, med ditt kontos behörighet: den kan läsa, ändra och skicka allt som du kan. Godkänn den bara om du litar på exakt de här filerna. Dess händelser startar agenter bara genom automationer som du aktiverar separat, och deras innehåll visas för agenter som obetrodda uppgifter."
+          }
+        }
+      }
+    },
+    "This profile has expired. Download the current Bluetooth profile from Apple." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här profilen har gått ut. Hämta den aktuella Bluetooth-profilen från Apple."
           }
         }
       }
@@ -67948,6 +68152,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Väntar på %@…"
+          }
+        }
+      }
+    },
+    "Waiting for Bluetooth packets. Check the iPhone logging profile and generate Bluetooth activity." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for Bluetooth packets. Check the iPhone logging profile and generate Bluetooth activity."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på Bluetooth-paket. Kontrollera loggningsprofilen på iPhone och skapa Bluetooth-aktivitet."
           }
         }
       }

@@ -1134,6 +1134,19 @@ THREADING_AUTOMATION_STRESS=1 scripts/test.sh fast \
 
 ## Implementation-time scaling gate
 
+Bluetooth Device Logs uses a worker-owned incremental PCAP decoder, bounded pipe drains and the
+existing virtual log table. In a Debug SwiftPM run on 2026-10-12, 100,000 synthetic HCI Reset
+packets decoded in 1.090 seconds, retaining zero bytes between complete batches. This is codec
+throughput, not a live-device or end-to-end UI measurement. The 256-byte hex preview, 65,535-byte
+packet bound, 32 KiB read bound and existing log retention keep packet size and stream lifetime
+from multiplying without a ceiling. The source/teardown contract and opt-in stress command are
+in [plugins.md](plugins.md#bluetooth-packet-source).
+Profile setup constructs one ephemeral browser only on demand. It has one bounded download;
+profile decoding is capped at 1 MiB, and installation admits one finite subprocess across panes
+with a 90-second deadline and 8 KiB diagnostics. File reads, CMS decoding, staging and cleanup
+run off the main actor. Setup chrome is fixed-size value content, never one view per profile or
+packet. See the same plugin note for WebKit progress/temporary-file limitations.
+
 The iPhone chat polish follows the existing 5,000-row timeline stress fixture. Activity category
 counts are O(changed rows), catch-up projects the loaded window once on entry/recovery and then
 counts only appended rows, and disclosure still mounts only visible collection cells. Inline

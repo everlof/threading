@@ -120,11 +120,14 @@ final class DeviceLogPaneRenderTests: XCTestCase {
     func testEveryControlInTheBarIsTheSameHeight() {
         let controller = pane()
         _ = laidOut(controller.view, width: 900, height: 420)
-        // The bar's controls only. The resume button floats over the rows rather than sitting in
-        // the bar, so it is free to be its own size and must not drag the row's height with it.
-        let controls = descendants(of: controller.view).filter {
+        // The two bars only. Resume and Bluetooth setup actions live on separate surfaces and
+        // are free to use the design system's ordinary button size.
+        let bars = descendants(of: controller.view).filter {
+            ["device-log-source-bar", "device-log-filter-bar"].contains($0.accessibilityIdentifier() ?? "")
+        }
+        XCTAssertEqual(bars.count, 2)
+        let controls = bars.flatMap { descendants(of: $0) }.filter {
             ($0 is ThemedPopUp || $0 is ThemedButton || $0 is ThemedTextField)
-                && $0.accessibilityIdentifier() != "device-log-resume-follow"
         }
         XCTAssertGreaterThanOrEqual(controls.count, 5, "expected the bar's controls")
         let heights = Set(controls.map { $0.frame.height.rounded() })

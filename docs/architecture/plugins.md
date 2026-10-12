@@ -431,6 +431,106 @@ selects the capability; arbitrary installed plugins do not receive it. The pane 
 version-checks the path during every source rescan, so an explicit Advanced Settings installation
 can become active without reloading the plugin or restarting the app.
 
+### Bluetooth packet source
+
+Paired phones also offer **Bluetooth (USB/Wi-Fi)**. This reads HCI traffic through the external
+`idevicebtlogger` executable from libimobiledevice. Apple documents the connected-phone capture
+route and the Bluetooth logging profile in [WWDC19 session 901](https://developer.apple.com/videos/play/wwdc2019/901/).
+The [service implementation](https://github.com/libimobiledevice/libimobiledevice/blob/master/src/bt_packet_logger.c)
+connects to `com.apple.bluetooth.BTPacketLogger` through the paired-device service transport.
+PacketLogger itself links Apple's private MobileDevice framework and its own PacketDecoder;
+neither framework nor PacketLogger's code is copied into Threading.
+
+`BluetoothLogRowSource` launches `idevicebtlogger -u <hardware-UDID> -x -f pcap [-n] -` on its
+own serial worker. The PCAP path flushes every packet; the tool's PKLG output can buffer quiet
+traffic. It is discovered beside the existing Homebrew relay executable and is not bundled or
+linked. The source remains discoverable without the tool and explains `brew install
+libimobiledevice` when selected. The phone owner installs Apple's current Bluetooth logging
+profile from [Profiles and Logs](https://developer.apple.com/bug-reporting/profiles-and-logs/?name=bluetooth).
+The **Set Up…** disclosure offers **Install from Apple…** and a downloaded-file fallback.
+The first opens the exact Apple profile download endpoint in a dedicated ephemeral `WKWebView`;
+Apple's authentication redirect returns to the download automatically. Navigation/download
+redirects admit HTTPS Apple domains only, with the current origin shown above the page. This
+view has no agent bridge, injected scripts, credential export, diagnostics or network capture.
+It is deliberately separate from the shared Browser and its project website data store.
+`WKDownload` takes the authenticated response directly into a private temporary directory;
+there is no cookie transfer into URLSession, Save panel or Downloads-folder watcher. Only a
+successful response for `iOSBluetoothLogging.mobileconfig` is admitted. Closing/hiding setup,
+switching phones and Cancel retire its generation, cancel WebKit, then remove partial files.
+
+`BluetoothProfileInstaller` reads at most 1 MiB from a regular file on a worker, decodes CMS or
+plain plist metadata, checks `com.apple.bluetooth.logging` and an absolute removal date, and
+stages those exact bytes privately. These checks identify the profile type, not signing trust;
+iOS owns the signature and consent presentation. The explicit install action pins the selected
+hardware UDID and invokes `pymobiledevice3 profile install --udid … --no-color -- …`, using the
+host-managed path or fixed local tool paths. Never use silent installation, supervise a phone,
+bundle Apple's profile, or expose this mutation to agent tools. Once sending starts it finishes
+for that exact phone even if the pane is hidden. An acknowledgement is reported as **sent**, not
+installed; the owner finishes in Settings and restarts the phone per Apple's instructions.
+Tool absence, rejection and an unconfirmed transfer have distinct guidance. Capture is
+phone-wide HCI traffic, not an app-PID stream or a promiscuous radio sniffer.
+
+The worker reads microsecond PCAP link type 201, validating lengths, direction, byte order and
+EOF. It emits value rows for HCI commands/events, ACL/L2CAP, complete ATT messages and SCO.
+Packet data is hex with a 256-byte preview ceiling and an explicit omitted-byte count.
+ACL continuations and incomplete L2CAP packets stay labelled as fragments; no cross-packet
+reassembly, full GATT database reconstruction, Apple vendor-log decoding or raw archive export
+is claimed. The tool's PCAP conversion omits non-HCI PacketLogger record types. UTC timestamps
+come from the phone's capture. These are packet payloads and can contain private application data;
+they follow Device Logs' existing local history retention, not unified-log privacy redaction.
+
+The existing native-plugin presentation is deliberately host-owned: phone identity, process
+lifetime, bounds and history custody stay with the plugin/host. Themes style the existing source
+menu and virtual table; this adds no safe-extension slot or new data grant. The source hides and
+clears the app-process selector and hides the redundant Process column. Compact protocol metadata
+leaves room for packet summaries; horizontal scrolling and cell tooltips expose longer previews.
+The first 700-point product-shell render left only about 140 points for the message. The Bluetooth
+column mode leaves about 400; the shell test now requires more than 350 points of visible message
+width and was inspected under System Dark, Swiss Minimalist and Cyberpunk.
+`plugin__devicelogs__bluetooth` requires a visible pane and an exact discovered
+hardware UDID and selects the same source; `visible` includes reader status, and existing search,
+focus and time-range tools read the captured rows. A start receipt never claims receipt of a
+packet. Silence keeps waiting with profile/activity guidance. Service-start errors are surfaced
+even when the CLI remains alive waiting for another device event. Rescan can restart a failed
+reader, and stale discovery completions cannot start a reader after the pane was hidden.
+
+Scaling: expected 100–6,000 packets/s, stress 100,000 generated packets; 32 KiB reads, at most
+128 KiB per pipe per 50 ms worker tick, one incomplete packet of at most 65,535 bytes, 4 KiB
+diagnostics, and 256 payload bytes per row. The existing 20,000-row handoff, 50,000-row viewport
+ring and 500,000-row local history apply. Process startup, parsing, reads and teardown stay off
+the main actor. Stop is asynchronous, and a child that ignores termination is killed after one
+second. No new view is created for a packet; the table continues to reuse its viewport cells.
+
+Profile setup creates WebKit only after a deliberate click, with one download per visible setup.
+Declared oversized downloads are rejected; progress above 1 MiB cancels the download, with a
+60-second transfer deadline. The file is checked again before bounded decoding (WebKit may
+buffer beyond a progress notification). Installation admits one process across all plugin panes,
+refuses concurrent work without queuing, drains at most 8 KiB of diagnostics, and times out after
+90 seconds. File/CMS/process work and temporary-directory cleanup stay off the main actor.
+Temporary files are removed after normal success/failure/cancellation; a process crash can leave
+a private OS-temporary directory for normal system cleanup.
+
+`BluetoothProfileTests` covers download policy, profile identity/expiry/size, optional local signed
+Apple input, exact-device staging and cleanup, CLI errors/deadlines, ephemeral WebKit and cancel
+settlement. Product-shell evidence includes expanded setup in three themes and the blank real
+WebKit surface in System Dark. Apple sign-in and actual on-phone installation remain a separate
+interactive hardware check; fixtures never contain Apple profile bytes or account details.
+
+`BluetoothPacketTests` covers split frames, endianness, ATT boundaries, malformed lengths, EOF,
+preview limits, silent-child teardown and a service failure without process exit. The shipping
+bundle is rendered in the real window shell by the `device-log-filters` evidence entry, using a
+synthetic capture through the production decoder. Hardware verification is separate:
+
+```bash
+THREADING_BLUETOOTH_LIVE_UDID=<hardware-UDID> swift test --package-path Plugins/DeviceLogsPlugin --filter BluetoothPacketTests/testLivePhoneProducesPackets
+THREADING_BLUETOOTH_STRESS=1 swift test --package-path Plugins/DeviceLogsPlugin --filter BluetoothPacketTests/testBurstKeepsOnlyAnIncompletePacketBetweenReads
+```
+
+On 2026-10-12 the attached iPhone accepted the service connection but returned no packets in a
+10-second CLI probe. That verifies connectivity only; successful live packet reception still
+requires a prepared phone and Bluetooth activity. Do not replace that limitation with the
+synthetic render or codec test result.
+
 ## Publishing the kit: not yet, but ready whenever
 
 `ThreadingPluginKit` is the one package here meant to leave this repository. The decision today is

@@ -48,7 +48,7 @@ final class DeviceLogToolsTests: XCTestCase {
     /// in a way nothing else would catch — the plugin still loads and the pane still draws.
     func testEveryToolDeclaresReadableJSONSchema() throws {
         let tools = try XCTUnwrap(DeviceLogsPlugin().pluginTools)
-        XCTAssertEqual(tools.count, 5)
+        XCTAssertEqual(tools.count, 6)
         for tool in tools {
             let data = Data(tool.inputSchemaJSON.utf8)
             let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -61,6 +61,43 @@ final class DeviceLogToolsTests: XCTestCase {
         let answer = call(loadedPlugin(), "not_a_tool")
         XCTAssertTrue(answer.isError)
         XCTAssertTrue(answer.text.contains("not_a_tool"))
+    }
+
+    func testBluetoothRequiresAnExactDiscoveredPhoneAndClearsTheAppProcessFilter() throws {
+        let plugin = loadedPlugin()
+        XCTAssertTrue(call(plugin, DeviceLogToolNames.bluetooth).isError)
+        XCTAssertTrue(call(plugin, DeviceLogToolNames.bluetooth, #"{"device_id":"other"}"#).isError)
+        let pane = try XCTUnwrap(plugin.paneForTesting)
+        pane.installSourcesForTesting([
+            DeviceLogSourceOption(
+                machine: .init(id: "phone", title: "Test iPhone", isSimulator: false),
+                title: "Bluetooth (USB)",
+                kind: .bluetooth(udid: "phone", overNetwork: false, toolPath: nil)
+            ),
+        ])
+        pane.installRowsForTesting([
+            DeviceLogRow(time: "00:00:00", level: "Info", process: "MyApp", subsystem: nil, message: "old log"),
+        ])
+        pane.selectProcessForTesting("MyApp")
+        let answer = call(plugin, DeviceLogToolNames.bluetooth, #"{"device_id":"phone"}"#)
+        XCTAssertTrue(answer.isError, "a tool must not start capture in a hidden pane")
+        XCTAssertTrue(answer.text.contains("Show this chat's Device Logs pane"))
+        XCTAssertFalse(pane.selectBluetooth(deviceID: "other"))
+        XCTAssertTrue(pane.selectBluetooth(deviceID: "phone"))
+        XCTAssertTrue(pane.isProcessControlHiddenForTesting)
+        XCTAssertTrue(pane.isRouteControlHiddenForTesting)
+        pane.installRowsForTesting([
+            DeviceLogRow(time: "00:00:01", level: "Info", process: "Bluetooth", subsystem: "HCI", message: "Reset"),
+        ])
+        XCTAssertEqual(pane.visibleRowsForTools(limit: 50).count, 1, "the old app filter must not hide packets")
+        pane.viewWillDisappear()
+        pane.installSourcesForTesting([
+            DeviceLogSourceOption(
+                machine: .init(id: "phone", title: "Test iPhone", isSimulator: false),
+                title: "System log (USB)", kind: .device(udid: "phone", overNetwork: false)
+            ),
+        ])
+        XCTAssertFalse(pane.isProcessControlHiddenForTesting, "System log must recover its process selector")
     }
 
     /// A focus with nothing in it would fold nothing and read as having worked, which is worse

@@ -371,17 +371,34 @@ public enum DeviceLogLimits {
 enum BoundedDeviceLogCommand {
     private static let terminationGrace: TimeInterval = 0.5
 
+    struct Result: Sendable {
+        let output: String
+        let exitStatus: Int32
+    }
+
     static func run(
         _ executable: String,
         _ arguments: [String],
         deadline seconds: TimeInterval = DeviceLogLimits.discoveryDeadline
     ) -> String? {
+        runResult(executable, arguments, deadline: seconds)?.output
+    }
+
+    static func runResult(
+        _ executable: String,
+        _ arguments: [String],
+        deadline seconds: TimeInterval = DeviceLogLimits.discoveryDeadline,
+        environment: [String: String]? = nil,
+        includeStandardError: Bool = false,
+        maximumOutputBytes: Int = DeviceLogLimits.maximumDiscoveryOutputBytes
+    ) -> Result? {
         guard seconds.isFinite, seconds > 0,
               FileManager.default.isExecutableFile(atPath: executable) else { return nil }
 
         let task = Process()
         task.executableURL = URL(fileURLWithPath: executable)
         task.arguments = arguments
+        task.environment = environment
         let pipe = Pipe()
         let descriptor = pipe.fileHandleForReading.fileDescriptor
         defer {
@@ -391,14 +408,14 @@ enum BoundedDeviceLogCommand {
         let flags = fcntl(descriptor, F_GETFL)
         guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) == 0 else { return nil }
         task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
+        task.standardError = includeStandardError ? pipe : FileHandle.nullDevice
 
         let processFinished = DispatchSemaphore(value: 0)
         task.terminationHandler = { _ in processFinished.signal() }
         guard (try? task.run()) != nil else { return nil }
         try? pipe.fileHandleForWriting.close()
 
-        var output = BoundedDeviceLogCommandOutput()
+        var output = BoundedDeviceLogCommandOutput(maximumBytes: maximumOutputBytes)
         var buffer = [UInt8](repeating: 0, count: 32 * 1_024)
         var expiresAt = DispatchTime.now() + seconds
         var exited = false
@@ -409,7 +426,7 @@ enum BoundedDeviceLogCommand {
                 return nil
             case .ended:
                 if exited || processFinished.wait(timeout: expiresAt) == .success {
-                    return output.text()
+                    return output.text().map { Result(output: $0, exitStatus: task.terminationStatus) }
                 }
                 stop(task, processFinished: processFinished)
                 return nil
@@ -447,8 +464,11 @@ enum BoundedDeviceLogCommand {
 private struct BoundedDeviceLogCommandOutput {
     enum PipeState { case open, ended, failed }
 
+    let maximumBytes: Int
     private var data = Data()
     private var exceededLimit = false
+
+    init(maximumBytes: Int) { self.maximumBytes = maximumBytes }
 
     mutating func drainAvailable(from descriptor: Int32, buffer: inout [UInt8]) -> PipeState {
         // Check the process deadline after at most 256 KiB, even for a continuously writable child.
@@ -474,7 +494,7 @@ private struct BoundedDeviceLogCommandOutput {
 
     private mutating func append(_ chunk: ArraySlice<UInt8>) {
         guard !exceededLimit else { return }
-        guard data.count + chunk.count <= DeviceLogLimits.maximumDiscoveryOutputBytes else {
+        guard data.count + chunk.count <= maximumBytes else {
             exceededLimit = true
             data.removeAll(keepingCapacity: false)
             return
@@ -1169,6 +1189,7 @@ public struct DeviceLogSourceOption: Equatable {
     public enum Kind: Equatable {
         case simulator(udid: String)
         case device(udid: String, overNetwork: Bool)
+        case bluetooth(udid: String, overNetwork: Bool, toolPath: String?)
         case structuredDevice(
             udid: String,
             overNetwork: Bool,
@@ -1227,6 +1248,8 @@ public struct DeviceLogSourceOption: Equatable {
         case .device(let udid, let overNetwork):
             guard let tool = DeviceLogSourceCatalog.syslogToolPath else { return nil }
             return PairedDeviceLogRowSource(udid: udid, overNetwork: overNetwork, toolPath: tool, processName: processName)
+        case .bluetooth(let udid, let overNetwork, let toolPath):
+            return BluetoothLogRowSource(udid: udid, overNetwork: overNetwork, toolPath: toolPath)
         case .structuredDevice(let udid, let overNetwork, let tool, let fallbackTool):
             return StructuredPairedDeviceLogRowSource(
                 udid: udid,
@@ -1268,6 +1291,11 @@ public enum DeviceLogSourceCatalog {
     /// Its absence is a named state the pane can explain, not a silent empty list.
     public static var syslogToolPath: String? {
         ["/opt/homebrew/bin/idevicesyslog", "/usr/local/bin/idevicesyslog"]
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    public static var bluetoothToolPath: String? {
+        ["/opt/homebrew/bin/idevicebtlogger", "/usr/local/bin/idevicebtlogger"]
             .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
@@ -1342,6 +1370,7 @@ public enum DeviceLogSourceCatalog {
                 preferredPath: preferredPymobiledevice3Path
             )
             let fallbackTool = syslogToolPath
+            let bluetoothTool = bluetoothToolPath
             // A simulator is its own machine and offers exactly one thing to read, so it is a
             // group of one rather than a special case in the menu.
             var options = bootedSimulators().map {
@@ -1382,6 +1411,11 @@ public enum DeviceLogSourceCatalog {
                     machine: machine,
                     title: L10n.format("System log (%@)", transport),
                     kind: systemLogKind
+                ))
+                options.append(DeviceLogSourceOption(
+                    machine: machine,
+                    title: L10n.format("Bluetooth (%@)", transport),
+                    kind: .bluetooth(udid: device.udid, overNetwork: device.overNetwork, toolPath: bluetoothTool)
                 ))
                 // One entry per app the user builds themselves. This is the route worth reaching
                 // for first: live, Apple-native, and unredacted, unlike the system log beside it.

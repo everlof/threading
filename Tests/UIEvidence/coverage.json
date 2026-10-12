@@ -478,7 +478,10 @@
       "description": "The bundled native log pane in the production conversation/window/display shell, with separate source and exact-process/filter controls.",
       "states": [
         "Exact process selector",
-        "Matches-only/context selector"
+        "Matches-only/context selector",
+        "Bluetooth HCI and ATT packets",
+        "Bluetooth profile setup",
+        "Dedicated Apple sign-in browser chrome (blank WebKit fixture)"
       ],
       "matrix": {
         "themes": [
