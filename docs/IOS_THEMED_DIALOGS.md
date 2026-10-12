@@ -570,6 +570,11 @@ existing immediate draft-persistence path. The composer's arrow owns the explici
 This is host-owned input behavior under the existing mobile theme; it introduces no extension
 surface or authority. Direct input continues to send keys to the terminal. The regression in
 `TerminalLineTextLayoutTests` edits and persists multiple lines through the shipping composer.
+The arrow remains enabled for an empty draft when input is allowed and no send or attachment
+transfer is pending. That explicit press sends one acknowledged Return to accept a terminal
+choice without text; native conversation messages still require content. Connection, Focused
+input authority and once-only settlement remain host-owned, and themes retain the button's
+material. Availability is constant work over existing connection and bounded attachment state.
 
 ## Inline conversation decisions
 

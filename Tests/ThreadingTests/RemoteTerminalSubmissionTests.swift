@@ -1,4 +1,5 @@
 import Network
+import ThreadingRemoteKit
 import XCTest
 
 @testable import Threading
@@ -18,7 +19,145 @@ final class RemoteTerminalSubmissionTests: HostedStoreTestCase {
     /// Held for the test's lifetime: `RemoteConnection` keeps its delegate weakly.
     private var connectionDelegates: [SilentSubmissionDelegate] = []
 
+    func testAnEmptySubmissionTravelsThroughTheAuthenticatedWebSocket() async throws {
+        let fixture = try makeFixture()
+        let suite = "RemoteEmptySubmissionTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let live = RemoteAccessCoordinator.makeServerServices(appSettings: AppSettings(defaults: defaults))
+        let identity = RemoteIdentityTestStore.make()
+        defer { RemoteIdentityTestStore.erase(identity.directory) }
+        let server = RemoteAccessServer(services: RemoteAccessServerServices(
+            sessionQueries: live.sessionQueries,
+            sessionMutations: live.sessionMutations,
+            runtimeStatus: live.runtimeStatus,
+            settings: live.settings,
+            eventLog: live.eventLog,
+            mirrors: fixture.registry,
+            notifications: live.notifications,
+            archiveSync: live.archiveSync,
+            snoozeCenter: live.snoozeCenter,
+            attachments: live.attachments,
+            extensions: live.extensions,
+            mobileDiagnosticsCaptures: live.mobileDiagnosticsCaptures,
+            usageDashboard: live.usageDashboard,
+            usageLimit: live.usageLimit
+        ), identityProvider: identity.store)
+        let authority = RemoteAuthorityStore()
+        authority.set(Self.ownerInteract, forToken: "empty-submit-token")
+        server.authorizer = authority
+        defer { server.stop() }
+        let listening = expectation(description: "loopback listener ready")
+        var port: UInt16?
+        server.start(configuration: RemoteListenerConfiguration(
+            preferredPort: try XCTUnwrap(FreeLocalPort.quiet())
+        )) { outcome in
+            port = outcome.port
+            listening.fulfill()
+        }
+        await fulfillment(of: [listening], timeout: 5)
+        let link = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: URL(string: "http://127.0.0.1:\(try XCTUnwrap(port))")!,
+            token: "empty-submit-token"
+        ))
+        let socket = URLSession.shared.webSocketTask(with: try XCTUnwrap(
+            link.webSocketURL(sessionID: fixture.sessionID.uuidString)
+        ))
+        socket.resume()
+        defer { socket.cancel(with: .goingAway, reason: nil) }
+        let answered = expectation(description: "empty submission acknowledged")
+        var result: RemotePromptSubmissionResultDTO?
+        var receiveError: Error?
+        let reader = Task { @MainActor in
+            do {
+                for _ in 0..<32 {
+                    guard case .string(let text) = try await socket.receive() else { continue }
+                    let data = Data(text.utf8)
+                    if let feedback = try? JSONDecoder().decode(RemotePromptSubmissionResultDTO.self, from: data),
+                       feedback.type == "submitResult" {
+                        result = feedback
+                        break
+                    }
+                    if let error = try? JSONDecoder().decode(RemoteErrorDTO.self, from: data),
+                       error.type == "error" {
+                        XCTFail("the wire rejected an empty submission: \(error.code)")
+                        break
+                    }
+                }
+            } catch {
+                receiveError = error
+            }
+            answered.fulfill()
+        }
+        defer { reader.cancel() }
+        for message in [
+            RemoteClientMessage(
+                type: "auth", token: "empty-submit-token", device: "phone",
+                protocolVersion: RemoteProtocol.current,
+                protocolMinimum: RemoteProtocol.minimumSupported
+            ),
+            RemoteClientMessage(type: "terminalSubmit", text: "", requestID: "empty-wire-selection"),
+        ] {
+            try await socket.send(.string(String(decoding: JSONEncoder().encode(message), as: UTF8.self)))
+        }
+        await fulfillment(of: [answered], timeout: 5)
+
+        XCTAssertNil(receiveError)
+        XCTAssertEqual(result?.requestID, "empty-wire-selection")
+        XCTAssertEqual(result?.status, .accepted)
+        XCTAssertEqual(fixture.capability.writes, ["\r"])
+    }
+
     // MARK: - The Two Writes
+
+    func testAnEmptySubmissionPressesReturnOnceAcrossRetries() async throws {
+        let fixture = try makeFixture()
+        try attachWatcher(to: fixture)
+
+        for _ in 0..<2 {
+            XCTAssertEqual(fixture.registry.submitTerminalLine(
+                "",
+                to: fixture.sessionID,
+                device: "phone",
+                authorization: Self.ownerInteract,
+                requestID: "empty-selection"
+            ), .accepted)
+        }
+
+        XCTAssertEqual(fixture.capability.writes, ["\r"])
+        try await Task.sleep(for: .seconds(TerminalDefaults.submitSequenceDelay * 2))
+        XCTAssertEqual(fixture.capability.writes, ["\r"], "no delayed second Return is owed")
+    }
+
+    func testAnEmptySubmissionCannotBypassReadOnlyAccess() throws {
+        let fixture = try makeFixture()
+        try attachWatcher(to: fixture)
+
+        XCTAssertEqual(fixture.registry.submitTerminalLine(
+            "",
+            to: fixture.sessionID,
+            device: "phone",
+            authorization: Self.viewOnly,
+            requestID: "empty-readonly"
+        ), .rejected)
+        XCTAssertEqual(fixture.capability.writes, [])
+    }
+
+    func testAnEmptySubmissionPressesThePreviousLinesReturnFirst() throws {
+        let fixture = try makeFixture()
+        try attachWatcher(to: fixture)
+
+        _ = fixture.registry.submitTerminalLine(
+            "first message", to: fixture.sessionID, device: "phone",
+            authorization: Self.ownerInteract, requestID: "first-line"
+        )
+        XCTAssertEqual(fixture.registry.submitTerminalLine(
+            "", to: fixture.sessionID, device: "phone",
+            authorization: Self.ownerInteract, requestID: "empty-selection"
+        ), .accepted)
+
+        XCTAssertEqual(fixture.capability.writes, ["first message", "\r", "\r"])
+    }
 
     func testASubmittedLineIsTypedWithoutItsReturn() throws {
         let fixture = try makeFixture()

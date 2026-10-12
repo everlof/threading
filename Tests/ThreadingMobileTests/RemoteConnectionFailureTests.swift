@@ -447,6 +447,27 @@ final class RemoteConnectionFailureTests: XCTestCase {
         XCTAssertFalse(encoded.contains("\"z\""))
     }
 
+    func testAnEmptyNativePromptStillRequiresContent() async {
+        let connection = RemoteSessionConnection(
+            session: RemoteSessionConnection.demoConversation().session,
+            client: RemoteClient(link: DemoExperience.link)
+        )
+        connection.connect()
+        defer { connection.disconnect(markEnded: false) }
+        let ready = await Self.eventually {
+            connection.phase == .connected && connection.conversationStore.state.canSend
+        }
+        XCTAssertTrue(ready)
+        XCTAssertEqual(connection.phase, .connected)
+        XCTAssertTrue(connection.conversationStore.state.canSend)
+
+        XCTAssertNil(connection.submit(""))
+        XCTAssertNil(connection.submit(" \n "))
+        XCTAssertNil(connection.promptSubmissionFeedback)
+        XCTAssertFalse(connection.isPromptSubmissionPending)
+        XCTAssertEqual(connection.phase, .connected)
+    }
+
     func testFollowupRetryRefusesAHostThatNoLongerAdvertisesIntentSupport() throws {
         let connection = makeConnection(port: 1, sessionID: UUID().uuidString)
         connection.connect()

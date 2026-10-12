@@ -4910,8 +4910,6 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
         guard let text,
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-              || attachmentUploadIDs?.isEmpty == false,
               let routed = connection.routedSessionID,
               let sessionID = SessionID(uuidString: routed)
         else {

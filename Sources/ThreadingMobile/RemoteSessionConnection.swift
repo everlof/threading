@@ -1486,6 +1486,7 @@ final class RemoteSessionConnection: ObservableObject {
     /// Submits a device-local terminal line as one acknowledged transaction. The host writes its
     /// text and Return to the PTY separately so agent TUIs do not classify the line as a paste. A
     /// host must advertise the capability because older hosts only understand shared raw keys.
+    /// Empty text is an explicit Return for a terminal choice, rather than a conversation message.
     @discardableResult
     func submitTerminalLine(
         _ text: String,
@@ -1497,7 +1498,8 @@ final class RemoteSessionConnection: ObservableObject {
             type: "terminalSubmit",
             text: line,
             attachmentUploadIDs: attachmentUploadIDs,
-            permitsLegacyHost: false
+            permitsLegacyHost: false,
+            permitsEmptyText: true
         )
     }
 
@@ -1545,10 +1547,12 @@ final class RemoteSessionConnection: ObservableObject {
         contextAttachments: [RemoteConversationContextAttachmentDTO] = [],
         attachmentUploadIDs: [String] = [],
         permitsLegacyHost: Bool,
+        permitsEmptyText: Bool = false,
         deliveryMode: RemoteConversationDeliveryMode? = nil
     ) -> String? {
         guard phase == .connected, capability == .interact,
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              permitsEmptyText
+                || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !contextAttachments.isEmpty
                 || !attachmentUploadIDs.isEmpty,
               pendingPromptSubmission == nil else { return nil }

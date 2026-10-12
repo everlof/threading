@@ -2391,6 +2391,7 @@ final class RemoteSessionMirrorRegistry {
     /// `pressReturnAfterTypedLine`. Bundled into a single write, as this did, the Return is
     /// part of what a TUI reads as pasted content, and the message a phone sent was left
     /// sitting in Claude Code's composer with a stray line break instead of being submitted.
+    /// An empty line presses Return immediately, so the phone can accept a TUI choice.
     /// `.accepted` is answered on the text landing, which is the write that can fail.
     func submitTerminalLine(
         _ text: String,
@@ -2435,9 +2436,8 @@ final class RemoteSessionMirrorRegistry {
                       stagedAttachmentPaths: stagedAttachmentPaths,
                       for: sessionID
                   ),
-                  writeTerminalInput(Array(line.utf8), to: sessionID)
+                  submitTerminalText(line, to: sessionID)
         {
-            pressReturnAfterTypedLine(in: sessionID)
             recordFirstInput(device: device, sessionID: sessionID)
             RemoteNotificationService.shared.recordInteraction(
                 sessionID: sessionID,
@@ -2452,6 +2452,15 @@ final class RemoteSessionMirrorRegistry {
             promptReplayCache.store(status, for: replayKey, fingerprint: fingerprint)
         }
         return status
+    }
+
+    private func submitTerminalText(_ line: String, to sessionID: SessionID) -> Bool {
+        guard !line.isEmpty else {
+            return writeTerminalInput(Array(TerminalDefaults.submitSequence.utf8), to: sessionID)
+        }
+        guard writeTerminalInput(Array(line.utf8), to: sessionID) else { return false }
+        pressReturnAfterTypedLine(in: sessionID)
+        return true
     }
 
     /// Takes custody of phone uploads and pastes their workspace paths into the PTY.

@@ -2284,6 +2284,11 @@ beat, and the same rule governs the Mac's own typed deliveries in `SessionMessag
 `SessionCoordinator`'s rename request. Because a PTY takes one message at a time, an owed Return
 is pressed before any later write reaches that session — a second submission, direct-mode typing,
 or remote access stopping — so two messages can never land on one composer line.
+An empty `terminalSubmit` is an explicit Return: the iPhone's Compose arrow stays available
+without text so a person can accept a highlighted TUI choice. The host writes that Return
+immediately, applies the same input authority and request-id replay checks, and acknowledges
+it once. Empty Native prompts remain invalid. In the Compose editor, Return itself still inserts
+a new line; only the arrow submits.
 When the terminal is solo, the same bar can switch between that Compose surface and Direct TUI
 input; collaboration temporarily requires Compose and does not overwrite the saved solo choice.
 

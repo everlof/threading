@@ -3352,11 +3352,13 @@ all TUIs on this device, including after restarting the app. **Settings → On t
 changes the same shared preference.
 
 In **Compose**, Return inserts a new line; tap the send arrow to send the finished draft.
+With an empty draft, the arrow sends Enter to the terminal, so you can accept a highlighted
+choice or answer a prompt without typing text.
 Paste inserts text at the cursor. Pasting a copied picture or file adds it to
 the attachment strip for your next message, just like **paperclip → From Clipboard**.
 
 When another reply-capable participant joins, the terminal temporarily uses **Compose**. The
-entire line and Return reach Claude Code or Codex as one PTY write, so another person cannot mix
+entire line and Return are submitted together, in separate PTY writes, so another person cannot mix
 their keystrokes into yours. The key bar's controls remain immediate, and the terminal returns to
 its saved input choice when it becomes solo again. In iPhone notification settings, **In-app
 collaboration** only controls people presence and typing indicators; these indicators never create

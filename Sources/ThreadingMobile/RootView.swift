@@ -87,6 +87,7 @@ extension MobileDemoScene {
         "terminal-reconnecting",
         "terminal-recovery-failed",
         "terminal-compose",
+        "terminal-compose-empty",
         "terminal-ansi",
         "terminal-scrollback",
         "terminal-attachments",
@@ -206,6 +207,7 @@ enum MobileDemoFixture: String, CaseIterable {
     case terminalReconnecting = "terminal-reconnecting"
     case terminalRecoveryFailed = "terminal-recovery-failed"
     case terminalCompose = "terminal-compose"
+    case terminalComposeEmpty = "terminal-compose-empty"
     case terminalScrollback = "terminal-scrollback"
     case terminalSelection = "terminal-selection"
 

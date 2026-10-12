@@ -670,6 +670,57 @@ final class ComposerTextViewPasteTests: XCTestCase {
 @MainActor
 final class TerminalLineTextLayoutTests: XCTestCase {
 
+    func testTheEmptyTerminalComposerSendsAnAcknowledgedReturn() async throws {
+        let restoreAccessibility = try MobileAccessibilityTestRuntime.enableAutomation()
+        defer { restoreAccessibility() }
+        let suite = "TerminalComposerEmptyTests.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let continuity = MobileSessionContinuityStore(defaults: defaults)
+        let model = RemoteAppModel(continuity: continuity)
+        model.startDemo()
+        let connection = RemoteSessionConnection(
+            session: RemoteSessionConnection.demoTerminal().session,
+            client: RemoteClient(link: DemoExperience.link)
+        )
+        connection.connect()
+        defer { connection.disconnect(markEnded: false) }
+        let connected = await eventually { connection.phase == .connected }
+        XCTAssertTrue(connected)
+        XCTAssertEqual(connection.phase, .connected)
+
+        let host = UIHostingController(rootView: TerminalLineComposer(
+            connection: connection, bridge: TerminalKeyBridge(), quotes: .constant([])
+        )
+        .environmentObject(model)
+        .environmentObject(continuity)
+        .mobileTheme(RemoteThemePalette(nil)))
+        let window = makeWindow(hosting: host, size: CGSize(width: 390, height: 844))
+        defer { window.isHidden = true }
+        let editor = try XCTUnwrap(descendants(of: TerminalLineTextView.self, in: window).first)
+        XCTAssertEqual(editor.text, "")
+        let send = try XCTUnwrap(MobileAccessibilityTestRuntime.element(
+            labelled: MobileL10n.string("Send terminal line"), in: window
+        ))
+        XCTAssertFalse(send.accessibilityTraits.contains(.notEnabled))
+        XCTAssertTrue(send.accessibilityActivate())
+
+        let acknowledged = await eventually { connection.promptSubmissionFeedback != nil }
+        XCTAssertTrue(acknowledged)
+        let feedback = try XCTUnwrap(connection.promptSubmissionFeedback)
+        XCTAssertEqual(feedback.status, .accepted)
+        XCTAssertEqual(feedback.text, "")
+        XCTAssertFalse(connection.isPromptSubmissionPending)
+    }
+
+    private func eventually(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<200 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
+
     func testTerminalComposerRoutesImagePasteToItsAttachmentTray() throws {
         let pasteboard = UIPasteboard.withUniqueName()
         defer { UIPasteboard.remove(withName: pasteboard.name) }

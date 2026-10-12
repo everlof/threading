@@ -1508,7 +1508,8 @@ struct TerminalRemoteView: View {
 
     private var inputPreference: MobileTerminalInputPreference {
         #if DEBUG
-            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-compose" {
+            if let fixture = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey],
+               fixture == "terminal-compose" || fixture == "terminal-compose-empty" {
                 return .compose
             }
         #endif
@@ -2369,9 +2370,6 @@ struct TerminalLineComposer: View {
             && !connection.isPromptSubmissionPending
             && attachmentPicksInFlight == 0
             && attachmentTray?.isSettling != true
-            && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !quotes.isEmpty
-                || attachmentTray?.readyUploadIDs.isEmpty == false)
     }
 
     private var attachmentMenu: some View {
@@ -2561,6 +2559,12 @@ struct TerminalLineComposer: View {
 
     private func restoreDraft() {
         #if DEBUG
+            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                == "terminal-compose-empty"
+            {
+                draft = ""
+                return
+            }
             if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
                 == "terminal-compose"
             {

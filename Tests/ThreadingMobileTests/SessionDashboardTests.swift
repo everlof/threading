@@ -1286,6 +1286,7 @@ final class MobileDemoSceneTests: XCTestCase {
             case .terminalReconnecting: expected = ("terminal-reconnecting", .terminal)
             case .terminalRecoveryFailed: expected = ("terminal-recovery-failed", .terminal)
             case .terminalCompose: expected = ("terminal-compose", .terminal)
+            case .terminalComposeEmpty: expected = ("terminal-compose-empty", .terminal)
             case .terminalScrollback: expected = ("terminal-scrollback", .terminal)
             case .terminalSelection: expected = ("terminal-selection", .terminal)
             case .marketingSessions: expected = ("marketing-sessions", .shippingRoot)
@@ -1485,6 +1486,7 @@ final class MobileDemoSceneTests: XCTestCase {
             "terminal-codex-tui",
             "terminal-collaboration",
             "terminal-compose",
+            "terminal-compose-empty",
             "terminal-reconnecting",
             "terminal-recovery-failed",
             "terminal-scrollback",
