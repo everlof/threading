@@ -379,7 +379,7 @@ final class AndroidAgentCommandTests: XCTestCase {
         XCTAssertEqual(platform(nil), .some(nil))
         XCTAssertEqual(platform("Android"), .some(true))
         XCTAssertEqual(platform("ios"), .some(false))
-        XCTAssertNil(platform("windows phone"))
+        XCTAssertEqual(platform("windows phone"), .none)
     }
 
     func testAnAndroidPreparationNamesItsSerialAndNoXcodeDestination() throws {

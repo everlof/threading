@@ -8,15 +8,12 @@ final class SubagentAttachmentTests: HostedStoreTestCase {
     private var payloads: [SessionID: String] = [:]
     private var allowsOutside = false
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
-        root = FileManager.default.temporaryDirectory.appendingPathComponent("subagent-attachments-\(UUID())")
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-    }
-
-    override func tearDownWithError() throws {
-        if let root { try? FileManager.default.removeItem(at: root) }
-        try super.tearDownWithError()
+    override func setUp() async throws {
+        try await super.setUp()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("subagent-attachments-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        root = directory
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
     }
 
     private func store() -> SessionAttachmentStore {

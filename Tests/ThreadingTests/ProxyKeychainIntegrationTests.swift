@@ -10,7 +10,7 @@ final class ProxyKeychainIntegrationTests: XCTestCase {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["THREADING_PROXY_KEYCHAIN_TEST"] == "1")
         let namespace = "codes.threading.proxy.tests.\(UUID().uuidString.lowercased())"
         print("Disposable proxy Keychain namespace: \(namespace)")
-        try await Task.detached { try Self.exerciseAuthority(namespace: namespace) }.value
+        try await Task.detached { try ProxyKeychainIntegrationTests.exerciseAuthority(namespace: namespace) }.value
     }
 
     private static func exerciseAuthority(namespace: String) throws {

@@ -11,7 +11,7 @@ final class ProxyCaptureTests: XCTestCase {
     }
 
     func testCertificatesValidateWithIndependentPlatformTLSVerifierAndExactHostname() async throws {
-        try await Task.detached { try Self.validateCertificates() }.value
+        try await Task.detached { try ProxyCaptureTests.validateCertificates() }.value
     }
 
     private static func validateCertificates() throws {
@@ -66,7 +66,7 @@ final class ProxyCaptureTests: XCTestCase {
         XCTAssertEqual(started["listen_address"] as? String, "127.0.0.1")
         XCTAssertEqual(started["client_address"] as? String, "127.0.0.2")
         let port = try XCTUnwrap(started["port"] as? Int)
-        try await Task.detached { try Self.expectRejectedClient(proxyPort: port) }.value
+        try await Task.detached { try ProxyCaptureTests.expectRejectedClient(proxyPort: port) }.value
         let status = try Self.object(await service.call(.status, for: owner))
         XCTAssertEqual(status["rejected_clients"] as? String, "1")
         XCTAssertEqual(status["retained_flows"] as? Int, 0)
@@ -84,7 +84,7 @@ final class ProxyCaptureTests: XCTestCase {
         let started = await service.call(.start(TrafficStartArguments(hosts: [], bodyLimit: 65536, upstreamCA: nil, listenAddress: "127.0.0.1", clientAddress: "127.0.0.1")), for: owner)
         let status = try Self.object(started)
         let proxyPort = try XCTUnwrap(status["port"] as? Int)
-        let bytes = try await Task.detached { try Self.performExchange(proxyPort: proxyPort) }.value
+        let bytes = try await Task.detached { try ProxyCaptureTests.performExchange(proxyPort: proxyPort) }.value
         XCTAssertTrue(String(decoding: bytes, as: UTF8.self).contains("bad request fixture"))
         var flowID: String?
         for _ in 0..<20 {
