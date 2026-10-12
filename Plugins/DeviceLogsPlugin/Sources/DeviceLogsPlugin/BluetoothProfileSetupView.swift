@@ -23,13 +23,13 @@ final class BluetoothProfileSetupView: NSView {
         title: L10n.string("Install from Apple…"), target: self, action: #selector(openDownload)
     )
     private lazy var install = ThemedButton(
-        title: L10n.string("Choose Downloaded File…"), target: self, action: #selector(chooseProfile)
+        title: L10n.string("Send certificate to this iPhone"), target: self, action: #selector(chooseProfile)
     )
 
     init(preferredToolPath: String?) {
         self.preferredToolPath = preferredToolPath
         super.init(frame: .zero)
-        explanation.stringValue = L10n.string("Sign in to Apple here. Threading downloads the Bluetooth profile and sends it to the selected iPhone. Approve installation in Settings, then restart the iPhone before capturing.")
+        explanation.stringValue = L10n.string("Send Apple's downloaded Bluetooth logging profile to this iPhone, or sign in to download it from Apple. Approve the installation prompt on your iPhone, then restart it before capturing.")
         for label in [explanation, status] {
             label.font = Design.Typography.caption()
             label.textColor = Design.Text.secondary
@@ -37,8 +37,9 @@ final class BluetoothProfileSetupView: NSView {
         }
         status.setAccessibilityIdentifier("bluetooth-profile-status")
         install.setAccessibilityIdentifier("bluetooth-profile-install")
+        install.emphasis = .primary
         download.setAccessibilityIdentifier("bluetooth-profile-download")
-        let actions = NSStackView(views: [download, install])
+        let actions = NSStackView(views: [install, download])
         actions.spacing = Design.Spacing.small
         actions.alignment = .centerY
         [explanation, actions, status].forEach { content.addArrangedSubview($0) }

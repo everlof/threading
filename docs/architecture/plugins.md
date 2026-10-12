@@ -447,8 +447,10 @@ traffic. It is discovered beside the existing Homebrew relay executable and is n
 linked. The source remains discoverable without the tool and explains `brew install
 libimobiledevice` when selected. The phone owner installs Apple's current Bluetooth logging
 profile from [Profiles and Logs](https://developer.apple.com/bug-reporting/profiles-and-logs/?name=bluetooth).
-The **Set Up…** disclosure offers **Install from Apple…** and a downloaded-file fallback.
-The first opens the exact Apple profile download endpoint in a dedicated ephemeral `WKWebView`;
+The **Set Up…** disclosure offers the primary **Send certificate to this iPhone** action: choose
+a downloaded Bluetooth logging profile and send it directly to the selected hardware UDID through
+the ordinary interactive installation service. **Install from Apple…** opens the exact Apple
+profile download endpoint in a dedicated ephemeral `WKWebView`;
 Apple's authentication redirect returns to the download automatically. Navigation/download
 redirects admit HTTPS Apple domains only, with the current origin shown above the page. This
 view has no agent bridge, injected scripts, credential export, diagnostics or network capture.

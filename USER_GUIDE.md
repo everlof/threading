@@ -4064,7 +4064,9 @@ inside Threading; the profile downloads internally and is sent to the selected, 
 unlocked iPhone. Complete installation in **Settings → General → VPN & Device Management**,
 restart the iPhone, then press **Rescan** and generate Bluetooth activity. Sending the profile
 requires **iPhone Tooling** from Threading's **Settings → Advanced**, or a local `pymobiledevice3`.
-**Choose Downloaded File…** also accepts a profile you downloaded yourself. The sign-in browser
+The primary **Send certificate to this iPhone** button lets you choose Apple's downloaded
+Bluetooth logging `.mobileconfig` file and sends it directly to the selected iPhone, which shows
+its installation prompt. The sign-in browser
 uses temporary website storage and is separate from the agent-controlled Browser. Closing setup,
 hiding the pane or choosing another phone cancels a pending download. Once a transfer to the phone
 has started, it finishes for that phone. Threading removes its temporary profile copies afterward.

@@ -13394,17 +13394,6 @@
         }
       }
     },
-    "Choose Downloaded File…" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Välj hämtad fil…"
-          }
-        }
-      }
-    },
     "Choose Enroll iPhone, then on the iPhone open Threading › Settings › Security › Face ID Approvals and type the code shown here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49148,6 +49137,17 @@
         }
       }
     },
+    "Send Apple's downloaded Bluetooth logging profile to this iPhone, or sign in to download it from Apple. Approve the installation prompt on your iPhone, then restart it before capturing." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka Apples hämtade Bluetooth-loggningsprofil till denna iPhone, eller logga in för att hämta den från Apple. Godkänn installationen på din iPhone och starta sedan om den innan du börjar logga."
+          }
+        }
+      }
+    },
     "Send Code" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49271,6 +49271,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skicka svar"
+          }
+        }
+      }
+    },
+    "Send certificate to this iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka certifikat till denna iPhone"
           }
         }
       }
@@ -51884,17 +51895,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Logga in i Groks terminalgränssnitt. Threading använder en Grok-inloggning."
-          }
-        }
-      }
-    },
-    "Sign in to Apple here. Threading downloads the Bluetooth profile and sends it to the selected iPhone. Approve installation in Settings, then restart the iPhone before capturing." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Logga in hos Apple här. Threading hämtar Bluetooth-profilen och skickar den till vald iPhone. Godkänn installationen i Inställningar och starta sedan om iPhone innan du börjar läsa paket."
           }
         }
       }
