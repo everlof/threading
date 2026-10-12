@@ -35,12 +35,29 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 preferredMachineID: context.argument("deviceID")
             )
             self.workspace = workspace
+            if context.argument("hostPaneSections") == "true" { return workspace.sectionView(.regular) }
             return workspace.view
+        }
+    }
+
+    public func makePaneSectionView(identifier: String) -> NSView? {
+        MainActor.assumeIsolated {
+            guard let stream = DeviceLogPaneViewController.Stream(rawValue: identifier) else { return nil }
+            return workspace?.sectionView(stream)
+        }
+    }
+
+    public func setPaneSectionPresented(identifier: String, presented: Bool) {
+        MainActor.assumeIsolated {
+            guard let stream = DeviceLogPaneViewController.Stream(rawValue: identifier) else { return }
+            workspace?.setSectionPresented(stream, presented: presented)
         }
     }
 
     public func activatePane(context: PluginContext) {
         MainActor.assumeIsolated {
+            if let value = context.argument("stream"),
+               let stream = DeviceLogPaneViewController.Stream(rawValue: value) { workspace?.selectStream(stream) }
             guard let deviceID = context.argument("deviceID") else { return }
             workspace?.selectMachine(id: deviceID)
         }
@@ -56,16 +73,28 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
             var decoder = BluetoothPacketDecoder()
             guard let rows = try? decoder.append(data) else { return }
             workspace.setPresented(false)
+            let phone = DeviceLogSourceOption.Machine(id: "bluetooth-fixture", title: "Test iPhone", isSimulator: false)
+            let options = [
+                DeviceLogSourceOption(machine: phone, title: "System log (USB)",
+                    kind: .device(udid: phone.id, overNetwork: false)),
+                DeviceLogSourceOption(machine: phone, title: L10n.format("Bluetooth (%@)", "USB"),
+                    kind: .bluetooth(udid: phone.id, overNetwork: false, toolPath: nil)),
+            ]
+            workspace.discover = { $0(options) }
+            workspace.sourceFactory = { _, _, _ in BufferedDeviceLogSource() }
+            for pane in workspace.panes.values { pane.sourceFactory = workspace.sourceFactory }
             workspace.selectStream(.bluetooth)
+            // Establish the fixture source identity through the normal selection path before
+            // inserting rows, so a later visibility change resumes the same source.
+            workspace.setPresented(true)
             guard let pane else { return }
-            pane.installSourcesForTesting([
-                DeviceLogSourceOption(
-                    machine: .init(id: "bluetooth-fixture", title: "Test iPhone", isSimulator: false),
-                    title: L10n.format("Bluetooth (%@)", "USB"),
-                    kind: .bluetooth(udid: "bluetooth-fixture", overNetwork: false, toolPath: nil)
-                ),
-            ])
             pane.installRowsForTesting(rows)
+            workspace.panes[.regular]?.installRowsForTesting([
+                .init(time: "09:41:00", level: "Info", process: "ExampleApp", subsystem: "Connection",
+                    message: "Connected to the peripheral"),
+                .init(time: "09:41:01", level: "Info", process: "ExampleApp", subsystem: "Connection",
+                    message: "Received characteristic update"),
+            ])
         }
     }
 
@@ -313,7 +342,10 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
         appliedThemeCount += 1
         MainActor.assumeIsolated {
             try? HostThemeHandoff.install(encoded: theme.encodedTheme)
-            if let workspace { AppThemeRefresh.repaint(workspace.view) }
+            if let workspace {
+                if workspace.usesHostSections { workspace.repaintSections() }
+                else { AppThemeRefresh.repaint(workspace.view) }
+            }
         }
     }
 }

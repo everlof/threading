@@ -3972,15 +3972,23 @@ to put a floor under how narrow the window could be made. It no longer does: dra
 edge in and the panel is squeezed with everything else. Its own width is still yours — drag the
 divider to set it, and it opens there next time.
 
-Shell, browser and the bundled Device Logs tabs can also change *pane*: drag the tab off its row and the other pane
-opens on its own to take it — a closed drawer or panel springs open the moment the drag
-leaves its home row, the receiving tab row shows a quiet wash while the drop would land, and
-the tab dims to say it is on its way out. Drop it at the spot you want; it lands in exactly
-that slot. Let go anywhere else and everything springs back. The same move is in the tab's
-secondary-click menu — **Move to Shell Drawer** on a panel tab, **Move to Display Panel** on
-a drawer tab. Either way the tab moves live — a shell keeps its process and scrollback, a
-browser keeps its page, and Device Logs keeps its one reader — and the new home survives a relaunch. The panel-only surfaces
-(Review, Overview, comparisons) stay where they are one of a kind.
+Drag a tab out of its row to dock it elsewhere in the workspace. A shaded preview shows the
+space it will occupy. The outermost edge creates a row or column across the whole workspace;
+move slightly inward over the conversation or right-hand panel to split only that side. The
+preview names the scope: **Whole workspace**, **Conversation**, **Side panel**, or **This pane**.
+The project/chat list stays outside this area.
+
+Each docked pane has its own tab row and draggable dividers. Drop near a pane's left or right
+edge to divide it again. Drop onto its tab row to join that group; holding over the row briefly
+offers a left/right split instead. Press Escape to cancel. The tab's secondary-click menu also
+provides **Split Left**, **Split Right**, **Split Above**, and **Split Below**.
+
+For example, keep Simulator in the right-hand panel, drag Bluetooth to the workspace's bottom
+edge, then drag Device Logs to the right half of the new bottom pane. Both logs remain visible
+beneath the conversation and Simulator. Moving a live tab preserves its controller, page or
+capture history. The layout and tab groups are saved per chat; closing the last tab in a docked
+pane removes that split. Up to eight additional docked groups can be open in one workspace.
+Shell, browser and Device Logs tabs can also move to the existing shell drawer using the tab menu.
 
 ### Physical iPhone in the panel
 
@@ -4058,10 +4066,10 @@ to `idevicesyslog`. That fallback remains live but has only the flattened metada
 supplies. Hiding the pane stops either reader; showing it resumes the selected source without
 clearing the rows already on screen.
 
-Device Logs has separate **Regular Logs** and **Bluetooth** tabs. Regular Logs keeps the
-system/app source selector; Bluetooth lists paired iPhones and their USB or Wi-Fi capture source.
-Open both tabs to capture both streams simultaneously. Switching tabs keeps each reader, filter,
-scroll position and history; hiding or closing the entire Device Logs pane stops both readers.
+Device Logs opens separate **Device Logs** and **Bluetooth** workspace tabs. Device Logs keeps
+the system/app source selector; Bluetooth lists paired iPhones and their USB or Wi-Fi capture source.
+Dock the two tabs side by side to watch both streams. Switching or moving tabs keeps each reader,
+filter, scroll position and history; both readers stop when neither log tab is visible.
 Bluetooth capture is created only when you first select its tab. Each tab has its own device
 selection, and Bluetooth initially follows the regular tab's phone when available.
 

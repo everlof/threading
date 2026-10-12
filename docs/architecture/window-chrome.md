@@ -33,6 +33,14 @@ The window uses `.fullSizeContentView` with a transparent, hidden title bar, so 
 runs the full height and the traffic lights float over it. The window title stays `Threading`,
 since it is only surfaced where macOS names the window (Mission Control, the Window menu).
 
+The outer split owns the project sidebar and the docking workspace. Inside that workspace,
+`contentSplitController` owns stable conversation and display branches, so the existing panel
+toggle, width persistence and collapse gesture still operate on the whole right-hand branch.
+Docking can wrap that pair or subdivide either branch without replacing the live leaf controllers.
+The additional row/column splits use the same `ThemedSplitView` in either orientation; horizontal
+divider tracking must use its height coordinate. Pane fold grips find the nearest vertical split.
+See [workspace docking](mcp-and-display.md) for the bounded layout and tab-transfer contract.
+
 **The titlebar's double-click is ours, because those two flags together take AppKit's away.**
 Measured across all four combinations of `.fullSizeContentView` and `titlebarAppearsTransparent`
 in a window otherwise identical to this one, a click 22pt below the top edge hit-tests to

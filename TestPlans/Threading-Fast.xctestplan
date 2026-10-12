@@ -104,6 +104,7 @@
   "testTargets" : [
     {
       "skippedTests" : [
+        "WorkspaceDockInteractionTests",
         "BrowserAgentBridgeIntegrationTests",
         "BrowserAnnotationEditingTests\/testEditorTakesKeyboardAndEscapeReturnsItToCanvas()",
           "BrowserCaptureGeometryTests",

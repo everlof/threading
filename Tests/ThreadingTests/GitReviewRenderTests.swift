@@ -1069,10 +1069,12 @@ final class GitReviewRenderTests: HostedStoreTestCase {
         let split = controller.splitViewController.splitView
         content.layoutSubtreeIfNeeded()
         split.setPosition(230, ofDividerAt: 0)
-        split.setPosition(825, ofDividerAt: 1)
+        content.layoutSubtreeIfNeeded()
+        let contentSplit = controller.contentSplitController.splitView
+        contentSplit.setPosition(825 - controller.workspaceDock.view.frame.minX, ofDividerAt: 0)
         content.layoutSubtreeIfNeeded()
 
-        let visiblePanes = split.arrangedSubviews.filter {
+        let visiblePanes = (Array(split.arrangedSubviews.prefix(1)) + contentSplit.arrangedSubviews).filter {
             !$0.isHidden && $0.bounds.width > 1 && $0.bounds.height > 1
         }
         XCTAssertEqual(visiblePanes.count, 3, "the website capture must show the full three-pane app")

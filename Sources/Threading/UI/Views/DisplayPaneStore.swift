@@ -192,8 +192,39 @@ final class DisplayPaneStore {
       loadLayout(for: sessionID)
       ?? PersistedPanel(tabs: [], activeTabID: nil, observedSignature: nil)
     guard !isQuarantined(sessionID) else { return }
-    panel.tabs = tabs + panel.drawerTabs + panel.detachedWindowTabs
+    panel.tabs = tabs + panel.drawerTabs + panel.detachedWindowTabs + panel.dockTabs
     panel.activeTabID = activeID
+    write(panel, for: sessionID)
+  }
+
+  func saveDockLayout(_ layout: WorkspaceDockLayout, for sessionID: SessionID) {
+    var panel = loadLayout(for: sessionID)
+      ?? PersistedPanel(tabs: [], activeTabID: nil, observedSignature: nil)
+    guard !isQuarantined(sessionID), layout.validated() else { return }
+    let ids = Set(layout.panes.map(\.id))
+    panel.tabs.removeAll { $0.dockID.map { !ids.contains($0) } ?? false }
+    // Selection belongs to each tab host; divider/layout writes must preserve it.
+    var merged = layout
+    for index in merged.nodes.indices where merged.nodes[index].kind == .pane {
+      merged.nodes[index].activeTabID = panel.dockLayout?.nodes.first {
+        $0.id == merged.nodes[index].id
+      }?.activeTabID
+    }
+    panel.dockLayout = merged.panes.isEmpty ? nil : merged
+    write(panel, for: sessionID)
+  }
+
+  func saveDockTabs(_ tabs: [PersistedTab], activeID: String?, dockID: UUID,
+    for sessionID: SessionID) {
+    guard var panel = loadLayout(for: sessionID), !isQuarantined(sessionID),
+      let index = panel.dockLayout?.nodes.firstIndex(where: { $0.id == dockID }) else { return }
+    panel.tabs.removeAll { $0.dockID == dockID }
+    panel.tabs += tabs.map { tab in
+      var tab = tab
+      tab.host = PersistedTab.dockHost(dockID)
+      return tab
+    }
+    panel.dockLayout?.nodes[index].activeTabID = activeID
     write(panel, for: sessionID)
   }
 
@@ -210,7 +241,7 @@ final class DisplayPaneStore {
       loadLayout(for: sessionID)
       ?? PersistedPanel(tabs: [], activeTabID: nil, observedSignature: nil)
     guard !isQuarantined(sessionID) else { return }
-    panel.tabs = panel.panelTabs + tabs + panel.detachedWindowTabs
+    panel.tabs = panel.panelTabs + tabs + panel.detachedWindowTabs + panel.dockTabs
     panel.drawerActiveTabID = activeID
     if let open { panel.drawerOpen = open }
     write(panel, for: sessionID)
@@ -233,7 +264,7 @@ final class DisplayPaneStore {
     guard !isQuarantined(sessionID) else { return }
 
     let others = panel.detachedWindowTabs.filter { $0.detachedWindowID != windowID }
-    panel.tabs = panel.panelTabs + panel.drawerTabs + others + tabs
+    panel.tabs = panel.panelTabs + panel.drawerTabs + others + tabs + panel.dockTabs
     panel.detachedWindows.removeAll { $0.id == window.id }
     // A window with no tabs left is no window: keeping the record would restore an empty one.
     if !tabs.isEmpty {

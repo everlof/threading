@@ -403,12 +403,10 @@ final class DrawerHostViewController: NSViewController {
         return controller
     }
 
-    private func makeDeviceLogs(for sessionID: SessionID) -> NativePluginPaneViewController? {
+    private func makeDeviceLogs(for sessionID: SessionID, section: String = "regular") -> NativePluginPaneViewController? {
         guard let bundleURL = NativePluginCatalog.deviceLogsBundle else { return nil }
-        let controller = NativePluginPaneViewController(
-            bundleURL: bundleURL,
-            owningSessionID: sessionID,
-            managedIPhoneToolPath: Pymobiledevice3ManagedTool.executable().path
+        let controller = NativePluginPaneViewController.deviceLogs(
+            bundleURL: bundleURL, sessionID: sessionID, section: section
         )
         addChild(controller)
         controller.onTitleChange = { [weak self] in
@@ -596,12 +594,15 @@ final class DrawerHostViewController: NSViewController {
                 tabs.append(PaneTab(id: id, body: .browser(controller)))
 
             case .deviceLog:
-                guard let controller = makeDeviceLogs(for: sessionID) else { continue }
+                guard let controller = makeDeviceLogs(for: sessionID, section: persisted.mode ?? "regular") else { continue }
                 tabs.append(PaneTab(
                     id: id,
                     body: .nativePlugin(controller),
                     owningSessionID: sessionID
                 ))
+                if persisted.mode == nil, let bluetooth = makeDeviceLogs(for: sessionID, section: "bluetooth") {
+                    tabs.append(PaneTab(body: .nativePlugin(bluetooth), owningSessionID: sessionID))
+                }
 
             default:
                 // Kinds the drawer cannot rebuild yet keep their place in the payload; they
@@ -657,7 +658,7 @@ final class DrawerHostViewController: NSViewController {
             return PersistedTab(
                 id: tab.id.uuidString, kind: .deviceLog, title: tab.title,
                 subtitle: "", url: nil, html: nil, cacheFile: nil,
-                host: PersistedTab.drawerHost
+                mode: plugin.paneSection, host: PersistedTab.drawerHost
             )
         }
 

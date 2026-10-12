@@ -364,7 +364,15 @@ final class DisplayPaneController: NSViewController {
 
   // MARK: - Lifecycle
 
+  let dockID: UUID?
+  private let dockSessionID: SessionID?
+  var onTabsChanged: (() -> Void)?
+  var peerTabs: ((SessionID) -> [PaneTab])?
+  var revealPeerTab: ((SessionID, (PaneTab) -> Bool) -> PaneTab?)?
+
   init(
+    dockID: UUID? = nil,
+    dockSessionID: SessionID? = nil,
     extensionPanels: ExtensionPanelRouting? = nil,
     customizationLookup: @escaping ComponentCustomizationHost.Lookup = {
       ComponentCustomizationProviderSlot.shared.customization(for: $0)
@@ -379,6 +387,8 @@ final class DisplayPaneController: NSViewController {
     extensionBackdropImageResolver: @escaping ComponentCustomizationHost.ImageResolver =
       ExtensionComponentResourceResolver.image
   ) {
+    self.dockID = dockID
+    self.dockSessionID = dockSessionID
     self.extensionPanels = extensionPanels ?? ExtensionManager.shared
     self.customizationLookup = customizationLookup
     self.browserFactory = browserFactory
@@ -396,7 +406,7 @@ final class DisplayPaneController: NSViewController {
 
     appEvents.observe(SessionAttachmentsDidChange.self) { [weak self] event in
       self?.advanceContentRevision(for: event.sessionID)
-      self?.ensureAttachmentsTab(for: event.sessionID)
+      if self?.dockID == nil { self?.ensureAttachmentsTab(for: event.sessionID) }
     }
     appEvents.observe(ControlGrantsDidChange.self) { [weak self] event in
       guard let self, event.sessionID == self.currentSessionID else { return }
@@ -826,6 +836,9 @@ final class DisplayPaneController: NSViewController {
     title: String,
     for sessionID: SessionID
   ) -> ExtensionPanelViewController {
+    if let existing = revealPeerTab?(sessionID, {
+      $0.extensionPanel?.extensionIdentifier == extensionIdentifier && $0.extensionPanel?.panelID == panelID
+    }), let panel = existing.extensionPanel { return panel }
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
 
@@ -908,6 +921,9 @@ final class DisplayPaneController: NSViewController {
       return browser
     }
 
+    if let existing = revealPeerTab?(sessionID, { $0.holdsAgentDrivableBrowser }),
+       let browser = existing.browser { return browser }
+
     let controller = makeBrowser(for: sessionID)
     let tab = DisplayTab(body: .browser(controller))
     tabs.append(tab)
@@ -953,6 +969,7 @@ final class DisplayPaneController: NSViewController {
   /// browser actions and the page they affected beside each other without rebuilding either.
   @discardableResult
   func addAuditTab(for sessionID: SessionID) -> ExecutionAuditViewController? {
+    if let existing = revealPeerTab?(sessionID, { $0.audit != nil }) { return existing.audit }
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
     if let existing = tabs.first(where: { $0.audit != nil }), let audit = existing.audit {
@@ -996,10 +1013,16 @@ final class DisplayPaneController: NSViewController {
     bundleURL: URL,
     for sessionID: SessionID
   ) -> NativePluginPaneViewController? {
+    let deviceLogs = bundleURL == NativePluginCatalog.deviceLogsBundle
+    defer { if deviceLogs { ensureBluetoothTab(bundleURL: bundleURL, for: sessionID) } }
+    if let existing = revealPeerTab?(sessionID, { tab in
+      if case let .nativePlugin(plugin) = tab.body { return plugin.bundleURL == bundleURL && (!deviceLogs || plugin.paneSection != "bluetooth") }
+      return false
+    }), case let .nativePlugin(plugin) = existing.body { return plugin }
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
     if let existing = tabs.first(where: {
-      if case .nativePlugin(let plugin) = $0.body { return plugin.bundleURL == bundleURL }
+      if case .nativePlugin(let plugin) = $0.body { return plugin.bundleURL == bundleURL && (!deviceLogs || plugin.paneSection != "bluetooth") }
       return false
     }) {
       activeTabIDBySession[sessionID] = existing.id
@@ -1019,11 +1042,28 @@ final class DisplayPaneController: NSViewController {
     return controller
   }
 
+  private func ensureBluetoothTab(bundleURL: URL, for sessionID: SessionID) {
+    let all = (tabsBySession[sessionID] ?? []) + (peerTabs?(sessionID) ?? [])
+    guard !all.contains(where: { tab in
+      if case let .nativePlugin(plugin) = tab.body {
+        return plugin.bundleURL == bundleURL && plugin.paneSection == "bluetooth"
+      }
+      return false
+    }) else { return }
+    let bluetooth = makeNativePluginPane(bundleURL: bundleURL, for: sessionID, section: "bluetooth")
+    tabsBySession[sessionID, default: []].append(DisplayTab(body: .nativePlugin(bluetooth), owningSessionID: sessionID))
+    persist(sessionID)
+    if sessionID == currentSessionID { render() }
+  }
+
   private func makeNativePluginPane(
     bundleURL: URL,
-    for sessionID: SessionID
+    for sessionID: SessionID,
+    section: String = "regular"
   ) -> NativePluginPaneViewController {
-    let controller = NativePluginPaneViewController(
+    let controller = bundleURL == NativePluginCatalog.deviceLogsBundle
+      ? NativePluginPaneViewController.deviceLogs(bundleURL: bundleURL, sessionID: sessionID, section: section)
+      : NativePluginPaneViewController(
       bundleURL: bundleURL,
       owningSessionID: sessionID,
       managedIPhoneToolPath: bundleURL == NativePluginCatalog.deviceLogsBundle
@@ -1098,6 +1138,7 @@ final class DisplayPaneController: NSViewController {
   /// remains a singleton because one session has one working-tree comparison.
   @discardableResult
   func activateReview(for sessionID: SessionID) -> GitReviewViewController? {
+    if let existing = revealPeerTab?(sessionID, { $0.review != nil }) { return existing.review }
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
 
@@ -1214,6 +1255,10 @@ final class DisplayPaneController: NSViewController {
     for sessionID: SessionID,
     section: SessionOverviewSection = .info
   ) -> SessionOverviewViewController? {
+    if let existing = revealPeerTab?(sessionID, { $0.overview != nil }), let overview = existing.overview {
+      overview.select(section)
+      return overview
+    }
     restoreIfNeeded(sessionID)
     if syntheticOverview?.sessionID == sessionID { discardSyntheticOverview() }
     var tabs = tabsBySession[sessionID] ?? []
@@ -1303,6 +1348,12 @@ final class DisplayPaneController: NSViewController {
     oldTitle: String? = nil,
     newTitle: String? = nil
   ) -> CompareViewController {
+    if let existing = revealPeerTab?(sessionID, {
+      $0.compare?.oldPath == oldPath && $0.compare?.newPath == newPath
+    }), let compare = existing.compare {
+      compare.refresh(force: true)
+      return compare
+    }
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
 
@@ -1345,6 +1396,12 @@ final class DisplayPaneController: NSViewController {
     content: BrowserComparisonViewController.Content,
     onAcceptRevision: @escaping (BrowserComparisonViewController.Approval) -> Void
   ) -> BrowserComparisonViewController {
+    if let existing = revealPeerTab?(sessionID, { $0.browserComparison != nil }),
+       let comparison = existing.browserComparison {
+      comparison.onAcceptRevision = onAcceptRevision
+      comparison.update(content)
+      return comparison
+    }
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
 
@@ -1489,6 +1546,8 @@ final class DisplayPaneController: NSViewController {
     deviceID: SimulatorDeviceID? = nil,
     automaticChoiceIsAndroid: Bool = false
   ) throws -> SimulatorPaneViewController {
+    if let existing = revealPeerTab?(sessionID, { $0.simulatorWorkspace != nil }),
+       let workspace = existing.simulatorWorkspace { return try workspace.adopt(deviceID) }
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
     if let existing = tabs.first(where: { $0.simulatorWorkspace != nil }),
@@ -1550,23 +1609,25 @@ final class DisplayPaneController: NSViewController {
   }
 
   func simulatorWorkspace(for sessionID: SessionID) -> SimulatorWorkspaceViewController? {
-    tabs(for: sessionID).compactMap(\.simulatorWorkspace).first
+    (tabs(for: sessionID) + (peerTabs?(sessionID) ?? [])).compactMap(\.simulatorWorkspace).first
   }
 
   private func makeSimulatorWorkspace(
     for sessionID: SessionID, state: SimulatorWorkspaceState
   ) -> SimulatorWorkspaceViewController {
-    let workspace = SimulatorWorkspaceViewController(state: state) { [weak self] device in
-      guard let self else { preconditionFailure("The display host must outlive its workspace.") }
+    let control = simulatorControl
+    let leases = simulatorLeaseManager
+    let streams = simulatorStreamCoordinator
+    let authorizer = simulatorInputAuthorizer
+    let openLogs = onOpenDeviceLogs
+    let workspace = SimulatorWorkspaceViewController(state: state) { device in
       let controller = SimulatorPaneViewController(
         preferredDeviceID: device, isWorkspaceMember: true,
-        control: self.simulatorControl, leaseManager: self.simulatorLeaseManager,
-        streamCoordinator: self.simulatorStreamCoordinator, inputAuthorizer: self.simulatorInputAuthorizer
+        control: control, leaseManager: leases,
+        streamCoordinator: streams, inputAuthorizer: authorizer
       )
       controller.annotationSessionID = sessionID
-      controller.onOpenDeviceLogs = { [weak self] device in
-        self?.onOpenDeviceLogs?(sessionID, device.rawValue)
-      }
+      controller.onOpenDeviceLogs = { device in openLogs?(sessionID, device.rawValue) }
       return controller
     }
     addChild(workspace)
@@ -1593,6 +1654,10 @@ final class DisplayPaneController: NSViewController {
     for sessionID: SessionID,
     deviceID: PhysicalDeviceID? = nil
   ) -> RealDevicePaneViewController {
+    if let existing = revealPeerTab?(sessionID, { $0.realDevice != nil }), let device = existing.realDevice {
+      if let deviceID { device.selectDevice(deviceID) }
+      return device
+    }
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
     if let existing = tabs.first(where: { $0.realDevice != nil }),
@@ -1647,6 +1712,10 @@ final class DisplayPaneController: NSViewController {
   /// Returns the visual-file list, creating and activating its singleton tab when needed.
   @discardableResult
   func activateAttachments(for sessionID: SessionID) -> SessionAttachmentsViewController? {
+    if let existing = revealPeerTab?(sessionID, { $0.attachments != nil }) {
+      existing.attachments?.refresh()
+      return existing.attachments
+    }
     guard let controller = ensureAttachmentsTab(for: sessionID) else { return nil }
     guard let tab = tabsBySession[sessionID]?.first(where: { $0.attachments === controller })
     else { return controller }
@@ -1663,6 +1732,10 @@ final class DisplayPaneController: NSViewController {
   private func ensureAttachmentsTab(
     for sessionID: SessionID
   ) -> SessionAttachmentsViewController? {
+    if let existing = peerTabs?(sessionID).first(where: { $0.attachments != nil }) {
+      existing.attachments?.refresh()
+      return existing.attachments
+    }
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
 
@@ -1714,6 +1787,10 @@ final class DisplayPaneController: NSViewController {
   /// dispersed when the app quit.
   @discardableResult
   func activateSharing(for sessionID: SessionID) -> SessionSharingViewController {
+    if let existing = revealPeerTab?(sessionID, { $0.sharing != nil }), let sharing = existing.sharing {
+      sharing.refresh()
+      return sharing
+    }
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
 
@@ -1745,6 +1822,11 @@ final class DisplayPaneController: NSViewController {
   /// unlike an agent-created document, revoking the role removes this surface immediately.
   @discardableResult
   func activateSupervision(for sessionID: SessionID) -> SupervisionListViewController? {
+    if ControlGrantStore.shared.isManager(sessionID),
+       let existing = revealPeerTab?(sessionID, { $0.supervision != nil }) {
+      existing.supervision?.refresh()
+      return existing.supervision
+    }
     restoreIfNeeded(sessionID)
     reconcileSupervisionTab(for: sessionID)
     guard let tab = tabsBySession[sessionID]?.first(where: { $0.supervision != nil }),
@@ -1762,6 +1844,7 @@ final class DisplayPaneController: NSViewController {
         existing.supervision?.refresh()
         return
       }
+      guard dockID == nil, !(peerTabs?(sessionID).contains { $0.supervision != nil } ?? false) else { return }
       let controller = SupervisionListViewController(managerID: sessionID)
       controller.onOpen = { [weak self] in self?.onOpenSupervisedChat?($0) }
       controller.onMessage = { [weak self] in self?.onMessageSupervisedChat?($0) }
@@ -1798,6 +1881,7 @@ final class DisplayPaneController: NSViewController {
   /// references never reach the durable display layout.
   @discardableResult
   func activateNotificationTest(for sessionID: SessionID) -> NotificationTestViewController? {
+    if let existing = revealPeerTab?(sessionID, { $0.notificationTest != nil }) { return existing.notificationTest }
     restoreIfNeeded(sessionID)
     if let existing = tabsBySession[sessionID]?.first(where: { $0.notificationTest != nil }),
       let controller = existing.notificationTest
@@ -1830,6 +1914,10 @@ final class DisplayPaneController: NSViewController {
     _ agent: SubagentTimeline.Agent,
     for sessionID: SessionID
   ) -> SubagentTranscriptViewController {
+    if let existing = revealPeerTab?(sessionID, { $0.subagents != nil }), let controller = existing.subagents {
+      controller.update(agent)
+      return controller
+    }
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
 
@@ -1865,6 +1953,10 @@ final class DisplayPaneController: NSViewController {
     selectedThreadID: String?,
     for sessionID: SessionID
   ) -> SubagentTranscriptViewController {
+    if let existing = revealPeerTab?(sessionID, { $0.subagents != nil }), let controller = existing.subagents {
+      controller.update(timeline, selectedThreadID: selectedThreadID)
+      return controller
+    }
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
 
@@ -2836,12 +2928,15 @@ final class DisplayPaneController: NSViewController {
   /// comes back after a relaunch. A no-op once loaded; an empty marker is left for a session with
   /// nothing stored, so its layout file is not re-read on every access.
   private func restoreIfNeeded(_ sessionID: SessionID) {
+    guard dockSessionID == nil || dockSessionID == sessionID else { return }
     guard tabsBySession[sessionID] == nil else { return }
     guard let panel = DisplayPaneStore.shared.loadLayout(for: sessionID) else {
       tabsBySession[sessionID] = []
       return
     }
 
+    let storedTabs = dockID.map { id in panel.tabs.filter { $0.dockID == id } } ?? panel.panelTabs
+    let storedActiveID = dockID.map { id in panel.dockLayout?.nodes.first { $0.id == id }?.activeTabID } ?? panel.activeTabID
     var tabs: [DisplayTab] = []
     // Image tabs written before a shown image became a row in the Attachments list. They are
     // converted rather than reopened, and the conversion is deferred to *after* the session's
@@ -2850,15 +2945,15 @@ final class DisplayPaneController: NSViewController {
     // is only a no-op once `tabsBySession` holds something. Recording inside this loop restores
     // the same layout again on every file, which recurses until the stack is gone.
     var imagesToConvert: [(source: URL?, cacheFile: String?, wasActive: Bool)] = []
-    let storedOverviewTabs = panel.panelTabs.filter {
+    let storedOverviewTabs = storedTabs.filter {
       $0.kind == .files || $0.kind == .info
     }
     // Old layouts may contain both singleton tabs. The active one wins; otherwise Activity is
     // the useful default. Exactly one identity and strip position survive the merge.
-    let storedOverview = storedOverviewTabs.first { $0.id == panel.activeTabID }
+    let storedOverview = storedOverviewTabs.first { $0.id == storedActiveID }
       ?? storedOverviewTabs.first { $0.kind == .files }
       ?? storedOverviewTabs.first
-    for persisted in panel.panelTabs {
+    for persisted in storedTabs {
       let id = UUID(uuidString: persisted.id) ?? UUID()
       switch persisted.kind {
       case .browser:
@@ -2888,7 +2983,7 @@ final class DisplayPaneController: NSViewController {
           imagesToConvert.append((
             source: persisted.url.flatMap(URL.init(string:)),
             cacheFile: persisted.cacheFile,
-            wasActive: persisted.id == panel.activeTabID
+            wasActive: persisted.id == storedActiveID
           ))
           continue
         }
@@ -2964,9 +3059,13 @@ final class DisplayPaneController: NSViewController {
         guard let bundle = NativePluginCatalog.deviceLogsBundle else { continue }
         tabs.append(DisplayTab(
           id: id,
-          body: .nativePlugin(makeNativePluginPane(bundleURL: bundle, for: sessionID)),
+          body: .nativePlugin(makeNativePluginPane(bundleURL: bundle, for: sessionID, section: persisted.mode ?? "regular")),
           owningSessionID: sessionID
         ))
+        if persisted.mode == nil {
+          tabs.append(DisplayTab(body: .nativePlugin(makeNativePluginPane(
+            bundleURL: bundle, for: sessionID, section: "bluetooth")), owningSessionID: sessionID))
+        }
 
       case .simulator:
         let deviceID = persisted.simulatorDeviceID.flatMap(SimulatorDeviceID.init)
@@ -3024,20 +3123,20 @@ final class DisplayPaneController: NSViewController {
     // Finish the migration in storage as well as memory. Transform the stored payload rather
     // than serializing the restored controllers: an extension panel can legitimately be
     // unavailable this early, and merging Overview must not erase unrelated tabs with it.
-    if storedOverviewTabs.count > 1, let storedOverview {
-      let migratedPanelTabs = panel.panelTabs.filter { tab in
+    if dockID == nil, storedOverviewTabs.count > 1, let storedOverview {
+      let migratedPanelTabs = storedTabs.filter { tab in
         (tab.kind != .files && tab.kind != .info) || tab.id == storedOverview.id
       }
       DisplayPaneStore.shared.saveLayout(
         tabs: migratedPanelTabs,
-        activeID: panel.activeTabID,
+        activeID: storedActiveID,
         for: sessionID
       )
     }
 
     tabsBySession[sessionID] = tabs
 
-    if let activeString = panel.activeTabID,
+    if let activeString = storedActiveID,
       let activeID = UUID(uuidString: activeString),
       tabs.contains(where: { $0.id == activeID })
     {
@@ -3112,7 +3211,12 @@ final class DisplayPaneController: NSViewController {
           : nil
       }
       ?? persistedTabs.first?.id
-    DisplayPaneStore.shared.saveLayout(tabs: persistedTabs, activeID: active, for: sessionID)
+    if let dockID {
+      DisplayPaneStore.shared.saveDockTabs(persistedTabs, activeID: active, dockID: dockID, for: sessionID)
+    } else {
+      DisplayPaneStore.shared.saveLayout(tabs: persistedTabs, activeID: active, for: sessionID)
+    }
+    onTabsChanged?()
   }
 
   private func advanceContentRevision(for sessionID: SessionID) {
@@ -3120,6 +3224,10 @@ final class DisplayPaneController: NSViewController {
   }
 
   private func persisted(_ tab: DisplayTab) -> PersistedTab? {
+    if case let .nativePlugin(plugin) = tab.body, plugin.bundleURL == NativePluginCatalog.deviceLogsBundle {
+      return PersistedTab(id: tab.id.uuidString, kind: .deviceLog, title: tab.title,
+        subtitle: "", url: nil, html: nil, cacheFile: nil, mode: plugin.paneSection)
+    }
     if let audit = tab.audit {
       return PersistedTab(
         id: tab.id.uuidString,
@@ -3373,10 +3481,12 @@ enum DisplayDocumentNavigationPolicy {
 /// non-optional session signatures; this bridges the "current scope" spelling onto them.
 extension DisplayPaneController: TabHosting {
 
-  var hostID: TabHostID { .displayPanel }
+  var hostID: TabHostID { dockID.map(TabHostID.dock) ?? .displayPanel }
 
   private func resolvedSession(_ sessionID: SessionID?) -> SessionID? {
-    sessionID ?? currentSessionID
+    let session = sessionID ?? currentSessionID
+    guard dockSessionID == nil || dockSessionID == session else { return nil }
+    return session
   }
 
   func tabs(for sessionID: SessionID?) -> [PaneTab] {
@@ -3412,7 +3522,7 @@ extension DisplayPaneController: TabHosting {
 
   /// The panel shows every tab kind there is — it is where each of them was built to live.
   func canAdopt(_ tab: PaneTab) -> Bool {
-    true
+    dockSessionID == nil || tab.owningSessionID == nil || tab.owningSessionID == dockSessionID
   }
 
   func detachTab(id: UUID, for sessionID: SessionID?) -> PaneTab? {
@@ -3456,6 +3566,55 @@ extension DisplayPaneController: TabHosting {
       persist(session)
       if session == currentSessionID { render() }
     }
+    if case let .nativePlugin(plugin) = tab.body {
+      plugin.onTitleChange = { [weak self] in
+        guard let self, session == currentSessionID else { return }
+        render()
+      }
+    }
+    tab.simulatorWorkspace?.onChange = { [weak self] in
+      guard let self else { return }
+      persist(session)
+      if session == currentSessionID { render() }
+    }
+    tab.audit?.onModeChange = { [weak self] _ in self?.persist(session) }
+    tab.review?.onModeChange = { [weak self] in self?.persist(session) }
+    tab.review?.onLoadingChange = { [weak self] loading in self?.onReviewLoadingChange?(session, loading) }
+    tab.compare?.onChange = { [weak self] in self?.persist(session) }
+    tab.compare?.onLoadingChange = { [weak self] loading in self?.onReviewLoadingChange?(session, loading) }
+    if let overview = tab.overview {
+      bindOverviewInfo(overview, for: session)
+      overview.onSectionChange = { [weak self, weak overview] _ in
+        guard let self, let overview else { return }
+        bindOverviewInfo(overview, for: session)
+        persist(session)
+      }
+    }
+    tab.terminal?.onTitleChange = { [weak self] in
+      guard let self, session == currentSessionID else { return }
+      render()
+    }
+    tab.attachments?.onCompare = { [weak self] old, new in
+      self?.addCompareTab(for: session, oldPath: old.url.path, newPath: new.url.path,
+        oldTitle: old.name, newTitle: new.name)
+    }
+    tab.sharing?.onShare = { [weak self] in self?.onShareSession?(session) }
+    tab.supervision?.onOpen = { [weak self] in self?.onOpenSupervisedChat?($0) }
+    tab.supervision?.onMessage = { [weak self] in self?.onMessageSupervisedChat?($0) }
+    tab.supervision?.onArchive = { [weak self] in self?.onArchiveSupervisedChat?($0) }
+    tab.supervision?.onRelease = { [weak self] in self?.onReleaseSupervisedChat?($0) }
+    if let subagents = tab.subagents { wireSubagentSelection(subagents, sessionID: session) }
+    if case let .realDevice(device) = tab.body {
+      device.onSelectedDeviceChange = { [weak self] _ in self?.persist(session) }
+      device.onOpenDeviceLogs = { [weak self] device in self?.onOpenDeviceLogs?(session, device.rawValue) }
+    }
+    if case let .extensionPanel(panel) = tab.body {
+      panel.onChange = { [weak self] in
+        guard let self else { return }
+        persist(session)
+        if session == currentSessionID { render() }
+      }
+    }
     var state = TabListState(
       tabs: tabsBySession[session] ?? [],
       activeTabID: activeTabIDBySession[session]
@@ -3469,6 +3628,14 @@ extension DisplayPaneController: TabHosting {
     }
     persist(session)
     if session == currentSessionID { render() }
+  }
+
+  private func bindOverviewInfo(_ overview: SessionOverviewViewController, for session: SessionID) {
+    guard let info = overview.infoControllerIfLoaded else { return }
+    info.shellRootProvider = { [weak self] in self?.shellRootResolver?(session) }
+    info.onOpenURL = { [weak self] url in
+      self?.activateBrowser(for: session).navigate(to: url.absoluteString)
+    }
   }
 }
 

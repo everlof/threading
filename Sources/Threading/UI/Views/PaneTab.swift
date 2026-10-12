@@ -14,6 +14,7 @@ enum TabHostID: Hashable {
   case displayPanel
   /// The drawer strip at the content pane's bottom edge.
   case drawer
+  case dock(UUID)
   /// A browser window detached from the main window, named by its own id because a session may
   /// have more than one. Unlike the two panes, this host is *pinned* to one session rather than
   /// following the selection — see `DetachedBrowserHostViewController`.

@@ -446,6 +446,91 @@ final class SimulatorPaneRenderTests: XCTestCase {
         }
     }
 
+    private func bluetoothFixtureCapture() -> Data {
+        // PCAP link type 201, then Reset and an ATT Write Command to attribute 0x0025.
+        var capture = Data([
+            0xa1, 0xb2, 0xc3, 0xd4, 0, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 8, 0, 0, 0, 0, 201,
+        ])
+        let packets: [[UInt8]] = [[1, 3, 12, 0], [2, 1, 0x20, 8, 0, 4, 0, 4, 0, 0x52, 0x25, 0, 0xab]]
+        for h4 in packets {
+            for value in [UInt32(1), 123_456, UInt32(h4.count + 4), UInt32(h4.count + 4)] {
+                capture.append(contentsOf: [24, 16, 8, 0].map { UInt8(truncatingIfNeeded: value >> $0) })
+            }
+            capture.append(contentsOf: [0, 0, 0, 0])
+            capture.append(contentsOf: h4)
+        }
+        return capture
+    }
+
+    func testRendersNestedDockingAndScopedPreviewsInProductShell() throws {
+        try FileManager.default.createDirectory(at: Render.directory, withIntermediateDirectories: true)
+        let previous = AppThemePalette.current
+        defer { AppThemePalette.set(previous) }
+        for (name, theme, appearance) in [
+            ("system-dark", AppTheme.system, NSAppearance.Name.darkAqua),
+            ("swiss", AppThemeStyles.swissMinimalist, NSAppearance.Name.aqua),
+        ] {
+            AppThemePalette.set(theme)
+            let fixture = try makeFixture(appearance: appearance, deviceFrame: makeDeviceFramePNG(), docked: true)
+            defer { fixture.tearDown() }
+            let dock = try XCTUnwrap(fixture.dock)
+            let session = try XCTUnwrap(fixture.panel.currentSessionID)
+            let logs = try XCTUnwrap(fixture.panel.activateDeviceLog(for: session))
+            eventually { logs.loaded != nil || logs.refusal != nil }
+            XCTAssertNil(logs.refusal)
+            let plugin = try XCTUnwrap(logs.loaded as? NSObject)
+            plugin.perform(NSSelectorFromString("installBluetoothCaptureForTesting:"),
+                with: bluetoothFixtureCapture() as NSData)
+            let tabs = fixture.panel.tabs(for: session)
+            let regular = try XCTUnwrap(tabs.first { tab in
+                if case let .nativePlugin(plugin) = tab.body { return plugin.paneSection == "regular" }
+                return false
+            })
+            let bluetooth = try XCTUnwrap(tabs.first { tab in
+                if case let .nativePlugin(plugin) = tab.body { return plugin.paneSection == "bluetooth" }
+                return false
+            })
+            func capture(_ suffix: String) throws {
+                settle(fixture.window)
+                let image = try XCTUnwrap(CGWindowListCreateImage(.null, .optionIncludingWindow,
+                    CGWindowID(fixture.window.windowNumber), [.boundsIgnoreFraming, .nominalResolution]))
+                try XCTUnwrap(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]))
+                    .write(to: Render.directory.appendingPathComponent("workspace-dock-\(suffix)-\(name).png"))
+            }
+            for (scope, target, surface) in [
+                ("whole", Optional<UUID>.none, dock.view),
+                ("conversation", Optional(WorkspaceDockLayout.conversationID), dock.conversation.view),
+                ("side", Optional(WorkspaceDockLayout.displayID), dock.display.view),
+            ] {
+                let bounds = dock.view.convert(surface.bounds, from: surface)
+                dock.showPreview(.init(targetID: target, edge: .bottom,
+                    frame: WorkspaceDockController.previewFrame(bounds, edge: .bottom, share: target == nil ? 0.3 : 0.5)))
+                try capture("preview-" + scope)
+            }
+            let left = try XCTUnwrap(dock.createGroup(at: .init(targetID: nil, edge: .bottom, frame: .zero)))
+            let detachedBluetooth = try XCTUnwrap(fixture.panel.detachTab(id: bluetooth.id, for: session))
+            left.adopt(detachedBluetooth, at: nil, for: session)
+            let right = try XCTUnwrap(dock.createGroup(at: .init(targetID: left.dockID, edge: .right, frame: .zero)))
+            let detachedRegular = try XCTUnwrap(fixture.panel.detachTab(id: regular.id, for: session))
+            right.adopt(detachedRegular, at: nil, for: session)
+            eventually { fixture.simulator.frameImageForTesting != nil }
+            settle(fixture.window)
+            XCTAssertTrue(left.tabs(for: session).first === bluetooth)
+            XCTAssertTrue(right.tabs(for: session).first === regular)
+            let leftRect = dock.view.convert(left.view.bounds, from: left.view)
+            let rightRect = dock.view.convert(right.view.bounds, from: right.view)
+            let simulatorRect = dock.view.convert(fixture.panel.view.bounds, from: fixture.panel.view)
+            XCTAssertLessThan(leftRect.maxY, simulatorRect.minY + 3)
+            XCTAssertEqual(leftRect.maxX, rightRect.minX, accuracy: 4)
+            XCTAssertEqual(leftRect.height, rightRect.height, accuracy: 1)
+            XCTAssertGreaterThan(leftRect.width, 500)
+            try capture("bottom-pair")
+            let data = try XCTUnwrap(DisplayPaneStore.shared.loadLayout(for: session))
+            XCTAssertEqual(data.dockTabs.count, 2)
+        }
+    }
+
     func testRendersDeviceLogsFiltersInProductShell() throws {
         try FileManager.default.createDirectory(at: Render.directory, withIntermediateDirectories: true)
         let previousTheme = AppThemePalette.current
@@ -458,7 +543,7 @@ final class SimulatorPaneRenderTests: XCTestCase {
             AppThemePalette.set(theme)
             let fixture = try makePhysicalDeviceFixture(appearance: appearance, deviceFrame: makeDeviceFramePNG())
             defer { fixture.tearDown() }
-            let logs = try XCTUnwrap(fixture.panel.activateDeviceLog(for: fixture.sessionID))
+            var logs = try XCTUnwrap(fixture.panel.activateDeviceLog(for: fixture.sessionID))
             eventually { logs.loaded != nil || logs.refusal != nil }
             XCTAssertNil(logs.refusal)
             XCTAssertNotNil(logs.loaded)
@@ -471,21 +556,14 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 return view.subviews.lazy.filter { !$0.isHidden || $0.accessibilityIdentifier() == id }
                     .compactMap { find(id, in: $0) }.first
             }
-            for id in ["device-log-stream-tabs", "device-log-process", "device-log-context"] {
+            for id in ["device-log-process", "device-log-context"] {
                 let control = try XCTUnwrap(find(id, in: logs.view))
                 XCTAssertFalse(control.isHiddenOrHasHiddenAncestor)
                 XCTAssertTrue(logs.view.bounds.contains(control.convert(control.bounds, to: logs.view)))
             }
-            let tabs = try XCTUnwrap(find("device-log-stream-tabs", in: logs.view))
-            tabs.effectiveAppearance.performAsCurrentDrawingAppearance {
-                guard let actual = tabs.layer?.backgroundColor.flatMap({ NSColor(cgColor: $0)?.usingColorSpace(.sRGB) }),
-                      let expected = Design.Surface.controlResting.usingColorSpace(.sRGB) else {
-                    return XCTFail("the tab track must have the current theme's surface")
-                }
-                XCTAssertEqual(actual.redComponent, expected.redComponent, accuracy: 0.001)
-                XCTAssertEqual(actual.greenComponent, expected.greenComponent, accuracy: 0.001)
-                XCTAssertEqual(actual.blueComponent, expected.blueComponent, accuracy: 0.001)
-            }
+            XCTAssertEqual(fixture.panel.tabs(for: fixture.sessionID).filter {
+                if case .nativePlugin = $0.body { return true }; return false
+            }.map(\.title), [L10n.string("Device Logs"), L10n.string("Bluetooth")])
             // cacheDisplay omitted the layer-backed chrome and plugin controls while every
             // geometry assertion above passed. Capture only this test-owned window, as the
             // sheet render tests do, so the evidence includes its actual composited controls.
@@ -542,19 +620,13 @@ final class SimulatorPaneRenderTests: XCTestCase {
             let plugin = try XCTUnwrap(logs.loaded as? NSObject)
             let selector = NSSelectorFromString("installBluetoothCaptureForTesting:")
             XCTAssertTrue(plugin.responds(to: selector))
-            // PCAP link type 201, then Reset and an ATT Write Command to attribute 0x0025.
-            var capture = Data([
-                0xa1, 0xb2, 0xc3, 0xd4, 0, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 8, 0, 0, 0, 0, 201,
-            ])
-            let packets: [[UInt8]] = [[1, 3, 12, 0], [2, 1, 0x20, 8, 0, 4, 0, 4, 0, 0x52, 0x25, 0, 0xab]]
-            for h4 in packets {
-                for value in [UInt32(1), 123_456, UInt32(h4.count + 4), UInt32(h4.count + 4)] {
-                    capture.append(contentsOf: [24, 16, 8, 0].map { UInt8(truncatingIfNeeded: value >> $0) })
-                }
-                capture.append(contentsOf: [0, 0, 0, 0])
-                capture.append(contentsOf: h4)
-            }
+            let capture = bluetoothFixtureCapture()
+            let bluetoothTab = try XCTUnwrap(fixture.panel.tabs(for: fixture.sessionID).first {
+                if case let .nativePlugin(plugin) = $0.body { return plugin.paneSection == "bluetooth" }
+                return false
+            })
+            XCTAssertTrue(fixture.panel.activateTab(id: bluetoothTab.id, for: fixture.sessionID))
+            if case let .nativePlugin(bluetooth) = bluetoothTab.body { logs = bluetooth }
             plugin.perform(selector, with: capture as NSData)
             settle(fixture.window)
             let process = try XCTUnwrap(find("device-log-process", in: logs.view))
@@ -575,16 +647,16 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 packetText = answer
             }
             XCTAssertTrue(packetText.contains("Write Command attribute=0x0025"), packetText)
-            func segment(_ title: String, in view: NSView) -> NSView? {
-                if view.accessibilityRole() == .radioButton, view.accessibilityTitle() == title { return view }
-                return view.subviews.lazy.compactMap { segment(title, in: $0) }.first
-            }
-            let regularTab = try XCTUnwrap(segment(L10n.string("Regular Logs"), in: tabs))
-            let bluetoothTab = try XCTUnwrap(segment(L10n.string("Bluetooth"), in: tabs))
-            XCTAssertTrue(regularTab.accessibilityPerformPress())
+            let regularID = try XCTUnwrap(fixture.panel.tabs(for: fixture.sessionID).first { tab in
+                if case let .nativePlugin(plugin) = tab.body { return plugin.paneSection == "regular" }
+                return false
+            }?.id)
+            let regularChip = try XCTUnwrap(strip.chipView(for: regularID))
+            let bluetoothChip = try XCTUnwrap(strip.chipView(for: bluetoothTab.id))
+            XCTAssertTrue(regularChip.accessibilityPerformPress())
             settle(fixture.window)
-            XCTAssertFalse(try XCTUnwrap(find("device-log-process", in: logs.view)).isHiddenOrHasHiddenAncestor)
-            XCTAssertTrue(bluetoothTab.accessibilityPerformPress())
+            XCTAssertFalse(try XCTUnwrap(find("device-log-process", in: fixture.panel.view)).isHiddenOrHasHiddenAncestor)
+            XCTAssertTrue(bluetoothChip.accessibilityPerformPress())
             settle(fixture.window)
             XCTAssertTrue(findTable(in: logs.view) === table, "switching tabs retains the Bluetooth view")
             XCTAssertEqual(table.numberOfRows, 2, "returning to Bluetooth retains its captured packets")
@@ -909,7 +981,8 @@ final class SimulatorPaneRenderTests: XCTestCase {
         additionalDeviceCount: Int = 0,
         alternateFrame: Data? = nil,
         panelWidth: CGFloat = Render.panelWidth,
-        androidSecond: Bool = false
+        androidSecond: Bool = false,
+        docked: Bool = false
     ) throws -> SimulatorPaneRenderFixture {
         let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
         let device = SimulatorDevice(
@@ -974,9 +1047,10 @@ final class SimulatorPaneRenderTests: XCTestCase {
             simulatorStreamCoordinator: streams
         )
         let split = SidebarSplitViewController()
-        let conversationItem = NSSplitViewItem(viewController: conversation)
+        let dock = docked ? WorkspaceDockController(base: split, conversation: conversation, display: panel) : nil
+        let conversationItem = NSSplitViewItem(viewController: dock?.conversationBranch ?? conversation)
         conversationItem.minimumThickness = 560
-        let panelItem = NSSplitViewItem(viewController: panel)
+        let panelItem = NSSplitViewItem(viewController: dock?.displayBranch ?? panel)
         // The real main window applies its opening width when it reveals this item. This direct
         // shell fixture has no window coordinator to perform that reveal, so hold the same
         // review width here rather than accepting NSSplitViewController's fitting-size answer.
@@ -985,7 +1059,7 @@ final class SimulatorPaneRenderTests: XCTestCase {
         split.addSplitViewItem(conversationItem)
         split.addSplitViewItem(panelItem)
 
-        let host = WindowChromeHostViewController(workspace: split)
+        let host = WindowChromeHostViewController(workspace: dock ?? split)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Render.size),
             styleMask: [.borderless],
@@ -1014,6 +1088,7 @@ final class SimulatorPaneRenderTests: XCTestCase {
         split.splitView.setPosition(dividerPosition, ofDividerAt: 0)
         host.view.layoutSubtreeIfNeeded()
 
+        dock?.showSession(session.id)
         panel.showSession(session.id)
         let simulator = try panel.activateSimulator(for: session.id, deviceID: device.id)
         for extra in additionalDevices { _ = try panel.activateSimulator(for: session.id, deviceID: extra.id) }
@@ -1026,7 +1101,8 @@ final class SimulatorPaneRenderTests: XCTestCase {
             panel: panel,
             simulator: simulator,
             control: control,
-            streams: streams
+            streams: streams,
+            dock: dock
         )
     }
 
@@ -1345,6 +1421,7 @@ private struct SimulatorPaneRenderFixture {
     let simulator: SimulatorPaneViewController
     let control: SimulatorPaneRenderControl
     let streams: SimulatorPaneRenderStreamCoordinator
+    var dock: WorkspaceDockController? = nil
 
     func tearDown() {
         if let session = panel.currentSessionID {

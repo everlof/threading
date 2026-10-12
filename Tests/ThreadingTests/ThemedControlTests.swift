@@ -4559,10 +4559,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     @MainActor
     func testSettingsUsesAModeHeaderInsteadOfAClosablePageTab() throws {
         let controller = makeMainWindowController()
-        let container = try XCTUnwrap(
-            controller.splitViewController.splitViewItems[1].viewController
-                as? TerminalContainerViewController
-        )
+        let container = controller.containerViewController
 
         controller.toggleSettings()
 
@@ -4641,10 +4638,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     @MainActor
     func testTheSettingsCommandClosesWhatItOpened() throws {
         let controller = makeMainWindowController()
-        let container = try XCTUnwrap(
-            controller.splitViewController.splitViewItems[1].viewController
-                as? TerminalContainerViewController
-        )
+        let container = controller.containerViewController
 
         XCTAssertFalse(container.isShowingSettings)
 
@@ -4696,10 +4690,7 @@ final class ThemedControlTests: HostedStoreTestCase {
         window.setContentSize(NSSize(width: 1200, height: 700))
         window.contentView?.layoutSubtreeIfNeeded()
 
-        let container = try XCTUnwrap(
-            controller.splitViewController.splitViewItems[1].viewController
-                as? TerminalContainerViewController
-        )
+        let container = controller.containerViewController
 
         XCTAssertEqual(
             container.headerLeadingInset,
@@ -4748,10 +4739,11 @@ final class ThemedControlTests: HostedStoreTestCase {
     private func dragDivider(
         at index: Int,
         to pointerX: CGFloat,
-        in controller: MainWindowController
+        in controller: MainWindowController,
+        displayPanel: Bool = false
     ) throws {
         let window = try XCTUnwrap(controller.window)
-        let splitView = controller.splitViewController.splitView
+        let splitView = displayPanel ? controller.contentSplitController.splitView : controller.splitViewController.splitView
         let leadingPane = try XCTUnwrap(splitView.arrangedSubviews[index])
         func inWindow(_ x: CGFloat) -> NSPoint {
             splitView.convert(NSPoint(x: x, y: splitView.frame.midY), to: nil)
@@ -4879,9 +4871,9 @@ final class ThemedControlTests: HostedStoreTestCase {
         XCTAssertTrue(toggle.isSelected, "the toggle did not start out lit for a visible panel")
 
         try dragDivider(
-            at: controller.splitViewController.splitViewItems.count - 2,
+            at: controller.contentSplitController.splitViewItems.count - 2,
             to: pane.frame.maxX - panelShutThreshold(displayItem) + DividerDragFixture.margin,
-            in: controller
+            in: controller, displayPanel: true
         )
 
         XCTAssertTrue(
@@ -4900,9 +4892,9 @@ final class ThemedControlTests: HostedStoreTestCase {
         let (controller, pane, displayItem) = try windowWithDisplayPanelOpen()
 
         try dragDivider(
-            at: controller.splitViewController.splitViewItems.count - 2,
+            at: controller.contentSplitController.splitViewItems.count - 2,
             to: pane.frame.maxX - panelShutThreshold(displayItem) - DividerDragFixture.margin,
-            in: controller
+            in: controller, displayPanel: true
         )
 
         XCTAssertFalse(displayItem.isCollapsed, "the panel shut on a drag inside its threshold")
@@ -4921,7 +4913,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     ) {
         let (controller, _) = try windowAtSidebarFloor()
         let window = try XCTUnwrap(controller.window)
-        let displayItem = try XCTUnwrap(controller.splitViewController.splitViewItems.last)
+        let displayItem = try XCTUnwrap(controller.contentSplitController.splitViewItems.last)
 
         controller.setDisplayPaneVisible(true)
         // The reveal restores the stored width through the transition route's deferred turns.
@@ -4930,7 +4922,7 @@ final class ThemedControlTests: HostedStoreTestCase {
         XCTAssertFalse(displayItem.isCollapsed, "the panel never opened, so nothing can shut it")
 
         let pane = try XCTUnwrap(
-            controller.splitViewController.splitView.arrangedSubviews.last
+            controller.contentSplitController.splitView.arrangedSubviews.last
         )
         return (controller, pane, displayItem)
     }
@@ -7990,6 +7982,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "NavigatorGridItemView",
                 "PageTitleView",
                 "PaneFoldDivider",
+                "WorkspaceDockPreview",
                 "PaneFooterView",
                 "PaneHeaderView",
                 "PaneNoticeView",

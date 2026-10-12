@@ -1190,10 +1190,40 @@ Device Logs' Regular Logs and Bluetooth tabs admit at most two readers per visib
 Each keeps the existing 20,000-row handoff, 50,000-row ring and 500,000-row history; histories
 have distinct files. Expect about 5,800 regular rows/s plus 100–6,000 Bluetooth packets/s;
 stress both with 100,000 generated rows. Switching tabs must retain both streams and filters.
-Only the selected table projects rows, updates process menus or lays out cells. The inactive
-tab drains into its bounded value ring and recorder every 100 ms; returning projects that ring
-once. Bluetooth's controller and reader are created only on first selection. Discovery is
-shared, and hiding the whole workspace retires discovery and stops both readers.
+Only visible tables project rows, update process menus or lay out cells. The two stream tabs
+can occupy different dock groups, in which case both tables are visible. An inactive tab drains
+into its bounded value ring and recorder every 100 ms; returning projects that ring once.
+Bluetooth's controller and reader are created only on first selection. Discovery is shared,
+and hiding both stream views retires discovery and stops both readers. Reparenting within one
+main run-loop turn preserves capture; a tab's destruction also clears its visibility membership.
+
+Docking expects two to four groups and caps additional groups at eight (19 flat tree nodes).
+Pointer movement reads bounded geometry and paints one preview; it does not create controllers,
+persist, or reparent content. A stationary header dwell is sampled at 10 Hz only during the drag.
+Commits rebuild the small split skeleton around retained content controllers and record a coarse
+`workspace-dock.commit` span. Divider persistence occurs on mouse release.
+
+The 2026-10-12 docking stress run exercised both visible stream projections with 100,000 rows
+per stream and retained 50,000 each. Paired 1,000-row drains measured 12.4 ms median and 143.6 ms
+maximum while concurrent builds competed for the machine; this is not a frame-time guarantee.
+The focused rerun after compilation settled measured 7.5 ms median and 13.9 ms maximum for
+the same docked workload; it still excludes onscreen cell layout and asynchronous disk commits.
+The geometry-only test evaluated 100,000 pointer samples in 67.4 ms without constructing panes
+or writing layout state. Shipping-window interaction tests cover scoped landings, Escape,
+header dwell, nested bottom groups and divider persistence; rendered evidence covers the same
+composition in System dark and Swiss light.
+
+The 2026-10-13 shared-interaction sweep used the same normal Debug test build. In the 120-step
+Claude resize fixture with grid changes and repaint enabled, steps measured 7.524 ms median,
+8.879 ms p95 and 10.350 ms maximum; none exceeded 16.7 ms. The natural-grid Codex display-pane
+fixture measured 6.015 ms median / 8.928 ms maximum to open and 4.942 / 5.189 ms to close over
+three cycles. These are deterministic window fixtures, not a live USB-capture frame guarantee.
+The full sweep is not a clean gate: attachment-format stress reproduced the earlier Mermaid
+`sourceOnly` versus `ready` failure. The 2,048-page settings-search repeat was stopped after a
+sample placed every main-thread sample in the initial `layoutSubtreeIfNeeded`, before either
+query; the earlier complete run measured 2,017.9 seconds there, then 144.5 / 141.7 ms for its
+two queries with 48 result rows. The remaining workload commands were run separately, including
+window resize, display-pane transitions, launch ledger and project statistics, and passed.
 
 The 2026-10-12 Debug SwiftPM stress run retained 50,000 rows and recorded all 100,000 rows in
 each stream's separate store. A paired drain of 1,000 rows per stream took 7.1 ms median and
@@ -6769,3 +6799,29 @@ bounded-workload observations, not evidence of a capture regression or a stable 
 The fixture reports capture bounds/RSS and checks completed responses. Separate integration tests
 fill history beyond 16 MiB, stream larger-than-capture bodies unchanged, and inspect truncated
 origins, binary bytes, chunked gzip and over-expanding compressed bodies.
+
+## Physical iPhone capture worker — 2026-10-12
+
+The physical pane's new movie path reuses the Simulator encoder through a serial actor; it admits
+one append in flight and caps submissions at 30 fps. Expected screenshot input is 1–10 fps.
+A bounded touch tick reuses the current frame between screenshots so a short tap survives even
+on a one-fps connection. Trails retain at most 128 points and ripples at most 32; a 10,000-input
+regression asserts those ceilings. PNG encoding and writes also run off main, one explicit
+snapshot at a time. Capture demand follows the pane, one presenter and one recording; input
+consent still follows visible-pane ownership.
+
+The opt-in `DevicePreviewCaptureTests/testFullResolutionRecordingWorkerStress` exercises the
+production worker with thirty 1206 × 2622 frames, spaced by 100 ms. On this Mac's Debug build it
+measured **8.96 ms median / 35.89 ms maximum** per worker append; the final-build repeat measured
+**9.44 ms median / 84.89 ms maximum**. Frame manufacture is outside the measurement. Other builds
+were running during the first run, and the results cover local compositing/encoding rather
+than hardware capture, end-to-end latency or Release performance. Physical recording had no prior
+implementation for a matched recording baseline. The existing Simulator's decoded-movie pixel
+checks and the new worker test both prove upright frames and touch placement.
+
+After building the hosted test bundle, run with `THREADING_DEVICE_CAPTURE_STRESS=1` through the
+same `DYLD_LIBRARY_PATH`, `DYLD_FRAMEWORK_PATH` and `xcrun xctest` setup used by
+`scripts/profile_threading.sh`. The ordinary Mac test plan deliberately skips this opt-in stress
+case. `RealDevicePaneTests` checks actual snapshot/movie output, immediate stop, rotation,
+disconnect, hidden recording demand and presenter/input revocation. The physical-iPhone evidence
+entry renders the toolbar, device menu and recording state in the product shell.

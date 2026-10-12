@@ -17,6 +17,29 @@ final class DeviceLogWorkspaceViewController: NSViewController {
     private(set) var isPresented = false
     private var discoveredSources: [DeviceLogSourceOption]?
     private var discoveryGeneration = 0
+    private(set) var usesHostSections = false
+    private var presentedSections = Set<Stream>()
+
+    func sectionView(_ stream: Stream) -> NSView {
+        usesHostSections = true
+        let pane = panes[stream] ?? makePane(stream)
+        pane.view.isHidden = false
+        return pane.view
+    }
+
+    func setSectionPresented(_ stream: Stream, presented: Bool) {
+        if presented { presentedSections.insert(stream); selectedStream = stream }
+        else { presentedSections.remove(stream) }
+        setPresented(!presentedSections.isEmpty)
+        for (candidate, pane) in panes {
+            pane.setRowsPresented(presentedSections.contains(candidate))
+            if isPresented { pane.startCapture(discover: false) }
+        }
+    }
+
+    func repaintSections() {
+        panes.values.forEach { AppThemeRefresh.repaint($0.view) }
+    }
 
     // Bounded seams let lifecycle tests exercise the actual controllers without device processes.
     var discover: ((@escaping ([DeviceLogSourceOption]) -> Void) -> Void)?
@@ -60,12 +83,12 @@ final class DeviceLogWorkspaceViewController: NSViewController {
 
     override func viewDidAppear() {
         super.viewDidAppear()
-        setPresented(true)
+        if !usesHostSections { setPresented(true) }
     }
 
     override func viewWillDisappear() {
         super.viewWillDisappear()
-        setPresented(false)
+        if !usesHostSections { setPresented(false) }
     }
 
     func setPresented(_ presented: Bool) {
@@ -73,7 +96,7 @@ final class DeviceLogWorkspaceViewController: NSViewController {
         isPresented = presented
         if presented {
             for (stream, pane) in panes {
-                pane.setRowsPresented(stream == selectedStream)
+                pane.setRowsPresented(usesHostSections ? presentedSections.contains(stream) : stream == selectedStream)
                 pane.startCapture(discover: false)
             }
             reloadSources()
@@ -91,8 +114,8 @@ final class DeviceLogWorkspaceViewController: NSViewController {
         selectedStream = stream
         tabs.selectedIndex = Stream.allCases.firstIndex(of: stream) ?? 0
         for (candidate, controller) in panes {
-            controller.setRowsPresented(candidate == stream)
-            controller.view.isHidden = candidate != stream
+            controller.setRowsPresented(usesHostSections ? presentedSections.contains(candidate) : candidate == stream)
+            if !usesHostSections { controller.view.isHidden = candidate != stream }
         }
         if isPresented { pane.startCapture(discover: false) }
     }
@@ -124,6 +147,7 @@ final class DeviceLogWorkspaceViewController: NSViewController {
         addChild(pane)
         let child = pane.view
         child.translatesAutoresizingMaskIntoConstraints = false
+        if !usesHostSections {
         content.addSubview(child)
         NSLayoutConstraint.activate([
             child.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -131,6 +155,7 @@ final class DeviceLogWorkspaceViewController: NSViewController {
             child.topAnchor.constraint(equalTo: content.topAnchor),
             child.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
+        }
         if let discoveredSources { pane.acceptSources(discoveredSources) }
         return pane
     }

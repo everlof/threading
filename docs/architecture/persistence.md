@@ -1191,3 +1191,17 @@ about what correct looks like expire without anyone deciding it should.
 **Lifecycle is by project.** Deleting a session leaves the library alone; removing a project takes its
 baselines, and the removal confirmation says so. Reset Everything already moves the whole support
 directory aside recoverably, so no separate handling is needed.
+
+### Docked workspace groups (panel document version 7)
+
+A `dock:<UUID>` tab belongs to one pane in `WorkspaceDockLayout`. The optional flat node list
+records the workspace, conversation and display anchors, binary splits, divider fractions and
+per-group active tabs. The decoder validates unique nodes, reachability, cycles, the eight-pane
+ceiling, declared tab hosts and selections. Flat decoding avoids recursively allocating an
+untrusted tree. A document with docking or an explicit Device Logs stream needs version 7;
+untouched older layouts keep their existing required version.
+
+Every panel, drawer and detached-window writer preserves dock tabs and layout metadata.
+`saveDockTabs` replaces one group's slice; `saveDockLayout` preserves that slice's selection
+while updating geometry. Unknown log stream identifiers are refused instead of being restored
+as regular logs. The existing unreadable-document quarantine applies to these writes too.

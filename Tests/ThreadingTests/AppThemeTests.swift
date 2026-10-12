@@ -2062,6 +2062,25 @@ final class AppThemeTests: HostedStoreTestCase {
         }
     }
 
+    @MainActor
+    func testHorizontalSplitTracksItsHorizontalDivider() throws {
+        let (window, split) = hoverableSplitFixture()
+        split.isVertical = false
+        split.adjustSubviews()
+        split.layoutSubtreeIfNeeded()
+        split.updateTrackingAreas()
+        let seam = try XCTUnwrap(split.arrangedSubviews.first).frame.maxY
+        try pointer(crosses: .mouseEntered,
+            at: NSPoint(x: split.bounds.midX, y: seam + split.dividerThickness / 2),
+            over: split, in: window)
+        XCTAssertEqual(split.activeDividerIndex, 0)
+        XCTAssertTrue(split.trackingAreas.contains {
+            $0.rect.width == split.bounds.width && $0.rect.height < split.bounds.height
+        }, "a horizontal divider needs a horizontal tracking band")
+        try pointer(crosses: .mouseExited, at: NSPoint(x: 20, y: 5), over: split, in: window)
+        XCTAssertNil(split.activeDividerIndex)
+    }
+
     /// The colour actually standing in the middle of the seam, off the drawn pixels.
     private func seamPixel(of split: ThemedSplitView) throws -> NSColor {
         let rep = try XCTUnwrap(split.bitmapImageRepForCachingDisplay(in: split.bounds))
@@ -2239,7 +2258,7 @@ final class AppThemeTests: HostedStoreTestCase {
     func testRevealingTheDisplayPanelRepaintsTheSeamItArrivesAt() throws {
         let controller = makeMainWindowController()
         controller.window?.setContentSize(NSSize(width: 1200, height: 700))
-        let split = try XCTUnwrap(controller.splitViewController.splitView as? ThemedSplitView)
+        let split = try XCTUnwrap(controller.contentSplitController.splitView as? ThemedSplitView)
         split.layoutSubtreeIfNeeded()
 
         let before = split.repaintedSeams

@@ -13615,6 +13615,17 @@
         }
       }
     },
+    "Choose a scope to preview a bottom split across the workspace, conversation, or side panel. The preview leaves pointer events with the content beneath it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj ett område för att förhandsvisa en nedre delning under hela arbetsytan, konversationen eller sidopanelen. Förhandsvisningen låter pekarhändelser nå innehållet under den."
+          }
+        }
+      }
+    },
     "Choose a session" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51778,6 +51789,17 @@
         }
       }
     },
+    "Side panel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sidopanel"
+          }
+        }
+      }
+    },
     "Sidebar" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -53187,6 +53209,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Förbruka en sparad återställning för det här kontot"
+          }
+        }
+      }
+    },
+    "Split Above" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela ovanför"
+          }
+        }
+      }
+    },
+    "Split Below" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela nedanför"
+          }
+        }
+      }
+    },
+    "Split Left" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela till vänster"
+          }
+        }
+      }
+    },
+    "Split Right" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela till höger"
           }
         }
       }
@@ -62906,6 +62972,17 @@
         }
       }
     },
+    "This pane" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här panelen"
+          }
+        }
+      }
+    },
     "This panel could not be opened." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -69380,6 +69457,17 @@
         }
       }
     },
+    "Whole workspace" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hela arbetsytan"
+          }
+        }
+      }
+    },
     "Winding down, or winding up?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -69849,6 +69937,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arbetsytenavigator"
+          }
+        }
+      }
+    },
+    "WorkspaceDockPreview" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WorkspaceDockPreview"
           }
         }
       }

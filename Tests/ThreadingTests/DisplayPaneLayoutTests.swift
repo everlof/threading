@@ -425,7 +425,7 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
     /// measurement. The next test owns the separate claim that the panel opens wide enough.
     func testThePanelHardFloorCostsOnlyItsOwnChrome() throws {
         let controller = makeMainWindowController()
-        let item = try XCTUnwrap(controller.splitViewController.splitViewItems.last)
+        let item = try XCTUnwrap(controller.contentSplitController.splitViewItems.last)
 
         XCTAssertEqual(item.minimumThickness, DisplayPaneDefaults.slimmestWidth)
         XCTAssertLessThan(
@@ -615,7 +615,7 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
             descendants(of: attachments.view).compactMap { $0 as? PaneFoldDivider }.first,
             "the attachments pane grew no fold"
         )
-        let split = try XCTUnwrap(controller.splitViewController.splitView as? ThemedSplitView)
+        let split = try XCTUnwrap(controller.contentSplitController.splitView as? ThemedSplitView)
         let panel = controller.displayPaneController.view.bounds.width
 
         let corner = NSPoint(x: fold.bounds.minX + 2, y: fold.bounds.midY)
@@ -792,7 +792,7 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         window.layoutIfNeeded()
         settle()
 
-        let item = try XCTUnwrap(controller.splitViewController.splitViewItems.last)
+        let item = try XCTUnwrap(controller.contentSplitController.splitViewItems.last)
         XCTAssertFalse(item.isCollapsed, "the panel never opened, so nothing was closed")
 
         let toggle = try XCTUnwrap(
@@ -826,7 +826,7 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         window.layoutIfNeeded()
         settle()
 
-        let item = try XCTUnwrap(controller.splitViewController.splitViewItems.last)
+        let item = try XCTUnwrap(controller.contentSplitController.splitViewItems.last)
         XCTAssertTrue(item.isCollapsed, "the fixture opened with the panel already showing")
 
         let content = try XCTUnwrap(window.contentView)
@@ -910,7 +910,7 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         window.layoutIfNeeded()
         settle()
 
-        let item = try XCTUnwrap(controller.splitViewController.splitViewItems.last)
+        let item = try XCTUnwrap(controller.contentSplitController.splitViewItems.last)
         let toggle = try XCTUnwrap(
             descendant(
                 in: item.viewController.view,
@@ -934,7 +934,7 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(NSSize(width: 1400, height: 800))
         let pane = controller.displayPaneController
-        let item = try XCTUnwrap(controller.splitViewController.splitViewItems.last)
+        let item = try XCTUnwrap(controller.contentSplitController.splitViewItems.last)
         let firstSessionID = SessionID()
         let otherSessionID = SessionID()
         defer {
@@ -1277,10 +1277,7 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         settings.setToolGroup(MCPToolCatalog.appearance.id, enabled: true)
 
         let controller = makeMainWindowController()
-        let container = try XCTUnwrap(
-            controller.splitViewController.splitViewItems[1].viewController
-                as? TerminalContainerViewController
-        )
+        let container = controller.containerViewController
 
         controller.toggleCurrentTheme()
         XCTAssertTrue(controller.isCurrentThemeVisible)

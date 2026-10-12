@@ -4,6 +4,14 @@ import XCTest
 
 @MainActor
 final class DeviceLogWorkspaceTests: XCTestCase {
+    func testEmptyBluetoothSectionHidesAppProcessAndRouteControlsBeforeDiscovery() throws {
+        let workspace = DeviceLogWorkspaceViewController(sessionID: nil, toolPath: nil, preferredMachineID: nil)
+        _ = workspace.sectionView(.bluetooth)
+        let pane = try XCTUnwrap(workspace.panes[.bluetooth])
+        XCTAssertTrue(pane.isProcessControlHiddenForTesting)
+        XCTAssertTrue(pane.isRouteControlHiddenForTesting)
+    }
+
     private final class Reader: BufferedDeviceLogSource {
         var starts = 0
         var stops = 0
@@ -80,6 +88,40 @@ final class DeviceLogWorkspaceTests: XCTestCase {
         XCTAssertEqual(regular.starts, 2)
         XCTAssertEqual(bluetooth.starts, 2)
         XCTAssertEqual(logs.focusSummary.total, 2, "reappearing keeps both rings")
+    }
+
+    func testDockedStreamsAreVisibleTogetherAndShareReaderLifetime() async throws {
+        let regular = Reader(), bluetooth = Reader()
+        let workspace = workspace(regular: regular, bluetooth: bluetooth)
+        let regularView = workspace.sectionView(.regular)
+        let bluetoothView = workspace.sectionView(.bluetooth)
+        workspace.setSectionPresented(.regular, presented: true)
+        workspace.setSectionPresented(.bluetooth, presented: true)
+        defer { workspace.setSectionPresented(.regular, presented: false); workspace.setSectionPresented(.bluetooth, presented: false) }
+        XCTAssertEqual(regular.starts, 1)
+        XCTAssertEqual(bluetooth.starts, 1)
+        regular.enqueue([row("regular retained")])
+        bluetooth.enqueue([row("bluetooth retained")])
+        let logs = try XCTUnwrap(workspace.panes[.regular])
+        let packets = try XCTUnwrap(workspace.panes[.bluetooth])
+        logs.drain(); packets.drain()
+        try await settleProjection(logs)
+        try await settleProjection(packets)
+        XCTAssertEqual(logs.visibleRowsForTools(limit: 5).map(\.message), ["regular retained"])
+        XCTAssertEqual(packets.visibleRowsForTools(limit: 5).map(\.message), ["bluetooth retained"])
+        workspace.setSectionPresented(.regular, presented: false)
+        XCTAssertEqual(regular.stops, 0, "another visible section keeps captures alive")
+        XCTAssertEqual(bluetooth.stops, 0)
+        XCTAssertTrue(workspace.sectionView(.regular) === regularView)
+        XCTAssertTrue(workspace.sectionView(.bluetooth) === bluetoothView)
+        workspace.setSectionPresented(.regular, presented: true)
+        XCTAssertEqual(regular.starts, 1, "reparenting cannot create a second reader")
+        workspace.setSectionPresented(.regular, presented: false)
+        workspace.setSectionPresented(.bluetooth, presented: false)
+        XCTAssertEqual(regular.stops, 1)
+        XCTAssertEqual(bluetooth.stops, 1)
+        XCTAssertEqual(logs.focusSummary.total, 1)
+        XCTAssertEqual(packets.focusSummary.total, 1)
     }
 
     func testLateDiscoveryCannotRestartHiddenWorkspace() {
@@ -170,6 +212,38 @@ final class DeviceLogWorkspaceTests: XCTestCase {
         XCTAssertEqual(logs.focusSummary.shown, retained)
         ticks.sort()
         print("Dual logs: \(batches * batch.count) rows per stream; median tick \(ticks[ticks.count / 2] * 1_000) ms; max \(ticks.last! * 1_000) ms; hidden updates \(logs.presentationUpdateCount - hiddenUpdates)")
+    }
+
+    func testBothDockedStreamsBoundHistoryUnderSustainedCapture() async throws {
+        let regular = Reader(), bluetooth = Reader()
+        let workspace = workspace(regular: regular, bluetooth: bluetooth)
+        _ = workspace.sectionView(.regular)
+        _ = workspace.sectionView(.bluetooth)
+        workspace.setSectionPresented(.regular, presented: true)
+        workspace.setSectionPresented(.bluetooth, presented: true)
+        defer { workspace.setPresented(false) }
+        let logs = try XCTUnwrap(workspace.panes[.regular])
+        let packets = try XCTUnwrap(workspace.panes[.bluetooth])
+        let batch = (0..<1_000).map { row("docked line \($0)") }
+        let batches = ProcessInfo.processInfo.environment["THREADING_DEVICE_LOG_DUAL_STRESS"] == "1" ? 100 : 2
+        var ticks: [Double] = []
+        for _ in 0..<batches {
+            regular.enqueue(batch); bluetooth.enqueue(batch)
+            let start = DispatchTime.now().uptimeNanoseconds
+            logs.drain(); packets.drain()
+            ticks.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+        }
+        try await settleProjection(logs)
+        try await settleProjection(packets)
+        let retained = min(batches * batch.count, DeviceLogLimits.ringCapacity)
+        XCTAssertEqual(logs.focusSummary.total, retained)
+        XCTAssertEqual(packets.focusSummary.total, retained)
+        XCTAssertEqual(logs.focusSummary.shown, retained)
+        XCTAssertEqual(packets.focusSummary.shown, retained)
+        XCTAssertEqual(regular.starts, 1)
+        XCTAssertEqual(bluetooth.starts, 1)
+        ticks.sort()
+        print("Docked dual logs: \(batches * batch.count) rows per stream; median drain \(ticks[ticks.count / 2]) ms; max \(ticks.last!) ms; retained \(retained) each")
     }
 
     private func row(_ message: String) -> DeviceLogRow {

@@ -163,6 +163,7 @@ final class ComponentGalleryViewController: NSViewController {
         "NavigatorGridItemView",
         "PageTitleView",
         "PaneFoldDivider",
+        "WorkspaceDockPreview",
         "PaneFooterView",
         "PaneHeaderView",
         "LaunchFailureView",
@@ -4070,6 +4071,11 @@ final class ComponentGalleryViewController: NSViewController {
                     makePaneFoldDividerSample()
                 ),
                 story(
+                    "WorkspaceDockPreview",
+                    "Choose a scope to preview a bottom split across the workspace, conversation, or side panel. The preview leaves pointer events with the content beneath it.",
+                    makeWorkspaceDockPreviewSample()
+                ),
+                story(
                     "PaneNoticeView",
                     "The pane's third band: a standing condition it found on its own, with the "
                         + "ways to answer it and the way out on the same line. Press Show to put "
@@ -5652,6 +5658,48 @@ final class ComponentGalleryViewController: NSViewController {
         ])
 
         return split
+    }
+
+    private func makeWorkspaceDockPreviewSample() -> NSView {
+        let width: CGFloat = 340
+        let height: CGFloat = 140
+        let preview = WorkspaceDockPreview()
+        preview.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            preview.widthAnchor.constraint(equalToConstant: width),
+            preview.heightAnchor.constraint(equalToConstant: height)
+        ])
+
+        let scopes = [L10n.string("Whole workspace"), L10n.string("Conversation"), L10n.string("Side panel")]
+        let landings = [
+            NSRect(x: 0, y: height / 2, width: width, height: height / 2),
+            NSRect(x: 0, y: height / 2, width: width * 0.6, height: height / 2),
+            NSRect(x: width * 0.6, y: height / 2, width: width * 0.4, height: height / 2)
+        ]
+        let chooser = ChipView()
+        var selected = 0
+        let select: (Int) -> Void = { [weak chooser, weak preview] index in
+            selected = index
+            chooser?.configure(symbolName: nil, title: scopes[index])
+            preview?.landing = landings[index]
+            preview?.title = L10n.string("Split Below") + " · " + scopes[index]
+        }
+        chooser.itemsProvider = {
+            scopes.enumerated().map { index, title in
+                .item(ThemedMenuItem(title: title, representedValue: index, isSelected: index == selected))
+            }
+        }
+        chooser.onSelect = { item in
+            guard let index = item.representedValue as? Int, scopes.indices.contains(index) else { return }
+            select(index)
+        }
+        select(0)
+
+        let stack = NSStackView(views: [chooser, preview])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        return stack
     }
 
     /// Two halves and the fold between them, wired the way a pane wires it: the travel moves the

@@ -279,6 +279,12 @@ public protocol ThreadingNativePlugin: NSObjectProtocol {
     /// subject simply ignores repeated activation and keeps the pane it already made.
     @objc optional func activatePane(context: PluginContext)
 
+    /// Independently dockable views sharing one plugin instance and its resources. A host opts
+    /// in with hostPaneSections=true in the initial context; ordinary pane plugins are unchanged.
+    @objc optional func makePaneSectionView(identifier: String) -> NSView?
+    /// Visibility is supplied by the host because section views may have different parents.
+    @objc optional func setPaneSectionPresented(identifier: String, presented: Bool)
+
     /// Builds one complete leading workspace navigator declared in the bundle's static metadata.
     ///
     /// Optional so every existing pane-only plugin remains loadable. The host discovers the

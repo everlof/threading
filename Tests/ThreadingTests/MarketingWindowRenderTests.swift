@@ -252,9 +252,11 @@ final class MarketingWindowRenderTests: HostedStoreTestCase {
         let split = controller.splitViewController.splitView
         content.layoutSubtreeIfNeeded()
         split.setPosition(Master.sidebarWidth, ofDividerAt: 0)
-        split.setPosition(Master.size.width - Master.displayPaneWidth, ofDividerAt: 1)
         content.layoutSubtreeIfNeeded()
-        let visiblePanes = split.arrangedSubviews.filter {
+        let contentSplit = controller.contentSplitController.splitView
+        contentSplit.setPosition(contentSplit.bounds.width - Master.displayPaneWidth, ofDividerAt: 0)
+        content.layoutSubtreeIfNeeded()
+        let visiblePanes = (Array(split.arrangedSubviews.prefix(1)) + contentSplit.arrangedSubviews).filter {
             !$0.isHidden && $0.bounds.width > 1 && $0.bounds.height > 1
         }
         XCTAssertEqual(visiblePanes.count, 3, "the master must show the full three-pane app")

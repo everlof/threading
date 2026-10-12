@@ -56,7 +56,7 @@ final class DisplayPanelTogglePressTests: HostedStoreTestCase {
         settle()
         window.contentView?.layoutSubtreeIfNeeded()
 
-        let displayItem = try XCTUnwrap(controller.splitViewController.splitViewItems.last)
+        let displayItem = try XCTUnwrap(controller.contentSplitController.splitViewItems.last)
         return Fixture(controller: controller, window: window, displayItem: displayItem) {
             store.removeProject(id: project.id)
             try? FileManager.default.removeItem(at: folder)
@@ -196,10 +196,7 @@ final class DisplayPanelTogglePressTests: HostedStoreTestCase {
         let fixture = try makeFixture()
         defer { fixture.teardown() }
         let splitController = fixture.controller.splitViewController
-        let content = try XCTUnwrap(
-            splitController.splitViewItems[1].viewController
-                as? TerminalContainerViewController
-        )
+        let content = fixture.controller.containerViewController
         XCTAssertNotNil(
             content.activeTerminalSession,
             "the fixture is not exercising the terminal-backed motion policy"
@@ -207,7 +204,7 @@ final class DisplayPanelTogglePressTests: HostedStoreTestCase {
 
         fixture.controller.setDisplayPaneVisible(true)
         XCTAssertFalse(
-            splitController.lastCollapseUsedAnimatedGeometry,
+            fixture.controller.contentSplitController.lastCollapseUsedAnimatedGeometry,
             "the display panel animated beside a live terminal"
         )
 

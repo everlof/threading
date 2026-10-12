@@ -38,6 +38,66 @@ final class NativePluginPaneViewController: NSViewController {
     private var verifiedCandidate: NativePluginCatalog.VerifiedCandidate?
     private var loadTask: Task<Void, Never>?
     var onTitleChange: (() -> Void)?
+    private(set) var paneSection: String?
+    private var sectionOwner: NativePluginPaneViewController?
+    private var sectionObservers: [UUID: () -> Void] = [:]
+    private let sectionObserverID = UUID()
+    private var visibilityGeneration = 0
+    private final class WeakPane {
+        weak var value: NativePluginPaneViewController?
+        init(_ value: NativePluginPaneViewController) { self.value = value }
+    }
+    private static var deviceLogOwners: [SessionID: WeakPane] = [:]
+
+    /// Both stream tabs share the verified plugin instance, registration and capture workspace.
+    static func deviceLogs(bundleURL: URL, sessionID: SessionID, section: String = "regular")
+        -> NativePluginPaneViewController {
+        deviceLogOwners = deviceLogOwners.filter { $0.value.value != nil }
+        let owner: NativePluginPaneViewController
+        if let existing = deviceLogOwners[sessionID]?.value { owner = existing }
+        else {
+            owner = NativePluginPaneViewController(bundleURL: bundleURL, owningSessionID: sessionID,
+                managedIPhoneToolPath: Pymobiledevice3ManagedTool.executable().path,
+                activationArguments: ["hostPaneSections": "true", "stream": "regular"])
+            owner.paneSection = "regular"
+            deviceLogOwners[sessionID] = WeakPane(owner)
+        }
+        guard section == "bluetooth" else { return owner }
+        let sibling = NativePluginPaneViewController(bundleURL: bundleURL, owningSessionID: sessionID)
+        sibling.paneSection = "bluetooth"
+        sibling.sectionOwner = owner
+        return sibling
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        visibilityGeneration += 1
+        if let paneSection { loaded?.setPaneSectionPresented?(identifier: paneSection, presented: true) }
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        visibilityGeneration += 1
+        let generation = visibilityGeneration
+        // Reparenting during one drop is not a capture stop/start. A real hide settles on the
+        // next main turn; reappearing in the destination cancels this pending visibility edge.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, visibilityGeneration == generation, let paneSection else { return }
+            loaded?.setPaneSectionPresented?(identifier: paneSection, presented: false)
+        }
+    }
+
+    private func installSection() {
+        guard let owner = sectionOwner, let paneSection else { return }
+        loaded = owner.loaded
+        refusal = owner.refusal
+        view.subviews.forEach { $0.removeFromSuperview() }
+        if let pane = loaded?.makePaneSectionView?(identifier: paneSection) {
+            install(pane)
+            loaded?.setPaneSectionPresented?(identifier: paneSection, presented: view.window != nil)
+        } else if let refusal { install(refusalView(refusal)) }
+        onTitleChange?()
+    }
 
     /// The plugin's own identity once it loads, so a crash-quarantine policy can name it rather
     /// than pointing at a path.
@@ -46,7 +106,8 @@ final class NativePluginPaneViewController: NSViewController {
     /// What the tab calls it. Verified bundle metadata replaces the filename once inspection
     /// finishes, so a refusal is still named without rereading a mutable install path on main.
     var displayName: String {
-        verifiedCandidate?.bundle.displayName ?? L10n.string("Plugin")
+        if let paneSection { return L10n.string(paneSection == "bluetooth" ? "Bluetooth" : "Device Logs") }
+        return verifiedCandidate?.bundle.displayName ?? L10n.string("Plugin")
     }
 
     struct ApprovalRequest: Equatable {
@@ -93,7 +154,7 @@ final class NativePluginPaneViewController: NSViewController {
         self.verifyPlugin = verifyPlugin
         super.init(nibName: nil, bundle: nil)
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
-            guard let plugin = self?.loaded else { return }
+            guard let self, sectionOwner == nil, let plugin = loaded else { return }
             plugin.apply(theme: NativePluginCatalog.theme())
         }
     }
@@ -103,7 +164,13 @@ final class NativePluginPaneViewController: NSViewController {
     deinit {
         loadTask?.cancel()
         // The tools go with the pane: they act on a stream and a view that are about to be gone.
-        MainActor.assumeIsolated { NativePluginRuntime.shared.deregister(self) }
+        MainActor.assumeIsolated {
+            if let paneSection {
+                loaded?.setPaneSectionPresented?(identifier: paneSection, presented: false)
+            }
+            sectionOwner?.sectionObservers.removeValue(forKey: sectionObserverID)
+            NativePluginRuntime.shared.deregister(self)
+        }
     }
 
     override func loadView() {
@@ -112,6 +179,12 @@ final class NativePluginPaneViewController: NSViewController {
     }
 
     private func loadViewContents() {
+        if let sectionOwner {
+            _ = sectionOwner.view
+            sectionOwner.sectionObservers[sectionObserverID] = { [weak self] in self?.installSection() }
+            installSection()
+            return
+        }
         if let loadPlugin {
             finish(loadPlugin(bundleURL))
             return
@@ -182,11 +255,15 @@ final class NativePluginPaneViewController: NSViewController {
             NativePluginRuntime.shared.register(plugin, controller: self, sessionID: owningSessionID)
             install(pane)
             plugin.apply(theme: NativePluginCatalog.theme())
+            if let paneSection {
+                plugin.setPaneSectionPresented?(identifier: paneSection, presented: view.window != nil)
+            }
         case .failure(let failure):
             loaded = nil
             refusal = failure
             install(refusalView(failure))
         }
+        sectionObservers.values.forEach { $0() }
     }
 
     /// Rebuilds through the full loader boundary. Used after an approval and kept internal so a
@@ -206,6 +283,7 @@ final class NativePluginPaneViewController: NSViewController {
     /// with the newest target instead.
     func activate(arguments: [String: String]) {
         activationArguments.merge(arguments) { _, newest in newest }
+        if let paneSection { activationArguments["stream"] = paneSection }
         loaded?.activatePane?(context: context())
     }
 

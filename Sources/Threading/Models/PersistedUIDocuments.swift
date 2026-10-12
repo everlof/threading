@@ -17,7 +17,7 @@ struct PersistedPanel: Codable {
   /// 6 is a workspace with an Android member: a build that predates Android cannot parse its
   /// device identity, and refusing the document is what keeps it from restoring the workspace
   /// minus that member and saving the loss back.
-  static let currentFormatVersion = 6
+  static let currentFormatVersion = 7
 
   var tabs: [PersistedTab]
   var activeTabID: String?
@@ -25,6 +25,8 @@ struct PersistedPanel: Codable {
   var drawerActiveTabID: String? = nil
   var drawerOpen: Bool? = nil
   var detachedWindows: [PersistedDetachedWindow] = []
+  var dockLayout: WorkspaceDockLayout? = nil
+  var dockTabs: [PersistedTab] { tabs.filter { $0.dockID != nil } }
 
   var panelTabs: [PersistedTab] { tabs.filter { $0.host == nil } }
   var drawerTabs: [PersistedTab] { tabs.filter { $0.host == PersistedTab.drawerHost } }
@@ -45,6 +47,7 @@ struct PersistedPanel: Codable {
     case drawerActiveTabID
     case drawerOpen
     case detachedWindows
+    case dockLayout
   }
 }
 
@@ -66,6 +69,10 @@ extension PersistedPanel {
     drawerActiveTabID = try container.decodeIfPresent(String.self, forKey: .drawerActiveTabID)
     drawerOpen = try container.decodeIfPresent(Bool.self, forKey: .drawerOpen)
 
+    guard tabs.allSatisfy({ $0.kind != .deviceLog || $0.mode == nil || ["regular", "bluetooth"].contains($0.mode!) }) else {
+      throw DecodingError.dataCorruptedError(forKey: .tabs, in: container,
+        debugDescription: "Unknown device log stream")
+    }
     let ids = tabs.map(\.id)
     guard ids.allSatisfy({ !$0.isEmpty }), Set(ids).count == ids.count else {
       throw DecodingError.dataCorruptedError(
@@ -77,9 +84,20 @@ extension PersistedPanel {
     detachedWindows =
       try container.decodeIfPresent([PersistedDetachedWindow].self, forKey: .detachedWindows) ?? []
 
+    dockLayout = try container.decodeIfPresent(WorkspaceDockLayout.self, forKey: .dockLayout)
+    let declaredDocks = Set(dockLayout?.panes.map(\.id) ?? [])
+    guard dockLayout?.validated() ?? true, tabs.allSatisfy({ tab in
+      tab.dockID.map(declaredDocks.contains) ?? true
+    }), (dockLayout?.panes ?? []).allSatisfy({ node in
+      node.activeTabID.map { active in tabs.contains { $0.dockID == node.id && $0.id == active } } ?? true
+    }) else {
+      throw DecodingError.dataCorruptedError(forKey: .dockLayout, in: container,
+        debugDescription: "Invalid workspace docking layout")
+    }
+
     guard
       tabs.allSatisfy({
-        $0.host == nil || $0.host == PersistedTab.drawerHost || $0.detachedWindowID != nil
+        $0.host == nil || $0.host == PersistedTab.drawerHost || $0.detachedWindowID != nil || $0.dockID != nil
       })
     else {
       throw DecodingError.dataCorruptedError(
@@ -147,6 +165,7 @@ extension PersistedPanel {
   /// every window slice. Stamping the version by what the document contains keeps the bump
   /// costing only the sessions that actually used the feature.
   var requiredFormatVersion: Int {
+    if dockLayout != nil || tabs.contains(where: { $0.kind == .deviceLog && $0.mode != nil }) { return 7 }
     if tabs.contains(where: \.namesAnAndroidDevice) { return 6 }
     if tabs.contains(where: { $0.simulatorWorkspace != nil }) { return 5 }
     if tabs.contains(where: { $0.kind == .realDevice }) { return 4 }
@@ -158,6 +177,7 @@ extension PersistedPanel {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(requiredFormatVersion, forKey: .formatVersion)
     try container.encode(tabs, forKey: .tabs)
+    try container.encodeIfPresent(dockLayout, forKey: .dockLayout)
     try container.encodeIfPresent(activeTabID, forKey: .activeTabID)
     try container.encodeIfPresent(observedSignature, forKey: .observedSignature)
     try container.encodeIfPresent(drawerActiveTabID, forKey: .drawerActiveTabID)
@@ -216,6 +236,12 @@ struct PersistedTab: Codable {
   var host: String? = nil
 
   static let drawerHost = "drawer"
+
+  static func dockHost(_ id: UUID) -> String { "dock:" + id.uuidString }
+  var dockID: UUID? {
+    guard let host, host.hasPrefix("dock:") else { return nil }
+    return UUID(uuidString: String(host.dropFirst(5)))
+  }
 
   /// A detached window's slice. Suffixed with the window's own id, because a session may have
   /// more than one and their tabs share this single flat list — the host string is what tells

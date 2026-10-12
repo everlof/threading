@@ -668,3 +668,19 @@ one is not mistaken for coverage.
 - **The ExtensionKit appex tier** (crash-isolated, third-party, `EXHostViewController`) is proposed
   and not started. It would link the same `ThreadingDesignKit`, which is the majority of the work in
   either plan and is now done.
+
+### Device Logs in independent dock groups
+
+The bundled log plugin supports two optional, additive PluginKit selectors:
+`makePaneSectionView(identifier:)` and `setPaneSectionPresented(identifier:presented:)`.
+The host opts in with `hostPaneSections=true` in the initial context. Without that opt-in, the
+plugin retains its internal segmented-control presentation, so older hosts and ordinary native
+plugins keep their existing contract. The binary API generation remains 5.
+
+Device Logs and Bluetooth become separate host tabs, with persisted modes `regular` and
+`bluetooth`. Their host controllers share one verified plugin owner and one runtime registration
+per session. A Bluetooth sibling retains that owner, including when the regular tab closes.
+Visibility is tracked per section: both can project rows simultaneously, an inactive section
+keeps its reader while another is visible, and hiding the last section stops both. Visibility
+loss is deferred one main turn so synchronous tab reparenting does not restart capture. Theme
+handoff repaints both section trees, including a section in another dock group.

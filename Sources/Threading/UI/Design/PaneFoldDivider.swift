@@ -174,7 +174,7 @@ final class PaneFoldDivider: ThemedControl {
     private var paneSplitView: ThemedSplitView? {
         var next: NSView? = superview
         while let view = next {
-            if let split = view as? ThemedSplitView { return split }
+            if let split = view as? ThemedSplitView, split.isVertical { return split }
             next = view.superview
         }
         return nil

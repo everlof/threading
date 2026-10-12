@@ -33,7 +33,7 @@ final class ThemedSplitView: NSSplitView {
     /// between the two is the only record of how hard the divider was pushed — the frames say
     /// nothing, because nothing moved. The owner decides what a push that far means; this view
     /// only knows that a drag ended and where the hand was.
-    var dividerDragDidEnd: ((_ dividerIndex: Int, _ pointerX: CGFloat) -> Void)?
+    var dividerDragDidEnd: ((_ dividerIndex: Int, _ pointerCoordinate: CGFloat) -> Void)?
 
     private let appEvents = AppEventObservations()
 
@@ -263,7 +263,8 @@ final class ThemedSplitView: NSSplitView {
         dividerHoverAreas = arrangedSubviews.dropLast().indices.compactMap { index in
             guard dividerIsGrabbable(at: index) else { return nil }
             let area = NSTrackingArea(
-                rect: dividerRect(at: index).insetBy(dx: -Self.dividerGrab, dy: 0),
+                rect: dividerRect(at: index).insetBy(
+                    dx: isVertical ? -Self.dividerGrab : 0, dy: isVertical ? 0 : -Self.dividerGrab),
                 options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow],
                 owner: self
             )
@@ -335,6 +336,10 @@ final class ThemedSplitView: NSSplitView {
 
     private func dividerRect(at index: Int) -> NSRect {
         guard arrangedSubviews.indices.contains(index + 1) else { return .zero }
+        if !isVertical {
+            return NSRect(x: 0, y: arrangedSubviews[index].frame.maxY,
+                width: bounds.width, height: dividerThickness)
+        }
         return NSRect(
             x: arrangedSubviews[index].frame.maxX,
             y: 0,
@@ -381,12 +386,12 @@ final class ThemedSplitView: NSSplitView {
 
         if let release = NSApp.currentEvent, release.type == .leftMouseUp {
             let released = convert(release.locationInWindow, from: nil)
-            dividerDragDidEnd?(index, released.x)
+            dividerDragDidEnd?(index, isVertical ? released.x : released.y)
             activeDividerIndex = attachedDividerIndex(at: released)
         } else if let window {
             let pointer = window.convertPoint(fromScreen: NSEvent.mouseLocation)
             let released = convert(pointer, from: nil)
-            dividerDragDidEnd?(index, released.x)
+            dividerDragDidEnd?(index, isVertical ? released.x : released.y)
             activeDividerIndex = attachedDividerIndex(at: released)
         }
     }
@@ -394,9 +399,11 @@ final class ThemedSplitView: NSSplitView {
     private func dividerIndex(at point: NSPoint) -> Int? {
         arrangedSubviews.dropLast().indices.first { index in
             guard dividerIsGrabbable(at: index) else { return false }
-            let seam = arrangedSubviews[index].frame.maxX
-            return point.x >= seam - Self.dividerGrab
-                && point.x <= seam + dividerThickness + Self.dividerGrab
+            let frame = arrangedSubviews[index].frame
+            let seam = isVertical ? frame.maxX : frame.maxY
+            let coordinate = isVertical ? point.x : point.y
+            return coordinate >= seam - Self.dividerGrab
+                && coordinate <= seam + dividerThickness + Self.dividerGrab
         }
     }
 
@@ -466,7 +473,7 @@ final class ThemedSplitView: NSSplitView {
     /// The seam beside the pane holding `descendant`, when `descendant` reaches that pane's edge
     /// and the seam is one a drag could move at all.
     private func seamIndex(beside descendant: NSView, on side: Side) -> Int? {
-        guard let paneIndex = arrangedSubviews.firstIndex(where: descendant.isDescendant(of:))
+        guard isVertical, let paneIndex = arrangedSubviews.firstIndex(where: descendant.isDescendant(of:))
         else { return nil }
 
         let pane = arrangedSubviews[paneIndex]

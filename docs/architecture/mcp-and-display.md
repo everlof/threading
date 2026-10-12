@@ -1860,3 +1860,38 @@ ring is evidence with a lifetime, and the tab is a surface with bytes in hand.
 
 The durable half lives elsewhere: baselines are project-scoped in `BrowserBaselineStore`, not in the
 panel's per-session cache. See [`agent-browser.md`](agent-browser.md).
+
+### Window-wide docking and nested groups
+
+`WorkspaceDockController` owns a bounded split tree around the conversation and right-hand
+panel. The project navigator remains an outer split item. The conversation and panel each have
+a stable branch controller, so a new bottom row can wrap the entire workspace or just one side;
+a docked group can then be split again. Existing content controllers move through
+`TabTransferCoordinator` without being reconstructed. Browser page callbacks and Simulator
+membership persistence are rebound when their tab changes host.
+
+Reopening a singleton surface resolves its existing tab across the session's hosts. Quiet
+attachment updates refresh a moved list without selecting it. Commands search visible dock
+hosts, preferring focus; Find, device actions and Review's file jump therefore survive a move.
+Checkout and turn events reach those hosts too, and every group uses the same browser-count
+resolver. A background session's activation updates its own selection without revealing it in
+the user's current workspace.
+
+The outer 22 points target the complete workspace. Farther inside, the nearest edge targets the
+conversation, side panel, or existing dock group. Preview geometry is calculated from those same
+views and the same split fraction used on commit. Dropping in another group's strip joins it;
+a 400 ms dwell in the middle of that strip offers a left/right split. The window polls the last
+drag sample at 10 Hz while the hand is stationary, and ends that timer on drop, cancellation,
+or window closure. Escape clears the preview without creating a pane or changing storage.
+
+The additional groups reuse `DisplayPaneController`, scoped by `.dock(UUID)`. Eight additional
+groups is the ceiling. Hover reads only the visible, bounded tree; group construction and
+persistence happen on commit, and divider fractions are persisted on release. Session switches
+retain controllers but detach inactive views. Closing a group's last tab collapses its split;
+removing a session tears down its dock hosts as well as its original panel and drawer.
+
+The customization gate is deliberately host-only for docking topology, targets, tab movement,
+selection, capture lifetime and persistence. Existing tab-strip extension decoration and the
+shared theme continue to own their published presentation surfaces. The passive landing
+preview lives in `UI/Design/WorkspaceDockPreview.swift`, uses semantic ink and typography, and
+never intercepts the pointer.

@@ -3305,7 +3305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 return .unavailable(L10n.string("The active surface is not a conversation."))
             }
         case AppCommands.ID.simulatorAutomaticLayout, AppCommands.ID.simulatorRowLayout, AppCommands.ID.simulatorColumnLayout, AppCommands.ID.simulatorGridLayout, AppCommands.ID.simulatorFocusLayout, AppCommands.ID.addSimulator, AppCommands.ID.removeSimulator:
-            guard let workspace = mainWindowController?.displayPaneController.currentSimulatorWorkspace else {
+            guard let workspace = mainWindowController?.commandSimulatorWorkspace else {
                 return .unavailable(L10n.string("Show an adopted Simulator first."))
             }
             if command.id == AppCommands.ID.addSimulator, !workspace.canAddSimulator {
@@ -3315,20 +3315,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 return .unavailable(L10n.string("Close the tab to remove the last Simulator."))
             }
         case AppCommands.ID.enableSimulatorAnnotations, AppCommands.ID.disableSimulatorAnnotations:
-            guard mainWindowController?.displayPaneController.currentSimulator?.canAnnotateNotes == true else {
+            guard mainWindowController?.commandSimulator?.canAnnotateNotes == true else {
                 return .unavailable(L10n.string("Show an adopted Simulator first."))
             }
         case AppCommands.ID.toggleSimulatorRecording:
-            guard let simulator = mainWindowController?.displayPaneController.currentSimulator,
+            guard let simulator = mainWindowController?.commandSimulator,
                   simulator.isRecordingForCommands || simulator.canRecord else {
                 return .unavailable(L10n.string("Show an adopted Simulator first."))
             }
         case AppCommands.ID.toggleSimulatorTouches:
-            guard mainWindowController?.displayPaneController.currentSimulator != nil else {
+            guard mainWindowController?.commandSimulator != nil else {
                 return .unavailable(L10n.string("Show an adopted Simulator first."))
             }
         case AppCommands.ID.toggleSimulatorPresenter:
-            guard let simulator = mainWindowController?.displayPaneController.currentSimulator,
+            guard let simulator = mainWindowController?.commandSimulator,
                   simulator.isPresenterWindowOpen || simulator.adoptedDevice != nil else {
                 return .unavailable(L10n.string("Show an adopted Simulator first."))
             }
@@ -3644,29 +3644,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.attachments: mainWindowController?.showAttachments()
         case AppCommands.ID.jumpToReviewFile: mainWindowController?.showReviewFileJump()
         case AppCommands.ID.simulatorAutomaticLayout:
-            mainWindowController?.displayPaneController.currentSimulatorWorkspace?.setLayout(.automatic)
+            mainWindowController?.commandSimulatorWorkspace?.setLayout(.automatic)
         case AppCommands.ID.simulatorRowLayout:
-            mainWindowController?.displayPaneController.currentSimulatorWorkspace?.setLayout(.row)
+            mainWindowController?.commandSimulatorWorkspace?.setLayout(.row)
         case AppCommands.ID.simulatorColumnLayout:
-            mainWindowController?.displayPaneController.currentSimulatorWorkspace?.setLayout(.column)
+            mainWindowController?.commandSimulatorWorkspace?.setLayout(.column)
         case AppCommands.ID.simulatorGridLayout:
-            mainWindowController?.displayPaneController.currentSimulatorWorkspace?.setLayout(.grid)
+            mainWindowController?.commandSimulatorWorkspace?.setLayout(.grid)
         case AppCommands.ID.simulatorFocusLayout:
-            mainWindowController?.displayPaneController.currentSimulatorWorkspace?.setLayout(.focus)
+            mainWindowController?.commandSimulatorWorkspace?.setLayout(.focus)
         case AppCommands.ID.addSimulator:
-            mainWindowController?.displayPaneController.currentSimulatorWorkspace?.showAddMenu()
+            mainWindowController?.commandSimulatorWorkspace?.showAddMenu()
         case AppCommands.ID.removeSimulator:
-            mainWindowController?.displayPaneController.currentSimulatorWorkspace?.removeSelected()
+            mainWindowController?.commandSimulatorWorkspace?.removeSelected()
         case AppCommands.ID.enableSimulatorAnnotations:
-            mainWindowController?.displayPaneController.currentSimulator?.setAnnotatingNotes(true)
+            mainWindowController?.commandSimulator?.setAnnotatingNotes(true)
         case AppCommands.ID.disableSimulatorAnnotations:
-            mainWindowController?.displayPaneController.currentSimulator?.setAnnotatingNotes(false)
+            mainWindowController?.commandSimulator?.setAnnotatingNotes(false)
         case AppCommands.ID.toggleSimulatorRecording:
-            mainWindowController?.displayPaneController.currentSimulator?.toggleRecording()
+            mainWindowController?.commandSimulator?.toggleRecording()
         case AppCommands.ID.toggleSimulatorTouches:
-            mainWindowController?.displayPaneController.currentSimulator?.toggleShowTouches()
+            mainWindowController?.commandSimulator?.toggleShowTouches()
         case AppCommands.ID.toggleSimulatorPresenter:
-            mainWindowController?.displayPaneController.currentSimulator?.togglePresenterWindow()
+            mainWindowController?.commandSimulator?.togglePresenterWindow()
         case AppCommands.ID.saveBaseline: mainWindowController?.saveVisibleBrowserBaseline()
         case AppCommands.ID.sessionInfo: mainWindowController?.showInfo()
         case AppCommands.ID.shell: mainWindowController?.toggleShellDrawer()

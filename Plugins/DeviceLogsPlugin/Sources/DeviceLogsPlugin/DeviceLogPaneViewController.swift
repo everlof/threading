@@ -254,6 +254,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         view = NSView()
         buildTable()
         buildChrome()
+        rebuildMenus()
     }
 
     public override func viewDidAppear() {
@@ -662,17 +663,17 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// which has one log and no choice to make — a control offering a decision that does not
     /// exist.
     private func updateRouteVisibility() {
-        processPopUp.isHidden = false
         let isBluetooth: Bool
         if let option = selectedOption, case .bluetooth = option.kind { isBluetooth = true }
-        else { isBluetooth = false }
-        bluetoothSetupButton.isHidden = !isBluetooth
+        else { isBluetooth = stream == .bluetooth }
+        processPopUp.isHidden = isBluetooth
         let setupTarget: BluetoothProfileSetupView.Target?
         if let option = selectedOption, case .bluetooth(let udid, _, _) = option.kind {
             setupTarget = .init(deviceID: udid, title: option.machine.title)
         } else {
             setupTarget = nil
         }
+        bluetoothSetupButton.isHidden = setupTarget == nil
         if bluetoothSetupDeviceID != setupTarget?.deviceID || !isBluetooth {
             bluetoothProfileSetup.isHidden = true
         }
@@ -688,7 +689,6 @@ public final class DeviceLogPaneViewController: NSViewController {
         } else {
             routePopUp.isHidden = true
         }
-        if case .bluetooth = option.kind { processPopUp.isHidden = true }
     }
 
     @objc private func toggleBluetoothSetup() {
@@ -924,6 +924,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     public func installRowsForTesting(_ fixture: [DeviceLogRow], focusing pattern: String = "") {
         projectedRows = nil
         rows = fixture
+        received = fixture.count
         discoverProcesses(in: fixture)
         filter = pattern
         filterField.stringValue = pattern
