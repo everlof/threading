@@ -4055,8 +4055,15 @@ to `idevicesyslog`. That fallback remains live but has only the flattened metada
 supplies. Hiding the pane stops either reader; showing it resumes the selected source without
 clearing the rows already on screen.
 
-For Bluetooth protocol traffic, choose **Bluetooth (USB)** or **Bluetooth (Wi-Fi)** for that
-iPhone. Install `libimobiledevice` on the Mac (`brew install libimobiledevice`), then Rescan.
+Device Logs has separate **Regular Logs** and **Bluetooth** tabs. Regular Logs keeps the
+system/app source selector; Bluetooth lists paired iPhones and their USB or Wi-Fi capture source.
+Open both tabs to capture both streams simultaneously. Switching tabs keeps each reader, filter,
+scroll position and history; hiding or closing the entire Device Logs pane stops both readers.
+Bluetooth capture is created only when you first select its tab. Each tab has its own device
+selection, and Bluetooth initially follows the regular tab's phone when available.
+
+For Bluetooth protocol traffic, open **Bluetooth** and select the iPhone.
+Install `libimobiledevice` on the Mac (`brew install libimobiledevice`), then Rescan.
 The iPhone needs Apple's current **Bluetooth logging profile**, available under
 [Bluetooth for iOS/iPadOS](https://developer.apple.com/bug-reporting/profiles-and-logs/?name=bluetooth).
 In the Bluetooth source, choose **Set Up… → Install from Apple…**. Sign in on Apple's page

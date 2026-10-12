@@ -694,6 +694,8 @@ Its profile setup and dedicated Apple sign-in view are host-only too: the host r
 official download origin, temporary authentication state, exact-phone install action, file and
 process bounds, iOS consent handoff and cleanup. Themes style controls; agents receive no profile
 installation action or access to this authentication browser.
+The Regular Logs/Bluetooth tab choice is host-owned as well: the workspace owns the two-reader
+limit, demand lifetime, per-stream history and filters, and the selected stream for agent tools.
 
 **Proxy debugging commands** are deliberately host-only. The existing Tools settings group and
 session MCP transport expose bounded HTTP(S) capture. Threading owns exact TLS scope, CA key

@@ -468,12 +468,23 @@ final class SimulatorPaneRenderTests: XCTestCase {
             settle(fixture.window)
             func find(_ id: String, in view: NSView) -> NSView? {
                 if view.accessibilityIdentifier() == id { return view }
-                return view.subviews.lazy.compactMap { find(id, in: $0) }.first
+                return view.subviews.lazy.filter { !$0.isHidden || $0.accessibilityIdentifier() == id }
+                    .compactMap { find(id, in: $0) }.first
             }
-            for id in ["device-log-process", "device-log-context"] {
+            for id in ["device-log-stream-tabs", "device-log-process", "device-log-context"] {
                 let control = try XCTUnwrap(find(id, in: logs.view))
                 XCTAssertFalse(control.isHiddenOrHasHiddenAncestor)
                 XCTAssertTrue(logs.view.bounds.contains(control.convert(control.bounds, to: logs.view)))
+            }
+            let tabs = try XCTUnwrap(find("device-log-stream-tabs", in: logs.view))
+            tabs.effectiveAppearance.performAsCurrentDrawingAppearance {
+                guard let actual = tabs.layer?.backgroundColor.flatMap({ NSColor(cgColor: $0)?.usingColorSpace(.sRGB) }),
+                      let expected = Design.Surface.controlResting.usingColorSpace(.sRGB) else {
+                    return XCTFail("the tab track must have the current theme's surface")
+                }
+                XCTAssertEqual(actual.redComponent, expected.redComponent, accuracy: 0.001)
+                XCTAssertEqual(actual.greenComponent, expected.greenComponent, accuracy: 0.001)
+                XCTAssertEqual(actual.blueComponent, expected.blueComponent, accuracy: 0.001)
             }
             // cacheDisplay omitted the layer-backed chrome and plugin controls while every
             // geometry assertion above passed. Capture only this test-owned window, as the
@@ -511,7 +522,7 @@ final class SimulatorPaneRenderTests: XCTestCase {
             XCTAssertTrue(process.isHidden, "Bluetooth packets have no app process")
             func findTable(in view: NSView) -> NSTableView? {
                 if let table = view as? NSTableView { return table }
-                return view.subviews.lazy.compactMap { findTable(in: $0) }.first
+                return view.subviews.lazy.filter { !$0.isHidden }.compactMap { findTable(in: $0) }.first
             }
             let table = try XCTUnwrap(findTable(in: logs.view))
             XCTAssertTrue(try XCTUnwrap(table.tableColumn(withIdentifier: .init("process"))).isHidden)
@@ -525,6 +536,19 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 packetText = answer
             }
             XCTAssertTrue(packetText.contains("Write Command attribute=0x0025"), packetText)
+            func segment(_ title: String, in view: NSView) -> NSView? {
+                if view.accessibilityRole() == .radioButton, view.accessibilityTitle() == title { return view }
+                return view.subviews.lazy.compactMap { segment(title, in: $0) }.first
+            }
+            let regularTab = try XCTUnwrap(segment(L10n.string("Regular Logs"), in: tabs))
+            let bluetoothTab = try XCTUnwrap(segment(L10n.string("Bluetooth"), in: tabs))
+            XCTAssertTrue(regularTab.accessibilityPerformPress())
+            settle(fixture.window)
+            XCTAssertFalse(try XCTUnwrap(find("device-log-process", in: logs.view)).isHiddenOrHasHiddenAncestor)
+            XCTAssertTrue(bluetoothTab.accessibilityPerformPress())
+            settle(fixture.window)
+            XCTAssertTrue(findTable(in: logs.view) === table, "switching tabs retains the Bluetooth view")
+            XCTAssertEqual(table.numberOfRows, 2, "returning to Bluetooth retains its captured packets")
             let setup = try XCTUnwrap(find("bluetooth-profile-setup", in: logs.view))
             XCTAssertFalse(setup.isHiddenOrHasHiddenAncestor)
             XCTAssertTrue(setup.accessibilityPerformPress())

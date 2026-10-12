@@ -10907,6 +10907,17 @@
         }
       }
     },
+    "Bluetooth" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth"
+          }
+        }
+      }
+    },
     "Bluetooth (%@)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43913,6 +43924,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Regionrapport"
+          }
+        }
+      }
+    },
+    "Regular Logs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vanliga loggar"
           }
         }
       }

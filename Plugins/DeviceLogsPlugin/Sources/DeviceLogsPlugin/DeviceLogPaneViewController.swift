@@ -15,6 +15,31 @@ import ThreadingDesignKit
 @MainActor
 public final class DeviceLogPaneViewController: NSViewController {
 
+    public enum Stream: String, CaseIterable {
+        case regular, bluetooth
+
+        var title: String {
+            switch self {
+            case .regular: return L10n.string("Regular Logs")
+            case .bluetooth: return L10n.string("Bluetooth")
+            }
+        }
+
+        func includes(_ option: DeviceLogSourceOption) -> Bool {
+            if case .bluetooth = option.kind { return self == .bluetooth }
+            return self == .regular
+        }
+    }
+
+    private let stream: Stream?
+    var captureManagedByWorkspace = false
+    var requestDiscovery: (() -> Void)?
+    var sourceFactory: ((DeviceLogSourceOption, DeviceLogSourceOption.Route, String?) -> DeviceLogRowSource?)?
+    var selectedDeviceID: String? { selectedMachine?.id }
+    private var presentsRows = true
+    private var presentationNeedsRefresh = false
+    private(set) var presentationUpdateCount = 0
+
     // MARK: Constants
 
     private enum Metrics {
@@ -182,14 +207,16 @@ public final class DeviceLogPaneViewController: NSViewController {
     public init(
         owningSessionID: String?,
         preferredPymobiledevice3Path: String? = nil,
-        preferredMachineID: String? = nil
+        preferredMachineID: String? = nil,
+        stream: Stream? = nil
     ) {
+        self.stream = stream
         self.owningSessionID = owningSessionID
         self.preferredPymobiledevice3Path = preferredPymobiledevice3Path
         self.requestedMachineID = preferredMachineID
         self.recorder = DeviceLogRecorder(
             directory: Self.storeDirectory,
-            name: owningSessionID ?? "unattached"
+            name: (owningSessionID ?? "unattached") + (stream == .bluetooth ? "-bluetooth" : "")
         )
         super.init(nibName: nil, bundle: nil)
     }
@@ -225,8 +252,12 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     public override func viewDidAppear() {
         super.viewDidAppear()
+        guard !captureManagedByWorkspace else { return }
+        startCapture()
+    }
+
+    func startCapture(discover: Bool = true) {
         guard drainTimer == nil else { return }
-        reloadSources()
         drainTimer = Timer.scheduledTimer(
             withTimeInterval: Metrics.drainInterval,
             repeats: true
@@ -244,10 +275,17 @@ public final class DeviceLogPaneViewController: NSViewController {
                 self.updateStatus()
             }
         }
+        if discover { reloadSources() }
+        else { startSelectedSource() }
     }
 
     public override func viewWillDisappear() {
         super.viewWillDisappear()
+        guard !captureManagedByWorkspace else { return }
+        stopCapture()
+    }
+
+    func stopCapture() {
         bluetoothProfileSetup.cancelBrowser()
         discoveryGeneration += 1
         sourceGeneration += 1
@@ -263,6 +301,27 @@ public final class DeviceLogPaneViewController: NSViewController {
         drainTimer = nil
         rateTimer?.invalidate()
         rateTimer = nil
+    }
+
+    func setRowsPresented(_ presented: Bool) {
+        presentsRows = presented
+        if !presented {
+            bluetoothProfileSetup.cancelBrowser()
+            projectionGeneration += 1
+            projectionTask?.cancel()
+            projectionTask = nil
+            presentationNeedsRefresh = true
+            return
+        }
+        guard presentationNeedsRefresh else { return }
+        presentationNeedsRefresh = false
+        processPopUp.removeAllItems()
+        processPopUp.addItem(withTitle: L10n.string("All processes"))
+        processChoices.forEach { processPopUp.addItem(withTitle: $0) }
+        processPopUp.selectItem(at: selectedProcess.flatMap { processChoices.firstIndex(of: $0).map { $0 + 1 } } ?? 0)
+        recomputeVisible(backgroundContext: true)
+        table.reloadData()
+        updateStatus()
     }
 
     // MARK: Building
@@ -499,6 +558,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     // MARK: Sources
 
     @objc private func reloadSources() {
+        if let requestDiscovery { requestDiscovery(); return }
         discoveryGeneration += 1
         let generation = discoveryGeneration
         DeviceLogSourceCatalog.discover(
@@ -506,11 +566,15 @@ public final class DeviceLogPaneViewController: NSViewController {
         ) { [weak self] found in
             MainActor.assumeIsolated {
                 guard let self, self.discoveryGeneration == generation else { return }
-                self.options = found
-                self.rebuildMenus()
-                self.startSelectedSource()
+                self.acceptSources(found)
             }
         }
+    }
+
+    func acceptSources(_ found: [DeviceLogSourceOption]) {
+        options = found.filter { stream?.includes($0) ?? true }
+        rebuildMenus()
+        if isVisibleForCapture { startSelectedSource() }
     }
 
     /// The machines, in discovery order, each appearing once.
@@ -576,7 +640,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         sources.forEach { sourcePopUp.addItem(withTitle: $0.title) }
         // By title within the machine rather than by a remembered index: the list changes shape
         // whenever an app is installed or removed, and an index would then name something else.
-        let wanted = Recents.sourceTitle(forMachine: machine.id)
+        let wanted = Recents.sourceTitle(forMachine: recentMachineKey(machine.id))
         let keep = sources.firstIndex { $0.title == runningSourceTitleWithinMachine }
             ?? sources.firstIndex { $0.title == wanted }
             ?? 0
@@ -701,6 +765,9 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     private func startSelectedSource() {
         guard let option = selectedOption else {
+            sourceGeneration += 1
+            source?.stop()
+            source = nil
             updateStatus()
             return
         }
@@ -728,7 +795,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         runningSourceTitle = identity
         runningSourceTitleWithinMachine = option.title
         Recents.rememberMachine(option.machine.id)
-        Recents.rememberSource(option.title, forMachine: option.machine.id)
+        Recents.rememberSource(option.title, forMachine: recentMachineKey(option.machine.id))
 
         sourceGeneration += 1
         let generation = sourceGeneration
@@ -741,7 +808,10 @@ public final class DeviceLogPaneViewController: NSViewController {
         }
 
         endedReason = nil
-        guard let started = option.makeSource(predicate: nil, route: route, processName: selectedProcess) else {
+        let reader: DeviceLogRowSource?
+        if let sourceFactory { reader = sourceFactory(option, route, selectedProcess) }
+        else { reader = option.makeSource(predicate: nil, route: route, processName: selectedProcess) }
+        guard let started = reader else {
             source = nil
             endedReason = L10n.string("this source has no reader on this Mac")
             updateStatus()
@@ -762,6 +832,10 @@ public final class DeviceLogPaneViewController: NSViewController {
         started.start()
         startedAt = Date()
         updateStatus()
+    }
+
+    private func recentMachineKey(_ id: String) -> String {
+        stream == .bluetooth ? id + ".bluetooth" : id
     }
 
     @objc private func sourceChanged() {
@@ -817,7 +891,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         for row in batch where processChoices.count < Metrics.maximumProcessChoices {
             guard !row.process.isEmpty, knownProcesses.insert(row.process).inserted else { continue }
             processChoices.append(row.process)
-            processPopUp.addItem(withTitle: row.process)
+            if presentsRows { processPopUp.addItem(withTitle: row.process) }
         }
     }
 
@@ -907,7 +981,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// Fill both popups without discovery, so the control bar can be drawn and reviewed. Discovery
     /// spawns child processes and takes tens of seconds, which no render test should wait for.
     public func installSourcesForTesting(_ fixture: [DeviceLogSourceOption]) {
-        options = fixture
+        options = fixture.filter { stream?.includes($0) ?? true }
         rebuildMenus()
     }
 
@@ -952,22 +1026,27 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     private var isFiltering: Bool { focus.isActive }
 
-    private func recomputeVisible() {
+    private func recomputeVisible(backgroundContext: Bool = false) {
         projectionGeneration += 1
         let generation = projectionGeneration
         projectionTask?.cancel()
         projectionTask = nil
         // The legacy agent focus keeps its synchronous receipt contract. User filtering scans
         // the fixed 50k ring off-main; ordinary streaming below tests only incoming rows.
-        if showingContext {
+        if showingContext && !backgroundContext {
             entries = LogFocusLayout.entries(rows: rows, focus: focus, expanded: expandedGaps)
             return
         }
         let snapshot = rows
         let selectedFocus = focus
         let offset = rowOffset
+        let context = showingContext
+        let expanded = expandedGaps
         projectionTask = Task { [weak self] in
             let worker = Task.detached(priority: .userInitiated) {
+                if context {
+                    return LogFocusLayout.entries(rows: snapshot, focus: selectedFocus, expanded: expanded)
+                }
                 var result: [LogDisplayEntry] = []
                 for index in snapshot.indices {
                     if index % 128 == 0, Task.isCancelled { return result }
@@ -981,12 +1060,16 @@ public final class DeviceLogPaneViewController: NSViewController {
                 worker.cancel()
             }
             guard let self, !Task.isCancelled, self.projectionGeneration == generation else { return }
+            if context, self.rowOffset != offset || self.rows.count != snapshot.count {
+                self.recomputeVisible(backgroundContext: true)
+                return
+            }
             let removed = self.rowOffset - offset
             let tailStart = max(0, snapshot.count - removed)
             // If the worker fell far behind, take a new snapshot instead of moving a large scan
             // onto the main actor. A normal 100ms batch is hundreds of rows, not the whole ring.
-            guard self.rows.count - tailStart <= Metrics.maximumProjectionCatchUp else { self.recomputeVisible(); return }
-            self.entries = projected.compactMap { entry in
+            guard self.rows.count - tailStart <= Metrics.maximumProjectionCatchUp else { self.recomputeVisible(backgroundContext: true); return }
+            self.entries = context ? projected : projected.compactMap { entry in
                 guard case .row(let index) = entry, index >= removed else { return nil }
                 return .row(index - removed)
             }
@@ -997,6 +1080,8 @@ public final class DeviceLogPaneViewController: NSViewController {
             }
             self.projectionTask = nil
             self.table.reloadData()
+            if self.isFollowing, !self.entries.isEmpty { self.table.scrollRowToVisible(self.entries.count - 1) }
+            self.updateFollowAffordance()
             self.updateStatus()
         }
     }
@@ -1005,7 +1090,7 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     /// One batch per tick. The bottom stays pinned only when it was already pinned, so scrolling
     /// back to read something is not fought by the stream.
-    private func drain() {
+    func drain() {
         guard let source else { return }
         let incoming = source.drain()
         guard !incoming.isEmpty else { return }
@@ -1022,6 +1107,12 @@ public final class DeviceLogPaneViewController: NSViewController {
         if rows.count > DeviceLogLimits.ringCapacity {
             rows.removeFirst(rows.count - DeviceLogLimits.ringCapacity)
         }
+
+        guard presentsRows, !(showingContext && projectionTask != nil) else {
+            presentationNeedsRefresh = true
+            return
+        }
+        presentationUpdateCount += 1
 
         if !showingContext {
             // Strict mode tests new rows only. Old matches shift with the ring; a whole-ring
@@ -1086,6 +1177,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     }
 
     private func updateStatus() {
+        guard presentsRows else { return }
         // The agent's note is appended to every state, including these two. It says what happened
         // to what the person is looking at, and dropping it in exactly the states where the pane is
         // otherwise uninformative is where it would be missed most: a search of recorded history

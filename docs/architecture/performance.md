@@ -1134,6 +1134,23 @@ THREADING_AUTOMATION_STRESS=1 scripts/test.sh fast \
 
 ## Implementation-time scaling gate
 
+Device Logs' Regular Logs and Bluetooth tabs admit at most two readers per visible workspace.
+Each keeps the existing 20,000-row handoff, 50,000-row ring and 500,000-row history; histories
+have distinct files. Expect about 5,800 regular rows/s plus 100–6,000 Bluetooth packets/s;
+stress both with 100,000 generated rows. Switching tabs must retain both streams and filters.
+Only the selected table projects rows, updates process menus or lays out cells. The inactive
+tab drains into its bounded value ring and recorder every 100 ms; returning projects that ring
+once. Bluetooth's controller and reader are created only on first selection. Discovery is
+shared, and hiding the whole workspace retires discovery and stops both readers.
+
+The 2026-10-12 Debug SwiftPM stress run retained 50,000 rows and recorded all 100,000 rows in
+each stream's separate store. A paired drain of 1,000 rows per stream took 7.1 ms median and
+15.6 ms maximum, with zero inactive-table updates. This measures model drains and recorder
+enqueueing, excluding fixture construction, asynchronous SQLite commits and onscreen cell
+layout. The test waits for both stores before checking their counts and verifies the inactive
+tab's projection catches up on selection. Run with
+`THREADING_DEVICE_LOG_DUAL_STRESS=1 swift test --package-path Plugins/DeviceLogsPlugin --filter DeviceLogWorkspaceTests`.
+
 Bluetooth Device Logs uses a worker-owned incremental PCAP decoder, bounded pipe drains and the
 existing virtual log table. In a Debug SwiftPM run on 2026-10-12, 100,000 synthetic HCI Reset
 packets decoded in 1.090 seconds, retaining zero bytes between complete batches. This is codec

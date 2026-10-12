@@ -9,12 +9,14 @@ import ThreadingPluginKit
 @objc(DeviceLogsPlugin)
 public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
 
-    private var pane: DeviceLogPaneViewController?
+    private var workspace: DeviceLogWorkspaceViewController?
+    @MainActor private var pane: DeviceLogPaneViewController? { workspace?.selectedPane }
     private(set) var appliedThemeCount = 0
 
     /// The pane a test drives. The tools act on it, so a test of the tools needs to see it.
     @MainActor
     public var paneForTesting: DeviceLogPaneViewController? { pane }
+    @MainActor var workspaceForTesting: DeviceLogWorkspaceViewController? { workspace }
 
     public override required init() { super.init() }
 
@@ -27,20 +29,20 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
     public func makePaneView(context: PluginContext) -> NSView {
         // Construction and all callbacks are main-actor isolated by the plugin contract.
         MainActor.assumeIsolated {
-            let pane = DeviceLogPaneViewController(
-                owningSessionID: context.argument("sessionID"),
-                preferredPymobiledevice3Path: context.argument("pymobiledevice3Path"),
+            let workspace = DeviceLogWorkspaceViewController(
+                sessionID: context.argument("sessionID"),
+                toolPath: context.argument("pymobiledevice3Path"),
                 preferredMachineID: context.argument("deviceID")
             )
-            self.pane = pane
-            return pane.view
+            self.workspace = workspace
+            return workspace.view
         }
     }
 
     public func activatePane(context: PluginContext) {
         MainActor.assumeIsolated {
             guard let deviceID = context.argument("deviceID") else { return }
-            pane?.selectMachine(id: deviceID)
+            workspace?.selectMachine(id: deviceID)
         }
     }
 
@@ -50,10 +52,12 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
     /// through the production decoder, then uses the same table and source controls.
     @objc public func installBluetoothCaptureForTesting(_ data: Data) {
         MainActor.assumeIsolated {
-            guard let pane, data.count <= BluetoothPacketDecoder.Limits.chunkBytes else { return }
+            guard let workspace, data.count <= BluetoothPacketDecoder.Limits.chunkBytes else { return }
             var decoder = BluetoothPacketDecoder()
             guard let rows = try? decoder.append(data) else { return }
-            pane.viewWillDisappear()
+            workspace.setPresented(false)
+            workspace.selectStream(.bluetooth)
+            guard let pane else { return }
             pane.installSourcesForTesting([
                 DeviceLogSourceOption(
                     machine: .init(id: "bluetooth-fixture", title: "Test iPhone", isSimulator: false),
@@ -80,7 +84,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 detail: "Search, focus and fold the live log stream",
                 symbol: "list.bullet.rectangle",
                 summary: """
-                    Search everything this chat's log pane has recorded, including rows that have scrolled out of view. Substring match, case-insensitive. Use it to find out what the app under development actually printed rather than guessing.
+                    Search everything the selected Device Logs tab has recorded, including rows that have scrolled out of view. Regular Logs and Bluetooth have separate histories. Substring match, case-insensitive. Use it to find out what the app under development actually printed rather than guessing.
                     """,
                 inputSchemaJSON: """
                     {"type":"object","properties":{ "text":{"type":"string","description":"Substring to look for."}, "limit":{"type":"integer","description":"Rows to return, newest last."}}, "required":["text"]}
@@ -92,7 +96,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 detail: "Search, focus and fold the live log stream",
                 symbol: "line.3.horizontal.decrease",
                 summary: """
-                    Fold the pane down to what matters: rows matching the pattern and at or above the level are kept with two rows of context either side, everything else collapses into a line saying how many are hidden. Nothing is deleted and the user can open any fold. The pane's own controls move to match, so the person watching can see what you asked for.
+                    Fold the selected Device Logs tab down to what matters: rows matching the pattern and at or above the level are kept with two rows of context either side, everything else collapses into a line saying how many are hidden. Nothing is deleted and the user can open any fold. The tab's own controls move to match, so the person watching can see what you asked for.
                     """,
                 inputSchemaJSON: """
                     {"type":"object","properties":{ "pattern":{"type":"string","description":"Substring that marks a row as interesting."}, "minimum_level":{"type":"string","enum":["debug","info","notice","warning","error","fault"], "description":"Rows below this level are folded away."}}}
@@ -103,7 +107,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 title: "Device logs",
                 detail: "Search, focus and fold the live log stream",
                 symbol: "xmark.circle",
-                summary: "Unfold everything and clear the pane's filter.",
+                summary: "Unfold everything and clear the selected Device Logs tab's filter.",
                 inputSchemaJSON: #"{"type":"object","properties":{}}"#
             ),
             PluginTool(
@@ -112,7 +116,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 detail: "Search, focus and fold the live log stream",
                 symbol: "clock",
                 summary: """
-                    Rows recorded between two instants, as ISO 8601 timestamps. Use it when you know when something happened — a crash, a request — and want what surrounded it. Rows whose line carried no timestamp are not in any range.
+                    Rows recorded in the selected Device Logs tab between two instants, as ISO 8601 timestamps. Use it when you know when something happened — a crash, a request — and want what surrounded it. Rows whose line carried no timestamp are not in any range.
                     """,
                 inputSchemaJSON: """
                     {"type":"object","properties":{ "from":{"type":"string","description":"ISO 8601 instant, inclusive."}, "to":{"type":"string","description":"ISO 8601 instant, inclusive."}}, "required":["from","to"]}
@@ -123,7 +127,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 title: "Device logs",
                 detail: "Search, focus and fold the live log stream",
                 symbol: "eye",
-                summary: "What the pane is showing right now, after any focus you applied.",
+                summary: "What the selected Device Logs tab is showing right now, after any focus you applied.",
                 inputSchemaJSON: #"{"type":"object","properties":{}}"#
             ),
             PluginTool(
@@ -132,7 +136,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 detail: "Read a paired iPhone's Bluetooth packets",
                 symbol: "antenna.radiowaves.left.and.right",
                 summary: """
-                    Select Bluetooth packet capture for one paired iPhone in this chat's Device Logs pane. Requires its exact hardware UDID, external idevicebtlogger (brew install libimobiledevice), and Apple's Bluetooth logging profile on the phone. Captures phone-wide HCI traffic, not an app's text logs or an over-the-air sniffer. Use visible/search/time_range to read packet summaries and bounded raw hex. Starting is not proof of received packets; visible reports reader status. Rescan in the pane after connecting a phone or installing tools. Hiding the pane stops capture.
+                    Open the Bluetooth tab and select packet capture for one paired iPhone in this chat's Device Logs pane. Regular Logs keeps capturing while Bluetooth is selected. Requires its exact hardware UDID, external idevicebtlogger (brew install libimobiledevice), and Apple's Bluetooth logging profile on the phone. Captures phone-wide HCI traffic, not an app's text logs or an over-the-air sniffer. Use visible/search/time_range to read the selected tab's packet summaries and bounded raw hex. Starting is not proof of received packets; visible reports reader status. Rescan in the pane after connecting a phone or installing tools. Switching log tabs keeps both streams running; hiding the whole Device Logs pane stops both.
                     """,
                 inputSchemaJSON: #"{"type":"object","properties":{"device_id":{"type":"string","description":"Exact paired iPhone hardware UDID."}},"required":["device_id"]}"#
             ),
@@ -155,10 +159,10 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 guard let deviceID = arguments["device_id"] as? String, !deviceID.isEmpty else {
                     return completion("Give the paired iPhone's exact device_id (hardware UDID).", true)
                 }
-                guard pane.isVisibleForCapture else {
+                guard workspace?.isPresented == true else {
                     return completion("Show this chat's Device Logs pane before starting Bluetooth capture (device_log_prepare can reveal it).", true)
                 }
-                guard pane.selectBluetooth(deviceID: deviceID) else {
+                guard workspace?.selectBluetooth(deviceID: deviceID) == true else {
                     return completion("That iPhone has no discovered Bluetooth source. Connect and trust it, then Rescan in Device Logs.", true)
                 }
                 completion("Starting Bluetooth capture for \(deviceID). Use visible to check for packets or setup errors.", false)
@@ -307,7 +311,9 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
 
     public func apply(theme: PluginTheme) {
         appliedThemeCount += 1
-        try? HostThemeHandoff.install(encoded: theme.encodedTheme)
-        MainActor.assumeIsolated { pane?.view.needsDisplay = true }
+        MainActor.assumeIsolated {
+            try? HostThemeHandoff.install(encoded: theme.encodedTheme)
+            if let workspace { AppThemeRefresh.repaint(workspace.view) }
+        }
     }
 }

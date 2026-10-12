@@ -433,7 +433,24 @@ can become active without reloading the plugin or restarting the app.
 
 ### Bluetooth packet source
 
-Paired phones also offer **Bluetooth (USB/Wi-Fi)**. This reads HCI traffic through the external
+The singleton Device Logs workspace contains **Regular Logs** and **Bluetooth** tabs.
+`DeviceLogWorkspaceViewController` owns one lazily constructed controller per stream, shares
+discovery, and owns capture lifetime independently of the selected child view. The first tab
+offers system/app sources; the second offers only paired-phone Bluetooth sources. Opening the
+Bluetooth tab starts its reader without stopping the regular reader. Switching tabs hides only
+presentation: the inactive controller records rows in its capped ring and distinct SQLite history,
+without projecting filters, changing menus or reloading its table. Returning projects a bounded
+snapshot off-main, preserving that tab's filter and following state. Closing/hiding the workspace
+stops both readers and retires pending discovery. The tab controls use the shared
+`ThemedSegmentedControl`, now exported through ThreadingDesignKit without separate drawing code.
+Theme delivery repaints the workspace through the plugin's own `AppThemeRefresh`: marking only
+the root dirty leaves layer fills frozen in the previous theme, because the host's refresh
+cannot read the plugin module's recorded surfaces. Product-shell evidence checks the tab track
+against the current theme as well as rendering it in dark, Cyberpunk and Swiss appearances.
+History and source recents are separated by stream; legacy history remains with Regular Logs.
+Agent tools read the selected tab, and `bluetooth` selects the Bluetooth tab for its exact UDID.
+
+Paired phones offer **Bluetooth (USB/Wi-Fi)** in that tab. This reads HCI traffic through the external
 `idevicebtlogger` executable from libimobiledevice. Apple documents the connected-phone capture
 route and the Bluetooth logging profile in [WWDC19 session 901](https://developer.apple.com/videos/play/wwdc2019/901/).
 The [service implementation](https://github.com/libimobiledevice/libimobiledevice/blob/master/src/bt_packet_logger.c)
@@ -490,7 +507,7 @@ The first 700-point product-shell render left only about 140 points for the mess
 column mode leaves about 400; the shell test now requires more than 350 points of visible message
 width and was inspected under System Dark, Swiss Minimalist and Cyberpunk.
 `plugin__devicelogs__bluetooth` requires a visible pane and an exact discovered
-hardware UDID and selects the same source; `visible` includes reader status, and existing search,
+hardware UDID and selects the same tab/source; `visible` includes reader status, and existing search,
 focus and time-range tools read the captured rows. A start receipt never claims receipt of a
 packet. Silence keeps waiting with profile/activity guidance. Service-start errors are surfaced
 even when the CLI remains alive waiting for another device event. Rescan can restart a failed

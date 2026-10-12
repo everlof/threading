@@ -20,7 +20,7 @@ import AppKit
 /// An unselected segment under the pointer answers in *ink* instead of taking a third fill step,
 /// because the design system has two control fills and inventing a third here is how a scale
 /// stops being a scale.
-final class ThemedSegmentedControl: NSView, TextBaselineProviding {
+public final class ThemedSegmentedControl: NSView, TextBaselineProviding {
 
     // MARK: - Properties
 
@@ -32,7 +32,7 @@ final class ThemedSegmentedControl: NSView, TextBaselineProviding {
     /// another segment has no way to see that the first one came up. A glyph rather than a
     /// coloured dot, because status must survive Differentiate Without Colour, and a spoken name
     /// beside it because it must survive not being looked at.
-    enum SegmentMark: Equatable {
+    public enum SegmentMark: Equatable {
         /// Doing what it says on the tin.
         case ready
         /// On, and not carrying what it promised.
@@ -75,7 +75,7 @@ final class ThemedSegmentedControl: NSView, TextBaselineProviding {
 
     /// Which segment is on, reported back by index. Setting it does not call `onSelect` —
     /// a host restoring a stored choice is not the user making one.
-    var selectedIndex: Int = 0 {
+    public var selectedIndex: Int = 0 {
         didSet {
             guard selectedIndex != oldValue else { return }
             updateSelection()
@@ -83,7 +83,7 @@ final class ThemedSegmentedControl: NSView, TextBaselineProviding {
     }
 
     /// Answered when the user picks a segment that was not already selected.
-    var onSelect: ((Int) -> Void)?
+    public var onSelect: ((Int) -> Void)?
 
     private var segmentViews: [SegmentView] = []
     private let stack = NSStackView()
@@ -104,14 +104,14 @@ final class ThemedSegmentedControl: NSView, TextBaselineProviding {
     /// A host that has to give a run a number cannot know that number: Automations measured its
     /// four pages against a three-choice constant, and under a monospaced theme "Activity" came
     /// out as "Activi…" while "Automations" took the room its floor demanded.
-    var sizesToTitles = false {
+    public var sizesToTitles = false {
         didSet {
             guard sizesToTitles != oldValue else { return }
             invalidateIntrinsicContentSize()
         }
     }
 
-    override var intrinsicContentSize: NSSize {
+    public override var intrinsicContentSize: NSSize {
         NSSize(width: sizesToTitles ? titleFittingWidth : NSView.noIntrinsicMetric, height: controlHeight)
     }
 
@@ -124,26 +124,26 @@ final class ThemedSegmentedControl: NSView, TextBaselineProviding {
     /// Where the segment titles' shared baseline sits. The run's children centre one control-
     /// font line in the track, so its public baseline has to state that same geometry; `NSView`'s
     /// default answer is the frame edge and makes any correctly baseline-aligned sibling wrong.
-    override var firstBaselineOffsetFromTop: CGFloat {
+    public override var firstBaselineOffsetFromTop: CGFloat {
         let font = Design.Typography.control()
         return (intrinsicContentSize.height - Design.Typography.lineHeight(of: font)) / 2
             + NSLayoutManager().defaultBaselineOffset(for: font)
     }
 
     /// Every segment has one title line, so its last baseline is the same line from the far edge.
-    override var lastBaselineOffsetFromBottom: CGFloat {
+    public override var lastBaselineOffsetFromBottom: CGFloat {
         intrinsicContentSize.height - firstBaselineOffsetFromTop
     }
 
     // MARK: - Initialization
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setupViews()
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -182,7 +182,7 @@ final class ThemedSegmentedControl: NSView, TextBaselineProviding {
 
     /// Replaces what the control offers. Selection is kept by index when the new run is at least
     /// as long, so a host re-configuring with the same choices does not silently move the user.
-    func configure(
+    public func configure(
         titles: [String],
         marks: [SegmentMark?] = [],
         selectedIndex: Int = 0
@@ -520,7 +520,7 @@ extension ThemedSegmentedControl: ControlRowMember {
 
     /// The track is a pill, so its radius is a function of its height — a run that resized
     /// without restating the surface would keep the silhouette of the size it used to be.
-    func adopt(_ metrics: ControlRowMetrics) {
+    public func adopt(_ metrics: ControlRowMetrics) {
         guard rowHeight != metrics.height else { return }
         rowHeight = metrics.height
         heightConstraint?.constant = metrics.height

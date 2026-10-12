@@ -63,10 +63,12 @@ final class DeviceLogToolsTests: XCTestCase {
         XCTAssertTrue(answer.text.contains("not_a_tool"))
     }
 
-    func testBluetoothRequiresAnExactDiscoveredPhoneAndClearsTheAppProcessFilter() throws {
+    func testBluetoothRequiresAnExactDiscoveredPhoneAndKeepsItsOwnFilters() throws {
         let plugin = loadedPlugin()
         XCTAssertTrue(call(plugin, DeviceLogToolNames.bluetooth).isError)
         XCTAssertTrue(call(plugin, DeviceLogToolNames.bluetooth, #"{"device_id":"other"}"#).isError)
+        let workspace = try XCTUnwrap(plugin.workspaceForTesting)
+        workspace.selectStream(.bluetooth)
         let pane = try XCTUnwrap(plugin.paneForTesting)
         pane.installSourcesForTesting([
             DeviceLogSourceOption(
@@ -90,14 +92,16 @@ final class DeviceLogToolsTests: XCTestCase {
             DeviceLogRow(time: "00:00:01", level: "Info", process: "Bluetooth", subsystem: "HCI", message: "Reset"),
         ])
         XCTAssertEqual(pane.visibleRowsForTools(limit: 50).count, 1, "the old app filter must not hide packets")
-        pane.viewWillDisappear()
-        pane.installSourcesForTesting([
+        pane.stopCapture()
+        workspace.selectStream(.regular)
+        let regular = try XCTUnwrap(plugin.paneForTesting)
+        regular.installSourcesForTesting([
             DeviceLogSourceOption(
                 machine: .init(id: "phone", title: "Test iPhone", isSimulator: false),
                 title: "System log (USB)", kind: .device(udid: "phone", overNetwork: false)
             ),
         ])
-        XCTAssertFalse(pane.isProcessControlHiddenForTesting, "System log must recover its process selector")
+        XCTAssertFalse(regular.isProcessControlHiddenForTesting, "Regular logs have their own process selector")
     }
 
     /// A focus with nothing in it would fold nothing and read as having worked, which is worse
