@@ -4152,6 +4152,10 @@ file and whether it loaded, and offers **Create File** (writes a working example
 file from the app's BLE code. The Bluetooth footer always names the file and its state, including
 the line number of the first mistake. Saved changes apply to the next packet without a Rescan.
 
+Messages are drawn with their structure coloured: direction, `key=` names, numbers, strings
+and enum names stand out, and the raw byte count and hex preview are dimmed. A `highlight:` map
+in the file colours your own words, for example `LOCATION: green`; see the format reference.
+
 The Bluetooth filter bar's first menu chooses which packets to show: **All packets**, **App packets
 only** (everything your definitions decoded), or **Fully decoded only**, which also leaves out
 packets whose bytes did not fit their definition. Those are logged at **Warning** with a `⚠` saying
@@ -4161,7 +4165,15 @@ loaded or none of their characteristics has matched yet.
 
 Characteristics are matched by an explicit `handle:` or by UUID. A UUID is matched to its handle
 from the GATT discovery seen in the capture; iOS caches discovery for known accessories, so when a
-capture starts after it, add the `handle:` shown in the ATT row. The format reference is
+capture starts after it, add the `handle:` shown in the ATT row. The accessory and the iPhone each
+have their own attribute handles, so a handle pin means the accessory's unless the characteristic
+says `server: phone`. Long reads and long writes are joined before decoding, and `type: msgpack`
+renders MessagePack values. A msgpack field can `match:` patterns such as `{ $cmd: $value }` and
+print a summary like `datetime {year=2026 …}`. When a device publishes its own command table, an
+enum's `learn:` block picks the names up from the traffic and Threading remembers them per device
+for later captures, so a capture after pairing still reads by name. The footer shows what was
+learned. Enum names are drawn in a colour derived from the name, so a command looks the same in
+every row. The format reference is
 [`docs/bluetooth-packet-definitions.md`](docs/bluetooth-packet-definitions.md).
 
 Agents can select it with `plugin__devicelogs__bluetooth` using the exact iPhone hardware UDID,

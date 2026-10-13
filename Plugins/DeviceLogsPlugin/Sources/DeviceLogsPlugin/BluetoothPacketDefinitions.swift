@@ -26,6 +26,11 @@ struct BluetoothPacketDefinitions: Sendable {
         static let renderedRepeatItems = 16
         static let renderedBytes = 32
         static let renderedCharacters = 1_024
+        static let highlights = 256
+        static let learners = 16
+        static let shapes = 1_024
+        /// A learned name longer than this is not a name.
+        static let learnedNameCharacters = 64
     }
 
     /// Where a project keeps its definitions, relative to the session's checkout, in lookup order.
@@ -35,6 +40,10 @@ struct BluetoothPacketDefinitions: Sendable {
         let name: String
         /// The enclosing service's `name:`, the last fallback for naming the peer in a row.
         var service: String? = nil
+        /// Whose attribute database the characteristic lives in. Both ends of an LE link can be
+        /// GATT servers with separate handle spaces; nil matches a UUID in either, and a
+        /// `handle:` pin then means the device's.
+        var server: BluetoothGATTServer? = nil
         /// Canonical: four upper-case hex digits for a Bluetooth SIG UUID, otherwise the dashed
         /// 128-bit form. See `BluetoothUUID`.
         let uuid: String?
@@ -56,6 +65,8 @@ struct BluetoothPacketDefinitions: Sendable {
         case bool
         case bytes
         case string
+        /// One MessagePack value; an `enum:` on the field names its integer map keys.
+        case msgpack
     }
 
     struct StructType: Sendable {
@@ -78,6 +89,30 @@ struct BluetoothPacketDefinitions: Sendable {
         let size: Size?
         let repetition: Repetition?
         let hidden: Bool
+        /// msgpack only: the first rule whose pattern fits renders the value.
+        var match: [MatchRule] = []
+        /// msgpack only: which enum names each pattern capture (`enum: { cmd: AnimaCommand }`).
+        var captureEnums: [String: String] = [:]
+        /// msgpack only: a `shapes:` set naming array positions, keyed by the bound enum name.
+        var values: String? = nil
+    }
+
+    /// `- { pattern: "{ $cmd: $value }", summary: "{cmd} {value}" }`
+    struct MatchRule: Sendable {
+        let pattern: MessagePackPattern
+        let summary: [SummaryPart]?
+    }
+
+    /// `learn:` under an enum: the device teaches number → name entries in its own traffic.
+    struct Learner: Sendable {
+        let enumName: String
+        /// The characteristic whose received values carry the table.
+        let from: String
+        /// Binds `$number` and `$name` once per entry.
+        let pattern: MessagePackPattern
+        /// The enum that names the pattern's words — `map_settings` in a settings table is a
+        /// command. Defaults to the enum being learned.
+        let names: String
     }
 
     enum Size: Sendable, Equatable {
@@ -106,18 +141,30 @@ struct BluetoothPacketDefinitions: Sendable {
     let characteristics: [Characteristic]
     let types: [String: StructType]
     let enums: [String: [Int64: String]]
+    /// `highlight:` — a word (an enum or flag name, a field id) and the colour it is drawn in.
+    let highlights: [String: BluetoothHighlightColor]
+    /// `shapes:` — per set, an enum name → the names of an array value's positions.
+    let shapes: [String: [String: [String]]]
+    let learners: [Learner]
 
-    private let byHandle: [Int: Int]
+    private let byHandle: [BluetoothGATTServer: [Int: Int]]
     private let byUUID: [String: Int]
 
-    init(characteristics: [Characteristic], types: [String: StructType], enums: [String: [Int64: String]]) {
+    init(
+        characteristics: [Characteristic], types: [String: StructType], enums: [String: [Int64: String]],
+        highlights: [String: BluetoothHighlightColor] = [:],
+        shapes: [String: [String: [String]]] = [:], learners: [Learner] = []
+    ) {
         self.characteristics = characteristics
+        self.highlights = highlights
+        self.shapes = shapes
+        self.learners = learners
         self.types = types
         self.enums = enums
-        var byHandle: [Int: Int] = [:]
+        var byHandle: [BluetoothGATTServer: [Int: Int]] = [:]
         var byUUID: [String: Int] = [:]
         for (index, characteristic) in characteristics.enumerated() {
-            if let handle = characteristic.handle { byHandle[handle] = index }
+            if let handle = characteristic.handle { byHandle[characteristic.server ?? .device, default: [:]][handle] = index }
             if let uuid = characteristic.uuid { byUUID[uuid] = index }
         }
         self.byHandle = byHandle
@@ -126,11 +173,19 @@ struct BluetoothPacketDefinitions: Sendable {
 
     /// An explicit `handle:` wins over a UUID learned from discovery: the author pinned it because
     /// the capture they are looking at started after discovery, and iOS caches GATT databases.
-    func characteristic(handle: Int, uuid: String?) -> Characteristic? {
-        if let index = byHandle[handle] { return characteristics[index] }
-        if let uuid, let index = byUUID[uuid] { return characteristics[index] }
+    func characteristic(handle: Int, uuid: String?, server: BluetoothGATTServer = .device) -> Characteristic? {
+        if let index = byHandle[server]?[handle] { return characteristics[index] }
+        if let uuid, let index = byUUID[uuid], characteristics[index].server.map({ $0 == server }) ?? true {
+            return characteristics[index]
+        }
         return nil
     }
+}
+
+/// One end of an LE link acting as a GATT server. The capture is taken on the phone, so the other
+/// end is "the device".
+enum BluetoothGATTServer: String, Sendable, Hashable, CaseIterable {
+    case device, phone
 }
 
 // MARK: - Compiling
@@ -157,12 +212,12 @@ private struct Compiler {
     typealias Definitions = BluetoothPacketDefinitions
     typealias Failure = BluetoothDefinitionError
 
-    private static let rootKeys: Set<String> = ["version", "services", "types", "enums"]
+    private static let rootKeys: Set<String> = ["version", "services", "types", "enums", "highlight", "shapes"]
     private static let serviceKeys: Set<String> = ["name", "uuid", "characteristics"]
-    private static let characteristicKeys: Set<String> = ["name", "uuid", "handle", "message", "rx", "tx"]
+    private static let characteristicKeys: Set<String> = ["name", "uuid", "handle", "server", "message", "rx", "tx"]
     private static let typeKeys: Set<String> = ["seq", "summary"]
     private static let fieldKeys: Set<String> = [
-        "id", "type", "enum", "scale", "unit", "flags", "size", "repeat", "hidden", "doc",
+        "id", "type", "enum", "scale", "unit", "flags", "size", "repeat", "hidden", "doc", "match", "values",
     ]
     private static let switchKeys: Set<String> = ["switch-on", "cases"]
 
@@ -176,11 +231,16 @@ private struct Compiler {
         }
 
         var enums: [String: [Int64: String]] = [:]
+        var pendingLearners: [(enumName: String, entry: YAMLEntry)] = []
         if let node = value("enums", in: entries) {
             for entry in try mapping(node, what: "enums") {
                 try checkIdentifier(entry.key, line: entry.line, what: "enum name")
                 var cases: [Int64: String] = [:]
                 for item in try mapping(entry.value, what: "enum \(entry.key)") {
+                    if item.key == "learn" {
+                        pendingLearners.append((entry.key, item))
+                        continue
+                    }
                     guard let number = Self.integer(item.key) else {
                         throw Failure(line: item.line, message: "enum \(entry.key): key '\(item.key)' is not a number (write 0x01 or 1)")
                     }
@@ -196,6 +256,30 @@ private struct Compiler {
             }
         }
 
+        var shapes: [String: [String: [String]]] = [:]
+        if let node = value("shapes", in: entries) {
+            var count = 0
+            for set in try mapping(node, what: "shapes") {
+                try checkIdentifier(set.key, line: set.line, what: "shape set")
+                var names: [String: [String]] = [:]
+                for shape in try mapping(set.value, what: "shapes \(set.key)") {
+                    count += 1
+                    guard count <= Definitions.Limits.shapes else {
+                        throw Failure(line: shape.line, message: "more than \(Definitions.Limits.shapes) shapes")
+                    }
+                    let positions = try sequence(shape.value, what: "shape \(shape.key)").map { node -> String in
+                        guard let name = scalar(node) else {
+                            throw Failure(line: node.line, message: "shape \(shape.key): positions are names, as in [year, month, date]")
+                        }
+                        try checkIdentifier(name, line: node.line, what: "shape position")
+                        return name
+                    }
+                    names[shape.key] = positions
+                }
+                shapes[set.key] = names
+            }
+        }
+
         // Names first, bodies second, so a type may refer to one declared below it.
         let typeEntries = try value("types", in: entries).map { try mapping($0, what: "types") } ?? []
         guard typeEntries.count <= Definitions.Limits.types else {
@@ -208,7 +292,7 @@ private struct Compiler {
                 throw Failure(line: entry.line, message: "'\(entry.key)' is a built-in type name; choose another")
             }
         }
-        let context = Context(typeNames: typeNames, enums: enums)
+        let context = Context(typeNames: typeNames, enums: enums, shapes: shapes)
         var types: [String: Definitions.StructType] = [:]
         for entry in typeEntries {
             types[entry.key] = try structure(entry.value, context: context, what: "type \(entry.key)")
@@ -236,12 +320,77 @@ private struct Compiler {
                 }
             }
         }
-        return Definitions(characteristics: characteristics, types: types, enums: enums)
+        var highlights: [String: BluetoothHighlightColor] = [:]
+        if let node = value("highlight", in: entries) {
+            let items = try mapping(node, what: "highlight")
+            guard items.count <= Definitions.Limits.highlights else {
+                throw Failure(line: node.line, message: "more than \(Definitions.Limits.highlights) highlight words")
+            }
+            for item in items {
+                try checkIdentifier(item.key, line: item.line, what: "highlight word")
+                guard let name = scalar(item.value), let color = BluetoothHighlightColor(rawValue: name) else {
+                    throw Failure(line: item.line, message: "highlight \(item.key): unknown colour '\(scalar(item.value) ?? "")' — use "
+                        + BluetoothHighlightColor.allCases.map(\.rawValue).joined(separator: ", "))
+                }
+                highlights[item.key] = color
+            }
+        }
+        guard pendingLearners.count <= Definitions.Limits.learners else {
+            throw Failure(line: pendingLearners[Definitions.Limits.learners].entry.line, message: "more than \(Definitions.Limits.learners) learn: blocks")
+        }
+        let learners = try pendingLearners.map {
+            try learner($0.entry, enumName: $0.enumName, characteristics: characteristics, enumNames: Set(enums.keys))
+        }
+        return Definitions(
+            characteristics: characteristics, types: types, enums: enums, highlights: highlights,
+            shapes: shapes, learners: learners
+        )
+    }
+
+    private static let learnKeys: Set<String> = ["from", "pattern", "scope", "names"]
+
+    private func learner(
+        _ entry: YAMLEntry, enumName: String, characteristics: [Definitions.Characteristic], enumNames: Set<String>
+    ) throws -> Definitions.Learner {
+        let what = "enum \(enumName) learn"
+        let fields = try mapping(entry.value, what: what)
+        try rejectUnknown(fields, allowed: Self.learnKeys, in: what)
+        func line(_ key: String) -> Int { fields.first { $0.key == key }?.line ?? entry.line }
+        guard let from = value("from", in: fields).flatMap(scalar) else {
+            throw Failure(line: entry.line, message: "\(what) needs from: naming the characteristic that carries the table")
+        }
+        guard characteristics.contains(where: { $0.name == from }) else {
+            throw Failure(line: line("from"), message: "\(what): no characteristic named \(from) under services:")
+        }
+        guard let text = value("pattern", in: fields).flatMap(scalar) else {
+            throw Failure(line: entry.line, message: "\(what) needs pattern: binding $number and $name, as in \"{ map_*: { $number: $name } }\"")
+        }
+        let pattern = try messagePackPattern(text, line: line("pattern"), what: what)
+        guard Set(pattern.captures).isSuperset(of: ["number", "name"]) else {
+            throw Failure(line: line("pattern"), message: "\(what): the pattern must bind $number and $name")
+        }
+        if let scope = value("scope", in: fields).flatMap(scalar), !["peer", "device"].contains(scope) {
+            throw Failure(line: line("scope"), message: "\(what): scope is peer — tables are remembered per device")
+        }
+        let names = value("names", in: fields).flatMap(scalar) ?? enumName
+        guard enumNames.contains(names) else {
+            throw Failure(line: line("names"), message: "\(what): names: \(names) is not an enum under enums:")
+        }
+        return .init(enumName: enumName, from: from, pattern: pattern, names: names)
+    }
+
+    private func messagePackPattern(_ text: String, line: Int, what: String) throws -> MessagePackPattern {
+        do {
+            return try MessagePackPattern.parse(text)
+        } catch let failure as MessagePack.Failure {
+            throw Failure(line: line, message: "\(what): \(failure.message)")
+        }
     }
 
     private struct Context {
         let typeNames: Set<String>
         let enums: [String: [Int64: String]]
+        let shapes: [String: [String: [String]]]
     }
 
     private func characteristic(_ node: YAMLNode, context: Context) throws -> Definitions.Characteristic {
@@ -271,7 +420,14 @@ private struct Compiler {
         guard received != nil || sent != nil else {
             throw Failure(line: node.line, message: "\(name) needs a message: (or rx:/tx:) type")
         }
-        return .init(name: name, uuid: uuid, handle: handle, received: received, sent: sent)
+        var server: BluetoothGATTServer?
+        if let entry = entries.first(where: { $0.key == "server" }) {
+            guard let value = scalar(entry.value).flatMap(BluetoothGATTServer.init(rawValue:)) else {
+                throw Failure(line: entry.line, message: "server must be device (the accessory's database) or phone (the iPhone's)")
+            }
+            server = value
+        }
+        return .init(name: name, server: server, uuid: uuid, handle: handle, received: received, sent: sent)
     }
 
     private func structure(_ node: YAMLNode, context: Context, what: String) throws -> Definitions.StructType {
@@ -332,8 +488,50 @@ private struct Compiler {
         }
 
         var enumName: String?
-        if let name = value("enum", in: entries).flatMap(scalar) {
-            try requireInteger("enum")
+        var captureEnums: [String: String] = [:]
+        var rules: [Definitions.MatchRule] = []
+        var shapeSet: String?
+        let isMessagePack: Bool
+        if case .primitive(.msgpack) = type { isMessagePack = true } else { isMessagePack = false }
+        if let node = value("match", in: entries) {
+            guard isMessagePack else {
+                throw Failure(line: line("match"), message: "\(label): match: applies to a msgpack field")
+            }
+            for item in try sequence(node, what: "\(label) match") {
+                let rule = try mapping(item, what: "a \(label) match rule")
+                try rejectUnknown(rule, allowed: ["pattern", "summary"], in: "a \(label) match rule")
+                guard let text = value("pattern", in: rule).flatMap(scalar) else {
+                    throw Failure(line: item.line, message: "\(label) match: each rule needs pattern:, as in \"{ $cmd: $value }\"")
+                }
+                let pattern = try messagePackPattern(text, line: item.line, what: "\(label) match")
+                var summary: [Definitions.SummaryPart]?
+                if let template = value("summary", in: rule).flatMap(scalar) {
+                    let parts = Self.template(template)
+                    for case .field(let id) in parts where !pattern.captures.contains(id) {
+                        throw Failure(line: item.line, message: "\(label) match: summary names {\(id)}, which the pattern does not bind")
+                    }
+                    summary = parts
+                }
+                rules.append(.init(pattern: pattern, summary: summary))
+            }
+        }
+        if let node = value("enum", in: entries), case .mapping(let bindings) = node.value {
+            guard isMessagePack else {
+                throw Failure(line: line("enum"), message: "\(label): enum: { capture: Enum } applies to a msgpack field with match:")
+            }
+            let captures = Set(rules.flatMap(\.pattern.captures))
+            for binding in bindings {
+                guard captures.contains(binding.key) else {
+                    throw Failure(line: binding.line, message: "\(label) enum: no match: pattern binds $\(binding.key)")
+                }
+                guard let name = scalar(binding.value), context.enums[name] != nil else {
+                    throw Failure(line: binding.line, message: "\(label) enum: \(binding.key) needs an enum declared under enums:")
+                }
+                captureEnums[binding.key] = name
+            }
+        } else if let name = value("enum", in: entries).flatMap(scalar) {
+            // On a msgpack field the enum names integer map keys.
+            if case .primitive(.msgpack) = type {} else { try requireInteger("enum") }
             guard context.enums[name] != nil else {
                 throw Failure(line: line("enum"), message: "\(label): no enum called \(name) under enums:")
             }
@@ -360,7 +558,7 @@ private struct Compiler {
 
         let isVariable: Bool
         switch type {
-        case .primitive(.bytes), .primitive(.string), .named, .structure, .switchOn: isVariable = true
+        case .primitive(.bytes), .primitive(.string), .primitive(.msgpack), .named, .structure, .switchOn: isVariable = true
         default: isVariable = false
         }
         var size: Definitions.Size?
@@ -378,11 +576,21 @@ private struct Compiler {
             case .field(let id): repetition = .field(id)
             }
         }
+        if let name = value("values", in: entries).flatMap(scalar) {
+            guard isMessagePack, !captureEnums.isEmpty else {
+                throw Failure(line: line("values"), message: "\(label): values: needs a msgpack field whose enum: names a capture")
+            }
+            guard context.shapes[name] != nil else {
+                throw Failure(line: line("values"), message: "\(label): no shape set called \(name) under shapes:")
+            }
+            shapeSet = name
+        }
         let hidden = value("hidden", in: entries).flatMap(scalar).map { $0 == "true" || $0 == "yes" } ?? false
         return .init(
             id: id, type: type, enumName: enumName, scale: scale,
             unit: value("unit", in: entries).flatMap(scalar),
-            flags: flags, size: size, repetition: repetition, hidden: hidden
+            flags: flags, size: size, repetition: repetition, hidden: hidden,
+            match: rules, captureEnums: captureEnums, values: shapeSet
         )
     }
 
@@ -406,7 +614,7 @@ private struct Compiler {
         if let name = scalar(node) {
             if let primitive = Self.primitive(name) { return .primitive(primitive) }
             guard context.typeNames.contains(name) else {
-                throw Failure(line: node.line, message: "\(what): unknown type '\(name)' — use u8…u64, s8…s64, f32, f64, bool, bytes, str, or a name under types:")
+                throw Failure(line: node.line, message: "\(what): unknown type '\(name)' — use u8…u64, s8…s64, f32, f64, bool, bytes, str, msgpack, or a name under types:")
             }
             return .named(name)
         }
@@ -496,6 +704,7 @@ private struct Compiler {
         case "bool": return .bool
         case "bytes": return .bytes
         case "str": return .string
+        case "msgpack": return .msgpack
         default: break
         }
         var body = Substring(name)
@@ -573,8 +782,9 @@ extension BluetoothPacketDefinitions {
         let problem: String?
     }
 
-    func decode(_ bytes: [UInt8], as type: TypeRef) -> Decoded {
-        var reader = ValueReader(definitions: self, bytes: bytes)
+    /// `learned` holds enum entries a device taught in its own traffic; they win over the file's.
+    func decode(_ bytes: [UInt8], as type: TypeRef, learned: [String: [Int64: String]] = [:]) -> Decoded {
+        var reader = ValueReader(definitions: self, bytes: bytes, learned: learned)
         var text: String
         var problem: String?
         do {
@@ -608,15 +818,22 @@ private struct ValueReader {
 
     let definitions: BluetoothPacketDefinitions
     let bytes: [UInt8]
+    let learned: [String: [Int64: String]]
     private(set) var offset = 0
     private var steps = 0
     private var depth = 0
     /// The fields rendered so far at the outermost level, so a failure still shows its progress.
     private(set) var partial = ""
 
-    init(definitions: BluetoothPacketDefinitions, bytes: [UInt8]) {
+    init(definitions: BluetoothPacketDefinitions, bytes: [UInt8], learned: [String: [Int64: String]] = [:]) {
         self.definitions = definitions
         self.bytes = bytes
+        self.learned = learned
+    }
+
+    /// An enum case, learned from the device first, then as the file declares it.
+    private func name(_ enumName: String, _ number: Int64) -> String? {
+        learned[enumName]?[number] ?? definitions.enums[enumName]?[number]
     }
 
     mutating func render(_ type: BluetoothPacketDefinitions.TypeRef, path: String, end: Int) throws -> String {
@@ -739,7 +956,7 @@ private struct ValueReader {
         case .primitive(let primitive):
             if case .integer(let width, let signed, let bigEndian) = primitive {
                 let number = try integer(width: width, signed: signed, bigEndian: bigEndian, path: path, end: end)
-                let enumName = field.enumName.flatMap { definitions.enums[$0]?[number] }
+                let enumName = field.enumName.flatMap { name($0, number) }
                 scope[field.id] = Scalar(number: number, enumName: enumName)
                 return format(number: number, signed: signed, field: field, enumName: enumName)
             }
@@ -793,11 +1010,91 @@ private struct ValueReader {
         case .string:
             let slice = bytes[offset..<end]
             offset = end
-            let text = String(decoding: slice, as: UTF8.self)
-                .replacingOccurrences(of: "\n", with: "\\n")
-            return "\"\(text)\""
+            return MessagePack.quoted(String(decoding: slice, as: UTF8.self))
+        case .msgpack:
+            var position = offset
+            let value: MessagePackValue
+            do {
+                value = try MessagePack.parse(bytes, offset: &position, end: end)
+            } catch let failure as MessagePack.Failure {
+                throw Failure(message: "\(path): \(failure.message)")
+            }
+            offset = position
+            return renderMessagePack(value, field: field)
         }
     }
+
+    // MARK: MessagePack
+
+    private func renderMessagePack(_ value: MessagePackValue, field: BluetoothPacketDefinitions.Field?) -> String {
+        let keyName: ((Int64) -> String?)? = field?.enumName.map { enumName in { name(enumName, $0) } }
+        guard let field, !field.match.isEmpty else { return MessagePack.render(value, keyName: keyName) }
+        // A glob such as `map_*` compares an integer by the name one of the bound enums gives it.
+        let enums = field.captureEnums.values.sorted()
+        let resolve: (Int64) -> String? = { number in
+            for enumName in enums { if let found = name(enumName, number) { return found } }
+            return nil
+        }
+        for rule in field.match {
+            let bindings = rule.pattern.match(value, name: resolve)
+            guard !bindings.isEmpty else { continue }
+            let shown = bindings.prefix(MessagePack.Limits.renderedItems).map { binding in
+                render(binding, rule: rule, field: field)
+            }
+            let more = bindings.count - shown.count
+            return shown.joined(separator: ", ") + (more > 0 ? ", …+\(more)" : "")
+        }
+        return MessagePack.render(value, keyName: keyName)
+    }
+
+    private func render(
+        _ binding: MessagePackPattern.Binding, rule: BluetoothPacketDefinitions.MatchRule,
+        field: BluetoothPacketDefinitions.Field
+    ) -> String {
+        guard let summary = rule.summary else {
+            return rule.pattern.captures.map { "\($0)=\(capture($0, in: binding, field: field))" }.joined(separator: " ")
+        }
+        return summary.map {
+            switch $0 {
+            case .text(let text): return text
+            case .field(let id): return capture(id, in: binding, field: field)
+            }
+        }.joined()
+    }
+
+    /// A bound part: by its enum when it has one, shaped when the binding's enum names a shape.
+    private func capture(_ id: String, in binding: MessagePackPattern.Binding, field: BluetoothPacketDefinitions.Field) -> String {
+        guard let value = binding[id] else { return "" }
+        if let enumName = field.captureEnums[id] {
+            if let number = value.integer { return name(enumName, number) ?? "\(number)?" }
+            if case .string(let text) = value { return text }
+        }
+        if let set = field.values.flatMap({ definitions.shapes[$0] }) {
+            for (other, enumName) in field.captureEnums.sorted(by: { $0.key < $1.key }) where other != id {
+                let shapeName: String?
+                switch binding[other] {
+                case .string(let text)?: shapeName = text
+                case let bound?: shapeName = bound.integer.flatMap { name(enumName, $0) }
+                case nil: shapeName = nil
+                }
+                if let shapeName, let positions = set[shapeName] { return Self.shaped(value, positions) }
+            }
+        }
+        return MessagePack.render(value)
+    }
+
+    /// `[2026, 10, 13]` with positions `[year, month, date]` → `{year=2026 month=10 date=13}`.
+    private static func shaped(_ value: MessagePackValue, _ positions: [String]) -> String {
+        guard case .array(let items) = value else {
+            return positions.count == 1 ? "{\(positions[0])=\(MessagePack.render(value))}" : MessagePack.render(value)
+        }
+        var parts = zip(positions, items).map { "\($0)=\(MessagePack.render($1))" }
+        if items.count > positions.count {
+            parts.append("+" + MessagePack.render(.array(Array(items.dropFirst(positions.count)))))
+        }
+        return "{" + parts.joined(separator: " ") + "}"
+    }
+
 
     private mutating func integer(width: Int, signed: Bool, bigEndian: Bool, path: String, end: Int) throws -> Int64 {
         let raw = try take(width, path: path, end: end)

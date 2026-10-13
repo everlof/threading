@@ -521,8 +521,21 @@ bounded by the 65,535-byte packet limit instead. The test fixture header now dec
 real 2,048, which is why the earlier 65,535 fixture never caught it.
 
 **App packet definitions.** `BluetoothATTSession` carries the cross-packet state an app value
-needs: reassembly, handle→UUID learned from Read By Type (0x2803) responses, and the outstanding
-Read Request handle. When the session's checkout has `.threading/bluetooth.yaml`, matching ATT
+needs: L2CAP reassembly per connection and direction, then per connection *and GATT database*
+(odd ATT opcodes are about the sender's, even ones the receiver's) the handle→UUID map learned from
+Read By Type (0x2803) responses, the outstanding read, a long read joined from Read Blob responses,
+and queued Prepare Writes. Keying by connection alone shipped first and labelled a watch's FOTA
+writes as the iPhone's ANCS characteristic, which had the same handle; a replay of that capture
+(`BluetoothCaptureReplayTests`, opt-in) went from 0 to 2,801 decoded FOTA writes.
+
+`msgpack` values are parsed into a bounded `MessagePackValue` tree, then rendered or matched by
+`MessagePackPattern` (`BluetoothMessagePack.swift`). `learn:` blocks make `BluetoothATTSession`
+fill `BluetoothLearnedEnums` from received values before decoding them, per device identity
+(address, else name, else the most recent teacher). The capture worker loads that store from
+Application Support at start, saves it at most once per definition check and on stop, and reports
+its summary and every enum name through `BluetoothDefinitionReport`; the pane colours those names
+with `NameColor` (FNV-1a hue, theme keyword lightness/chroma in OKLCH, `legible(on:)` the ground,
+resolved at draw time). Two panes capturing at once each save their own view; the last save wins. When the session's checkout has `.threading/bluetooth.yaml`, matching ATT
 values are interpreted by `BluetoothPacketDefinitions` — a Kaitai-flavoured, bounded interpreter
 over our own YAML subset (`YAMLSubset`, no dependency) — and the row's subsystem becomes `App`. The
 plugin learns the checkout from the existing `checkoutPath` placement argument; no contract
@@ -532,7 +545,9 @@ the agent `visible` answer. A value whose bytes do not fit is logged at Warning,
 the filter bar's "Fully decoded only" excludes (`LogFocus.maximumSeverity`). Decoded rows name the
 peer from HCI events and GATT as well — Device Name read, else advertised local name tied by the
 connection-complete address, else the definitions' service name — with advertised names capped at
-256 addresses and dropped per handle on disconnection. Bounds per value and per file, and the
+256 addresses and dropped per handle on disconnection. The message column is coloured by `LogMessageHighlighter`, a pure UTF-16 tokenizer run per
+viewport cell (at most 2,048 units examined, ~0.3 ms per long row in Debug); the definitions'
+`highlight:` words arrive with the status callback. Bounds per value and per file, and the
 authoring format, are in [`bluetooth-packet-definitions.md`](../bluetooth-packet-definitions.md);
 the in-app guide and the example share `BluetoothDefinitionsGuide`, whose example is compiled by a
 test.

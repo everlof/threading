@@ -28,9 +28,59 @@ final class BluetoothDefinitionsRenderTests: XCTestCase {
             // The fixture has no checkout, so the pane's own off-main load reports that; let it
             // land, then show what a project with the guide's example would read.
             try await Task.sleep(for: .milliseconds(200))
-            pane.applyDefinitionStatusForTesting(.loaded(file, characteristics: 2, types: 3))
+            pane.applyDefinitionStatusForTesting(.loaded(file, characteristics: 2, types: 3),
+                highlights: try BluetoothPacketDefinitions.compile(BluetoothDefinitionsGuide.example).highlights)
             try render(pane.view, width: 1_180, height: 400, name: "bluetooth-\(name)")
         }
+    }
+
+    /// A device that teaches its own command table, decoded through the advanced example: every
+    /// command name keeps one colour of its own.
+    func testRendersLearnedCommandsInTheirOwnColours() async throws {
+        var decoder = BluetoothPacketDecoder()
+        let definitions = try BluetoothPacketDefinitions.compile(BluetoothDefinitionsGuide.advancedExample
+            .replacingOccurrences(of: "message: CommandMessage", with: "handle: 0x002e\n        message: CommandMessage"))
+        decoder.definitions = definitions
+        func att(_ pdu: [UInt8]) -> [UInt8] {
+            let l2cap = [UInt8(pdu.count), 0, 0x04, 0x00] + pdu
+            return [0x40, 0x20, UInt8(l2cap.count), 0] + l2cap
+        }
+        func text(_ value: String) -> [UInt8] { [0xa0 | UInt8(value.utf8.count)] + Array(value.utf8) }
+        let table: [(UInt8, String)] = [(0, "map_cmd"), (8, "fastmode"), (17, "map_settings"), (19, "error"), (20, "datetime"), (73, "steps_target")]
+        let page: [UInt8] = [0x81, 0x00, 0x80 | UInt8(table.count)] + table.flatMap { [$0.0] + text($0.1) }
+        // The page is read as the phone would: one response, then 22-byte Read Blobs.
+        var read: [([UInt8], Bool)] = [([0x0a, 0x2e, 0x00], false), ([0x0b] + page.prefix(22), true)]
+        for offset in stride(from: 22, to: page.count, by: 22) {
+            read.append(([0x0c, 0x2e, 0x00, UInt8(offset), 0], false))
+            read.append(([0x0d] + page[offset..<min(offset + 22, page.count)], true))
+        }
+        let packets: [([UInt8], Bool)] = [([0x12, 0x2e, 0x00, 0x92, 0x00, 0x00], false)] + read + [
+            ([0x12, 0x2e, 0x00, 0x81, 0x08, 0xc3], false),
+            ([0x1b, 0x2e, 0x00, 0x81, 0x13, 0x16], true),
+            ([0x12, 0x2e, 0x00, 0x81, 0x14, 0x96, 0xcd, 0x07, 0xea, 0x0a, 0x0d, 0x0f, 0x06, 0x27], false),
+            ([0x12, 0x2e, 0x00, 0x81, 0x49, 0xcd, 0x27, 0x10], false),
+            ([0x12, 0x2e, 0x00, 0x92, 0x11, 0x02], false),
+            ([0x12, 0x2e, 0x00, 0x81, 0x08, 0xc3], false),
+        ]
+        var data = BluetoothPacketTests.header()
+        for (index, packet) in packets.enumerated() {
+            data.append(Self.record([2] + att(packet.0), incoming: packet.1, seconds: 54_399 + index, microseconds: 0))
+        }
+        let rows = try decoder.append(data)
+        XCTAssertTrue(rows.contains { $0.message.contains("datetime {year=2026 month=10 date=13 hour=15 minute=6 second=39}") }, rows.map(\.message).joined(separator: "\n"))
+        let pane = DeviceLogPaneViewController(owningSessionID: UUID().uuidString, stream: .bluetooth)
+        pane.loadView()
+        let phone = DeviceLogSourceOption.Machine(id: "phone", title: "iPhone", isSimulator: false)
+        pane.acceptSources([DeviceLogSourceOption(machine: phone, title: "Bluetooth (USB)",
+            kind: .bluetooth(udid: phone.id, overNetwork: false, toolPath: nil))])
+        pane.installRowsForTesting(rows)
+        pane.setPacketFilter(.app)
+        for _ in 0..<200 where pane.isProjectingForTesting { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(200))
+        pane.applyDefinitionStatusForTesting(.loaded(file, characteristics: 2, types: 1),
+            learned: decoder.learned.summary(enums: definitions.learnedEnumNames),
+            names: decoder.learned.names(definitions: definitions))
+        try render(pane.view, width: 1_180, height: 330, name: "bluetooth-learned-commands")
     }
 
     func testRendersTheHelpPanelWithALoadedFile() throws {

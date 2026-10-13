@@ -115,6 +115,15 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// The last load of the project's definitions file, from the reader or the "?" panel.
     private(set) var definitionStatus: BluetoothDefinitionStatus?
     private var definitionLoadGeneration = 0
+    /// The definitions' `highlight:` words, drawn in their colour in the message column.
+    private var definitionHighlights: [String: BluetoothHighlightColor] = [:]
+    /// What devices taught through `learn:`, e.g. "AnimaCommand: 149 learned (Kronaby)".
+    private var definitionLearned: String?
+    /// Enum case names, declared and learned, drawn in a colour of their own.
+    private var definitionNames: Set<String> = []
+    private var definitionSummary: String {
+        (definitionStatus?.summary ?? "") + (definitionLearned.map { " · " + $0 } ?? "")
+    }
     /// Footer line naming the definitions file and whether it loaded: the standing hint of where
     /// the file goes, so it is discoverable without opening anything.
     private let definitionsLabel = NSTextField(labelWithString: "")
@@ -780,17 +789,33 @@ public final class DeviceLogPaneViewController: NSViewController {
         let generation = definitionLoadGeneration
         let checkout = definitionsCheckout
         Task { [weak self] in
-            let status = await Task.detached(priority: .utility) {
-                BluetoothDefinitionsFile.load(checkout: checkout).1
+            let report = await Task.detached(priority: .utility) {
+                let (definitions, status) = BluetoothDefinitionsFile.load(checkout: checkout)
+                let enums = definitions?.learnedEnumNames ?? []
+                let learned = enums.isEmpty ? BluetoothLearnedEnums() : BluetoothLearnedEnums.load()
+                return BluetoothDefinitionReport(
+                    status: status, highlights: definitions?.highlights ?? [:],
+                    learned: learned.summary(enums: enums), names: learned.names(definitions: definitions)
+                )
             }.value
             guard let self, self.definitionLoadGeneration == generation else { return }
-            self.applyDefinitionStatus(status)
+            self.applyDefinitionStatus(report.status, highlights: report.highlights, learned: report.learned,
+                                       names: report.names)
         }
     }
 
-    private func applyDefinitionStatus(_ status: BluetoothDefinitionStatus) {
+    private func applyDefinitionStatus(
+        _ status: BluetoothDefinitionStatus, highlights: [String: BluetoothHighlightColor] = [:],
+        learned: String? = nil, names: Set<String> = []
+    ) {
         definitionStatus = status
-        definitionsLabel.stringValue = status.summary
+        definitionLearned = learned
+        if highlights != definitionHighlights || names != definitionNames {
+            definitionHighlights = highlights
+            definitionNames = names
+            table.reloadData()
+        }
+        definitionsLabel.stringValue = definitionSummary
         definitionsLabel.toolTip = status.url?.path
         definitionsLabel.textColor = status.isFailure ? Design.Status.warning : Design.Text.tertiary
         definitionsHelp?.apply(status)
@@ -802,8 +827,11 @@ public final class DeviceLogPaneViewController: NSViewController {
         bluetoothProfileSetup.showBrowserForTesting()
     }
 
-    func applyDefinitionStatusForTesting(_ status: BluetoothDefinitionStatus) {
-        applyDefinitionStatus(status)
+    func applyDefinitionStatusForTesting(
+        _ status: BluetoothDefinitionStatus, highlights: [String: BluetoothHighlightColor] = [:],
+        learned: String? = nil, names: Set<String> = []
+    ) {
+        applyDefinitionStatus(status, highlights: highlights, learned: learned, names: names)
     }
     #endif
 
@@ -869,7 +897,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         // which line it stopped at; the footer says so to a person, this says it to the agent.
         guard !definitionsLabel.isHidden, let definitionStatus else { return statusLabel.stringValue }
         let location = definitionStatus.url.map { " (\($0.path))" } ?? ""
-        return statusLabel.stringValue + "\n" + definitionStatus.summary + location
+        return statusLabel.stringValue + "\n" + definitionSummary + location
     }
     public var isVisibleForCapture: Bool { drainTimer != nil }
 
@@ -948,12 +976,13 @@ public final class DeviceLogPaneViewController: NSViewController {
         }
         if let bluetooth = started as? BluetoothLogRowSource {
             bluetooth.definitionsCheckout = definitionsCheckout
-            let apply: @MainActor @Sendable (BluetoothDefinitionStatus) -> Void = { [weak self] status in
+            let apply: @MainActor @Sendable (BluetoothDefinitionReport) -> Void = { [weak self] report in
                 guard let self, self.sourceGeneration == generation else { return }
-                self.applyDefinitionStatus(status)
+                self.applyDefinitionStatus(report.status, highlights: report.highlights, learned: report.learned,
+                                       names: report.names)
             }
-            bluetooth.onDefinitionsChanged = { status in
-                DispatchQueue.main.async { MainActor.assumeIsolated { apply(status) } }
+            bluetooth.onDefinitionsChanged = { report in
+                DispatchQueue.main.async { MainActor.assumeIsolated { apply(report) } }
             }
         }
         source = started
@@ -1555,6 +1584,67 @@ extension DeviceLogPaneViewController: NSTableViewDelegate {
         }
         label.applyFont(font)
         label.toolTip = label.stringValue
+        if identifier == Columns.message, case .row(let index) = entries[row] {
+            let displayed = projectedRows ?? rows
+            if displayed.indices.contains(index) { colorize(label, entry: displayed[index]) }
+        }
+    }
+
+    /// Draws the message's structure: grammar in theme syntax colours, scaffolding dimmed, the
+    /// project's `highlight:` words in theirs. Errors keep one warning colour so they still read
+    /// as errors at a glance. Viewport rows only, each bounded by `LogMessageHighlighter.Limits`.
+    private func colorize(_ label: NSTextField, entry: DeviceLogRow) {
+        guard entry.severity < 3, let font = label.font else { return }
+        let kind: LogMessageHighlighter.Kind
+        if entry.process == "Bluetooth" {
+            kind = entry.subsystem == BluetoothATTSession.appProtocolName ? .bluetoothApp : .bluetooth
+        } else {
+            kind = .plain
+        }
+        let spans = LogMessageHighlighter.spans(
+            entry.message, kind: kind, highlights: definitionHighlights, names: definitionNames
+        )
+        guard !spans.isEmpty else { return }
+        let text = NSMutableAttributedString(string: entry.message, attributes: [
+            .font: font, .foregroundColor: label.textColor ?? Design.Text.label,
+        ])
+        let bold = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+        for span in spans {
+            text.addAttribute(.foregroundColor, value: Self.color(for: span.style), range: span.range)
+            if span.style == .characteristic { text.addAttribute(.font, value: bold, range: span.range) }
+        }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = label.lineBreakMode
+        text.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: text.length))
+        label.attributedStringValue = text
+    }
+
+    private static func color(for style: LogMessageStyle) -> NSColor {
+        switch style {
+        case .direction(let received): received ? Design.Syntax.type : Design.Syntax.keyword
+        case .route, .verb, .key: Design.Text.secondary
+        case .characteristic: Design.Text.label
+        case .punctuation: Design.Text.tertiary
+        case .preview: Design.Syntax.comment
+        case .string: Design.Syntax.string
+        case .number: Design.Syntax.number
+        case .constant: Design.Syntax.keyword
+        case .uuid: Design.Syntax.type
+        case .warning: Design.Status.warning
+        case .named(let name): NameColor.color(for: name)
+        case .custom(let color):
+            switch color {
+            case .red: .systemRed
+            case .orange: .systemOrange
+            case .yellow: .systemYellow
+            case .green: .systemGreen
+            case .teal: .systemTeal
+            case .blue: .systemBlue
+            case .purple: .systemPurple
+            case .pink: .systemPink
+            case .gray: .systemGray
+            }
+        }
     }
 
     /// Opening a fold is a click on it, which is the only affordance a folded run needs.

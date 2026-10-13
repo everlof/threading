@@ -31,6 +31,12 @@ struct BluetoothPacketDecoder {
         get { session.definitions }
         set { session.definitions = newValue }
     }
+    /// Enum entries devices taught; loaded and saved by the capture worker.
+    var learned: BluetoothLearnedEnums {
+        get { session.learned }
+        set { session.learned = newValue }
+    }
+    var learnedRevision: Int { session.learnedRevision }
     var bufferedBytes: Int { buffer.count }
 
     mutating func append(_ data: Data) throws -> [DeviceLogRow] {
@@ -76,7 +82,7 @@ struct BluetoothPacketDecoder {
             let packetType = buffer[start + 4]
             let payload = Array(buffer[start + Limits.hciHeaderBytes..<end])
             if packetType == 4 { session.event(payload) }
-            let acl = packetType == 2 ? session.acl(payload) : nil
+            let acl = packetType == 2 ? session.acl(payload, incoming: direction == 1) : nil
             rows.append(BluetoothPacketSummary.row(
                 type: packetType, incoming: direction == 1, payload: payload, acl: acl,
                 seconds: seconds, microseconds: microseconds, truncated: captured < original

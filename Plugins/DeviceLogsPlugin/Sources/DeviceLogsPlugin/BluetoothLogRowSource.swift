@@ -13,7 +13,7 @@ public final class BluetoothLogRowSource: BufferedDeviceLogSource, @unchecked Se
     /// Set before `start()`.
     var definitionsCheckout: String?
     /// Every load of the definitions file, from the worker's queue.
-    var onDefinitionsChanged: (@Sendable (BluetoothDefinitionStatus) -> Void)?
+    var onDefinitionsChanged: (@Sendable (BluetoothDefinitionReport) -> Void)?
 
     public init(udid: String, overNetwork: Bool, toolPath: String?) {
         self.udid = udid
@@ -67,13 +67,17 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
     private var onEnd: (@Sendable (String) -> Void)?
     private var definitionsCheckout: String?
     private var definitionsStamp: BluetoothDefinitionsFile.Stamp?
-    private var onDefinitions: (@Sendable (BluetoothDefinitionStatus) -> Void)?
+    /// Where learned enums are kept; tests point it elsewhere.
+    var learnedStoreURL = BluetoothLearnedEnums.defaultURL
+    private var savedLearnedRevision = 0
+    private var report = BluetoothDefinitionReport(status: .noCheckout)
+    private var onDefinitions: (@Sendable (BluetoothDefinitionReport) -> Void)?
     private var ticksUntilDefinitionCheck = 0
 
     func start(
         toolPath: String?, arguments: [String],
         definitionsCheckout: String?,
-        onDefinitions: (@Sendable (BluetoothDefinitionStatus) -> Void)?,
+        onDefinitions: (@Sendable (BluetoothDefinitionReport) -> Void)?,
         onRows: @escaping @Sendable ([DeviceLogRow]) -> Void,
         onEnd: @escaping @Sendable (String) -> Void
     ) {
@@ -86,6 +90,8 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
                 return
             }
             decoder = BluetoothPacketDecoder()
+            decoder.learned = BluetoothLearnedEnums.load(from: learnedStoreURL)
+            savedLearnedRevision = decoder.learnedRevision
             self.definitionsCheckout = definitionsCheckout
             self.onDefinitions = onDefinitions
             reloadDefinitions()
@@ -134,7 +140,25 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
         definitionsStamp = stamp
         let (definitions, status) = BluetoothDefinitionsFile.load(checkout: definitionsCheckout)
         decoder.definitions = definitions
-        onDefinitions?(status)
+        report.status = status
+        report.highlights = definitions?.highlights ?? [:]
+        report.learned = decoder.learned.summary(enums: definitions?.learnedEnumNames ?? [])
+        report.names = decoder.learned.names(definitions: definitions)
+        onDefinitions?(report)
+    }
+
+    /// Saves what devices taught since the last save and tells the pane. On the worker, at most
+    /// once per definition check, so a map exchange of hundreds of pages is one write.
+    private func persistLearned() {
+        guard decoder.learnedRevision != savedLearnedRevision else { return }
+        savedLearnedRevision = decoder.learnedRevision
+        try? decoder.learned.save(to: learnedStoreURL)
+        let summary = decoder.learned.summary(enums: decoder.definitions?.learnedEnumNames ?? [])
+        let names = decoder.learned.names(definitions: decoder.definitions)
+        guard summary != report.learned || names != report.names else { return }
+        report.learned = summary
+        report.names = names
+        onDefinitions?(report)
     }
 
     private func tick() {
@@ -143,6 +167,7 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
         if ticksUntilDefinitionCheck <= 0 {
             ticksUntilDefinitionCheck = Limits.definitionCheckTicks
             reloadDefinitions(force: false)
+            persistLearned()
         }
         do {
             _ = try drain(errors.fileHandleForReading) { [self] data in
@@ -202,6 +227,7 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
     }
 
     private func stopOnQueue() {
+        persistLearned()
         timer?.cancel()
         timer = nil
         onRows = nil

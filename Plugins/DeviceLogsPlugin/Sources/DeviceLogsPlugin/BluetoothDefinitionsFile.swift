@@ -7,6 +7,17 @@ import ThreadingDesignKit
 /// worktree), so the definitions travel with the app's source and its history. Reading is file
 /// work and never happens on the main actor; the capture worker re-stats at most once a second so
 /// saving the file takes effect on the next packet without a Rescan.
+/// What the capture worker tells the pane about definitions: the file, its highlight words, and
+/// what devices have taught (`learn:`), as one value so the three cannot arrive out of step.
+struct BluetoothDefinitionReport: Sendable, Equatable {
+    var status: BluetoothDefinitionStatus
+    var highlights: [String: BluetoothHighlightColor] = [:]
+    /// "AnimaCommand: 149 learned (Kronaby, fw …)", or nil when nothing is learned.
+    var learned: String?
+    /// Every enum case name, declared or learned, so the pane colours each by its name.
+    var names: Set<String> = []
+}
+
 enum BluetoothDefinitionStatus: Sendable, Equatable {
     case noCheckout
     case missing(expected: URL)

@@ -707,6 +707,9 @@ project data, not an extension seam: the file declares how ATT bytes are read an
 reach the network or add UI. Threading owns the interpreter and its bounds, file discovery under
 the session checkout, reload cadence, the panel's create/open/copy actions and the rendered row
 text. Themes style the panel through the shared popover, button and text-view components.
+Enum entries a device teaches (`learn:`) are host-owned state in Application Support, keyed per
+device, bounded and never written back to the project; enum names are coloured from the theme's own
+syntax keyword lightness and chroma, so a theme restyles them without a new seam.
 
 **Proxy debugging commands** are deliberately host-only. The existing Tools settings group and
 session MCP transport expose bounded HTTP(S) capture. Threading owns exact TLS scope, CA key
