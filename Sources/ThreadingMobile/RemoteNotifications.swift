@@ -815,12 +815,11 @@ private enum MobileUIEvidenceCapture {
         let markerURL = directory.appendingPathComponent("\(request.identifier).json")
 
         do {
-            try FileManager.default.createDirectory(
-                at: directory,
-                withIntermediateDirectories: true
-            )
-            guard !FileManager.default.fileExists(atPath: imageURL.path),
-                  !FileManager.default.fileExists(atPath: markerURL.path) else {
+            guard try await prepareOutputDirectory(
+                directory,
+                imageURL: imageURL,
+                markerURL: markerURL
+            ) else {
                 return
             }
 
@@ -1185,6 +1184,21 @@ private enum MobileUIEvidenceCapture {
                 try? await Task.sleep(for: .milliseconds(50))
             }
             return FileManager.default.fileExists(atPath: url.path)
+        }.value
+    }
+
+    private nonisolated static func prepareOutputDirectory(
+        _ directory: URL,
+        imageURL: URL,
+        markerURL: URL
+    ) async throws -> Bool {
+        try await Task.detached(priority: .utility) {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            return !FileManager.default.fileExists(atPath: imageURL.path)
+                && !FileManager.default.fileExists(atPath: markerURL.path)
         }.value
     }
 
