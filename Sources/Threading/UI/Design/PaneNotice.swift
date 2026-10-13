@@ -225,6 +225,9 @@ final class PaneNoticeView: NSView, ThemedComponent {
         titleLabel?.applyFont(.control)
         titleLabel?.maximumNumberOfLines = 1
         titleLabel?.lineBreakMode = .byTruncatingTail
+        // The title yields with the sentence. At its default resistance a long title tied with the
+        // buttons and a 260pt pane squeezed three of them into one empty plate beside it.
+        titleLabel?.setContentCompressionResistancePriority(PaneNoticeDefaults.messagePriority, for: .horizontal)
 
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
         messageLabel.applyFont(title == nil ? .control : .detail())

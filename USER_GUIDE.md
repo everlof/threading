@@ -3821,6 +3821,21 @@ platform adds one of its devices beside the ones there, so **iOS Simulator** the
 Emulator** gives you both side by side. Choosing a platform the tab already holds just shows it.
 If no other device of that platform is available, Threading says so instead.
 
+**Scenarios.** A project can list the states its app's debug build can open — a screen with sample
+data, a theme, each step of a flow — in `.threading/scenarios.json`. The **Scenarios** button
+(beside **+**) opens them: groups as submenus, a screen's variants (dark, Swedish, empty…) in a
+submenu of their own. Choosing one starts the installed app in that state on every device in the
+tab that can show it, so an iPhone and an Android phone show the same state side by side. A
+scenario with steps puts a band above the devices — “Step 2 of 4: Payment accepted” — with
+**Back**, **Next** and **Play**: each step changes the running app in place, so you watch the
+transition as it ships, and the stream keeps running so you can record it. **✕** closes the
+scenario and leaves the app as it is. Without a file, the button opens **Scenario Help**, which
+explains the format, can create the file from an example, and has **Copy Agent Prompt** to ask an
+agent in the project to add scenarios to the app. The command palette has **Simulator Scenarios…**,
+**Next Scenario Step**, **Previous Scenario Step** and **Play or Pause Scenario**; assign shortcuts
+in Keyboard Settings. Agents open and step the same scenarios with `simulator_scenario`, and you see
+the band follow along.
+
 **Layouts.** **Auto** considers the available pane space and each device's current screen shape:
 portrait phones normally sit side by side, landscape phones normally stack above and below.
 Choose **Row**, **Column** or **Grid** to hold an arrangement, or **Focus** to show the selected

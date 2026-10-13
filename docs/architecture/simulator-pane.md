@@ -307,6 +307,8 @@ The built-in **iOS Simulator** tool group is session-scoped. Its preferred seque
    pane is showing one.
 5. `simulator_tap`, `simulator_swipe`, `simulator_type_text` and `simulator_press_button` address
    that same visible lease with normalized coordinates and a closed, bounded input vocabulary.
+6. `simulator_scenario` opens the installed app in a state the project declares, on every member at
+   once, and steps a flow in place ([`simulator-scenarios.md`](simulator-scenarios.md)).
 
 `xcodebuild` is deliberately not hidden inside a pre-approved MCP call. The MCP group makes the
 in-app surface easy to discover and reuse; it does not broaden permission to execute an arbitrary
@@ -384,6 +386,11 @@ while Threading owns availability, exact-device choice, lease refresh and input 
 adds one lazy, fixed-size view per failed member (normally one, at most four in a workspace),
 updated only on state changes. Chooser discovery uses the existing off-main, 512-device-bounded
 catalogue once per explicit click; resize, frame callbacks and failed devices do not poll it.
+
+**Scenarios open the app in states the project declares.** The workspace's Scenarios button, its
+step band and `simulator_scenario` read `.threading/scenarios.json` from the session checkout and
+drive every member through the same leases; starting the app is a public transaction, a step's link
+is not. See [`simulator-scenarios.md`](simulator-scenarios.md).
 
 **Annotations have an explicit mode and a one-note gesture.** Option-click (or the screen menu's
 **Add Note Here**) pins a note through exactly the same bounded editor without enabling the

@@ -45,7 +45,8 @@ enum MCPRemoteSessionToolScope {
         // installed on either, and there is nothing to inspect without one.
         case .deviceLogPrepare, .simulatorPrepare, .simulatorInstallLaunch, .simulatorScreenshot,
              .simulatorSnapshot, .simulatorAnnotations, .simulatorWait, .simulatorTap, .simulatorSwipe,
-             .simulatorTypeText, .simulatorPressButton, .listIOSDiagnosticDevices, .inspectIOSDiagnostics:
+             .simulatorTypeText, .simulatorPressButton, .simulatorScenario, .listIOSDiagnosticDevices,
+             .inspectIOSDiagnostics:
             return false
 
         // The listener, trust bundle and exported certificate paths belong to this Mac.

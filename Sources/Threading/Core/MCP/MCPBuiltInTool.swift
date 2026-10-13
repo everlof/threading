@@ -59,6 +59,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case simulatorSwipe
   case simulatorTypeText
   case simulatorPressButton
+  case simulatorScenario
   case panelListTabs
   case panelActivateTab
   case setProjectIcon

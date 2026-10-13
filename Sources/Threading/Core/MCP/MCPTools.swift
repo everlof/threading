@@ -2470,6 +2470,20 @@ struct SimulatorPressButtonArguments: Codable, Sendable {
   }
 }
 
+struct SimulatorScenarioArguments: Codable, Sendable {
+  /// A scenario id from the checkout's `.threading/scenarios.json`; omitted with `step` absent
+  /// lists them.
+  let scenario: String?
+  /// A step of the scenario, from 0; alone it steps the scenario already open.
+  let step: Int?
+  var deviceID: String? = nil
+
+  private enum CodingKeys: String, CodingKey {
+    case scenario, step
+    case deviceID = "device_id"
+  }
+}
+
 struct EmptyToolArguments: Codable, Sendable {}
 
 struct SetSessionCheckoutArguments: Codable, Sendable {
@@ -3460,6 +3474,7 @@ enum MCPTools {
   static let simulatorSwipe = MCPBuiltInTool.simulatorSwipe.rawValue
   static let simulatorTypeText = MCPBuiltInTool.simulatorTypeText.rawValue
   static let simulatorPressButton = MCPBuiltInTool.simulatorPressButton.rawValue
+  static let simulatorScenario = MCPBuiltInTool.simulatorScenario.rawValue
 
   static let panelListTabs = MCPBuiltInTool.panelListTabs.rawValue
   static let panelActivateTab = MCPBuiltInTool.panelActivateTab.rawValue
@@ -7166,6 +7181,48 @@ enum MCPTools {
           )
         ],
         required: ["button"]
+      )
+    ),
+    MCPToolDefinition(
+      tool: .simulatorScenario,
+      name: "simulator_scenario",
+      groupID: "simulator",
+      family: .simulator,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Open Simulator scenario",
+      detail: "Open the app in a state the project declares, or step through a flow.",
+      symbol: "play.rectangle.on.rectangle",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SimulatorScenarioArguments.self, forKey: .arguments)
+          ?? SimulatorScenarioArguments(scenario: nil, step: nil)
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.simulatorScenario(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Open the app under development in a state its project declares in .threading/scenarios.json, \
+        on the devices in Threading's Simulator workspace, and step through a flow while the app runs. \
+        With no arguments, lists the scenarios the workspace's devices can open (id, group, title, \
+        variant, steps), the one open now, and any problems in the file. With scenario, starts the \
+        installed app in it on every device that can show it, or only device_id; add step to go on \
+        to that step. With step alone, takes the open scenario to that step (from 0) in place, \
+        without restarting the app, so its transition shows. Install the app first with \
+        simulator_install_launch; the person sees the same scenario band in the panel. Scenario \
+        Help in the workspace's Scenarios menu explains how a project adds the file.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "device_id": MCPPropertySchema(type: .string, description: "Optional exact adopted device id; omitted, every device that can show the scenario."),
+          "scenario": MCPPropertySchema(type: .string, description: "A scenario id from the list."),
+          "step": MCPPropertySchema(type: .number, description: "A step index from 0."),
+        ],
+        required: []
       )
     ),
     MCPToolDefinition(

@@ -466,6 +466,11 @@ enum MCPToolCatalog {
       to the existing devices instead of switching a lone one; layout also takes column, grid, focus \
       and automatic. Each result's workspace field lists every member's device_id and platform; in \
       a mixed workspace, platform alone also addresses that platform's only device.
+
+      When the checkout has .threading/scenarios.json, simulator_scenario opens the installed app \
+      in a state it declares on every device at once, and steps through a flow in place so the \
+      transition shows; call it without arguments to list them. Prefer it over tapping through the \
+      app to reach a screen.
       """
   )
 

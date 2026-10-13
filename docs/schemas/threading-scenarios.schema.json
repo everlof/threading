@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threading.codes/schemas/threading-scenarios.schema.json",
+  "title": "Threading Simulator scenarios",
+  "description": "States an app's debug build can open, offered in Threading's Simulator workspace. Read from .threading/scenarios.json in the session checkout. Nothing in it runs on the Mac.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "apps", "scenarios"],
+  "properties": {
+    "$schema": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "version": { "const": 1 },
+    "apps": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "ios": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bundleIdentifier"],
+          "properties": {
+            "bundleIdentifier": { "type": "string", "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]{0,253}[A-Za-z0-9_-]$" },
+            "urlScheme": { "$ref": "#/$defs/scheme" }
+          }
+        },
+        "android": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["package"],
+          "properties": {
+            "package": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$", "maxLength": 255 },
+            "activity": {
+              "type": "string",
+              "description": "The debug activity Threading starts, relative to the package (.Scenes) or fully qualified.",
+              "pattern": "^\\.?[A-Za-z_][A-Za-z0-9_$]*(\\.[A-Za-z_][A-Za-z0-9_$]*)*$",
+              "maxLength": 255
+            },
+            "urlScheme": { "$ref": "#/$defs/scheme" }
+          }
+        }
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "maxItems": 512,
+      "items": { "$ref": "#/$defs/scenario" }
+    }
+  },
+  "$defs": {
+    "scheme": {
+      "type": "string",
+      "description": "The app's own scheme. Web, file and telephony schemes are refused.",
+      "pattern": "^[a-z][a-z0-9+.-]{0,63}$",
+      "not": { "enum": ["http", "https", "file", "ftp", "data", "javascript", "about", "mailto", "tel", "sms", "facetime"] }
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?=.*\\S)[^\\u0000-\\u001F\\u007F]+$"
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "group", "title", "launch"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$" },
+        "group": { "$ref": "#/$defs/text", "maxLength": 64 },
+        "title": { "$ref": "#/$defs/text", "maxLength": 96 },
+        "variant": { "$ref": "#/$defs/text", "maxLength": 64 },
+        "appearance": { "enum": ["light", "dark"] },
+        "launch": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "ios": {
+              "type": "array",
+              "maxItems": 64,
+              "items": { "type": "string", "maxLength": 4096 }
+            },
+            "android": {
+              "type": "object",
+              "maxProperties": 64,
+              "propertyNames": { "pattern": "^[A-Za-z0-9._-]{1,128}$" },
+              "additionalProperties": {
+                "oneOf": [
+                  { "type": "string", "maxLength": 4096 },
+                  { "type": "boolean" },
+                  { "type": "integer" }
+                ]
+              }
+            }
+          }
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 64,
+          "description": "States in order; the launch opens the first. Every step after the first needs a link.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title"],
+            "properties": {
+              "title": { "$ref": "#/$defs/text", "maxLength": 96 },
+              "link": {
+                "type": "string",
+                "description": "Relative to apps.<platform>.urlScheme: debug/step?n=2 opens myapp://debug/step?n=2.",
+                "minLength": 1,
+                "maxLength": 2048,
+                "pattern": "^(?!.*://)[^\\s\\u0000-\\u001F\\u007F]+$"
+              }
+            }
+          }
+        },
+        "stepInterval": { "type": "number", "minimum": 0.5, "maximum": 30, "default": 2 }
+      }
+    }
+  }
+}

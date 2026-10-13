@@ -284,6 +284,11 @@ final class DisplayPaneController: NSViewController {
   private let simulatorStreamCoordinator: any SimulatorLiveStreamCoordinating
   private let simulatorInputAuthorizer: any SimulatorInputAuthorizing
   private let physicalDeviceControl: (any PhysicalDeviceControlling)?
+  /// The checkout a session's Simulator workspace reads `.threading/scenarios.json` from. A seam
+  /// so a test can point a workspace at a fixture checkout without a stored project.
+  var simulatorScenarioCheckout: @MainActor (SessionID) -> URL? = { sessionID in
+    ProjectStore.shared.workingDirectory(forSessionID: sessionID).map { URL(fileURLWithPath: $0, isDirectory: true) }
+  }
 
   /// Test and embedding seam for extension actions. Production routes through the shared
   /// provider slot when no explicit receiver is installed.
@@ -1625,7 +1630,9 @@ final class DisplayPaneController: NSViewController {
     let streams = simulatorStreamCoordinator
     let authorizer = simulatorInputAuthorizer
     let openLogs = onOpenDeviceLogs
-    let workspace = SimulatorWorkspaceViewController(state: state) { device in
+    // Scenarios come from the checkout the session works in, read again each time they are offered.
+    let checkout: @MainActor () -> URL? = { [weak self] in self?.simulatorScenarioCheckout(sessionID) }
+    let workspace = SimulatorWorkspaceViewController(state: state, scenarioCheckout: checkout) { device in
       let controller = SimulatorPaneViewController(
         preferredDeviceID: device, isWorkspaceMember: true,
         control: control, leaseManager: leases,

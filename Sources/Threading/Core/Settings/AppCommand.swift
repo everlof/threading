@@ -222,6 +222,10 @@ enum AppCommands {
         static let removeSimulator = "simulator.workspace.remove"
         static let enableSimulatorAnnotations = "simulator.annotations.enable"
         static let disableSimulatorAnnotations = "simulator.annotations.disable"
+        static let showSimulatorScenarios = "simulator.scenarios.show"
+        static let nextSimulatorScenarioStep = "simulator.scenario.next"
+        static let previousSimulatorScenarioStep = "simulator.scenario.previous"
+        static let playSimulatorScenario = "simulator.scenario.play"
         static let saveIPhoneScreenshot = "iphone.screenshot.save"
         static let copyIPhoneScreenshot = "iphone.screenshot.copy"
         static let toggleIPhoneRecording = "iphone.recording.toggle"
@@ -436,6 +440,14 @@ enum AppCommands {
                    defaultShortcut: nil, isEditable: true, scope: .session, iconName: "plus.bubble"),
         AppCommand(id: ID.disableSimulatorAnnotations, group: .view, title: "Disable Simulator Annotations",
                    defaultShortcut: nil, isEditable: true, scope: .session, iconName: "plus.bubble"),
+        AppCommand(id: ID.showSimulatorScenarios, group: .view, title: "Simulator Scenarios…",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "play.rectangle.on.rectangle"),
+        AppCommand(id: ID.nextSimulatorScenarioStep, group: .view, title: "Next Scenario Step",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "forward.frame"),
+        AppCommand(id: ID.previousSimulatorScenarioStep, group: .view, title: "Previous Scenario Step",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "backward.frame"),
+        AppCommand(id: ID.playSimulatorScenario, group: .view, title: "Play or Pause Scenario",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "play"),
         // No default chords: Simulator's own ⌘S/⌃⌘C would collide with app commands, and these
         // earn a key only when someone assigns one on the shortcuts page.
         AppCommand(id: ID.saveIPhoneScreenshot, group: .view, title: "Save iPhone Screenshot",

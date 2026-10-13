@@ -96,6 +96,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Subagents navigator and child transcript | — | host-only | child identity/hierarchy, lifecycle and transcript availability, bounded paging, provider progress and usage truth, selection/reveal routing | Host-only |
 | In-panel iOS Simulator workspace and device tiles (iOS and Android members) | — | host-only | Exact device/member identity (CoreSimulator UDID, AVD or adb serial), the emulator gRPC key grant, collection admission, saved layout/order/selection, boot leases, per-device consent and agent targeting, framebuffer/input authority, shared device transactions, viewer budget and fallback truth | Host-only |
 | In-panel physical iPhone body | — | host-only | exact paired hardware identity, trust and developer-service/media/HID capability truth, capture lifetime, input grant and fail-closed DisplayService/HID authority | Host-only |
+| Simulator scenarios: Scenarios button and menu, step band, Scenario Help | — | host-only | Discovery and bounds of the project's `.threading/scenarios.json`, launch and link delivery per platform, device targeting, the public-transaction rule, the iOS link drop's location checks, step order and band state | Host-only |
 | Simulator presenter window, recording badge and screen menu | — | host-only | The same device lease, consent route and stream demand as the pane; recording state; the touch style burned into shared and recorded pixels | Host-only |
 | Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity and usage truth, refresh, the whole reveal gesture | Implemented |
 | Launch failure surface | — | host-only | the runtime's captured words verbatim, exit classification, retry, the report path's review-before-send rule, repair eligibility and the working-copy boundary | Host-only |
@@ -719,6 +720,14 @@ between the Regular Logs and Bluetooth tabs is host-owned workspace behaviour, a
 `linked` tool reads only the rows the tabs already hold. `identities:` and `procedures:` are
 declarative too; the Timelines panel (shared popover, text view and buttons, themed) and the
 attempt history in Application Support are host-owned, bounded and never written to the project.
+
+**Simulator scenarios** (the workspace's Scenarios button and menu, its step band, Scenario Help
+and `simulator_scenario`) extend the host-only Simulator workspace. `.threading/scenarios.json` is
+project data, not an extension seam: it names app identifiers, launch arguments, intent extras and
+relative links, runs no code on the Mac and adds no controls. Threading owns its discovery under the
+session checkout and its bounds, the launch and link vocabulary per platform, device targeting, the
+public-transaction rule, the iOS link drop's location checks, step ordering and the band's state.
+Themes style the button, menu, band and help panel through the shared components.
 
 **Proxy debugging commands** are deliberately host-only. The existing Tools settings group and
 session MCP transport expose bounded HTTP(S) capture. Threading owns exact TLS scope, CA key

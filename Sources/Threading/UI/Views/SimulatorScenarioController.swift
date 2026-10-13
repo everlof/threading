@@ -91,7 +91,7 @@ final class SimulatorScenarioController {
 
     init(
         checkout: @escaping @MainActor () -> URL?,
-        loader: @escaping @Sendable (URL) async -> SimulatorScenarioCatalog = SimulatorScenarioController.loadDetached,
+        loader: @escaping @Sendable (URL) async -> SimulatorScenarioCatalog = { await SimulatorScenarioController.loadDetached($0) },
         sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }
     ) {
         self.checkout = checkout
@@ -312,25 +312,25 @@ final class SimulatorScenarioController {
         return await task.value
     }
 
-    /// Every member at once; the failures name their device.
+    /// Every member at once (each starts before any is awaited); the failures name their device.
     private static func perform<Action: Sendable>(
         _ work: [(any SimulatorScenarioTarget, Action)],
         _ body: @escaping @MainActor @Sendable (any SimulatorScenarioTarget, Action) async throws -> Void
     ) async -> [String] {
-        await withTaskGroup(of: String?.self) { group in
-            for (member, action) in work {
-                group.addTask { @MainActor in
-                    do {
-                        try await body(member, action)
-                        return nil
-                    } catch {
-                        return L10n.format("%1$@: %2$@", member.scenarioDeviceName, error.localizedDescription)
-                    }
+        let tasks = work.map { member, action in
+            Task { @MainActor () -> String? in
+                do {
+                    try await body(member, action)
+                    return nil
+                } catch {
+                    return L10n.format("%1$@: %2$@", member.scenarioDeviceName, error.localizedDescription)
                 }
             }
-            var failures: [String] = []
-            for await failure in group { if let failure { failures.append(failure) } }
-            return failures
         }
+        var failures: [String] = []
+        for task in tasks {
+            if let failure = await task.value { failures.append(failure) }
+        }
+        return failures
     }
 }

@@ -180,6 +180,8 @@ final class SimulatorPaneViewController: NSViewController {
     var workspaceMenuExtras: (() -> [ThemedMenuEntry])?
     /// Workspace-wide choices in the shared header when several devices are shown.
     var workspaceLayoutMenu: (() -> [ThemedMenuEntry])?
+    /// Workspace-wide entries a narrow header has no room for, such as Scenarios.
+    var workspaceOverflowMenu: (() -> [ThemedMenuEntry])?
     /// The member's own actions for the workspace's shared header row.
     var workspaceActions: NSView { workspaceActionButtons }
     var workspaceHardwareControls: NSView { hardwareButtonRow }
@@ -585,8 +587,13 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     func workspaceHeaderMenuEntries() -> [ThemedMenuEntry] {
-        guard workspaceRole != .solo else { return memberMenuEntries() }
-        var entries: [ThemedMenuEntry] = workspaceHeaderShowsLayout ? [] : (workspaceLayoutMenu?() ?? [])
+        let overflow = workspaceOverflowMenu?() ?? []
+        guard workspaceRole != .solo else {
+            return overflow.isEmpty ? memberMenuEntries() : overflow + [.separator] + memberMenuEntries()
+        }
+        var entries: [ThemedMenuEntry] = overflow
+        if !entries.isEmpty, !workspaceHeaderShowsLayout { entries.append(.separator) }
+        entries += workspaceHeaderShowsLayout ? [] : (workspaceLayoutMenu?() ?? [])
         if !entries.isEmpty { entries.append(.separator) }
         entries += sharedTouchSettingEntries()
         return entries

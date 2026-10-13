@@ -21,6 +21,7 @@ final class SimulatorAgentToolTests: HostedStoreTestCase {
             .simulatorSwipe,
             .simulatorTypeText,
             .simulatorPressButton,
+            .simulatorScenario,
         ])
         XCTAssertTrue(group.instruction.contains("prefer Threading's adopted Simulator"))
         XCTAssertTrue(group.instruction.contains("Do not run open -a Simulator"))
@@ -300,6 +301,51 @@ final class SimulatorAgentToolTests: HostedStoreTestCase {
         XCTAssertEqual(unchangedInputs, secondInputs)
     }
 
+    func testScenarioToolListsOpensAndStepsTheCheckoutsScenarios() async throws {
+        let fixture = makeFixture(visible: false)
+        defer { fixture.cleanup() }
+        let checkout = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scenario-tool-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: checkout.appendingPathComponent(".threading"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: checkout) }
+        fixture.pane.simulatorScenarioCheckout = { _ in checkout }
+
+        let early = await execute(.simulatorScenario(SimulatorScenarioArguments(scenario: nil, step: nil)),
+                                  with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertTrue(early.isError)
+        XCTAssertTrue(early.text.contains("simulator_prepare"), early.text)
+
+        _ = await execute(.simulatorPrepare(SimulatorPrepareArguments(deviceID: nil)),
+                          with: fixture.coordinator, sessionID: fixture.sessionID)
+        let missing = await execute(.simulatorScenario(SimulatorScenarioArguments(scenario: nil, step: nil)),
+                                    with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertTrue(missing.isError)
+        XCTAssertTrue(missing.text.contains(".threading/scenarios.json"), missing.text)
+
+        try Data(SimulatorScenarioGuide.example.utf8).write(to: checkout.appendingPathComponent(".threading/scenarios.json"))
+        let listed = await execute(.simulatorScenario(SimulatorScenarioArguments(scenario: nil, step: nil)),
+                                   with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertFalse(listed.isError, listed.text)
+        XCTAssertTrue(listed.text.contains(#""id" : "order/delivery""#), listed.text)
+        XCTAssertTrue(listed.text.contains(#""device_platforms" : ["#), listed.text)
+
+        let opened = await execute(.simulatorScenario(SimulatorScenarioArguments(scenario: "order/delivery", step: 2)),
+                                   with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertFalse(opened.isError, opened.text)
+        XCTAssertTrue(opened.text.contains(#""step_title" : "Courier on the way""#), opened.text)
+        let stepped = await execute(.simulatorScenario(SimulatorScenarioArguments(scenario: nil, step: 3)),
+                                    with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertFalse(stepped.isError, stepped.text)
+        let state = await fixture.control.snapshot()
+        XCTAssertEqual(state.appLaunches, [.iOS(bundleIdentifier: "com.example.shop", arguments: ["-scene", "order", "-step", "0"])])
+        XCTAssertEqual(state.links.map(\.url.absoluteString), ["exampleshop://debug/step?n=2", "exampleshop://debug/step?n=3"])
+
+        let unknown = await execute(.simulatorScenario(SimulatorScenarioArguments(scenario: "nope", step: nil)),
+                                    with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertTrue(unknown.isError)
+        XCTAssertTrue(unknown.text.contains("nope"), unknown.text)
+    }
+
     private func execute(
         _ command: AgentCommand,
         with coordinator: AgentToolCoordinator,
@@ -393,6 +439,8 @@ private actor SimulatorAgentControlFake: SimulatorControlling {
         var prepares = 0
         var launch: Launch?
         var screenshots = 0
+        var appLaunches: [SimulatorAppLaunch] = []
+        var links: [SimulatorAppLink] = []
     }
 
     private var state = Snapshot()
@@ -437,6 +485,15 @@ private actor SimulatorAgentControlFake: SimulatorControlling {
     }
 
     func release(_ lease: SimulatorDeviceLease) async throws {}
+
+    func launchApp(_ launch: SimulatorAppLaunch, on deviceID: SimulatorDeviceID) async throws -> SimulatorLaunchReceipt {
+        state.appLaunches.append(launch)
+        return SimulatorLaunchReceipt(deviceID: deviceID, bundleIdentifier: "com.example.shop", processIdentifier: 7)
+    }
+
+    func openAppLink(_ link: SimulatorAppLink, on deviceID: SimulatorDeviceID) async throws {
+        state.links.append(link)
+    }
 
     private static let onePixelPNG =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/"

@@ -342,6 +342,17 @@
         }
       }
     },
+    "%1$@: %2$@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: %2$@"
+          }
+        }
+      }
+    },
     "%@\n\nYou keep a test credential for %@. Threading can stop asking about submissions there until you quit." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -878,6 +889,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ finns inte i din inloggningsskals-PATH. Installera det och försök igen."
+          }
+        }
+      }
+    },
+    "%@ is not installed on this device. Build and install it first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ är inte installerad på den här enheten. Bygg och installera den först."
           }
         }
       }
@@ -3185,6 +3207,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld källor lästa"
+          }
+        }
+      }
+    },
+    "%lld steps" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld steg"
           }
         }
       }
@@ -6742,6 +6775,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Justera rullhjulets rullhastighet"
+          }
+        }
+      }
+    },
+    "Adopt a device in the Simulator workspace first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg först till en enhet i simulatorarbetsytan."
           }
         }
       }
@@ -14971,6 +15015,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stäng presentatörsfönstret"
+          }
+        }
+      }
+    },
+    "Close Scenario" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stäng scenario"
           }
         }
       }
@@ -23275,6 +23330,17 @@
         }
       }
     },
+    "Example scenario file" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exempel på scenariofil"
+          }
+        }
+      }
+    },
     "Example — .threading/bluetooth.yaml" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23282,6 +23348,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Exempel — .threading/bluetooth.yaml"
+          }
+        }
+      }
+    },
+    "Example: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exempel: %@"
           }
         }
       }
@@ -31765,6 +31842,28 @@
         }
       }
     },
+    "Loaded %@: %lld scenarios, %lld with problems listed in the Scenarios menu." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läste in %@: %lld scenarier, %lld med problem som listas i menyn Scenarier."
+          }
+        }
+      }
+    },
+    "Loaded %@: %lld scenarios." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läste in %@: %lld scenarier."
+          }
+        }
+      }
+    },
     "Loaded extension “%@” and rendered “%@”." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34901,6 +35000,17 @@
         }
       }
     },
+    "Next Scenario Step" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nästa scenariosteg"
+          }
+        }
+      }
+    },
     "Next Step" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35491,6 +35601,17 @@
         }
       }
     },
+    "No device in this workspace can open “%@”." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen enhet i den här arbetsytan kan öppna ”%@”."
+          }
+        }
+      }
+    },
     "No devices" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36017,6 +36138,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ingen sparad konversation hittades, så detta kommer att börja från början."
+          }
+        }
+      }
+    },
+    "No scenario has the ID “%@”." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget scenario har id:t ”%@”."
+          }
+        }
+      }
+    },
+    "No scenario is open in this workspace." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget scenario är öppet i den här arbetsytan."
+          }
+        }
+      }
+    },
+    "No scenario opens on these devices" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget scenario öppnas på de här enheterna"
           }
         }
       }
@@ -38654,6 +38808,17 @@
         }
       }
     },
+    "Open a scenario with steps first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna först ett scenario med steg."
+          }
+        }
+      }
+    },
     "Open a window before I start" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39080,6 +39245,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppna inställningarna för Claude i Chrome"
+          }
+        }
+      }
+    },
+    "Open the app in a state from this project's scenarios" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna appen i ett läge från projektets scenarier"
           }
         }
       }
@@ -40639,6 +40815,17 @@
         }
       }
     },
+    "Play or Pause Scenario" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spela upp eller pausa scenario"
+          }
+        }
+      }
+    },
     "Playback" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41394,6 +41581,17 @@
         }
       }
     },
+    "Previous Scenario Step" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Föregående scenariosteg"
+          }
+        }
+      }
+    },
     "Previous Step" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41621,6 +41819,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Problem rapporterat från Threading"
+          }
+        }
+      }
+    },
+    "Problems in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Problem i %@"
           }
         }
       }
@@ -42157,6 +42366,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Prompten kopierades — klistra in den i en agentsession i det här projektet."
+          }
+        }
+      }
+    },
+    "Prompt copied. Paste it into an agent session in this project." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prompten kopierades. Klistra in den i en agentsession i det här projektet."
           }
         }
       }
@@ -43528,6 +43748,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Läser leverantör…"
+          }
+        }
+      }
+    },
+    "Reading the checkout…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läser utcheckningen…"
           }
         }
       }
@@ -48356,6 +48587,193 @@
         }
       }
     },
+    "Scenario %lld has an appearance other than light or dark." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenario %lld har ett utseende som varken är light eller dark."
+          }
+        }
+      }
+    },
+    "Scenario %lld has an unknown field: %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenario %lld har ett okänt fält: %@."
+          }
+        }
+      }
+    },
+    "Scenario %lld has step links, so apps.%@ needs a urlScheme." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenario %lld har steglänkar, så apps.%@ behöver ett urlScheme."
+          }
+        }
+      }
+    },
+    "Scenario %lld must be a JSON object." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenario %lld måste vara ett JSON-objekt."
+          }
+        }
+      }
+    },
+    "Scenario %lld needs 2–64 steps, each with a title. Every step after the first needs a link relative to the app's scheme, without spaces." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenario %lld behöver 2–64 steg med var sin titel. Varje steg efter det första behöver en länk relativ till appens schema, utan mellanslag."
+          }
+        }
+      }
+    },
+    "Scenario %lld needs a group and a title, and its group, title and variant must be short text without control characters." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenario %lld behöver en grupp och en titel, och dess grupp, titel och variant måste vara kort text utan styrtecken."
+          }
+        }
+      }
+    },
+    "Scenario %lld needs a launch for ios, android, or both, each for an app declared in apps." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenario %lld behöver en start för ios, android eller båda, var och en för en app som anges i apps."
+          }
+        }
+      }
+    },
+    "Scenario %lld needs an ID of 1–128 bytes using lowercase letters, numbers, dots, slashes, underscores, or hyphens." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenario %lld behöver ett id på 1–128 byte med gemener, siffror, punkter, snedstreck, understreck eller bindestreck."
+          }
+        }
+      }
+    },
+    "Scenario %lld repeats the ID “%@”." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenario %lld upprepar id:t ”%@”."
+          }
+        }
+      }
+    },
+    "Scenario %lld: launch.android must be at most 64 extras named with letters, numbers, dots, underscores, or hyphens, each text, true or false, or a whole number." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenario %lld: launch.android får ha högst 64 extras med namn av bokstäver, siffror, punkter, understreck eller bindestreck, och varje värde är text, true eller false, eller ett heltal."
+          }
+        }
+      }
+    },
+    "Scenario %lld: launch.ios must be at most 64 launch arguments of at most 4096 bytes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenario %lld: launch.ios får ha högst 64 startargument på högst 4096 byte."
+          }
+        }
+      }
+    },
+    "Scenario %lld: stepInterval must be between 0.5 and 30 seconds." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenario %lld: stepInterval måste vara mellan 0,5 och 30 sekunder."
+          }
+        }
+      }
+    },
+    "Scenario Help…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hjälp om scenarier…"
+          }
+        }
+      }
+    },
+    "Scenario file version must be %lld." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenariofilens version måste vara %lld."
+          }
+        }
+      }
+    },
+    "Scenarios" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenarier"
+          }
+        }
+      }
+    },
+    "Scenarios open your app in states it declares: a screen with sample data, a theme, a step in a flow. Threading starts the app on every device in the workspace with the scenario's launch arguments, and steps through a flow while the app runs so you see each transition. The app needs a debug-only way to read them; Copy Agent Prompt asks an agent to add it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenarier öppnar din app i lägen den själv anger: en skärm med exempeldata, ett tema, ett steg i ett flöde. Threading startar appen på varje enhet i arbetsytan med scenariots startargument och stegar genom ett flöde medan appen körs, så att du ser varje övergång. Appen behöver ett sätt att läsa dem som bara finns i debugbyggen; Kopiera agentprompt ber en agent att lägga till det."
+          }
+        }
+      }
+    },
+    "Scenarios…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenarier…"
+          }
+        }
+      }
+    },
     "Schedule" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -52830,6 +53248,17 @@
         }
       }
     },
+    "Simulator Scenarios…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorscenarier…"
+          }
+        }
+      }
+    },
     "Simulator control is unavailable." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54385,6 +54814,17 @@
         }
       }
     },
+    "Starting the app…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startar appen…"
+          }
+        }
+      }
+    },
     "Starting the tool listener" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54524,6 +54964,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Steg %lld / %lld"
+          }
+        }
+      }
+    },
+    "Step %lld does not exist; this scenario has steps 0–%lld." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steg %lld finns inte; det här scenariot har stegen 0–%lld."
+          }
+        }
+      }
+    },
+    "Step %lld of %lld: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steg %lld av %lld: %@"
           }
         }
       }
@@ -56302,6 +56764,17 @@
         }
       }
     },
+    "That device is not in this Simulator workspace." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den enheten finns inte i den här simulatorarbetsytan."
+          }
+        }
+      }
+    },
     "That did not work. Unlock this Mac and try again." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -57473,6 +57946,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Appen är inte tillgänglig."
+          }
+        }
+      }
+    },
+    "The apps field must declare an ios app with a bundleIdentifier, an android app with a package, or both. A urlScheme must be the app's own scheme, such as myapp." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fältet apps måste ange en ios-app med bundleIdentifier, en android-app med package, eller båda. Ett urlScheme måste vara appens eget schema, till exempel myapp."
           }
         }
       }
@@ -58730,6 +59214,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Filen kunde inte läsas som en bild."
+          }
+        }
+      }
+    },
+    "The file declares %lld scenarios; at most %lld are allowed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filen anger %lld scenarier; högst %lld är tillåtna."
           }
         }
       }
@@ -60602,6 +61097,72 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "De sparade utseendevalen kunde inte läsas."
+          }
+        }
+      }
+    },
+    "The scenario file could not be read: %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenariofilen kunde inte läsas: %@."
+          }
+        }
+      }
+    },
+    "The scenario file exceeds the 1 MiB limit." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenariofilen är större än gränsen på 1 MiB."
+          }
+        }
+      }
+    },
+    "The scenario file is not valid JSON: %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenariofilen är inte giltig JSON: %@."
+          }
+        }
+      }
+    },
+    "The scenario file must be a JSON object." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenariofilen måste vara ett JSON-objekt."
+          }
+        }
+      }
+    },
+    "The scenario file must be a regular file inside the checkout, not a symbolic link." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scenariofilen måste vara en vanlig fil i utcheckningen, inte en symbolisk länk."
+          }
+        }
+      }
+    },
+    "The scenarios field must be an array." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fältet scenarios måste vara en array."
           }
         }
       }
@@ -62786,6 +63347,17 @@
         }
       }
     },
+    "This Simulator tab belongs to a session without a checkout, so there is no file to read." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här simulatorfliken hör till en session utan utcheckning, så det finns ingen fil att läsa."
+          }
+        }
+      }
+    },
     "This Turn" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63079,6 +63651,17 @@
         }
       }
     },
+    "This checkout has no %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här utcheckningen har ingen %@."
+          }
+        }
+      }
+    },
     "This checkout's chats and terminals follow these unless they answer for themselves." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63218,6 +63801,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här kopian av Threading innehåller inte bakgrundsvärden."
+          }
+        }
+      }
+    },
+    "This device cannot run that request." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här enheten kan inte utföra den begäran."
           }
         }
       }
@@ -63857,6 +64451,17 @@
         }
       }
     },
+    "This scenario has no steps, so step %lld does not exist." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det här scenariot har inga steg, så steg %lld finns inte."
+          }
+        }
+      }
+    },
     "This script is no longer available in the active checkout." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63886,6 +64491,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här sessionen har haft spärrtid sedan %@, så Threading spenderar den inte på egen hand."
+          }
+        }
+      }
+    },
+    "This session has no checkout to read scenarios from." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här sessionen har ingen utcheckning att läsa scenarier från."
           }
         }
       }
@@ -67081,6 +67697,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Okänt fält i projektkonfigurationen: %@."
+          }
+        }
+      }
+    },
+    "Unknown scenario file field: %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Okänt fält i scenariofilen: %@."
           }
         }
       }

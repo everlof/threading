@@ -183,6 +183,29 @@ final class PaneNoticeTests: XCTestCase {
         }
     }
 
+    /// A title truncates like the sentence. It once kept its whole width, and a 260pt Simulator
+    /// pane's scenario band drew Back, Next and Play as one empty plate.
+    func testANarrowTitledBandTruncatesItsTitleRatherThanItsControls() throws {
+        let notice = PaneNoticeView(
+            tone: .informational,
+            title: "Order from cart to delivery, with every courier update",
+            message: "Step 2 of 4: Payment accepted",
+            actions: [PaneNoticeAction(title: "Back") {}, PaneNoticeAction(title: "Next") {}],
+            onDismiss: {}
+        )
+        host(notice, width: 260)
+
+        for button in notice.actionControls {
+            XCTAssertGreaterThanOrEqual(
+                button.frame.width, button.fittingSize.width - 0.5,
+                "\(button.title) was squeezed so the title could keep its words"
+            )
+        }
+        let title = try XCTUnwrap(notice.descendants.compactMap { $0 as? NSTextField }.first { $0.stringValue == notice.title })
+        XCTAssertLessThanOrEqual(title.convert(title.bounds, to: notice).maxX,
+                                 try XCTUnwrap(notice.actionControls.first).frame.minX)
+    }
+
     func testTheSentenceNeverRunsUnderTheControlsAnsweringIt() throws {
         let notice = PaneNoticeView(
             tone: .attention,

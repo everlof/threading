@@ -132,7 +132,9 @@ final class SimulatorWorkspaceViewController: NSViewController {
     init(
         state: SimulatorWorkspaceState,
         scenarioCheckout: @escaping @MainActor () -> URL? = { nil },
-        scenarioLoader: @escaping @Sendable (URL) async -> SimulatorScenarioCatalog = SimulatorScenarioController.loadDetached,
+        scenarioLoader: @escaping @Sendable (URL) async -> SimulatorScenarioCatalog = {
+            await SimulatorScenarioController.loadDetached($0)
+        },
         factory: @escaping (SimulatorDeviceID?) -> SimulatorPaneViewController
     ) {
         self.state = state
@@ -200,6 +202,7 @@ final class SimulatorWorkspaceViewController: NSViewController {
         guard compact != headerIsCompact else { return }
         headerIsCompact = compact
         refreshHeader()
+        refreshScenarioBand()
     }
 
     // MARK: - Membership
@@ -432,6 +435,12 @@ final class SimulatorWorkspaceViewController: NSViewController {
                 onChoose: { [weak self] in self?.remove(member.id) }
             ))]
         }
+        controller.workspaceOverflowMenu = { [weak self, weak controller] in
+            guard let self, self.headerIsCompact, self.scenarioCheckout() != nil else { return [] }
+            return [.item(ThemedMenuItem(title: L10n.string("Scenarios…"), onChoose: { [weak self, weak controller] in
+                self?.showScenarioMenu(from: controller?.workspaceActions)
+            }))]
+        }
         controller.workspaceLayoutMenu = { [weak self] in
             guard let self, self.state.members.count > 1 else { return [] }
             return SimulatorWorkspaceLayout.allCases.map { layout in
@@ -496,8 +505,9 @@ final class SimulatorWorkspaceViewController: NSViewController {
         selected.workspaceHeaderShowsLayout = showsLayout
         // A session with a checkout always offers Scenarios: with no file yet, the button opens
         // the help that sets one up, which is how a project finds out the feature exists.
+        // A narrow header keeps the device's name readable and offers Scenarios from its … menu.
         var leading: [NSView] = [deviceChip, addButton]
-        if scenarioCheckout() != nil { leading.append(scenarioButton) }
+        if scenarioCheckout() != nil, !headerIsCompact { leading.append(scenarioButton) }
         if showsLayout { leading.append(layoutChip) }
         let trailing = [selected.workspaceActions]
         if !headerRow.leadingViews.elementsEqual(leading, by: ===)
@@ -572,14 +582,15 @@ final class SimulatorWorkspaceViewController: NSViewController {
 extension SimulatorWorkspaceViewController {
     /// Reads the checkout's file again, then offers it: the scenarios the members can open, or the
     /// setup help when the checkout has no file yet.
-    func showScenarioMenu() {
+    /// `anchor` is where a narrow header's … menu stood; the Scenarios button otherwise.
+    func showScenarioMenu(from anchor: NSView? = nil) {
         Task { [weak self] in
             guard let self else { return }
             guard let catalog = await self.scenarios.reload(), catalog.fileExists else {
-                self.showScenarioHelp()
+                self.showScenarioHelp(from: anchor)
                 return
             }
-            self.presentScenarioMenu(catalog)
+            self.presentScenarioMenu(catalog, from: anchor)
         }
     }
 
@@ -609,7 +620,7 @@ extension SimulatorWorkspaceViewController {
         return .loaded(catalog.fileURL, scenarios: catalog.scenarios.count, problems: catalog.diagnostics.count)
     }
 
-    func showScenarioHelp() {
+    func showScenarioHelp(from anchor: NSView? = nil) {
         if let popover = scenarioHelpPopover, popover.isShown { popover.close() }
         let help = SimulatorScenarioHelpViewController(status: scenarioHelpStatus)
         help.onFileCreated = { [weak self] in self?.reloadScenarioHelp() }
@@ -619,7 +630,8 @@ extension SimulatorWorkspaceViewController {
         popover.initialFirstResponder = help.view
         popover.onClose = { [weak self] in self?.scenarioHelpPopover = nil }
         scenarioHelpPopover = popover
-        popover.show(relativeTo: scenarioButton.bounds, of: scenarioButton, preferredEdge: .maxY)
+        let source = scenarioAnchor(anchor)
+        popover.show(relativeTo: source.bounds, of: source, preferredEdge: .maxY)
         reloadScenarioHelp()
     }
 
@@ -666,7 +678,12 @@ extension SimulatorWorkspaceViewController {
         return order.map { ($0, members[$0] ?? []) }
     }
 
-    private func presentScenarioMenu(_ catalog: SimulatorScenarioCatalog) {
+    /// The Scenarios button while it stands in the header, else what the caller opened from.
+    private func scenarioAnchor(_ anchor: NSView?) -> NSView {
+        scenarioButton.window != nil ? scenarioButton : anchor ?? selectedSimulator.workspaceActions
+    }
+
+    private func presentScenarioMenu(_ catalog: SimulatorScenarioCatalog, from anchor: NSView?) {
         var entries = Self.scenarioEntries(scenarios.offeredScenarios, selectedID: scenarios.session?.scenario.id) {
             [weak self] scenario in self?.openScenario(scenario.id)
         }
@@ -679,11 +696,11 @@ extension SimulatorWorkspaceViewController {
             entries += catalog.diagnostics.map { .item(ThemedMenuItem(title: $0.message, help: $0.message, isEnabled: false)) }
         }
         entries += [.separator, .item(ThemedMenuItem(
-            title: L10n.string("Scenario Help…"), onChoose: { [weak self] in self?.showScenarioHelp() }
+            title: L10n.string("Scenario Help…"), onChoose: { [weak self] in self?.showScenarioHelp(from: anchor) }
         ))]
         menuSession = ThemedMenuPresenter.present(
             ThemedMenuPresentation(entries: entries, minimumWidth: Self.deviceMenuWidth),
-            from: scenarioButton, selectedEntryIndex: nil, onChoose: { _, item in item.onChoose?() },
+            from: scenarioAnchor(anchor), selectedEntryIndex: nil, onChoose: { _, item in item.onChoose?() },
             onDismiss: { [weak self] in self?.menuSession = nil }
         )
     }
@@ -752,10 +769,13 @@ extension SimulatorWorkspaceViewController {
             actions = [
                 PaneNoticeAction(title: L10n.string("Back")) { [weak self] in self?.scenarios.previous() },
                 PaneNoticeAction(title: L10n.string("Next")) { [weak self] in self?.scenarios.next() },
-                PaneNoticeAction(title: session.isPlaying ? L10n.string("Pause") : L10n.string("Play")) { [weak self] in
-                    self?.scenarios.togglePlay()
-                },
             ]
+            // A narrow pane keeps the two that move by hand; Play stays in the palette.
+            if !headerIsCompact {
+                actions.append(PaneNoticeAction(title: session.isPlaying ? L10n.string("Pause") : L10n.string("Play")) {
+                    [weak self] in self?.scenarios.togglePlay()
+                })
+            }
         } else if session.failure != nil {
             actions = [PaneNoticeAction(title: L10n.string("Try Again")) { [weak self] in self?.openScenario(scenario.id) }]
         }

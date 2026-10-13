@@ -234,6 +234,134 @@ final class SimulatorPaneRenderTests: XCTestCase {
         }
     }
 
+    /// The Scenarios button, the band on a step and after a refusal, and the setup help, where they
+    /// ship: in the right panel beside a conversation, light and dark, and at the narrowest pane.
+    func testRendersScenariosInTheWorkspace() throws {
+        let checkout = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scenario-render-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: checkout.appendingPathComponent(".threading"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: checkout) }
+        try Data(SimulatorScenarioGuide.example.utf8).write(to: checkout.appendingPathComponent(".threading/scenarios.json"))
+
+        let variants: [(String, NSAppearance.Name, CGFloat)] = [
+            ("light", .aqua, Render.panelWidth), ("dark", .darkAqua, Render.panelWidth), ("narrow", .aqua, 260),
+        ]
+        for (name, appearance, width) in variants {
+            AppThemePalette.set(.system)
+            let fixture = try makeFixture(appearance: appearance, deviceFrame: try makeDeviceFramePNG(),
+                                          panelWidth: width, scenarioCheckout: checkout)
+            defer { fixture.tearDown() }
+            let workspace = try XCTUnwrap(fixture.panel.currentSimulatorWorkspace)
+            eventually { workspace.simulators.allSatisfy { $0.frameImageForTesting != nil } }
+            let header = workspace.headerForTesting
+            let narrow = name == "narrow"
+            XCTAssertEqual(header.leadingViews.contains { $0 === workspace.scenarioButtonForTesting }, !narrow,
+                           "a narrow header keeps the device's name and offers Scenarios from its … menu")
+            if narrow {
+                let overflow = workspace.selectedSimulator.workspaceHeaderMenuEntries().compactMap(\.item).map(\.title)
+                XCTAssertTrue(overflow.contains(L10n.string("Scenarios…")), "\(overflow)")
+            }
+
+            try run {
+                _ = try await workspace.scenarios.open("order/delivery")
+                _ = try await workspace.scenarios.go(to: 1)
+            }
+            eventually { workspace.simulators.allSatisfy { $0.frameImageForTesting != nil } }
+            settle(fixture.window)
+            let band = try XCTUnwrap(workspace.scenarioBandForTesting)
+            XCTAssertEqual(band.title, "Order from cart to delivery")
+            XCTAssertTrue(band.message.contains("Payment accepted"), band.message)
+            XCTAssertEqual(band.actionControls.map(\.title),
+                           [L10n.string("Back"), L10n.string("Next")] + (narrow ? [] : [L10n.string("Play")]))
+            XCTAssertTrue(band.actionControls.allSatisfy(\.isEnabled))
+            for button in band.actionControls {
+                XCTAssertGreaterThanOrEqual(button.frame.width, button.fittingSize.width - 0.5,
+                                            "\(button.title) was squeezed at \(width) points")
+            }
+            // Window coordinates grow upward: "under" is a smaller y.
+            let canvas = workspace.canvasForTesting
+            let bandFrame = band.convert(band.bounds, to: nil)
+            XCTAssertLessThanOrEqual(bandFrame.maxY, header.convert(header.bounds, to: nil).minY,
+                                     "The band sits under the header.")
+            XCTAssertLessThanOrEqual(canvas.convert(canvas.bounds, to: nil).maxY, bandFrame.minY,
+                                     "The band pushes the devices down rather than covering them.")
+            for control in band.actionControls + [band.dismissControl].compactMap({ $0 }) {
+                XCTAssertTrue(band.bounds.contains(control.convert(control.bounds, to: band)),
+                              "A band control escaped the band at \(width) points.")
+            }
+            for view in header.leadingViews + header.trailingViews {
+                XCTAssertTrue(header.bounds.contains(view.convert(view.bounds, to: header)),
+                              "A header control escaped the header at \(width) points.")
+            }
+            try write(fixture.window, "simulator-scenarios-step-\(name)")
+
+            if name == "light" {
+                try run { _ = try await workspace.scenarios.go(to: 0) }
+                settle(fixture.window)
+                XCTAssertEqual(workspace.scenarioBandForTesting?.actionControls.map(\.isEnabled), [false, true, true],
+                               "Back rests at the first step")
+                try run {
+                    await fixture.control.refuseLaunches(.applicationNotInstalled("com.example.shop"))
+                    _ = try await workspace.scenarios.open("home/empty")
+                }
+                settle(fixture.window)
+                let failure = try XCTUnwrap(workspace.scenarioBandForTesting)
+                XCTAssertTrue(failure.message.contains("com.example.shop"), failure.message)
+                XCTAssertEqual(failure.actionControls.map(\.title), [L10n.string("Try Again")])
+                try write(fixture.window, "simulator-scenarios-failure-light")
+            }
+        }
+
+        for (name, appearance) in Render.appearances {
+            for (state, status) in [
+                ("missing", SimulatorScenarioHelpViewController.Status.missing(checkout.appendingPathComponent(".threading/scenarios.json"))),
+                ("loaded", .loaded(checkout.appendingPathComponent(".threading/scenarios.json"), scenarios: 3, problems: 0)),
+            ] {
+                let help = SimulatorScenarioHelpViewController(status: status)
+                let drawing = try XCTUnwrap(NSAppearance(named: appearance))
+                help.view.appearance = drawing
+                help.view.layoutSubtreeIfNeeded()
+                help.view.setFrameSize(help.view.fittingSize)
+                help.view.layoutSubtreeIfNeeded()
+                // The popover draws the panel's ground; stand in for it so the picture shows the
+                // text on the surface it ships on rather than on a transparent sheet.
+                let ground = NSView(frame: help.view.bounds)
+                ground.wantsLayer = true
+                ground.appearance = drawing
+                drawing.performAsCurrentDrawingAppearance {
+                    ground.layer?.backgroundColor = Design.Surface.floating.cgColor
+                }
+                ground.addSubview(help.view)
+                AppThemeRefresh.repaint(help.view)
+                let bitmap = try XCTUnwrap(ground.bitmapImageRepForCachingDisplay(in: ground.bounds))
+                ground.cacheDisplay(in: ground.bounds, to: bitmap)
+                try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
+                    to: Render.directory.appendingPathComponent("simulator-scenarios-help-\(state)-\(name).png"))
+            }
+        }
+    }
+
+    /// Runs async work to completion while the run loop turns, as the rest of these synchronous
+    /// render fixtures do, so the device stream keeps delivering frames meanwhile.
+    private func run(_ body: @escaping @MainActor () async throws -> Void) throws {
+        var outcome: Result<Void, Error>?
+        Task { @MainActor in
+            do { try await body(); outcome = .success(()) } catch { outcome = .failure(error) }
+        }
+        let deadline = Date().addingTimeInterval(5)
+        while outcome == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        try XCTUnwrap(outcome, "the work did not finish").get()
+    }
+
+    private func write(_ window: NSWindow, _ name: String) throws {
+        let root = try XCTUnwrap(window.contentView)
+        let bitmap = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+        root.cacheDisplay(in: root.bounds, to: bitmap)
+        try FileManager.default.createDirectory(at: Render.directory, withIntermediateDirectories: true)
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
+            to: Render.directory.appendingPathComponent("\(name).png"))
+    }
+
     private func renderWorkspaceLayouts() throws {
         let variants: [(String, AppTheme, NSAppearance.Name, Int, Bool, Bool, SimulatorWorkspaceLayout)] = [
             ("portraits-light", .system, .aqua, 2, false, false, .automatic),
@@ -1023,7 +1151,8 @@ final class SimulatorPaneRenderTests: XCTestCase {
         alternateFrame: Data? = nil,
         panelWidth: CGFloat = Render.panelWidth,
         androidSecond: Bool = false,
-        docked: Bool = false
+        docked: Bool = false,
+        scenarioCheckout: URL? = nil
     ) throws -> SimulatorPaneRenderFixture {
         let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
         let device = SimulatorDevice(
@@ -1087,6 +1216,7 @@ final class SimulatorPaneRenderTests: XCTestCase {
             simulatorControl: control,
             simulatorStreamCoordinator: streams
         )
+        if let scenarioCheckout { panel.simulatorScenarioCheckout = { _ in scenarioCheckout } }
         let split = SidebarSplitViewController()
         let dock = docked ? WorkspaceDockController(base: split, conversation: conversation, display: panel) : nil
         let conversationItem = NSSplitViewItem(viewController: dock?.conversationBranch ?? conversation)
@@ -1521,6 +1651,15 @@ private actor PhysicalDevicePaneRenderControl: PhysicalDeviceControlling {
 private actor SimulatorPaneRenderControl: SimulatorControlling {
     private var unavailable: Set<SimulatorDeviceID> = []
     func makeUnavailable(_ id: SimulatorDeviceID) { unavailable.insert(id) }
+    private var launchRefusal: SimulatorControlError?
+    func refuseLaunches(_ error: SimulatorControlError?) { launchRefusal = error }
+
+    func launchApp(_ launch: SimulatorAppLaunch, on deviceID: SimulatorDeviceID) async throws -> SimulatorLaunchReceipt {
+        if let launchRefusal { throw launchRefusal }
+        return SimulatorLaunchReceipt(deviceID: deviceID, bundleIdentifier: "com.example.shop", processIdentifier: nil)
+    }
+
+    func openAppLink(_ link: SimulatorAppLink, on deviceID: SimulatorDeviceID) async throws {}
     private let device: SimulatorDevice
     private let additionalDevices: [SimulatorDevice]
     private let frame: Data

@@ -3329,6 +3329,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             guard mainWindowController?.commandSimulator?.canAnnotateNotes == true else {
                 return .unavailable(L10n.string("Show an adopted Simulator first."))
             }
+        case AppCommands.ID.showSimulatorScenarios:
+            guard mainWindowController?.commandSimulatorWorkspace != nil else {
+                return .unavailable(L10n.string("Show an adopted Simulator first."))
+            }
+        case AppCommands.ID.nextSimulatorScenarioStep, AppCommands.ID.previousSimulatorScenarioStep,
+             AppCommands.ID.playSimulatorScenario:
+            guard mainWindowController?.commandSimulatorWorkspace?.scenarios.session?.scenario.hasSteps == true else {
+                return .unavailable(L10n.string("Open a scenario with steps first."))
+            }
         case AppCommands.ID.saveIPhoneScreenshot, AppCommands.ID.copyIPhoneScreenshot,
              AppCommands.ID.toggleIPhoneRecording, AppCommands.ID.toggleIPhoneTouches,
              AppCommands.ID.toggleIPhonePresenter:
@@ -3693,6 +3702,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             mainWindowController?.commandSimulator?.setAnnotatingNotes(true)
         case AppCommands.ID.disableSimulatorAnnotations:
             mainWindowController?.commandSimulator?.setAnnotatingNotes(false)
+        case AppCommands.ID.showSimulatorScenarios:
+            mainWindowController?.commandSimulatorWorkspace?.showScenarioMenu()
+        case AppCommands.ID.nextSimulatorScenarioStep:
+            mainWindowController?.commandSimulatorWorkspace?.scenarios.next()
+        case AppCommands.ID.previousSimulatorScenarioStep:
+            mainWindowController?.commandSimulatorWorkspace?.scenarios.previous()
+        case AppCommands.ID.playSimulatorScenario:
+            mainWindowController?.commandSimulatorWorkspace?.scenarios.togglePlay()
         case AppCommands.ID.saveIPhoneScreenshot:
             mainWindowController?.commandRealDevice?.saveSnapshot()
         case AppCommands.ID.copyIPhoneScreenshot:
