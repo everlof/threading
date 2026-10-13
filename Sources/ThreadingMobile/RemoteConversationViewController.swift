@@ -367,7 +367,6 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             submissionLabel,
             queuedMessagesButton,
             deliveryButton,
-            settingsView,
             composerShell,
         ].forEach(bottomStack.addArrangedSubview)
 
@@ -571,6 +570,9 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         composerContentStack.spacing = MobileDesign.Spacing.tight
         composerContentStack.addArrangedSubview(attachmentStrip)
         composerContentStack.addArrangedSubview(composerStack)
+        // Settings qualify the prompt, so they live inside its panel on one quiet line rather
+        // than as a block of controls between the transcript and the text field.
+        composerContentStack.addArrangedSubview(settingsView)
         attachmentStrip.isHidden = true
         composerPanel.addSubview(composerContentStack)
         composerLeadingConstraint = composerPanel.leadingAnchor.constraint(

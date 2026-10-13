@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import XCTest
 @testable import Threading
 
@@ -396,6 +397,192 @@ final class RealDevicePaneTests: HostedStoreTestCase {
         XCTAssertEqual(restoredCounts.available, 0)
     }
 
+    func testScreenshotSavesDisplayedFrameWithoutGrantingInput() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let control = RealDeviceControlFake(frame: try captureFrame())
+        var saved: URL?
+        let controller = RealDevicePaneViewController(control: control, captureDirectory: directory,
+            revealCapture: { saved = $0 })
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.canCapture }
+        XCTAssertEqual(controller.captureButtonForTesting.accessibilityTitle(), L10n.string("Save Screenshot"))
+        XCTAssertTrue(controller.captureButtonForTesting.performPrimaryAction())
+        try await eventually { saved != nil }
+        let image = try XCTUnwrap(NSImage(contentsOf: XCTUnwrap(saved)))
+        XCTAssertEqual(image.size, NSSize(width: 48, height: 64))
+        let inputs = await control.inputs()
+        XCTAssertTrue(inputs.isEmpty)
+        XCTAssertEqual(controller.screenInteractionStateForTesting, .unavailable)
+    }
+
+    func testRecordingSurvivesHiddenPaneAndFinishesAPlayableMovie() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let control = RealDeviceControlFake(support: .available(supportedMediaFeatures: 140),
+            frame: try captureFrame(), interval: .milliseconds(40))
+        var saved: URL?
+        let controller = RealDevicePaneViewController(control: control,
+            inputAuthorizer: PhysicalDeviceInputAuthorizerFake(approval: true),
+            captureDirectory: directory, revealCapture: { saved = $0 })
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.canRecord && controller.controlSupportForTesting != nil }
+        XCTAssertTrue(controller.controlButtonForTesting.performPrimaryAction())
+        XCTAssertTrue(controller.recordButtonForTesting.performPrimaryAction())
+        try await eventually { controller.recordingHasStartedForTesting }
+        XCTAssertFalse(controller.recordingBadgeForTesting.isHidden)
+        XCTAssertTrue(controller.screenViewForTesting.isRecording)
+        controller.setPresented(false)
+        XCTAssertEqual(controller.screenInteractionStateForTesting, .unavailable)
+        let before = await control.counts().screenshots
+        try await eventually { await control.counts().screenshots >= before + 3 }
+        controller.stopRecording()
+        try await eventually { controller.recordingHasFinishedForTesting }
+        XCTAssertTrue(controller.recordingBadgeForTesting.isHidden)
+        let asset = AVURLAsset(url: try XCTUnwrap(saved))
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let size = try await XCTUnwrap(tracks.first).load(.naturalSize)
+        XCTAssertEqual(size, CGSize(width: 48, height: 64))
+        let after = await control.counts().screenshots
+        try await Task.sleep(for: .milliseconds(160))
+        let stopped = await control.counts().screenshots
+        XCTAssertEqual(after, stopped)
+    }
+
+    func testPresenterKeepsPreviewButCannotKeepInputConsentWhenPaneHides() async throws {
+        let control = RealDeviceControlFake(support: .available(supportedMediaFeatures: 140),
+            frame: try captureFrame(), interval: .milliseconds(40))
+        var presenter: SimulatorPresenterWindowController?
+        let controller = RealDevicePaneViewController(control: control,
+            inputAuthorizer: PhysicalDeviceInputAuthorizerFake(approval: true),
+            showPresenter: { presenter = $0 })
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.canCapture && controller.controlSupportForTesting != nil }
+        XCTAssertTrue(controller.controlButtonForTesting.performPrimaryAction())
+        XCTAssertTrue(controller.presenterButtonForTesting.performPrimaryAction())
+        let mirror = try XCTUnwrap(presenter).screenView
+        XCTAssertEqual(mirror.image?.size, controller.frameImageForTesting?.size)
+        controller.setPresented(false)
+        XCTAssertEqual(mirror.interactionState, .unavailable)
+        mirror.onTap?(CGPoint(x: 0.5, y: 0.5))
+        let inputs = await control.inputs()
+        XCTAssertTrue(inputs.isEmpty)
+        let before = await control.counts().screenshots
+        try await eventually { await control.counts().screenshots > before }
+        controller.togglePresenterWindow()
+        let closed = await control.counts().screenshots
+        try await Task.sleep(for: .milliseconds(160))
+        let after = await control.counts().screenshots
+        XCTAssertEqual(closed, after)
+    }
+
+    func testTouchOverlayOnlyDrawsAuthorizedInputAndClearsOnRevocation() async throws {
+        let suite = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = SimulatorTouchPreferences(defaults: defaults)
+        preferences.showsLiveTouches = true
+        let controller = RealDevicePaneViewController(
+            control: RealDeviceControlFake(support: .available(supportedMediaFeatures: 140)),
+            inputAuthorizer: PhysicalDeviceInputAuthorizerFake(approval: true), touchPreferences: preferences)
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.canCapture && controller.controlSupportForTesting != nil }
+        let screen = controller.screenViewForTesting
+        screen.onTap?(CGPoint(x: 0.2, y: 0.3))
+        XCTAssertNil(screen.touchIndicators)
+        XCTAssertTrue(controller.controlButtonForTesting.performPrimaryAction())
+        screen.onTap?(CGPoint(x: 0.2, y: 0.3))
+        XCTAssertEqual(screen.touchIndicators?.ripples.first?.point, CGPoint(x: 0.2, y: 0.3))
+        controller.setPresented(false)
+        XCTAssertNil(screen.touchIndicators)
+    }
+
+    func testCaptureFailureFinishesRecordingAndDisablesNewCapture() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let control = RealDeviceControlFake(frame: try captureFrame(), interval: .milliseconds(40))
+        var saved: URL?
+        let controller = RealDevicePaneViewController(control: control, captureDirectory: directory,
+            revealCapture: { saved = $0 })
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.canRecord }
+        controller.toggleRecording()
+        try await eventually { controller.recordingHasStartedForTesting }
+        await control.failScreenshot()
+        try await eventually { controller.recordingHasFinishedForTesting && !controller.canCapture }
+        XCTAssertNotNil(saved)
+        XCTAssertFalse(controller.recordButtonForTesting.isEnabled)
+        XCTAssertFalse(controller.captureButtonForTesting.isEnabled)
+    }
+
+    func testImmediateStopFinalizesStartupWithoutLeavingRecordingActive() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var saved: [URL] = []
+        let controller = RealDevicePaneViewController(control: RealDeviceControlFake(frame: try captureFrame()),
+            captureDirectory: directory, revealCapture: { saved.append($0) })
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.canRecord }
+        for count in 1...3 {
+            controller.toggleRecording()
+            controller.stopRecording()
+            try await eventually { controller.recordingHasFinishedForTesting }
+            XCTAssertEqual(saved.count, count)
+            XCTAssertTrue(controller.canRecord)
+            XCTAssertFalse(controller.screenViewForTesting.isRecording)
+        }
+    }
+
+    func testRotationFinishesMovieAndRevokesControl() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let control = RealDeviceControlFake(support: .available(supportedMediaFeatures: 140),
+            frame: try captureFrame(), interval: .milliseconds(40))
+        var saved: URL?
+        let controller = RealDevicePaneViewController(control: control,
+            inputAuthorizer: PhysicalDeviceInputAuthorizerFake(approval: true),
+            captureDirectory: directory, revealCapture: { saved = $0 })
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.canRecord && controller.controlSupportForTesting != nil }
+        XCTAssertTrue(controller.controlButtonForTesting.performPrimaryAction())
+        controller.toggleRecording()
+        try await eventually { controller.recordingHasStartedForTesting }
+        await control.replaceFrame(try captureFrame(width: 64, height: 48))
+        try await eventually { controller.frameImageForTesting?.size == NSSize(width: 64, height: 48) }
+        try await eventually { controller.recordingHasFinishedForTesting }
+        XCTAssertEqual(controller.screenInteractionStateForTesting, .unavailable)
+        let asset = AVURLAsset(url: try XCTUnwrap(saved))
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let size = try await XCTUnwrap(tracks.first).load(.naturalSize)
+        XCTAssertEqual(size, CGSize(width: 48, height: 64), "A new orientation must not be stretched into the old movie")
+    }
+
+    private func captureFrame(width: Int = 48, height: Int = 64) throws -> Data {
+        let rep = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        return try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+    }
+
     private func eventually(
         timeout: Duration = .seconds(3),
         _ condition: @MainActor () async -> Bool
@@ -424,6 +611,8 @@ private let physicalDeviceTestFixture = PhysicalDevice(
 )
 
 private actor RealDeviceControlFake: PhysicalDeviceControlling {
+    nonisolated let frameInterval: Duration
+    private var frame: Data?
     nonisolated let supportsLiveTouch: Bool
     nonisolated let supportsKeyboardInput: Bool
     struct Counts: Sendable {
@@ -447,8 +636,12 @@ private actor RealDeviceControlFake: PhysicalDeviceControlling {
         preparationFailure: PhysicalDeviceControlError? = nil,
         screenshotFailure: PhysicalDeviceControlError? = nil,
         liveTouch: Bool = false,
-        keyboardInput: Bool = false
+        keyboardInput: Bool = false,
+        frame: Data? = nil,
+        interval: Duration = .seconds(1)
     ) {
+        self.frame = frame
+        frameInterval = interval
         self.failure = failure
         self.support = support
         self.preparedSupport = preparedSupport
@@ -457,6 +650,10 @@ private actor RealDeviceControlFake: PhysicalDeviceControlling {
         supportsLiveTouch = liveTouch
         supportsKeyboardInput = keyboardInput
     }
+
+    func replaceFrame(_ frame: Data) { self.frame = frame }
+
+    func failScreenshot() { screenshotFailure = .invalidScreenshot }
 
     func installTooling() {
         screenshotFailure = nil
@@ -489,7 +686,7 @@ private actor RealDeviceControlFake: PhysicalDeviceControlling {
     func screenshot(of device: PhysicalDevice) async throws -> Data {
         callCounts.screenshots += 1
         if let screenshotFailure { throw screenshotFailure }
-        return Data(base64Encoded: Self.onePixelPNG)!
+        return frame ?? Data(base64Encoded: Self.onePixelPNG)!
     }
 
     private static let onePixelPNG =

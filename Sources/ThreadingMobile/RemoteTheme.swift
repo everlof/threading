@@ -36,6 +36,10 @@ enum MobileDesign {
         /// The icon-only chrome control: the dashboard's toolbar circles and the plus that
         /// starts a chat in a project. One size keeps them reading as the same kind of thing.
         static let compactControl: CGFloat = 34
+        /// A composer setting chip beneath the prompt. Deliberately below the 44-point target:
+        /// the chips are wide, sit on their own line clear of the prompt's actions, and a full
+        /// target per chip made the settings taller than the text field they qualify.
+        static let composerSettingChip: CGFloat = 28
         /// The mark inside a compact glyph control — the paperclip, the draft's one-glyph menus —
         /// as the point size of the subheadline face they draw in. Read when asked rather than
         /// stored: it follows the reader's text size.

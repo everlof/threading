@@ -7533,6 +7533,17 @@
         }
       }
     },
+    "All packets" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alla paket"
+          }
+        }
+      }
+    },
     "All persistent access" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8788,6 +8799,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Applogg"
+          }
+        }
+      }
+    },
+    "App packet definitions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Appens paketdefinitioner"
+          }
+        }
+      }
+    },
+    "App packets only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Endast apppaket"
           }
         }
       }
@@ -17460,6 +17493,17 @@
         }
       }
     },
+    "Copy Agent Prompt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera agentprompt"
+          }
+        }
+      }
+    },
     "Copy Annotated Screenshot" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17566,6 +17610,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kopiera detaljer"
+          }
+        }
+      }
+    },
+    "Copy Example" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera exempel"
           }
         }
       }
@@ -17753,6 +17808,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kopiera git apply-kommando"
+          }
+        }
+      }
+    },
+    "Copy iPhone Screenshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy iPhone Screenshot"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera iPhone-skärmbild"
           }
         }
       }
@@ -17955,6 +18027,23 @@
         }
       }
     },
+    "Could not copy the screenshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not copy the screenshot"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte kopiera skärmbilden"
+          }
+        }
+      }
+    },
     "Could not create managed workspace" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17962,6 +18051,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte skapa hanterad arbetsyta"
+          }
+        }
+      }
+    },
+    "Could not create the file: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte skapa filen: %@"
           }
         }
       }
@@ -18106,6 +18206,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte återställa"
+          }
+        }
+      }
+    },
+    "Could not save recording" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not save recording"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte spara inspelningen"
           }
         }
       }
@@ -18706,6 +18823,17 @@
         }
       }
     },
+    "Create File" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skapa fil"
+          }
+        }
+      }
+    },
     "Create New Folder…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19005,6 +19133,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skapad"
+          }
+        }
+      }
+    },
+    "Created from the example. Edit it to match your app." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skapad från exemplet. Redigera den så att den passar din app."
           }
         }
       }
@@ -23059,6 +23198,17 @@
         }
       }
     },
+    "Example copied." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exemplet kopierades."
+          }
+        }
+      }
+    },
     "Example extension" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23066,6 +23216,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Exempeltillägg"
+          }
+        }
+      }
+    },
+    "Example packet definitions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exempel på paketdefinitioner"
+          }
+        }
+      }
+    },
+    "Example — .threading/bluetooth.yaml" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exempel — .threading/bluetooth.yaml"
           }
         }
       }
@@ -25686,6 +25858,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fullt appägda dropdownar: markering, undertitel, avgränsare, inaktiverat tillstånd och tangentbordsnavigering."
+          }
+        }
+      }
+    },
+    "Fully decoded only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Endast helt avkodade"
           }
         }
       }
@@ -31494,6 +31677,17 @@
         }
       }
     },
+    "Loaded %@ — %d characteristics, %d types." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läste in %1$@ — %2$d egenskaper, %3$d typer."
+          }
+        }
+      }
+    },
     "Loaded extension “%@” and rendered “%@”." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36350,6 +36544,17 @@
         }
       }
     },
+    "Not created yet. Threading looks for %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte skapad än. Threading letar efter %@"
+          }
+        }
+      }
+    },
     "Not currently reachable: Tailscale is not connected." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38141,6 +38346,17 @@
         }
       }
     },
+    "Open File" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna fil"
+          }
+        }
+      }
+    },
     "Open Git Review (⇧⌘R)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38671,6 +38887,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppna eller stäng simulatorns presentatörsfönster"
+          }
+        }
+      }
+    },
+    "Open or Close iPhone Presenter Window" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open or Close iPhone Presenter Window"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna eller stäng iPhone-presentationsfönster"
           }
         }
       }
@@ -39388,6 +39621,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Paket"
+          }
+        }
+      }
+    },
+    "Packet definitions: %@ %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paketdefinitioner: %1$@ %2$@"
+          }
+        }
+      }
+    },
+    "Packet definitions: %@ · %d characteristics, %d types" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paketdefinitioner: %1$@ · %2$d egenskaper, %3$d typer"
+          }
+        }
+      }
+    },
+    "Packet definitions: none (add %@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paketdefinitioner: inga (lägg till %@)"
+          }
+        }
+      }
+    },
+    "Packet definitions: this tab has no project checkout" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paketdefinitioner: fliken har ingen projektutcheckning"
           }
         }
       }
@@ -41774,6 +42051,17 @@
         }
       }
     },
+    "Prompt copied — paste it into an agent session in this project." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prompten kopierades — klistra in den i en agentsession i det här projektet."
+          }
+        }
+      }
+    },
     "Prompt text" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43675,6 +43963,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spara den här bilden som baslinjens nya godkända version"
+          }
+        }
+      }
+    },
+    "Record the iPhone preview with Threading touches; frame rate follows the connection" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Record the iPhone preview with Threading touches; frame rate follows the connection"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spela in iPhone-förhandsvisningen med tryck från Threading; bildfrekvensen följer anslutningen"
           }
         }
       }
@@ -47510,6 +47815,17 @@
         }
       }
     },
+    "Save a screenshot of the device (right-click for options)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara en skärmbild av enheten (högerklicka för alternativ)"
+          }
+        }
+      }
+    },
     "Save a snapshot of the device (right-click for options)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -47594,6 +47910,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spara ändringar i %@?"
+          }
+        }
+      }
+    },
+    "Save iPhone Screenshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save iPhone Screenshot"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara iPhone-skärmbild"
           }
         }
       }
@@ -51067,6 +51400,23 @@
         }
       }
     },
+    "Show an iPhone preview first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show an iPhone preview first."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa en iPhone-förhandsvisning först."
+          }
+        }
+      }
+    },
     "Show attachments from" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51365,6 +51715,23 @@
         }
       }
     },
+    "Show or Hide iPhone Touches" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show or Hide iPhone Touches"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa eller dölj iPhone-tryck"
+          }
+        }
+      }
+    },
     "Show or Hide the Display Panel" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51592,6 +51959,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa sessionens konfiguration och tokenanvändning"
+          }
+        }
+      }
+    },
+    "Show touches sent through Threading (right-click for style)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa tryck skickade via Threading (högerklicka för stil)"
           }
         }
       }
@@ -53672,6 +54050,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Starta eller stoppa simulatorinspelning"
+          }
+        }
+      }
+    },
+    "Start or Stop iPhone Recording" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start or Stop iPhone Recording"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starta eller stoppa iPhone-inspelning"
           }
         }
       }
@@ -62138,6 +62533,17 @@
         }
       }
     },
+    "This Device Logs tab is not attached to a project checkout, so there is no file to read. Open Device Logs from a project's session." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här enhetsloggfliken hör inte till någon projektutcheckning, så det finns ingen fil att läsa. Öppna enhetsloggar från en session i ett projekt."
+          }
+        }
+      }
+    },
     "This Mac" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -64192,6 +64598,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading skapade den här mappen för chattar som inte handlar om något projekt. Det är ett vanligt git-arkiv, så inget du skriver här går förlorat — och inget utanför den hör till Threading. Du kan flytta den, eller ange en annan plats för Threading, i Inställningar."
+          }
+        }
+      }
+    },
+    "Threading decodes Bluetooth down to ATT: which attribute was written or notified, and its raw bytes. What those bytes mean is your app's protocol, so your project describes it in a small YAML file and every matching row shows decoded fields instead of hex." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading avkodar Bluetooth ner till ATT: vilket attribut som skrevs eller notifierades, och dess råa byte. Vad de byten betyder är din apps protokoll, så ditt projekt beskriver det i en liten YAML-fil och varje matchande rad visar avkodade fält i stället för hex."
           }
         }
       }
@@ -72816,6 +73233,28 @@
         }
       }
     },
+    "is larger than %d KiB" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "är större än %d KiB"
+          }
+        }
+      }
+    },
+    "is not UTF-8 text" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "är inte UTF-8-text"
+          }
+        }
+      }
+    },
     "joined %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -73529,6 +73968,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ingen operationer"
+          }
+        }
+      }
+    },
+    "no packet definitions loaded — see ?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "inga paketdefinitioner inlästa — se ?"
+          }
+        }
+      }
+    },
+    "no packets matched a defined characteristic yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "inga paket har matchat en definierad egenskap än"
           }
         }
       }

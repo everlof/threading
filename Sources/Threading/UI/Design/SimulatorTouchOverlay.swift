@@ -2,15 +2,15 @@ import AppKit
 
 /// What to draw for input right now: fading tap ripples and the live contact with its recent trail.
 /// A plain value so the live pane overlay and the video recorder draw the exact same thing.
-struct SimulatorTouchIndicators: Equatable {
-    struct Ripple: Equatable {
+struct SimulatorTouchIndicators: Equatable, Sendable {
+    struct Ripple: Equatable, Sendable {
         /// Normalized device point, top-left origin (the tap space).
         let point: CGPoint
         /// 0 at the tap, 1 as it finishes fading.
         let progress: Double
     }
 
-    struct Contact: Equatable {
+    struct Contact: Equatable, Sendable {
         let point: CGPoint
         /// Recent points of the live drag, oldest first.
         let trail: [CGPoint]
@@ -29,6 +29,9 @@ final class SimulatorTouchOverlayModel {
     static let rippleDuration: TimeInterval = 0.45
     static let trailDuration: TimeInterval = 0.35
 
+    private static let maximumPoints = 128
+    private static let maximumRipples = 32
+
     private struct TimedPoint { let point: CGPoint; let time: TimeInterval }
     private var ripples: [(point: CGPoint, bornAt: TimeInterval)] = []
     private var trail: [TimedPoint] = []
@@ -36,7 +39,16 @@ final class SimulatorTouchOverlayModel {
 
     private func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
 
-    func tap(at point: CGPoint) { ripples.append((point, now())) }
+    func tap(at point: CGPoint) {
+        ripples.append((point, now()))
+        if ripples.count > Self.maximumRipples { ripples.removeFirst(ripples.count - Self.maximumRipples) }
+    }
+
+    func reset() {
+        ripples.removeAll(keepingCapacity: true)
+        trail.removeAll(keepingCapacity: true)
+        contactActive = false
+    }
 
     func contactBegan(at point: CGPoint) {
         contactActive = true
@@ -45,14 +57,20 @@ final class SimulatorTouchOverlayModel {
 
     func contactMoved(to point: CGPoint) {
         guard contactActive else { return }
-        trail.append(TimedPoint(point: point, time: now()))
+        let time = now()
+        trail.removeAll { time - $0.time >= Self.trailDuration }
+        trail.append(TimedPoint(point: point, time: time))
+        if trail.count > Self.maximumPoints { trail.removeFirst(trail.count - Self.maximumPoints) }
     }
 
     func contactEnded(at point: CGPoint) {
         guard contactActive else { return }
         contactActive = false
-        trail.append(TimedPoint(point: point, time: now()))
-        ripples.append((point, now()))
+        let time = now()
+        trail.removeAll { time - $0.time >= Self.trailDuration }
+        trail.append(TimedPoint(point: point, time: time))
+        if trail.count > Self.maximumPoints { trail.removeFirst(trail.count - Self.maximumPoints) }
+        tap(at: point)
     }
 
     /// Whether anything is still animating, so the pane knows when to stop ticking.
@@ -174,8 +192,23 @@ extension Design {
 /// Every measurement is a fraction of the screen's short side rather than a point size. The live
 /// pane draws a device a few hundred points wide while the recorder draws the full-resolution
 /// framebuffer, and fixed radii made a finger in the movie a third of the size it was on screen.
-@MainActor
 enum SimulatorTouchMarks {
+    /// Resolve theme ink once on main; the movie worker receives immutable colors.
+    struct Ink: Sendable {
+        let color: CGColor
+        let edge: CGColor
+        let contactFillAlpha: CGFloat
+        let trailAlpha: CGFloat
+        let edgeAlpha: CGFloat
+
+        @MainActor init(style: SimulatorTouchStyle) {
+            color = Design.SimulatorTouch.color(style.color).cgColor
+            edge = Design.SimulatorTouch.edge(style.color).cgColor
+            contactFillAlpha = Design.SimulatorTouch.contactFillAlpha
+            trailAlpha = Design.SimulatorTouch.trailAlpha
+            edgeAlpha = Design.SimulatorTouch.edgeAlpha
+        }
+    }
     /// About a fingertip on an iPhone: a 40pt disc on a 393pt-wide screen.
     private static let contactRadiusFraction: CGFloat = 0.05
     private static let minimumContactRadius: CGFloat = 5
@@ -192,20 +225,29 @@ enum SimulatorTouchMarks {
         return max(minimumContactRadius, side * contactRadiusFraction * CGFloat(style.size.scale))
     }
 
-    static func draw(
+    @MainActor static func draw(
         _ indicators: SimulatorTouchIndicators,
         in target: NSRect,
         style: SimulatorTouchStyle = .standard
     ) {
-        guard !target.isEmpty, !indicators.isEmpty else { return }
+        draw(indicators, in: target, style: style, ink: Ink(style: style))
+    }
+
+    nonisolated static func draw(
+        _ indicators: SimulatorTouchIndicators,
+        in target: NSRect,
+        style: SimulatorTouchStyle,
+        ink: Ink
+    ) {
+        guard !target.isEmpty, !indicators.isEmpty,
+              let color = NSColor(cgColor: ink.color),
+              let edge = NSColor(cgColor: ink.edge) else { return }
         func viewPoint(_ normalized: CGPoint) -> CGPoint {
             CGPoint(
                 x: target.minX + normalized.x * target.width,
                 y: target.maxY - normalized.y * target.height
             )
         }
-        let color = Design.SimulatorTouch.color(style.color)
-        let edge = Design.SimulatorTouch.edge(style.color)
         let radius = contactRadius(in: target, style: style)
         let stroke = max(1, radius * strokeFraction)
         let edgeWidth = max(0.5, radius * edgeFraction)
@@ -219,10 +261,10 @@ enum SimulatorTouchMarks {
                 path.lineJoinStyle = .round
                 let width = max(1.5, radius * trailWidthFraction)
                 path.lineWidth = width + edgeWidth * 2
-                edge.withAlphaComponent(Design.SimulatorTouch.edgeAlpha / 2).setStroke()
+                edge.withAlphaComponent(ink.edgeAlpha / 2).setStroke()
                 path.stroke()
                 path.lineWidth = width
-                color.withAlphaComponent(Design.SimulatorTouch.trailAlpha).setStroke()
+                color.withAlphaComponent(ink.trailAlpha).setStroke()
                 path.stroke()
             }
             let head = viewPoint(contact.point)
@@ -230,7 +272,7 @@ enum SimulatorTouchMarks {
                 x: head.x - radius, y: head.y - radius,
                 width: radius * 2, height: radius * 2
             ))
-            color.withAlphaComponent(Design.SimulatorTouch.contactFillAlpha).setFill()
+            color.withAlphaComponent(ink.contactFillAlpha).setFill()
             dot.fill()
             dot.lineWidth = stroke + edgeWidth * 2
             edge.setStroke()
@@ -249,7 +291,7 @@ enum SimulatorTouchMarks {
             ))
             let fade = CGFloat(1 - ripple.progress)
             ring.lineWidth = stroke + edgeWidth * 2
-            edge.withAlphaComponent(Design.SimulatorTouch.edgeAlpha * fade).setStroke()
+            edge.withAlphaComponent(ink.edgeAlpha * fade).setStroke()
             ring.stroke()
             ring.lineWidth = stroke
             color.withAlphaComponent(fade).setStroke()

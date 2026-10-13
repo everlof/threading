@@ -110,4 +110,12 @@ final class LogFocusTests: XCTestCase {
         print(String(format: "FOCUS layout of %d rows: %.1f ms worst of 5", full.count, slowest))
         XCTAssertLessThan(slowest, 120, "the background projection must keep up with capture")
     }
+
+    func testSubsystemIsAnExactMatchAndActivatesTheFocus() {
+        let focus = LogFocus(subsystem: "App")
+        XCTAssertTrue(focus.isActive)
+        XCTAssertTrue(focus.matches(DeviceLogRow(time: "", level: "Info", process: "Bluetooth", subsystem: "App", message: "x")))
+        XCTAssertFalse(focus.matches(DeviceLogRow(time: "", level: "Info", process: "Bluetooth", subsystem: "Apple", message: "App")))
+        XCTAssertFalse(focus.matches(DeviceLogRow(time: "", level: "Info", process: "Bluetooth", subsystem: nil, message: "App")))
+    }
 }

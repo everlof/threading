@@ -89,6 +89,9 @@ public final class DeviceLogPaneViewController: NSViewController {
     private let levelPopUp = ThemedPopUp()
     private let processPopUp = ThemedPopUp()
     private let contextPopUp = ThemedPopUp()
+    /// Bluetooth only, in the process chooser's place: every packet, or only those the project's
+    /// definitions decoded. A view filter — the reader still records everything.
+    private let packetPopUp = ThemedPopUp()
     private let filterField = ThemedTextField()
     private let statusLabel = NSTextField(labelWithString: "")
     private lazy var bluetoothProfileSetup = BluetoothProfileSetupView(preferredToolPath: preferredPymobiledevice3Path)
@@ -96,6 +99,27 @@ public final class DeviceLogPaneViewController: NSViewController {
         title: L10n.string("Set Up…"), target: self, action: #selector(toggleBluetoothSetup)
     )
     private var bluetoothSetupDeviceID: String?
+    /// The "?" beside Set Up…: how to describe the app's own packets. Bluetooth only.
+    private lazy var definitionsButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "questionmark.circle",
+            accessibility: L10n.string("App packet definitions"),
+            target: .inline
+        )
+        button.onPress = { [weak self] in self?.toggleDefinitionsHelp() }
+        button.setAccessibilityIdentifier("bluetooth-definitions-help-button")
+        return button
+    }()
+    private var definitionsPopover: ThemedPopover?
+    private weak var definitionsHelp: BluetoothDefinitionsHelpViewController?
+    /// The last load of the project's definitions file, from the reader or the "?" panel.
+    private(set) var definitionStatus: BluetoothDefinitionStatus?
+    private var definitionLoadGeneration = 0
+    /// Footer line naming the definitions file and whether it loaded: the standing hint of where
+    /// the file goes, so it is discoverable without opening anything.
+    private let definitionsLabel = NSTextField(labelWithString: "")
+    /// The session's checkout, where `.threading/bluetooth.yaml` lives.
+    let definitionsCheckout: String?
     /// The opaque ground the Resume button stands on while it floats over the rows.
     ///
     /// A view rather than a layer colour on purpose: a theme colour baked into a `CGColor` is not
@@ -163,6 +187,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// Info so the pane opens as a useful console; Debug remains one explicit menu choice away.
     private var minimumSeverity = 1
     private var selectedProcess: String?
+    private(set) var packetFilter = BluetoothPacketFilter.all
     private var processChoices: [String] = []
     private var knownProcesses: Set<String> = []
     private var showingContext = false
@@ -181,7 +206,9 @@ public final class DeviceLogPaneViewController: NSViewController {
             pattern: filter,
             minimumSeverity: minimumSeverity,
             context: DeviceLogLimits.foldContext,
-            process: selectedProcess
+            process: selectedProcess,
+            subsystem: packetFilter == .all ? nil : BluetoothATTSession.appProtocolName,
+            maximumSeverity: packetFilter == .complete ? BluetoothPacketFilter.completeMaximumSeverity : nil
         )
     }
     private var drainTimer: Timer?
@@ -214,9 +241,11 @@ public final class DeviceLogPaneViewController: NSViewController {
         owningSessionID: String?,
         preferredPymobiledevice3Path: String? = nil,
         preferredMachineID: String? = nil,
-        stream: Stream? = nil
+        stream: Stream? = nil,
+        definitionsCheckout: String? = nil
     ) {
         self.stream = stream
+        self.definitionsCheckout = definitionsCheckout
         self.owningSessionID = owningSessionID
         self.preferredPymobiledevice3Path = preferredPymobiledevice3Path
         self.requestedMachineID = preferredMachineID
@@ -446,6 +475,11 @@ public final class DeviceLogPaneViewController: NSViewController {
         processPopUp.action = #selector(processChanged)
         processPopUp.setAccessibilityIdentifier("device-log-process")
         processPopUp.widthAnchor.constraint(lessThanOrEqualToConstant: Metrics.maximumProcessControlWidth).isActive = true
+        for filter in BluetoothPacketFilter.allCases { packetPopUp.addItem(withTitle: filter.title) }
+        packetPopUp.target = self
+        packetPopUp.action = #selector(packetFilterChanged)
+        packetPopUp.setAccessibilityIdentifier("bluetooth-packet-filter")
+        packetPopUp.isHidden = true
         contextPopUp.addItem(withTitle: L10n.string("Matches only"))
         contextPopUp.addItem(withTitle: L10n.string("Show context"))
         contextPopUp.target = self
@@ -474,7 +508,8 @@ public final class DeviceLogPaneViewController: NSViewController {
         bluetoothSetupButton.isHidden = true
         bluetoothSetupButton.setAccessibilityIdentifier("bluetooth-profile-setup")
         bluetoothProfileSetup.isHidden = true
-        let bar = NSStackView(views: [devicePopUp, sourcePopUp, routePopUp, bluetoothSetupButton, rescan, clear])
+        definitionsButton.isHidden = true
+        let bar = NSStackView(views: [devicePopUp, sourcePopUp, routePopUp, bluetoothSetupButton, definitionsButton, rescan, clear])
         bar.setAccessibilityIdentifier("device-log-source-bar")
         bar.orientation = .horizontal
         bar.spacing = Design.Spacing.small
@@ -485,17 +520,23 @@ public final class DeviceLogPaneViewController: NSViewController {
             bottom: Design.Spacing.small,
             right: Design.Spacing.medium
         )
-        let filters = NSStackView(views: [processPopUp, levelPopUp, filterField, contextPopUp])
+        let filters = NSStackView(views: [processPopUp, packetPopUp, levelPopUp, filterField, contextPopUp])
         filters.setAccessibilityIdentifier("device-log-filter-bar")
         filters.orientation = .horizontal
         filters.spacing = Design.Spacing.small
         filters.alignment = .centerY
         filters.edgeInsets = bar.edgeInsets
-        for control in [devicePopUp, sourcePopUp, routePopUp, levelPopUp, processPopUp, contextPopUp] as [NSView] + [bluetoothSetupButton, rescan, clear, filterField] {
+        for control in [devicePopUp, sourcePopUp, routePopUp, levelPopUp, processPopUp, packetPopUp, contextPopUp] as [NSView] + [bluetoothSetupButton, rescan, clear, filterField] {
             control.heightAnchor.constraint(equalToConstant: Metrics.controlHeight).isActive = true
         }
 
-        let footer = NSStackView(views: [statusLabel])
+        definitionsLabel.font = Design.Typography.compactCode()
+        definitionsLabel.textColor = Design.Text.tertiary
+        definitionsLabel.lineBreakMode = .byTruncatingMiddle
+        definitionsLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        definitionsLabel.setAccessibilityIdentifier("bluetooth-definitions-footer")
+        definitionsLabel.isHidden = true
+        let footer = NSStackView(views: [definitionsLabel, statusLabel])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.edgeInsets = NSEdgeInsets(
@@ -667,6 +708,13 @@ public final class DeviceLogPaneViewController: NSViewController {
         if let option = selectedOption, case .bluetooth = option.kind { isBluetooth = true }
         else { isBluetooth = stream == .bluetooth }
         processPopUp.isHidden = isBluetooth
+        packetPopUp.isHidden = !isBluetooth
+        if !isBluetooth, packetFilter != .all {
+            // Only Bluetooth rows carry the App subsystem; elsewhere the filter would hide all.
+            packetFilter = .all
+            packetPopUp.selectItem(at: BluetoothPacketFilter.all.rawValue)
+            recomputeVisible()
+        }
         let setupTarget: BluetoothProfileSetupView.Target?
         if let option = selectedOption, case .bluetooth(let udid, _, _) = option.kind {
             setupTarget = .init(deviceID: udid, title: option.machine.title)
@@ -674,6 +722,9 @@ public final class DeviceLogPaneViewController: NSViewController {
             setupTarget = nil
         }
         bluetoothSetupButton.isHidden = setupTarget == nil
+        definitionsButton.isHidden = !isBluetooth
+        definitionsLabel.isHidden = !isBluetooth
+        if isBluetooth, definitionStatus == nil { loadDefinitionStatus() }
         if bluetoothSetupDeviceID != setupTarget?.deviceID || !isBluetooth {
             bluetoothProfileSetup.isHidden = true
         }
@@ -697,10 +748,62 @@ public final class DeviceLogPaneViewController: NSViewController {
         if bluetoothProfileSetup.isHidden { bluetoothProfileSetup.cancelBrowser() }
     }
 
+    // MARK: Packet definitions
+
+    private func toggleDefinitionsHelp() {
+        if let definitionsPopover, definitionsPopover.isShown {
+            definitionsPopover.close()
+            return
+        }
+        let help = BluetoothDefinitionsHelpViewController(
+            status: definitionStatus ?? (definitionsCheckout == nil ? .noCheckout : .missing(
+                expected: BluetoothDefinitionsFile.candidates(checkout: definitionsCheckout)[0]
+            ))
+        )
+        help.onFileCreated = { [weak self] in self?.loadDefinitionStatus() }
+        let popover = ThemedPopover()
+        popover.behavior = .transient
+        popover.contentViewController = help
+        popover.initialFirstResponder = help.view
+        popover.onClose = { [weak self] in self?.definitionsPopover = nil }
+        definitionsPopover = popover
+        definitionsHelp = help
+        popover.show(relativeTo: definitionsButton.bounds, of: definitionsButton, preferredEdge: .maxY)
+        // The reader reports changes while it runs; without one, read the file now so the panel
+        // describes the file as it is rather than as it was.
+        loadDefinitionStatus()
+    }
+
+    /// Reads the file off the main actor; the reader's own reports stay authoritative while it runs.
+    private func loadDefinitionStatus() {
+        definitionLoadGeneration += 1
+        let generation = definitionLoadGeneration
+        let checkout = definitionsCheckout
+        Task { [weak self] in
+            let status = await Task.detached(priority: .utility) {
+                BluetoothDefinitionsFile.load(checkout: checkout).1
+            }.value
+            guard let self, self.definitionLoadGeneration == generation else { return }
+            self.applyDefinitionStatus(status)
+        }
+    }
+
+    private func applyDefinitionStatus(_ status: BluetoothDefinitionStatus) {
+        definitionStatus = status
+        definitionsLabel.stringValue = status.summary
+        definitionsLabel.toolTip = status.url?.path
+        definitionsLabel.textColor = status.isFailure ? Design.Status.warning : Design.Text.tertiary
+        definitionsHelp?.apply(status)
+    }
+
     #if DEBUG
     func showBluetoothProfileBrowserForTesting() {
         bluetoothProfileSetup.isHidden = false
         bluetoothProfileSetup.showBrowserForTesting()
+    }
+
+    func applyDefinitionStatusForTesting(_ status: BluetoothDefinitionStatus) {
+        applyDefinitionStatus(status)
     }
     #endif
 
@@ -761,7 +864,13 @@ public final class DeviceLogPaneViewController: NSViewController {
         return true
     }
 
-    public var readerStatus: String { statusLabel.stringValue }
+    public var readerStatus: String {
+        // An agent writing `.threading/bluetooth.yaml` needs to read back whether it loaded and
+        // which line it stopped at; the footer says so to a person, this says it to the agent.
+        guard !definitionsLabel.isHidden, let definitionStatus else { return statusLabel.stringValue }
+        let location = definitionStatus.url.map { " (\($0.path))" } ?? ""
+        return statusLabel.stringValue + "\n" + definitionStatus.summary + location
+    }
     public var isVisibleForCapture: Bool { drainTimer != nil }
 
     /// The selected source, resolved through the machine rather than through a flat index.
@@ -837,6 +946,16 @@ public final class DeviceLogPaneViewController: NSViewController {
                 }
             }
         }
+        if let bluetooth = started as? BluetoothLogRowSource {
+            bluetooth.definitionsCheckout = definitionsCheckout
+            let apply: @MainActor @Sendable (BluetoothDefinitionStatus) -> Void = { [weak self] status in
+                guard let self, self.sourceGeneration == generation else { return }
+                self.applyDefinitionStatus(status)
+            }
+            bluetooth.onDefinitionsChanged = { status in
+                DispatchQueue.main.async { MainActor.assumeIsolated { apply(status) } }
+            }
+        }
         source = started
         started.start()
         startedAt = Date()
@@ -868,6 +987,22 @@ public final class DeviceLogPaneViewController: NSViewController {
         minimumSeverity = Self.levelThresholds.indices.contains(index)
             ? Self.levelThresholds[index]
             : 0
+        recomputeVisible()
+        table.reloadData()
+        updateStatus()
+    }
+
+    @objc private func packetFilterChanged() {
+        setPacketFilter(BluetoothPacketFilter(rawValue: packetPopUp.indexOfSelectedItem) ?? .all)
+    }
+
+    /// Shows only rows the project's definitions decoded, optionally only those whose bytes fit
+    /// their definition exactly. Recorded history is unaffected.
+    func setPacketFilter(_ filter: BluetoothPacketFilter) {
+        packetFilter = filter
+        packetPopUp.selectItem(at: filter.rawValue)
+        expandedGaps.removeAll()
+        clearAgentNote()
         recomputeVisible()
         table.reloadData()
         updateStatus()
@@ -1328,6 +1463,16 @@ public final class DeviceLogPaneViewController: NSViewController {
         if folded > 0 { parts.append("\(folded) folded") }
         parts.append("\(rate)/s")
         if let dropped = source?.dropped, dropped > 0 { parts.append("⚠︎ \(dropped)") }
+        if packetFilter != .all, shown == 0 {
+            // An empty table under "App packets only" is nearly always a missing or broken file,
+            // or characteristics that have not matched yet; say which rather than show nothing.
+            switch definitionStatus {
+            case .loaded?:
+                parts.append(L10n.string("no packets matched a defined characteristic yet"))
+            default:
+                parts.append(L10n.string("no packet definitions loaded — see ?"))
+            }
+        }
         if let agentNote { parts.append(agentNote) }
         statusLabel.stringValue = parts.joined(separator: " · ")
     }
@@ -1479,5 +1624,37 @@ final class FollowPlateView: NSView {
         )
         border.lineWidth = Design.Radius.border
         border.stroke()
+    }
+}
+
+// MARK: - Bluetooth packet filter
+
+/// The Bluetooth tab's packet chooser. Raw values are the menu's item order.
+enum BluetoothPacketFilter: Int, CaseIterable, Sendable {
+    /// Every HCI, L2CAP and ATT row.
+    case all
+    /// Rows the project's definitions decoded, including ones whose bytes did not fit.
+    case app
+    /// Decoded rows whose bytes fit their definition exactly: a misfit is logged at Warning.
+    case complete
+
+    /// Info's `DeviceLogRow.severity`.
+    static let completeMaximumSeverity = 1
+
+    var title: String {
+        switch self {
+        case .all: L10n.string("All packets")
+        case .app: L10n.string("App packets only")
+        case .complete: L10n.string("Fully decoded only")
+        }
+    }
+
+    /// The device-log `focus` tool's `packets` argument.
+    var toolName: String {
+        switch self {
+        case .all: "all"
+        case .app: "app"
+        case .complete: "complete"
+        }
     }
 }

@@ -9,6 +9,12 @@ public final class BluetoothLogRowSource: BufferedDeviceLogSource, @unchecked Se
     private let overNetwork: Bool
     private let toolPath: String?
 
+    /// The session's checkout, whose `.threading/bluetooth.yaml` gives ATT values app meaning.
+    /// Set before `start()`.
+    var definitionsCheckout: String?
+    /// Every load of the definitions file, from the worker's queue.
+    var onDefinitionsChanged: (@Sendable (BluetoothDefinitionStatus) -> Void)?
+
     public init(udid: String, overNetwork: Bool, toolPath: String?) {
         self.udid = udid
         self.overNetwork = overNetwork
@@ -25,6 +31,8 @@ public final class BluetoothLogRowSource: BufferedDeviceLogSource, @unchecked Se
         worker.start(
             toolPath: toolPath,
             arguments: Self.arguments(udid: udid, overNetwork: overNetwork),
+            definitionsCheckout: definitionsCheckout,
+            onDefinitions: onDefinitionsChanged,
             onRows: { [weak self] in self?.enqueue($0) },
             onEnd: { [weak self] in self?.onStreamEnded?($0) }
         )
@@ -43,6 +51,8 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
         static let readsPerTick = 4
         static let diagnosticsBytes = 4_096
         static let terminationSeconds: TimeInterval = 1
+        /// Ticks between definition-file stats: once a second at the 50 ms poll.
+        static let definitionCheckTicks = 20
     }
 
     private let queue = DispatchQueue(label: "codes.threading.devicelog.bluetooth")
@@ -55,9 +65,15 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
     private var diagnosticFailure: String?
     private var onRows: (@Sendable ([DeviceLogRow]) -> Void)?
     private var onEnd: (@Sendable (String) -> Void)?
+    private var definitionsCheckout: String?
+    private var definitionsStamp: BluetoothDefinitionsFile.Stamp?
+    private var onDefinitions: (@Sendable (BluetoothDefinitionStatus) -> Void)?
+    private var ticksUntilDefinitionCheck = 0
 
     func start(
         toolPath: String?, arguments: [String],
+        definitionsCheckout: String?,
+        onDefinitions: (@Sendable (BluetoothDefinitionStatus) -> Void)?,
         onRows: @escaping @Sendable ([DeviceLogRow]) -> Void,
         onEnd: @escaping @Sendable (String) -> Void
     ) {
@@ -70,6 +86,9 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
                 return
             }
             decoder = BluetoothPacketDecoder()
+            self.definitionsCheckout = definitionsCheckout
+            self.onDefinitions = onDefinitions
+            reloadDefinitions()
             diagnostics = Data()
             diagnosticFailure = nil
             let task = Process()
@@ -107,8 +126,24 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
 
     func stop() { queue.async { [self] in stopOnQueue() } }
 
+    /// Loads the file when it changed since the last load, so an author's save shows on the next
+    /// packet. A stat a second is the whole steady-state cost.
+    private func reloadDefinitions(force: Bool = true) {
+        let stamp = BluetoothDefinitionsFile.stamp(checkout: definitionsCheckout)
+        guard force || stamp != definitionsStamp else { return }
+        definitionsStamp = stamp
+        let (definitions, status) = BluetoothDefinitionsFile.load(checkout: definitionsCheckout)
+        decoder.definitions = definitions
+        onDefinitions?(status)
+    }
+
     private func tick() {
         guard process != nil, let output, let errors else { return }
+        ticksUntilDefinitionCheck -= 1
+        if ticksUntilDefinitionCheck <= 0 {
+            ticksUntilDefinitionCheck = Limits.definitionCheckTicks
+            reloadDefinitions(force: false)
+        }
         do {
             _ = try drain(errors.fileHandleForReading) { [self] data in
                 diagnostics.append(data)
@@ -171,6 +206,7 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
         timer = nil
         onRows = nil
         onEnd = nil
+        onDefinitions = nil
         if let task = process, task.isRunning {
             task.terminate()
             // A wedged child must not retain the device service after the pane has stopped.

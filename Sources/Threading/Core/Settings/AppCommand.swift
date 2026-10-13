@@ -222,6 +222,11 @@ enum AppCommands {
         static let removeSimulator = "simulator.workspace.remove"
         static let enableSimulatorAnnotations = "simulator.annotations.enable"
         static let disableSimulatorAnnotations = "simulator.annotations.disable"
+        static let saveIPhoneScreenshot = "iphone.screenshot.save"
+        static let copyIPhoneScreenshot = "iphone.screenshot.copy"
+        static let toggleIPhoneRecording = "iphone.recording.toggle"
+        static let toggleIPhoneTouches = "iphone.touches.toggle"
+        static let toggleIPhonePresenter = "iphone.presenter.toggle"
         static let toggleSimulatorRecording = "simulator.recording.toggle"
         static let toggleSimulatorTouches = "simulator.touches.toggle"
         static let toggleSimulatorPresenter = "simulator.presenter.toggle"
@@ -433,6 +438,16 @@ enum AppCommands {
                    defaultShortcut: nil, isEditable: true, scope: .session, iconName: "plus.bubble"),
         // No default chords: Simulator's own ⌘S/⌃⌘C would collide with app commands, and these
         // earn a key only when someone assigns one on the shortcuts page.
+        AppCommand(id: ID.saveIPhoneScreenshot, group: .view, title: "Save iPhone Screenshot",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "camera"),
+        AppCommand(id: ID.copyIPhoneScreenshot, group: .view, title: "Copy iPhone Screenshot",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "doc.on.clipboard"),
+        AppCommand(id: ID.toggleIPhoneRecording, group: .view, title: "Start or Stop iPhone Recording",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "record.circle"),
+        AppCommand(id: ID.toggleIPhoneTouches, group: .view, title: "Show or Hide iPhone Touches",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "hand.tap"),
+        AppCommand(id: ID.toggleIPhonePresenter, group: .view, title: "Open or Close iPhone Presenter Window",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "macwindow.on.rectangle"),
         AppCommand(id: ID.toggleSimulatorRecording, group: .view, title: "Start or Stop Simulator Recording",
                    detail: "Records the adopted Simulator with its touches.",
                    defaultShortcut: nil, isEditable: true, scope: .session,

@@ -22,6 +22,12 @@ public struct LogFocus: Equatable, Sendable {
     public let context: Int
     /// Exact process name, not a substring of another process's message.
     public let process: String?
+    /// Exact subsystem, so "App packets only" in the Bluetooth tab cannot also match a packet whose
+    /// message happens to contain the letters.
+    public let subsystem: String?
+    /// Rows above this `severity` are not matches; nil means no ceiling. "Fully decoded only"
+    /// uses it to drop app packets whose bytes did not fit their definition (level Warning).
+    public let maximumSeverity: Int?
 
     /// The pattern folded to lowercase bytes, once.
     ///
@@ -31,22 +37,31 @@ public struct LogFocus: Equatable, Sendable {
     /// bridges into ICU and took 158 ms. A log line is bytes.
     private let needle: [UInt8]
 
-    public init(pattern: String = "", minimumSeverity: Int = 0, context: Int = 2, process: String? = nil) {
+    public init(
+        pattern: String = "", minimumSeverity: Int = 0, context: Int = 2,
+        process: String? = nil, subsystem: String? = nil, maximumSeverity: Int? = nil
+    ) {
         self.pattern = pattern
         self.minimumSeverity = minimumSeverity
         self.context = context
         self.process = process
+        self.subsystem = subsystem
+        self.maximumSeverity = maximumSeverity
         self.needle = Array(pattern.lowercased().utf8)
     }
 
     /// Nothing is folded when nothing has been asked for.
-    public var isActive: Bool { !pattern.isEmpty || minimumSeverity > 0 || process != nil }
+    public var isActive: Bool {
+        !pattern.isEmpty || minimumSeverity > 0 || process != nil || subsystem != nil || maximumSeverity != nil
+    }
 
     /// Whether this row is one of the ones being looked for — which is also what gets highlighted.
     /// Context rows are shown but are not matches, so the eye still lands on the reason.
     public func matches(_ row: DeviceLogRow) -> Bool {
         guard process == nil || row.process == process else { return false }
+        guard subsystem == nil || row.subsystem == subsystem else { return false }
         guard minimumSeverity == 0 || row.severity >= minimumSeverity else { return false }
+        guard maximumSeverity.map({ row.severity <= $0 }) ?? true else { return false }
         guard !pattern.isEmpty else { return true }
         return Self.contains(row.message, needle)
             || Self.contains(row.process, needle)

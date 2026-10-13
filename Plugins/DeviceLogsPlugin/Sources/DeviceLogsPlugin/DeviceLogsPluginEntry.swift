@@ -32,7 +32,8 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
             let workspace = DeviceLogWorkspaceViewController(
                 sessionID: context.argument("sessionID"),
                 toolPath: context.argument("pymobiledevice3Path"),
-                preferredMachineID: context.argument("deviceID")
+                preferredMachineID: context.argument("deviceID"),
+                checkoutPath: context.argument("checkoutPath")
             )
             self.workspace = workspace
             if context.argument("hostPaneSections") == "true" { return workspace.sectionView(.regular) }
@@ -125,10 +126,10 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 detail: "Search, focus and fold the live log stream",
                 symbol: "line.3.horizontal.decrease",
                 summary: """
-                    Fold the selected Device Logs tab down to what matters: rows matching the pattern and at or above the level are kept with two rows of context either side, everything else collapses into a line saying how many are hidden. Nothing is deleted and the user can open any fold. The tab's own controls move to match, so the person watching can see what you asked for.
+                    Fold the selected Device Logs tab down to what matters: rows matching the pattern and at or above the level are kept with two rows of context either side, everything else collapses into a line saying how many are hidden. In the Bluetooth tab, packets "app" keeps only packets decoded by the project's .threading/bluetooth.yaml and "complete" only those whose bytes fit their definition exactly. Nothing is deleted and the user can open any fold. The tab's own controls move to match, so the person watching can see what you asked for.
                     """,
                 inputSchemaJSON: """
-                    {"type":"object","properties":{ "pattern":{"type":"string","description":"Substring that marks a row as interesting."}, "minimum_level":{"type":"string","enum":["debug","info","notice","warning","error","fault"], "description":"Rows below this level are folded away."}}}
+                    {"type":"object","properties":{ "pattern":{"type":"string","description":"Substring that marks a row as interesting."}, "minimum_level":{"type":"string","enum":["debug","info","notice","warning","error","fault"], "description":"Rows below this level are folded away."}, "packets":{"type":"string","enum":["all","app","complete"],"description":"Bluetooth tab: all packets, only packets decoded by the project's packet definitions (subsystem App), or only those decoded without a misfit warning."}}}
                     """
             ),
             PluginTool(
@@ -202,12 +203,16 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
             case DeviceLogToolNames.focus:
                 let pattern = arguments["pattern"] as? String ?? ""
                 let severity = DeviceLogToolLevels.severity(named: arguments["minimum_level"] as? String)
-                guard !pattern.isEmpty || severity > 0 else {
+                let packets = (arguments["packets"] as? String).flatMap { name in
+                    BluetoothPacketFilter.allCases.first { $0.toolName == name }
+                }
+                guard !pattern.isEmpty || severity > 0 || packets.map({ $0 != .all }) == true else {
                     return completion(
-                        "Give a pattern, a minimum_level, or both — otherwise nothing is folded.",
+                        "Give a pattern, a minimum_level, packets, or a combination — otherwise nothing is folded.",
                         true
                     )
                 }
+                if let packets, packets != pane.packetFilter { pane.setPacketFilter(packets) }
                 pane.applyFocus(pattern: pattern, minimumSeverity: severity)
                 let summary = pane.focusSummary
                 pane.noteAgentAction(Self.note(focusing: pattern, severity: severity))
@@ -217,6 +222,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                     false
                 )
             case DeviceLogToolNames.clearFocus:
+                pane.setPacketFilter(.all)
                 pane.applyFocus(pattern: "", minimumSeverity: 0)
                 pane.clearAgentNote()
                 completion("Cleared. All \(pane.focusSummary.total) rows are shown.", false)

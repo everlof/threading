@@ -3329,6 +3329,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             guard mainWindowController?.commandSimulator?.canAnnotateNotes == true else {
                 return .unavailable(L10n.string("Show an adopted Simulator first."))
             }
+        case AppCommands.ID.saveIPhoneScreenshot, AppCommands.ID.copyIPhoneScreenshot,
+             AppCommands.ID.toggleIPhoneRecording, AppCommands.ID.toggleIPhoneTouches,
+             AppCommands.ID.toggleIPhonePresenter:
+            guard let phone = mainWindowController?.commandRealDevice else {
+                return .unavailable(L10n.string("Show an iPhone preview first."))
+            }
+            if command.id == AppCommands.ID.toggleIPhoneRecording {
+                guard phone.canRecord || phone.isRecordingForCommands else {
+                    return .unavailable(L10n.string("Show an iPhone preview first."))
+                }
+            } else if command.id == AppCommands.ID.toggleIPhonePresenter {
+                guard phone.canCapture || phone.isPresenterWindowOpen else {
+                    return .unavailable(L10n.string("Show an iPhone preview first."))
+                }
+            } else if command.id != AppCommands.ID.toggleIPhoneTouches, !phone.canSaveSnapshot {
+                return .unavailable(L10n.string("Show an iPhone preview first."))
+            }
         case AppCommands.ID.toggleSimulatorRecording:
             guard let simulator = mainWindowController?.commandSimulator,
                   simulator.isRecordingForCommands || simulator.canRecord else {
@@ -3676,6 +3693,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             mainWindowController?.commandSimulator?.setAnnotatingNotes(true)
         case AppCommands.ID.disableSimulatorAnnotations:
             mainWindowController?.commandSimulator?.setAnnotatingNotes(false)
+        case AppCommands.ID.saveIPhoneScreenshot:
+            mainWindowController?.commandRealDevice?.saveSnapshot()
+        case AppCommands.ID.copyIPhoneScreenshot:
+            mainWindowController?.commandRealDevice?.copySnapshot()
+        case AppCommands.ID.toggleIPhoneRecording:
+            mainWindowController?.commandRealDevice?.toggleRecording()
+        case AppCommands.ID.toggleIPhoneTouches:
+            mainWindowController?.commandRealDevice?.toggleShowTouches()
+        case AppCommands.ID.toggleIPhonePresenter:
+            mainWindowController?.commandRealDevice?.togglePresenterWindow()
         case AppCommands.ID.toggleSimulatorRecording:
             mainWindowController?.commandSimulator?.toggleRecording()
         case AppCommands.ID.toggleSimulatorTouches:

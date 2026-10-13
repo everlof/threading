@@ -9,6 +9,8 @@ final class DeviceLogWorkspaceViewController: NSViewController {
 
     private let sessionID: String?
     private let toolPath: String?
+    /// The session's checkout, for the Bluetooth tab's `.threading/bluetooth.yaml`.
+    private let checkoutPath: String?
     private var preferredMachineID: String?
     private let tabs = ThemedSegmentedControl(frame: .zero)
     private let content = NSView()
@@ -47,8 +49,9 @@ final class DeviceLogWorkspaceViewController: NSViewController {
 
     var selectedPane: DeviceLogPaneViewController? { panes[selectedStream] }
 
-    init(sessionID: String?, toolPath: String?, preferredMachineID: String?) {
+    init(sessionID: String?, toolPath: String?, preferredMachineID: String?, checkoutPath: String? = nil) {
         self.sessionID = sessionID
+        self.checkoutPath = checkoutPath
         self.toolPath = toolPath
         self.preferredMachineID = preferredMachineID
         super.init(nibName: nil, bundle: nil)
@@ -138,7 +141,8 @@ final class DeviceLogWorkspaceViewController: NSViewController {
             owningSessionID: sessionID,
             preferredPymobiledevice3Path: toolPath,
             preferredMachineID: selectedPane?.selectedDeviceID ?? preferredMachineID,
-            stream: stream
+            stream: stream,
+            definitionsCheckout: checkoutPath
         )
         pane.captureManagedByWorkspace = true
         pane.sourceFactory = sourceFactory

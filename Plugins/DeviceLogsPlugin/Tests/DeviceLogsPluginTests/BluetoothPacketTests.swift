@@ -43,7 +43,7 @@ final class BluetoothPacketTests: XCTestCase {
         continuation[5] = 10
         let firstFragment = try XCTUnwrap(decoder.append(Self.packet(continuation)).first)
         XCTAssertEqual(firstFragment.subsystem, "L2CAP")
-        XCTAssertTrue(firstFragment.message.contains("fragmented"))
+        XCTAssertTrue(firstFragment.message.contains("start 8/14"), firstFragment.message)
     }
 
     func testMalformedLengthsLinkTypeAndTruncatedStreamAreRejected() throws {
@@ -61,6 +61,21 @@ final class BluetoothPacketTests: XCTestCase {
         decoder = BluetoothPacketDecoder()
         _ = try decoder.append(Self.header() + Self.packet([4, 0x0e, 0]).dropLast())
         XCTAssertThrowsError(try decoder.finish())
+    }
+
+    func testRecordLargerThanTheToolsDeclaredSnapshotLengthIsDecoded() throws {
+        // idevicebtlogger declares snaplen 2,048 but writes whole packets; a long ACL exceeded
+        // it on a real phone and stopped the reader with "invalid packet length or timestamp".
+        let body = [UInt8](repeating: 0xaa, count: 2_100)
+        let l2cap = [UInt8(body.count & 0xff), UInt8(body.count >> 8), 0x40, 0]
+        let aclLength = l2cap.count + body.count
+        let acl = [UInt8(2), 0x1a, 0x20, UInt8(aclLength & 0xff), UInt8(aclLength >> 8)] + l2cap + body
+        var decoder = BluetoothPacketDecoder()
+        let rows = try decoder.append(Self.header() + Self.packet(acl, incoming: true))
+        let row = try XCTUnwrap(rows.first)
+        XCTAssertEqual(row.subsystem, "L2CAP")
+        XCTAssertTrue(row.message.contains("RX ACL handle=0x001a CID=0x0040 · \(acl.count - 1) bytes"), row.message)
+        XCTAssertEqual(decoder.bufferedBytes, 0)
     }
 
     func testCommandStatusErrorAndPreviewLimit() throws {
@@ -199,10 +214,11 @@ final class BluetoothPacketTests: XCTestCase {
         print("Bluetooth hardware probe: \(rows.count) packets; protocols=\(Set(rows.compactMap(\.subsystem)))")
     }
 
-    static func header(littleEndian: Bool = false) -> Data {
+    /// idevicebtlogger's own header declares a 2,048-byte snapshot length.
+    static func header(littleEndian: Bool = false, snapLength: Int = 2_048) -> Data {
         var data = Data(littleEndian ? [0xd4, 0xc3, 0xb2, 0xa1] : [0xa1, 0xb2, 0xc3, 0xd4])
         data.append(contentsOf: littleEndian ? [2, 0, 4, 0] : [0, 2, 0, 4])
-        for value in [0, 0, 65_535, 201] { data.append(word(value, littleEndian: littleEndian)) }
+        for value in [0, 0, snapLength, 201] { data.append(word(value, littleEndian: littleEndian)) }
         return data
     }
 

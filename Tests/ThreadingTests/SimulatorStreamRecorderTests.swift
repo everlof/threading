@@ -130,3 +130,96 @@ final class SimulatorStreamRecorderTests: XCTestCase {
         )
     }
 }
+
+@MainActor
+final class DevicePreviewCaptureTests: XCTestCase {
+    func testWorkerMovieIncludesTouchOverlayAndPreservesFrameOrientation() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("phone-movie-\(UUID()).mov")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let frame = try makeFrame(width: 160, height: 240)
+        let worker = DevicePreviewCapture()
+        let style = SimulatorTouchStyle(color: .white)
+        let ink = SimulatorTouchMarks.Ink(style: style)
+        let touches = SimulatorTouchIndicators(ripples: [],
+            contact: .init(point: CGPoint(x: 0.5, y: 0.25), trail: []))
+        let started = await worker.start(url: url, image: frame, indicators: touches, style: style, ink: ink)
+        XCTAssertTrue(started)
+        for _ in 0..<3 {
+            try await Task.sleep(for: .milliseconds(40))
+            await worker.append(image: frame, indicators: touches, style: style, ink: ink)
+        }
+        let saved = await worker.finish()
+        XCTAssertEqual(saved, url)
+        let asset = AVURLAsset(url: try XCTUnwrap(saved))
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: try XCTUnwrap(tracks.first), outputSettings: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        ])
+        reader.add(output)
+        XCTAssertTrue(reader.startReading())
+        let sample = try XCTUnwrap(output.copyNextSampleBuffer())
+        let buffer = try XCTUnwrap(CMSampleBufferGetImageBuffer(sample))
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer {
+            CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
+            reader.cancelReading()
+        }
+        let pixels = try XCTUnwrap(CVPixelBufferGetBaseAddress(buffer)).assumingMemoryBound(to: UInt8.self)
+        let row = CVPixelBufferGetBytesPerRow(buffer)
+        let top = pixels.advanced(by: 60 * row + 30 * 4)
+        let bottom = pixels.advanced(by: 180 * row + 30 * 4)
+        let touch = pixels.advanced(by: 60 * row + 80 * 4)
+        XCTAssertGreaterThan(Int(top[2]), Int(top[0]) + 100)
+        XCTAssertGreaterThan(Int(bottom[0]), Int(bottom[2]) + 100)
+        XCTAssertGreaterThan(Int(touch[1]), Int(top[1]) + 20, "The worker dropped the white touch overlay")
+        let duration = try await asset.load(.duration)
+        XCTAssertGreaterThan(duration.seconds, 0.08)
+    }
+
+    func testCannotStartMovieAtAnUnwritableDestination() async throws {
+        let worker = DevicePreviewCapture()
+        let frame = try makeFrame(width: 48, height: 64)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString).appendingPathComponent("missing/movie.mov")
+        let started = await worker.start(url: url, image: frame, indicators: nil, style: .standard,
+                                        ink: .init(style: .standard))
+        XCTAssertFalse(started)
+        let saved = await worker.finish()
+        XCTAssertNil(saved)
+    }
+
+    func testFullResolutionRecordingWorkerStress() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["THREADING_DEVICE_CAPTURE_STRESS"] == "1")
+        let frame = try makeFrame(width: 1206, height: 2622)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("phone-stress-\(UUID()).mov")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let worker = DevicePreviewCapture()
+        let ink = SimulatorTouchMarks.Ink(style: .standard)
+        let started = await worker.start(url: url, image: frame, indicators: nil, style: .standard, ink: ink)
+        XCTAssertTrue(started)
+        var durations: [Double] = []
+        for _ in 0..<30 {
+            let start = ProcessInfo.processInfo.systemUptime
+            await worker.append(image: frame, indicators: nil, style: .standard, ink: ink)
+            durations.append((ProcessInfo.processInfo.systemUptime - start) * 1000)
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let saved = await worker.finish()
+        XCTAssertNotNil(saved)
+        durations.sort()
+        print("Physical movie worker: median \(durations[durations.count / 2]) ms, max \(durations.last!) ms; 1206x2622, 30 appends")
+    }
+
+    private func makeFrame(width: Int, height: Int) throws -> CGImage {
+        let pixels: [UInt8] = (0..<height).flatMap { y in
+            let color: [UInt8] = y < height / 2 ? [255, 0, 0, 255] : [0, 0, 255, 255]
+            return Array(repeating: color, count: width).flatMap { $0 }
+        }
+        let provider = try XCTUnwrap(CGDataProvider(data: Data(pixels) as CFData))
+        return try XCTUnwrap(CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue).union(.byteOrder32Big),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+    }
+}

@@ -13,10 +13,9 @@ final class RemoteConversationStoreTests: XCTestCase {
         settings.update(.init(controls: [
             .init(setting: .model, title: "Model", isEnabled: true, choices: [])
         ]), theme: theme, allowsChanges: true)
-        settings.frame = CGRect(x: 0, y: 0, width: 340, height: 80)
+        settings.frame = CGRect(x: 0, y: 0, width: 340, height: MobileDesign.Size.composerSettingChip)
         settings.layoutIfNeeded()
-        let row = try XCTUnwrap(settings.arrangedSubviews.first as? UIStackView)
-        let button = try XCTUnwrap(row.arrangedSubviews.first as? UIButton)
+        let button = try XCTUnwrap(settings.chip(for: .model))
         button.layoutIfNeeded()
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -34,6 +33,32 @@ final class RemoteConversationStoreTests: XCTestCase {
             XCTAssertEqual(pixels[corner + channel], pixels[center + channel],
                            "The control's square corner must paint the same background as its face")
         }
+    }
+
+    @MainActor
+    func testComposerSettingsStayOneCompactLineBeneathThePrompt() throws {
+        let theme = RemoteThemePalette(try XCTUnwrap(RemoteAppModel.demoCatalogThemes.first))
+        let settings = MobileConversationSettingsView()
+        settings.update(.init(controls: [
+            .init(setting: .model, title: "GPT-6.1 Sol", isEnabled: true, choices: []),
+            .init(setting: .effort, title: "High", isEnabled: true, choices: []),
+            .init(setting: .permissions, title: "Never ask", isEnabled: true, choices: []),
+            .init(setting: .speed, title: "Standard", isEnabled: true, choices: []),
+        ]), theme: theme, allowsChanges: true)
+        let width: CGFloat = 340
+        let height = settings.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+        ).height
+        XCTAssertLessThan(height, MobileDesign.Size.minimumTapTarget,
+                          "Four settings must not make the composer taller than one compact line")
+        settings.frame = CGRect(x: 0, y: 0, width: width, height: height)
+        settings.layoutIfNeeded()
+        let chips = RemoteConversationConfigurationDTO.Setting.allCases.compactMap(settings.chip(for:))
+        XCTAssertEqual(chips.count, 4)
+        let origins = Set(chips.map { $0.convert($0.bounds, to: settings).minY.rounded() })
+        XCTAssertEqual(origins.count, 1, "The settings share one line rather than wrapping into rows")
+        XCTAssertEqual(chips.first?.accessibilityLabel, "Model, GPT-6.1 Sol")
     }
 
     @MainActor

@@ -686,6 +686,12 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+**Physical iPhone capture and presentation controls** extend the host-only device pane. The host
+owns frame custody, explicit snapshot/recording initiation, file destinations, recording lifecycle,
+preview demand, exact phone identity and input revocation. Themes style the existing buttons,
+recording badge and menus. The presenter has no independent input grant; no extension capability
+or agent input authority is added.
+
 **Bluetooth packet capture** extends the existing host-owned Device Logs native plugin. Themes
 style its source menu and virtual table. Exact phone identity, profile/tooling setup truth,
 capture lifetime, packet parsing limits, local history and agent source selection stay owned by
@@ -696,6 +702,11 @@ process bounds, iOS consent handoff and cleanup. Themes style controls; agents r
 installation action or access to this authentication browser.
 The Regular Logs/Bluetooth tab choice is host-owned as well: the workspace owns the two-reader
 limit, demand lifetime, per-stream history and filters, and the selected stream for agent tools.
+**App packet definitions** (`.threading/bluetooth.yaml`, its "?" panel and footer line) are
+project data, not an extension seam: the file declares how ATT bytes are read and cannot run code,
+reach the network or add UI. Threading owns the interpreter and its bounds, file discovery under
+the session checkout, reload cadence, the panel's create/open/copy actions and the rendered row
+text. Themes style the panel through the shared popover, button and text-view components.
 
 **Proxy debugging commands** are deliberately host-only. The existing Tools settings group and
 session MCP transport expose bounded HTTP(S) capture. Threading owns exact TLS scope, CA key

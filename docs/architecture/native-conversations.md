@@ -1506,8 +1506,13 @@ client display labels.
 The view count is four controls, independent of catalogue and transcript size. Typical catalogues
 have 6–20 models; the existing Codex input bound is 512. At most 100 menu entries per control are
 projected, with a 64 KiB aggregate UTF-8 content ceiling, and UIKit menu actions are constructed
-only on opening. Accessibility text sizes
-stack the controls vertically. These surfaces remain host-owned under the mobile theme boundary.
+only on opening. The controls are one line of 28-point value chips inside the composer panel,
+beneath the prompt: a setting glyph and the current value, with the setting's name in the menu
+title and accessibility label. A first version stacked four 44-point two-line buttons in a 2×2
+grid between the transcript and the composer, which made the settings taller than the text field
+they qualify. The line scrolls sideways rather than wrapping, so accessibility text sizes grow
+the chips' height but never add rows above the keyboard. These surfaces remain host-owned under
+the mobile theme boundary.
 
 The phone microphone starts one explicit recording, with live transcription into the editable
 draft. Speech/microphone consent is requested only on tap, audio engine work lives in an actor,

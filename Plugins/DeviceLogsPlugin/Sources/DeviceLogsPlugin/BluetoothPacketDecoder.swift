@@ -25,7 +25,12 @@ struct BluetoothPacketDecoder {
 
     private var buffer: [UInt8] = []
     private var littleEndian: Bool?
-    private var snapLength = 0
+    private var session = BluetoothATTSession()
+    /// The app's own definitions for ATT values; replaced live when the file changes.
+    var definitions: BluetoothPacketDefinitions? {
+        get { session.definitions }
+        set { session.definitions = newValue }
+    }
     var bufferedBytes: Int { buffer.count }
 
     mutating func append(_ data: Data) throws -> [DeviceLogRow] {
@@ -45,10 +50,9 @@ struct BluetoothPacketDecoder {
                   number(20) == Limits.linkType else {
                 throw DecodeError.invalid("unsupported PCAP version or link type")
             }
-            snapLength = number(16)
-            guard (Limits.hciHeaderBytes...Limits.packetBytes).contains(snapLength) else {
-                throw DecodeError.invalid("invalid snapshot length")
-            }
+            // The header's snapshot length is not a bound on records: idevicebtlogger hard-codes
+            // 2,048 ("larger than any ACL") yet writes every packet whole, and LE Data Length
+            // Extension ACLs exceed it. Each record is bounded by `Limits.packetBytes` instead.
             consumed = Limits.fileHeaderBytes
         }
 
@@ -59,7 +63,7 @@ struct BluetoothPacketDecoder {
             let captured = number(consumed + 8)
             let original = number(consumed + 12)
             guard (Limits.hciHeaderBytes...Limits.packetBytes).contains(captured),
-                  captured <= snapLength, original >= captured,
+                  original >= captured,
                   microseconds < 1_000_000 else {
                 throw DecodeError.invalid("invalid packet length or timestamp")
             }
@@ -71,8 +75,10 @@ struct BluetoothPacketDecoder {
             guard direction <= 1 else { throw DecodeError.invalid("invalid HCI direction") }
             let packetType = buffer[start + 4]
             let payload = Array(buffer[start + Limits.hciHeaderBytes..<end])
+            if packetType == 4 { session.event(payload) }
+            let acl = packetType == 2 ? session.acl(payload) : nil
             rows.append(BluetoothPacketSummary.row(
-                type: packetType, incoming: direction == 1, payload: payload,
+                type: packetType, incoming: direction == 1, payload: payload, acl: acl,
                 seconds: seconds, microseconds: microseconds, truncated: captured < original
             ))
             consumed = end
@@ -93,19 +99,22 @@ struct BluetoothPacketDecoder {
 
 private enum BluetoothPacketSummary {
     static func row(
-        type: UInt8, incoming: Bool, payload: [UInt8],
+        type: UInt8, incoming: Bool, payload: [UInt8], acl: BluetoothATTSession.Summary?,
         seconds: Int, microseconds: Int, truncated: Bool
     ) -> DeviceLogRow {
         let direction = incoming ? "RX" : "TX"
-        let summary = decode(type: type, payload: payload)
+        let summary = acl.map {
+            Summary(protocolName: $0.protocolName, text: $0.text, error: $0.error, warning: $0.warning)
+        } ?? decode(type: type, payload: payload)
         let clock = seconds % 86_400
         let time = String(format: "%02d:%02d:%02d.%06d", clock / 3_600, clock / 60 % 60, clock % 60, microseconds)
+        let payload = acl?.preview ?? payload
         let preview = payload.prefix(BluetoothPacketDecoder.Limits.previewBytes)
             .map { String(format: "%02x", $0) }.joined(separator: " ")
         let omitted = payload.count - min(payload.count, BluetoothPacketDecoder.Limits.previewBytes)
         let suffix = omitted > 0 ? " … (\(omitted) bytes omitted)" : ""
         return DeviceLogRow(
-            time: time, level: summary.error ? "Error" : "Info", process: "Bluetooth",
+            time: time, level: summary.error ? "Error" : summary.warning ? "Warning" : "Info", process: "Bluetooth",
             subsystem: summary.protocolName,
             message: "\(direction) \(summary.text) · \(payload.count) bytes"
                 + (truncated ? " (capture truncated)" : "") + " | \(preview)\(suffix)",
@@ -117,6 +126,7 @@ private enum BluetoothPacketSummary {
         let protocolName: String
         let text: String
         var error = false
+        var warning = false
     }
 
     private static func decode(type: UInt8, payload: [UInt8]) -> Summary {
@@ -149,45 +159,9 @@ private enum BluetoothPacketSummary {
                 failed = payload[2] != 0
             }
             return Summary(protocolName: "HCI", text: text, error: failed)
-        case 2: return acl(payload)
         case 3: return Summary(protocolName: "SCO", text: "SCO Data")
         default: return Summary(protocolName: "HCI", text: "HCI type=\(hex(Int(type)))")
         }
-    }
-
-    private static func acl(_ payload: [UInt8]) -> Summary {
-        guard payload.count >= 4, word(payload, 2) == payload.count - 4 else {
-            return Summary(protocolName: "ACL", text: "Malformed ACL Data", error: true)
-        }
-        let flagsAndHandle = word(payload, 0)
-        let handle = flagsAndHandle & 0x0fff
-        let packetBoundary = (flagsAndHandle >> 12) & 0x03
-        let prefix = "ACL handle=\(hex(handle))"
-        // No cross-packet reassembly in this reader. A continuation cannot be interpreted as a
-        // new L2CAP header, even when its bytes happen to resemble the ATT fixed channel.
-        guard packetBoundary != 1 else {
-            return Summary(protocolName: "ACL", text: prefix + " continuation")
-        }
-        guard payload.count >= 8 else {
-            return Summary(protocolName: "ACL", text: prefix + " incomplete L2CAP header")
-        }
-        let l2capLength = word(payload, 4)
-        let channel = word(payload, 6)
-        guard l2capLength == payload.count - 8 else {
-            return Summary(protocolName: "L2CAP", text: prefix + " CID=\(hex(channel)) fragmented L2CAP")
-        }
-        guard channel == 0x0004, payload.count > 8 else {
-            return Summary(protocolName: "L2CAP", text: prefix + " CID=\(hex(channel))")
-        }
-        let opcode = payload[8]
-        var text = prefix + " ATT " + (attributes[opcode] ?? "opcode=\(hex(Int(opcode)))")
-        if handleOpcodes.contains(opcode), payload.count >= 11 {
-            text += " attribute=\(hex(word(payload, 9)))"
-        }
-        if opcode == 0x01, payload.count >= 13 {
-            text += " request=\(hex(Int(payload[9]))) attribute=\(hex(word(payload, 10))) error=\(hex(Int(payload[12])))"
-        }
-        return Summary(protocolName: "ATT", text: text, error: opcode == 0x01)
     }
 
     private static func word(_ bytes: [UInt8], _ index: Int) -> Int {
@@ -203,17 +177,5 @@ private enum BluetoothPacketSummary {
         0x2013: "LE Connection Update", 0x2019: "LE Start Encryption",
         0x2041: "LE Set Extended Scan Parameters", 0x2042: "LE Set Extended Scan Enable",
         0x2043: "LE Extended Create Connection",
-    ]
-    private static let handleOpcodes: Set<UInt8> = [0x0a, 0x0c, 0x12, 0x16, 0x17, 0x1b, 0x1d, 0x52, 0xd2]
-    private static let attributes: [UInt8: String] = [
-        0x01: "Error Response", 0x02: "Exchange MTU Request", 0x03: "Exchange MTU Response",
-        0x04: "Find Information Request", 0x05: "Find Information Response",
-        0x08: "Read By Type Request", 0x09: "Read By Type Response",
-        0x0a: "Read Request", 0x0b: "Read Response", 0x0c: "Read Blob Request",
-        0x0d: "Read Blob Response", 0x10: "Read By Group Type Request", 0x11: "Read By Group Type Response",
-        0x12: "Write Request", 0x13: "Write Response", 0x16: "Prepare Write Request",
-        0x17: "Prepare Write Response", 0x18: "Execute Write Request", 0x19: "Execute Write Response",
-        0x1b: "Handle Value Notification", 0x1d: "Handle Value Indication",
-        0x1e: "Handle Value Confirmation", 0x52: "Write Command", 0xd2: "Signed Write Command",
     ]
 }

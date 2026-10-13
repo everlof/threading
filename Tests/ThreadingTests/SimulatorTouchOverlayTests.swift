@@ -4,6 +4,21 @@ import XCTest
 
 @MainActor
 final class SimulatorTouchOverlayTests: XCTestCase {
+    func testLongDragAndTapBurstRetainBoundedIndicators() {
+        let model = SimulatorTouchOverlayModel()
+        model.contactBegan(at: .zero)
+        for index in 0..<10_000 {
+            model.contactMoved(to: CGPoint(x: Double(index) / 10_000, y: 0.5))
+            model.tap(at: .zero)
+        }
+        let indicators = model.indicators()
+        XCTAssertLessThanOrEqual(indicators.contact?.trail.count ?? 0, 128)
+        XCTAssertLessThanOrEqual(indicators.ripples.count, 32)
+        XCTAssertEqual(indicators.contact?.point.x, 0.9999)
+        model.reset()
+        XCTAssertTrue(model.indicators().isEmpty)
+    }
+
     func testAFreshModelHasNothingToDraw() {
         let model = SimulatorTouchOverlayModel()
         XCTAssertTrue(model.indicators().isEmpty)

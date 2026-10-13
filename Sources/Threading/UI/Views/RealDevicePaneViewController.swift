@@ -37,6 +37,48 @@ final class RealDevicePaneViewController: NSViewController {
 
     private enum Timing {
         static let maximumPendingInput = 32
+        static let menuWidth: CGFloat = 220
+        static let touchFramesPerSecond = 30.0
+        static let confirmationDuration = 1.8
+    }
+
+    private enum RecordingState { case idle, starting, recording, finishing }
+    private let touchPreferences: SimulatorTouchPreferences
+    private let captureDirectory: URL?
+    private let revealCapture: @MainActor (URL) -> Void
+    private let showPresenter: @MainActor (SimulatorPresenterWindowController) -> Void
+    private var touchPreferencesObserver: NSObjectProtocol?
+    private let touchOverlay = SimulatorTouchOverlayModel()
+    private var touchTimer: Timer?
+    private var recordingTimer: Timer?
+    private var latestFrame: CGImage?
+    private var recorder: DevicePreviewCapture?
+    private var recordingStartTask: Task<Bool, Never>?
+    private var frameWriteTask: Task<Void, Never>?
+    private var recordingState: RecordingState = .idle
+    private var recordingStartedAt: Date?
+    private var lastRecordingFrameAt: TimeInterval = 0
+    private var captureBusy = false
+    private var captureMessageTimer: Timer?
+    private var captureMessage: String? {
+        didSet {
+            captureMessageTimer?.invalidate()
+            captureMessageTimer = nil
+            guard captureMessage != nil else { return }
+            let timer = Timer(timeInterval: Timing.confirmationDuration, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.captureMessage = nil
+                    self?.renderState()
+                }
+            }
+            RunLoop.current.add(timer, forMode: .common)
+            captureMessageTimer = timer
+        }
+    }
+    private var presenter: SimulatorPresenterWindowController?
+    private var menuSession: AnyObject?
+    private var wantsPreview: Bool {
+        isPresented || presenter != nil || recordingState == .starting || recordingState == .recording
     }
 
     private let control: any PhysicalDeviceControlling
@@ -93,12 +135,16 @@ final class RealDevicePaneViewController: NSViewController {
     private lazy var captureButton: ThemedIconButton = {
         let button = ThemedIconButton(
             symbolName: "camera",
-            accessibility: L10n.string("Retry iPhone Preview"),
+            accessibility: L10n.string("Save Screenshot"),
             target: .inline,
             inkSource: .chrome
         )
-        button.toolTip = L10n.string("Retry iPhone Preview")
-        button.onPress = { [weak self] in self?.restartCapture() }
+        button.toolTip = L10n.string("Save a screenshot of the device (right-click for options)")
+        button.onPress = { [weak self] in self?.saveSnapshot() }
+        button.onContextMenu = { [weak self, weak button] anchor in
+            guard let self, let button else { return false }
+            return self.presentMenu(self.captureEntries(), from: button, anchor: anchor)
+        }
         button.setAccessibilityIdentifier("realDevice.capture")
         return button
     }()
@@ -134,7 +180,7 @@ final class RealDevicePaneViewController: NSViewController {
 
     private lazy var controlButton: ThemedIconButton = {
         let button = ThemedIconButton(
-            symbolName: "hand.tap",
+            symbolName: SimulatorPaneSymbols.control,
             accessibility: L10n.string("Enable iPhone Control"),
             target: .inline,
             inkSource: .chrome
@@ -146,8 +192,45 @@ final class RealDevicePaneViewController: NSViewController {
 
     private lazy var controlRow = ControlRowView(
         leading: [deviceChip],
-        trailing: [logsButton, controlButton, captureButton, retryButton]
+        trailing: [captureButton, recordButton, touchesButton, presenterButton, logsButton, controlButton, retryButton]
     )
+
+    private lazy var recordButton: ThemedIconButton = {
+        let button = ThemedIconButton(symbolName: SimulatorPaneSymbols.record,
+            accessibility: L10n.string("Record Video"), target: .inline, inkSource: .chrome)
+        button.onPress = { [weak self] in self?.toggleRecording() }
+        button.setAccessibilityIdentifier("realDevice.record")
+        return button
+    }()
+
+    private lazy var touchesButton: ThemedIconButton = {
+        let button = ThemedIconButton(symbolName: SimulatorPaneSymbols.touches,
+            accessibility: L10n.string("Show Touches"), target: .inline, inkSource: .chrome)
+        button.onPress = { [weak self] in self?.toggleShowTouches() }
+        button.onContextMenu = { [weak self, weak button] anchor in
+            guard let self, let button else { return false }
+            return self.presentMenu(self.touchEntries(), from: button, anchor: anchor)
+        }
+        button.setAccessibilityIdentifier("realDevice.touches")
+        button.toolTip = L10n.string("Show touches sent through Threading (right-click for style)")
+        return button
+    }()
+
+    private lazy var presenterButton: ThemedIconButton = {
+        let button = ThemedIconButton(symbolName: SimulatorPaneSymbols.presenter,
+            accessibility: L10n.string("Open Presenter Window"), target: .inline, inkSource: .chrome)
+        button.onPress = { [weak self] in self?.togglePresenterWindow() }
+        button.setAccessibilityIdentifier("realDevice.presenter")
+        return button
+    }()
+
+    private lazy var recordingBadge: SimulatorRecordingBadge = {
+        let badge = SimulatorRecordingBadge()
+        badge.isHidden = true
+        badge.onPress = { [weak self] in self?.stopRecording() }
+        badge.setAccessibilityIdentifier("realDevice.recording")
+        return badge
+    }()
 
     private lazy var screenView: SimulatorScreenView = {
         let screen = SimulatorScreenView()
@@ -181,6 +264,10 @@ final class RealDevicePaneViewController: NSViewController {
             ))
         }
         screen.onText = { [weak self] text in self?.submitText(text) }
+        screen.onContextMenu = { [weak self, weak screen] request in
+            guard let self, let screen else { return false }
+            return self.presentMenu(self.screenMenuEntries(), from: screen, anchor: request.anchor)
+        }
         return screen
     }()
 
@@ -254,8 +341,16 @@ final class RealDevicePaneViewController: NSViewController {
         control: any PhysicalDeviceControlling = PersistentPhysicalDeviceControl(),
         inputAuthorizer: any PhysicalDeviceInputAuthorizing =
             PhysicalDeviceInputConsentController(),
-        notificationCenter: NotificationCenter = .default
+        notificationCenter: NotificationCenter = .default,
+        touchPreferences: SimulatorTouchPreferences? = nil,
+        captureDirectory: URL? = nil,
+        revealCapture: (@MainActor (URL) -> Void)? = nil,
+        showPresenter: (@MainActor (SimulatorPresenterWindowController) -> Void)? = nil
     ) {
+        self.touchPreferences = touchPreferences ?? .shared
+        self.captureDirectory = captureDirectory
+        self.revealCapture = revealCapture ?? SimulatorCaptureSaver.reveal
+        self.showPresenter = showPresenter ?? { $0.showWindow(nil) }
         self.preferredDeviceID = preferredDeviceID
         self.control = control
         self.inputAuthorizer = inputAuthorizer
@@ -281,6 +376,12 @@ final class RealDevicePaneViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
+        touchPreferencesObserver = NotificationCenter.default.addObserver(
+            forName: SimulatorTouchPreferences.didChange, object: touchPreferences, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyTouchPreferences() }
+        }
+        applyTouchPreferences()
         renderState()
     }
 
@@ -289,8 +390,12 @@ final class RealDevicePaneViewController: NSViewController {
         view.addSubview(screenView)
         view.addSubview(emptyContent)
         view.addSubview(statusLabel)
+        view.addSubview(recordingBadge)
 
         NSLayoutConstraint.activate([
+            recordingBadge.centerXAnchor.constraint(equalTo: screenView.centerXAnchor),
+            recordingBadge.topAnchor.constraint(equalTo: screenView.topAnchor, constant: Design.Spacing.small),
+            recordingBadge.widthAnchor.constraint(lessThanOrEqualTo: screenView.widthAnchor),
             controlRow.topAnchor.constraint(
                 equalTo: view.topAnchor,
                 constant: Design.Spacing.medium
@@ -356,7 +461,7 @@ final class RealDevicePaneViewController: NSViewController {
             if let selectedDevice {
                 presentationState = .ready(selectedDevice)
                 startControlSupportProbe(for: selectedDevice)
-                startCaptureLoop(for: selectedDevice)
+                if captureTask == nil { startCaptureLoop(for: selectedDevice) }
             } else {
                 discover(preferredDeviceID)
             }
@@ -364,12 +469,23 @@ final class RealDevicePaneViewController: NSViewController {
             revokeControl()
             stopDiscovery()
             stopControlSupportProbe()
-            stopCapture()
+            if !wantsPreview { stopCapture() }
         }
         renderState()
     }
 
     func terminate() {
+        stopRecording()
+        closePresenterWindow()
+        captureMessage = nil
+        touchTimer?.invalidate()
+        touchTimer = nil
+        if let touchPreferencesObserver {
+            NotificationCenter.default.removeObserver(touchPreferencesObserver)
+            self.touchPreferencesObserver = nil
+        }
+        ThemedMenuPresenter.dismiss(menuSession)
+        menuSession = nil
         isPresented = false
         revokeControl()
         stopDiscovery()
@@ -379,10 +495,14 @@ final class RealDevicePaneViewController: NSViewController {
 
     func selectDevice(_ id: PhysicalDeviceID) {
         guard id != selectedDeviceID else { return }
+        stopRecording()
+        closePresenterWindow()
+        stopCapture()
         revokeControl()
+        captureMessage = nil
         preferredDeviceID = id
         selectedDevice = nil
-        screenView.image = nil
+        clearFrame()
         captureState = .idle
         stopControlSupportProbe()
         stopInput()
@@ -395,7 +515,9 @@ final class RealDevicePaneViewController: NSViewController {
 
     private func retry() {
         guard isPresented else { return }
-        screenView.image = nil
+        stopRecording()
+        captureMessage = nil
+        clearFrame()
         captureState = .idle
         stopControlSupportProbe()
         stopInput()
@@ -454,11 +576,6 @@ final class RealDevicePaneViewController: NSViewController {
         discoveryGeneration += 1
         discoveryTask?.cancel()
         discoveryTask = nil
-    }
-
-    private func restartCapture() {
-        guard let selectedDevice else { return }
-        startCaptureLoop(for: selectedDevice)
     }
 
     private func startControlSupportProbe(for device: PhysicalDevice) {
@@ -542,6 +659,7 @@ final class RealDevicePaneViewController: NSViewController {
 
     private func activateControl() {
         guard let device = selectedDevice, isPresented else { return }
+        captureMessage = nil
         if needsToolingSetup {
             openToolingSettings()
             return
@@ -596,6 +714,7 @@ final class RealDevicePaneViewController: NSViewController {
             }
             pendingInput.append(input)
         }
+        showTouch(input)
         guard inputTask == nil else { return }
 
         inputGeneration += 1
@@ -660,6 +779,11 @@ final class RealDevicePaneViewController: NSViewController {
         inputReady = false
         control.stopInput()
         dragOrigin = nil
+        touchOverlay.reset()
+        screenView.touchIndicators = nil
+        presenter?.screenView.touchIndicators = nil
+        touchTimer?.invalidate()
+        touchTimer = nil
     }
 
     private func connectInput(for device: PhysicalDevice) {
@@ -690,7 +814,7 @@ final class RealDevicePaneViewController: NSViewController {
     }
 
     private func startCaptureLoop(for device: PhysicalDevice) {
-        guard isPresented else { return }
+        guard wantsPreview else { return }
         stopCapture()
         captureGeneration += 1
         let generation = captureGeneration
@@ -707,14 +831,15 @@ final class RealDevicePaneViewController: NSViewController {
                         throw PhysicalDeviceControlError.invalidScreenshot
                     }
                     guard let self,
-                          self.isPresented,
+                          self.wantsPreview,
                           self.captureGeneration == generation,
                           self.selectedDevice?.id == device.id else { return }
                     if let previous = self.screenView.image,
                        previous.size != NSSize(width: cgImage.width, height: cgImage.height) {
+                        self.stopRecording()
                         self.revokeControl()
                     }
-                    self.screenView.image = NSImage(cgImage: cgImage, size: .zero)
+                    self.showFrame(cgImage)
                     if self.captureState != .live { self.captureState = .live }
                     try await Task.sleep(until: started.advanced(by: control.frameInterval), clock: .continuous)
                 } catch is CancellationError {
@@ -723,7 +848,9 @@ final class RealDevicePaneViewController: NSViewController {
                     guard let self,
                           !Task.isCancelled,
                           self.captureGeneration == generation else { return }
+                    self.stopRecording()
                     self.revokeControl()
+                    self.captureTask = nil
                     control.stopPreview()
                     if error as? PhysicalDeviceControlError == .screenshotToolUnavailable {
                         self.captureState = .toolingRequired
@@ -814,7 +941,8 @@ final class RealDevicePaneViewController: NSViewController {
         } else {
             logsButton.isEnabled = false
         }
-        captureButton.isEnabled = isPresented && selectedDevice != nil && captureState != .capturing
+        captureButton.isEnabled = canSaveSnapshot
+        refreshCapturePresentation()
         configureControlButton()
         configureScreenInteraction()
         statusLabel.toolTip = statusLabel.stringValue
@@ -823,7 +951,7 @@ final class RealDevicePaneViewController: NSViewController {
     private func configureControlButton() {
         let decision = selectedDeviceID.flatMap { inputAuthorizer.decision(for: $0) }
         if needsToolingSetup {
-            controlButton.setSymbol("hand.tap", accessibility: toolingActionTitle)
+            controlButton.setSymbol(SimulatorPaneSymbols.control, accessibility: toolingActionTitle)
             controlButton.toolTip = toolingActionTitle
             controlButton.isSelected = false
             controlButton.isEnabled = isPresented && selectedDevice != nil
@@ -858,7 +986,7 @@ final class RealDevicePaneViewController: NSViewController {
             enabled = selectedDevice != nil
         }
         controlButton.setSymbol(
-            decision == false ? "hand.raised.slash" : "hand.tap",
+            decision == false ? SimulatorPaneSymbols.controlDenied : SimulatorPaneSymbols.control,
             accessibility: title
         )
         controlButton.toolTip = title
@@ -871,12 +999,14 @@ final class RealDevicePaneViewController: NSViewController {
               inputAuthorizer.decision(for: deviceID) == true,
               case .resolved(.available) = controlSupportState else {
             screenView.interactionState = .unavailable
+            presenter?.screenView.interactionState = .unavailable
             return
         }
         screenView.interactionState = .ready(
             touch: true,
             keyboard: control.supportsKeyboardInput
         )
+        presenter?.screenView.interactionState = screenView.interactionState
     }
 
     private func deviceEntries() -> [ThemedMenuEntry] {
@@ -959,6 +1089,359 @@ final class RealDevicePaneViewController: NSViewController {
             )
         }
     }
+
+    // MARK: - Capture and presentation
+
+    var canCapture: Bool { wantsPreview && latestFrame != nil && captureState == .live }
+    var canSaveSnapshot: Bool { canCapture && !captureBusy }
+    var canRecord: Bool { canCapture && recordingState == .idle }
+    var isRecordingForCommands: Bool { recordingState == .starting || recordingState == .recording }
+    var isPresenterWindowOpen: Bool { presenter != nil }
+
+    private func clearFrame() {
+        latestFrame = nil
+        screenView.image = nil
+        presenter?.screenView.image = nil
+    }
+
+    private func showFrame(_ image: CGImage) {
+        latestFrame = image
+        let frame = NSImage(cgImage: image, size: .zero)
+        screenView.image = frame
+        presenter?.screenView.image = frame
+        presenter?.adoptFrameSize(frame.size)
+        appendRecordingFrame(image)
+    }
+
+    private func appendRecordingFrame(_ image: CGImage) {
+        guard recordingState == .recording, frameWriteTask == nil, let recorder else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastRecordingFrameAt >= 1.0 / Timing.touchFramesPerSecond else { return }
+        lastRecordingFrameAt = now
+        let indicators = touchOverlay.indicators()
+        let style = touchPreferences.style
+        let ink = SimulatorTouchMarks.Ink(style: style)
+        frameWriteTask = Task { [weak self] in
+            await recorder.append(image: image, indicators: indicators, style: style, ink: ink)
+            self?.frameWriteTask = nil
+        }
+    }
+
+    func saveSnapshot() { captureSnapshot(copying: false) }
+    func copySnapshot() { captureSnapshot(copying: true) }
+
+    private func captureSnapshot(copying: Bool) {
+        guard canSaveSnapshot, let image = latestFrame, let device = selectedDevice else { return }
+        captureBusy = true
+        captureMessage = nil
+        renderState()
+        let directory = captureDirectory
+        Task { [weak self] in
+            if copying {
+                let data = await Task.detached(priority: .userInitiated) {
+                    DevicePreviewCapture.png(image)
+                }.value
+                if let data {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setData(data, forType: .png)
+                }
+                self?.captureMessage = data == nil
+                    ? L10n.string("Could not copy the screenshot") : L10n.string("Copied screenshot")
+            } else {
+                let url = await Task.detached(priority: .userInitiated) {
+                    DevicePreviewCapture.save(image, deviceName: device.name, directory: directory)
+                }.value
+                if let url { self?.revealCapture(url) }
+                self?.captureMessage = url == nil
+                    ? L10n.string("Could not save the screenshot") : L10n.string("Saved screenshot")
+            }
+            self?.captureBusy = false
+            self?.renderState()
+        }
+    }
+
+    func toggleRecording() {
+        if isRecordingForCommands { stopRecording() } else { startRecording() }
+    }
+
+    private func startRecording() {
+        guard canRecord, let image = latestFrame, let device = selectedDevice else { return }
+        let recorder = DevicePreviewCapture()
+        self.recorder = recorder
+        recordingState = .starting
+        recordingStartedAt = Date()
+        lastRecordingFrameAt = ProcessInfo.processInfo.systemUptime
+        captureMessage = nil
+        let directory = captureDirectory
+        let indicators = touchOverlay.indicators()
+        let style = touchPreferences.style
+        let ink = SimulatorTouchMarks.Ink(style: style)
+        recordingStartTask = Task {
+            let url = await Task.detached(priority: .userInitiated) {
+                DevicePreviewCapture.destination(deviceName: device.name, video: true, directory: directory)
+            }.value
+            return await recorder.start(url: url, image: image, indicators: indicators, style: style, ink: ink)
+        }
+        let startTask = recordingStartTask
+        Task { [weak self] in
+            let started = await startTask?.value == true
+            guard let self, self.recorder === recorder, self.recordingState == .starting else { return }
+            self.recordingStartTask = nil
+            if started {
+                self.recordingState = .recording
+            } else {
+                self.recordingState = .idle
+                self.recorder = nil
+                self.recordingTimer?.invalidate()
+                self.recordingTimer = nil
+                self.captureMessage = L10n.string("Could not start recording")
+                self.releaseUnwatchedPreview()
+            }
+            self.renderState()
+        }
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshCapturePresentation() }
+        }
+        RunLoop.current.add(timer, forMode: .common)
+        recordingTimer = timer
+        renderState()
+    }
+
+    func stopRecording() {
+        guard isRecordingForCommands, let recorder else { return }
+        recordingState = .finishing
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        let startTask = recordingStartTask
+        let appendTask = frameWriteTask
+        renderState()
+        releaseUnwatchedPreview()
+        // Start/append may still own the worker. Finish only after those accepted operations.
+        Task { [weak self] in
+            _ = await startTask?.value
+            await appendTask?.value
+            let url = await recorder.finish()
+            guard let self, self.recorder === recorder else { return }
+            self.recorder = nil
+            self.recordingStartTask = nil
+            self.recordingState = .idle
+            self.recordingStartedAt = nil
+            self.captureMessage = url == nil
+                ? L10n.string("Could not save recording") : L10n.string("Saved recording")
+            if let url { self.revealCapture(url) }
+            self.renderState()
+        }
+    }
+
+    private func refreshCapturePresentation() {
+        let active = isRecordingForCommands
+        let finishing = recordingState == .finishing
+        let elapsed = max(0, Int(recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0))
+        let title = finishing ? L10n.string("Saving recording…")
+            : active ? L10n.string("Stop Recording") : L10n.string("Record Video")
+        recordButton.setSymbol(active ? SimulatorPaneSymbols.stopRecording : SimulatorPaneSymbols.record,
+                               accessibility: title)
+        recordButton.toolTip = active || finishing ? title
+            : L10n.string("Record the iPhone preview with Threading touches; frame rate follows the connection")
+        recordButton.isSelected = active
+        recordButton.isEnabled = active || canRecord
+        recordingBadge.isHidden = !active && !finishing
+        recordingBadge.phase = finishing ? .finishing : .recording(elapsedSeconds: elapsed)
+        screenView.isRecording = active
+        presenter?.screenView.isRecording = active
+        let presenterTitle = presenter == nil ? L10n.string("Open Presenter Window")
+            : L10n.string("Close Presenter Window")
+        presenterButton.setSymbol(SimulatorPaneSymbols.presenter, accessibility: presenterTitle)
+        presenterButton.toolTip = presenterTitle
+        presenterButton.isSelected = presenter != nil
+        presenterButton.isEnabled = presenter != nil || canCapture
+        if active || finishing {
+            let recordingText = finishing ? title
+                : L10n.format("Recording %@", SimulatorRecordingBadge.elapsedText(elapsed))
+            statusLabel.stringValue = [recordingText, controlSupportSummary].joined(separator: "\n")
+            statusLabel.textColor = Design.Status.negative
+        } else if let captureMessage, captureState == .live {
+            statusLabel.stringValue = [captureMessage, controlSupportSummary].joined(separator: "\n")
+        }
+    }
+
+    func togglePresenterWindow() {
+        if presenter != nil { closePresenterWindow(); return }
+        guard canCapture, let device = selectedDevice else { return }
+        let controller = SimulatorPresenterWindowController(deviceName: device.name)
+        let mirror = controller.screenView
+        mirror.setAccessibilityLabel(L10n.string("iPhone screen"))
+        mirror.image = screenView.image
+        mirror.touchStyle = touchPreferences.style
+        mirror.touchIndicators = screenView.touchIndicators
+        mirror.interactionState = screenView.interactionState
+        mirror.onTap = screenView.onTap
+        mirror.onTouchBegan = screenView.onTouchBegan
+        mirror.onTouchMoved = screenView.onTouchMoved
+        mirror.onTouchEnded = screenView.onTouchEnded
+        mirror.onText = screenView.onText
+        mirror.onContextMenu = { [weak self, weak mirror] request in
+            guard let self, let mirror else { return false }
+            return self.presentMenu(self.screenMenuEntries(), from: mirror, anchor: request.anchor)
+        }
+        if let image = screenView.image { controller.adoptFrameSize(image.size) }
+        controller.onClose = { [weak self] in
+            self?.presenter = nil
+            self?.releaseUnwatchedPreview()
+            self?.renderState()
+        }
+        presenter = controller
+        controller.placeBeside(view.window)
+        renderState()
+        showPresenter(controller)
+    }
+
+    private func closePresenterWindow() {
+        guard let presenter else { return }
+        self.presenter = nil
+        presenter.onClose = nil
+        presenter.close()
+        releaseUnwatchedPreview()
+        renderState()
+    }
+
+    private func releaseUnwatchedPreview() {
+        if !wantsPreview { stopCapture() }
+    }
+
+    // MARK: - Touch overlays
+
+    func toggleShowTouches() { touchPreferences.showsLiveTouches.toggle() }
+
+    private func applyTouchPreferences() {
+        screenView.touchStyle = touchPreferences.style
+        presenter?.screenView.touchStyle = touchPreferences.style
+        let shows = touchPreferences.showsLiveTouches
+        touchesButton.isSelected = shows
+        touchesButton.setSymbol(SimulatorPaneSymbols.touches,
+            accessibility: shows ? L10n.string("Hide Touches") : L10n.string("Show Touches"))
+        if !shows {
+            if !isRecordingForCommands {
+                touchTimer?.invalidate()
+                touchTimer = nil
+            }
+            screenView.touchIndicators = nil
+            presenter?.screenView.touchIndicators = nil
+        }
+    }
+
+    private func showTouch(_ input: PhysicalDeviceInput) {
+        guard touchPreferences.showsLiveTouches || isRecordingForCommands else { return }
+        switch input {
+        case .tap(let x, let y): touchOverlay.tap(at: CGPoint(x: x, y: y))
+        case .touchDown(let x, let y): touchOverlay.contactBegan(at: CGPoint(x: x, y: y))
+        case .touchMove(let x, let y): touchOverlay.contactMoved(to: CGPoint(x: x, y: y))
+        case .touchUp(let x, let y): touchOverlay.contactEnded(at: CGPoint(x: x, y: y))
+        case .drag(let fromX, let fromY, let toX, let toY):
+            touchOverlay.contactBegan(at: CGPoint(x: fromX, y: fromY))
+            touchOverlay.contactMoved(to: CGPoint(x: toX, y: toY))
+            touchOverlay.contactEnded(at: CGPoint(x: toX, y: toY))
+        default: return
+        }
+        // A slow screenshot connection can go a whole ripple lifetime between frames. Capture
+        // accepted input on the current picture too, so a tap is not lost from the movie.
+        if let latestFrame { appendRecordingFrame(latestFrame) }
+        guard touchTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / Timing.touchFramesPerSecond, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tickTouches() }
+        }
+        RunLoop.current.add(timer, forMode: .common)
+        touchTimer = timer
+        tickTouches()
+    }
+
+    private func tickTouches() {
+        let indicators = touchOverlay.indicators()
+        screenView.touchIndicators = touchPreferences.showsLiveTouches && !indicators.isEmpty ? indicators : nil
+        presenter?.screenView.touchIndicators = screenView.touchIndicators
+        if let latestFrame { appendRecordingFrame(latestFrame) }
+        if !touchOverlay.hasActivity {
+            touchTimer?.invalidate()
+            touchTimer = nil
+        }
+    }
+
+    private func updateTouchStyle(_ change: (inout SimulatorTouchStyle) -> Void) {
+        var style = touchPreferences.style
+        change(&style)
+        touchPreferences.style = style
+    }
+
+    private func touchEntries() -> [ThemedMenuEntry] {
+        let style = touchPreferences.style
+        return [
+            .item(ThemedMenuItem(title: L10n.string("Show Touches"),
+                isSelected: touchPreferences.showsLiveTouches,
+                onChoose: { [weak self] in self?.toggleShowTouches() })),
+            .item(ThemedMenuItem(title: L10n.string("Color"), submenu:
+                SimulatorTouchStyle.Color.allCases.map { color in
+                    .item(ThemedMenuItem(title: Design.SimulatorTouch.name(color),
+                        image: Design.SimulatorTouch.swatch(color), isSelected: style.color == color,
+                        onChoose: { [weak self] in self?.updateTouchStyle { $0.color = color } }))
+                })),
+            .item(ThemedMenuItem(title: L10n.string("Size"), submenu:
+                SimulatorTouchStyle.Size.allCases.map { size in
+                    .item(ThemedMenuItem(title: Design.SimulatorTouch.name(size), isSelected: style.size == size,
+                        onChoose: { [weak self] in self?.updateTouchStyle { $0.size = size } }))
+                })),
+            .item(ThemedMenuItem(title: L10n.string("Show Swipe Trail"), isSelected: style.showsTrail,
+                onChoose: { [weak self] in self?.updateTouchStyle { $0.showsTrail.toggle() } })),
+        ]
+    }
+
+    private func captureEntries() -> [ThemedMenuEntry] {
+        [
+            .item(ThemedMenuItem(title: L10n.string("Save Screenshot"), isEnabled: canSaveSnapshot,
+                onChoose: { [weak self] in self?.saveSnapshot() })),
+            .item(ThemedMenuItem(title: L10n.string("Copy Screenshot"), isEnabled: canSaveSnapshot,
+                onChoose: { [weak self] in self?.copySnapshot() })),
+        ]
+    }
+
+    func screenMenuEntries() -> [ThemedMenuEntry] {
+        captureEntries() + [
+            .item(ThemedMenuItem(title: isRecordingForCommands ? L10n.string("Stop Recording") : L10n.string("Record Video"),
+                isEnabled: isRecordingForCommands || canRecord,
+                onChoose: { [weak self] in self?.toggleRecording() })),
+            .separator,
+        ] + touchEntries() + [
+            .separator,
+            .item(ThemedMenuItem(title: presenter == nil ? L10n.string("Open Presenter Window") : L10n.string("Close Presenter Window"),
+                isEnabled: presenter != nil || canCapture,
+                onChoose: { [weak self] in self?.togglePresenterWindow() })),
+            .item(ThemedMenuItem(title: L10n.string("Keep on Top"), isSelected: presenter?.keepsOnTop == true,
+                isEnabled: presenter != nil,
+                onChoose: { [weak self] in self?.presenter?.keepsOnTop.toggle() })),
+        ]
+    }
+
+    private func presentMenu(_ entries: [ThemedMenuEntry], from source: NSView, anchor: ThemedMenuAnchor) -> Bool {
+        ThemedMenuPresenter.dismiss(menuSession)
+        menuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: Timing.menuWidth), from: source, anchor: anchor,
+            selectedEntryIndex: nil, onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.menuSession = nil })
+        return menuSession != nil
+    }
+
+    func showRecordingPresentationForTesting(elapsedSeconds: Int?) {
+        recordingState = elapsedSeconds == nil ? .idle : .recording
+        recordingStartedAt = elapsedSeconds.map { Date().addingTimeInterval(-TimeInterval($0)) }
+        renderState()
+    }
+
+    var recordingHasFinishedForTesting: Bool { recordingState == .idle }
+    var recordingHasStartedForTesting: Bool { recordingState == .recording }
+    var captureButtonForTesting: ThemedIconButton { captureButton }
+    var recordButtonForTesting: ThemedIconButton { recordButton }
+    var touchesButtonForTesting: ThemedIconButton { touchesButton }
+    var presenterButtonForTesting: ThemedIconButton { presenterButton }
+    var recordingBadgeForTesting: SimulatorRecordingBadge { recordingBadge }
 
     var frameImageForTesting: NSImage? { screenView.image }
     var isPresentedForTesting: Bool { isPresented }

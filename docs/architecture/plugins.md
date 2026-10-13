@@ -510,9 +510,34 @@ phone-wide HCI traffic, not an app-PID stream or a promiscuous radio sniffer.
 The worker reads microsecond PCAP link type 201, validating lengths, direction, byte order and
 EOF. It emits value rows for HCI commands/events, ACL/L2CAP, complete ATT messages and SCO.
 Packet data is hex with a 256-byte preview ceiling and an explicit omitted-byte count.
-ACL continuations and incomplete L2CAP packets stay labelled as fragments; no cross-packet
-reassembly, full GATT database reconstruction, Apple vendor-log decoding or raw archive export
-is claimed. The tool's PCAP conversion omits non-HCI PacketLogger record types. UTC timestamps
+L2CAP frames are reassembled per ACL connection (one pending frame each, 16 connections, LRU);
+a continuation with no pending start stays labelled. No full GATT database reconstruction,
+Apple vendor-log decoding or raw archive export is claimed.
+
+**The PCAP header's snapshot length is not a record bound.** `idevicebtlogger` hard-codes 2,048
+("larger than any ACL") and then writes every packet whole; LE Data Length Extension ACLs exceed
+it, and enforcing it stopped real captures with "invalid packet length or timestamp". Records are
+bounded by the 65,535-byte packet limit instead. The test fixture header now declares the tool's
+real 2,048, which is why the earlier 65,535 fixture never caught it.
+
+**App packet definitions.** `BluetoothATTSession` carries the cross-packet state an app value
+needs: reassembly, handle→UUID learned from Read By Type (0x2803) responses, and the outstanding
+Read Request handle. When the session's checkout has `.threading/bluetooth.yaml`, matching ATT
+values are interpreted by `BluetoothPacketDefinitions` — a Kaitai-flavoured, bounded interpreter
+over our own YAML subset (`YAMLSubset`, no dependency) — and the row's subsystem becomes `App`. The
+plugin learns the checkout from the existing `checkoutPath` placement argument; no contract
+change. The capture worker stats the file once a second and recompiles on change, so a save takes
+effect on the next packet; compile errors carry a line and appear in the footer, the "?" panel and
+the agent `visible` answer. A value whose bytes do not fit is logged at Warning, which is what
+the filter bar's "Fully decoded only" excludes (`LogFocus.maximumSeverity`). Decoded rows name the
+peer from HCI events and GATT as well — Device Name read, else advertised local name tied by the
+connection-complete address, else the definitions' service name — with advertised names capped at
+256 addresses and dropped per handle on disconnection. Bounds per value and per file, and the
+authoring format, are in [`bluetooth-packet-definitions.md`](../bluetooth-packet-definitions.md);
+the in-app guide and the example share `BluetoothDefinitionsGuide`, whose example is compiled by a
+test.
+
+The tool's PCAP conversion omits non-HCI PacketLogger record types. UTC timestamps
 come from the phone's capture. These are packet payloads and can contain private application data;
 they follow Device Logs' existing local history retention, not unified-log privacy redaction.
 

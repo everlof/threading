@@ -386,6 +386,13 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 "the Device Logs shortcut must ship in the visible iPhone toolbar"
             )
 
+            for button in [fixture.realDevice.captureButtonForTesting, fixture.realDevice.recordButtonForTesting,
+                           fixture.realDevice.touchesButtonForTesting, fixture.realDevice.presenterButtonForTesting] {
+                XCTAssertTrue(button.isEnabled)
+                let bounds = button.convert(button.bounds, to: fixture.realDevice.view)
+                XCTAssertTrue(fixture.realDevice.view.bounds.contains(bounds), "iPhone toolbar action was clipped")
+            }
+
             let representation = try XCTUnwrap(
                 content.bitmapImageRepForCachingDisplay(in: content.bounds)
             )
@@ -398,6 +405,31 @@ final class SimulatorPaneRenderTests: XCTestCase {
                     "physical-iphone-pane-system-\(appearance.name).png"
                 )
             )
+
+            let idleDeviceRect = fixture.realDevice.screenViewForTesting.imageRect
+            fixture.realDevice.showRecordingPresentationForTesting(elapsedSeconds: 72)
+            fixture.realDevice.screenViewForTesting.touchIndicators = SimulatorTouchIndicators(
+                ripples: [], contact: .init(point: CGPoint(x: 0.6, y: 0.4),
+                    trail: [CGPoint(x: 0.4, y: 0.7), CGPoint(x: 0.5, y: 0.55), CGPoint(x: 0.6, y: 0.4)]))
+            settle(fixture.window)
+            XCTAssertFalse(fixture.realDevice.recordingBadgeForTesting.isHidden)
+            XCTAssertEqual(fixture.realDevice.screenViewForTesting.imageRect, idleDeviceRect,
+                           "Starting a recording must not resize the device under the pointer")
+            let recording = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: recording)
+            try XCTUnwrap(recording.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent("physical-iphone-pane-recording-\(appearance.name).png"))
+            fixture.realDevice.showRecordingPresentationForTesting(elapsedSeconds: nil)
+            let screen = fixture.realDevice.screenViewForTesting
+            XCTAssertTrue(screen.onContextMenu?(.init(anchor: .pointer(screen.convert(
+                CGPoint(x: screen.bounds.midX, y: screen.bounds.midY), to: nil)),
+                point: nil, noteID: nil)) == true)
+            settle(fixture.window)
+            let menu = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: menu)
+            try XCTUnwrap(menu.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent("physical-iphone-pane-menu-\(appearance.name).png"))
+            fixture.window.firstResponder?.cancelOperation(nil)
         }
 
         print("Rendered the physical iPhone pane to \(Render.directory.path)")
@@ -1247,7 +1279,7 @@ final class SimulatorPaneRenderTests: XCTestCase {
                     "I can keep the physical-device pane view-only until you grant input."
                 ),
                 .text(
-                    "Your paired iPhone is open in the right panel. Use the hand button to grant "
+                    "Your paired iPhone is open in the right panel. Use the pointer button to grant "
                     + "temporary tap, swipe, and keyboard control."
                 )
             ]),

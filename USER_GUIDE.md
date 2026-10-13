@@ -3108,8 +3108,9 @@ and other attachments, or the active browser tab.
 
 The iPhone chat keeps its pinned status, delivery choices and composer on a separate themed
 background with a border above it, so this area stays distinct from the scrolling messages.
-On your own paired device, the composer also shows **Model**, **Effort**, **Permissions** and
-**Speed** when the current provider supports them. Tap a control to change the same session
+On your own paired device, a line of small chips beneath the prompt shows the current
+**Model**, **Effort**, **Permissions** and **Speed** when the current provider supports them;
+swipe the line sideways if it does not fit. Tap a chip to change the same session
 setting as on the Mac. Controls stay visible while temporarily unavailable. Permission choices
 say when they apply; some providers require the chat to restart. Claude has no live effort
 control, so that control is absent for a running Claude chat. Shared participants cannot change
@@ -4009,16 +4010,34 @@ Shell, browser and Device Logs tabs can also move to the existing shell drawer u
 ### Physical iPhone in the panel
 
 Choose **+ → iPhone Device** to keep a paired physical iPhone beside the current conversation.
-Threading shows a visibility-bounded screenshot preview and stops asking the phone for frames when
-the tab is hidden. Pairing, trusting this Mac or detecting developer services does not grant
-control.
+Threading shows a screenshot preview. Capture stops when the tab is hidden unless a recording or
+presenter window is still using it. Pairing, trusting this Mac or detecting developer services does
+not grant control.
 
-When the phone supports it, press the hand button and approve **Allow Control** for that exact
+The toolbar offers the same capture and presentation controls as the Simulator:
+
+- **Camera** saves the displayed frame to **Pictures → Threading** and reveals it in Finder.
+  Right-click the camera or the device to **Copy Screenshot** instead.
+- **Record** saves a silent movie to **Movies → Threading**. The red **REC** badge and screen border
+  show recording is active; press Record or the badge to stop. Movies include touch marks for input
+  sent through Threading, and their frame rate follows the preview connection. Switching tabs keeps
+  recording; closing the tab, switching phones, rotating the phone or losing capture finishes it.
+- **Show Touches** draws Threading's taps and swipes. Right-click it for color, size and swipe-trail
+  choices, shared with the Simulator. Touches made directly on the phone are not reported.
+- **Presenter Window** shows the phone alone for screen sharing, with **Keep on Top** in its context
+  menu. It continues previewing after you switch tabs. Input still requires the phone pane to be
+  visible and its exact-device control grant to be active.
+
+Right-click the device for these actions. Screenshot, recording, touch-overlay and presenter
+commands are also in the command palette and can receive shortcuts in Keyboard Settings. Physical
+iPhones do not currently offer the Simulator's element inspector, note annotations or hardware buttons.
+
+When the phone supports it, press the pointer button and approve **Allow Control** for that exact
 iPhone. You can then click the preview to tap, drag across it to swipe, and type with the Mac
 keyboard after clicking a text field on the phone. The first keyboard slice supports standard US
 text plus Return, Tab and Delete; Command and Control shortcuts stay on the Mac. The grant is temporary:
 hiding or closing the tab, switching phones or ending the session revokes it. A denial is not
-asked again on every screen click; press the crossed-out hand button to retry explicitly. This
+asked again on every screen click; press the crossed-out pointer button to retry explicitly. This
 control version does not send Home, Lock or volume-button presses, and agents cannot use your
 visible-pane grant to operate the phone.
 
@@ -4033,7 +4052,7 @@ the preview recovers.
 The second status line explains what Threading found. **Media streaming unavailable** means the
 developer service reports no usable media features; because its media session authenticates
 touch, input cannot work in that state either. **Touch surface unavailable** means the phone did
-not report its main touchscreen. If the check fails after an iOS upgrade, the hand button becomes
+not report its main touchscreen. If the check fails after an iOS upgrade, the pointer button becomes
 **Prepare iPhone Control**. Pressing it can download and install the matching developer image—for
 iOS 27, its Cryptex1 DDI—then Threading checks again. Connect and unlock that exact iPhone over USB
 for this one-time preparation. Afterward, an already-prepared phone can still be controlled over
@@ -4108,11 +4127,42 @@ has started, it finishes for that phone. Threading removes its temporary profile
 PacketLogger itself is not required. Follow Apple's profile instructions for expiry and removal.
 
 The stream shows HCI commands and events, connection handles, complete ATT reads/writes and
-notifications, plus raw hex previews (up to 256 bytes per packet). Fragmented L2CAP traffic is
-labelled but not reassembled. Capture covers the phone's Bluetooth controller traffic; packets
+notifications, plus raw hex previews (up to 256 bytes per packet). Fragmented L2CAP frames are
+reassembled per connection: the start and middle fragments show their progress, and the fragment
+that completes the frame shows the whole ATT message. Capture covers the phone's Bluetooth controller traffic; packets
 do not carry an app process, so the process selector is hidden. Packet payloads can include private
 data and are saved in the same local history as other Device Logs. A quiet stream shows setup
 guidance; it does not prove the logging profile is active.
+
+#### App packet definitions
+
+ATT tells you *which* characteristic was written, read or notified; what its bytes mean is your
+app's own protocol. Describe it in **`.threading/bluetooth.yaml`** at the root of the session's
+checkout (`.yml` also works), and every matching row is decoded: its subsystem becomes **App** and
+the message reads, for example,
+`RX Pulse 4F2A → iPhone · Messages notify · LOCATION #412 {lat=59.3293° …}`, with the hex preview
+showing the characteristic's value. The first part names the device and the direction: Threading
+uses the GATT Device Name read on that connection, else the name the device advertised before it
+connected, else your file's service `name:`, else the device's address. The second is your
+characteristic's `name:` and what happened to it (write, notify, indicate or read).
+
+The **?** beside **Set Up…** explains the format, shows where Threading looks for this project's
+file and whether it loaded, and offers **Create File** (writes a working example, then opens it),
+**Copy Example**, and **Copy Agent Prompt**, which asks a coding agent in this project to write the
+file from the app's BLE code. The Bluetooth footer always names the file and its state, including
+the line number of the first mistake. Saved changes apply to the next packet without a Rescan.
+
+The Bluetooth filter bar's first menu chooses which packets to show: **All packets**, **App packets
+only** (everything your definitions decoded), or **Fully decoded only**, which also leaves out
+packets whose bytes did not fit their definition. Those are logged at **Warning** with a `⚠` saying
+what was missing or left over. It is a view filter: everything is still recorded and searchable,
+and **All packets** brings the rest back. If nothing shows, the footer says whether no definitions are
+loaded or none of their characteristics has matched yet.
+
+Characteristics are matched by an explicit `handle:` or by UUID. A UUID is matched to its handle
+from the GATT discovery seen in the capture; iOS caches discovery for known accessories, so when a
+capture starts after it, add the `handle:` shown in the ATT row. The format reference is
+[`docs/bluetooth-packet-definitions.md`](docs/bluetooth-packet-definitions.md).
 
 Agents can select it with `plugin__devicelogs__bluetooth` using the exact iPhone hardware UDID,
 then read it with the existing `visible`, `search` and `time_range` tools. Hiding the pane stops

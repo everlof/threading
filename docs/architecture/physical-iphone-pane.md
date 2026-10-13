@@ -50,15 +50,16 @@ is written to disk by the persistent path. The legacy path retains its mode-`070
 The process deadline and generation guard apply to every request; revocation interrupts a blocked
 read and cannot cancel a newer generation's child.
 
-`RealDevicePaneViewController.setPresented(_:)` is the demand boundary:
+`RealDevicePaneViewController` owns preview demand: the visible pane, an explicit recording or an
+open presenter window. `setPresented(_:)` remains the input-consent boundary:
 
 - no discovery or capture starts for a restored or background-session tab;
 - presenting discovers the selected device and starts at most one screenshot loop;
 - the persistent preview requests at most ten frames per second, with one request/decode in
   flight and only the latest local frame retained; the command fallback keeps its one-fps cap;
   both are screenshot preview, not video, so actual cadence remains capture-limited;
-- hiding, switching away, closing or terminating cancels discovery, the capture loop and its
-  current child process;
+- hiding or switching away cancels discovery and input; capture stops when no presenter or
+  recording remains. Closing/terminating finishes recording, closes the presenter and cancels capture;
 - selecting a hardware identity while hidden only records that preference.
 
 A hidden controller may retain its last `NSImage` for immediate local redisplay. That is not a
@@ -67,6 +68,44 @@ capture lease and performs no device work.
 The toolbar's Device Logs button carries the selected hardware UDID to the window-owned tab
 router. That router moves the session's one bundled Device Logs plugin into the bottom drawer and
 retargets it, so the preview stays visible beside the log stream and no second reader is created.
+
+## Capture and presentation controls
+
+The physical pane reuses `SimulatorScreenView`, `SimulatorRecordingBadge`, the presenter window,
+`SimulatorTouchPreferences` and the touch renderer. The camera now saves/copies the displayed
+frame; Refresh owns retry. The fixed toolbar and screen context menu expose recording, touch style
+and presenter actions. Stable `iphone.*` commands route to the same operations. Physical element
+inspection, note annotations and hardware buttons remain unavailable.
+
+Snapshots are PNG-encoded and written off main. One explicit snapshot may be in flight. Movies use
+`DeviceMovieWriter`, the encoder also behind `SimulatorStreamRecorder`, through the
+`DevicePreviewCapture` actor. One append is admitted at a time; newer preview frames replace the
+screen normally while a busy encoder drops recording frames. The first visible frame starts the
+movie, monotonic timestamps preserve real time, and finalization checks AVFoundation's completed
+status before revealing a file. Start, accepted append and finish are ordered, including an
+immediate stop during asynchronous startup. Rotation, disconnect, device change and termination
+finish the existing movie rather than splicing a different geometry or phone into it.
+
+A movie records the screenshot preview at its actual cadence, without audio; it does not enable a
+new hardware video service. Overlay input comes only from the existing consented Threading input
+queue. Direct touches on the phone are unavailable. Touch styles are shared with the Simulator;
+movie ink is resolved on main and passed as immutable colors to the worker. The shared renderer
+keeps movie and live mark geometry identical. Trails cap at 128 points, ripples at 32, and a 30 Hz
+overlay timer runs only during live or recorded touch activity. Revocation clears all contacts immediately.
+
+The presenter is a mirror without its own transport or grant. It holds preview demand while open,
+but hiding the main pane still revokes input in both windows. The last viewer leaving cancels the
+preview. Restoring a tab never starts a recording or presenter.
+
+Scaling contract: one selected phone, one latest frame (existing 16-megapixel ceiling), one frame
+being encoded, one snapshot operation, one presenter, and a fixed menu/control set. Expected
+preview cadence is 1–10 fps; input stress uses 10,000 points while retained trail/ripple counts stay
+constant. Recording submissions cap at 30 fps; between new screenshots the bounded touch tick
+can reuse the latest frame to keep short taps and fading marks in a slow connection's movie.
+PNG encoding, file creation, movie initialization/compositing/appends/finalization are
+worker work; main only updates the fixed controls and screen image. The tests exercise real PNG
+and playable MOV output plus recording/presenter demand and revocation. Hardware cadence and
+live user input remain a separate on-device check.
 
 ## Managed tooling and runtime data
 
