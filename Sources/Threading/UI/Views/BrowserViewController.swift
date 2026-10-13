@@ -1859,15 +1859,18 @@ final class BrowserViewController: NSViewController {
         }
     }
 
-    /// Activates one exact control and waits for the resulting WKDownload through the user's
-    /// native save decision. The chosen destination is returned only because the save panel says
-    /// explicitly that the agent will receive it.
+    /// Activates one exact control and waits for its WKDownload to finish at the selected path.
     func agentRequestDownload(
         ref: String?,
         selector: String?,
-        locator: BrowserSemanticLocator?
+        locator: BrowserSemanticLocator?,
+        destination: URL?,
+        mode: BrowserDownloadMode
     ) async throws -> BrowserActionOutcome {
-        guard let request = downloadCoordinator.beginAgentRequest() else {
+        guard let request = downloadCoordinator.beginAgentRequest(
+            destination: destination,
+            mode: mode
+        ) else {
             return BrowserActionOutcome(
                 ok: false,
                 message: "Another agent-requested download is already pending in this tab."
@@ -1920,7 +1923,9 @@ final class BrowserViewController: NSViewController {
         case .success(let destination):
             return BrowserActionOutcome(
                 ok: true,
-                message: "Download completed at the user-approved path: \(destination.path)"
+                message: mode == .direct
+                    ? "Download completed at the requested path: \(destination.path)"
+                    : "Download completed at the user-approved path: \(destination.path)"
             )
         case .failure(let message):
             return BrowserActionOutcome(ok: false, message: message)
@@ -3328,7 +3333,7 @@ final class BrowserViewController: NSViewController {
             "Choose where to save a PNG of the visible browser page."
         )
         if let savePanelProvider {
-            savePanelProvider(suggestedFilename, false, message, completion)
+            savePanelProvider(suggestedFilename, nil, false, message, completion)
             return
         }
 
@@ -4363,7 +4368,8 @@ extension BrowserViewController: WKDownloadDelegate {
         completionHandler: @escaping @MainActor @Sendable (URL?) -> Void
     ) {
         let downloadID = BrowserDownloadID(download)
-        let isAgentRequested = downloadCoordinator.isAgentRequested(downloadID)
+        let agentRequest = downloadCoordinator.agentRequest(for: downloadID)
+        let isAgentRequested = agentRequest != nil
         let message = !isAgentRequested
             ? L10n.string("Choose where to save this download.")
             : L10n.string("""
@@ -4386,9 +4392,18 @@ extension BrowserViewController: WKDownloadDelegate {
             }
         }
 
+        if agentRequest?.mode == .direct {
+            decidedURL(agentRequest?.destination)
+            return
+        }
+
+        let suggestedDestination = agentRequest?.destination
+        let filename = suggestedDestination?.lastPathComponent ?? suggestedFilename
+
         if let savePanelProvider {
             savePanelProvider(
-                suggestedFilename,
+                filename,
+                suggestedDestination,
                 isAgentRequested,
                 message,
                 decidedURL
@@ -4397,7 +4412,8 @@ extension BrowserViewController: WKDownloadDelegate {
         }
 
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = suggestedFilename
+        panel.nameFieldStringValue = filename
+        panel.directoryURL = suggestedDestination?.deletingLastPathComponent()
         panel.message = message
 
         let decided: (NSApplication.ModalResponse) -> Void = { result in

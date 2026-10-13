@@ -990,7 +990,7 @@ final class BrowserAgentBridgeTests: XCTestCase {
                   "jsonrpc":"2.0","id":23,"method":"tools/call",
                   "params":{
                     "name":"browser_download",
-                    "arguments":{"ref":"e17"}
+                    "arguments":{"ref":"e17","path":"/tmp/invoice.pdf","mode":"direct"}
                   }
                 }
                 """#.utf8
@@ -1001,6 +1001,8 @@ final class BrowserAgentBridgeTests: XCTestCase {
           tool: .browserDownload
         )
         XCTAssertEqual(download.ref, "e17")
+        XCTAssertEqual(download.path, "/tmp/invoice.pdf")
+        XCTAssertEqual(download.mode, .direct)
 
         let compareRequest = try JSONDecoder().decode(
             JSONRPCRequest.self,
@@ -3339,18 +3341,23 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             .appendingPathComponent("chosen-\(UUID().uuidString).txt")
         let downloadURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("download-\(UUID().uuidString).bin")
+        let directDownloadURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("direct-download-\(UUID().uuidString).bin")
         try Data("suggested".utf8).write(to: suggestionURL, options: .atomic)
         try Data("chosen".utf8).write(to: chosenURL, options: .atomic)
         defer {
             try? FileManager.default.removeItem(at: suggestionURL)
             try? FileManager.default.removeItem(at: chosenURL)
             try? FileManager.default.removeItem(at: downloadURL)
+            try? FileManager.default.removeItem(at: directDownloadURL)
         }
 
         var openPanelMessages: [String] = []
         var suggestedSelections: [[URL]] = []
         var savePanelWasAgentRequested = false
         var savePanelMessage = ""
+        var savePanelSuggestedDestination: URL?
+        var savePanelCallCount = 0
         let pane = DisplayPaneController(browserFactory: { context, projectID in
             BrowserViewController(
                 contextKind: context,
@@ -3360,7 +3367,9 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
                     suggestedSelections.append(suggestions)
                     decide([chosenURL])
                 },
-                savePanelProvider: { _, agentRequested, message, decide in
+                savePanelProvider: { _, suggestedDestination, agentRequested, message, decide in
+                    savePanelCallCount += 1
+                    savePanelSuggestedDestination = suggestedDestination
                     savePanelWasAgentRequested = agentRequested
                     savePanelMessage = message
                     decide(downloadURL)
@@ -3507,6 +3516,48 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         XCTAssertEqual(completionToast.request.detail, downloadURL.lastPathComponent)
         XCTAssertEqual(completionToast.request.actionTitle, L10n.string("Reveal in Finder"))
         XCTAssertTrue(window.sheets.isEmpty)
+
+        let suggestedDownload = await call(
+            coordinator,
+            .browserDownload(.init(
+                ref: nil,
+                selector: "#download",
+                path: directDownloadURL.path
+            )),
+            sessionID: sessionID
+        )
+        XCTAssertFalse(suggestedDownload.isError, suggestedDownload.text)
+        XCTAssertEqual(savePanelSuggestedDestination, directDownloadURL)
+        XCTAssertEqual(savePanelCallCount, 2)
+
+        let directDownload = await call(
+            coordinator,
+            .browserDownload(.init(
+                ref: nil,
+                selector: "#download",
+                path: directDownloadURL.path,
+                mode: .direct
+            )),
+            sessionID: sessionID
+        )
+        XCTAssertFalse(directDownload.isError, directDownload.text)
+        XCTAssertTrue(directDownload.text.contains(directDownloadURL.path), directDownload.text)
+        XCTAssertEqual(try Data(contentsOf: directDownloadURL), downloadData)
+        XCTAssertEqual(savePanelCallCount, 2)
+
+        let existingDirectDownload = await call(
+            coordinator,
+            .browserDownload(.init(
+                ref: nil,
+                selector: "#download",
+                path: directDownloadURL.path,
+                mode: .direct
+            )),
+            sessionID: sessionID
+        )
+        XCTAssertTrue(existingDirectDownload.isError)
+        XCTAssertTrue(existingDirectDownload.text.contains("already exists"))
+        XCTAssertEqual(try Data(contentsOf: directDownloadURL), downloadData)
     }
 
     func testIsolatedPlaywrightScenarioUsesFreshStrictContextAndCachesScreenshot() async throws {

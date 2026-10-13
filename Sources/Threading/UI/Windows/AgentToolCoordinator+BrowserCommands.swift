@@ -506,19 +506,17 @@ extension AgentToolCoordinator {
         for sessionID: SessionID,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
-        let hasRef = arguments.ref?.isEmpty == false
-        let hasSelector = arguments.selector?.isEmpty == false
-        let hasLocator = arguments.locator != nil
-        guard [hasRef, hasSelector, hasLocator].filter({ $0 }).count == 1 else {
-            completion(.failure(
-                "Provide exactly one download target: ref, selector, or locator."
-            ))
+        let options: BrowserDownloadOptions
+        do {
+            options = try BrowserDownloadOptions(arguments)
+        } catch {
+            completion(.failure(error.localizedDescription))
             return
         }
 
         withAuthorizedBrowser(
             for: sessionID,
-            purpose: "request a user-approved download from"
+            purpose: options.mode == .direct ? "save a download directly from" : "request a download from"
         ) { [weak self] browser in
             guard let self, let browser else {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
@@ -530,7 +528,9 @@ extension AgentToolCoordinator {
                     let outcome = try await browser.agentRequestDownload(
                         ref: arguments.ref,
                         selector: arguments.selector,
-                        locator: arguments.locator
+                        locator: arguments.locator,
+                        destination: options.destination,
+                        mode: options.mode
                     )
                     completion(await self.browserActionResult(
                         outcome,

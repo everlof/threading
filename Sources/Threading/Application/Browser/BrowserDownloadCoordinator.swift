@@ -16,9 +16,16 @@ enum BrowserAgentDownloadResult: Equatable {
 
 @MainActor
 final class BrowserAgentDownloadRequest {
+    let destination: URL?
+    let mode: BrowserDownloadMode
     private(set) var isAttached = false
     private var result: BrowserAgentDownloadResult?
     private var continuation: CheckedContinuation<BrowserAgentDownloadResult, Never>?
+
+    init(destination: URL?, mode: BrowserDownloadMode) {
+        self.destination = destination
+        self.mode = mode
+    }
 
     func attach() {
         guard result == nil else { return }
@@ -87,9 +94,12 @@ final class BrowserDownloadCoordinator {
         self.prepareDestination = prepareDestination
     }
 
-    func beginAgentRequest() -> BrowserAgentDownloadRequest? {
+    func beginAgentRequest(
+        destination: URL? = nil,
+        mode: BrowserDownloadMode = .chooser
+    ) -> BrowserAgentDownloadRequest? {
         guard pendingAgentRequest == nil else { return nil }
-        let request = BrowserAgentDownloadRequest()
+        let request = BrowserAgentDownloadRequest(destination: destination, mode: mode)
         pendingAgentRequest = request
         return request
     }
@@ -109,6 +119,10 @@ final class BrowserDownloadCoordinator {
         agentRequests[downloadID] != nil
     }
 
+    func agentRequest(for downloadID: BrowserDownloadID) -> BrowserAgentDownloadRequest? {
+        agentRequests[downloadID]
+    }
+
     func decideDestination(
         _ destination: URL?,
         for downloadID: BrowserDownloadID
@@ -120,14 +134,23 @@ final class BrowserDownloadCoordinator {
         }
 
         do {
-            try prepareDestination(destination)
+            if agentRequests[downloadID]?.mode == .direct {
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    throw CocoaError(.fileWriteFileExists)
+                }
+            } else {
+                try prepareDestination(destination)
+            }
             destinations[downloadID] = destination
             return .approved(destination)
         } catch {
             let message = error.localizedDescription
+            let label = agentRequests[downloadID]?.mode == .direct
+                ? "requested"
+                : "user-approved"
             agentRequests.removeValue(forKey: downloadID)?
                 .finish(.failure(
-                    "Could not use the user-approved download destination: " + message
+                    "Could not use the \(label) download destination: " + message
                 ))
             return .rejected(message)
         }

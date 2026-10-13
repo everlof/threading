@@ -4581,6 +4581,9 @@ When the browser tab is visible, Cmd+F opens its native find bar inside that tab
 Cmd+R reloads while the page, its address field, or its selected tab has keyboard focus.
 After a download finishes, a brief toast names the saved file and offers **Reveal in Finder**.
 You can find it later in the browser's recent downloads menu.
+When an agent calls `browser_download`, it can suggest an absolute filename and folder in the
+native save panel. If you ask it to save directly, it can use `mode: "direct"` with an absolute
+`path` and skip the panel; an existing file is never replaced by that mode.
 
 The agent driving that session sees and acts on this same tab—it can open pages, go back or
 forward, reload, read a semantic page outline, click, hover, drag between page elements, type, and
@@ -4635,9 +4638,9 @@ Access**, where they can be revoked. Redirects are checked again before the dest
 returned to the agent. Form submissions, website-data clearing and other sensitive actions keep
 their separate confirmations.
 
-Passwords, file selection, download destinations, and form submissions stay with you. Threading
-reveals the browser or opens a native sheet for those boundaries instead of passing their secrets
-or decisions through the conversation. Console, network, CSS-query, and page-snapshot results are
+Passwords and form submissions keep their native confirmation boundaries. File uploads and
+downloads can use a user-chosen native panel or an exact local path requested through the agent's
+browser tools. Console, network, CSS-query, and page-snapshot results are
 explicitly marked as untrusted page data. Network capture defaults to metadata only.
 **Settings ▸ Tools ▸ Browser Network Capture** has independent switches for request headers,
 response headers, request bodies and response bodies. These apply to all in-app browser tabs and

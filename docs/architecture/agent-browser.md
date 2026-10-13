@@ -803,10 +803,14 @@ input accepts only one. The call reports file selection, not completion of a web
 upload. The browser-level navigation guard remains active through file-input change events in both
 modes, so an indirect `requestSubmit()` is still blocked. The direct mode's ten-path limit bounds
 the callback; WebKit reads file contents only after selection, with no file bytes copied through
-Threading's JavaScript bridge. `browser_download` binds one
-semantic action to the next WebKit download and waits through a native save panel whose copy says
-the chosen destination will be returned to the agent; cancellation and targets that do not start a
-download are explicit failures. Ordinary downloads still use the same native save panel. Successful
+Threading's JavaScript bridge. `browser_download` binds one semantic action to the next WebKit
+download. Its default `chooser` mode waits through a native save panel whose copy says the chosen
+destination will be returned to the agent; an optional absolute `path` preselects the directory
+and filename but the user may change or cancel it. `mode: "direct"` requires an absolute file path
+and gives it to WebKit without a panel. Direct mode refuses existing files and missing parent
+directories, and rechecks the existing-file boundary when WebKit asks for the destination so it
+never deletes a file that appeared after the initial check. Targets that do not start a download
+fail explicitly. Ordinary downloads still use the same native save panel. Successful
 downloads show a timed browser toast naming the file with Reveal in Finder; the recent-downloads
 menu retains the path after the toast leaves. Download failures keep their alert. The browser host
 owns the save decision, destination and reveal action; the toast only presents the receipt.

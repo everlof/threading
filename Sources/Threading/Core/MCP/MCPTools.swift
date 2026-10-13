@@ -252,6 +252,13 @@ struct BrowserDownloadArguments: Codable, Sendable {
   let ref: String?
   let selector: String?
   var locator: BrowserSemanticLocator? = nil
+  var path: String? = nil
+  var mode: BrowserDownloadMode? = nil
+}
+
+enum BrowserDownloadMode: String, Codable, Sendable {
+  case chooser
+  case direct
 }
 
 struct BrowserResizeArguments: Codable, Sendable {
@@ -4703,7 +4710,7 @@ enum MCPTools {
         openWorldHint: true
       ),
       title: "Download file",
-      detail: "Download through a native user-approved save destination.",
+      detail: "Download to a suggested or direct local destination.",
       symbol: "arrow.down.doc",
       decodeArguments: { container in
         try container.decodeIfPresent(BrowserDownloadArguments.self, forKey: .arguments)
@@ -4717,10 +4724,11 @@ enum MCPTools {
       },
       description: """
         Activate one exact semantic control and wait for the resulting WebKit download. \
-        The user chooses or cancels the destination in a native save panel that explicitly \
-        states the approved path will be returned to the agent. No automatic destination \
-        or overwrite occurs without that native decision, and a target that does not start \
-        a download fails rather than being mistaken for one.
+        In chooser mode (default), an optional absolute path preselects the filename and \
+        directory in a native save panel; the user may change or cancel it. In direct mode, \
+        path is required and the download saves there without a panel. Direct mode refuses \
+        existing files and missing parent directories. A target that does not start a \
+        download fails rather than being mistaken for one.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -4733,6 +4741,14 @@ enum MCPTools {
             description: "Optional strict fallback selector for the download control."
           ),
           "locator": browserSemanticLocatorSchema,
+          "path": MCPPropertySchema(
+            type: .string,
+            description: "Optional absolute destination path in chooser mode; required in direct mode."
+          ),
+          "mode": MCPPropertySchema(
+            type: .string,
+            description: "chooser (default) or direct. Direct saves without a native panel and refuses existing files."
+          ),
         ],
         required: []
       )

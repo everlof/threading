@@ -11,6 +11,7 @@ typealias BrowserOpenPanelProvider = (
 
 typealias BrowserSavePanelProvider = (
     _ suggestedFilename: String,
+    _ suggestedDestination: URL?,
     _ agentRequested: Bool,
     _ message: String,
     _ completion: @escaping (URL?) -> Void
