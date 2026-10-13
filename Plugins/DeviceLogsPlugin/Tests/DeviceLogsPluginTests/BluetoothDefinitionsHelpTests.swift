@@ -40,7 +40,7 @@ final class BluetoothDefinitionsHelpTests: XCTestCase {
         let help = BluetoothDefinitionsHelpViewController(status: .missing(expected: file))
         _ = laidOut(help.view)
         let example = try XCTUnwrap(descendants(of: help.view).compactMap { $0 as? ThemedTextScrollView }.first)
-        XCTAssertEqual(example.frame.width, BluetoothDefinitionsHelpViewController.Metrics.width, accuracy: 1)
+        XCTAssertEqual(example.frame.width, BluetoothDefinitionsHelpViewController.Metrics.contentWidth, accuracy: 1)
         XCTAssertEqual(example.textView.string, BluetoothDefinitionsGuide.example)
         XCTAssertFalse(example.textView.isEditable)
     }
@@ -116,19 +116,38 @@ final class BluetoothDefinitionsHelpTests: XCTestCase {
         XCTAssertFalse(pane.isProjectingForTesting)
     }
 
+    /// Sized exactly as `ThemedPopover.reposition()` sizes it: the detached view's own fitting
+    /// size, measured before it has ever been laid out at its final width. The panel shipped
+    /// clipped because that first measurement was short; a host that laid out first and measured
+    /// second hid it.
     private func laidOut(_ content: NSView) -> NSView {
-        let inset = Design.Spacing.large
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: BluetoothDefinitionsHelpViewController.Metrics.width + inset * 2, height: 10))
-        content.translatesAutoresizingMaskIntoConstraints = false
+        content.layoutSubtreeIfNeeded()
+        let size = content.fittingSize
+        let host = NSView(frame: NSRect(origin: .zero, size: size))
+        content.translatesAutoresizingMaskIntoConstraints = true
+        content.frame = host.bounds
         host.addSubview(content)
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: inset),
-            content.topAnchor.constraint(equalTo: host.topAnchor, constant: inset),
-        ])
-        host.layoutSubtreeIfNeeded()
-        host.setFrameSize(NSSize(width: host.frame.width, height: content.fittingSize.height + inset * 2))
         host.layoutSubtreeIfNeeded()
         return host
+    }
+
+    func testThePopoversFirstMeasurementHoldsEverythingWithItsPadding() throws {
+        for status in [BluetoothDefinitionStatus.noCheckout, .missing(expected: file),
+                       .failed(file, message: String(repeating: "line 7: a long compile error ", count: 6))] {
+            let help = BluetoothDefinitionsHelpViewController(status: status)
+            let host = laidOut(help.view)
+            let padding = BluetoothDefinitionsHelpViewController.Metrics.padding
+            // A text field draws its glyphs 2 pt inside its frame, so the frame may reach 2 pt further.
+            let content = host.bounds.insetBy(dx: padding - 3, dy: padding - 3)
+            for view in descendants(of: help.view) where view is NSTextField || view is ThemedButton {
+                let frame = view.convert(view.bounds, to: host)
+                XCTAssertTrue(content.contains(frame), "\(view) at \(frame) is outside \(content)")
+                if let label = view as? NSTextField, label.cell?.wraps == true, !label.stringValue.isEmpty {
+                    let needed = label.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: label.bounds.width, height: .greatestFiniteMagnitude)).height
+                    XCTAssertGreaterThanOrEqual(label.bounds.height + 1, needed, "\(label.stringValue.prefix(40)) is cut off")
+                }
+            }
+        }
     }
 
     private func descendants(of view: NSView) -> [NSView] {

@@ -10,8 +10,12 @@ import ThreadingDesignKit
 @MainActor
 final class BluetoothDefinitionsHelpViewController: NSViewController {
     enum Metrics {
-        static let width: CGFloat = 520
-        static let exampleHeight: CGFloat = 240
+        /// The whole panel. ThemedPopover insets its content by a hairline only, so the padding
+        /// is the panel's own.
+        static let width: CGFloat = 540
+        static let padding = Design.Spacing.large
+        static var contentWidth: CGFloat { width - 2 * padding }
+        static let exampleHeight: CGFloat = 220
     }
 
     enum Identifiers {
@@ -50,19 +54,28 @@ final class BluetoothDefinitionsHelpViewController: NSViewController {
         title.applyFont(.emphasizedBody)
         title.textColor = Design.Text.label
 
-        let explanation = Self.wrapping(BluetoothDefinitionsGuide.explanation)
+        let explanation = Self.wrapping(BluetoothDefinitionsGuide.explanation, width: Metrics.contentWidth)
         statusLabel.font = Design.Typography.caption()
+        // The popover sizes itself from `fittingSize` before the panel exists, and a wrapping
+        // label without a layout width measures as one line: the panel came out short and AppKit
+        // clipped its top. Every wrapping label states the width it will wrap at.
+        statusLabel.preferredMaxLayoutWidth = Metrics.contentWidth
         statusLabel.setAccessibilityIdentifier(Identifiers.status)
 
-        let reference = NSGridView(views: BluetoothDefinitionsGuide.reference.map { line in
+        let terms = BluetoothDefinitionsGuide.reference.map { line in
             let term = NSTextField(labelWithString: line.term)
             term.applyFont(.subheading)
             term.textColor = Design.Text.tertiary
-            let detail = Self.wrapping(line.detail)
-            return [term, detail]
+            return term
+        }
+        let termWidth = ceil(terms.map(\.intrinsicContentSize.width).max() ?? 0)
+        let detailWidth = Metrics.contentWidth - termWidth - Design.Spacing.medium
+        let reference = NSGridView(views: zip(terms, BluetoothDefinitionsGuide.reference).map { term, line in
+            [term, Self.wrapping(line.detail, width: detailWidth)]
         })
         reference.rowSpacing = Design.Spacing.tight
         reference.columnSpacing = Design.Spacing.medium
+        reference.column(at: 0).width = termWidth
         reference.column(at: 0).xPlacement = .leading
         reference.rowAlignment = .firstBaseline
 
@@ -101,10 +114,10 @@ final class BluetoothDefinitionsHelpViewController: NSViewController {
         root.addSubview(stack)
         NSLayoutConstraint.activate([
             root.widthAnchor.constraint(equalToConstant: Metrics.width),
-            stack.topAnchor.constraint(equalTo: root.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: Metrics.padding),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Metrics.padding),
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Metrics.padding),
+            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Metrics.padding),
             // A vertical stack aligned .leading gives each view its fitting width; say the width.
             explanation.widthAnchor.constraint(equalTo: stack.widthAnchor),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -200,8 +213,9 @@ final class BluetoothDefinitionsHelpViewController: NSViewController {
         }
     }
 
-    private static func wrapping(_ text: String) -> NSTextField {
+    private static func wrapping(_ text: String, width: CGFloat) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
+        label.preferredMaxLayoutWidth = width
         label.applyFont(.subheading)
         label.textColor = Design.Text.secondary
         label.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)

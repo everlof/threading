@@ -36,18 +36,13 @@ final class BluetoothDefinitionsRenderTests: XCTestCase {
     func testRendersTheHelpPanelWithALoadedFile() throws {
         let help = BluetoothDefinitionsHelpViewController(status: .loaded(file, characteristics: 2, types: 3))
         help.loadView()
-        let inset = Design.Spacing.large
-        let width = BluetoothDefinitionsHelpViewController.Metrics.width + inset * 2
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 10))
-        help.view.translatesAutoresizingMaskIntoConstraints = false
+        // Measured as the popover measures it, before any layout at its final width.
+        help.view.layoutSubtreeIfNeeded()
+        let size = help.view.fittingSize
+        let host = NSView(frame: NSRect(origin: .zero, size: size))
+        help.view.frame = host.bounds
         host.addSubview(help.view)
-        NSLayoutConstraint.activate([
-            help.view.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: inset),
-            help.view.topAnchor.constraint(equalTo: host.topAnchor, constant: inset),
-        ])
-        host.layoutSubtreeIfNeeded()
-        let height = help.view.fittingSize.height + inset * 2
-        try render(host, width: width, height: height, name: "bluetooth-definitions-help-loaded", hosted: true)
+        try render(host, width: size.width, height: size.height, name: "bluetooth-definitions-help-loaded", hosted: true)
     }
 
     // MARK: Fixture

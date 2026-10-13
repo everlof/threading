@@ -21,7 +21,7 @@ enum BluetoothDefinitionsGuide {
             characteristics:
               - name: Messages
                 uuid: 6E400003-B5A3-F393-E0A9-E50E24DCCA9E
-                # handle: 0x0025   # pin it when the capture starts after GATT discovery
+                # handle: 0x0025   # set it when the capture missed discovery
                 message: Frame       # both directions; or rx: / tx: for one each
               - name: Battery Level
                 uuid: 2A19
